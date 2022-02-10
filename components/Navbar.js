@@ -1,3 +1,6 @@
+/**
+ * Navbar located at the top of all pages
+ */
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -18,7 +21,9 @@ function Navbar() {
       <Link href="/">
         <a className={styles.nav_link}>Home</a>
       </Link>
-      <a className={styles.nav_link}>Sermons</a>
+      <Link href="/sermons">
+        <a className={styles.nav_link}>Sermons</a>
+      </Link>
       <Link href="/about">
         <a className={styles.nav_link}>About</a>
       </Link>

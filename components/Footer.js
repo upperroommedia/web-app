@@ -1,3 +1,6 @@
+/**
+ * Footer located at the bottom of all pages
+ */
 import Image from "next/image";
 import styles from "../styles/Home.module.css";
 
