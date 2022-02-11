@@ -75,5 +75,8 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v1
 
+      - name: Run Prettier Styling
+        run: npm run make-pretty
+
       - name: Run code style check
         run: npm run style:all
