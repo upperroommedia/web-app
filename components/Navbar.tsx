@@ -1,10 +1,10 @@
 /**
  * Navbar: located at the top of all pages
  */
-import React, { FunctionComponent } from "react";
-import Link from "next/link";
-import Image from "next/image";
-import styles from "../styles/Home.module.css";
+import { FunctionComponent } from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
+import styles from '../styles/Home.module.css';
 
 const Navbar: FunctionComponent = () => {
   return (
@@ -32,6 +32,6 @@ const Navbar: FunctionComponent = () => {
       </Link>
     </nav>
   );
-}
+};
 
 export default Navbar;
