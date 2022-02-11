@@ -1,15 +1,15 @@
 /**
  * Navbar: located at the top of all pages
  */
-import React, { FunctionComponent } from "react";
-import Link from "next/link";
-import Image from "next/image";
-import styles from "../styles/Home.module.css";
+import React, { FunctionComponent } from 'react'
+import Link from 'next/link'
+import Image from 'next/image'
+import styles from '../styles/Home.module.css'
 
 const Navbar: FunctionComponent = () => {
   return (
     <nav>
-      <div className={styles.navbar}>
+            <div className={styles.navbar}>
         <h1 className={styles.title}>Upper Room Media</h1>
         <Image
           src="/upper_room_media_icon.png"
@@ -28,7 +28,7 @@ const Navbar: FunctionComponent = () => {
         <a className={styles.nav_link}>About</a>
       </Link>
     </nav>
-  );
+  )
 }
 
-export default Navbar;
+export default Navbar
