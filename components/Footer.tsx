@@ -2,9 +2,10 @@
  * Footer located at the bottom of all pages
  */
 import Image from "next/image";
+import { FunctionComponent } from "react";
 import styles from "../styles/Home.module.css";
 
-const Footer = () => {
+const Footer: FunctionComponent = () => {
   return (
     <footer className={styles.footer}>
       <a>
