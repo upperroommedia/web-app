@@ -1,5 +1,5 @@
 /**
- * Navbar located at the top of all pages
+ * Navbar: located at the top of all pages
  */
 import React, { FunctionComponent } from "react";
 import Link from "next/link";
