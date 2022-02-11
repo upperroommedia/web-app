@@ -1,12 +1,13 @@
 /**
  * Website's home page
  */
+import type { NextPage } from 'next'
 import Head from "next/head";
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
 import styles from "../styles/Home.module.css";
 
-export default function Home() {
+const  Home: NextPage = () => {
   return (
     <div className={styles.container}>
       <Navbar />
@@ -53,3 +54,5 @@ export default function Home() {
     </div>
   );
 }
+
+export default Home

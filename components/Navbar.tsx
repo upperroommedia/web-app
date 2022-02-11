@@ -1,12 +1,12 @@
 /**
  * Navbar located at the top of all pages
  */
-import React from "react";
+import React, { FunctionComponent } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import styles from "../styles/Home.module.css";
 
-function Navbar() {
+const Navbar: FunctionComponent = () => {
   return (
     <nav>
       <div className={styles.navbar}>
