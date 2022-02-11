@@ -1,5 +1,5 @@
 /**
- * Sermons page for viewing all sermons
+ * Sermons page for viewing all sermons test
  */
 import type { NextPage } from 'next';
 import Footer from '../components/Footer';
