@@ -27,6 +27,9 @@ const Navbar: FunctionComponent = () => {
       <Link href="/about">
         <a className={styles.nav_link}>About</a>
       </Link>
+      <Link href="/uploader">
+        <a className={styles.nav_link}>Uploader</a>
+      </Link>
     </nav>
   );
 }
