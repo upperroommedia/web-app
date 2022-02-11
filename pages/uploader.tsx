@@ -1,7 +1,7 @@
 /**
- * About page for information about Upper Room Media
+ * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
- import type { NextPage } from 'next'
+import type { NextPage } from "next";
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
 import styles from "../styles/Home.module.css";
@@ -14,6 +14,6 @@ const Uploader: NextPage = () => {
       <Footer />
     </div>
   );
-}
+};
 
 export default Uploader;
