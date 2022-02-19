@@ -1,0 +1,9 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  background-color: green;
+}
+
+.dragAndDrop {
+  background-color: red;
+}
