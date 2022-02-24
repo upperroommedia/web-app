@@ -10,3 +10,4 @@ node_modules/
 
 *-debug.log
 urm-app-firebase-adminsdk.json
+.env
