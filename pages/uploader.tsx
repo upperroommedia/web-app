@@ -17,17 +17,22 @@ export interface UploadableFile {
 
 const Uploader: NextPage = () => {
   // const db = getFirestore(firebase);
-  const [file, setFile] = useState<UploadableFile[]>([]);
+  const [file, setFile] = useState<UploadableFile>();
   const onDrop = useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
       // Do something with the files
-      const mappedAccepted = [{ file: acceptedFiles[0], errors: [] }];
+      if (rejectedFiles.length > 0) {
+        // console.log(rejectedFiles[0].errors[0]);
+        setFile(undefined);
+        return;
+      }
+      const mappedAccepted = { file: acceptedFiles[0], errors: [] };
+      setFile(mappedAccepted);
       // const mappedAccepted2 = acceptedFiles.map((file) => ({
       //   file,
       //   errors: [],
       // }));
       // setFile((curr) => [...curr, mappedAccepted, ...rejectedFiles]);
-      setFile(rejectedFiles.length > 0 ? rejectedFiles : mappedAccepted);
     },
     []
   );
@@ -38,18 +43,58 @@ const Uploader: NextPage = () => {
     accept: 'audio/*',
   });
 
+  function uploadFile(file: File) {
+    // console.log('Upload File', file);
+    // const url = '...';
+    // return await new Promise((res, rej) => {
+    //   const xhr = new XMLHttpRequest();
+    //   xhr.open('POST', url);
+    //   xhr.onload = () => {
+    //     res('00')
+    //   }
+    //   xhr.onerror = (evt) => rej(evt);
+    //   xhr.upload.onprogress = (event) => {
+    //     if (event.lengthComputable) {
+    //       const percentage = (event.loaded / event.total) * 100;
+    //       onProgress(Math.round(percentage))
+    //     }
+    //   };
+    //   const formData = new FormData();
+    //   formData.append('file', file);
+    //   formData.append('key', key)
+    //   xhr.send(formData)
+    // });
+  }
+
   return (
     <div className={styles.container}>
       <Navbar />
       <h1>Uploader</h1>
       <form className={styles.form}>
-        <div className={styles.dragAndDrop} {...getRootProps()}>
-          <input {...getInputProps} />
-          {/* eslint-disable-next-line react/no-unescaped-entities */}
-          <p>Drag 'n' drop audio files here, or click to select files</p>
-        </div>
-        {JSON.stringify(file)}
-        <input type="submit" value="Upload" />
+        {file ? (
+          <span>
+            <p>{JSON.stringify(file)}</p>
+            <button onClick={() => setFile(undefined)}>Clear</button>
+          </span>
+        ) : (
+          <div className={styles.dragAndDrop} {...getRootProps()}>
+            <input {...getInputProps} />
+            <p>
+              Drag &apos;n&apos; drop audio files here, or click to select files
+            </p>
+          </div>
+        )}
+        <input
+          type="submit"
+          value="Upload"
+          disabled={file === undefined}
+          onClick={() => {
+            if (file !== undefined) {
+              uploadFile(file.file);
+            }
+          }}
+          // onClick={uploadFile(file?.file)}
+        />
       </form>
       <Footer />
     </div>
