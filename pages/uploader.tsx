@@ -16,7 +16,13 @@ export interface UploadableFile {
   preview: string;
   errors: FileError[];
 }
-let Url: URL | window.webkitURL;
+// TODO: figure out how to type this properly
+let Url: {
+  new (url: string | URL, base?: string | URL | undefined): URL;
+  createObjectURL: any;
+  prototype?: URL;
+  revokeObjectURL?: (url: string) => void;
+};
 if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
@@ -31,7 +37,6 @@ const Uploader: NextPage = () => {
         setFile(undefined);
         return;
       }
-      console.log('HERE');
       // const reader = new FileReader();
       // reader.readAsDataURL(acceptedFiles[0]);
       // reader.addEventListener('progress', function (pe) {
@@ -49,9 +54,7 @@ const Uploader: NextPage = () => {
         name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
         errors: [],
       };
-      console.log(mappedAccepted);
       setFile(mappedAccepted);
-      console.log('after set file');
       //   },
       //   false
       // );
@@ -60,7 +63,6 @@ const Uploader: NextPage = () => {
       //   errors: [],
       // }));
       // setFile((curr) => [...curr, mappedAccepted, ...rejectedFiles]);
-      console.log('end');
     },
     []
   );
