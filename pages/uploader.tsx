@@ -12,9 +12,14 @@ import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
 export interface UploadableFile {
   file: File;
+  name: string;
+  preview: string;
   errors: FileError[];
 }
-
+let Url: URL | window.webkitURL;
+if (typeof window !== 'undefined') {
+  Url = window.URL || window.webkitURL;
+}
 const Uploader: NextPage = () => {
   // const db = getFirestore(firebase);
   const [file, setFile] = useState<UploadableFile>();
@@ -26,13 +31,36 @@ const Uploader: NextPage = () => {
         setFile(undefined);
         return;
       }
-      const mappedAccepted = { file: acceptedFiles[0], errors: [] };
+      console.log('HERE');
+      // const reader = new FileReader();
+      // reader.readAsDataURL(acceptedFiles[0]);
+      // reader.addEventListener('progress', function (pe) {
+      //   if (pe.lengthComputable) {
+      //     console.log('Progress:', pe.loaded, 'Total:', pe.total);
+      //   }
+      // });
+      // reader.addEventListener(
+      //   'load',
+      //   function () {
+      const mappedAccepted = {
+        file: acceptedFiles[0],
+        // preview: reader.result as string,
+        preview: Url.createObjectURL(acceptedFiles[0]),
+        name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
+        errors: [],
+      };
+      console.log(mappedAccepted);
       setFile(mappedAccepted);
+      console.log('after set file');
+      //   },
+      //   false
+      // );
       // const mappedAccepted2 = acceptedFiles.map((file) => ({
       //   file,
       //   errors: [],
       // }));
       // setFile((curr) => [...curr, mappedAccepted, ...rejectedFiles]);
+      console.log('end');
     },
     []
   );
@@ -40,7 +68,7 @@ const Uploader: NextPage = () => {
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     multiple: false,
-    accept: 'audio/*',
+    accept: ['audio/*'],
   });
 
   function uploadFile(file: File) {
@@ -72,19 +100,26 @@ const Uploader: NextPage = () => {
       <h1>Uploader</h1>
       <form className={styles.form}>
         {file ? (
-          <span>
-            <p>{JSON.stringify(file)}</p>
-            <button onClick={() => setFile(undefined)}>Clear</button>
-          </span>
+          <>
+            <h2>{file.name}</h2>
+            <audio controls autoPlay src={file.preview}></audio>
+            <button
+              className={styles.button}
+              onClick={() => setFile(undefined)}
+            >
+              Clear
+            </button>
+          </>
         ) : (
           <div className={styles.dragAndDrop} {...getRootProps()}>
-            <input {...getInputProps} />
+            <input type="hidden" {...getInputProps} />
             <p>
               Drag &apos;n&apos; drop audio files here, or click to select files
             </p>
           </div>
         )}
         <input
+          className={styles.button}
           type="submit"
           value="Upload"
           disabled={file === undefined}
