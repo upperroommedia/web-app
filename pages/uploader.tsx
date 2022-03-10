@@ -4,6 +4,7 @@
 import type { NextPage } from 'next';
 import Footer from '../components/Footer';
 import Navbar from '../components/Navbar';
+import AudioTrimmer from '../components/AudioTrimmer';
 import styles from '../styles/Uploader.module.css';
 // import firebase from '../firebase/firebase';
 // import { getFirestore, collection, addDoc } from 'firebase/firestore';
@@ -17,12 +18,13 @@ export interface UploadableFile {
   errors: FileError[];
 }
 // TODO: figure out how to type this properly
-let Url: {
-  new (url: string | URL, base?: string | URL | undefined): URL;
-  createObjectURL: any;
-  prototype?: URL;
-  revokeObjectURL?: (url: string) => void;
-};
+// let Url: {
+//   new (url: string | URL, base?: string | URL | undefined): URL;
+//   createObjectURL: any;
+//   prototype?: URL;
+//   revokeObjectURL?: (url: string) => void;
+// };
+let Url: any;
 if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
@@ -103,9 +105,9 @@ const Uploader: NextPage = () => {
       <form className={styles.form}>
         {file ? (
           <>
-            <h2>{file.name}</h2>
-            <audio controls autoPlay src={file.preview}></audio>
+            <AudioTrimmer url={file.preview}></AudioTrimmer>
             <button
+              type="button"
               className={styles.button}
               onClick={() => setFile(undefined)}
             >
@@ -130,7 +132,6 @@ const Uploader: NextPage = () => {
               uploadFile(file.file);
             }
           }}
-          // onClick={uploadFile(file?.file)}
         />
       </form>
       <Footer />

@@ -192,3 +192,9 @@
   box-shadow: rgba(60, 64, 67, 0.3) 0 1px 3px 0,
     rgba(60, 64, 67, 0.15) 0 4px 8px 3px;
 }
+
+.range::-webkit-slider-runnable-track {
+  /* background: red; */
+  background-image: url('https://audiotrimmer.com/waves/scrubbg.png');
+  box-shadow: rgba(60, 64, 67, 0);
+}

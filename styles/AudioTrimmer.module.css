@@ -1,0 +1,67 @@
+.audio_container {
+  --thumb_height: 20px;
+  width: 1000px;
+  height: 200px;
+  margin-top: var(--thumb_height);
+  /* background-color: lightblue; */
+  background-image: url('https://audiotrimmer.com/waves/scrubbg.png');
+  background-size: cover;
+  position: relative;
+}
+
+.trim_area {
+  height: 100%;
+  /* width: 100px; */
+  /* left: 25%;
+  right: 25%; */
+  background-color: rgba(66, 176, 245, 0.3);
+  --handle_width: 10px;
+  position: absolute;
+}
+
+.left_handle {
+  position: absolute;
+  left: calc(-1 * var(--handle_width));
+  height: 100%;
+  width: var(--handle_width);
+  background-color: rgb(46, 112, 181);
+}
+
+.right_handle {
+  position: absolute;
+  height: 100%;
+  width: var(--handle_width);
+  background-color: rgb(254, 148, 26);
+  right: calc(-1 * var(--handle_width));
+}
+.audio_scrubber_container {
+  height: 100%;
+  position: absolute;
+  /* backgroundColor: 'green'; */
+  display: flex;
+  flexdirection: column;
+}
+
+.audio_scrubber {
+  --scrubber_width: 1px;
+  position: absolute;
+  height: 100%;
+  width: var(--scrubber_width);
+  background-color: red;
+}
+
+.audio_scrubber_thumb {
+  --width: 20px;
+  width: var(--width);
+  height: var(--thumb_height);
+  background-color: red;
+  clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+  position: relative;
+  top: calc(-1 * var(--thumb_height));
+  left: calc(-0.5 * (var(--width) - var(--scrubber_width)));
+}
+
+.time_label {
+  width: 70px;
+  /* background-color: red; */
+}
