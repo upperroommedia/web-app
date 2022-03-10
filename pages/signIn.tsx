@@ -1,6 +1,6 @@
 import type { NextPage } from 'next';
 import StyledFirebaseAuth from 'react-firebaseui/StyledFirebaseAuth';
-import firebase from '../firebase/firebase';
+import { firebase } from '../firebase/firebase';
 import { getAuth, EmailAuthProvider, GoogleAuthProvider } from 'firebase/auth';
 import styles from '../styles/SignIn.module.css';
 const auth = getAuth(firebase);

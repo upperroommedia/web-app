@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { getStorage } from 'firebase/storage';
 // Your web app's Firebase configuration
 // These keys are ok to leave public according to Firebase docs
 // Initialize Firebase
@@ -12,4 +13,5 @@ const firebase = initializeApp({
   measurementId: 'G-3PE6CE9N0H',
 });
 
-export default firebase;
+const storage = getStorage();
+export { firebase, storage };
