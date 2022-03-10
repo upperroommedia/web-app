@@ -116,7 +116,7 @@ const Uploader: NextPage = () => {
           </>
         ) : (
           <div className={styles.dragAndDrop} {...getRootProps()}>
-            <input type="hidden" {...getInputProps} />
+            <input type="hidden" {...getInputProps()} />
             <p>
               Drag &apos;n&apos; drop audio files here, or click to select files
             </p>

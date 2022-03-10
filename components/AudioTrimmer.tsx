@@ -13,7 +13,6 @@ interface AudioTrimmerProps {
 }
 // TODO: Seperate into components
 // TODO: Impelement loop which will make playhead stay between start and end trim
-// TODO: Dropzone support for safari and check firefox and other browsers
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
   const [currentTime, setCurrentTime] = useState<number>(0);
