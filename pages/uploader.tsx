@@ -19,8 +19,8 @@ import {
   collection, // eslint-disable-line
   addDoc, // eslint-disable-line
   getFirestore,
-  setDoc, 
-  doc, 
+  setDoc,
+  doc,
 } from 'firebase/firestore';
 
 import { v4 as uuidv4 } from 'uuid';
@@ -113,7 +113,7 @@ const Uploader: NextPage = () => {
   };
 
   function uploadFile(file: File) {
-    const id = uuidv4() 
+    const id = uuidv4();
     const sermonRef = ref(storage, `sermons/${id}`);
     // const sermonRef = ref(storage, `sermons/${file.name}`);
     const uploadTask = uploadBytesResumable(sermonRef, file);
@@ -187,6 +187,7 @@ const Uploader: NextPage = () => {
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            placeholder="required"
           />
         </label>
         <label>
@@ -219,6 +220,7 @@ const Uploader: NextPage = () => {
             type="text"
             value={speaker}
             onChange={(e) => setSpeaker(e.target.value)}
+            placeholder="required"
           />
         </label>
         <label>
@@ -265,7 +267,9 @@ const Uploader: NextPage = () => {
           className={styles.button}
           type="button"
           value="Upload"
-          disabled={file === undefined}
+          disabled={
+            file === undefined || title === '' || date === '' || speaker === ''
+          }
           onClick={() => {
             if (file !== undefined) {
               uploadFile(file.file);
