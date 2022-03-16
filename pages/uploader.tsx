@@ -47,9 +47,14 @@ const Uploader: NextPage = () => {
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
 
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yyyy = today.getFullYear();
+
   const [title, setTitle] = useState<string>('');
   const [subtitle, setSubtitle] = useState<string>('');
-  const [date, setDate] = useState<string>('');
+  const [date, setDate] = useState<string>(`${mm}/${dd}/${yyyy}`);
   const [description, setDescription] = useState<string>('');
   const [speaker, setSpeaker] = useState<string>('');
   const [scripture, setScripture] = useState<string>('');
