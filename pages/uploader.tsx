@@ -167,7 +167,7 @@ const Uploader: NextPage = () => {
       <h1>Uploader</h1>
       <form>
         <label>
-          Name:
+          Title:
           <input
             type="text"
             value={title}
