@@ -190,7 +190,7 @@ const Uploader: NextPage = () => {
         <label>
           Date:
           <input
-            type="text"
+            type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
             placeholder="MM/DD/YYYY"
