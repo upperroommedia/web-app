@@ -26,6 +26,7 @@ specifiers:
   react-firebase-hooks: ^5.0.2
   react-firebaseui: ^6.0.0
   typescript: ^4.5.5
+  uuid: ^8.3.2
 
 dependencies:
   firebase: 9.6.7
@@ -35,6 +36,7 @@ dependencies:
   react-dropzone: 12.0.4_react@17.0.2
   react-firebase-hooks: 5.0.2_firebase@9.6.7+react@17.0.2
   react-firebaseui: 6.0.0_firebase@9.6.7+react@17.0.2
+  uuid: 8.3.2
 
 devDependencies:
   '@types/node': 17.0.17
@@ -2881,6 +2883,11 @@ packages:
 
   /util-deprecate/1.0.2:
     resolution: {integrity: sha1-RQ1Nyfpw3nMnYvvS1KKJgUGaDM8=}
+    dev: false
+
+  /uuid/8.3.2:
+    resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
+    hasBin: true
     dev: false
 
   /v8-compile-cache/2.3.0:
