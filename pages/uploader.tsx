@@ -156,10 +156,10 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
         </label>
         <Box sx={{ maxWidth: 120 }}>
           <FormControl required fullWidth>
-            <InputLabel id="demo-simple-select-label">Speaker</InputLabel>
+            <InputLabel id="speaker-select-label">Speaker</InputLabel>
             <Select
-              labelId="demo-simple-select-label"
-              id="demo-simple-select"
+              labelId="speaker-select-label"
+              id="speaker-simple-select"
               value={speaker}
               label="Speaker"
               onChange={handleSpeakerChange}
