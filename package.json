@@ -13,7 +13,6 @@
     "prepare": "husky install"
   },
   "dependencies": {
-    "axios": "^0.26.1",
     "firebase": "^9.6.7",
     "firebase-tools": "^10.6.0",
     "marked": "^0.7.0",

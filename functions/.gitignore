@@ -8,6 +8,8 @@ typings/
 # Node.js dependency directory
 node_modules/
 
-*-debug.log
-urm-app-firebase-adminsdk.json
+# Ignore environment variables
 .env
+
+# Ignore Log Files
+*.log
