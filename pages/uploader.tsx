@@ -5,6 +5,7 @@ import type { NextPage } from 'next';
 import Footer from '../components/Footer';
 import Navbar from '../components/Navbar';
 import AudioTrimmer from '../components/AudioTrimmer';
+import SpeakersList from '../components/SpeakersList';
 
 import uploadFile from './api/uploadFile';
 
@@ -203,7 +204,7 @@ const Uploader: NextPage = () => {
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
-        <label>
+        {/* <label>
           Speaker:
           <input
             type="text"
@@ -211,7 +212,8 @@ const Uploader: NextPage = () => {
             onChange={(e) => setSpeaker(e.target.value)}
             placeholder="required"
           />
-        </label>
+        </label> */}
+        <SpeakersList setSpeaker={setSpeaker}/>
         <label>
           Scripture:
           <input
