@@ -16,11 +16,8 @@ import styles from '../styles/Uploader.module.css';
 import { useCallback, useState } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
-import Box from '@mui/material/Box';
-import InputLabel from '@mui/material/InputLabel';
-import MenuItem from '@mui/material/MenuItem';
-import FormControl from '@mui/material/FormControl';
-import Select, { SelectChangeEvent } from '@mui/material/Select';
+import TextField from '@mui/material/TextField';
+import Autocomplete from '@mui/material/Autocomplete';
 
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
@@ -112,10 +109,6 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
     setTopic('');
   };
 
-  const handleSpeakerChange = (event: SelectChangeEvent) => {
-    setSpeaker(event.target.value as string);
-  };
-
   return (
     <div className={styles.container}>
       <Navbar />
@@ -154,26 +147,20 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
-        <Box sx={{ maxWidth: 120 }}>
-          <FormControl required fullWidth>
-            <InputLabel id="speaker-select-label">Speaker</InputLabel>
-            <Select
-              labelId="speaker-select-label"
-              id="speaker-simple-select"
-              value={speaker}
-              label="Speaker"
-              onChange={handleSpeakerChange}
-            >
-              {speakers.map((speaker) => {
-                return (
-                  <MenuItem key={speaker} value={speaker}>
-                    {speaker}
-                  </MenuItem>
-                );
-              })}
-            </Select>
-          </FormControl>
-        </Box>
+        <Autocomplete
+          value={speaker}
+          onChange={(event: any, newValue: string | null) => {
+            if (newValue !== null && speakers.includes(newValue)) {
+              setSpeaker(newValue);
+            }
+          }}
+          id="speaker-input"
+          options={speakers}
+          sx={{ width: 300 }}
+          renderInput={(params) => (
+            <TextField {...params} required label="Speaker" />
+          )}
+        />
         <label>
           Scripture:
           <input
