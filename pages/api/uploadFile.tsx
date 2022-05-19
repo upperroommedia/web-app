@@ -10,6 +10,7 @@ interface uploadFileProps {
   file: UploadableFile;
   setFile: Dispatch<SetStateAction<UploadableFile | undefined>>;
 
+  uploadProgress: string | undefined;
   setUploadProgress: Dispatch<SetStateAction<string | undefined>>;
 
   title: string;

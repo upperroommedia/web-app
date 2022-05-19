@@ -265,6 +265,7 @@ const Uploader: NextPage = () => {
               uploadFile({
                 file,
                 setFile,
+                uploadProgress,
                 setUploadProgress,
                 title,
                 subtitle,
