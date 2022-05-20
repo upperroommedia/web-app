@@ -179,9 +179,7 @@ const Uploader: NextPage<{
         options={topics}
         multiple
         sx={{ width: 200 }}
-        renderInput={(params) => (
-          <TextField {...params} required label="Topic(s)" />
-        )}
+        renderInput={(params) => <TextField {...params} label="Topic(s)" />}
       />
       <form className={styles.form}>
         {file ? (
