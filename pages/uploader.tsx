@@ -113,71 +113,64 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
     <div className={styles.container}>
       <Navbar />
       <h1>Uploader</h1>
-      <form>
-        <label>
-          Title:
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="required"
-          />
-        </label>
-        <label>
-          Subtitle:
-          <input
-            type="text"
-            value={subtitle}
-            onChange={(e) => setSubtitle(e.target.value)}
-          />
-        </label>
-        <label>
-          Date:
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
-        <label>
-          Description:
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-        <Autocomplete
-          value={speaker}
-          onChange={(event: any, newValue: string | null) => {
-            if (newValue !== null && speakers.includes(newValue)) {
-              setSpeaker(newValue);
-            }
-          }}
-          id="speaker-input"
-          options={speakers}
-          sx={{ width: 300 }}
-          renderInput={(params) => (
-            <TextField {...params} required label="Speaker" />
-          )}
+      <TextField
+        id="title-input"
+        label="Title"
+        variant="outlined"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        required
+      />
+      <TextField
+        id="title-input"
+        label="Subtitle"
+        variant="outlined"
+        value={subtitle}
+        onChange={(e) => setSubtitle(e.target.value)}
+      />
+      <label>
+        Date:
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
         />
-        <label>
-          Scripture:
-          <input
-            type="text"
-            value={scripture}
-            onChange={(e) => setScripture(e.target.value)}
-          />
-        </label>
-        <label>
-          Topic:
-          <input
-            type="text"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-          />
-        </label>
-      </form>
+      </label>
+      <TextField
+        id="description-text"
+        label="Description"
+        placeholder="Description"
+        multiline
+        onChange={(e) => setDescription(e.target.value)}
+      />
+      <Autocomplete
+        value={speaker === '' ? null : speaker}
+        onChange={(event: any, newValue: string | null) => {
+          if (newValue !== null && speakers.includes(newValue)) {
+            setSpeaker(newValue);
+          }
+        }}
+        id="speaker-input"
+        options={speakers}
+        sx={{ width: 200 }}
+        renderInput={(params) => (
+          <TextField {...params} required label="Speaker" />
+        )}
+      />
+      <TextField
+        id="scripture-input"
+        label="Scripture"
+        variant="outlined"
+        value={scripture}
+        onChange={(e) => setScripture(e.target.value)}
+      />
+      <TextField
+        id="topic-input"
+        label="Topic"
+        variant="outlined"
+        value={topic}
+        onChange={(e) => setTopic(e.target.value)}
+      />
       <form className={styles.form}>
         {file ? (
           <>
