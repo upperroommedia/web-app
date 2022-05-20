@@ -16,7 +16,7 @@ interface uploadFileProps {
   subtitle: string;
   date: string;
   description: string;
-  speaker: string;
+  speaker: Array<string>;
   scripture: string;
   topic: string;
 }

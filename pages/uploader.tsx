@@ -51,7 +51,7 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
   const [subtitle, setSubtitle] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [description, setDescription] = useState<string>('');
-  const [speaker, setSpeaker] = useState<string>('');
+  const [speaker, setSpeaker] = useState<Array<string>>([]);
   const [scripture, setScripture] = useState<string>('');
   const [topic, setTopic] = useState<string>('');
 
@@ -104,7 +104,7 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
     setSubtitle('');
     setDate('');
     setDescription('');
-    setSpeaker('');
+    setSpeaker([]);
     setScripture('');
     setTopic('');
   };
@@ -144,17 +144,18 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
         onChange={(e) => setDescription(e.target.value)}
       />
       <Autocomplete
-        value={speaker === '' ? null : speaker}
-        onChange={(event: any, newValue: string | null) => {
-          if (newValue !== null && speakers.includes(newValue)) {
+        value={speaker === [] ? undefined : speaker}
+        onChange={(event: any, newValue: Array<string> | null) => {
+          if (newValue !== null && newValue.length <= 3) {
             setSpeaker(newValue);
           }
         }}
         id="speaker-input"
         options={speakers}
+        multiple
         sx={{ width: 200 }}
         renderInput={(params) => (
-          <TextField {...params} required label="Speaker" />
+          <TextField {...params} required label="Speaker(s)" />
         )}
       />
       <TextField
@@ -200,7 +201,7 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
           type="button"
           value="Upload"
           disabled={
-            file === undefined || title === '' || date === '' || speaker === ''
+            file === undefined || title === '' || date === '' || speaker === []
           }
           onClick={() => {
             if (file !== undefined) {
