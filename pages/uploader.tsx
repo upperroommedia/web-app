@@ -41,7 +41,10 @@ if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
 
-const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
+const Uploader: NextPage<{
+  speakers: Array<string>;
+  topics: Array<string>;
+}> = ({ speakers, topics }) => {
   getAuth();
 
   const [file, setFile] = useState<UploadableFile>();
@@ -53,7 +56,7 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
   const [description, setDescription] = useState<string>('');
   const [speaker, setSpeaker] = useState<Array<string>>([]);
   const [scripture, setScripture] = useState<string>('');
-  const [topic, setTopic] = useState<string>('');
+  const [topic, setTopic] = useState<Array<string>>([]);
 
   const onDrop = useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
@@ -106,7 +109,7 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
     setDescription('');
     setSpeaker([]);
     setScripture('');
-    setTopic('');
+    setTopic([]);
   };
 
   return (
@@ -165,12 +168,20 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
         value={scripture}
         onChange={(e) => setScripture(e.target.value)}
       />
-      <TextField
+      <Autocomplete
+        value={topic === [] ? undefined : topic}
+        onChange={(event: any, newValue: Array<string> | null) => {
+          if (newValue !== null && newValue.length <= 10) {
+            setTopic(newValue);
+          }
+        }}
         id="topic-input"
-        label="Topic"
-        variant="outlined"
-        value={topic}
-        onChange={(e) => setTopic(e.target.value)}
+        options={topics}
+        multiple
+        sx={{ width: 200 }}
+        renderInput={(params) => (
+          <TextField {...params} required label="Topic(s)" />
+        )}
       />
       <form className={styles.form}>
         {file ? (
@@ -229,22 +240,33 @@ const Uploader: NextPage<{ speakers: Array<string> }> = ({ speakers }) => {
 
 Uploader.propTypes = {
   speakers: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
+  topics: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
 };
 
 export const getServerSideProps: GetServerSideProps = async (context) => {
-  interface Speaker {
+  interface speakerAndTopic {
     name: string;
   }
+
   const db = getFirestore(firebase);
-  const q = query(collection(db, 'speakers'));
+
+  const speakersQuery = query(collection(db, 'speakers'));
   const speakers: Array<string> = [];
-  const querySnapshot = await getDocs(q);
-  querySnapshot.forEach((doc) => {
-    const current: Speaker = doc.data() as unknown as Speaker;
+  const speakersQuerySnapshot = await getDocs(speakersQuery);
+  speakersQuerySnapshot.forEach((doc) => {
+    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
     speakers.push(current.name);
   });
+
+  const topicsQuery = query(collection(db, 'topics'));
+  const topics: Array<string> = [];
+  const topicsQuerySnapshot = await getDocs(topicsQuery);
+  topicsQuerySnapshot.forEach((doc) => {
+    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
+    topics.push(current.name);
+  });
   return {
-    props: { speakers: speakers },
+    props: { speakers: speakers, topics: topics },
   };
 };
 

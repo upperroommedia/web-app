@@ -18,7 +18,7 @@ interface uploadFileProps {
   description: string;
   speaker: Array<string>;
   scripture: string;
-  topic: string;
+  topic: Array<string>;
 }
 
 const uploadFile = (props: uploadFileProps) => {
@@ -34,7 +34,7 @@ const uploadFile = (props: uploadFileProps) => {
     description: props.description,
     speaker: props.speaker,
     scripture: props.scripture,
-    topic: props.topic.split(' '),
+    topic: props.topic,
     ref: sermonRef.fullPath,
   };
   uploadTask.on(
