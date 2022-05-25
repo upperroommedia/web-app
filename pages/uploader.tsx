@@ -147,7 +147,7 @@ const Uploader: NextPage<{
         onChange={(e) => setDescription(e.target.value)}
       />
       <Autocomplete
-        value={speaker === [] ? undefined : speaker}
+        value={speaker}
         onChange={(event: any, newValue: Array<string> | null) => {
           if (newValue !== null && newValue.length <= 3) {
             setSpeaker(newValue);
@@ -169,7 +169,7 @@ const Uploader: NextPage<{
         onChange={(e) => setScripture(e.target.value)}
       />
       <Autocomplete
-        value={topic === [] ? undefined : topic}
+        value={topic}
         onChange={(event: any, newValue: Array<string> | null) => {
           if (newValue !== null && newValue.length <= 10) {
             setTopic(newValue);
@@ -210,7 +210,10 @@ const Uploader: NextPage<{
           type="button"
           value="Upload"
           disabled={
-            file === undefined || title === '' || date === '' || speaker === []
+            file === undefined ||
+            title === '' ||
+            date === '' ||
+            speaker.length === 0
           }
           onClick={() => {
             if (file !== undefined) {
