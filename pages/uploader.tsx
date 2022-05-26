@@ -7,7 +7,6 @@ import PropTypes from 'prop-types';
 import Footer from '../components/Footer';
 import Navbar from '../components/Navbar';
 import AudioTrimmer from '../components/AudioTrimmer';
-
 import uploadFile from './api/uploadFile';
 
 import styles from '../styles/Uploader.module.css';
@@ -17,7 +16,10 @@ import { useCallback, useState } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
 import TextField from '@mui/material/TextField';
+import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
@@ -52,7 +54,7 @@ const Uploader: NextPage<{
 
   const [title, setTitle] = useState<string>('');
   const [subtitle, setSubtitle] = useState<string>('');
-  const [date, setDate] = useState<string>('');
+  const [date, setDate] = useState<Date | null>(new Date());
   const [description, setDescription] = useState<string>('');
   const [speaker, setSpeaker] = useState<Array<string>>([]);
   const [scripture, setScripture] = useState<string>('');
@@ -105,135 +107,170 @@ const Uploader: NextPage<{
   const clearForm = () => {
     setTitle('');
     setSubtitle('');
-    setDate('');
+    setDate(new Date());
     setDescription('');
     setSpeaker([]);
     setScripture('');
     setTopic([]);
   };
 
+  const handleChange = (newValue: Date | null) => {
+    setDate(newValue);
+  };
+
   return (
     <div className={styles.container}>
       <Navbar />
-      <h1>Uploader</h1>
-      <TextField
-        id="title-input"
-        label="Title"
-        variant="outlined"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        required
-      />
-      <TextField
-        id="title-input"
-        label="Subtitle"
-        variant="outlined"
-        value={subtitle}
-        onChange={(e) => setSubtitle(e.target.value)}
-      />
-      <label>
-        Date:
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          padding: '2rem',
+          gap: '1ch',
+          margin: 'auto',
+          maxWidth: '900px',
+        }}
+      >
+        <h1>Uploader</h1>
+        <TextField
+          sx={{
+            display: 'block',
+            width: 1,
+          }}
+          fullWidth
+          id="title-input"
+          label="Title"
+          variant="outlined"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          required
         />
-      </label>
-      <TextField
-        id="description-text"
-        label="Description"
-        placeholder="Description"
-        multiline
-        onChange={(e) => setDescription(e.target.value)}
-      />
-      <Autocomplete
-        value={speaker}
-        onChange={(event: any, newValue: Array<string> | null) => {
-          if (newValue !== null && newValue.length <= 3) {
-            setSpeaker(newValue);
-          }
-        }}
-        id="speaker-input"
-        options={speakers}
-        multiple
-        sx={{ width: 200 }}
-        renderInput={(params) => (
-          <TextField {...params} required label="Speaker(s)" />
-        )}
-      />
-      <TextField
-        id="scripture-input"
-        label="Scripture"
-        variant="outlined"
-        value={scripture}
-        onChange={(e) => setScripture(e.target.value)}
-      />
-      <Autocomplete
-        value={topic}
-        onChange={(event: any, newValue: Array<string> | null) => {
-          if (newValue !== null && newValue.length <= 10) {
-            setTopic(newValue);
-          }
-        }}
-        id="topic-input"
-        options={topics}
-        multiple
-        sx={{ width: 200 }}
-        renderInput={(params) => <TextField {...params} label="Topic(s)" />}
-      />
-      <form className={styles.form}>
-        {file ? (
-          <>
-            <AudioTrimmer url={file.preview}></AudioTrimmer>
-            <button
-              type="button"
-              className={styles.button}
-              onClick={() => {
-                setFile(undefined);
-                setUploadProgress(undefined);
-                clearForm();
-              }}
-            >
-              Clear
-            </button>
-          </>
-        ) : (
-          <div className={styles.dragAndDrop} {...getRootProps()}>
-            <input type="hidden" {...getInputProps()} />
-            <p>
-              Drag &apos;n&apos; drop audio files here, or click to select files
-            </p>
-          </div>
-        )}
-        <input
-          className={styles.button}
-          type="button"
-          value="Upload"
-          disabled={
-            file === undefined ||
-            title === '' ||
-            date === '' ||
-            speaker.length === 0
-          }
-          onClick={() => {
-            if (file !== undefined) {
-              uploadFile({
-                file,
-                setFile,
-                setUploadProgress,
-                title,
-                subtitle,
-                date,
-                description,
-                speaker,
-                scripture,
-                topic,
-              });
+        <Box sx={{ display: 'flex', color: 'red', gap: '1ch', width: 1 }}>
+          <TextField
+            fullWidth
+            id="title-input"
+            label="Subtitle"
+            variant="outlined"
+            value={subtitle}
+            onChange={(e) => setSubtitle(e.target.value)}
+          />
+          <LocalizationProvider
+            dateAdapter={AdapterDateFns}
+            sx={{ width: 1 }}
+            fullWidth
+          >
+            <DesktopDatePicker
+              label="Date"
+              inputFormat="MM/dd/yyyy"
+              value={date}
+              onChange={handleChange}
+              renderInput={(params) => <TextField {...params} />}
+            />
+          </LocalizationProvider>
+        </Box>
+        <TextField
+          sx={{
+            display: 'block',
+          }}
+          fullWidth
+          rows={4}
+          id="description-text"
+          label="Description"
+          placeholder="Description"
+          multiline
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <Autocomplete
+          fullWidth
+          value={speaker}
+          onChange={(event: any, newValue: Array<string> | null) => {
+            if (newValue !== null && newValue.length <= 3) {
+              setSpeaker(newValue);
             }
           }}
+          id="speaker-input"
+          options={speakers}
+          multiple
+          renderInput={(params) => (
+            <TextField {...params} required label="Speaker(s)" />
+          )}
         />
-        <p>{uploadProgress}</p>
-      </form>
+        <TextField
+          fullWidth
+          id="scripture-input"
+          label="Scripture"
+          variant="outlined"
+          value={scripture}
+          onChange={(e) => setScripture(e.target.value)}
+        />
+        <Autocomplete
+          fullWidth
+          value={topic}
+          onChange={(event: any, newValue: Array<string> | null) => {
+            if (newValue !== null && newValue.length <= 10) {
+              setTopic(newValue);
+            }
+          }}
+          id="topic-input"
+          options={topics}
+          multiple
+          renderInput={(params) => <TextField {...params} label="Topic(s)" />}
+        />
+        <form className={styles.form}>
+          {file ? (
+            <>
+              <AudioTrimmer url={file.preview}></AudioTrimmer>
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => {
+                  setFile(undefined);
+                  setUploadProgress(undefined);
+                  clearForm();
+                }}
+              >
+                Clear
+              </button>
+            </>
+          ) : (
+            <div className={styles.dragAndDrop} {...getRootProps()}>
+              <input type="hidden" {...getInputProps()} />
+              <p>
+                Drag &apos;n&apos; drop audio files here, or click to select
+                files
+              </p>
+            </div>
+          )}
+          <input
+            className={styles.button}
+            type="button"
+            value="Upload"
+            disabled={
+              file === undefined ||
+              title === '' ||
+              date === null ||
+              speaker.length === 0
+            }
+            onClick={() => {
+              if (file !== undefined) {
+                uploadFile({
+                  file,
+                  setFile,
+                  setUploadProgress,
+                  title,
+                  subtitle,
+                  date,
+                  description,
+                  speaker,
+                  scripture,
+                  topic,
+                });
+              }
+            }}
+          />
+          <p>{uploadProgress}</p>
+        </form>
+      </Box>
       <Footer />
     </div>
   );
