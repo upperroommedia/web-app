@@ -11,9 +11,6 @@ import styles from '../styles/Uploader.module.css';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 
-import AudioPlayer from 'material-ui-audio-player';
-import { getAuth } from 'firebase/auth';
-
 interface sermon {
   ref: string;
   title: string;
