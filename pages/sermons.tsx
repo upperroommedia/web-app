@@ -21,7 +21,7 @@ interface sermon {
   date: Date;
   topic: Array<string>;
 }
-// https://firebasestorage.googleapis.com/v0/b/urm-app.appspot.com/o/sermons%2F0c148562-6de0-4342-949c-75176647e07c
+
 const Sermons: NextPage<{ sermons: Array<sermon> }> = ({ sermons }) => {
   return (
     <div className={styles.container}>
@@ -37,16 +37,13 @@ const Sermons: NextPage<{ sermons: Array<sermon> }> = ({ sermons }) => {
             >
               {sermon.title}
             </a>
-            {/* <AudioPlayer
-              elevation={1}
-              width="500px"
-              variation="primary"
-              download={true}
-              debug={false}
-              src={`https://storage.googleapis.com/download/storage/v1/b/sermons/o/${
-                sermon.ref.split('/')[1]
-              }?alt=media`}
-            /> */}
+            <audio controls>
+              <source
+                src={`https://storage.googleapis.com/download/storage/v1/b/sermons/o/${
+                  sermon.ref.split('/')[1]
+                }?alt=media`}
+              />
+            </audio>
           </p>
         </>
       ))}
