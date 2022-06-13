@@ -1,73 +1,108 @@
-import { useState } from 'react';
-import { Button, Form } from 'react-bootstrap';
-import { useAuth } from '../context/AuthContext';
+/**
+ * Page for Signing up the User
+ */
+import { useState, useContext } from 'react';
+import { useRouter } from 'next/router';
+import UserContext from '../context/user/UserContext';
+import { Button, Input, InputLabel, FormControl } from '@mui/material';
+import PopUp from '../components/PopUp';
 
 const Signup = () => {
   //  const { user, login } = useAuth();
-  const { signup } = useAuth();
+  const router = useRouter();
+  const { isAuthenticated, signup } = useContext(UserContext);
+
   //   console.log('User:' + user);
   const [data, setData] = useState({
     email: '',
     password: '',
   });
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const handleOpen = () => {
+    setOpen(true);
+  };
+
+  const handleClose = () => {
+    setOpen(false);
+  };
 
   const handleSignup = async (e: any) => {
     e.preventDefault();
-
-    try {
-      await signup(data.email, data.password);
-    } catch (err) {
-      //   console.log(err);
+    const res = await signup(data);
+    switch (res) {
+      case 'auth/weak-password':
+        setTitle('Weak Password');
+        setErrorMessage('Make a password with 6 or more characters');
+        handleOpen();
+        break;
+      case 'auth/email-already-in-use':
+        setTitle('Email Already in Use');
+        handleOpen();
+        setErrorMessage('The email you are using is Already in Use');
+        break;
+      default:
+        if (isAuthenticated) {
+          router.push('/uploader');
+        }
     }
-
-    // console.log(data);
   };
 
   return (
     <div
       style={{
-        width: '40%',
-        margin: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-around',
+        alignItems: 'center',
       }}
     >
       <h1 className="text-center my-3 ">Signup</h1>
-      <Form onSubmit={handleSignup}>
-        <Form.Group className="mb-3" controlId="formBasicEmail">
-          <Form.Label>Email address</Form.Label>
-          <Form.Control
-            type="email"
-            placeholder="Enter email"
-            required
-            onChange={(e: any) =>
-              setData({
-                ...data,
-                email: e.target.value,
-              })
-            }
-            value={data.email}
-          />
-        </Form.Group>
-
-        <Form.Group className="mb-3" controlId="formBasicPassword">
-          <Form.Label>Password</Form.Label>
-          <Form.Control
-            type="password"
-            placeholder="Password"
-            required
-            onChange={(e: any) =>
-              setData({
-                ...data,
-                password: e.target.value,
-              })
-            }
-            value={data.password}
-          />
-        </Form.Group>
-
-        <Button variant="primary" type="submit">
+      <form style={{ height: '100%' }} onSubmit={handleSignup}>
+        <div>
+          <FormControl>
+            <InputLabel>Email address</InputLabel>
+            <Input
+              type="email"
+              placeholder="Enter email"
+              required
+              onChange={(e: any) =>
+                setData({
+                  ...data,
+                  email: e.target.value,
+                })
+              }
+              value={data.email}
+            />
+          </FormControl>
+        </div>
+        <div>
+          <FormControl>
+            <InputLabel>Password</InputLabel>
+            <Input
+              type="password"
+              placeholder="Password"
+              required
+              onChange={(e: any) =>
+                setData({
+                  ...data,
+                  password: e.target.value,
+                })
+              }
+              value={data.password}
+            />
+          </FormControl>
+        </div>
+        <Button variant="contained" type="submit">
           Signup
         </Button>
-      </Form>
+
+        <PopUp title={title} open={open} setOpen={handleClose}>
+          {errorMessage}
+        </PopUp>
+      </form>
     </div>
   );
 };

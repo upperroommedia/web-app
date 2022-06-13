@@ -1,12 +1,16 @@
 import '../styles/globals.css';
 import type { AppProps } from 'next/app';
-import { AuthContextProvider } from '../context/AuthContext';
+import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
+import UserState from '../context/user/UserState';
 
-function MyApp({ Component, pageProps }: AppProps) {
+function MyApp({ Component, pageProps: { session, ...pageProps } }: AppProps) {
   return (
-    <AuthContextProvider>
+    <UserState>
+      <Navbar />
       <Component {...pageProps} />
-    </AuthContextProvider>
+      <Footer />
+    </UserState>
   );
 }
 
