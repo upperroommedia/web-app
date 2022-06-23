@@ -1,5 +1,5 @@
 /**
- * SermonListCard: located at the top of all pages
+ * SermonListCard: A component to display sermons in a list
  */
 import { FunctionComponent } from 'react';
 // import Image from 'next/image';

@@ -1,5 +1,5 @@
 /**
- * BottomAudioBar located at the bottom of all pages
+ * BottomAudioBar is a component that displays the audio player similar to Spotify's bottom play bar
  */
 // import Image from 'next/image';
 import { FunctionComponent, useEffect, useRef } from 'react';
