@@ -42,9 +42,17 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
-      - name: Install NPM dependencies
-        run: npm install
+      - uses: actions/checkout@v2
+      - uses: pnpm/action-setup@v2.2.2
+        with:
+          version: 7
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v2
@@ -76,7 +84,7 @@ jobs:
         uses: github/codeql-action/analyze@v2
 
       - name: Run Prettier Styling
-        run: npm run make-pretty
+        run: pnpm run make-pretty
 
       - name: Run code style check
-        run: npm run style:all
+        run: pnpm run style:all
