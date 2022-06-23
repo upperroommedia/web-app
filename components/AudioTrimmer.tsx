@@ -226,6 +226,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
         // style={{ background-image: url("https://audiotrimmer.com/waves/scrubbg.png")}}
         // style={{styles.range}}
       /> */}
+      {/* TODO: Style this better */}
       <div style={{ display: 'flex' }}>
         <button type="button" onClick={rewindToStart}>
           Rewind

@@ -2,7 +2,6 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import type { GetServerSideProps, NextPage } from 'next';
-import PropTypes from 'prop-types';
 
 import Footer from '../components/Footer';
 import Navbar from '../components/Navbar';
@@ -12,7 +11,7 @@ import uploadFile from './api/uploadFile';
 import styles from '../styles/Uploader.module.css';
 // import firebase from '../firebase/firebase';
 // import { getFirestore, collection, addDoc } from 'firebase/firestore';
-import { useCallback, useState } from 'react';
+import { ChangeEvent, useCallback, useState } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
 import TextField from '@mui/material/TextField';
@@ -24,6 +23,7 @@ import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
+import { Sermon, emptySermon } from '../types/Sermon';
 
 export interface UploadableFile {
   file: File;
@@ -42,22 +42,20 @@ let Url: any;
 if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
-
-const Uploader: NextPage<{
+interface Props {
   speakers: Array<string>;
   topics: Array<string>;
-}> = ({ speakers, topics }) => {
-  getAuth();
+}
 
+const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
+  getAuth();
+  const [sermonData, setSermonData] = useState<Sermon>(emptySermon);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
 
-  const [title, setTitle] = useState<string>('');
-  const [subtitle, setSubtitle] = useState<string>('');
+  // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date | null>(new Date());
-  const [description, setDescription] = useState<string>('');
   const [speaker, setSpeaker] = useState<Array<string>>([]);
-  const [scripture, setScripture] = useState<string>('');
   const [topic, setTopic] = useState<Array<string>>([]);
 
   const onDrop = useCallback(
@@ -105,21 +103,27 @@ const Uploader: NextPage<{
   });
 
   const clearForm = () => {
-    setTitle('');
-    setSubtitle('');
+    setSermonData(emptySermon);
     setDate(new Date());
-    setDescription('');
     setSpeaker([]);
-    setScripture('');
     setTopic([]);
   };
 
-  const handleChange = (newValue: Date | null) => {
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    setSermonData((prevSermonData) => {
+      return {
+        ...prevSermonData,
+        [event.target.name]: event.target.value,
+      };
+    });
+  }
+
+  const handleDateChange = (newValue: Date | null) => {
     setDate(newValue);
   };
 
   return (
-    <div className={styles.container}>
+    <form className={styles.container}>
       <Navbar />
       <Box
         sx={{
@@ -140,9 +144,10 @@ const Uploader: NextPage<{
           fullWidth
           id="title-input"
           label="Title"
+          name="title"
           variant="outlined"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          value={sermonData.title}
+          onChange={handleChange}
           required
         />
         <Box sx={{ display: 'flex', color: 'red', gap: '1ch', width: 1 }}>
@@ -150,20 +155,22 @@ const Uploader: NextPage<{
             fullWidth
             id="title-input"
             label="Subtitle"
+            name="subtitle"
             variant="outlined"
-            value={subtitle}
-            onChange={(e) => setSubtitle(e.target.value)}
+            value={sermonData.subtitle}
+            onChange={handleChange}
           />
           <LocalizationProvider
             dateAdapter={AdapterDateFns}
             sx={{ width: 1 }}
             fullWidth
           >
+            {/* TODO: Use date invalid for disabling the button */}
             <DesktopDatePicker
               label="Date"
               inputFormat="MM/dd/yyyy"
               value={date}
-              onChange={handleChange}
+              onChange={handleDateChange}
               renderInput={(params) => <TextField {...params} />}
             />
           </LocalizationProvider>
@@ -176,9 +183,11 @@ const Uploader: NextPage<{
           rows={4}
           id="description-text"
           label="Description"
+          name="description"
           placeholder="Description"
           multiline
-          onChange={(e) => setDescription(e.target.value)}
+          value={sermonData.description}
+          onChange={handleChange}
         />
         <Autocomplete
           fullWidth
@@ -199,9 +208,10 @@ const Uploader: NextPage<{
           fullWidth
           id="scripture-input"
           label="Scripture"
+          name="scripture"
           variant="outlined"
-          value={scripture}
-          onChange={(e) => setScripture(e.target.value)}
+          value={sermonData.scripture}
+          onChange={handleChange}
         />
         <Autocomplete
           fullWidth
@@ -216,7 +226,7 @@ const Uploader: NextPage<{
           multiple
           renderInput={(params) => <TextField {...params} label="Topic(s)" />}
         />
-        <form className={styles.form}>
+        <div className={styles.form}>
           {file ? (
             <>
               <AudioTrimmer url={file.preview}></AudioTrimmer>
@@ -247,39 +257,41 @@ const Uploader: NextPage<{
             value="Upload"
             disabled={
               file === undefined ||
-              title === '' ||
+              sermonData.title === '' ||
               date === null ||
               speaker.length === 0
             }
+            // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
+            // the user from double clicking upload
             onClick={() => {
-              if (file !== undefined) {
+              if (file !== undefined && date != null) {
                 uploadFile({
-                  file,
-                  setFile,
-                  setUploadProgress,
-                  title,
-                  subtitle,
-                  date,
-                  description,
-                  speaker,
-                  scripture,
-                  topic,
+                  file: file,
+                  setFile: setFile,
+                  setUploadProgress: setUploadProgress,
+                  title: sermonData.title,
+                  subtitle: sermonData.subtitle,
+                  date: date,
+                  description: sermonData.description,
+                  speaker: speakers,
+                  scripture: sermonData.scripture,
+                  topic: topics,
                 });
               }
             }}
           />
           <p>{uploadProgress}</p>
-        </form>
+        </div>
       </Box>
       <Footer />
-    </div>
+    </form>
   );
 };
 
-Uploader.propTypes = {
-  speakers: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
-  topics: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
-};
+// Uploader.propTypes = {
+//   speakers: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
+//   topics: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
+// };
 
 export const getServerSideProps: GetServerSideProps = async (context) => {
   interface speakerAndTopic {

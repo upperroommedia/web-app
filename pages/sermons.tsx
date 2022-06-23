@@ -2,74 +2,88 @@
  * Sermons page for viewing all sermons test
  */
 import type { GetServerSideProps, NextPage } from 'next';
-import PropTypes from 'prop-types';
+// import PropTypes from 'prop-types';
 
 import Footer from '../components/Footer';
 import Navbar from '../components/Navbar';
+import SermonListCard from '../components/SermonListCard';
+import BottomAudioBar from '../components/BottomAudioBar';
 
-import styles from '../styles/Uploader.module.css';
+import { Sermon, sermonConverter } from '../types/Sermon';
+
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
-import { firebase } from '../firebase/firebase';
+import { getDownloadURL, ref } from 'firebase/storage';
+import { firebase, storage } from '../firebase/firebase';
+import { useState } from 'react';
 
-interface sermon {
-  ref: string;
-  title: string;
-  description: string;
-  speaker: Array<string>;
-  subtitle: string;
-  scripture: string;
-  date: Date;
-  topic: Array<string>;
+interface Props {
+  sermons: Sermon[];
 }
 
-const Sermons: NextPage<{ sermons: Array<sermon> }> = ({ sermons }) => {
-  return (
-    <div className={styles.container}>
-      <Navbar />
-      <h1>Sermons</h1>
-      {sermons.map((sermon) => (
-        <>
-          <p>
-            <a
-              href={`https://storage.googleapis.com/download/storage/v1/b/sermons/o/${
-                sermon.ref.split('/')[1]
-              }?alt=media`}
-            >
-              {sermon.title}
-            </a>
-            <audio controls>
-              <source
-                src={`https://storage.googleapis.com/download/storage/v1/b/sermons/o/${
-                  sermon.ref.split('/')[1]
-                }?alt=media`}
-              />
-            </audio>
-          </p>
-        </>
-      ))}
-      <Footer />
-    </div>
-  );
-};
+const Sermons: NextPage<Props> = ({ sermons }: Props) => {
+  const sermonsRef = ref(storage, 'sermons');
+  const [currentSermon, setCurrentSermon] = useState<
+    [Sermon, string] | undefined
+  >(undefined);
 
-Sermons.propTypes = {
-  sermons: PropTypes.any,
+  const handleSermonClick = (sermon: Sermon) => {
+    // console.log('handle click');
+    // setCurrentSermon(sermon);
+  };
+  const playSermonClick = async (sermon: Sermon) => {
+    // console.log('Play');
+    const url = await getDownloadURL(ref(sermonsRef, sermon.key));
+    setCurrentSermon([sermon, url]);
+  };
+
+  return (
+    <>
+      <div style={{ padding: '0 2rem' }}>
+        <Navbar />
+        <h1>Sermons</h1>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            margin: 'auto',
+            maxWidth: '1000px',
+            // gap: '3px',
+          }}
+        >
+          {sermons.map((sermon, i) => (
+            <SermonListCard
+              sermon={sermon}
+              handleSermonClick={handleSermonClick}
+              playSermonClick={playSermonClick}
+              key={`sermon_list_card_${i}`}
+            ></SermonListCard>
+          ))}
+        </div>
+
+        <Footer />
+      </div>
+      {currentSermon && (
+        <BottomAudioBar sermon={currentSermon[0]} url={currentSermon[1]} />
+      )}
+    </>
+  );
 };
 
 export const getServerSideProps: GetServerSideProps = async (context) => {
   const db = getFirestore(firebase);
-
-  const sermonsQuery = query(collection(db, 'sermons'));
-  const sermons: Array<sermon> = [];
+  // Firestore data converter to convert the queried data to the expected type
+  const sermonsQuery = query(collection(db, 'sermons')).withConverter(
+    sermonConverter
+  );
+  const sermons: Sermon[] = [];
   const sermonsQuerySnapshot = await getDocs(sermonsQuery);
   sermonsQuerySnapshot.forEach((doc) => {
-    const current: sermon = doc.data() as unknown as sermon;
-    if (current.title !== 'just here for testing') {
-      sermons.push(current);
-    }
+    // console.log(doc.data());
+    sermons.push(doc.data());
   });
   return {
-    props: { sermons: sermons },
+    props: { sermons: JSON.parse(JSON.stringify(sermons)) },
+    // props: { sermons },
   };
 };
 
