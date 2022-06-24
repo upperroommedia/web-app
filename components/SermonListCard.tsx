@@ -5,17 +5,22 @@ import { FunctionComponent } from 'react';
 // import Image from 'next/image';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
+import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import styles from '../styles/SermonListCard.module.css';
 import { Sermon } from '../types/Sermon';
 
 interface Props {
   sermon: Sermon;
+  index: number;
+  isPlaying: boolean;
   handleSermonClick: (sermon: Sermon) => void;
-  playSermonClick: (sermon: Sermon) => void;
+  playSermonClick: (index: number) => void;
 }
 
 const SermonListCard: FunctionComponent<Props> = ({
   sermon,
+  index,
+  isPlaying,
   handleSermonClick,
   playSermonClick,
 }: Props) => {
@@ -39,10 +44,10 @@ const SermonListCard: FunctionComponent<Props> = ({
             <IconButton
               onClick={(e) => {
                 e.preventDefault();
-                playSermonClick(sermon);
+                playSermonClick(index);
               }}
             >
-              <PlayCircleIcon />
+              {isPlaying ? <PauseCircleIcon /> : <PlayCircleIcon />}
             </IconButton>
             <h2 className={styles.date}>{sermon.dateString}</h2>
           </div>

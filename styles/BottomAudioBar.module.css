@@ -1,22 +1,62 @@
 .container {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1.75fr 1fr;
   position: fixed;
+  grid-gap: 15px;
   z-index: 1;
   bottom: 0px;
-  background-color: lightgray;
+  background-color: #ccc;
   justify-content: space-around;
-  aligh-items: center;
+  align-items: center;
   width: 100%;
-  gap: 50px;
   padding: 0px 30px;
 }
 
-.audio {
-  margin: auto 0;
-  flex: 2;
-  background-color: lightgray;
+.controls-container {
+  display: grid;
+  grid-template-columns: 4em auto 4em;
+  grid-gap: 0.5em;
+  width: 100%;
 }
 
 .title {
-  flex: 1;
+  /* grid-area: 1 / 1 / 1 / 2; */
+  font-size: 1.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current-time {
+  justify-self: end;
+}
+
+.duration {
+  justify-self: start;
+}
+
+.vertical-container {
+  /* background-color: green; */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 2;
+  padding: 10px 0;
+}
+
+.controls-container > h4 {
+  margin: 0;
+  align-self: center;
+  font-size: 0.8em;
+}
+
+.slider {
+  /* -webkit-appearance: none; */
+  width: 100%;
+  justify-self: center;
+  align-self: center;
+  /* background: red; */
+  /* border-radius: 0.5em; */
+  /* height: 0.3em; */
 }

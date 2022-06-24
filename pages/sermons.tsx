@@ -14,7 +14,7 @@ import { Sermon, sermonConverter } from '../types/Sermon';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
 import { getDownloadURL, ref } from 'firebase/storage';
 import { firebase, storage } from '../firebase/firebase';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
   sermons: Sermon[];
@@ -22,19 +22,36 @@ interface Props {
 
 const Sermons: NextPage<Props> = ({ sermons }: Props) => {
   const sermonsRef = ref(storage, 'sermons');
-  const [currentSermon, setCurrentSermon] = useState<
-    [Sermon, string] | undefined
-  >(undefined);
+  const [playRef, setPlayRef] = useState<{ index: number; isPlaying: boolean }>(
+    { index: -1, isPlaying: false }
+  );
+  const urls = useRef<string[]>(new Array(sermons.length));
+  const [url, setUrl] = useState<string | undefined>();
 
   const handleSermonClick = (sermon: Sermon) => {
     // console.log('handle click');
     // setCurrentSermon(sermon);
   };
-  const playSermonClick = async (sermon: Sermon) => {
-    // console.log('Play');
-    const url = await getDownloadURL(ref(sermonsRef, sermon.key));
-    setCurrentSermon([sermon, url]);
+  const playSermonClick = async (index: number) => {
+    setPlayRef((prevIndex) => ({
+      index: index,
+      isPlaying: prevIndex.index === index ? !prevIndex.isPlaying : true,
+    }));
   };
+
+  useEffect(() => {
+    if (playRef.index === -1) return;
+    const index = playRef.index;
+    // cache urls on demand to avoid unnecessary network requests
+    if (!urls.current[index]) {
+      getDownloadURL(ref(sermonsRef, sermons[index].key)).then((url) => {
+        urls.current[index] = url;
+        setUrl(url);
+      });
+    } else {
+      setUrl(urls.current[index]);
+    }
+  }, [playRef]);
 
   return (
     <>
@@ -53,6 +70,8 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
           {sermons.map((sermon, i) => (
             <SermonListCard
               sermon={sermon}
+              index={i}
+              isPlaying={i === playRef.index ? playRef.isPlaying : false}
               handleSermonClick={handleSermonClick}
               playSermonClick={playSermonClick}
               key={`sermon_list_card_${i}`}
@@ -62,8 +81,13 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
 
         <Footer />
       </div>
-      {currentSermon && (
-        <BottomAudioBar sermon={currentSermon[0]} url={currentSermon[1]} />
+      {playRef.index !== -1 && (
+        <BottomAudioBar
+          sermon={sermons[playRef.index]}
+          playRef={playRef}
+          url={url}
+          playSermonClick={playSermonClick}
+        />
       )}
     </>
   );
