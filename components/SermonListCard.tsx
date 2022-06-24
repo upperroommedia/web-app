@@ -19,7 +19,6 @@ const SermonListCard: FunctionComponent<Props> = ({
   handleSermonClick,
   playSermonClick,
 }: Props) => {
-  const date = new Date(sermon.date as unknown as string);
   return (
     <div
       onClick={(e) => {
@@ -45,7 +44,7 @@ const SermonListCard: FunctionComponent<Props> = ({
             >
               <PlayCircleIcon />
             </IconButton>
-            <h2 className={styles.date}>{date.toDateString()}</h2>
+            <h2 className={styles.date}>{sermon.dateString}</h2>
           </div>
         </div>
       </div>
