@@ -78,12 +78,10 @@ export const getServerSideProps: GetServerSideProps = async (context) => {
   const sermons: Sermon[] = [];
   const sermonsQuerySnapshot = await getDocs(sermonsQuery);
   sermonsQuerySnapshot.forEach((doc) => {
-    // console.log(doc.data());
     sermons.push(doc.data());
   });
   return {
-    props: { sermons: JSON.parse(JSON.stringify(sermons)) },
-    // props: { sermons },
+    props: { sermons: sermons },
   };
 };
 

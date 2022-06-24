@@ -11,22 +11,32 @@ export interface Sermon {
   speaker: Array<string>;
   subtitle: string;
   scripture: string;
-  date: Date;
+  dateMillis: number;
   topic: Array<string>;
+  dateString?: string;
 }
 
+export interface FirebaseSermon
+  extends Omit<Sermon, 'dateMillis' | 'dateString'> {
+  date: Timestamp;
+}
+
+/* This converter takes care of converting a Sermon to a FirebaseSermon on upload
+ *  and a FirebaseSermon to a Sermon on download.
+ */
 export const sermonConverter = {
-  toFirestore: (sermon: Sermon) => {
-    return { ...sermon, date: Timestamp.fromDate(sermon.date) };
+  toFirestore: (sermon: Sermon): FirebaseSermon => {
+    return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
   fromFirestore: (
-    snapshot: QueryDocumentSnapshot<Sermon>,
+    snapshot: QueryDocumentSnapshot<FirebaseSermon>,
     options: SnapshotOptions
-  ) => {
+  ): Sermon => {
+    const { date, ...data } = snapshot.data(options);
     return {
-      ...snapshot.data(options),
-      // TODO: Fix this type issue
-      date: (snapshot.data(options).date as unknown as Timestamp).toDate(),
+      ...data,
+      dateMillis: snapshot.data(options).date.toMillis(),
+      dateString: snapshot.data(options).date.toDate().toDateString(),
     };
   },
 };
@@ -35,9 +45,10 @@ export const emptySermon: Sermon = {
   key: '',
   title: '',
   subtitle: '',
-  date: new Date(),
+  dateMillis: 0,
   description: '',
   speaker: [],
   scripture: '',
   topic: [],
+  dateString: undefined,
 };
