@@ -4,7 +4,7 @@
 import { FunctionComponent } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import styles from '../styles/Home.module.css';
+import styles from '../styles/Navbar.module.css';
 
 const Navbar: FunctionComponent = () => {
   return (

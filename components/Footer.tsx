@@ -3,7 +3,7 @@
  */
 import Image from 'next/image';
 import { FunctionComponent } from 'react';
-import styles from '../styles/Home.module.css';
+import styles from '../styles/Footer.module.css';
 
 const Footer: FunctionComponent = () => (
   <footer className={styles.footer}>
