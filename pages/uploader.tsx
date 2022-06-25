@@ -1,10 +1,13 @@
 /**
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
-import type { GetServerSideProps, NextPage } from 'next';
+import type {
+  GetServerSideProps,
+  NextPage,
+  InferGetServerSidePropsType,
+  GetServerSidePropsContext,
+} from 'next';
 
-import Footer from '../components/Footer';
-import Navbar from '../components/Navbar';
 import AudioTrimmer from '../components/AudioTrimmer';
 import uploadFile from './api/uploadFile';
 
@@ -24,6 +27,8 @@ import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon } from '../types/Sermon';
+
+import ProtectedRoute from '../components/ProtectedRoute';
 
 export interface UploadableFile {
   file: File;
@@ -47,7 +52,9 @@ interface Props {
   topics: Array<string>;
 }
 
-const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
+const Uploader: NextPage<Props> = (
+  props: InferGetServerSidePropsType<typeof getServerSideProps>
+) => {
   getAuth();
   const [sermonData, setSermonData] = useState<Sermon>(emptySermon);
   const [file, setFile] = useState<UploadableFile>();
@@ -124,7 +131,6 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
 
   return (
     <form className={styles.container}>
-      <Navbar />
       <Box
         sx={{
           display: 'flex',
@@ -198,7 +204,7 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
             }
           }}
           id="speaker-input"
-          options={speakers}
+          options={props.speakers}
           multiple
           renderInput={(params) => (
             <TextField {...params} required label="Speaker(s)" />
@@ -222,7 +228,7 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
             }
           }}
           id="topic-input"
-          options={topics}
+          options={props.topics}
           multiple
           renderInput={(params) => <TextField {...params} label="Topic(s)" />}
         />
@@ -273,9 +279,9 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
                   subtitle: sermonData.subtitle,
                   date: date,
                   description: sermonData.description,
-                  speaker: speakers,
+                  speaker: props.speakers,
                   scripture: sermonData.scripture,
-                  topic: topics,
+                  topic: props.topics,
                 });
               }
             }}
@@ -283,7 +289,6 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
           <p>{uploadProgress}</p>
         </div>
       </Box>
-      <Footer />
     </form>
   );
 };
@@ -293,31 +298,42 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
 //   topics: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
 // };
 
-export const getServerSideProps: GetServerSideProps = async (context) => {
-  interface speakerAndTopic {
-    name: string;
+export const getServerSideProps: GetServerSideProps = async (
+  ctx: GetServerSidePropsContext
+) => {
+  const userCredentials = await ProtectedRoute(ctx);
+  if (userCredentials.props.token) {
+    interface speakerAndTopic {
+      name: string;
+    }
+
+    const db = getFirestore(firebase);
+
+    const speakersQuery = query(collection(db, 'speakers'));
+    const speakers: Array<string> = [];
+    const speakersQuerySnapshot = await getDocs(speakersQuery);
+    speakersQuerySnapshot.forEach((doc) => {
+      const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
+      speakers.push(current.name);
+    });
+
+    const topicsQuery = query(collection(db, 'topics'));
+    const topics: Array<string> = [];
+    const topicsQuerySnapshot = await getDocs(topicsQuery);
+    topicsQuerySnapshot.forEach((doc) => {
+      const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
+      topics.push(current.name);
+    });
+    return {
+      props: {
+        speakers: speakers,
+        topics: topics,
+      },
+    };
+  } else {
+    const failedUserCredentials = userCredentials;
+    return failedUserCredentials;
   }
-
-  const db = getFirestore(firebase);
-
-  const speakersQuery = query(collection(db, 'speakers'));
-  const speakers: Array<string> = [];
-  const speakersQuerySnapshot = await getDocs(speakersQuery);
-  speakersQuerySnapshot.forEach((doc) => {
-    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
-    speakers.push(current.name);
-  });
-
-  const topicsQuery = query(collection(db, 'topics'));
-  const topics: Array<string> = [];
-  const topicsQuerySnapshot = await getDocs(topicsQuery);
-  topicsQuerySnapshot.forEach((doc) => {
-    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
-    topics.push(current.name);
-  });
-  return {
-    props: { speakers: speakers, topics: topics },
-  };
 };
 
 export default Uploader;

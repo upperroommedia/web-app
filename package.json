@@ -15,28 +15,20 @@
   "dependencies": {
     "@emotion/react": "^11.9.0",
     "@emotion/styled": "^11.8.1",
-<<<<<<< HEAD
+    "@firebase/app-types": "0.x",
     "@mui/icons-material": "^5.8.4",
     "@mui/material": "^5.8.1",
     "@mui/system": "^5.2.3",
     "@mui/x-date-pickers": "^5.0.0-alpha.4",
     "date-fns": "^2.28.0",
-    "firebase": "^n9.6.7",
+    "firebase": "^9.6.7",
+    "firebase-admin": "^11.0.0",
     "next": "12.0.10",
+    "nookies": "^2.5.2",
     "react": "^18.1.0",
     "react-dom": "18.1.0",
     "react-dropzone": "^12.0.4",
-    "react-firebaseui": "^6.0.0",
     "uuid": "^8.3.2"
-=======
-    "@material-ui/core": "^4.12.4",
-    "@mui/material": "^5.8.2",
-    "firebase": "^9.8.2",
-    "next": "12.1.0",
-    "next-auth": "^4.3.4",
-    "react": "17.0.2",
-    "react-dom": "17.0.2"
->>>>>>> 80a42a0 (removed unneeded dependencies)
   },
   "devDependencies": {
     "@babel/core": ">=7.0.0 <8.0.0",

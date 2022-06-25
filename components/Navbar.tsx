@@ -5,7 +5,7 @@ import { useContext, FunctionComponent } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from '../styles/Navbar.module.css';
-import { AuthContextProvider } from '../context/AuthContext';
+import UserContext from '../context/user/UserContext';
 
 const Navbar: FunctionComponent = () => {
   const { isAuthenticated } = useContext(UserContext);
@@ -40,6 +40,7 @@ const Navbar: FunctionComponent = () => {
           </Link>
         </>
       ) : (
+        // All Pages that need to be protected
         <>
           <Link href="/uploader">
             <a className={styles.nav_link}>Uploader</a>

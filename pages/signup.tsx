@@ -1,18 +1,34 @@
 /**
  * Page for Signing up the User
  */
+// React
 import { useState, useContext } from 'react';
 import { useRouter } from 'next/router';
-import UserContext from '../context/user/UserContext';
-import { Button, Input, InputLabel, FormControl } from '@mui/material';
-import PopUp from '../components/PopUp';
 
-const Signup = () => {
-  //  const { user, login } = useAuth();
+// Next
+import type {
+  GetServerSideProps,
+  InferGetServerSidePropsType,
+  GetServerSidePropsContext,
+} from 'next';
+
+// Auth
+import UserContext from '../context/user/UserContext';
+
+// 3rd Party
+import { Button, Input, InputLabel, FormControl } from '@mui/material';
+
+// Components
+import ProtectedRoute from '../components/ProtectedRoute';
+import PopUp from '../components/PopUp';
+import AuthErrors from '../components/AuthErrors';
+
+const Signup = (
+  props: InferGetServerSidePropsType<typeof getServerSideProps>
+) => {
   const router = useRouter();
   const { isAuthenticated, signup } = useContext(UserContext);
 
-  //   console.log('User:' + user);
   const [data, setData] = useState({
     email: '',
     password: '',
@@ -32,21 +48,15 @@ const Signup = () => {
   const handleSignup = async (e: any) => {
     e.preventDefault();
     const res = await signup(data);
-    switch (res) {
-      case 'auth/weak-password':
-        setTitle('Weak Password');
-        setErrorMessage('Make a password with 6 or more characters');
-        handleOpen();
-        break;
-      case 'auth/email-already-in-use':
-        setTitle('Email Already in Use');
-        handleOpen();
-        setErrorMessage('The email you are using is Already in Use');
-        break;
-      default:
-        if (isAuthenticated) {
-          router.push('/uploader');
-        }
+    const authResult = AuthErrors(res);
+    if (authResult.authFailure) {
+      setTitle(authResult.title);
+      setErrorMessage(authResult.errorMessage);
+      handleOpen();
+    } else {
+      if (isAuthenticated) {
+        router.push(authResult.dest);
+      }
     }
   };
 
@@ -107,4 +117,20 @@ const Signup = () => {
   );
 };
 
+export const getServerSideProps: GetServerSideProps = async (
+  ctx: GetServerSidePropsContext
+) => {
+  const userCredentials = await ProtectedRoute(ctx);
+  if (userCredentials.props.token) {
+    return {
+      redirect: {
+        permanent: false,
+        destination: '/uploader',
+      },
+      props: {},
+    };
+  } else {
+    return { props: {} };
+  }
+};
 export default Signup;

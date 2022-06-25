@@ -1,16 +1,33 @@
 /**
  * Page for Logging in the User
  */
+// React
 import { useState, useContext } from 'react';
+
+// Next
+import type {
+  GetServerSideProps,
+  InferGetServerSidePropsType,
+  GetServerSidePropsContext,
+} from 'next';
 import { useRouter } from 'next/router';
+
+// 3rd Party Components
 import { Button, Input, InputLabel, FormControl } from '@mui/material';
+
+// Auth
 import UserContext from '../context/user/UserContext';
+
+// Components
+import ProtectedRoute from '../components/ProtectedRoute';
+import AuthErrors from '../components/AuthErrors';
 import PopUp from '../components/PopUp';
 
-const Login = () => {
+const Login = (
+  props: InferGetServerSidePropsType<typeof getServerSideProps>
+) => {
   const router = useRouter();
-  //  const { user, login } = useAuth();
-  const { login } = useContext(UserContext);
+  const { isAuthenticated, login } = useContext(UserContext);
 
   const [data, setData] = useState({
     email: '',
@@ -33,15 +50,15 @@ const Login = () => {
 
     const res = await login(data);
 
-    switch (res) {
-      case 'auth/user-not-found':
-        setTitle('Wrong Credentials');
-        setErrorMessage('Double Check your username and password');
-        handleOpen();
-        break;
-      default:
-        router.push('/uploader');
-      // console.log(error);
+    const authResult = AuthErrors(res);
+    if (authResult.authFailure) {
+      setTitle(authResult.title);
+      setErrorMessage(authResult.errorMessage);
+      handleOpen();
+    } else {
+      if (isAuthenticated) {
+        router.push(authResult.dest);
+      }
     }
   };
 
@@ -99,6 +116,23 @@ const Login = () => {
       </PopUp>
     </div>
   );
+};
+
+export const getServerSideProps: GetServerSideProps = async (
+  ctx: GetServerSidePropsContext
+) => {
+  const userCredentials = await ProtectedRoute(ctx);
+  if (userCredentials.props.token) {
+    return {
+      redirect: {
+        permanent: false,
+        destination: '/uploader',
+      },
+      props: {},
+    };
+  } else {
+    return { props: {} };
+  }
 };
 
 export default Login;

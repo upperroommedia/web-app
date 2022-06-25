@@ -8,7 +8,8 @@ import {
   signOut,
 } from 'firebase/auth';
 import firebase from 'firebase/auth';
-import { auth } from '../../config/firebase';
+import { auth } from '../../firebase/firebase';
+import nookies from "nookies";
 
 import { GET_USER, SET_LOADING, LOGOUT, userCreditionals } from '../types';
 
@@ -24,13 +25,40 @@ const UserState = (props: any) => {
   const [state, dispatch] = useReducer(userReducer, initialState);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as any).nookies = nookies;
+    }
     return auth.onIdTokenChanged(async (user) => {
       if (!user) {
         setUser(null);
+        nookies.destroy(null, "token");
+        nookies.set(null, "token", "", {path: '/'});
+        dispatch({ dispatch: LOGOUT });
       } else {
+        const token = await user.getIdToken();
         setUser(user);
+        nookies.destroy(null, "token");
+        nookies.set(null, "token", token, {path: '/'});
+        await dispatch({
+          type: GET_USER,
+          payload: {
+            username: user.email,
+            // TODO Role
+            role: null,
+          },
+        });
       }
     });
+  }, []);
+
+  useEffect(() => {
+    const handle = setInterval(async () => {
+      // eslint-disable-next-line no-console
+      console.log(`refreshing token...`);
+      const user = auth.currentUser;
+      if (user) await user.getIdToken(true);
+    }, 10 * 60 * 1000);
+    return () => clearInterval(handle);
   }, []);
 
   // Trigger loading state
@@ -58,17 +86,6 @@ const UserState = (props: any) => {
         role: null,
       },
     });
-    // This will be implemented to keep the User logged in the next Pull request with just a bit more testing
-    // localStorage.setItem(
-    //   'userData',
-    //   JSON.stringify({
-    //     type: GET_USER,
-    //     payload: {
-    //       username: loginForm.email,
-    //       role: null,
-    //     },
-    //   })
-    // );
   };
   const signup = async (loginForm: userCreditionals) => {
     setLoading();
@@ -89,25 +106,13 @@ const UserState = (props: any) => {
         role: null,
       },
     });
-    // This will be implemented to keep the User logged in the next Pull request with just a bit more testing
-    // localStorage.setItem(
-    //   'userData',
-    //   JSON.stringify({
-    //     type: GET_USER,
-    //     payload: {
-    //       username: loginForm.email,
-    //       role: null,
-    //     },
-    //   })
-    // );
+
   };
 
   const logoutUser = async () => {
     await signOut(auth);
     setUser(null);
     dispatch({ dispatch: LOGOUT });
-    // This will be implemented to keep the User logged in the next Pull request with just a bit more testing
-    // localStorage.setItem('userData', JSON.stringify({ dispatch: LOGOUT }));
   };
 
   return (
