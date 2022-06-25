@@ -7,6 +7,7 @@ import Footer from '../components/Footer';
 import Navbar from '../components/Navbar';
 import AudioTrimmer from '../components/AudioTrimmer';
 import uploadFile from './api/uploadFile';
+import YoutubeUpload from '../components/YoutubeUpload';
 
 import styles from '../styles/Uploader.module.css';
 // import firebase from '../firebase/firebase';
@@ -19,6 +20,7 @@ import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import Switch from '@mui/material/Switch';
 
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
@@ -57,6 +59,8 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
   const [date, setDate] = useState<Date | null>(new Date());
   const [speaker, setSpeaker] = useState<Array<string>>([]);
   const [topic, setTopic] = useState<Array<string>>([]);
+
+  const [uploadToYoutube, setUploadToYoutube] = useState<boolean>(true);
 
   const onDrop = useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
@@ -136,6 +140,7 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
         }}
       >
         <h1>Uploader</h1>
+        <Switch onChange={() => setUploadToYoutube(!uploadToYoutube)} />
         <TextField
           sx={{
             display: 'block',
@@ -226,62 +231,66 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
           multiple
           renderInput={(params) => <TextField {...params} label="Topic(s)" />}
         />
-        <div className={styles.form}>
-          {file ? (
-            <>
-              <AudioTrimmer url={file.preview}></AudioTrimmer>
-              <button
-                type="button"
-                className={styles.button}
-                onClick={() => {
-                  setFile(undefined);
-                  setUploadProgress(undefined);
-                  clearForm();
-                }}
-              >
-                Clear
-              </button>
-            </>
-          ) : (
-            <div className={styles.dragAndDrop} {...getRootProps()}>
-              <input type="hidden" {...getInputProps()} />
-              <p>
-                Drag &apos;n&apos; drop audio files here, or click to select
-                files
-              </p>
-            </div>
-          )}
-          <input
-            className={styles.button}
-            type="button"
-            value="Upload"
-            disabled={
-              file === undefined ||
-              sermonData.title === '' ||
-              date === null ||
-              speaker.length === 0
+        {uploadToYoutube ? (
+          <YoutubeUpload />
+        ) : (
+          <div className={styles.form}>
+            {file ? (
+              <>
+                <AudioTrimmer url={file.preview}></AudioTrimmer>
+                <button
+                  type="button"
+                  className={styles.button}
+                  onClick={() => {
+                    setFile(undefined);
+                    setUploadProgress(undefined);
+                    clearForm();
+                  }}
+                >
+                  Clear
+                </button>
+              </>
+            ) : (
+              <div className={styles.dragAndDrop} {...getRootProps()}>
+                <input type="hidden" {...getInputProps()} />
+                <p>
+                  Drag &apos;n&apos; drop audio files here, or click to select
+                  files
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+        <input
+          className={styles.button}
+          type="button"
+          value="Upload"
+          disabled={
+            file === undefined ||
+            sermonData.title === '' ||
+            date === null ||
+            speaker.length === 0
+          }
+          // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
+          // the user from double clicking upload
+          onClick={() => {
+            if (file !== undefined && date != null) {
+              uploadFile({
+                file: file,
+                setFile: setFile,
+                setUploadProgress: setUploadProgress,
+                title: sermonData.title,
+                subtitle: sermonData.subtitle,
+                date: date,
+                description: sermonData.description,
+                speaker: speakers,
+                scripture: sermonData.scripture,
+                topic: topics,
+              });
             }
-            // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
-            // the user from double clicking upload
-            onClick={() => {
-              if (file !== undefined && date != null) {
-                uploadFile({
-                  file: file,
-                  setFile: setFile,
-                  setUploadProgress: setUploadProgress,
-                  title: sermonData.title,
-                  subtitle: sermonData.subtitle,
-                  date: date,
-                  description: sermonData.description,
-                  speaker: speakers,
-                  scripture: sermonData.scripture,
-                  topic: topics,
-                });
-              }
-            }}
-          />
-          <p>{uploadProgress}</p>
-        </div>
+          }}
+        />
+        <p>{uploadProgress}</p>
       </Box>
       <Footer />
     </form>
