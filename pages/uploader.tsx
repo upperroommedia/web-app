@@ -62,8 +62,8 @@ const Uploader: NextPage<Props> = (
 
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date | null>(new Date());
-  const [speaker, setSpeaker] = useState<Array<string>>([]);
-  const [topic, setTopic] = useState<Array<string>>([]);
+  const [speaker, setSpeaker] = useState([]);
+  const [topic, setTopic] = useState([]);
 
   const onDrop = useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
@@ -198,7 +198,7 @@ const Uploader: NextPage<Props> = (
         <Autocomplete
           fullWidth
           value={speaker}
-          onChange={(event: any, newValue: Array<string> | null) => {
+          onChange={(event: any, newValue: any | null) => {
             if (newValue !== null && newValue.length <= 3) {
               setSpeaker(newValue);
             }
@@ -222,7 +222,7 @@ const Uploader: NextPage<Props> = (
         <Autocomplete
           fullWidth
           value={topic}
-          onChange={(event: any, newValue: Array<string> | null) => {
+          onChange={(event: any, newValue: any | null) => {
             if (newValue !== null && newValue.length <= 10) {
               setTopic(newValue);
             }
