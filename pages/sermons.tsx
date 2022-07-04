@@ -76,7 +76,7 @@ export const getServerSideProps: GetServerSideProps = async (context) => {
     sermons.push(doc.data());
   });
   return {
-    props: { sermons: sermons },
+    props: { sermons },
   };
 };
 
