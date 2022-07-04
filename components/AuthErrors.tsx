@@ -5,10 +5,10 @@ const createErrorObject = (
   dest: string
 ) => {
   return {
-    title: title,
-    errorMessage: errorMessage,
-    authFailure: authFailure,
-    dest: dest,
+    title,
+    errorMessage,
+    authFailure,
+    dest,
   };
 };
 

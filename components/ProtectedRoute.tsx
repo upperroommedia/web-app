@@ -11,7 +11,7 @@ export default async function ProtectedRoute(
     console.log(JSON.stringify(cookies, null, 2));
     const token = await firebaseAdmin.auth().verifyIdToken(cookies.token);
     return {
-      props: { token: token },
+      props: { token },
     };
   } catch (err) {
     // User is not authenticated

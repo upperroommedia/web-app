@@ -119,7 +119,7 @@ const UserState = (props: any) => {
     <UserContext.Provider
       value={{
         username: state.username,
-        user: user,
+        user,
         isAuthenticated: state.isAuthenticated,
         loading: state.loading,
         role: state.role,

@@ -272,12 +272,12 @@ const Uploader: NextPage<Props> = (
             onClick={() => {
               if (file !== undefined && date != null) {
                 uploadFile({
-                  file: file,
-                  setFile: setFile,
-                  setUploadProgress: setUploadProgress,
+                  file,
+                  setFile,
+                  setUploadProgress,
                   title: sermonData.title,
                   subtitle: sermonData.subtitle,
-                  date: date,
+                  date,
                   description: sermonData.description,
                   speaker: props.speakers,
                   scripture: sermonData.scripture,
@@ -326,8 +326,8 @@ export const getServerSideProps: GetServerSideProps = async (
     });
     return {
       props: {
-        speakers: speakers,
-        topics: topics,
+        speakers,
+        topics,
       },
     };
   } else {

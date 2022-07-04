@@ -14,9 +14,9 @@ if (!privateKey || !clientEmail || !projectId) {
 if (!firebaseAdmin.apps.length) {
   firebaseAdmin.initializeApp({
     credential: firebaseAdmin.credential.cert({
-      projectId: projectId,
-      privateKey: privateKey,
-      clientEmail: clientEmail,
+      projectId,
+      privateKey,
+      clientEmail,
     }),
     databaseURL: `https://${projectId}.firebaseio.com`,
   });
