@@ -4,8 +4,6 @@
 import type { GetServerSideProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
-import Footer from '../components/Footer';
-import Navbar from '../components/Navbar';
 import SermonListCard from '../components/SermonListCard';
 import BottomAudioBar from '../components/BottomAudioBar';
 
@@ -39,7 +37,6 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
   return (
     <>
       <div style={{ padding: '0 2rem' }}>
-        <Navbar />
         <h1>Sermons</h1>
         <div
           style={{
@@ -59,8 +56,6 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
             ></SermonListCard>
           ))}
         </div>
-
-        <Footer />
       </div>
       {currentSermon && (
         <BottomAudioBar sermon={currentSermon[0]} url={currentSermon[1]} />

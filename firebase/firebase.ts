@@ -1,5 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getStorage } from 'firebase/storage';
+import { getAuth } from 'firebase/auth';
+
 // Your web app's Firebase configuration
 // These keys are ok to leave public according to Firebase docs
 // Initialize Firebase
@@ -14,4 +16,6 @@ const firebase = initializeApp({
 });
 
 const storage = getStorage();
-export { firebase, storage };
+const auth = getAuth();
+export { firebase, storage, auth };
+
