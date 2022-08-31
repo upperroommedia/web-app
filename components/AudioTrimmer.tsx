@@ -1,3 +1,7 @@
+// An audio trimmer component that allows the user to trim audio files.
+// Specifically, it allows the user to select a start and stop timestamp for the audio file.
+// The start timestamp is the time is used in the backend to actually trim the file
+
 import {
   FunctionComponent,
   MouseEvent,
@@ -13,6 +17,7 @@ interface AudioTrimmerProps {
 }
 // TODO: Seperate into components
 // TODO: Impelement loop which will make playhead stay between start and end trim
+// TODO: THIS ENTIRE FILE NEEDS TO BE REFACTORED
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
   const [currentTime, setCurrentTime] = useState<number>(0);
@@ -226,6 +231,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
         // style={{ background-image: url("https://audiotrimmer.com/waves/scrubbg.png")}}
         // style={{styles.range}}
       /> */}
+      {/* TODO: Style this better */}
       <div style={{ display: 'flex' }}>
         <button type="button" onClick={rewindToStart}>
           Rewind

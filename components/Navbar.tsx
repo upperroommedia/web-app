@@ -1,12 +1,14 @@
 /**
  * Navbar: located at the top of all pages
  */
-import { FunctionComponent } from 'react';
+import { useContext, FunctionComponent } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from '../styles/Navbar.module.css';
+import UserContext from '../context/user/UserContext';
 
 const Navbar: FunctionComponent = () => {
+  const { isAuthenticated } = useContext(UserContext);
   return (
     <nav>
       <div className={styles.navbar}>
@@ -27,9 +29,27 @@ const Navbar: FunctionComponent = () => {
       <Link href="/about">
         <a className={styles.nav_link}>About</a>
       </Link>
-      <Link href="/uploader">
-        <a className={styles.nav_link}>Uploader</a>
-      </Link>
+
+      {!isAuthenticated ? (
+        <>
+          <Link href="/login">
+            <a className={styles.nav_link}>Login</a>
+          </Link>
+          <Link href="/signup">
+            <a className={styles.nav_link}>Sign Up</a>
+          </Link>
+        </>
+      ) : (
+        // All Pages that need to be protected
+        <>
+          <Link href="/uploader">
+            <a className={styles.nav_link}>Uploader</a>
+          </Link>
+          <Link href="/logout">
+            <a className={styles.nav_link}>Log out</a>
+          </Link>
+        </>
+      )}
     </nav>
   );
 };

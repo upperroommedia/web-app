@@ -153,7 +153,7 @@ export const trimAudio = functions.https.onRequest(
     functions.logger.info('Trying to trim audio');
 
     try {
-      //TODO (1): replace hardcoded elements with request inputs and add checks
+      // TODO (1): replace hardcoded elements with request inputs and add checks
       const outputUrl = await getOutputUrl('sermons', 'test_youtube', 'mp3');
       const transcodeResponse = await transcodeAudio(
         'https://www.youtube.com/watch?v=utHMClq8tYo',
