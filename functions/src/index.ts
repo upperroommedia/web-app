@@ -2,12 +2,120 @@ import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { GetSignedUrlConfig } from '@google-cloud/storage';
 import axios, { AxiosResponse, AxiosRequestConfig } from 'axios';
+import qs from 'qs';
 import FormData from 'form-data';
 admin.initializeApp();
 
-// To test functions run: npm run-script build && firebase emulators:start --only functions
+// To test functions: npm run-script serve
+// To deploy functions: npm run-script deploy
 
-export const trimAudio = functions.storage
+const getDolbyToken = async (): Promise<AxiosResponse> => {
+  const data = qs.stringify({
+    grant_type: 'client_credentials',
+  });
+
+  const keySecret = `${process.env.DOLBY_API_KEY}:${process.env.DOLBY_API_SECRET}`;
+  functions.logger.log('Key:Secret', keySecret);
+  const creds = Buffer.from(keySecret).toString('base64');
+
+  const config: AxiosRequestConfig = {
+    method: 'post',
+    url: 'https://api.dolby.io/v1/auth/token',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Basic ${creds}`,
+      'Cache-Control': 'no-cache',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    data: data,
+  };
+  functions.logger.log('getDolbyToken axios config', config);
+
+  return await axios(config);
+};
+
+const getOutputUrl = async (
+  fileBucket: string,
+  fileName: string,
+  transcodeTo: string
+): Promise<string> => {
+  functions.logger.log(
+    'Get Output Url with Parameters:',
+    fileBucket,
+    fileName,
+    transcodeTo
+  );
+  // These options will allow temporary uploading of the file with outgoing
+  // Content-types tried:
+  // application/octet-stream
+  // audio/mpeg
+  // audio/mp4
+  // application/mp4
+  // and leaving it empty
+  const outputOptions: GetSignedUrlConfig = {
+    version: 'v4',
+    action: 'write',
+    expires: Date.now() + 15 * 60 * 1000, // 15 minutes
+    // contentType: tried all of the above
+  };
+  const [outputUrl] = await admin
+    .storage()
+    .bucket(fileBucket)
+    .file(`processed-sermons/${fileName}.${transcodeTo}`)
+    .getSignedUrl(outputOptions);
+  functions.logger.log('OutputUrl:', outputUrl);
+  return outputUrl;
+};
+
+const transcodeAudio = async (
+  inputUrl: string,
+  outputUrl: string,
+  transcodeTo: string,
+  start?: number,
+  duration?: number
+): Promise<AxiosResponse> => {
+  functions.logger.log(
+    'Transcode Audio with Parameters:',
+    inputUrl,
+    outputUrl,
+    transcodeTo,
+    start,
+    duration
+  );
+  const inputs = { source: { url: inputUrl }, segment: {} };
+  if (start !== undefined && duration !== undefined) {
+    inputs['segment'] = { start, duration };
+  }
+  const bearerToken = (await getDolbyToken()).data.access_token;
+  functions.logger.log('Bearer Token', bearerToken);
+  const axiosResponse: AxiosResponse = await axios({
+    method: 'post',
+    url: 'https://api.dolby.com/media/transcode',
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      'Content-Type': 'application/json', // tried chaining this to audio/mp4
+      Accept: 'application/json',
+    },
+    data: {
+      inputs: [inputs],
+      outputs: [
+        {
+          audio: [
+            {
+              codec: transcodeTo,
+            },
+          ],
+          destination: outputUrl,
+          kind: transcodeTo,
+        },
+      ],
+    },
+  });
+  functions.logger.info(`Axios Response: ${axiosResponse}`);
+  return axiosResponse;
+};
+
+export const trimAudioOnStorage = functions.storage
   .object()
   .onFinalize(async (object) => {
     const fileBucket = object.bucket;
@@ -32,56 +140,37 @@ export const trimAudio = functions.storage
       .file(fileName)
       .getSignedUrl(inputOptions);
 
-    // These options will allow temporary uploading of the file with outgoing
-    // Content-types tried:
-    // application/octet-stream
-    // audio/mpeg
-    // audio/mp4
-    // application/mp4
-    // and leaving it empty
-    const outputOptions: GetSignedUrlConfig = {
-      version: 'v4',
-      action: 'write',
-      expires: Date.now() + 15 * 60 * 1000, // 15 minutes
-      // contentType: tried all of the above
-    };
-    const [outputUrl] = await admin
-      .storage()
-      .bucket(fileBucket)
-      .file(
-        `processed-sermons/${
-          fileName.split('/')[1].split('.')[0]
-        }.${transcodeTo}`
-      )
-      .getSignedUrl(outputOptions);
-
-    const axiosResponse: AxiosResponse = await axios({
-      method: 'post',
-      url: 'https://api.dolby.com/media/transcode',
-      headers: {
-        'x-api-key': process.env.DOLBYIO_API_KEY,
-        'Content-Type': 'application/json', // tried chaining this to audio/mp4
-        Accept: 'application/json',
-      },
-      data: {
-        inputs: [
-          {
-            source: { url: inputUrl },
-            segment: { start: 0, duration: 10 },
-          },
-        ],
-        outputs: [
-          {
-            audio: [{}],
-            destination: outputUrl,
-            kind: transcodeTo,
-          },
-        ],
-      },
-    });
-    functions.logger.info(`Job ID: ${axiosResponse.data.job_id}`);
-    return true;
+    const outputUrl = await getOutputUrl(
+      fileBucket,
+      fileName.split('/')[1].split('.')[0],
+      transcodeTo
+    );
+    transcodeAudio(inputUrl, outputUrl, transcodeTo);
   });
+
+export const trimAudio = functions.https.onRequest(
+  async (_request, response) => {
+    functions.logger.info('Trying to trim audio');
+
+    try {
+      //TODO (1): replace hardcoded elements with request inputs and add checks
+      const outputUrl = await getOutputUrl('sermons', 'test_youtube', 'mp3');
+      const transcodeResponse = await transcodeAudio(
+        'https://www.youtube.com/watch?v=utHMClq8tYo',
+        outputUrl,
+        'mp3',
+        45,
+        30
+      );
+      functions.logger.info(`Trim Audio: ${transcodeResponse.data}`);
+      response.send(transcodeResponse.data);
+    } catch (error) {
+      functions.logger.log(error);
+      response.send(error);
+    }
+    functions.logger.info('DONE WITH TRIM AUDIO FUNCITON');
+  }
+);
 
 export const uploadToSubsplash = functions.https.onRequest(
   async (request, response) => {
@@ -90,7 +179,6 @@ export const uploadToSubsplash = functions.https.onRequest(
       response.send('Email or Password are not set in .env file');
       return;
     }
-
     try {
       const formData = new FormData();
       formData.append('grant_type', 'password');
@@ -135,7 +223,7 @@ export const uploadToSubsplash = functions.https.onRequest(
         summary: request.body.description,
         external_audio_url: request.body.audio_url,
         date: new Date(),
-        auto_publish: false, // TODO: Change to true
+        auto_publish: request.body.autoPublish ?? false, // TODO: Change to true
         _embedded: {
           images: [
             { id: '30b301b5-16f2-4982-b248-6a96a2093a1f', type: 'square' },
