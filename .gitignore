@@ -20,7 +20,7 @@
 *.pem
 
 # debug
-*debug.log*
+*.log*
 
 
 # local env files
