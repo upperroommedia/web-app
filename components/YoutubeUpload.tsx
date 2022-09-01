@@ -1,10 +1,13 @@
 /**
  * YoutubeUpload: located at the top of all pages
  */
-import { FunctionComponent, useState } from 'react';
+import { FunctionComponent, useState, useEffect, ReactElement } from 'react';
 
 const YoutubeUpload: FunctionComponent = () => {
   const [inputText, setInputText] = useState<string>('');
+  const [startTime, setStartTime] = useState<string>('');
+  const [endTime, setEndTime] = useState<string>('');
+  const [iFrame, setIFrame] = useState<ReactElement>(<></>);
 
   const youtubeParser = (url: string) => {
     const regExp =
@@ -15,29 +18,41 @@ const YoutubeUpload: FunctionComponent = () => {
       : '';
   };
 
-  const RenderYoutubeVideoIFrame = () => {
+  useEffect(() => {
     const link = youtubeParser(inputText);
-    return link ? (
-      <iframe
-        src={link}
-        frameBorder="0"
-        allow="autoplay; encrypted-media"
-        allowFullScreen
-        title="video"
-      />
-    ) : (
-      <></>
+    setIFrame(
+      link ? (
+        <iframe
+          src={link}
+          frameBorder="0"
+          allow="autoplay; encrypted-media"
+          allowFullScreen
+          title="video"
+        />
+      ) : (
+        <></>
+      )
     );
-  };
+  }, [inputText]);
 
   return (
-    <div>
+    <div style={{ alignItems: 'center' }}>
       <input
         placeholder="insert a youtube link here"
         onChange={(e) => setInputText(e.target.value)}
         value={inputText}
       />
-      {<RenderYoutubeVideoIFrame />}
+      {iFrame}
+      <input
+        placeholder="start time"
+        onChange={(e) => setStartTime(e.target.value)}
+        value={startTime}
+      />
+      <input
+        placeholder="end time"
+        onChange={(e) => setEndTime(e.target.value)}
+        value={endTime}
+      />
     </div>
   );
 };
