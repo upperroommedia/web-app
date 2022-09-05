@@ -11,7 +11,7 @@ import {
   useState,
 } from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
-import { formatTime } from '../utils/audioUtils';
+
 interface AudioTrimmerProps {
   url: string;
 }
@@ -64,6 +64,18 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
     };
   }, []);
 
+  const calculateTime = (sec: number) => {
+    const hours: number = Math.floor(sec / 3600); // get hours
+    const minutes: number = Math.floor((sec - hours * 3600) / 60); // get minutes
+    const seconds: number = Math.floor(sec - hours * 3600 - minutes * 60); //  get seconds
+    return (
+      (hours > 0 ? hours + ':' : '') +
+      String(minutes).padStart(2, '0') +
+      ':' +
+      String(seconds).padStart(2, '0')
+    ); // Return is HH : MM : SS
+  };
+
   const togglePlayPause = () => {
     const prevValue = isPlaying;
     setIsPlaying(!prevValue);
@@ -85,7 +97,10 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
     e: MouseEvent,
     booleanCallback: { (value: SetStateAction<boolean>): void }
   ) => {
-    const time = formatTimeFromPosition(e.pageX, scrubberContainer!.current!);
+    const time = calculateTimeFromPosition(
+      e.pageX,
+      scrubberContainer!.current!
+    );
     audioPlayer.current.currentTime = time;
     setScrubbingTime(time);
     booleanCallback(true);
@@ -113,7 +128,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
       scrubberContainer.current &&
       (isScrubbing || isMovingStartTrim || isMovingStopTrim)
     ) {
-      let time = formatTimeFromPosition(e.pageX, scrubberContainer.current);
+      let time = calculateTimeFromPosition(e.pageX, scrubberContainer.current);
       if (isMovingStartTrim) {
         time = time < stopTrim ? time : stopTrim;
         setStartTrim(time);
@@ -127,7 +142,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
     }
   };
 
-  const formatTimeFromPosition = (
+  const calculateTimeFromPosition = (
     mousePageX: number,
     container: HTMLDivElement
   ) => {
@@ -139,7 +154,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
     return time;
   };
 
-  const formatTimePercentage = (currentTime: number, right = false) => {
+  const calculateTimePercentage = (currentTime: number, right = false) => {
     if (right) return `${100 - (currentTime / duration) * 100}%`;
     return `${(currentTime / duration) * 100}%`;
   };
@@ -159,7 +174,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
         onMouseUp={MouseUp}
       >
         {/* current time */}
-        <div className={styles.time_label}>{formatTime(currentTime)}</div>
+        <div className={styles.time_label}>{calculateTime(currentTime)}</div>
         <div
           onMouseDown={(e) => {
             MouseDown(e, setIsScrubbing);
@@ -170,8 +185,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
               className={styles.audio_scrubber_container}
               style={{
                 left: isScrubbing
-                  ? formatTimePercentage(scrubbingTime)
-                  : formatTimePercentage(currentTime),
+                  ? calculateTimePercentage(scrubbingTime)
+                  : calculateTimePercentage(currentTime),
               }}
             >
               <div className={styles.audio_scrubber}>
@@ -181,8 +196,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
             <div
               className={styles.trim_area}
               style={{
-                left: formatTimePercentage(startTrim),
-                right: formatTimePercentage(stopTrim, true),
+                left: calculateTimePercentage(startTrim),
+                right: calculateTimePercentage(stopTrim, true),
               }}
             >
               <div
@@ -201,7 +216,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
           </div>
         </div>
         {/* duration */}
-        <div className={styles.time_label}>{formatTime(duration)}</div>
+        <div className={styles.time_label}>{calculateTime(duration)}</div>
       </div>
       {/* <input
         type="range"
@@ -230,9 +245,9 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
       </div>
       <div style={{ display: 'flex', gap: '10px' }}>
         {/* start time */}
-        <div>Trim Start: {formatTime(startTrim)}</div>
+        <div>Trim Start: {calculateTime(startTrim)}</div>
         {/* end time */}
-        <div>Trim Stop: {formatTime(stopTrim)}</div>
+        <div>Trim Stop: {calculateTime(stopTrim)}</div>
       </div>
     </>
   );
