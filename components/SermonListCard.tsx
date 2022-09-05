@@ -49,6 +49,18 @@ const SermonListCard: FunctionComponent<Props> = ({
             >
               {isPlaying ? <PauseCircleIcon /> : <PlayCircleIcon />}
             </IconButton>
+            {sermon.currentPlayTime < sermon.duration ? (
+              <progress
+                className={styles.songProgress}
+                value={sermon.currentPlayTime}
+                max={sermon.duration}
+              />
+            ) : (
+              <>
+                <span>Played</span>
+                <span style={{ color: 'lightgreen' }}> &#10003;</span>
+              </>
+            )}
             <h2 className={styles.date}>{sermon.dateString}</h2>
           </div>
         </div>

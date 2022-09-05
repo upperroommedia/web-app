@@ -60,8 +60,24 @@
 
 .bottomDiv {
   display: flex;
+  gap: 10px;
   /* background-color: red; */
   align-items: center;
+}
+.songProgress {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 250px;
+  --progress-height: 10px;
+  height: var(--progress-height);
+}
+.songProgress::-webkit-progress-value {
+  background-color: gray;
+  border-radius: calc(var(--progress-height) / 2);
+}
+.songProgress::-webkit-progress-bar {
+  background-color: lightgrey;
+  border-radius: calc(var(--progress-height) / 2);
 }
 
 .date {
