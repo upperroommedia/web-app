@@ -13,6 +13,13 @@
 }
 
 .controls-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 5px;
+}
+
+.progress-container {
   display: grid;
   grid-template-columns: 4em auto 4em;
   grid-gap: 0.5em;
@@ -45,7 +52,7 @@
   padding: 10px 0;
 }
 
-.controls-container > h4 {
+.progress-container > h4 {
   margin: 0;
   align-self: center;
   font-size: 0.8em;

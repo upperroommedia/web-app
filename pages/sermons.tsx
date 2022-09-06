@@ -4,59 +4,36 @@
 import type { GetServerSideProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
-import Footer from '../components/Footer';
-import Navbar from '../components/Navbar';
 import SermonListCard from '../components/SermonListCard';
 import BottomAudioBar from '../components/BottomAudioBar';
 
 import { Sermon, sermonConverter } from '../types/Sermon';
 
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
-import { getDownloadURL, ref } from 'firebase/storage';
-import { firebase, storage } from '../firebase/firebase';
-import { useEffect, useRef, useState } from 'react';
+import { firebase } from '../firebase/firebase';
+import { useEffect } from 'react';
+import useAudioPlayer from '../context/audio/audioPlayerContext';
 
 interface Props {
   sermons: Sermon[];
 }
 
 const Sermons: NextPage<Props> = ({ sermons }: Props) => {
-  const sermonsRef = ref(storage, 'sermons');
-  const [playRef, setPlayRef] = useState<{ index: number; isPlaying: boolean }>(
-    { index: -1, isPlaying: false }
-  );
-  const urls = useRef<string[]>(new Array(sermons.length));
-  const [url, setUrl] = useState<string | undefined>();
-
-  const handleSermonClick = (sermon: Sermon) => {
-    // console.log('handle click');
-    // setCurrentSermon(sermon);
-  };
-  const playSermonClick = async (index: number) => {
-    setPlayRef((prevIndex) => ({
-      index: index,
-      isPlaying: prevIndex.index === index ? !prevIndex.isPlaying : true,
-    }));
-  };
+  const { playing, playlist, setPlaylist, currentSermon, currentSecond } =
+    useAudioPlayer();
 
   useEffect(() => {
-    if (playRef.index === -1) return;
-    const index = playRef.index;
-    // cache urls on demand to avoid unnecessary network requests
-    if (!urls.current[index]) {
-      getDownloadURL(ref(sermonsRef, sermons[index].key)).then((url) => {
-        urls.current[index] = url;
-        setUrl(url);
-      });
-    } else {
-      setUrl(urls.current[index]);
-    }
-  }, [playRef]);
+    setPlaylist(sermons);
+  }, []);
+
+  // const handleSermonClick = (sermon: Sermon) => {
+  //   // console.log('handle click');
+  //   // setCurrentSermon(sermon);
+  // };
 
   return (
     <>
       <div style={{ padding: '0 2rem' }}>
-        <Navbar />
         <h1>Sermons</h1>
         <div
           style={{
@@ -67,28 +44,25 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
             // gap: '3px',
           }}
         >
-          {sermons.map((sermon, i) => (
-            <SermonListCard
-              sermon={sermon}
-              index={i}
-              isPlaying={i === playRef.index ? playRef.isPlaying : false}
-              handleSermonClick={handleSermonClick}
-              playSermonClick={playSermonClick}
-              key={`sermon_list_card_${i}`}
-            ></SermonListCard>
-          ))}
+          {playlist.map((sermon, i) => {
+            const key = `sermon_list_card_${i}`;
+            if (currentSermon.key === sermon.key) {
+              return (
+                <SermonListCard
+                  sermon={{ ...sermon, currentSecond }}
+                  playing={playing}
+                  key={key}
+                />
+              );
+            } else {
+              return (
+                <SermonListCard sermon={sermon} playing={false} key={key} />
+              );
+            }
+          })}
         </div>
-
-        <Footer />
       </div>
-      {playRef.index !== -1 && (
-        <BottomAudioBar
-          sermon={sermons[playRef.index]}
-          playRef={playRef}
-          url={url}
-          playSermonClick={playSermonClick}
-        />
-      )}
+      {currentSermon && <BottomAudioBar />}
     </>
   );
 };
