@@ -1,47 +1,47 @@
 lockfileVersion: 5.4
 
 specifiers:
-  '@babel/core': ^7.19.0
-  '@emotion/react': ^11.10.4
-  '@emotion/styled': ^11.10.4
-  '@firebase/app-types': ~0.7.0
-  '@mui/icons-material': ^5.10.3
-  '@mui/material': ^5.10.3
-  '@mui/system': ^5.10.3
-  '@mui/x-date-pickers': ^5.0.0
-  '@next/eslint-plugin-next': ^12.2.5
-  '@types/node': ^17.0.45
-  '@types/react': ^17.0.49
-  '@types/react-dom': ^18.0.6
-  '@types/styled-components': ^5.1.26
+  '@babel/core': '>=7.0.0 <8.0.0'
+  '@emotion/react': ^11.9.0
+  '@emotion/styled': ^11.8.1
+  '@firebase/app-types': 0.x
+  '@mui/icons-material': ^5.8.4
+  '@mui/material': ^5.8.1
+  '@mui/system': ^5.2.3
+  '@mui/x-date-pickers': ^5.0.0-alpha.4
+  '@next/eslint-plugin-next': ^12.1.6
+  '@types/node': ^17.0.17
+  '@types/react': ^17.0.39
+  '@types/react-dom': ^18.0.5
+  '@types/styled-components': ^5.1.25
   '@types/uuid': ^8.3.4
-  '@typescript-eslint/eslint-plugin': ^5.36.2
-  '@typescript-eslint/parser': ^5.36.2
-  date-fns: ^2.29.2
+  '@typescript-eslint/eslint-plugin': ^5.11.0
+  '@typescript-eslint/parser': ^5.11.0
+  date-fns: ^2.28.0
   eslint: ^7.32.0
-  eslint-config-next: ^12.2.5
-  eslint-config-prettier: ^8.5.0
+  eslint-config-next: ^12.0.10
+  eslint-config-prettier: ^8.3.0
   eslint-config-standard: ^16.0.3
-  eslint-plugin-import: ^2.26.0
-  eslint-plugin-jsx-a11y: ^6.6.1
+  eslint-plugin-import: ^2.25.4
+  eslint-plugin-jsx-a11y: ^6.5.1
   eslint-plugin-node: ^11.1.0
-  eslint-plugin-prettier: ^4.2.1
+  eslint-plugin-prettier: ^4.0.0
   eslint-plugin-promise: ^5.2.0
-  eslint-plugin-react: ^7.31.7
-  eslint-plugin-react-hooks: ^4.6.0
-  firebase: ^9.9.4
-  firebase-admin: ^11.0.1
-  firebase-tools: ^10.9.2
+  eslint-plugin-react: ^7.28.0
+  eslint-plugin-react-hooks: ^4.3.0
+  firebase: ^9.6.7
+  firebase-admin: ^11.0.0
+  firebase-tools: ^10.6.0
   husky: ^7.0.4
-  next: ^12.2.5
+  next: ^12.1.0
   nookies: ^2.5.2
-  prettier: ^2.7.1
+  prettier: ^2.5.1
   prop-types: ^15.8.1
-  react: ^18.2.0
+  react: ^18.1.0
   react-dom: 18.1.0
-  react-dropzone: ^12.1.0
+  react-dropzone: ^12.0.4
   react-firebaseui: ^6.0.0
-  typescript: ^4.8.2
+  typescript: ^4.5.5
   uuid: ^8.3.2
 
 dependencies:
@@ -1132,7 +1132,7 @@ packages:
       '@types/long': 4.0.2
       lodash.camelcase: 4.3.0
       long: 4.0.0
-      protobufjs: 6.11.2
+      protobufjs: 6.11.3
       yargs: 16.2.0
     dev: false
 
@@ -6398,7 +6398,7 @@ packages:
   /proto3-json-serializer/0.1.9:
     resolution: {integrity: sha512-A60IisqvnuI45qNRygJjrnNjX2TMdQGMY+57tR3nul3ZgO2zXkR9OGR8AXxJhkqx84g0FTnrfi3D5fWMSdANdQ==}
     dependencies:
-      protobufjs: 6.11.2
+      protobufjs: 6.11.3
     dev: false
 
   /protobufjs/6.11.2:
