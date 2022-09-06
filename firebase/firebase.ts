@@ -18,4 +18,3 @@ const firebase = initializeApp({
 const storage = getStorage();
 const auth = getAuth();
 export { firebase, storage, auth };
-

@@ -9,7 +9,7 @@ import {
 } from 'firebase/auth';
 import firebase from 'firebase/auth';
 import { auth } from '../../firebase/firebase';
-import nookies from "nookies";
+import nookies from 'nookies';
 
 import { GET_USER, SET_LOADING, LOGOUT, userCreditionals } from '../types';
 
@@ -25,20 +25,20 @@ const UserState = (props: any) => {
   const [state, dispatch] = useReducer(userReducer, initialState);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       (window as any).nookies = nookies;
     }
     return auth.onIdTokenChanged(async (user) => {
       if (!user) {
         setUser(null);
-        nookies.destroy(null, "token");
-        nookies.set(null, "token", "", {path: '/'});
+        nookies.destroy(null, 'token');
+        nookies.set(null, 'token', '', { path: '/' });
         dispatch({ dispatch: LOGOUT });
       } else {
         const token = await user.getIdToken();
         setUser(user);
-        nookies.destroy(null, "token");
-        nookies.set(null, "token", token, {path: '/'});
+        nookies.destroy(null, 'token');
+        nookies.set(null, 'token', token, { path: '/' });
         await dispatch({
           type: GET_USER,
           payload: {
@@ -106,7 +106,6 @@ const UserState = (props: any) => {
         role: null,
       },
     });
-
   };
 
   const logoutUser = async () => {
