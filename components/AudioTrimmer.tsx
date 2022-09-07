@@ -14,15 +14,20 @@ import styles from '../styles/AudioTrimmer.module.css';
 
 interface AudioTrimmerProps {
   url: string;
+  duration: number;
+  setDuration: React.Dispatch<SetStateAction<number>>;
 }
 // TODO: Seperate into components
 // TODO: Impelement loop which will make playhead stay between start and end trim
 // TODO: THIS ENTIRE FILE NEEDS TO BE REFACTORED
 
-const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url }) => {
+const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
+  url,
+  duration,
+  setDuration,
+}) => {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [duration, setDuration] = useState<number>(0);
   const [startTrim, setStartTrim] = useState<number>(0);
   const [stopTrim, setStopTrim] = useState<number>(duration);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);

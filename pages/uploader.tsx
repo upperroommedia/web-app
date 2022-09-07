@@ -59,6 +59,7 @@ const Uploader: NextPage<Props> = (
   const [sermonData, setSermonData] = useState<Sermon>(emptySermon);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
+  const [duration, setDuration] = useState<number>(0);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date | null>(new Date());
@@ -235,7 +236,11 @@ const Uploader: NextPage<Props> = (
         <div className={styles.form}>
           {file ? (
             <>
-              <AudioTrimmer url={file.preview}></AudioTrimmer>
+              <AudioTrimmer
+                url={file.preview}
+                duration={duration}
+                setDuration={setDuration}
+              ></AudioTrimmer>
               <button
                 type="button"
                 className={styles.button}
@@ -277,6 +282,7 @@ const Uploader: NextPage<Props> = (
                   setUploadProgress: setUploadProgress,
                   title: sermonData.title,
                   subtitle: sermonData.subtitle,
+                  durationSeconds: duration,
                   date: date,
                   description: sermonData.description,
                   speaker: props.speakers,

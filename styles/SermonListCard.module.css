@@ -24,6 +24,7 @@
 
 .divText {
   margin-left: 15px;
+  width: 100%;
 }
 
 .description {
@@ -59,12 +60,34 @@
 }
 
 .bottomDiv {
+  white-space: nowrap;
   display: flex;
-  /* background-color: red; */
+  gap: 10px;
   align-items: center;
 }
+.songProgress {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 250px;
+  --progress-height: 5px;
+  height: var(--progress-height);
+  border-radius: calc(var(--progress-height) / 2);
+  overflow: hidden;
+}
 
+.songProgress::-webkit-progress-value {
+  background-color: gray;
+  border-radius: calc(var(--progress-height) / 2);
+}
+.songProgress::-webkit-progress-bar {
+  background-color: lightgrey;
+  border-radius: calc(var(--progress-height) / 2);
+}
+.bottomDivText {
+  display: flex;
+  gap: 5px;
+}
 .date {
-  font-size: 0.8em;
-  font-weight: normal;
+  /* font-size: 0.8em; */
+  /* font-weight: normal; */
 }

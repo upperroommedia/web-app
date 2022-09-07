@@ -10,29 +10,26 @@ import BottomAudioBar from '../components/BottomAudioBar';
 import { Sermon, sermonConverter } from '../types/Sermon';
 
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
-import { getDownloadURL, ref } from 'firebase/storage';
-import { firebase, storage } from '../firebase/firebase';
-import { useState } from 'react';
+import { firebase } from '../firebase/firebase';
+import { useEffect } from 'react';
+import useAudioPlayer from '../context/audio/audioPlayerContext';
 
 interface Props {
   sermons: Sermon[];
 }
 
 const Sermons: NextPage<Props> = ({ sermons }: Props) => {
-  const sermonsRef = ref(storage, 'sermons');
-  const [currentSermon, setCurrentSermon] = useState<
-    [Sermon, string] | undefined
-  >(undefined);
+  const { playing, playlist, setPlaylist, currentSermon, currentSecond } =
+    useAudioPlayer();
 
-  const handleSermonClick = (sermon: Sermon) => {
-    // console.log('handle click');
-    // setCurrentSermon(sermon);
-  };
-  const playSermonClick = async (sermon: Sermon) => {
-    // console.log('Play');
-    const url = await getDownloadURL(ref(sermonsRef, sermon.key));
-    setCurrentSermon([sermon, url]);
-  };
+  useEffect(() => {
+    setPlaylist(sermons);
+  }, []);
+
+  // const handleSermonClick = (sermon: Sermon) => {
+  //   // console.log('handle click');
+  //   // setCurrentSermon(sermon);
+  // };
 
   return (
     <>
@@ -47,19 +44,25 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
             // gap: '3px',
           }}
         >
-          {sermons.map((sermon, i) => (
-            <SermonListCard
-              sermon={sermon}
-              handleSermonClick={handleSermonClick}
-              playSermonClick={playSermonClick}
-              key={`sermon_list_card_${i}`}
-            ></SermonListCard>
-          ))}
+          {playlist.map((sermon, i) => {
+            const key = `sermon_list_card_${i}`;
+            if (currentSermon.key === sermon.key) {
+              return (
+                <SermonListCard
+                  sermon={{ ...sermon, currentSecond }}
+                  playing={playing}
+                  key={key}
+                />
+              );
+            } else {
+              return (
+                <SermonListCard sermon={sermon} playing={false} key={key} />
+              );
+            }
+          })}
         </div>
       </div>
-      {currentSermon && (
-        <BottomAudioBar sermon={currentSermon[0]} url={currentSermon[1]} />
-      )}
+      {currentSermon && <BottomAudioBar />}
     </>
   );
 };
