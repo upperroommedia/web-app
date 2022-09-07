@@ -16,7 +16,7 @@ export default function audioPlayerReducer(
   action: { type: string; payload: any }
 ) {
   const { type, payload } = action;
-  console.log(type, payload);
+  // console.log(type, payload);
   switch (type) {
     case 'SET_PLAYLIST': {
       return {
