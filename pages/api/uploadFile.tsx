@@ -18,6 +18,7 @@ interface uploadFileProps {
   subtitle: string;
   date: Date;
   description: string;
+  durationSeconds: number;
   speaker: Array<string>;
   scripture: string;
   topic: Array<string>;
@@ -33,6 +34,7 @@ const uploadFile = (props: uploadFileProps) => {
   const sermonData: Sermon = {
     title: props.title,
     subtitle: props.subtitle,
+    durationSeconds: props.durationSeconds,
     dateMillis: props.date.getTime(),
     description: props.description,
     speaker: props.speaker,

@@ -12,6 +12,7 @@ export interface Sermon {
   subtitle: string;
   scripture: string;
   dateMillis: number;
+  durationSeconds: number;
   topic: Array<string>;
   dateString?: string;
 }
@@ -33,10 +34,27 @@ export const sermonConverter = {
     options: SnapshotOptions
   ): Sermon => {
     const { date, ...data } = snapshot.data(options);
+    const getDateString = (date: Date) => {
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      return `${months[date.getMonth()]} ${date.getDay()}`;
+    };
     return {
       ...data,
       dateMillis: snapshot.data(options).date.toMillis(),
-      dateString: snapshot.data(options).date.toDate().toDateString(),
+      dateString: getDateString(snapshot.data(options).date.toDate()),
     };
   },
 };
@@ -46,6 +64,7 @@ export const emptySermon: Sermon = {
   title: '',
   subtitle: '',
   dateMillis: 0,
+  durationSeconds: 0,
   description: '',
   speaker: [],
   scripture: '',
