@@ -304,42 +304,42 @@ const Uploader: NextPage<Props> = (
 //   topics: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
 // };
 
+interface speakerAndTopic {
+  name: string;
+}
+
 export const getServerSideProps: GetServerSideProps = async (
   ctx: GetServerSidePropsContext
 ) => {
   const userCredentials = await ProtectedRoute(ctx);
-  if (userCredentials.props.token) {
-    interface speakerAndTopic {
-      name: string;
-    }
-
-    const db = getFirestore(firebase);
-
-    const speakersQuery = query(collection(db, 'speakers'));
-    const speakers: Array<string> = [];
-    const speakersQuerySnapshot = await getDocs(speakersQuery);
-    speakersQuerySnapshot.forEach((doc) => {
-      const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
-      speakers.push(current.name);
-    });
-
-    const topicsQuery = query(collection(db, 'topics'));
-    const topics: Array<string> = [];
-    const topicsQuerySnapshot = await getDocs(topicsQuery);
-    topicsQuerySnapshot.forEach((doc) => {
-      const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
-      topics.push(current.name);
-    });
-    return {
-      props: {
-        speakers: speakers,
-        topics: topics,
-      },
-    };
-  } else {
+  if (!userCredentials.props.token) {
     const failedUserCredentials = userCredentials;
     return failedUserCredentials;
   }
+
+  const db = getFirestore(firebase);
+
+  const speakersQuery = query(collection(db, 'speakers'));
+  const speakers: Array<string> = [];
+  const speakersQuerySnapshot = await getDocs(speakersQuery);
+  speakersQuerySnapshot.forEach((doc) => {
+    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
+    speakers.push(current.name);
+  });
+
+  const topicsQuery = query(collection(db, 'topics'));
+  const topics: Array<string> = [];
+  const topicsQuerySnapshot = await getDocs(topicsQuery);
+  topicsQuerySnapshot.forEach((doc) => {
+    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
+    topics.push(current.name);
+  });
+  return {
+    props: {
+      speakers: speakers,
+      topics: topics,
+    },
+  };
 };
 
 export default Uploader;

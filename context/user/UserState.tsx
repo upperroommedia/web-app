@@ -87,6 +87,7 @@ const UserState = (props: any) => {
       },
     });
   };
+
   const signup = async (loginForm: userCreditionals) => {
     setLoading();
     try {
@@ -111,7 +112,7 @@ const UserState = (props: any) => {
   const logoutUser = async () => {
     await signOut(auth);
     setUser(null);
-    dispatch({ dispatch: LOGOUT });
+    dispatch({ type: LOGOUT });
   };
 
   return (
