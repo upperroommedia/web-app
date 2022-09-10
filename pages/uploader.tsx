@@ -3,7 +3,6 @@
  */
 import type { GetServerSideProps, NextPage } from 'next';
 
-import Footer from '../components/Footer';
 import AudioTrimmer from '../components/AudioTrimmer';
 import uploadFile from './api/uploadFile';
 import YoutubeUpload from '../components/YoutubeUpload';
@@ -247,6 +246,35 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
                 >
                   Clear
                 </button>
+                <input
+                  className={styles.button}
+                  type="button"
+                  value="Upload"
+                  disabled={
+                    file === undefined ||
+                    sermonData.title === '' ||
+                    date === null ||
+                    speaker.length === 0
+                  }
+                  // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
+                  // the user from double clicking upload
+                  onClick={() => {
+                    if (file !== undefined && date != null) {
+                      uploadFile({
+                        file,
+                        setFile,
+                        setUploadProgress,
+                        title: sermonData.title,
+                        subtitle: sermonData.subtitle,
+                        date,
+                        description: sermonData.description,
+                        speaker: speakers,
+                        scripture: sermonData.scripture,
+                        topic: topics,
+                      });
+                    }
+                  }}
+                />
               </>
             ) : (
               <div className={styles.dragAndDrop} {...getRootProps()}>
@@ -259,38 +287,8 @@ const Uploader: NextPage<Props> = ({ speakers, topics }: Props) => {
             )}
           </div>
         )}
-        <input
-          className={styles.button}
-          type="button"
-          value="Upload"
-          disabled={
-            file === undefined ||
-            sermonData.title === '' ||
-            date === null ||
-            speaker.length === 0
-          }
-          // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
-          // the user from double clicking upload
-          onClick={() => {
-            if (file !== undefined && date != null) {
-              uploadFile({
-                file: file,
-                setFile: setFile,
-                setUploadProgress: setUploadProgress,
-                title: sermonData.title,
-                subtitle: sermonData.subtitle,
-                date: date,
-                description: sermonData.description,
-                speaker: speakers,
-                scripture: sermonData.scripture,
-                topic: topics,
-              });
-            }
-          }}
-        />
         <p>{uploadProgress}</p>
       </Box>
-      <Footer />
     </form>
   );
 };
