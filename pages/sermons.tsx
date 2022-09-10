@@ -7,25 +7,31 @@ import type { GetServerSideProps, NextPage } from 'next';
 import SermonListCard from '../components/SermonListCard';
 import BottomAudioBar from '../components/BottomAudioBar';
 
-import { Sermon, sermonConverter } from '../types/Sermon';
-
-import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
-import { firebase } from '../firebase/firebase';
 import { useEffect } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
+import { Sermon } from '../context/types';
+import { getSermons } from '../firebase/audio_functions';
+import * as admin from 'firebase-admin';
+import nookies from 'nookies';
 
 interface Props {
   sermons: Sermon[];
 }
 
 const Sermons: NextPage<Props> = ({ sermons }: Props) => {
-  const { playing, playlist, setPlaylist, currentSermon, currentSecond } =
-    useAudioPlayer();
+  const {
+    playing,
+    playlist,
+    setPlaylist,
+    currentSermon,
+    currentSecond,
+    currentPlayedState,
+  } = useAudioPlayer();
 
   useEffect(() => {
+    console.log('From SSR:', sermons);
     setPlaylist(sermons);
   }, []);
-
   // const handleSermonClick = (sermon: Sermon) => {
   //   // console.log('handle click');
   //   // setCurrentSermon(sermon);
@@ -49,14 +55,22 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
             if (currentSermon.key === sermon.key) {
               return (
                 <SermonListCard
-                  sermon={{ ...sermon, currentSecond }}
+                  sermon={sermon}
                   playing={playing}
+                  currentPlayedState={currentPlayedState}
+                  currentSecond={currentSecond}
                   key={key}
                 />
               );
             } else {
               return (
-                <SermonListCard sermon={sermon} playing={false} key={key} />
+                <SermonListCard
+                  sermon={sermon}
+                  playing={false}
+                  currentPlayedState={sermon.playedState.state}
+                  currentSecond={0}
+                  key={key}
+                />
               );
             }
           })}
@@ -67,19 +81,17 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
   );
 };
 
+// TODO(1): make sure to handle when token is expired
 export const getServerSideProps: GetServerSideProps = async (context) => {
-  const db = getFirestore(firebase);
-  // Firestore data converter to convert the queried data to the expected type
-  const sermonsQuery = query(collection(db, 'sermons')).withConverter(
-    sermonConverter
-  );
-  const sermons: Sermon[] = [];
-  const sermonsQuerySnapshot = await getDocs(sermonsQuery);
-  sermonsQuerySnapshot.forEach((doc) => {
-    sermons.push(doc.data());
-  });
+  const cookies = nookies.get(context);
+  const token = await admin.auth().verifyIdToken(cookies.token);
+
+  // the user is authenticated!
+  const { uid, email } = token;
+  console.log('User: ', uid, email);
+
   return {
-    props: { sermons: sermons },
+    props: { sermons: await getSermons(uid) },
   };
 };
 

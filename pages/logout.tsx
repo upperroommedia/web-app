@@ -6,7 +6,7 @@ import { useContext, useEffect } from 'react';
 import UserContext from '../context/user/UserContext';
 import { useRouter } from 'next/router';
 
-const Logout: NextPage = (props) => {
+const Logout: NextPage = (_props) => {
   const router = useRouter();
   const { logoutUser } = useContext(UserContext);
 

@@ -24,7 +24,7 @@ import PopUp from '../components/PopUp';
 import AuthErrors from '../components/AuthErrors';
 
 const Signup = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
+  _props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   const router = useRouter();
   const { isAuthenticated, signup } = useContext(UserContext);

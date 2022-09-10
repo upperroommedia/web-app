@@ -1,7 +1,7 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent } from 'react';
+import { FunctionComponent, useEffect, useState } from 'react';
 // import Image from 'next/image';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -9,21 +9,39 @@ import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import styles from '../styles/SermonListCard.module.css';
 // import { Sermon } from '../types/Sermon';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
-import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
+import { PLAY_STATE, SermonWithMetadata } from '../context/types';
 
 interface Props {
   sermon: SermonWithMetadata;
   playing: boolean;
+  currentSecond: number;
+  currentPlayedState: PLAY_STATE;
   // handleSermonClick: (sermon: Sermon) => void;
 }
 
 const SermonListCard: FunctionComponent<Props> = ({
   sermon,
   playing,
+  currentSecond,
+  currentPlayedState,
 }: // handleSermonClick,
 Props) => {
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
+  const [activePlayedState, setActivePlayedState] = useState(
+    sermon.playedState
+  );
+  useEffect(() => {
+    console.log(playing, currentPlayedState, sermon.playedState, currentSecond);
+    if (playing) {
+      setActivePlayedState({
+        playPositionMilliseconds: currentSecond,
+        state: currentPlayedState,
+      });
+    } else {
+      setActivePlayedState(sermon.playedState);
+    }
+  }, [playing, currentPlayedState, sermon.playedState, currentSecond]);
   return (
     <div
       onClick={(e) => {
@@ -54,29 +72,32 @@ Props) => {
             <div className={styles.bottomDivText}>
               <span className={styles.date}>{sermon.dateString}</span>
               <span>·</span>
-              {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
-                <>
-                  <span className={styles.timeLeft}>
-                    {formatRemainingTime(
-                      Math.floor(sermon.durationSeconds) - sermon.currentSecond
-                    ) + (playing || sermon.currentSecond > 0 ? ' left' : '')}
-                  </span>
-                </>
-              ) : (
+              {activePlayedState.state === PLAY_STATE.COMPLETED ? (
                 <>
                   <span>Played</span>
                   <span style={{ color: 'lightgreen' }}> &#10003;</span>
                 </>
+              ) : (
+                <>
+                  <span className={styles.timeLeft}>
+                    {formatRemainingTime(
+                      Math.floor(sermon.durationSeconds) -
+                        activePlayedState.playPositionMilliseconds
+                    ) +
+                      (activePlayedState.state === PLAY_STATE.IN_PROGRESS
+                        ? ' left'
+                        : '')}
+                  </span>
+                </>
               )}
             </div>
-            {sermon.currentSecond < Math.floor(sermon.durationSeconds) &&
-              (playing || sermon.currentSecond > 0) && (
-                <progress
-                  className={styles.songProgress}
-                  value={sermon.currentSecond}
-                  max={Math.floor(sermon.durationSeconds)}
-                />
-              )}
+            {activePlayedState.state === PLAY_STATE.IN_PROGRESS && (
+              <progress
+                className={styles.songProgress}
+                value={activePlayedState.playPositionMilliseconds}
+                max={Math.floor(sermon.durationSeconds)}
+              />
+            )}
             <span style={{ width: '100%' }}></span>
           </div>
         </div>

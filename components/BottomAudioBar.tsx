@@ -34,6 +34,7 @@ const BottomAudioBar: FunctionComponent = () => {
     setCurrentSermonUrl,
     previousSermon,
     nextSermon,
+    sermonEnded,
   } = useAudioPlayer();
   const audioPlayer = useRef<HTMLAudioElement>(new Audio());
   const [seekTime, setSeekTime] = useState(-1);
@@ -127,6 +128,7 @@ const BottomAudioBar: FunctionComponent = () => {
             ref={audioPlayer}
             src={currentSermon.url}
             onTimeUpdate={onPlaying}
+            onEnded={sermonEnded}
           ></audio>
           <h4 className={styles.duration}>
             {formatTime(currentSermon.durationSeconds)}

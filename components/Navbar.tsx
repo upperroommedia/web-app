@@ -6,9 +6,10 @@ import Link from 'next/link';
 import Image from 'next/image';
 import styles from '../styles/Navbar.module.css';
 import UserContext from '../context/user/UserContext';
+import { auth } from '../firebase/firebase';
 
 const Navbar: FunctionComponent = () => {
-  const { isAuthenticated } = useContext(UserContext);
+  const { isAuthenticated, user } = useContext(UserContext);
   return (
     <nav>
       <div className={styles.navbar}>
@@ -20,36 +21,48 @@ const Navbar: FunctionComponent = () => {
           height="100%"
         />
       </div>
-      <Link href="/">
-        <a className={styles.nav_link}>Home</a>
-      </Link>
-      <Link href="/sermons">
-        <a className={styles.nav_link}>Sermons</a>
-      </Link>
-      <Link href="/about">
-        <a className={styles.nav_link}>About</a>
-      </Link>
+      <div className={styles.navbarMenu}>
+        <Link href="/">
+          <a className={styles.nav_link}>Home</a>
+        </Link>
+        <Link href="/sermons">
+          <a className={styles.nav_link}>Sermons</a>
+        </Link>
+        <Link href="/about">
+          <a className={styles.nav_link}>About</a>
+        </Link>
 
-      {!isAuthenticated ? (
-        <>
-          <Link href="/login">
-            <a className={styles.nav_link}>Login</a>
-          </Link>
-          <Link href="/signup">
-            <a className={styles.nav_link}>Sign Up</a>
-          </Link>
-        </>
-      ) : (
-        // All Pages that need to be protected
-        <>
-          <Link href="/uploader">
-            <a className={styles.nav_link}>Uploader</a>
-          </Link>
-          <Link href="/logout">
-            <a className={styles.nav_link}>Log out</a>
-          </Link>
-        </>
-      )}
+        {!isAuthenticated ? (
+          <>
+            <Link href="/login">
+              <a className={styles.nav_link}>Login</a>
+            </Link>
+            <Link href="/signup">
+              <a className={styles.nav_link}>Sign Up</a>
+            </Link>
+          </>
+        ) : (
+          // All Pages that need to be protected
+          <>
+            <Link href="/uploader">
+              <a className={styles.nav_link}>Uploader</a>
+            </Link>
+            <Link href="/logout">
+              <a className={styles.nav_link}>Log out</a>
+            </Link>
+            <div
+              style={{
+                marginLeft: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <span>From Auth:{auth.currentUser?.email}</span>
+              <span>From Context:{user.email}</span>
+            </div>
+          </>
+        )}
+      </div>
     </nav>
   );
 };

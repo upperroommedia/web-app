@@ -3,25 +3,8 @@ import {
   QueryDocumentSnapshot,
   SnapshotOptions,
 } from 'firebase/firestore';
-
-export interface Sermon {
-  key: string;
-  title: string;
-  description: string;
-  speaker: Array<string>;
-  subtitle: string;
-  scripture: string;
-  dateMillis: number;
-  durationSeconds: number;
-  topic: Array<string>;
-  dateString?: string;
-}
-
-export interface FirebaseSermon
-  extends Omit<Sermon, 'dateMillis' | 'dateString'> {
-  date: Timestamp;
-}
-
+import { Sermon, FirebaseSermon } from '../context/types';
+import { getDateString } from '../utils/sermonUtils';
 /* This converter takes care of converting a Sermon to a FirebaseSermon on upload
  *  and a FirebaseSermon to a Sermon on download.
  */
@@ -33,24 +16,8 @@ export const sermonConverter = {
     snapshot: QueryDocumentSnapshot<FirebaseSermon>,
     options: SnapshotOptions
   ): Sermon => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data(options);
-    const getDateString = (date: Date) => {
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      return `${months[date.getMonth()]} ${date.getDay()}`;
-    };
     return {
       ...data,
       dateMillis: snapshot.data(options).date.toMillis(),

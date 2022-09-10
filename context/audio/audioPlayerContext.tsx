@@ -1,13 +1,21 @@
+import { resolve } from 'path';
 import { createContext, useReducer, useContext } from 'react';
-import { Sermon } from '../../types/Sermon';
-import audioPlayerReducer, {
+import {
+  Sermon,
   AudioPlayerState,
   SermonWithMetadata,
-} from '../../reducers/audioPlayerReducer';
+  AUDIO_PLAYER,
+  PLAY_STATE,
+} from '../../context/types';
+
+import { updateListenTime } from '../../firebase/audio_functions';
+import audioPlayerReducer from '../../reducers/audioPlayerReducer';
+import UserContext from '../user/UserContext';
 const initialState: AudioPlayerState = {
   playlist: [],
   currentSermonIndex: 0,
   currentSermonSecond: 0,
+  currentPlayedState: PLAY_STATE.NOT_STARTED,
   playing: false,
 };
 
@@ -15,6 +23,7 @@ type AudioPlayerContextType = {
   playlist: SermonWithMetadata[];
   currentSermon: SermonWithMetadata;
   currentSecond: number;
+  currentPlayedState: PLAY_STATE;
   playing: boolean;
   setPlaylist: (playlist: Sermon[]) => void;
   // addToPlaylist: (sermon: Sermon) => void;
@@ -22,6 +31,7 @@ type AudioPlayerContextType = {
   setCurrentSermonUrl: (url: string) => void;
   setCurrentSermon: (sermon: Sermon) => void;
   updateCurrentSecond: (second: number) => void;
+  sermonEnded: () => void;
   togglePlaying: (play?: boolean) => void;
   nextSermon: () => void;
   previousSermon: () => void;
@@ -31,23 +41,38 @@ const AudioPlayerContext = createContext<AudioPlayerContextType | null>(null);
 
 export const AudioPlayerProvider = ({ children }: any) => {
   const [state, dispatch] = useReducer(audioPlayerReducer, initialState);
-
+  const { user } = useContext(UserContext);
   const setPlaylist = (playlist: Sermon[]) => {
-    const playlistWithMetadata = playlist.map(
-      (sermon): SermonWithMetadata => ({ ...sermon, currentSecond: 0 })
-    );
-    dispatch({ type: 'SET_PLAYLIST', payload: playlistWithMetadata });
+    dispatch({
+      type: AUDIO_PLAYER.SET_PLAYLIST,
+      payload: playlist,
+    });
   };
 
   const updateCurrentSecond = (currentSecond: number) => {
-    dispatch({ type: 'UPDATE_CURRENT_SECOND', payload: currentSecond });
+    if (currentSecond % 5 === 0) {
+      updateListenTime(
+        user.uid,
+        state.playlist[state.currentSermonIndex].key,
+        currentSecond
+      );
+    }
+    dispatch({
+      type: AUDIO_PLAYER.UPDATE_CURRENT_SECOND,
+      payload: currentSecond,
+    });
   };
 
   const togglePlaying = (play?: boolean) => {
+    updateListenTime(
+      user.uid,
+      state.playlist[state.currentSermonIndex].key,
+      state.currentSermonSecond
+    );
     if (play === undefined) {
       play = !state.playing;
     }
-    dispatch({ type: 'TOGGLE_PLAYING', payload: play });
+    dispatch({ type: AUDIO_PLAYER.TOGGLE_PLAYING, payload: play });
   };
 
   const setCurrentSermon = (sermon: Sermon) => {
@@ -55,18 +80,21 @@ export const AudioPlayerProvider = ({ children }: any) => {
     const currentSermonIndex = state.playlist.findIndex(
       (s: SermonWithMetadata) => s.key === sermon.key
     );
-    dispatch({ type: 'SET_CURRENT_SERMON_INDEX', payload: currentSermonIndex });
+    dispatch({
+      type: AUDIO_PLAYER.SET_CURRENT_SERMON_INDEX,
+      payload: currentSermonIndex,
+    });
   };
   const nextSermon = () => {
     dispatch({
-      type: 'SET_CURRENT_SERMON_INDEX',
+      type: AUDIO_PLAYER.SET_CURRENT_SERMON_INDEX,
       payload: (state.currentSermonIndex + 1) % state.playlist.length,
     });
   };
 
   const previousSermon = () => {
     dispatch({
-      type: 'SET_CURRENT_SERMON_INDEX',
+      type: AUDIO_PLAYER.SET_CURRENT_SERMON_INDEX,
       payload: (state.currentSermonIndex - 1) % state.playlist.length,
     });
   };
@@ -76,7 +104,20 @@ export const AudioPlayerProvider = ({ children }: any) => {
       ...state.playlist[state.currentSermonIndex],
       url,
     };
-    dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: sermon });
+    dispatch({ type: AUDIO_PLAYER.UPDATE_CURRENT_SERMON, payload: sermon });
+  };
+
+  const sermonEnded = () => {
+    console.log('sermon ended');
+    updateListenTime(
+      user.uid,
+      state.playlist[state.currentSermonIndex].key,
+      0,
+      PLAY_STATE.COMPLETED
+    );
+    dispatch({ type: AUDIO_PLAYER.SERMON_ENDED, payload: null });
+    resolve();
+    nextSermon();
   };
 
   return (
@@ -85,6 +126,7 @@ export const AudioPlayerProvider = ({ children }: any) => {
         playlist: state.playlist,
         currentSermon: state.playlist[state.currentSermonIndex],
         currentSecond: state.currentSermonSecond,
+        currentPlayedState: state.currentPlayedState,
         playing: state.playing,
         setPlaylist,
         // addToPlaylist,
@@ -92,6 +134,7 @@ export const AudioPlayerProvider = ({ children }: any) => {
         setCurrentSermonUrl,
         setCurrentSermon,
         updateCurrentSecond,
+        sermonEnded,
         togglePlaying,
         nextSermon,
         previousSermon,
