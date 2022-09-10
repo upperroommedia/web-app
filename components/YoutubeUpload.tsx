@@ -53,6 +53,7 @@ const YoutubeUpload: FunctionComponent = () => {
         onChange={(e) => setEndTime(e.target.value)}
         value={endTime}
       />
+      <button>upload</button>
     </div>
   );
 };

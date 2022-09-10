@@ -4,6 +4,8 @@ import { GetSignedUrlConfig } from '@google-cloud/storage';
 import axios, { AxiosResponse, AxiosRequestConfig } from 'axios';
 import qs from 'qs';
 import FormData from 'form-data';
+import ytdl from 'ytdl-core';
+import fs from 'fs';
 admin.initializeApp();
 
 // To test functions: npm run-script serve
@@ -61,7 +63,7 @@ const getOutputUrl = async (
   const [outputUrl] = await admin
     .storage()
     .bucket(fileBucket)
-    .file(`processed-sermons/${fileName}.${transcodeTo}`)
+    .file(`${fileName}.${transcodeTo}`)
     .getSignedUrl(outputOptions);
   functions.logger.log('OutputUrl:', outputUrl);
   return outputUrl;
@@ -257,3 +259,24 @@ export const uploadToSubsplash = functions.https.onRequest(
     }
   }
 );
+
+export const youtubeToAudioFile = functions.https.onRequest(
+  async (request, response) => {
+    console.log(request);
+    functions.logger.info('Trying to convert youtube to mp3');
+    try {
+      const outputUrl = await getOutputUrl('sermons', 'filename', 'mp3');
+      // handle errors
+      ytdl(
+        'https://www.youtube.com/watch?v=-uRRKqQbmw4&ab_channel=StarWars'
+      ).pipe(fs.createWriteStream(outputUrl));
+    } catch (error) {
+      functions.logger.log(error);
+      response.send(error);
+    }
+    functions.logger.info('DONE WITH TRIM AUDIO FUNCITON');
+  }
+);
+
+// To test functions: npm run-script serve
+// To deploy functions: npm run-script deploy
