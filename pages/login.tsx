@@ -13,7 +13,7 @@ import type {
 import { useRouter } from 'next/router';
 
 // 3rd Party Components
-import { Button, Input, InputLabel, FormControl } from '@mui/material';
+import { Button, TextField } from '@mui/material';
 
 // Auth
 import UserContext from '../context/user/UserContext';
@@ -61,42 +61,47 @@ const Login = (
       }}
     >
       <h1 className="text-center my-3 ">Login</h1>
-      <form style={{ height: '100%' }} onSubmit={handleLogin}>
-        <div>
-          <FormControl>
-            <InputLabel>Email address</InputLabel>
-            <Input
-              type="email"
-              placeholder="Enter email"
-              required
-              onChange={(e: any) =>
-                setData({
-                  ...data,
-                  email: e.target.value,
-                })
-              }
-              value={data.email}
-            />
-          </FormControl>
+      <form
+        style={{ height: '100%', width: '300px', margin: '20px' }}
+        onSubmit={handleLogin}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <TextField
+            fullWidth
+            type="email"
+            placeholder="Enter email"
+            required
+            onChange={(e: any) =>
+              setData({
+                ...data,
+                email: e.target.value,
+              })
+            }
+            value={data.email}
+            size="small"
+          />
+          <TextField
+            fullWidth
+            type="password"
+            placeholder="Password"
+            required
+            onChange={(e: any) =>
+              setData({
+                ...data,
+                password: e.target.value,
+              })
+            }
+            value={data.password}
+            size="small"
+          />
         </div>
-        <div>
-          <FormControl>
-            <InputLabel>Password</InputLabel>
-            <Input
-              type="password"
-              placeholder="Password"
-              required
-              onChange={(e: any) =>
-                setData({
-                  ...data,
-                  password: e.target.value,
-                })
-              }
-              value={data.password}
-            />
-          </FormControl>
-        </div>
-        <Button variant="contained" type="submit">
+        <Button
+          fullWidth
+          variant="contained"
+          type="submit"
+          style={{ marginTop: '30px' }}
+          size="medium"
+        >
           Login
         </Button>
       </form>
