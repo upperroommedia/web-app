@@ -14,13 +14,6 @@ const createErrorObject = (
 
 const AuthErrors = (error: string) => {
   switch (error) {
-    case 'auth/user-not-found':
-      return createErrorObject(
-        'Wrong Credentials',
-        'Double Check your username and password',
-        true,
-        ''
-      );
     case 'auth/weak-password':
       return createErrorObject(
         'Weak Password',
@@ -31,7 +24,7 @@ const AuthErrors = (error: string) => {
     case 'auth/email-already-in-use':
       return createErrorObject(
         'Email Already in Use',
-        'The email you are using is Already in Use',
+        'The email you are using is already in use',
         true,
         ''
       );
@@ -42,8 +35,16 @@ const AuthErrors = (error: string) => {
         true,
         ''
       );
-    default:
+    case undefined:
+      // No Error Login or SignUp Succeeded
       return createErrorObject('', '', false, '/uploader');
+    default:
+      return createErrorObject(
+        'Wrong Credentials',
+        'Double check your username and password',
+        true,
+        ''
+      );
   }
 };
 

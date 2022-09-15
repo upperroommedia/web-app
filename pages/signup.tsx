@@ -27,7 +27,7 @@ const Signup = (
   props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   const router = useRouter();
-  const { isAuthenticated, signup } = useContext(UserContext);
+  const { signup } = useContext(UserContext);
 
   const [data, setData] = useState({
     email: '',
@@ -37,14 +37,6 @@ const Signup = (
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleOpen = () => {
-    setOpen(true);
-  };
-
-  const handleClose = () => {
-    setOpen(false);
-  };
-
   const handleSignup = async (e: any) => {
     e.preventDefault();
     const res = await signup(data);
@@ -52,12 +44,9 @@ const Signup = (
     if (authResult.authFailure) {
       setTitle(authResult.title);
       setErrorMessage(authResult.errorMessage);
-      handleOpen();
-    } else {
-      if (isAuthenticated) {
-        router.push(authResult.dest);
-      }
+      setOpen(true);
     }
+    router.push(authResult.dest);
   };
 
   return (
@@ -109,7 +98,7 @@ const Signup = (
           Signup
         </Button>
 
-        <PopUp title={title} open={open} setOpen={handleClose}>
+        <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
           {errorMessage}
         </PopUp>
       </form>
