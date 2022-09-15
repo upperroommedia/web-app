@@ -5,11 +5,12 @@ import {
   Dialog,
   Button,
 } from '@mui/material';
+import { ReactElement } from 'react';
 
 interface PopUpInfo {
   title: string;
   open: boolean;
-  children: string;
+  children: string | ReactElement;
   setOpen: any;
 }
 

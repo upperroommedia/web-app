@@ -10,10 +10,10 @@ import type {
 
 import AudioTrimmer from '../components/AudioTrimmer';
 import uploadFile from './api/uploadFile';
+import addNewSeries from './api/addNewSeries';
+import PopUp from '../components/PopUp';
 
 import styles from '../styles/Uploader.module.css';
-// import firebase from '../firebase/firebase';
-// import { getFirestore, collection, addDoc } from 'firebase/firestore';
 import { ChangeEvent, useCallback, useState } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
@@ -22,6 +22,8 @@ import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import IconButton from '@mui/material/IconButton';
+import AddIcon from '@mui/icons-material/Add';
 
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
@@ -29,6 +31,7 @@ import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon } from '../types/Sermon';
 
 import ProtectedRoute from '../components/ProtectedRoute';
+import Button from '@mui/material/Button';
 
 export interface UploadableFile {
   file: File;
@@ -50,6 +53,7 @@ if (typeof window !== 'undefined') {
 interface Props {
   speakers: Array<string>;
   topics: Array<string>;
+  seriesArray: Array<string>;
 }
 
 const Uploader: NextPage<Props> = (
@@ -65,6 +69,11 @@ const Uploader: NextPage<Props> = (
   const [date, setDate] = useState<Date | null>(new Date());
   const [speaker, setSpeaker] = useState([]);
   const [topic, setTopic] = useState([]);
+
+  const [series, setSeries] = useState();
+
+  const [newSeries, setNewSeries] = useState<string>('');
+  const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
   const onDrop = useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
@@ -196,6 +205,28 @@ const Uploader: NextPage<Props> = (
           value={sermonData.description}
           onChange={handleChange}
         />
+        <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+          <Autocomplete
+            fullWidth
+            value={series || null}
+            onChange={(event: any, newValue: any | null) => {
+              if (newValue !== null) {
+                setSeries(newValue);
+              }
+            }}
+            id="series-input"
+            options={props.seriesArray}
+            renderInput={(params) => <TextField {...params} label="Series" />}
+          />
+          <p style={{ paddingLeft: '10px' }}>or</p>
+          <IconButton
+            onClick={() => {
+              setNewSeriesPopup(true);
+            }}
+          >
+            <AddIcon />
+          </IconButton>
+        </div>
         <Autocomplete
           fullWidth
           value={speaker}
@@ -295,6 +326,30 @@ const Uploader: NextPage<Props> = (
           <p>{uploadProgress}</p>
         </div>
       </Box>
+      <PopUp
+        title={'Add new series'}
+        open={newSeriesPopup}
+        setOpen={() => setNewSeriesPopup(false)}
+      >
+        <div style={{ display: 'flex' }}>
+          <TextField
+            value={newSeries}
+            onChange={(e) => {
+              setNewSeries(e.target.value);
+            }}
+          />
+          <Button
+            disabled={newSeries === ''}
+            onClick={() => {
+              addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
+              props.seriesArray.push(newSeries);
+              setNewSeries('');
+            }}
+          >
+            Submit
+          </Button>
+        </div>
+      </PopUp>
     </form>
   );
 };
@@ -304,7 +359,7 @@ const Uploader: NextPage<Props> = (
 //   topics: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
 // };
 
-interface speakerAndTopic {
+interface field {
   name: string;
 }
 
@@ -323,7 +378,7 @@ export const getServerSideProps: GetServerSideProps = async (
   const speakers: Array<string> = [];
   const speakersQuerySnapshot = await getDocs(speakersQuery);
   speakersQuerySnapshot.forEach((doc) => {
-    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
+    const current: field = doc.data() as unknown as field;
     speakers.push(current.name);
   });
 
@@ -331,13 +386,23 @@ export const getServerSideProps: GetServerSideProps = async (
   const topics: Array<string> = [];
   const topicsQuerySnapshot = await getDocs(topicsQuery);
   topicsQuerySnapshot.forEach((doc) => {
-    const current: speakerAndTopic = doc.data() as unknown as speakerAndTopic;
+    const current: field = doc.data() as unknown as field;
     topics.push(current.name);
   });
+
+  const seriesQuery = query(collection(db, 'series'));
+  const series: Array<string> = [];
+  const seriesQuerySnapshot = await getDocs(seriesQuery);
+  seriesQuerySnapshot.forEach((doc) => {
+    const current: field = doc.data() as unknown as field;
+    series.push(current.name);
+  });
+
   return {
     props: {
       speakers: speakers,
       topics: topics,
+      seriesArray: series,
     },
   };
 };
