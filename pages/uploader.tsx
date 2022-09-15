@@ -314,11 +314,12 @@ const Uploader: NextPage<Props> = (
                   title: sermonData.title,
                   subtitle: sermonData.subtitle,
                   durationSeconds: duration,
-                  date: date,
+                  date,
                   description: sermonData.description,
-                  speaker: props.speakers,
+                  speaker,
                   scripture: sermonData.scripture,
-                  topic: props.topics,
+                  topic,
+                  series,
                 });
               }
             }}
@@ -339,7 +340,7 @@ const Uploader: NextPage<Props> = (
             }}
           />
           <Button
-            disabled={newSeries === ''}
+            disabled={newSeries === '' || props.seriesArray.includes(newSeries)}
             onClick={() => {
               addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
               props.seriesArray.push(newSeries);

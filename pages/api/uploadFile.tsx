@@ -1,4 +1,10 @@
-import { doc, getFirestore, setDoc } from 'firebase/firestore';
+import {
+  arrayUnion,
+  doc,
+  getFirestore,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
 import { ref, uploadBytesResumable } from 'firebase/storage';
 import { firebase, storage } from '../../firebase/firebase';
 import { v4 as uuidv4 } from 'uuid';
@@ -22,6 +28,7 @@ interface uploadFileProps {
   speaker: Array<string>;
   scripture: string;
   topic: Array<string>;
+  series: string | undefined;
 }
 
 const uploadFile = (props: uploadFileProps) => {
@@ -29,6 +36,17 @@ const uploadFile = (props: uploadFileProps) => {
   const db = getFirestore(firebase);
   const id = uuidv4();
   const sermonRef = ref(storage, `sermons/${id}`);
+
+  if (props.series !== undefined) {
+    const seriesRef = doc(db, 'series', props.series);
+    try {
+      updateDoc(seriesRef, {
+        sermonIds: arrayUnion(id),
+      });
+    } catch (err) {
+      console.log(err);
+    }
+  }
   // const sermonRef = ref(storage, `sermons/${file.name}`);
   const uploadTask = uploadBytesResumable(sermonRef, props.file.file);
   const sermonData: Sermon = {
