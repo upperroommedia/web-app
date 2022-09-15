@@ -16,7 +16,7 @@ import type {
 import UserContext from '../context/user/UserContext';
 
 // 3rd Party
-import { Button, Input, InputLabel, FormControl } from '@mui/material';
+import { Button, TextField } from '@mui/material';
 
 // Components
 import ProtectedRoute from '../components/ProtectedRoute';
@@ -59,45 +59,49 @@ const Signup = (
       }}
     >
       <h1 className="text-center my-3 ">Signup</h1>
-      <form style={{ height: '100%' }} onSubmit={handleSignup}>
-        <div>
-          <FormControl>
-            <InputLabel>Email address</InputLabel>
-            <Input
-              type="email"
-              placeholder="Enter email"
-              required
-              onChange={(e: any) =>
-                setData({
-                  ...data,
-                  email: e.target.value,
-                })
-              }
-              value={data.email}
-            />
-          </FormControl>
+      <form
+        style={{ height: '100%', width: '300px', margin: '20px' }}
+        onSubmit={handleSignup}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <TextField
+            fullWidth
+            type="email"
+            placeholder="Enter email"
+            required
+            onChange={(e: any) =>
+              setData({
+                ...data,
+                email: e.target.value,
+              })
+            }
+            value={data.email}
+            size="small"
+          />
+          <TextField
+            fullWidth
+            type="password"
+            placeholder="Password"
+            required
+            onChange={(e: any) =>
+              setData({
+                ...data,
+                password: e.target.value,
+              })
+            }
+            value={data.password}
+            size="small"
+          />
         </div>
-        <div>
-          <FormControl>
-            <InputLabel>Password</InputLabel>
-            <Input
-              type="password"
-              placeholder="Password"
-              required
-              onChange={(e: any) =>
-                setData({
-                  ...data,
-                  password: e.target.value,
-                })
-              }
-              value={data.password}
-            />
-          </FormControl>
-        </div>
-        <Button variant="contained" type="submit">
-          Signup
+        <Button
+          fullWidth
+          variant="contained"
+          type="submit"
+          style={{ marginTop: '30px' }}
+          size="medium"
+        >
+          SignUp
         </Button>
-
         <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
           {errorMessage}
         </PopUp>
