@@ -27,7 +27,7 @@ const Login = (
   props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   const router = useRouter();
-  const { isAuthenticated, login } = useContext(UserContext);
+  const { login } = useContext(UserContext);
 
   const [data, setData] = useState({
     email: '',
@@ -36,14 +36,6 @@ const Login = (
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-
-  const handleOpen = () => {
-    setOpen(true);
-  };
-
-  const handleClose = () => {
-    setOpen(false);
-  };
 
   const handleLogin = async (e: any) => {
     e.preventDefault();
@@ -54,12 +46,9 @@ const Login = (
     if (authResult.authFailure) {
       setTitle(authResult.title);
       setErrorMessage(authResult.errorMessage);
-      handleOpen();
-    } else {
-      if (isAuthenticated) {
-        router.push(authResult.dest);
-      }
+      setOpen(true);
     }
+    router.push(authResult.dest);
   };
 
   return (
@@ -111,7 +100,7 @@ const Login = (
           Login
         </Button>
       </form>
-      <PopUp title={title} open={open} setOpen={handleClose}>
+      <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
         {errorMessage}
       </PopUp>
     </div>
@@ -122,17 +111,16 @@ export const getServerSideProps: GetServerSideProps = async (
   ctx: GetServerSidePropsContext
 ) => {
   const userCredentials = await ProtectedRoute(ctx);
-  if (userCredentials.props.token) {
-    return {
-      redirect: {
-        permanent: false,
-        destination: '/uploader',
-      },
-      props: {},
-    };
-  } else {
+  if (!userCredentials.props.token) {
     return { props: {} };
   }
+  return {
+    redirect: {
+      permanent: false,
+      destination: '/uploader',
+    },
+    props: {},
+  };
 };
 
 export default Login;
