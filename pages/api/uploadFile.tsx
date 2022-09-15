@@ -44,7 +44,7 @@ const uploadFile = (props: uploadFileProps) => {
         sermonIds: arrayUnion(id),
       });
     } catch (err) {
-      console.log(err);
+      props.setUploadProgress(`Error: ${err}`);
     }
   }
   // const sermonRef = ref(storage, `sermons/${file.name}`);
