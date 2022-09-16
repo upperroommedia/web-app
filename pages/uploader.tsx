@@ -355,11 +355,6 @@ const Uploader: NextPage<Props> = (
   );
 };
 
-// Uploader.propTypes = {
-//   speakers: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
-//   topics: PropTypes.arrayOf(PropTypes.string.isRequired).isRequired,
-// };
-
 interface field {
   name: string;
 }
