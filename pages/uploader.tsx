@@ -26,7 +26,8 @@ import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
-import { Sermon, emptySermon } from '../types/Sermon';
+import { emptySermon } from '../types/Sermon';
+import { Sermon } from '../context/types';
 
 import ProtectedRoute from '../components/ProtectedRoute';
 

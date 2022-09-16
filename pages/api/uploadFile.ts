@@ -6,7 +6,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../uploader';
 import { getAuth } from 'firebase/auth';
-import { Sermon, sermonConverter } from '../../types/Sermon';
+import { sermonConverter } from '../../types/Sermon';
+import { Sermon } from '../../context/types';
 
 interface uploadFileProps {
   file: UploadableFile;

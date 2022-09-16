@@ -4,6 +4,8 @@ import { GetSignedUrlConfig } from '@google-cloud/storage';
 import axios, { AxiosResponse, AxiosRequestConfig } from 'axios';
 import qs from 'qs';
 import FormData from 'form-data';
+import * as sermonFunctions from './sermon_functions';
+exports.getSermons = sermonFunctions.getSermons;
 admin.initializeApp();
 
 // To test functions: npm run-script serve

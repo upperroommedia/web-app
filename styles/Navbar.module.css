@@ -5,6 +5,12 @@
   display: flex;
   margin-top: 1rem;
 }
+.navbarMenu {
+  /* background-color: lightblue; */
+  display: flex;
+  justify-content: flex-start;
+  align-items: baseline;
+}
 
 .nav_link {
   padding: 1rem;

@@ -11,7 +11,7 @@ specifiers:
   eslint-config-google: ^0.14.0
   eslint-plugin-import: ^2.25.4
   firebase-admin: ^10.0.2
-  firebase-functions: ^3.22.0
+  firebase-functions: ^3.23.0
   firebase-functions-test: ^0.2.0
   form-data: ^4.0.0
   headers: ^0.9.6
@@ -23,7 +23,7 @@ dependencies:
   axios: 0.26.1
   dotenv: 16.0.2
   firebase-admin: 10.0.2_r5e2ebpicw3bnh447f4ifawqqy
-  firebase-functions: 3.22.0_firebase-admin@10.0.2
+  firebase-functions: 3.23.0_firebase-admin@10.0.2
   form-data: 4.0.0
   headers: 0.9.6
 
@@ -33,7 +33,7 @@ devDependencies:
   eslint: 8.12.0
   eslint-config-google: 0.14.0_eslint@8.12.0
   eslint-plugin-import: 2.26.0_mzojdsoryzqztjvqj5t7e5xqmq
-  firebase-functions-test: 0.2.3_5ntdhgpynut6p3mgxctw2srlym
+  firebase-functions-test: 0.2.3_sqmv6dj4jag77m4kfryorz5aea
   typescript: 4.6.3
 
 packages:
@@ -641,7 +641,7 @@ packages:
     dev: true
 
   /array-flatten/1.1.1:
-    resolution: {integrity: sha1-ml9pkFGx5wczKPKgCJaLZOopVdI=}
+    resolution: {integrity: sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg==}
 
   /array-includes/3.1.4:
     resolution: {integrity: sha512-ZTNSQkmWumEbiHO2GF4GmWxYVTiQyJy2XOTa15sdQSrvKn7l+180egQMqlrMOUMCyLMD7pmyQe4mMDUT6Behrw==}
@@ -1352,7 +1352,7 @@ packages:
       - encoding
       - supports-color
 
-  /firebase-functions-test/0.2.3_5ntdhgpynut6p3mgxctw2srlym:
+  /firebase-functions-test/0.2.3_sqmv6dj4jag77m4kfryorz5aea:
     resolution: {integrity: sha512-zYX0QTm53wCazuej7O0xqbHl90r/v1PTXt/hwa0jo1YF8nDM+iBKnLDlkIoW66MDd0R6aGg4BvKzTTdJpvigUA==}
     engines: {node: '>=8.0.0'}
     peerDependencies:
@@ -1361,12 +1361,12 @@ packages:
     dependencies:
       '@types/lodash': 4.14.181
       firebase-admin: 10.0.2_r5e2ebpicw3bnh447f4ifawqqy
-      firebase-functions: 3.22.0_firebase-admin@10.0.2
+      firebase-functions: 3.23.0_firebase-admin@10.0.2
       lodash: 4.17.21
     dev: true
 
-  /firebase-functions/3.22.0_firebase-admin@10.0.2:
-    resolution: {integrity: sha512-d1BxBpT95MhvVqXkpLWDvWbyuX7e2l69cFAiqG3U1XQDaMV88bM9S+Zg7H8i9pitEGFr+76ErjKgrY0n+g3ZDA==}
+  /firebase-functions/3.23.0_firebase-admin@10.0.2:
+    resolution: {integrity: sha512-/jujnNChTWIuoXK3IPNGYu1zjXF1fYRy88uYbkrJhs3dhK6EdXZi0rX6JUEOCB7h6IkRQvbio+bvtaoI7h+4Lg==}
     engines: {node: ^8.13.0 || >=10.10.0}
     hasBin: true
     peerDependencies:
@@ -2264,7 +2264,7 @@ packages:
     dev: true
 
   /path-to-regexp/0.1.7:
-    resolution: {integrity: sha1-32BBeABfUi8V60SQ5yR6G/qmf4w=}
+    resolution: {integrity: sha512-5DFkuoqlv1uYQKxy8omFBeJPQcdoE07Kv2sferDCrAq1ohOU+MSDswDIbnx3YAM60qIOnYa53wBhXW0EbMonrQ==}
 
   /path-type/4.0.0:
     resolution: {integrity: sha512-gDKb8aZMDeD/tZWs9P6+q0J9Mwkdl6xMV8TjnGP3qJVJ06bdMgkbBlLU8IdfOsIsFz2BW1rNVT3XuNEl8zPAvw==}
@@ -2717,7 +2717,7 @@ packages:
     optional: true
 
   /unpipe/1.0.0:
-    resolution: {integrity: sha1-sr9O6FFKrmFltIF4KdIbLvSZBOw=}
+    resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
     engines: {node: '>= 0.8'}
 
   /uri-js/4.4.1:

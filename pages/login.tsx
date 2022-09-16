@@ -24,7 +24,7 @@ import AuthErrors from '../components/AuthErrors';
 import PopUp from '../components/PopUp';
 
 const Login = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
+  _props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   const router = useRouter();
   const { login } = useContext(UserContext);
