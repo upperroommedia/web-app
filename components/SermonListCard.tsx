@@ -1,7 +1,7 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent } from 'react';
+import { FunctionComponent, useState } from 'react';
 // import Image from 'next/image';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -9,6 +9,7 @@ import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import styles from '../styles/SermonListCard.module.css';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import { Button } from '@mui/material';
 // import { Sermon } from '../types/Sermon';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
@@ -17,6 +18,7 @@ import { deleteDoc, doc, getFirestore } from 'firebase/firestore';
 
 import { Sermon } from '../types/Sermon';
 import { firebase } from '../firebase/firebase';
+import PopUp from './PopUp';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -33,13 +35,17 @@ const SermonListCard: FunctionComponent<Props> = ({
   setPlaylist,
 }: // handleSermonClick,
 Props) => {
+  const [deleteConfirmationPopup, setDeleteConfirmationPopup] =
+    useState<boolean>(false);
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
   const db = getFirestore(firebase);
+
   const handleDelete = async (id: string) => {
     await deleteDoc(doc(db, 'sermons', id)).then(() =>
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key))
     );
   };
+
   return (
     <div
       onClick={(e) => {
@@ -99,10 +105,29 @@ Props) => {
             </IconButton>
             <IconButton
               style={{ color: 'red' }}
-              onClick={() => handleDelete(sermon.key)}
+              onClick={() => setDeleteConfirmationPopup(true)}
             >
               <DeleteIcon />
             </IconButton>
+            <PopUp
+              title={'Are you sure you want to delete this sermon?'}
+              open={deleteConfirmationPopup}
+              setOpen={() => setDeleteConfirmationPopup(false)}
+            >
+              <div>
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    handleDelete(sermon.key).then(() =>
+                      setDeleteConfirmationPopup(false)
+                    );
+                  }}
+                  color="primary"
+                >
+                  Yes
+                </Button>
+              </div>
+            </PopUp>
           </div>
         </div>
       </div>
