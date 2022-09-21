@@ -70,7 +70,7 @@ const Uploader: NextPage<Props> = (
   const [speaker, setSpeaker] = useState([]);
   const [topic, setTopic] = useState([]);
 
-  const [series, setSeries] = useState();
+  const [series, setSeries] = useState<string>('');
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
@@ -209,10 +209,8 @@ const Uploader: NextPage<Props> = (
           <Autocomplete
             fullWidth
             value={series || null}
-            onChange={(event: any, newValue: any | null) => {
-              if (newValue !== null) {
-                setSeries(newValue);
-              }
+            onChange={(_, newValue) => {
+              newValue === null ? setSeries('') : setSeries(newValue);
             }}
             id="series-input"
             options={props.seriesArray}
