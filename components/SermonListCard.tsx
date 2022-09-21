@@ -7,23 +7,39 @@ import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import styles from '../styles/SermonListCard.module.css';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 // import { Sermon } from '../types/Sermon';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
+import { deleteDoc, doc, getFirestore } from 'firebase/firestore';
+
+import { Sermon } from '../types/Sermon';
+import { firebase } from '../firebase/firebase';
 
 interface Props {
   sermon: SermonWithMetadata;
   playing: boolean;
+  playlist: Sermon[];
+  setPlaylist: (playlist: Sermon[]) => void;
   // handleSermonClick: (sermon: Sermon) => void;
 }
 
 const SermonListCard: FunctionComponent<Props> = ({
   sermon,
   playing,
+  playlist,
+  setPlaylist,
 }: // handleSermonClick,
 Props) => {
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
+  const db = getFirestore(firebase);
+  const handleDelete = async (id: string) => {
+    await deleteDoc(doc(db, 'sermons', id)).then(() =>
+      setPlaylist(playlist.filter((obj) => obj.key !== sermon.key))
+    );
+  };
   return (
     <div
       onClick={(e) => {
@@ -78,6 +94,15 @@ Props) => {
                 />
               )}
             <span style={{ width: '100%' }}></span>
+            <IconButton style={{ color: 'lightblue' }}>
+              <EditIcon />
+            </IconButton>
+            <IconButton
+              style={{ color: 'red' }}
+              onClick={() => handleDelete(sermon.key)}
+            >
+              <DeleteIcon />
+            </IconButton>
           </div>
         </div>
       </div>
