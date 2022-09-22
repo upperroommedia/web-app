@@ -19,6 +19,7 @@ import { deleteDoc, doc, getFirestore } from 'firebase/firestore';
 import { Sermon } from '../types/Sermon';
 import { firebase } from '../firebase/firebase';
 import PopUp from './PopUp';
+import EditSermonForm from './EditSermonForm';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -37,6 +38,8 @@ const SermonListCard: FunctionComponent<Props> = ({
 Props) => {
   const [deleteConfirmationPopup, setDeleteConfirmationPopup] =
     useState<boolean>(false);
+  const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
+
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
   const db = getFirestore(firebase);
 
@@ -100,7 +103,10 @@ Props) => {
                 />
               )}
             <span style={{ width: '100%' }}></span>
-            <IconButton style={{ color: 'lightblue' }}>
+            <IconButton
+              style={{ color: 'lightblue' }}
+              onClick={() => setEditFormPopup(true)}
+            >
               <EditIcon />
             </IconButton>
             <IconButton
@@ -128,6 +134,14 @@ Props) => {
                 </Button>
               </div>
             </PopUp>
+            <EditSermonForm
+              title={'Edit Sermon'}
+              open={editFormPopup}
+              setOpen={() => setEditFormPopup(false)}
+              sermon={sermon}
+            >
+              edit form
+            </EditSermonForm>
           </div>
         </div>
       </div>

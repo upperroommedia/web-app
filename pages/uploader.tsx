@@ -54,13 +54,16 @@ interface Props {
   speakers: Array<string>;
   topics: Array<string>;
   seriesArray: Array<string>;
+  existingSermon?: Sermon;
 }
 
 const Uploader: NextPage<Props> = (
   props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   getAuth();
-  const [sermonData, setSermonData] = useState<Sermon>(emptySermon);
+  const [sermonData, setSermonData] = useState<Sermon>(
+    props.existingSermon ? props.existingSermon : emptySermon
+  );
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
   const [duration, setDuration] = useState<number>(0);
@@ -69,7 +72,6 @@ const Uploader: NextPage<Props> = (
   const [date, setDate] = useState<Date | null>(new Date());
   const [speaker, setSpeaker] = useState([]);
   const [topic, setTopic] = useState([]);
-
   const [series, setSeries] = useState();
 
   const [newSeries, setNewSeries] = useState<string>('');
@@ -126,14 +128,14 @@ const Uploader: NextPage<Props> = (
     setTopic([]);
   };
 
-  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSermonData((prevSermonData) => {
       return {
         ...prevSermonData,
         [event.target.name]: event.target.value,
       };
     });
-  }
+  };
 
   const handleDateChange = (newValue: Date | null) => {
     setDate(newValue);
@@ -264,68 +266,74 @@ const Uploader: NextPage<Props> = (
           multiple
           renderInput={(params) => <TextField {...params} label="Topic(s)" />}
         />
-        <div className={styles.form}>
-          {file ? (
-            <>
-              <AudioTrimmer
-                url={file.preview}
-                duration={duration}
-                setDuration={setDuration}
-              ></AudioTrimmer>
-              <button
-                type="button"
-                className={styles.button}
-                onClick={() => {
-                  setFile(undefined);
-                  setUploadProgress(undefined);
-                  clearForm();
-                }}
-              >
-                Clear
-              </button>
-            </>
-          ) : (
-            <div className={styles.dragAndDrop} {...getRootProps()}>
-              <input type="hidden" {...getInputProps()} />
-              <p>
-                Drag &apos;n&apos; drop audio files here, or click to select
-                files
-              </p>
-            </div>
-          )}
-          <input
-            className={styles.button}
-            type="button"
-            value="Upload"
-            disabled={
-              file === undefined ||
-              sermonData.title === '' ||
-              date === null ||
-              speaker.length === 0
-            }
-            // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
-            // the user from double clicking upload
-            onClick={() => {
-              if (file !== undefined && date != null) {
-                uploadFile({
-                  file: file,
-                  setFile: setFile,
-                  setUploadProgress: setUploadProgress,
-                  title: sermonData.title,
-                  subtitle: sermonData.subtitle,
-                  durationSeconds: duration,
-                  date,
-                  description: sermonData.description,
-                  speaker,
-                  scripture: sermonData.scripture,
-                  topic,
-                  series,
-                });
+        {props.existingSermon ? (
+          <div>
+            <Button>update sermon</Button>
+          </div>
+        ) : (
+          <div className={styles.form}>
+            {file ? (
+              <>
+                <AudioTrimmer
+                  url={file.preview}
+                  duration={duration}
+                  setDuration={setDuration}
+                ></AudioTrimmer>
+                <button
+                  type="button"
+                  className={styles.button}
+                  onClick={() => {
+                    setFile(undefined);
+                    setUploadProgress(undefined);
+                    clearForm();
+                  }}
+                >
+                  Clear
+                </button>
+              </>
+            ) : (
+              <div className={styles.dragAndDrop} {...getRootProps()}>
+                <input type="hidden" {...getInputProps()} />
+                <p>
+                  Drag &apos;n&apos; drop audio files here, or click to select
+                  files
+                </p>
+              </div>
+            )}
+            <input
+              className={styles.button}
+              type="button"
+              value="Upload"
+              disabled={
+                file === undefined ||
+                sermonData.title === '' ||
+                date === null ||
+                speaker.length === 0
               }
-            }}
-          />
-          <p>{uploadProgress}</p>
-        </div>
+              // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
+              // the user from double clicking upload
+              onClick={() => {
+                if (file !== undefined && date != null) {
+                  uploadFile({
+                    file: file,
+                    setFile: setFile,
+                    setUploadProgress: setUploadProgress,
+                    title: sermonData.title,
+                    subtitle: sermonData.subtitle,
+                    durationSeconds: duration,
+                    date,
+                    description: sermonData.description,
+                    speaker,
+                    scripture: sermonData.scripture,
+                    topic,
+                    series,
+                  });
+                }
+              }}
+            />
+            <p>{uploadProgress}</p>
+          </div>
+        )}
       </Box>
       <PopUp
         title={'Add new series'}
