@@ -6,7 +6,7 @@ import {
   Button,
 } from '@mui/material';
 import { getFirestore, query, collection, getDocs } from 'firebase/firestore';
-import { ReactElement, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { firebase } from '../firebase/firebase';
 import Uploader from '../pages/uploader';
 import { Sermon } from '../types/Sermon';
@@ -14,13 +14,12 @@ import { Sermon } from '../types/Sermon';
 interface EditSermonFormInfo {
   title: string;
   open: boolean;
-  children: string | ReactElement;
   setOpen: any;
   sermon: Sermon;
 }
 
 const EditSermonForm = (props: EditSermonFormInfo) => {
-  const { title, children, sermon, open, setOpen } = props;
+  const { title, sermon, open, setOpen } = props;
   const [speakersArray, setSpeakersArray] = useState<string[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
   const [seriesArray, setSeriesArray] = useState<string[]>([]);
@@ -68,7 +67,6 @@ const EditSermonForm = (props: EditSermonFormInfo) => {
             seriesArray={seriesArray}
             existingSermon={sermon}
           />
-          {children}
         </div>
       </DialogContent>
       <DialogActions>

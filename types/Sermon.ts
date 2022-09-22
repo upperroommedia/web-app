@@ -8,6 +8,7 @@ export interface Sermon {
   key: string;
   title: string;
   description: string;
+  series: string;
   speaker: Array<string>;
   subtitle: string;
   scripture: string;
@@ -63,9 +64,10 @@ export const emptySermon: Sermon = {
   key: '',
   title: '',
   subtitle: '',
+  series: '',
+  description: '',
   dateMillis: 0,
   durationSeconds: 0,
-  description: '',
   speaker: [],
   scripture: '',
   topic: [],

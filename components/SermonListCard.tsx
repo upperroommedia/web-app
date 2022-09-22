@@ -139,9 +139,7 @@ Props) => {
               open={editFormPopup}
               setOpen={() => setEditFormPopup(false)}
               sermon={sermon}
-            >
-              edit form
-            </EditSermonForm>
+            />
           </div>
         </div>
       </div>

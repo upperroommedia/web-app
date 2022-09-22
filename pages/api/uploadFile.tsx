@@ -24,11 +24,11 @@ interface uploadFileProps {
   subtitle: string;
   date: Date;
   description: string;
+  series: string;
   durationSeconds: number;
   speaker: Array<string>;
   scripture: string;
   topic: Array<string>;
-  series: string | undefined;
 }
 
 const uploadFile = (props: uploadFileProps) => {
@@ -55,6 +55,7 @@ const uploadFile = (props: uploadFileProps) => {
     durationSeconds: props.durationSeconds,
     dateMillis: props.date.getTime(),
     description: props.description,
+    series: props.series,
     speaker: props.speaker,
     scripture: props.scripture,
     topic: props.topic,

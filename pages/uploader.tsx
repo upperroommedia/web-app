@@ -10,6 +10,7 @@ import type {
 
 import AudioTrimmer from '../components/AudioTrimmer';
 import uploadFile from './api/uploadFile';
+import editSermon from './api/editSermon';
 import addNewSeries from './api/addNewSeries';
 import PopUp from '../components/PopUp';
 
@@ -69,13 +70,40 @@ const Uploader: NextPage<Props> = (
   const [duration, setDuration] = useState<number>(0);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
-  const [date, setDate] = useState<Date | null>(new Date());
-  const [speaker, setSpeaker] = useState([]);
-  const [topic, setTopic] = useState([]);
-  const [series, setSeries] = useState();
+  const [date, setDate] = useState<Date>(
+    new Date(
+      props.existingSermon ? props.existingSermon.dateMillis : new Date()
+    )
+  );
+  const [speaker, setSpeaker] = useState(
+    props.existingSermon ? props.existingSermon.speaker : []
+  );
+  const [topic, setTopic] = useState(
+    props.existingSermon ? props.existingSermon.topic : []
+  );
+  const [series, setSeries] = useState(
+    props.existingSermon ? props.existingSermon.series : ''
+  );
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
+
+  const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
+    const sermon1Date = new Date(sermon1.dateMillis);
+
+    return (
+      sermon1.title === sermon2.title &&
+      sermon1.subtitle === sermon2.subtitle &&
+      sermon1.description === sermon2.description &&
+      sermon1Date.getDate() === date?.getDate() &&
+      sermon1Date.getMonth() === date?.getMonth() &&
+      sermon1Date.getFullYear() === date?.getFullYear() &&
+      sermon1.series === series &&
+      JSON.stringify(sermon1.speaker) === JSON.stringify(speaker) &&
+      sermon1.scripture === sermon2.scripture &&
+      JSON.stringify(sermon1.topic) === JSON.stringify(topic)
+    );
+  };
 
   const onDrop = useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
@@ -137,7 +165,7 @@ const Uploader: NextPage<Props> = (
     });
   };
 
-  const handleDateChange = (newValue: Date | null) => {
+  const handleDateChange = (newValue: Date) => {
     setDate(newValue);
   };
 
@@ -188,7 +216,11 @@ const Uploader: NextPage<Props> = (
               label="Date"
               inputFormat="MM/dd/yyyy"
               value={date}
-              onChange={handleDateChange}
+              onChange={(newValue) => {
+                if (newValue !== null) {
+                  handleDateChange(new Date(newValue));
+                }
+              }}
               renderInput={(params) => <TextField {...params} />}
             />
           </LocalizationProvider>
@@ -268,7 +300,24 @@ const Uploader: NextPage<Props> = (
         />
         {props.existingSermon ? (
           <div>
-            <Button>update sermon</Button>
+            <Button
+              onClick={() =>
+                editSermon({
+                  key: sermonData.key,
+                  title: sermonData.title,
+                  subtitle: sermonData.subtitle,
+                  date,
+                  description: sermonData.description,
+                  speaker,
+                  scripture: sermonData.scripture,
+                  topic,
+                  series,
+                }).then(() => setUploadProgress('sermon edited!'))
+              }
+              disabled={sermonsEqual(props.existingSermon, sermonData)}
+            >
+              update sermon
+            </Button>
           </div>
         ) : (
           <div className={styles.form}>
@@ -331,9 +380,9 @@ const Uploader: NextPage<Props> = (
                 }
               }}
             />
-            <p>{uploadProgress}</p>
           </div>
         )}
+        {uploadProgress}
       </Box>
       <PopUp
         title={'Add new series'}
