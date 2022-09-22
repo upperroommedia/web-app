@@ -35,7 +35,7 @@ import AddIcon from '@mui/icons-material/Add';
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
-import { Sermon, emptySermon } from '../types/Sermon';
+import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
 import ProtectedRoute from '../components/ProtectedRoute';
 import Button from '@mui/material/Button';
@@ -332,6 +332,7 @@ const Uploader: NextPage<Props> = (
                     scripture: sermonData.scripture,
                     topic,
                     series,
+                    dateString: getDateString(date)
                   });
                   setUploadProgress('sermon edited!');
                   setTimeout(props.setEditFormOpen(false), 1000);

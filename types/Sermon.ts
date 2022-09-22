@@ -23,6 +23,24 @@ export interface FirebaseSermon
   date: Timestamp;
 }
 
+export const getDateString = (date: Date) => {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return `${months[date.getMonth()]} ${date.getDay()}`;
+};
+
 /* This converter takes care of converting a Sermon to a FirebaseSermon on upload
  *  and a FirebaseSermon to a Sermon on download.
  */
@@ -35,23 +53,7 @@ export const sermonConverter = {
     options: SnapshotOptions
   ): Sermon => {
     const { date, ...data } = snapshot.data(options);
-    const getDateString = (date: Date) => {
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      return `${months[date.getMonth()]} ${date.getDay()}`;
-    };
+
     return {
       ...data,
       dateMillis: snapshot.data(options).date.toMillis(),
