@@ -6,7 +6,7 @@ import {
   Button,
 } from '@mui/material';
 import { getFirestore, query, collection, getDocs } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { firebase } from '../firebase/firebase';
 import Uploader from '../pages/uploader';
 import { Sermon } from '../types/Sermon';
@@ -16,6 +16,7 @@ interface EditSermonFormInfo {
   open: boolean;
   setOpen: any;
   sermon: Sermon;
+  setUpdatedSermon: Dispatch<SetStateAction<Sermon>>
 }
 
 const EditSermonForm = (props: EditSermonFormInfo) => {
@@ -66,6 +67,8 @@ const EditSermonForm = (props: EditSermonFormInfo) => {
             topics={topicsArray}
             seriesArray={seriesArray}
             existingSermon={sermon}
+            setUpdatedSermon={props.setUpdatedSermon}
+            setEditFormOpen={setOpen}
           />
         </div>
       </DialogContent>

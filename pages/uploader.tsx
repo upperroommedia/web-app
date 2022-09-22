@@ -15,7 +15,13 @@ import addNewSeries from './api/addNewSeries';
 import PopUp from '../components/PopUp';
 
 import styles from '../styles/Uploader.module.css';
-import { ChangeEvent, useCallback, useState } from 'react';
+import {
+  ChangeEvent,
+  Dispatch,
+  SetStateAction,
+  useCallback,
+  useState,
+} from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
 import TextField from '@mui/material/TextField';
@@ -56,6 +62,8 @@ interface Props {
   topics: Array<string>;
   seriesArray: Array<string>;
   existingSermon?: Sermon;
+  setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
+  setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
 const Uploader: NextPage<Props> = (
@@ -312,7 +320,22 @@ const Uploader: NextPage<Props> = (
                   scripture: sermonData.scripture,
                   topic,
                   series,
-                }).then(() => setUploadProgress('sermon edited!'))
+                }).then(() => {
+                  props.setUpdatedSermon({
+                    key: sermonData.key,
+                    title: sermonData.title,
+                    subtitle: sermonData.subtitle,
+                    dateMillis: date.getTime(),
+                    durationSeconds: sermonData.durationSeconds,
+                    description: sermonData.description,
+                    speaker,
+                    scripture: sermonData.scripture,
+                    topic,
+                    series,
+                  });
+                  setUploadProgress('sermon edited!');
+                  setTimeout(props.setEditFormOpen(false), 1000);
+                })
               }
               disabled={sermonsEqual(props.existingSermon, sermonData)}
             >

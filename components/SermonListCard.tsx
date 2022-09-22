@@ -1,7 +1,7 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent, useState } from 'react';
+import { FunctionComponent, useEffect, useState } from 'react';
 // import Image from 'next/image';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -16,7 +16,7 @@ import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
 import { deleteDoc, doc, getFirestore } from 'firebase/firestore';
 
-import { Sermon } from '../types/Sermon';
+import { emptySermon, Sermon } from '../types/Sermon';
 import { firebase } from '../firebase/firebase';
 import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
@@ -39,6 +39,19 @@ Props) => {
   const [deleteConfirmationPopup, setDeleteConfirmationPopup] =
     useState<boolean>(false);
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
+
+  const [updatedSermon, setUpdatedSermon] = useState<Sermon>(emptySermon);
+
+  useEffect(() => {
+    if (updatedSermon !== emptySermon) {
+      const index = playlist.findIndex((object) => {
+        return object.key === sermon.key;
+      });
+      const newPlaylist = [...playlist];
+      newPlaylist[index] = updatedSermon;
+      setPlaylist(newPlaylist);
+    }
+  }, [updatedSermon]);
 
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
   const db = getFirestore(firebase);
@@ -139,6 +152,7 @@ Props) => {
               open={editFormPopup}
               setOpen={() => setEditFormPopup(false)}
               sermon={sermon}
+              setUpdatedSermon={setUpdatedSermon}
             />
           </div>
         </div>
