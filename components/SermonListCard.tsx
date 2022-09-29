@@ -138,9 +138,10 @@ Props) => {
                 <Button
                   variant="contained"
                   onClick={() => {
-                    handleDelete(sermon.key).then(() =>
-                      setDeleteConfirmationPopup(false)
-                    );
+                    handleDelete(sermon.key).then(() => {
+                      setDeleteConfirmationPopup(false);
+                      setDeleteChecked(false);
+                    });
                   }}
                   color="primary"
                   disabled={!deleteChecked}
@@ -150,11 +151,11 @@ Props) => {
               }
             >
               <div>
-                <div style={{ display: 'flex' }}>
-                  <Checkbox
-                    checked={deleteChecked}
-                    onClick={() => setDeleteChecked(!deleteChecked)}
-                  />
+                <div
+                  style={{ display: 'flex' }}
+                  onClick={() => setDeleteChecked(!deleteChecked)}
+                >
+                  <Checkbox checked={deleteChecked} />
                   <p>
                     I understand that deleting is permanent and cannot be undone
                   </p>

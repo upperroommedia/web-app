@@ -353,7 +353,6 @@ const Uploader = (props: Props) => {
                     dateString: getDateString(date),
                   });
                   setUploadProgress('sermon edited!');
-                  setTimeout(() => props.setEditFormOpen?.(false), 1000);
                 })
               }
               disabled={sermonsEqual(props.existingSermon, sermonData)}
@@ -425,7 +424,6 @@ const Uploader = (props: Props) => {
             />
           </div>
         )}
-        {uploadProgress}
       </Box>
       <PopUp
         title={'Add new series'}
@@ -462,6 +460,7 @@ const Uploader = (props: Props) => {
           />
         </div>
       </PopUp>
+      <p style={{ textAlign: 'center' }}>{uploadProgress}</p>
     </form>
   );
 };
