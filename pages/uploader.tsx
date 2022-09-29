@@ -96,6 +96,9 @@ const Uploader = (props: Props) => {
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
+  const [speakerError, setSpeakerError] = useState<boolean>(false);
+  const [speakerErrorMessage, setSpeakerErrorMessage] = useState<string>('');
+
   useEffect(() => {
     const fetchData = async () => {
       const db = getFirestore(firebase);
@@ -314,13 +317,23 @@ const Uploader = (props: Props) => {
           onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 3) {
               setSpeaker(newValue);
+              setSpeakerError(false);
+            } else if (newValue.length === 4) {
+              setSpeakerError(true);
+              setSpeakerErrorMessage('Can only add up to 3 speakers');
             }
           }}
           id="speaker-input"
           options={speakersArray}
           multiple
           renderInput={(params) => (
-            <TextField {...params} required label="Speaker(s)" />
+            <TextField
+              {...params}
+              required
+              label="Speaker(s)"
+              error={speakerError}
+              helperText={speakerError ? speakerErrorMessage : ''}
+            />
           )}
         />
         <TextField
@@ -373,7 +386,7 @@ const Uploader = (props: Props) => {
                     series,
                     dateString: getDateString(date),
                   });
-                  setUploadProgress('sermon edited!');
+                  props.setEditFormOpen?.(false);
                 })
               }
               disabled={sermonsEqual(props.existingSermon, sermonData)}
@@ -422,9 +435,9 @@ const Uploader = (props: Props) => {
                   speaker.length === 0 ||
                   sermonData.subtitle === ''
                 }
-                onClick={() => {
+                onClick={async () => {
                   if (file !== undefined && date != null) {
-                    uploadFile({
+                    await uploadFile({
                       file: file,
                       setFile: setFile,
                       setUploadProgress: setUploadProgress,
@@ -437,7 +450,10 @@ const Uploader = (props: Props) => {
                       scripture: sermonData.scripture,
                       topic,
                       series,
-                    }).then(() => clearForm());
+                    }).then(() => {
+                      setSpeakerError(false);
+                      clearForm();
+                    });
                   }
                 }}
               />
