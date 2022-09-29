@@ -9,7 +9,7 @@ import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import styles from '../styles/SermonListCard.module.css';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import { Button } from '@mui/material';
+import { Button, Checkbox } from '@mui/material';
 // import { Sermon } from '../types/Sermon';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
@@ -41,6 +41,8 @@ Props) => {
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
 
   const [updatedSermon, setUpdatedSermon] = useState<Sermon>(emptySermon);
+
+  const [deleteChecked, setDeleteChecked] = useState<boolean>(false);
 
   useEffect(() => {
     if (updatedSermon !== emptySermon) {
@@ -129,11 +131,10 @@ Props) => {
               <DeleteIcon />
             </IconButton>
             <PopUp
-              title={'Are you sure you want to delete this sermon?'}
+              title={'Are you sure you want to permanently delete this sermon?'}
               open={deleteConfirmationPopup}
               setOpen={() => setDeleteConfirmationPopup(false)}
-            >
-              <div>
+              button={
                 <Button
                   variant="contained"
                   onClick={() => {
@@ -142,13 +143,25 @@ Props) => {
                     );
                   }}
                   color="primary"
+                  disabled={!deleteChecked}
                 >
-                  Yes
+                  Delete Forever
                 </Button>
+              }
+            >
+              <div>
+                <div style={{ display: 'flex' }}>
+                  <Checkbox
+                    checked={deleteChecked}
+                    onClick={() => setDeleteChecked(!deleteChecked)}
+                  />
+                  <p>
+                    I understand that deleting is permanent and cannot be undone
+                  </p>
+                </div>
               </div>
             </PopUp>
             <EditSermonForm
-              title={'Edit Sermon'}
               open={editFormPopup}
               setOpen={() => setEditFormPopup(false)}
               sermon={sermon}

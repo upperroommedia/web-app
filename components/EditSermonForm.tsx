@@ -1,16 +1,9 @@
-import {
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Dialog,
-  Button,
-} from '@mui/material';
+import { DialogContent, DialogActions, Dialog, Button } from '@mui/material';
 import { Dispatch, SetStateAction } from 'react';
 import Uploader from '../pages/uploader';
 import { Sermon } from '../types/Sermon';
 
 interface EditSermonFormInfo {
-  title: string;
   open: boolean;
   setOpen: any;
   sermon: Sermon;
@@ -18,7 +11,7 @@ interface EditSermonFormInfo {
 }
 
 const EditSermonForm = (props: EditSermonFormInfo) => {
-  const { title, sermon, open, setOpen } = props;
+  const { sermon, open, setOpen } = props;
 
   return (
     <Dialog
@@ -27,15 +20,12 @@ const EditSermonForm = (props: EditSermonFormInfo) => {
       aria-labelledby="confirm-dialog"
       maxWidth="lg"
     >
-      <DialogTitle id="confirm-dialog">{title}</DialogTitle>
       <DialogContent>
-        <div>
-          <Uploader
-            existingSermon={sermon}
-            setUpdatedSermon={props.setUpdatedSermon}
-            setEditFormOpen={setOpen}
-          />
-        </div>
+        <Uploader
+          existingSermon={sermon}
+          setUpdatedSermon={props.setUpdatedSermon}
+          setEditFormOpen={setOpen}
+        />
       </DialogContent>
       <DialogActions>
         <Button

@@ -204,13 +204,12 @@ const Uploader = (props: Props) => {
         sx={{
           display: 'flex',
           flexWrap: 'wrap',
-          padding: '2rem',
           gap: '1ch',
           margin: 'auto',
           maxWidth: '900px',
         }}
       >
-        <h1>Uploader</h1>
+        <h1>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
         <TextField
           sx={{
             display: 'block',
@@ -326,7 +325,7 @@ const Uploader = (props: Props) => {
           renderInput={(params) => <TextField {...params} label="Topic(s)" />}
         />
         {props.existingSermon ? (
-          <div>
+          <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
               onClick={() =>
                 editSermon({
@@ -358,6 +357,7 @@ const Uploader = (props: Props) => {
                 })
               }
               disabled={sermonsEqual(props.existingSermon, sermonData)}
+              variant="contained"
             >
               update sermon
             </Button>

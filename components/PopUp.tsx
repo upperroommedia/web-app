@@ -12,6 +12,7 @@ interface PopUpInfo {
   open: boolean;
   children: string | ReactElement;
   setOpen: any;
+  button?: ReactElement;
 }
 
 const PopUp = (props: PopUpInfo) => {
@@ -32,8 +33,9 @@ const PopUp = (props: PopUpInfo) => {
           }}
           color="primary"
         >
-          Close
+          {props.button ? 'Cancel' : 'Close'}
         </Button>
+        {props.button}
       </DialogActions>
     </Dialog>
   );
