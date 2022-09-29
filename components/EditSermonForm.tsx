@@ -25,6 +25,7 @@ const EditSermonForm = (props: EditSermonFormInfo) => {
       open={open}
       onClose={() => setOpen(false)}
       aria-labelledby="confirm-dialog"
+      maxWidth="lg"
     >
       <DialogTitle id="confirm-dialog">{title}</DialogTitle>
       <DialogContent>
