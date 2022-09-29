@@ -5,9 +5,7 @@ import {
   Dialog,
   Button,
 } from '@mui/material';
-import { getFirestore, query, collection, getDocs } from 'firebase/firestore';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
-import { firebase } from '../firebase/firebase';
+import { Dispatch, SetStateAction } from 'react';
 import Uploader from '../pages/uploader';
 import { Sermon } from '../types/Sermon';
 
@@ -16,42 +14,11 @@ interface EditSermonFormInfo {
   open: boolean;
   setOpen: any;
   sermon: Sermon;
-  setUpdatedSermon: Dispatch<SetStateAction<Sermon>>
+  setUpdatedSermon: Dispatch<SetStateAction<Sermon>>;
 }
 
 const EditSermonForm = (props: EditSermonFormInfo) => {
   const { title, sermon, open, setOpen } = props;
-  const [speakersArray, setSpeakersArray] = useState<string[]>([]);
-  const [topicsArray, setTopicsArray] = useState<string[]>([]);
-  const [seriesArray, setSeriesArray] = useState<string[]>([]);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      const db = getFirestore(firebase);
-
-      const speakersQuery = query(collection(db, 'speakers'));
-      const speakersQuerySnapshot = await getDocs(speakersQuery);
-      speakersQuerySnapshot.forEach((doc) => {
-        const current = doc.data();
-        setSpeakersArray((oldArray) => [...oldArray, current.name]);
-      });
-
-      const topicsQuery = query(collection(db, 'topics'));
-      const topicsQuerySnapshot = await getDocs(topicsQuery);
-      topicsQuerySnapshot.forEach((doc) => {
-        const current = doc.data();
-        setTopicsArray((oldArray) => [...oldArray, current.name]);
-      });
-
-      const seriesQuery = query(collection(db, 'series'));
-      const seriesQuerySnapshot = await getDocs(seriesQuery);
-      seriesQuerySnapshot.forEach((doc) => {
-        const current = doc.data();
-        setSeriesArray((oldArray) => [...oldArray, current.name]);
-      });
-    };
-    fetchData();
-  }, []);
 
   return (
     <Dialog
@@ -63,9 +30,6 @@ const EditSermonForm = (props: EditSermonFormInfo) => {
       <DialogContent>
         <div>
           <Uploader
-            speakers={speakersArray}
-            topics={topicsArray}
-            seriesArray={seriesArray}
             existingSermon={sermon}
             setUpdatedSermon={props.setUpdatedSermon}
             setEditFormOpen={setOpen}

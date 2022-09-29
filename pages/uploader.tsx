@@ -1,13 +1,6 @@
 /**
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
-import type {
-  GetServerSideProps,
-  NextPage,
-  InferGetServerSidePropsType,
-  GetServerSidePropsContext,
-} from 'next';
-
 import AudioTrimmer from '../components/AudioTrimmer';
 import uploadFile from './api/uploadFile';
 import editSermon from './api/editSermon';
@@ -20,6 +13,7 @@ import {
   Dispatch,
   SetStateAction,
   useCallback,
+  useEffect,
   useState,
 } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
@@ -37,7 +31,6 @@ import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
-import ProtectedRoute from '../components/ProtectedRoute';
 import Button from '@mui/material/Button';
 
 export interface UploadableFile {
@@ -58,17 +51,12 @@ if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
 interface Props {
-  speakers: Array<string>;
-  topics: Array<string>;
-  seriesArray: Array<string>;
   existingSermon?: Sermon;
   setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-const Uploader: NextPage<Props> = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
-) => {
+const Uploader = (props: Props) => {
   getAuth();
   const [sermonData, setSermonData] = useState<Sermon>(
     props.existingSermon ? props.existingSermon : emptySermon
@@ -76,6 +64,10 @@ const Uploader: NextPage<Props> = (
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
   const [duration, setDuration] = useState<number>(0);
+
+  const [seriesArray, setSeriesArray] = useState<string[]>([]);
+  const [speakersArray, setSpeakersArray] = useState<string[]>([]);
+  const [topicsArray, setTopicsArray] = useState<string[]>([]);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(
@@ -95,6 +87,34 @@ const Uploader: NextPage<Props> = (
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const db = getFirestore(firebase);
+
+      const speakersQuery = query(collection(db, 'speakers'));
+      const speakersQuerySnapshot = await getDocs(speakersQuery);
+      speakersQuerySnapshot.forEach((doc) => {
+        const current = doc.data();
+        setSpeakersArray((oldArray) => [...oldArray, current.name]);
+      });
+
+      const topicsQuery = query(collection(db, 'topics'));
+      const topicsQuerySnapshot = await getDocs(topicsQuery);
+      topicsQuerySnapshot.forEach((doc) => {
+        const current = doc.data();
+        setTopicsArray((oldArray) => [...oldArray, current.name]);
+      });
+
+      const seriesQuery = query(collection(db, 'series'));
+      const seriesQuerySnapshot = await getDocs(seriesQuery);
+      seriesQuerySnapshot.forEach((doc) => {
+        const current = doc.data();
+        setSeriesArray((oldArray) => [...oldArray, current.name]);
+      });
+    };
+    fetchData();
+  }, []);
 
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
@@ -255,7 +275,7 @@ const Uploader: NextPage<Props> = (
               newValue === null ? setSeries('') : setSeries(newValue);
             }}
             id="series-input"
-            options={props.seriesArray}
+            options={seriesArray}
             renderInput={(params) => <TextField {...params} label="Series" />}
           />
           <p style={{ paddingLeft: '10px' }}>or</p>
@@ -276,7 +296,7 @@ const Uploader: NextPage<Props> = (
             }
           }}
           id="speaker-input"
-          options={props.speakers}
+          options={speakersArray}
           multiple
           renderInput={(params) => (
             <TextField {...params} required label="Speaker(s)" />
@@ -300,7 +320,7 @@ const Uploader: NextPage<Props> = (
             }
           }}
           id="topic-input"
-          options={props.topics}
+          options={topicsArray}
           multiple
           renderInput={(params) => <TextField {...params} label="Topic(s)" />}
         />
@@ -319,7 +339,7 @@ const Uploader: NextPage<Props> = (
                   topic,
                   series,
                 }).then(() => {
-                  props.setUpdatedSermon({
+                  props.setUpdatedSermon?.({
                     key: sermonData.key,
                     title: sermonData.title,
                     subtitle: sermonData.subtitle,
@@ -330,10 +350,10 @@ const Uploader: NextPage<Props> = (
                     scripture: sermonData.scripture,
                     topic,
                     series,
-                    dateString: getDateString(date)
+                    dateString: getDateString(date),
                   });
                   setUploadProgress('sermon edited!');
-                  setTimeout(props.setEditFormOpen(false), 1000);
+                  // setTimeout(props.setEditFormOpen(false), 1000);
                 })
               }
               disabled={sermonsEqual(props.existingSermon, sermonData)}
@@ -419,10 +439,10 @@ const Uploader: NextPage<Props> = (
             }}
           />
           <Button
-            disabled={newSeries === '' || props.seriesArray.includes(newSeries)}
+            disabled={newSeries === '' || seriesArray.includes(newSeries)}
             onClick={() => {
               addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
-              props.seriesArray.push(newSeries);
+              seriesArray.push(newSeries);
               setNewSeries('');
             }}
           >
@@ -432,54 +452,6 @@ const Uploader: NextPage<Props> = (
       </PopUp>
     </form>
   );
-};
-
-interface field {
-  name: string;
-}
-
-export const getServerSideProps: GetServerSideProps = async (
-  ctx: GetServerSidePropsContext
-) => {
-  const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.token) {
-    const failedUserCredentials = userCredentials;
-    return failedUserCredentials;
-  }
-
-  const db = getFirestore(firebase);
-
-  const speakersQuery = query(collection(db, 'speakers'));
-  const speakers: Array<string> = [];
-  const speakersQuerySnapshot = await getDocs(speakersQuery);
-  speakersQuerySnapshot.forEach((doc) => {
-    const current: field = doc.data() as unknown as field;
-    speakers.push(current.name);
-  });
-
-  const topicsQuery = query(collection(db, 'topics'));
-  const topics: Array<string> = [];
-  const topicsQuerySnapshot = await getDocs(topicsQuery);
-  topicsQuerySnapshot.forEach((doc) => {
-    const current: field = doc.data() as unknown as field;
-    topics.push(current.name);
-  });
-
-  const seriesQuery = query(collection(db, 'series'));
-  const series: Array<string> = [];
-  const seriesQuerySnapshot = await getDocs(seriesQuery);
-  seriesQuerySnapshot.forEach((doc) => {
-    const current: field = doc.data() as unknown as field;
-    series.push(current.name);
-  });
-
-  return {
-    props: {
-      speakers: speakers,
-      topics: topics,
-      seriesArray: series,
-    },
-  };
 };
 
 export default Uploader;
