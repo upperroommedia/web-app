@@ -431,15 +431,9 @@ const Uploader = (props: Props) => {
         title={'Add new series'}
         open={newSeriesPopup}
         setOpen={() => setNewSeriesPopup(false)}
-      >
-        <div style={{ display: 'flex' }}>
-          <TextField
-            value={newSeries}
-            onChange={(e) => {
-              setNewSeries(e.target.value);
-            }}
-          />
+        button={
           <Button
+            variant="contained"
             disabled={newSeries === '' || seriesArray.includes(newSeries)}
             onClick={() => {
               addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
@@ -449,6 +443,23 @@ const Uploader = (props: Props) => {
           >
             Submit
           </Button>
+        }
+      >
+        <div style={{ display: 'flex', padding: '10px' }}>
+          <TextField
+            value={newSeries}
+            onChange={(e) => {
+              setNewSeries(e.target.value);
+            }}
+            error={newSeries === '' || seriesArray.includes(newSeries)}
+            label={
+              newSeries === '' || seriesArray.includes(newSeries)
+                ? newSeries === ''
+                  ? 'Series cannot be empty'
+                  : 'Series already exists'
+                : ''
+            }
+          />
         </div>
       </PopUp>
     </form>
