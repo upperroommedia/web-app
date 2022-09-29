@@ -72,6 +72,7 @@ const Uploader = (props: Props) => {
   const [uploadProgress, setUploadProgress] = useState<string>();
   const [duration, setDuration] = useState<number>(0);
 
+  const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
   const [seriesArray, setSeriesArray] = useState<string[]>([]);
   const [speakersArray, setSpeakersArray] = useState<string[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
@@ -98,6 +99,13 @@ const Uploader = (props: Props) => {
   useEffect(() => {
     const fetchData = async () => {
       const db = getFirestore(firebase);
+
+      const subtitlesRef = doc(db, 'subtitles', 'subtitlesDoc');
+      const subtitlesSnap = await getDoc(subtitlesRef);
+      const subtitlesData = subtitlesSnap.data();
+      setSubtitlesArray(
+        subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []
+      );
 
       const seriesQuery = query(collection(db, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
@@ -227,14 +235,25 @@ const Uploader = (props: Props) => {
           required
         />
         <Box sx={{ display: 'flex', color: 'red', gap: '1ch', width: 1 }}>
-          <TextField
+          <Autocomplete
             fullWidth
-            id="title-input"
-            label="Subtitle"
-            name="subtitle"
-            variant="outlined"
-            value={sermonData.subtitle}
-            onChange={handleChange}
+            id="subtitle-input"
+            value={sermonData.subtitle || null}
+            onChange={(_, newValue) => {
+              newValue === null
+                ? setSermonData((oldSermonData) => ({
+                    ...oldSermonData,
+                    subtitle: '',
+                  }))
+                : setSermonData((oldSermonData) => ({
+                    ...oldSermonData,
+                    subtitle: newValue,
+                  }));
+            }}
+            renderInput={(params) => (
+              <TextField required {...params} label="Subtitle" />
+            )}
+            options={subtitlesArray}
           />
           <LocalizationProvider
             dateAdapter={AdapterDateFns}
@@ -292,7 +311,7 @@ const Uploader = (props: Props) => {
         <Autocomplete
           fullWidth
           value={speaker}
-          onChange={(event: any, newValue: any | null) => {
+          onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 3) {
               setSpeaker(newValue);
             }
@@ -400,7 +419,8 @@ const Uploader = (props: Props) => {
                   file === undefined ||
                   sermonData.title === '' ||
                   date === null ||
-                  speaker.length === 0
+                  speaker.length === 0 ||
+                  sermonData.subtitle === ''
                 }
                 onClick={() => {
                   if (file !== undefined && date != null) {
