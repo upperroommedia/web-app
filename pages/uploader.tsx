@@ -99,24 +99,20 @@ const Uploader = (props: Props) => {
     const fetchData = async () => {
       const db = getFirestore(firebase);
 
+      const seriesQuery = query(collection(db, 'series'));
+      const seriesQuerySnapshot = await getDocs(seriesQuery);
+      setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
+
       const speakersQuery = query(collection(db, 'speakers'));
       const speakersQuerySnapshot = await getDocs(speakersQuery);
-      speakersQuerySnapshot.forEach((doc) => {
-        const current = doc.data();
-        setSpeakersArray((oldArray) => [...oldArray, current.name]);
-      });
+      setSpeakersArray(
+        speakersQuerySnapshot.docs.map((doc) => doc.data().name)
+      );
 
       const topicsRef = doc(db, 'topics', 'topicsDoc');
       const topicsSnap = await getDoc(topicsRef);
       const topicsData = topicsSnap.data();
       setTopicsArray(topicsData ? topicsSnap.data()?.topicsArray : []);
-
-      const seriesQuery = query(collection(db, 'series'));
-      const seriesQuerySnapshot = await getDocs(seriesQuery);
-      seriesQuerySnapshot.forEach((doc) => {
-        const current = doc.data();
-        setSeriesArray((oldArray) => [...oldArray, current.name]);
-      });
     };
     fetchData();
   }, []);
