@@ -183,6 +183,8 @@ const Uploader = (props: Props) => {
     setDate(new Date());
     setSpeaker([]);
     setTopic([]);
+    setSeries('');
+    setFile(undefined);
   };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -369,18 +371,16 @@ const Uploader = (props: Props) => {
                   url={file.preview}
                   duration={duration}
                   setDuration={setDuration}
-                ></AudioTrimmer>
-                <button
-                  type="button"
-                  className={styles.button}
-                  onClick={() => {
-                    setFile(undefined);
-                    setUploadProgress(undefined);
-                    clearForm();
-                  }}
-                >
-                  Clear
-                </button>
+                />
+                <div style={{ display: 'flex' }}>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() => setFile(undefined)}
+                  >
+                    Clear File
+                  </button>
+                </div>
               </>
             ) : (
               <div className={styles.dragAndDrop} {...getRootProps()}>
@@ -391,37 +391,44 @@ const Uploader = (props: Props) => {
                 </p>
               </div>
             )}
-            <input
-              className={styles.button}
-              type="button"
-              value="Upload"
-              disabled={
-                file === undefined ||
-                sermonData.title === '' ||
-                date === null ||
-                speaker.length === 0
-              }
-              // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
-              // the user from double clicking upload
-              onClick={() => {
-                if (file !== undefined && date != null) {
-                  uploadFile({
-                    file: file,
-                    setFile: setFile,
-                    setUploadProgress: setUploadProgress,
-                    title: sermonData.title,
-                    subtitle: sermonData.subtitle,
-                    durationSeconds: duration,
-                    date,
-                    description: sermonData.description,
-                    speaker,
-                    scripture: sermonData.scripture,
-                    topic,
-                    series,
-                  });
+            <div style={{ display: 'flex' }}>
+              <input
+                className={styles.button}
+                type="button"
+                value="Upload"
+                disabled={
+                  file === undefined ||
+                  sermonData.title === '' ||
+                  date === null ||
+                  speaker.length === 0
                 }
-              }}
-            />
+                onClick={() => {
+                  if (file !== undefined && date != null) {
+                    uploadFile({
+                      file: file,
+                      setFile: setFile,
+                      setUploadProgress: setUploadProgress,
+                      title: sermonData.title,
+                      subtitle: sermonData.subtitle,
+                      durationSeconds: duration,
+                      date,
+                      description: sermonData.description,
+                      speaker,
+                      scripture: sermonData.scripture,
+                      topic,
+                      series,
+                    }).then(() => clearForm());
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => clearForm()}
+              >
+                Clear Form
+              </button>
+            </div>
           </div>
         )}
       </Box>

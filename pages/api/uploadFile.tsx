@@ -31,7 +31,7 @@ interface uploadFileProps {
   topic: Array<string>;
 }
 
-const uploadFile = (props: uploadFileProps) => {
+const uploadFile = async (props: uploadFileProps) => {
   getAuth();
   const db = getFirestore(firebase);
   const id = uuidv4();
@@ -40,7 +40,7 @@ const uploadFile = (props: uploadFileProps) => {
   if (props.series !== '') {
     const seriesRef = doc(db, 'series', props.series);
     try {
-      updateDoc(seriesRef, {
+      await updateDoc(seriesRef, {
         sermonIds: arrayUnion(id),
       });
     } catch (err) {
