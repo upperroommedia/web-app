@@ -37,7 +37,7 @@ const uploadFile = (props: uploadFileProps) => {
   const id = uuidv4();
   const sermonRef = ref(storage, `sermons/${id}`);
 
-  if (props.series !== undefined) {
+  if (props.series !== '') {
     const seriesRef = doc(db, 'series', props.series);
     try {
       updateDoc(seriesRef, {
