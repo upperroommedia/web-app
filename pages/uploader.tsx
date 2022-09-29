@@ -27,7 +27,14 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
 import { getAuth } from 'firebase/auth';
-import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  query,
+} from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
@@ -99,12 +106,10 @@ const Uploader = (props: Props) => {
         setSpeakersArray((oldArray) => [...oldArray, current.name]);
       });
 
-      const topicsQuery = query(collection(db, 'topics'));
-      const topicsQuerySnapshot = await getDocs(topicsQuery);
-      topicsQuerySnapshot.forEach((doc) => {
-        const current = doc.data();
-        setTopicsArray((oldArray) => [...oldArray, current.name]);
-      });
+      const topicsRef = doc(db, 'topics', 'topicsDoc');
+      const topicsSnap = await getDoc(topicsRef);
+      const topicsData = topicsSnap.data();
+      setTopicsArray(topicsData ? topicsSnap.data()?.topicsArray : []);
 
       const seriesQuery = query(collection(db, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
@@ -353,7 +358,7 @@ const Uploader = (props: Props) => {
                     dateString: getDateString(date),
                   });
                   setUploadProgress('sermon edited!');
-                  // setTimeout(props.setEditFormOpen(false), 1000);
+                  setTimeout(() => props.setEditFormOpen?.(false), 1000);
                 })
               }
               disabled={sermonsEqual(props.existingSermon, sermonData)}
