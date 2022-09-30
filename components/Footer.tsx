@@ -10,12 +10,7 @@ const Footer: FunctionComponent = () => (
     <a>
       Powered by{' '}
       <span className={styles.logo}>
-        <Image
-          src="/coptic-devs-logo.webp"
-          alt="Coptic Devs Logo"
-          width="100%"
-          height="100%"
-        />
+        <Image src="/coptic-devs-logo.webp" alt="Coptic Devs Logo" width="100%" height="100%" />
       </span>
     </a>
   </footer>

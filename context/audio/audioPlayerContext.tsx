@@ -1,9 +1,6 @@
 import { createContext, useReducer, useContext } from 'react';
 import { Sermon } from '../../types/Sermon';
-import audioPlayerReducer, {
-  AudioPlayerState,
-  SermonWithMetadata,
-} from '../../reducers/audioPlayerReducer';
+import audioPlayerReducer, { AudioPlayerState, SermonWithMetadata } from '../../reducers/audioPlayerReducer';
 const initialState: AudioPlayerState = {
   playlist: [],
   currentSermonIndex: 0,
@@ -33,9 +30,7 @@ export const AudioPlayerProvider = ({ children }: any) => {
   const [state, dispatch] = useReducer(audioPlayerReducer, initialState);
 
   const setPlaylist = (playlist: Sermon[]) => {
-    const playlistWithMetadata = playlist.map(
-      (sermon): SermonWithMetadata => ({ ...sermon, currentSecond: 0 })
-    );
+    const playlistWithMetadata = playlist.map((sermon): SermonWithMetadata => ({ ...sermon, currentSecond: 0 }));
     dispatch({ type: 'SET_PLAYLIST', payload: playlistWithMetadata });
   };
 
@@ -52,9 +47,7 @@ export const AudioPlayerProvider = ({ children }: any) => {
 
   const setCurrentSermon = (sermon: Sermon) => {
     if (state.playlist[state.currentSermonIndex].key === sermon.key) return;
-    const currentSermonIndex = state.playlist.findIndex(
-      (s: SermonWithMetadata) => s.key === sermon.key
-    );
+    const currentSermonIndex = state.playlist.findIndex((s: SermonWithMetadata) => s.key === sermon.key);
     dispatch({ type: 'SET_CURRENT_SERMON_INDEX', payload: currentSermonIndex });
   };
   const nextSermon = () => {

@@ -36,8 +36,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   setPlaylist,
 }: // handleSermonClick,
 Props) => {
-  const [deleteConfirmationPopup, setDeleteConfirmationPopup] =
-    useState<boolean>(false);
+  const [deleteConfirmationPopup, setDeleteConfirmationPopup] = useState<boolean>(false);
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
 
   const [updatedSermon, setUpdatedSermon] = useState<Sermon>(emptySermon);
@@ -59,9 +58,7 @@ Props) => {
   const db = getFirestore(firebase);
 
   const handleDelete = async (id: string) => {
-    await deleteDoc(doc(db, 'sermons', id)).then(() =>
-      setPlaylist(playlist.filter((obj) => obj.key !== sermon.key))
-    );
+    await deleteDoc(doc(db, 'sermons', id)).then(() => setPlaylist(playlist.filter((obj) => obj.key !== sermon.key)));
   };
 
   return (
@@ -76,9 +73,7 @@ Props) => {
       <div className={styles.cardContent}>
         <div className={styles.divImage}></div>
         <div className={styles.divText}>
-          <h1
-            className={styles.title}
-          >{`${sermon.title}: ${sermon.subtitle}`}</h1>
+          <h1 className={styles.title}>{`${sermon.title}: ${sermon.subtitle}`}</h1>
           <p className={styles.description}>{sermon.description}</p>
           <div className={styles.bottomDiv}>
             <IconButton
@@ -97,9 +92,8 @@ Props) => {
               {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
                 <>
                   <span className={styles.timeLeft}>
-                    {formatRemainingTime(
-                      Math.floor(sermon.durationSeconds) - sermon.currentSecond
-                    ) + (playing || sermon.currentSecond > 0 ? ' left' : '')}
+                    {formatRemainingTime(Math.floor(sermon.durationSeconds) - sermon.currentSecond) +
+                      (playing || sermon.currentSecond > 0 ? ' left' : '')}
                   </span>
                 </>
               ) : (
@@ -109,25 +103,18 @@ Props) => {
                 </>
               )}
             </div>
-            {sermon.currentSecond < Math.floor(sermon.durationSeconds) &&
-              (playing || sermon.currentSecond > 0) && (
-                <progress
-                  className={styles.songProgress}
-                  value={sermon.currentSecond}
-                  max={Math.floor(sermon.durationSeconds)}
-                />
-              )}
+            {sermon.currentSecond < Math.floor(sermon.durationSeconds) && (playing || sermon.currentSecond > 0) && (
+              <progress
+                className={styles.songProgress}
+                value={sermon.currentSecond}
+                max={Math.floor(sermon.durationSeconds)}
+              />
+            )}
             <span style={{ width: '100%' }}></span>
-            <IconButton
-              style={{ color: 'lightblue' }}
-              onClick={() => setEditFormPopup(true)}
-            >
+            <IconButton style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
               <EditIcon />
             </IconButton>
-            <IconButton
-              style={{ color: 'red' }}
-              onClick={() => setDeleteConfirmationPopup(true)}
-            >
+            <IconButton style={{ color: 'red' }} onClick={() => setDeleteConfirmationPopup(true)}>
               <DeleteIcon />
             </IconButton>
             <PopUp
@@ -151,14 +138,9 @@ Props) => {
               }
             >
               <div>
-                <div
-                  style={{ display: 'flex' }}
-                  onClick={() => setDeleteChecked(!deleteChecked)}
-                >
+                <div style={{ display: 'flex' }} onClick={() => setDeleteChecked(!deleteChecked)}>
                   <Checkbox checked={deleteChecked} />
-                  <p>
-                    I understand that deleting is permanent and cannot be undone
-                  </p>
+                  <p>I understand that deleting is permanent and cannot be undone</p>
                 </div>
               </div>
             </PopUp>
