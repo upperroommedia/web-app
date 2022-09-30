@@ -46,6 +46,7 @@ const BottomAudioBar: FunctionComponent = () => {
           setCurrentSermonUrl(url);
         })
         .catch((error) => {
+          // eslint-disable-next-line no-console
           console.log(error);
         });
     }
