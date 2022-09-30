@@ -99,24 +99,28 @@ const Uploader = (props: Props) => {
   const [speakerError, setSpeakerError] = useState<boolean>(false);
   const [speakerErrorMessage, setSpeakerErrorMessage] = useState<string>('');
 
-  const [newSeriesError, setNewSeriesError] = useState<boolean>(false);
-  const [newSeriesErrorMessage, setNewSeriesErrorMessage] =
-    useState<string>('');
+  const [newSeriesError, setNewSeriesError] = useState<{
+    error: boolean;
+    message: string;
+  }>({ error: false, message: '' });
 
   const [userHasTypedInSeries, setUserHasTypedInSeries] =
     useState<boolean>(false);
 
   useEffect(() => {
-    setNewSeriesError(
-      (newSeries === '' || seriesArray.includes(newSeries)) &&
-        userHasTypedInSeries
-    );
-    if (newSeries === '') {
-      setNewSeriesErrorMessage('Series cannot be empty');
-    } else if (seriesArray.includes(newSeries)) {
-      setNewSeriesErrorMessage('Series already exists');
+    if (!userHasTypedInSeries) {
+      setNewSeriesError({ error: false, message: '' });
+      return;
     }
-  }, [newSeries]);
+
+    if (newSeries === '') {
+      setNewSeriesError({ error: true, message: 'Series cannot be empty' });
+    } else if (seriesArray.includes(newSeries)) {
+      setNewSeriesError({ error: true, message: 'Series already exists' });
+    } else {
+      setNewSeriesError({ error: false, message: '' });
+    }
+  }, [newSeries, userHasTypedInSeries, seriesArray]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -515,10 +519,10 @@ const Uploader = (props: Props) => {
             value={newSeries}
             onChange={(e) => {
               setNewSeries(e.target.value);
-              setUserHasTypedInSeries(true);
+              !userHasTypedInSeries && setUserHasTypedInSeries(true);
             }}
-            error={newSeriesError}
-            label={newSeriesError ? newSeriesErrorMessage : 'Series'}
+            error={newSeriesError.error}
+            label={newSeriesError.error ? newSeriesError.message : 'Series'}
           />
         </div>
       </PopUp>
