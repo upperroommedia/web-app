@@ -116,7 +116,7 @@ const Uploader = (props: Props) => {
     } else if (seriesArray.includes(newSeries)) {
       setNewSeriesErrorMessage('Series already exists');
     }
-  });
+  }, [newSeries]);
 
   useEffect(() => {
     const fetchData = async () => {
