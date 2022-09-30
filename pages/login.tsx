@@ -5,11 +5,7 @@
 import { useState, useContext } from 'react';
 
 // Next
-import type {
-  GetServerSideProps,
-  InferGetServerSidePropsType,
-  GetServerSidePropsContext,
-} from 'next';
+import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
 import { useRouter } from 'next/router';
 
 // 3rd Party Components
@@ -23,9 +19,7 @@ import ProtectedRoute from '../components/ProtectedRoute';
 import AuthErrors from '../components/AuthErrors';
 import PopUp from '../components/PopUp';
 
-const Login = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
-) => {
+const Login = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
   const { login } = useContext(UserContext);
 
@@ -61,10 +55,7 @@ const Login = (
       }}
     >
       <h1 className="text-center my-3 ">Login</h1>
-      <form
-        style={{ height: '100%', width: '300px', margin: '20px' }}
-        onSubmit={handleLogin}
-      >
+      <form style={{ height: '100%', width: '300px', margin: '20px' }} onSubmit={handleLogin}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <TextField
             fullWidth
@@ -95,13 +86,7 @@ const Login = (
             size="small"
           />
         </div>
-        <Button
-          fullWidth
-          variant="contained"
-          type="submit"
-          style={{ marginTop: '30px' }}
-          size="medium"
-        >
+        <Button fullWidth variant="contained" type="submit" style={{ marginTop: '30px' }} size="medium">
           Login
         </Button>
       </form>
@@ -112,9 +97,7 @@ const Login = (
   );
 };
 
-export const getServerSideProps: GetServerSideProps = async (
-  ctx: GetServerSidePropsContext
-) => {
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
   if (!userCredentials.props.token) {
     return { props: {} };

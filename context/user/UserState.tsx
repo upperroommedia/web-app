@@ -2,11 +2,7 @@
 import { useReducer, useEffect, useState } from 'react';
 import UserContext from './UserContext';
 import userReducer from './UserReducer';
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-} from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import firebase from 'firebase/auth';
 import { auth } from '../../firebase/firebase';
 import nookies from 'nookies';
@@ -70,11 +66,7 @@ const UserState = (props: any) => {
   const login = async (loginForm: userCreditionals) => {
     setLoading();
     try {
-      await signInWithEmailAndPassword(
-        auth,
-        loginForm.email,
-        loginForm.password
-      );
+      await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
     } catch (error: any) {
       return error.code;
     }
@@ -91,11 +83,7 @@ const UserState = (props: any) => {
   const signup = async (loginForm: userCreditionals) => {
     setLoading();
     try {
-      await createUserWithEmailAndPassword(
-        auth,
-        loginForm.email,
-        loginForm.password
-      );
+      await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
     } catch (error: any) {
       return error.code;
     }
