@@ -100,6 +100,8 @@ const Uploader = (props: Props) => {
   const [speakerErrorMessage, setSpeakerErrorMessage] = useState<string>('');
 
   const [newSeriesError, setNewSeriesError] = useState<boolean>(false);
+  const [newSeriesErrorMessage, setNewSeriesErrorMessage] =
+    useState<string>('');
 
   const [userHasTypedInSeries, setUserHasTypedInSeries] =
     useState<boolean>(false);
@@ -109,6 +111,11 @@ const Uploader = (props: Props) => {
       (newSeries === '' || seriesArray.includes(newSeries)) &&
         userHasTypedInSeries
     );
+    if (newSeries === '') {
+      setNewSeriesErrorMessage('Series cannot be empty');
+    } else if (seriesArray.includes(newSeries)) {
+      setNewSeriesErrorMessage('Series already exists');
+    }
   });
 
   useEffect(() => {
@@ -511,13 +518,7 @@ const Uploader = (props: Props) => {
               setUserHasTypedInSeries(true);
             }}
             error={newSeriesError}
-            label={
-              newSeriesError
-                ? newSeries === ''
-                  ? 'Series cannot be empty'
-                  : 'Series already exists'
-                : 'Series'
-            }
+            label={newSeriesError ? newSeriesErrorMessage : 'Series'}
           />
         </div>
       </PopUp>
