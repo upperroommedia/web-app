@@ -1,8 +1,4 @@
-import {
-  Timestamp,
-  QueryDocumentSnapshot,
-  SnapshotOptions,
-} from 'firebase/firestore';
+import { Timestamp, QueryDocumentSnapshot, SnapshotOptions } from 'firebase/firestore';
 
 export interface Sermon {
   key: string;
@@ -18,26 +14,12 @@ export interface Sermon {
   dateString?: string;
 }
 
-export interface FirebaseSermon
-  extends Omit<Sermon, 'dateMillis' | 'dateString'> {
+export interface FirebaseSermon extends Omit<Sermon, 'dateMillis' | 'dateString'> {
   date: Timestamp;
 }
 
 export const getDateString = (date: Date) => {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${months[date.getMonth()]} ${date.getDay()}`;
 };
 
@@ -48,10 +30,7 @@ export const sermonConverter = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
     return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
-  fromFirestore: (
-    snapshot: QueryDocumentSnapshot<FirebaseSermon>,
-    options: SnapshotOptions
-  ): Sermon => {
+  fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>, options: SnapshotOptions): Sermon => {
     const { date, ...data } = snapshot.data(options);
 
     return {
