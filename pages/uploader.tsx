@@ -99,6 +99,18 @@ const Uploader = (props: Props) => {
   const [speakerError, setSpeakerError] = useState<boolean>(false);
   const [speakerErrorMessage, setSpeakerErrorMessage] = useState<string>('');
 
+  const [newSeriesError, setNewSeriesError] = useState<boolean>(false);
+
+  const [userHasTypedInSeries, setUserHasTypedInSeries] =
+    useState<boolean>(false);
+
+  useEffect(() => {
+    setNewSeriesError(
+      (newSeries === '' || seriesArray.includes(newSeries)) &&
+        userHasTypedInSeries
+    );
+  });
+
   useEffect(() => {
     const fetchData = async () => {
       const db = getFirestore(firebase);
@@ -472,6 +484,10 @@ const Uploader = (props: Props) => {
         title={'Add new series'}
         open={newSeriesPopup}
         setOpen={() => setNewSeriesPopup(false)}
+        onClose={() => {
+          setUserHasTypedInSeries(false);
+          setNewSeries('');
+        }}
         button={
           <Button
             variant="contained"
@@ -479,6 +495,7 @@ const Uploader = (props: Props) => {
             onClick={() => {
               addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
               seriesArray.push(newSeries);
+              setSeries(newSeries);
               setNewSeries('');
             }}
           >
@@ -491,14 +508,15 @@ const Uploader = (props: Props) => {
             value={newSeries}
             onChange={(e) => {
               setNewSeries(e.target.value);
+              setUserHasTypedInSeries(true);
             }}
-            error={newSeries === '' || seriesArray.includes(newSeries)}
+            error={newSeriesError}
             label={
-              newSeries === '' || seriesArray.includes(newSeries)
+              newSeriesError
                 ? newSeries === ''
                   ? 'Series cannot be empty'
                   : 'Series already exists'
-                : ''
+                : 'Series'
             }
           />
         </div>

@@ -13,26 +13,23 @@ interface PopUpInfo {
   children: string | ReactElement;
   setOpen: any;
   button?: ReactElement;
+  onClose?: () => void;
 }
 
 const PopUp = (props: PopUpInfo) => {
   const { title, children, open, setOpen } = props;
+
+  const onClose = () => {
+    setOpen(false);
+    props.onClose?.();
+  };
+
   return (
-    <Dialog
-      open={open}
-      onClose={() => setOpen(false)}
-      aria-labelledby="confirm-dialog"
-    >
+    <Dialog open={open} onClose={onClose} aria-labelledby="confirm-dialog">
       <DialogTitle id="confirm-dialog">{title}</DialogTitle>
       <DialogContent>{children}</DialogContent>
       <DialogActions>
-        <Button
-          variant="contained"
-          onClick={() => {
-            setOpen(false);
-          }}
-          color="primary"
-        >
+        <Button variant="contained" onClick={onClose} color="primary">
           {props.button ? 'Cancel' : 'Close'}
         </Button>
         {props.button}
