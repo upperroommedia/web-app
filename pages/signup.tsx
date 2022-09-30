@@ -6,11 +6,7 @@ import { useState, useContext } from 'react';
 import { useRouter } from 'next/router';
 
 // Next
-import type {
-  GetServerSideProps,
-  InferGetServerSidePropsType,
-  GetServerSidePropsContext,
-} from 'next';
+import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
 
 // Auth
 import UserContext from '../context/user/UserContext';
@@ -23,9 +19,7 @@ import ProtectedRoute from '../components/ProtectedRoute';
 import PopUp from '../components/PopUp';
 import AuthErrors from '../components/AuthErrors';
 
-const Signup = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
-) => {
+const Signup = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
   const { signup } = useContext(UserContext);
 
@@ -59,10 +53,7 @@ const Signup = (
       }}
     >
       <h1 className="text-center my-3 ">Signup</h1>
-      <form
-        style={{ height: '100%', width: '300px', margin: '20px' }}
-        onSubmit={handleSignup}
-      >
+      <form style={{ height: '100%', width: '300px', margin: '20px' }} onSubmit={handleSignup}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <TextField
             fullWidth
@@ -93,13 +84,7 @@ const Signup = (
             size="small"
           />
         </div>
-        <Button
-          fullWidth
-          variant="contained"
-          type="submit"
-          style={{ marginTop: '30px' }}
-          size="medium"
-        >
+        <Button fullWidth variant="contained" type="submit" style={{ marginTop: '30px' }} size="medium">
           SignUp
         </Button>
         <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
@@ -110,9 +95,7 @@ const Signup = (
   );
 };
 
-export const getServerSideProps: GetServerSideProps = async (
-  ctx: GetServerSidePropsContext
-) => {
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
   if (userCredentials.props.token) {
     return {

@@ -11,12 +11,7 @@ function convertToHMS(sec: number): {
 
 export function formatTime(sec: number): String {
   const { hours, minutes, seconds } = convertToHMS(sec);
-  return (
-    (hours > 0 ? hours + ':' : '') +
-    String(minutes).padStart(2, '0') +
-    ':' +
-    String(seconds).padStart(2, '0')
-  ); // Return is HH : MM : SS
+  return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
 }
 
 export function formatRemainingTime(sec: number): String {

@@ -14,18 +14,9 @@ const EditSermonForm = (props: EditSermonFormInfo) => {
   const { sermon, open, setOpen } = props;
 
   return (
-    <Dialog
-      open={open}
-      onClose={() => setOpen(false)}
-      aria-labelledby="confirm-dialog"
-      maxWidth="lg"
-    >
+    <Dialog open={open} onClose={() => setOpen(false)} aria-labelledby="confirm-dialog" maxWidth="lg">
       <DialogContent>
-        <Uploader
-          existingSermon={sermon}
-          setUpdatedSermon={props.setUpdatedSermon}
-          setEditFormOpen={setOpen}
-        />
+        <Uploader existingSermon={sermon} setUpdatedSermon={props.setUpdatedSermon} setEditFormOpen={setOpen} />
       </DialogContent>
       <DialogActions>
         <Button

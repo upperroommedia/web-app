@@ -2,9 +2,7 @@ import type { GetServerSidePropsContext } from 'next';
 import { firebaseAdmin } from '../firebase/firebaseAdmin';
 import nookies from 'nookies';
 
-export default async function ProtectedRoute(
-  context: GetServerSidePropsContext
-) {
+export default async function ProtectedRoute(context: GetServerSidePropsContext) {
   try {
     const cookies = nookies.get(context);
 
