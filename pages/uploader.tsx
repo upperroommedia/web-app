@@ -45,7 +45,7 @@ import {
   InferGetServerSidePropsType,
 } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
-import userContext from '../context/user/userContext';
+import userContext from '../context/user/UserContext';
 
 export interface UploadableFile {
   file: File;
@@ -105,8 +105,15 @@ const Uploader = (
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
-  const [speakerError, setSpeakerError] = useState<boolean>(false);
-  const [speakerErrorMessage, setSpeakerErrorMessage] = useState<string>('');
+  const [speakerError, setSpeakerError] = useState<{
+    error: boolean;
+    message: string;
+  }>({ error: false, message: '' });
+
+  const [topicError, setTopicError] = useState<{
+    error: boolean;
+    message: string;
+  }>({ error: false, message: '' });
 
   const [newSeriesError, setNewSeriesError] = useState<{
     error: boolean;
@@ -346,13 +353,17 @@ const Uploader = (
         <Autocomplete
           fullWidth
           value={speaker}
+          onBlur={() => {
+            setSpeakerError({ error: false, message: '' });
+          }}
           onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 3) {
               setSpeaker(newValue);
-              setSpeakerError(false);
-            } else if (newValue.length === 4) {
-              setSpeakerError(true);
-              setSpeakerErrorMessage('Can only add up to 3 speakers');
+            } else if (newValue.length >= 4) {
+              setSpeakerError({
+                error: true,
+                message: 'Can only add up to 3 speakers',
+              });
             }
           }}
           id="speaker-input"
@@ -363,8 +374,8 @@ const Uploader = (
               {...params}
               required
               label="Speaker(s)"
-              error={speakerError}
-              helperText={speakerError ? speakerErrorMessage : ''}
+              error={speakerError.error}
+              helperText={speakerError.message}
             />
           )}
         />
@@ -380,15 +391,30 @@ const Uploader = (
         <Autocomplete
           fullWidth
           value={topic}
-          onChange={(event: any, newValue: any | null) => {
+          onBlur={() => {
+            setTopicError({ error: false, message: '' });
+          }}
+          onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 10) {
               setTopic(newValue);
+            } else if (newValue.length >= 11) {
+              setTopicError({
+                error: true,
+                message: 'Can only add up to 10 topics',
+              });
             }
           }}
           id="topic-input"
           options={topicsArray}
           multiple
-          renderInput={(params) => <TextField {...params} label="Topic(s)" />}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Topic(s)"
+              error={topicError.error}
+              helperText={topicError.message}
+            />
+          )}
         />
         {props.existingSermon ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
@@ -488,7 +514,7 @@ const Uploader = (
                       series,
                     })
                       .then(() => {
-                        setSpeakerError(false);
+                        setSpeakerError({ error: false, message: '' });
                         clearForm();
                       })
                       .catch((e) => setUploadProgress(JSON.stringify(e)));
