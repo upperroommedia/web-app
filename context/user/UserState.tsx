@@ -1,6 +1,6 @@
 /* eslint-disable import/no-duplicates */
 import { useReducer, useEffect, useState, Reducer } from 'react';
-import userContext from './userContext';
+import userContext from './UserContext';
 import userReducer from './UserReducer';
 import {
   createUserWithEmailAndPassword,

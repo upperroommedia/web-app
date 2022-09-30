@@ -6,14 +6,10 @@ import { useState, useContext } from 'react';
 import { useRouter } from 'next/router';
 
 // Next
-import type {
-  GetServerSideProps,
-  InferGetServerSidePropsType,
-  GetServerSidePropsContext,
-} from 'next';
+import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
 
 // Auth
-import userContext from '../context/user/userContext';
+import userContext from '../context/user/UserContext';
 
 // 3rd Party
 import { Button, TextField } from '@mui/material';
@@ -26,9 +22,7 @@ import AuthErrors from '../components/AuthErrors';
 import styles from '../styles/SignInWithGoogleButton.module.css';
 import Image from 'next/image';
 
-const Signup = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
-) => {
+const Signup = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
   const { signup, loginWithGoogle } = useContext(userContext);
 
@@ -125,9 +119,7 @@ const Signup = (
   );
 };
 
-export const getServerSideProps: GetServerSideProps = async (
-  ctx: GetServerSidePropsContext
-) => {
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
   if (userCredentials.props.token) {
     return {

@@ -87,20 +87,10 @@ const Uploader = (
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
-  const [date, setDate] = useState<Date>(
-    new Date(
-      props.existingSermon ? props.existingSermon.dateMillis : new Date()
-    )
-  );
-  const [speaker, setSpeaker] = useState(
-    props.existingSermon ? props.existingSermon.speaker : []
-  );
-  const [topic, setTopic] = useState(
-    props.existingSermon ? props.existingSermon.topic : []
-  );
-  const [series, setSeries] = useState(
-    props.existingSermon ? props.existingSermon.series : ''
-  );
+  const [date, setDate] = useState<Date>(new Date(props.existingSermon ? props.existingSermon.dateMillis : new Date()));
+  const [speaker, setSpeaker] = useState(props.existingSermon ? props.existingSermon.speaker : []);
+  const [topic, setTopic] = useState(props.existingSermon ? props.existingSermon.topic : []);
+  const [series, setSeries] = useState(props.existingSermon ? props.existingSermon.series : '');
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
@@ -120,8 +110,7 @@ const Uploader = (
     message: string;
   }>({ error: false, message: '' });
 
-  const [userHasTypedInSeries, setUserHasTypedInSeries] =
-    useState<boolean>(false);
+  const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
 
   useEffect(() => {
     if (!userHasTypedInSeries) {
@@ -145,9 +134,7 @@ const Uploader = (
       const subtitlesRef = doc(db, 'subtitles', 'subtitlesDoc');
       const subtitlesSnap = await getDoc(subtitlesRef);
       const subtitlesData = subtitlesSnap.data();
-      setSubtitlesArray(
-        subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []
-      );
+      setSubtitlesArray(subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []);
 
       const seriesQuery = query(collection(db, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
@@ -155,9 +142,7 @@ const Uploader = (
 
       const speakersQuery = query(collection(db, 'speakers'));
       const speakersQuerySnapshot = await getDocs(speakersQuery);
-      setSpeakersArray(
-        speakersQuerySnapshot.docs.map((doc) => doc.data().name)
-      );
+      setSpeakersArray(speakersQuerySnapshot.docs.map((doc) => doc.data().name));
 
       const topicsRef = doc(db, 'topics', 'topicsDoc');
       const topicsSnap = await getDoc(topicsRef);
@@ -184,43 +169,40 @@ const Uploader = (
     );
   };
 
-  const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
-      // Do something with the files
-      if (rejectedFiles.length > 0) {
-        // console.log(rejectedFiles[0].errors[0]);
-        setFile(undefined);
-        return;
-      }
-      // const reader = new FileReader();
-      // reader.readAsDataURL(acceptedFiles[0]);
-      // reader.addEventListener('progress', function (pe) {
-      //   if (pe.lengthComputable) {
-      //     console.log('Progress:', pe.loaded, 'Total:', pe.total);
-      //   }
-      // });
-      // reader.addEventListener(
-      //   'load',
-      //   function () {
-      const mappedAccepted = {
-        file: acceptedFiles[0],
-        // preview: reader.result as string,
-        preview: Url.createObjectURL(acceptedFiles[0]),
-        name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
-        errors: [],
-      };
-      setFile(mappedAccepted);
-      //   },
-      //   false
-      // );
-      // const mappedAccepted2 = acceptedFiles.map((file) => ({
-      //   file,
-      //   errors: [],
-      // }));
-      // setFile((curr) => [...curr, mappedAccepted, ...rejectedFiles]);
-    },
-    []
-  );
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
+    // Do something with the files
+    if (rejectedFiles.length > 0) {
+      // console.log(rejectedFiles[0].errors[0]);
+      setFile(undefined);
+      return;
+    }
+    // const reader = new FileReader();
+    // reader.readAsDataURL(acceptedFiles[0]);
+    // reader.addEventListener('progress', function (pe) {
+    //   if (pe.lengthComputable) {
+    //     console.log('Progress:', pe.loaded, 'Total:', pe.total);
+    //   }
+    // });
+    // reader.addEventListener(
+    //   'load',
+    //   function () {
+    const mappedAccepted = {
+      file: acceptedFiles[0],
+      // preview: reader.result as string,
+      preview: Url.createObjectURL(acceptedFiles[0]),
+      name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
+      errors: [],
+    };
+    setFile(mappedAccepted);
+    //   },
+    //   false
+    // );
+    // const mappedAccepted2 = acceptedFiles.map((file) => ({
+    //   file,
+    //   errors: [],
+    // }));
+    // setFile((curr) => [...curr, mappedAccepted, ...rejectedFiles]);
+  }, []);
 
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
@@ -292,16 +274,10 @@ const Uploader = (
                     subtitle: newValue,
                   }));
             }}
-            renderInput={(params) => (
-              <TextField required {...params} label="Subtitle" />
-            )}
+            renderInput={(params) => <TextField required {...params} label="Subtitle" />}
             options={subtitlesArray}
           />
-          <LocalizationProvider
-            dateAdapter={AdapterDateFns}
-            sx={{ width: 1 }}
-            fullWidth
-          >
+          <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
             {/* TODO: Use date invalid for disabling the button */}
             <DesktopDatePicker
               label="Date"
@@ -408,12 +384,7 @@ const Uploader = (
           options={topicsArray}
           multiple
           renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Topic(s)"
-              error={topicError.error}
-              helperText={topicError.message}
-            />
+            <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
           )}
         />
         {props.existingSermon ? (
@@ -457,17 +428,9 @@ const Uploader = (
           <div className={styles.form}>
             {file ? (
               <>
-                <AudioTrimmer
-                  url={file.preview}
-                  duration={duration}
-                  setDuration={setDuration}
-                />
+                <AudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
                 <div style={{ display: 'flex' }}>
-                  <button
-                    type="button"
-                    className={styles.button}
-                    onClick={() => setFile(undefined)}
-                  >
+                  <button type="button" className={styles.button} onClick={() => setFile(undefined)}>
                     Clear File
                   </button>
                 </div>
@@ -475,10 +438,7 @@ const Uploader = (
             ) : (
               <div className={styles.dragAndDrop} {...getRootProps()}>
                 <input type="hidden" {...getInputProps()} />
-                <p>
-                  Drag &apos;n&apos; drop audio files here, or click to select
-                  files
-                </p>
+                <p>Drag &apos;n&apos; drop audio files here, or click to select files</p>
               </div>
             )}
             <div style={{ display: 'flex' }}>
@@ -523,11 +483,7 @@ const Uploader = (
                   }
                 }}
               />
-              <button
-                type="button"
-                className={styles.button}
-                onClick={() => clearForm()}
-              >
+              <button type="button" className={styles.button} onClick={() => clearForm()}>
                 Clear Form
               </button>
             </div>

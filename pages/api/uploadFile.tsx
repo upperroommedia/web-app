@@ -1,10 +1,4 @@
-import {
-  arrayUnion,
-  doc,
-  getFirestore,
-  setDoc,
-  updateDoc,
-} from 'firebase/firestore';
+import { arrayUnion, doc, getFirestore, setDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytesResumable } from 'firebase/storage';
 import { firebase, storage } from '../../firebase/firebase';
 import { v4 as uuidv4 } from 'uuid';
@@ -79,10 +73,7 @@ const uploadFile = async (props: uploadFileProps) => {
       // addDoc(collection(db, 'sermons'), sermonData);
       // with custom id so it doesnt duplicate upload
       try {
-        await setDoc(
-          doc(db, 'sermons', id).withConverter(sermonConverter),
-          sermonData
-        );
+        await setDoc(doc(db, 'sermons', id).withConverter(sermonConverter), sermonData);
         props.setUploadProgress('Uploaded!');
       } catch (error) {
         props.setUploadProgress(`Error: ${error}`);
