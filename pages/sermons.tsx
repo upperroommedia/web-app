@@ -52,11 +52,19 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
                   sermon={{ ...sermon, currentSecond }}
                   playing={playing}
                   key={key}
+                  playlist={playlist}
+                  setPlaylist={setPlaylist}
                 />
               );
             } else {
               return (
-                <SermonListCard sermon={sermon} playing={false} key={key} />
+                <SermonListCard
+                  sermon={sermon}
+                  playing={false}
+                  key={key}
+                  playlist={playlist}
+                  setPlaylist={setPlaylist}
+                />
               );
             }
           })}

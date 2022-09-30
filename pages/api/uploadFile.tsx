@@ -24,23 +24,23 @@ interface uploadFileProps {
   subtitle: string;
   date: Date;
   description: string;
+  series: string;
   durationSeconds: number;
   speaker: Array<string>;
   scripture: string;
   topic: Array<string>;
-  series: string | undefined;
 }
 
-const uploadFile = (props: uploadFileProps) => {
+const uploadFile = async (props: uploadFileProps) => {
   getAuth();
   const db = getFirestore(firebase);
   const id = uuidv4();
   const sermonRef = ref(storage, `sermons/${id}`);
 
-  if (props.series !== undefined) {
+  if (props.series !== '') {
     const seriesRef = doc(db, 'series', props.series);
     try {
-      updateDoc(seriesRef, {
+      await updateDoc(seriesRef, {
         sermonIds: arrayUnion(id),
       });
     } catch (err) {
@@ -55,6 +55,7 @@ const uploadFile = (props: uploadFileProps) => {
     durationSeconds: props.durationSeconds,
     dateMillis: props.date.getTime(),
     description: props.description,
+    series: props.series,
     speaker: props.speaker,
     scripture: props.scripture,
     topic: props.topic,

@@ -1,20 +1,21 @@
 /**
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
-import type {
-  GetServerSideProps,
-  NextPage,
-  InferGetServerSidePropsType,
-  GetServerSidePropsContext,
-} from 'next';
-
 import AudioTrimmer from '../components/AudioTrimmer';
 import uploadFile from './api/uploadFile';
+import editSermon from './api/editSermon';
 import addNewSeries from './api/addNewSeries';
 import PopUp from '../components/PopUp';
 
 import styles from '../styles/Uploader.module.css';
-import { ChangeEvent, useCallback, useState } from 'react';
+import {
+  ChangeEvent,
+  Dispatch,
+  SetStateAction,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
 import TextField from '@mui/material/TextField';
@@ -26,11 +27,17 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
 import { getAuth } from 'firebase/auth';
-import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  query,
+} from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
-import { Sermon, emptySermon } from '../types/Sermon';
+import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
-import ProtectedRoute from '../components/ProtectedRoute';
 import Button from '@mui/material/Button';
 
 export interface UploadableFile {
@@ -51,29 +58,115 @@ if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
 interface Props {
-  speakers: Array<string>;
-  topics: Array<string>;
-  seriesArray: Array<string>;
+  existingSermon?: Sermon;
+  setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
+  setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-const Uploader: NextPage<Props> = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
-) => {
+const Uploader = (props: Props) => {
   getAuth();
-  const [sermonData, setSermonData] = useState<Sermon>(emptySermon);
+  const [sermonData, setSermonData] = useState<Sermon>(
+    props.existingSermon ? props.existingSermon : emptySermon
+  );
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
   const [duration, setDuration] = useState<number>(0);
 
-  // TODO: REFACTOR THESE INTO SERMON DATA
-  const [date, setDate] = useState<Date | null>(new Date());
-  const [speaker, setSpeaker] = useState([]);
-  const [topic, setTopic] = useState([]);
+  const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
+  const [seriesArray, setSeriesArray] = useState<string[]>([]);
+  const [speakersArray, setSpeakersArray] = useState<string[]>([]);
+  const [topicsArray, setTopicsArray] = useState<string[]>([]);
 
-  const [series, setSeries] = useState();
+  // TODO: REFACTOR THESE INTO SERMON DATA
+  const [date, setDate] = useState<Date>(
+    new Date(
+      props.existingSermon ? props.existingSermon.dateMillis : new Date()
+    )
+  );
+  const [speaker, setSpeaker] = useState(
+    props.existingSermon ? props.existingSermon.speaker : []
+  );
+  const [topic, setTopic] = useState(
+    props.existingSermon ? props.existingSermon.topic : []
+  );
+  const [series, setSeries] = useState(
+    props.existingSermon ? props.existingSermon.series : ''
+  );
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
+
+  const [speakerError, setSpeakerError] = useState<boolean>(false);
+  const [speakerErrorMessage, setSpeakerErrorMessage] = useState<string>('');
+
+  const [newSeriesError, setNewSeriesError] = useState<{
+    error: boolean;
+    message: string;
+  }>({ error: false, message: '' });
+
+  const [userHasTypedInSeries, setUserHasTypedInSeries] =
+    useState<boolean>(false);
+
+  useEffect(() => {
+    if (!userHasTypedInSeries) {
+      setNewSeriesError({ error: false, message: '' });
+      return;
+    }
+
+    if (newSeries === '') {
+      setNewSeriesError({ error: true, message: 'Series cannot be empty' });
+    } else if (seriesArray.includes(newSeries)) {
+      setNewSeriesError({ error: true, message: 'Series already exists' });
+    } else {
+      setNewSeriesError({ error: false, message: '' });
+    }
+  }, [newSeries, userHasTypedInSeries, seriesArray]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const db = getFirestore(firebase);
+
+      const subtitlesRef = doc(db, 'subtitles', 'subtitlesDoc');
+      const subtitlesSnap = await getDoc(subtitlesRef);
+      const subtitlesData = subtitlesSnap.data();
+      setSubtitlesArray(
+        subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []
+      );
+
+      const seriesQuery = query(collection(db, 'series'));
+      const seriesQuerySnapshot = await getDocs(seriesQuery);
+      setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
+
+      const speakersQuery = query(collection(db, 'speakers'));
+      const speakersQuerySnapshot = await getDocs(speakersQuery);
+      setSpeakersArray(
+        speakersQuerySnapshot.docs.map((doc) => doc.data().name)
+      );
+
+      const topicsRef = doc(db, 'topics', 'topicsDoc');
+      const topicsSnap = await getDoc(topicsRef);
+      const topicsData = topicsSnap.data();
+      setTopicsArray(topicsData ? topicsSnap.data()?.topicsArray : []);
+    };
+    fetchData();
+  }, []);
+
+  const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
+    const sermon1Date = new Date(sermon1.dateMillis);
+
+    return (
+      sermon1.title === sermon2.title &&
+      sermon1.subtitle === sermon2.subtitle &&
+      sermon1.description === sermon2.description &&
+      sermon1Date.getDate() === date?.getDate() &&
+      sermon1Date.getMonth() === date?.getMonth() &&
+      sermon1Date.getFullYear() === date?.getFullYear() &&
+      sermon1.series === series &&
+      JSON.stringify(sermon1.speaker) === JSON.stringify(speaker) &&
+      sermon1.scripture === sermon2.scripture &&
+      JSON.stringify(sermon1.topic) === JSON.stringify(topic)
+    );
+  };
 
   const onDrop = useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
@@ -124,18 +217,20 @@ const Uploader: NextPage<Props> = (
     setDate(new Date());
     setSpeaker([]);
     setTopic([]);
+    setSeries('');
+    setFile(undefined);
   };
 
-  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSermonData((prevSermonData) => {
       return {
         ...prevSermonData,
         [event.target.name]: event.target.value,
       };
     });
-  }
+  };
 
-  const handleDateChange = (newValue: Date | null) => {
+  const handleDateChange = (newValue: Date) => {
     setDate(newValue);
   };
 
@@ -145,13 +240,12 @@ const Uploader: NextPage<Props> = (
         sx={{
           display: 'flex',
           flexWrap: 'wrap',
-          padding: '2rem',
           gap: '1ch',
           margin: 'auto',
           maxWidth: '900px',
         }}
       >
-        <h1>Uploader</h1>
+        <h1>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
         <TextField
           sx={{
             display: 'block',
@@ -167,14 +261,25 @@ const Uploader: NextPage<Props> = (
           required
         />
         <Box sx={{ display: 'flex', color: 'red', gap: '1ch', width: 1 }}>
-          <TextField
+          <Autocomplete
             fullWidth
-            id="title-input"
-            label="Subtitle"
-            name="subtitle"
-            variant="outlined"
-            value={sermonData.subtitle}
-            onChange={handleChange}
+            id="subtitle-input"
+            value={sermonData.subtitle || null}
+            onChange={(_, newValue) => {
+              newValue === null
+                ? setSermonData((oldSermonData) => ({
+                    ...oldSermonData,
+                    subtitle: '',
+                  }))
+                : setSermonData((oldSermonData) => ({
+                    ...oldSermonData,
+                    subtitle: newValue,
+                  }));
+            }}
+            renderInput={(params) => (
+              <TextField required {...params} label="Subtitle" />
+            )}
+            options={subtitlesArray}
           />
           <LocalizationProvider
             dateAdapter={AdapterDateFns}
@@ -186,7 +291,11 @@ const Uploader: NextPage<Props> = (
               label="Date"
               inputFormat="MM/dd/yyyy"
               value={date}
-              onChange={handleDateChange}
+              onChange={(newValue) => {
+                if (newValue !== null) {
+                  handleDateChange(new Date(newValue));
+                }
+              }}
               renderInput={(params) => <TextField {...params} />}
             />
           </LocalizationProvider>
@@ -209,13 +318,11 @@ const Uploader: NextPage<Props> = (
           <Autocomplete
             fullWidth
             value={series || null}
-            onChange={(event: any, newValue: any | null) => {
-              if (newValue !== null) {
-                setSeries(newValue);
-              }
+            onChange={(_, newValue) => {
+              newValue === null ? setSeries('') : setSeries(newValue);
             }}
             id="series-input"
-            options={props.seriesArray}
+            options={seriesArray}
             renderInput={(params) => <TextField {...params} label="Series" />}
           />
           <p style={{ paddingLeft: '10px' }}>or</p>
@@ -230,16 +337,26 @@ const Uploader: NextPage<Props> = (
         <Autocomplete
           fullWidth
           value={speaker}
-          onChange={(event: any, newValue: any | null) => {
+          onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 3) {
               setSpeaker(newValue);
+              setSpeakerError(false);
+            } else if (newValue.length === 4) {
+              setSpeakerError(true);
+              setSpeakerErrorMessage('Can only add up to 3 speakers');
             }
           }}
           id="speaker-input"
-          options={props.speakers}
+          options={speakersArray}
           multiple
           renderInput={(params) => (
-            <TextField {...params} required label="Speaker(s)" />
+            <TextField
+              {...params}
+              required
+              label="Speaker(s)"
+              error={speakerError}
+              helperText={speakerError ? speakerErrorMessage : ''}
+            />
           )}
         />
         <TextField
@@ -260,147 +377,158 @@ const Uploader: NextPage<Props> = (
             }
           }}
           id="topic-input"
-          options={props.topics}
+          options={topicsArray}
           multiple
           renderInput={(params) => <TextField {...params} label="Topic(s)" />}
         />
-        <div className={styles.form}>
-          {file ? (
-            <>
-              <AudioTrimmer
-                url={file.preview}
-                duration={duration}
-                setDuration={setDuration}
-              ></AudioTrimmer>
-              <button
-                type="button"
-                className={styles.button}
-                onClick={() => {
-                  setFile(undefined);
-                  setUploadProgress(undefined);
-                  clearForm();
-                }}
-              >
-                Clear
-              </button>
-            </>
-          ) : (
-            <div className={styles.dragAndDrop} {...getRootProps()}>
-              <input type="hidden" {...getInputProps()} />
-              <p>
-                Drag &apos;n&apos; drop audio files here, or click to select
-                files
-              </p>
-            </div>
-          )}
-          <input
-            className={styles.button}
-            type="button"
-            value="Upload"
-            disabled={
-              file === undefined ||
-              sermonData.title === '' ||
-              date === null ||
-              speaker.length === 0
-            }
-            // TODO: Clear the form when upload is complete also remove upload button when it is uploading as to prevent
-            // the user from double clicking upload
-            onClick={() => {
-              if (file !== undefined && date != null) {
-                uploadFile({
-                  file: file,
-                  setFile: setFile,
-                  setUploadProgress: setUploadProgress,
+        {props.existingSermon ? (
+          <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
+            <Button
+              onClick={() =>
+                editSermon({
+                  key: sermonData.key,
                   title: sermonData.title,
                   subtitle: sermonData.subtitle,
-                  durationSeconds: duration,
                   date,
                   description: sermonData.description,
                   speaker,
                   scripture: sermonData.scripture,
                   topic,
                   series,
-                });
+                }).then(() => {
+                  props.setUpdatedSermon?.({
+                    key: sermonData.key,
+                    title: sermonData.title,
+                    subtitle: sermonData.subtitle,
+                    dateMillis: date.getTime(),
+                    durationSeconds: sermonData.durationSeconds,
+                    description: sermonData.description,
+                    speaker,
+                    scripture: sermonData.scripture,
+                    topic,
+                    series,
+                    dateString: getDateString(date),
+                  });
+                  props.setEditFormOpen?.(false);
+                })
               }
-            }}
-          />
-          <p>{uploadProgress}</p>
-        </div>
+              disabled={sermonsEqual(props.existingSermon, sermonData)}
+              variant="contained"
+            >
+              update sermon
+            </Button>
+          </div>
+        ) : (
+          <div className={styles.form}>
+            {file ? (
+              <>
+                <AudioTrimmer
+                  url={file.preview}
+                  duration={duration}
+                  setDuration={setDuration}
+                />
+                <div style={{ display: 'flex' }}>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() => setFile(undefined)}
+                  >
+                    Clear File
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className={styles.dragAndDrop} {...getRootProps()}>
+                <input type="hidden" {...getInputProps()} />
+                <p>
+                  Drag &apos;n&apos; drop audio files here, or click to select
+                  files
+                </p>
+              </div>
+            )}
+            <div style={{ display: 'flex' }}>
+              <input
+                className={styles.button}
+                type="button"
+                value="Upload"
+                disabled={
+                  file === undefined ||
+                  sermonData.title === '' ||
+                  date === null ||
+                  speaker.length === 0 ||
+                  sermonData.subtitle === ''
+                }
+                onClick={async () => {
+                  if (file !== undefined && date != null) {
+                    await uploadFile({
+                      file: file,
+                      setFile: setFile,
+                      setUploadProgress: setUploadProgress,
+                      title: sermonData.title,
+                      subtitle: sermonData.subtitle,
+                      durationSeconds: duration,
+                      date,
+                      description: sermonData.description,
+                      speaker,
+                      scripture: sermonData.scripture,
+                      topic,
+                      series,
+                    }).then(() => {
+                      setSpeakerError(false);
+                      clearForm();
+                    });
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => clearForm()}
+              >
+                Clear Form
+              </button>
+            </div>
+          </div>
+        )}
       </Box>
       <PopUp
         title={'Add new series'}
         open={newSeriesPopup}
         setOpen={() => setNewSeriesPopup(false)}
-      >
-        <div style={{ display: 'flex' }}>
-          <TextField
-            value={newSeries}
-            onChange={(e) => {
-              setNewSeries(e.target.value);
-            }}
-          />
+        onClose={() => {
+          setUserHasTypedInSeries(false);
+          setNewSeries('');
+        }}
+        button={
           <Button
-            disabled={newSeries === '' || props.seriesArray.includes(newSeries)}
+            variant="contained"
+            disabled={newSeries === '' || seriesArray.includes(newSeries)}
             onClick={() => {
               addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
-              props.seriesArray.push(newSeries);
+              seriesArray.push(newSeries);
+              setSeries(newSeries);
               setNewSeries('');
             }}
           >
             Submit
           </Button>
+        }
+      >
+        <div style={{ display: 'flex', padding: '10px' }}>
+          <TextField
+            value={newSeries}
+            onChange={(e) => {
+              setNewSeries(e.target.value);
+              !userHasTypedInSeries && setUserHasTypedInSeries(true);
+            }}
+            error={newSeriesError.error}
+            label={newSeriesError.error ? newSeriesError.message : 'Series'}
+          />
         </div>
       </PopUp>
+      <p style={{ textAlign: 'center' }}>{uploadProgress}</p>
     </form>
   );
-};
-
-interface field {
-  name: string;
-}
-
-export const getServerSideProps: GetServerSideProps = async (
-  ctx: GetServerSidePropsContext
-) => {
-  const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.token) {
-    const failedUserCredentials = userCredentials;
-    return failedUserCredentials;
-  }
-
-  const db = getFirestore(firebase);
-
-  const speakersQuery = query(collection(db, 'speakers'));
-  const speakers: Array<string> = [];
-  const speakersQuerySnapshot = await getDocs(speakersQuery);
-  speakersQuerySnapshot.forEach((doc) => {
-    const current: field = doc.data() as unknown as field;
-    speakers.push(current.name);
-  });
-
-  const topicsQuery = query(collection(db, 'topics'));
-  const topics: Array<string> = [];
-  const topicsQuerySnapshot = await getDocs(topicsQuery);
-  topicsQuerySnapshot.forEach((doc) => {
-    const current: field = doc.data() as unknown as field;
-    topics.push(current.name);
-  });
-
-  const seriesQuery = query(collection(db, 'series'));
-  const series: Array<string> = [];
-  const seriesQuerySnapshot = await getDocs(seriesQuery);
-  seriesQuerySnapshot.forEach((doc) => {
-    const current: field = doc.data() as unknown as field;
-    series.push(current.name);
-  });
-
-  return {
-    props: {
-      speakers: speakers,
-      topics: topics,
-      seriesArray: series,
-    },
-  };
 };
 
 export default Uploader;
