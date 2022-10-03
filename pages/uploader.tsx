@@ -70,8 +70,15 @@ const Uploader = (props: Props) => {
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
-  const [speakerError, setSpeakerError] = useState<boolean>(false);
-  const [speakerErrorMessage, setSpeakerErrorMessage] = useState<string>('');
+  const [speakerError, setSpeakerError] = useState<{
+    error: boolean;
+    message: string;
+  }>({ error: false, message: '' });
+
+  const [topicError, setTopicError] = useState<{
+    error: boolean;
+    message: string;
+  }>({ error: false, message: '' });
 
   const [newSeriesError, setNewSeriesError] = useState<{
     error: boolean;
@@ -297,13 +304,17 @@ const Uploader = (props: Props) => {
         <Autocomplete
           fullWidth
           value={speaker}
+          onBlur={() => {
+            setSpeakerError({ error: false, message: '' });
+          }}
           onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 3) {
               setSpeaker(newValue);
-              setSpeakerError(false);
-            } else if (newValue.length === 4) {
-              setSpeakerError(true);
-              setSpeakerErrorMessage('Can only add up to 3 speakers');
+            } else if (newValue.length >= 4) {
+              setSpeakerError({
+                error: true,
+                message: 'Can only add up to 3 speakers',
+              });
             }
           }}
           id="speaker-input"
@@ -314,8 +325,8 @@ const Uploader = (props: Props) => {
               {...params}
               required
               label="Speaker(s)"
-              error={speakerError}
-              helperText={speakerError ? speakerErrorMessage : ''}
+              error={speakerError.error}
+              helperText={speakerError.message}
             />
           )}
         />
@@ -331,15 +342,25 @@ const Uploader = (props: Props) => {
         <Autocomplete
           fullWidth
           value={topic}
-          onChange={(event: any, newValue: any | null) => {
+          onBlur={() => {
+            setTopicError({ error: false, message: '' });
+          }}
+          onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 10) {
               setTopic(newValue);
+            } else if (newValue.length >= 11) {
+              setTopicError({
+                error: true,
+                message: 'Can only add up to 10 topics',
+              });
             }
           }}
           id="topic-input"
           options={topicsArray}
           multiple
-          renderInput={(params) => <TextField {...params} label="Topic(s)" />}
+          renderInput={(params) => (
+            <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
+          )}
         />
         {props.existingSermon ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
@@ -423,7 +444,6 @@ const Uploader = (props: Props) => {
                       topic,
                       series,
                     }).then(() => {
-                      setSpeakerError(false);
                       clearForm();
                     });
                   }
@@ -449,10 +469,13 @@ const Uploader = (props: Props) => {
             variant="contained"
             disabled={newSeries === '' || seriesArray.includes(newSeries)}
             onClick={() => {
-              addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
-              seriesArray.push(newSeries);
-              setSeries(newSeries);
-              setNewSeries('');
+              addNewSeries(newSeries).then(() => {
+                setNewSeriesPopup(false);
+                seriesArray.push(newSeries);
+                setSeries(newSeries);
+                setUserHasTypedInSeries(false);
+                setNewSeries('');
+              });
             }}
           >
             Submit
