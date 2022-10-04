@@ -23,11 +23,14 @@ import ProtectedRoute from '../components/ProtectedRoute';
 import AuthErrors from '../components/AuthErrors';
 import PopUp from '../components/PopUp';
 
+import styles from '../styles/SignInWithGoogleButton.module.css';
+import Image from 'next/image';
+
 const Login = (
   props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   const router = useRouter();
-  const { login } = useContext(UserContext);
+  const { login, loginWithGoogle } = useContext(UserContext);
 
   const [data, setData] = useState({
     email: '',
@@ -37,9 +40,7 @@ const Login = (
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleLogin = async (e: any) => {
-    e.preventDefault();
-
+  const handleLogin = async () => {
     const res = await login(data);
 
     const authResult = AuthErrors(res);
@@ -49,6 +50,10 @@ const Login = (
       setOpen(true);
     }
     router.push(authResult.dest);
+  };
+
+  const handleLoginWithGoogle = async () => {
+    await loginWithGoogle().then(() => router.push('/'));
   };
 
   return (
@@ -61,10 +66,7 @@ const Login = (
       }}
     >
       <h1 className="text-center my-3 ">Login</h1>
-      <form
-        style={{ height: '100%', width: '300px', margin: '20px' }}
-        onSubmit={handleLogin}
-      >
+      <div style={{ height: '100%', width: '300px', margin: '20px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <TextField
             fullWidth
@@ -101,10 +103,22 @@ const Login = (
           type="submit"
           style={{ marginTop: '30px' }}
           size="medium"
+          onClick={handleLogin}
         >
           Login
         </Button>
-      </form>
+        <p style={{ textAlign: 'center' }}>or</p>
+        <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
+          <div className={styles.google_icon_wrapper}>
+            <div className={styles.google_icon}>
+              <Image src="/google-logo.svg" width="30px" height="30px" />
+            </div>
+          </div>
+          <p className={styles.btn_text}>
+            <b>Sign in with google</b>
+          </p>
+        </div>
+      </div>
       <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
         {errorMessage}
       </PopUp>

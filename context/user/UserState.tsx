@@ -4,7 +4,9 @@ import UserContext from './UserContext';
 import userReducer from './UserReducer';
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
 } from 'firebase/auth';
 import firebase from 'firebase/auth';
@@ -88,6 +90,25 @@ const UserState = (props: any) => {
     });
   };
 
+  const loginWithGoogle = async () => {
+    setLoading();
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider).then((res) =>
+        dispatch({
+          type: GET_USER,
+          payload: {
+            username: res.user.email,
+            // TODO Role
+            role: null,
+          },
+        })
+      );
+    } catch (error: any) {
+      return error.code;
+    }
+  };
+
   const signup = async (loginForm: userCreditionals) => {
     setLoading();
     try {
@@ -124,6 +145,7 @@ const UserState = (props: any) => {
         loading: state.loading,
         role: state.role,
         login,
+        loginWithGoogle,
         signup,
         logoutUser,
       }}
