@@ -30,15 +30,16 @@ const UserState = (props: any) => {
 
   const [state, dispatch] = useReducer(userReducer, initialState);
 
-  const addUserToDb = async (email: string, role: string) => {
-    await setDoc(doc(db, 'users', email), {
-      email: email,
-      role: 'user',
+  const addUserToDb = async (uid: string, email: string, role: string) => {
+    await setDoc(doc(db, 'users', uid), {
+      uid,
+      email,
+      role,
     });
   };
 
-  const fetchUserFromDb = async (email: string) => {
-    const userRef = doc(db, 'users', email);
+  const fetchUserFromDb = async (uid: string) => {
+    const userRef = doc(db, 'users', uid);
     const userSnap = await getDoc(userRef);
     return userSnap.data();
   };
@@ -92,14 +93,15 @@ const UserState = (props: any) => {
         auth,
         loginForm.email,
         loginForm.password
-      );
-      const user = await fetchUserFromDb(loginForm.email);
-      dispatch({
-        type: GET_USER,
-        payload: {
-          username: loginForm.email,
-          role: user?.role,
-        },
+      ).then(async (res) => {
+        const user = await fetchUserFromDb(res.user.uid);
+        dispatch({
+          type: GET_USER,
+          payload: {
+            username: loginForm.email,
+            role: user?.role,
+          },
+        });
       });
     } catch (error: any) {
       return error.code;
@@ -113,7 +115,7 @@ const UserState = (props: any) => {
       await signInWithPopup(auth, provider).then(async (res) => {
         const details = getAdditionalUserInfo(res);
         if (res.user.email !== null && details?.isNewUser) {
-          await addUserToDb(res.user.email, 'user');
+          await addUserToDb(res.user.uid, res.user.email, 'user');
           dispatch({
             type: GET_USER,
             payload: {
@@ -122,7 +124,7 @@ const UserState = (props: any) => {
             },
           });
         } else if (res.user.email !== null && !details?.isNewUser) {
-          const user = await fetchUserFromDb(res.user.email);
+          const user = await fetchUserFromDb(res.user.uid);
           dispatch({
             type: GET_USER,
             payload: {
@@ -144,8 +146,9 @@ const UserState = (props: any) => {
         auth,
         loginForm.email,
         loginForm.password
+      ).then(
+        async (res) => await addUserToDb(res.user.uid, loginForm.email, 'user')
       );
-      await addUserToDb(loginForm.email, 'user');
     } catch (error: any) {
       return error.code;
     }
