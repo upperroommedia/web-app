@@ -13,6 +13,7 @@ import {
   Dispatch,
   SetStateAction,
   useCallback,
+  useContext,
   useEffect,
   useState,
 } from 'react';
@@ -44,6 +45,7 @@ import {
   InferGetServerSidePropsType,
 } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
+import UserContext from '../context/user/UserContext';
 
 export interface UploadableFile {
   file: File;
@@ -71,6 +73,7 @@ interface UploaderProps {
 const Uploader = (
   props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
+  const { user } = useContext(UserContext);
   const [sermonData, setSermonData] = useState<Sermon>(
     props.existingSermon ? props.existingSermon : emptySermon
   );
@@ -465,7 +468,11 @@ const Uploader = (
                   sermonData.subtitle === ''
                 }
                 onClick={async () => {
-                  if (file !== undefined && date != null) {
+                  if (
+                    file !== undefined &&
+                    date != null &&
+                    user.role === 'admin'
+                  ) {
                     await uploadFile({
                       file: file,
                       setFile: setFile,
@@ -479,10 +486,14 @@ const Uploader = (
                       scripture: sermonData.scripture,
                       topic,
                       series,
-                    }).then(() => {
-                      setSpeakerError(false);
-                      clearForm();
-                    });
+                    })
+                      .then(() => {
+                        setSpeakerError(false);
+                        clearForm();
+                      })
+                      .catch((e) => setUploadProgress(JSON.stringify(e)));
+                  } else if (user.role !== 'admin') {
+                    setUploadProgress('You do not have permission to upload');
                   }
                 }}
               />
@@ -509,11 +520,17 @@ const Uploader = (
           <Button
             variant="contained"
             disabled={newSeries === '' || seriesArray.includes(newSeries)}
-            onClick={() => {
-              addNewSeries(newSeries).then(() => setNewSeriesPopup(false));
-              seriesArray.push(newSeries);
-              setSeries(newSeries);
-              setNewSeries('');
+            onClick={async () => {
+              await addNewSeries(newSeries)
+                .then(() => {
+                  setNewSeriesPopup(false);
+                  seriesArray.push(newSeries);
+                  setSeries(newSeries);
+                  setNewSeries('');
+                })
+                .catch((e) =>
+                  setNewSeriesError({ error: true, message: JSON.stringify(e) })
+                );
             }}
           >
             Submit

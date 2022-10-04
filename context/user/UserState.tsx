@@ -1,5 +1,5 @@
 /* eslint-disable import/no-duplicates */
-import { useReducer, useEffect, useState } from 'react';
+import { useReducer, useEffect, useState, Reducer } from 'react';
 import UserContext from './UserContext';
 import userReducer from './UserReducer';
 import {
@@ -14,13 +14,19 @@ import firebase from 'firebase/auth';
 import { auth } from '../../firebase/firebase';
 import nookies from 'nookies';
 
-import { GET_USER, SET_LOADING, LOGOUT, userCredentials } from '../types';
+import {
+  GET_USER,
+  SET_LOADING,
+  LOGOUT,
+  userCredentials,
+  AuthState,
+} from '../types';
 import { setDoc, doc, getFirestore, getDoc } from 'firebase/firestore';
 import { firebase as projectFirebase } from '../../firebase/firebase';
 
 const UserState = (props: any) => {
   const db = getFirestore(projectFirebase);
-  const initialState = {
+  const initialState: AuthState = {
     username: null,
     role: null,
     isAuthenticated: false,
@@ -28,7 +34,10 @@ const UserState = (props: any) => {
   };
   const [user, setUser] = useState<firebase.User | null>(null);
 
-  const [state, dispatch] = useReducer(userReducer, initialState);
+  const [state, dispatch] = useReducer<Reducer<AuthState, any>>(
+    userReducer,
+    initialState
+  );
 
   const addUserToDb = async (uid: string, email: string, role: string) => {
     await setDoc(doc(db, 'users', uid), {

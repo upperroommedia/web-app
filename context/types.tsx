@@ -8,3 +8,10 @@ export interface userCredentials {
   email: string;
   password: string;
 }
+
+export interface AuthState {
+  username: string | null;
+  role: string | null;
+  isAuthenticated: boolean;
+  loading: boolean;
+}
