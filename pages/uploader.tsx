@@ -26,7 +26,6 @@ import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
-import { getAuth } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -64,7 +63,6 @@ interface Props {
 }
 
 const Uploader = (props: Props) => {
-  getAuth();
   const [sermonData, setSermonData] = useState<Sermon>(
     props.existingSermon ? props.existingSermon : emptySermon
   );
