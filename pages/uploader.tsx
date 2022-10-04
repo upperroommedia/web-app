@@ -38,6 +38,12 @@ import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
 import Button from '@mui/material/Button';
+import {
+  GetServerSideProps,
+  GetServerSidePropsContext,
+  InferGetServerSidePropsType,
+} from 'next';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 export interface UploadableFile {
   file: File;
@@ -56,13 +62,15 @@ let Url: any;
 if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
-interface Props {
+interface UploaderProps {
   existingSermon?: Sermon;
   setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-const Uploader = (props: Props) => {
+const Uploader = (
+  props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>
+) => {
   const [sermonData, setSermonData] = useState<Sermon>(
     props.existingSermon ? props.existingSermon : emptySermon
   );
@@ -530,3 +538,19 @@ const Uploader = (props: Props) => {
 };
 
 export default Uploader;
+
+export const getServerSideProps: GetServerSideProps = async (
+  ctx: GetServerSidePropsContext
+) => {
+  const userCredentials = await ProtectedRoute(ctx);
+  if (!userCredentials.props.token) {
+    return {
+      redirect: {
+        permanent: false,
+        destination: '/login',
+      },
+      props: {},
+    };
+  }
+  return { props: {} };
+};
