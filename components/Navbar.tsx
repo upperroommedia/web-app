@@ -8,7 +8,7 @@ import styles from '../styles/Navbar.module.css';
 import UserContext from '../context/user/UserContext';
 
 const Navbar: FunctionComponent = () => {
-  const { isAuthenticated } = useContext(UserContext);
+  const { user } = useContext(UserContext);
   return (
     <nav>
       <div className={styles.navbar}>
@@ -30,7 +30,7 @@ const Navbar: FunctionComponent = () => {
         <a className={styles.nav_link}>About</a>
       </Link>
 
-      {!isAuthenticated ? (
+      {!user.isAuthenticated ? (
         <>
           <Link href="/login">
             <a className={styles.nav_link}>Login</a>

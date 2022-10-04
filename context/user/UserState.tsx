@@ -4,6 +4,7 @@ import UserContext from './UserContext';
 import userReducer from './UserReducer';
 import {
   createUserWithEmailAndPassword,
+  getAdditionalUserInfo,
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -13,9 +14,12 @@ import firebase from 'firebase/auth';
 import { auth } from '../../firebase/firebase';
 import nookies from 'nookies';
 
-import { GET_USER, SET_LOADING, LOGOUT, userCreditionals } from '../types';
+import { GET_USER, SET_LOADING, LOGOUT, userCredentials } from '../types';
+import { setDoc, doc, getFirestore, getDoc } from 'firebase/firestore';
+import { firebase as projectFirebase } from '../../firebase/firebase';
 
 const UserState = (props: any) => {
+  const db = getFirestore(projectFirebase);
   const initialState = {
     username: null,
     role: null,
@@ -25,6 +29,19 @@ const UserState = (props: any) => {
   const [user, setUser] = useState<firebase.User | null>(null);
 
   const [state, dispatch] = useReducer(userReducer, initialState);
+
+  const addUserToDb = async (email: string, role: string) => {
+    await setDoc(doc(db, 'users', email), {
+      email: email,
+      role: 'user',
+    });
+  };
+
+  const fetchUserFromDb = async (email: string) => {
+    const userRef = doc(db, 'users', email);
+    const userSnap = await getDoc(userRef);
+    return userSnap.data();
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -41,12 +58,11 @@ const UserState = (props: any) => {
         setUser(user);
         nookies.destroy(null, 'token');
         nookies.set(null, 'token', token, { path: '/' });
-        await dispatch({
+        dispatch({
           type: GET_USER,
           payload: {
             username: user.email,
-            // TODO Role
-            role: null,
+            role: state.role,
           },
         });
       }
@@ -69,7 +85,7 @@ const UserState = (props: any) => {
   };
 
   // Login User
-  const login = async (loginForm: userCreditionals) => {
+  const login = async (loginForm: userCredentials) => {
     setLoading();
     try {
       await signInWithEmailAndPassword(
@@ -77,39 +93,51 @@ const UserState = (props: any) => {
         loginForm.email,
         loginForm.password
       );
+      const user = await fetchUserFromDb(loginForm.email);
+      dispatch({
+        type: GET_USER,
+        payload: {
+          username: loginForm.email,
+          role: user?.role,
+        },
+      });
     } catch (error: any) {
       return error.code;
     }
-    await dispatch({
-      type: GET_USER,
-      payload: {
-        username: loginForm.email,
-        // TODO Role
-        role: null,
-      },
-    });
   };
 
   const loginWithGoogle = async () => {
     setLoading();
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider).then((res) =>
-        dispatch({
-          type: GET_USER,
-          payload: {
-            username: res.user.email,
-            // TODO Role
-            role: null,
-          },
-        })
-      );
+      await signInWithPopup(auth, provider).then(async (res) => {
+        const details = getAdditionalUserInfo(res);
+        if (res.user.email !== null && details?.isNewUser) {
+          await addUserToDb(res.user.email, 'user');
+          dispatch({
+            type: GET_USER,
+            payload: {
+              username: res.user.email,
+              role: 'user',
+            },
+          });
+        } else if (res.user.email !== null && !details?.isNewUser) {
+          const user = await fetchUserFromDb(res.user.email);
+          dispatch({
+            type: GET_USER,
+            payload: {
+              username: res.user.email,
+              role: user?.role,
+            },
+          });
+        }
+      });
     } catch (error: any) {
       return error.code;
     }
   };
 
-  const signup = async (loginForm: userCreditionals) => {
+  const signup = async (loginForm: userCredentials) => {
     setLoading();
     try {
       await createUserWithEmailAndPassword(
@@ -117,15 +145,15 @@ const UserState = (props: any) => {
         loginForm.email,
         loginForm.password
       );
+      await addUserToDb(loginForm.email, 'user');
     } catch (error: any) {
       return error.code;
     }
-    await dispatch({
+    dispatch({
       type: GET_USER,
       payload: {
         username: loginForm.email,
-        // TODO Role
-        role: null,
+        role: 'user',
       },
     });
   };
@@ -133,17 +161,15 @@ const UserState = (props: any) => {
   const logoutUser = async () => {
     await signOut(auth);
     setUser(null);
-    dispatch({ type: LOGOUT });
+    dispatch({
+      type: LOGOUT,
+    });
   };
 
   return (
     <UserContext.Provider
       value={{
-        username: state.username,
-        user: user,
-        isAuthenticated: state.isAuthenticated,
-        loading: state.loading,
-        role: state.role,
+        user: { ...user, ...state },
         login,
         loginWithGoogle,
         signup,

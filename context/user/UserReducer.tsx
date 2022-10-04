@@ -19,6 +19,7 @@ const userReducer = (state: any, action: any) => {
       return {
         ...state,
         username: null,
+        role: null,
         isAuthenticated: false,
         loading: false,
       };

@@ -4,7 +4,7 @@ export const LOGOUT = 'LOGOUT';
 // User Context
 export const GET_USER = 'GET_USER';
 
-export interface userCreditionals {
+export interface userCredentials {
   email: string;
   password: string;
 }
