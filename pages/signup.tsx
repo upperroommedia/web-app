@@ -13,7 +13,7 @@ import type {
 } from 'next';
 
 // Auth
-import UserContext from '../context/user/UserContext';
+import userContext from '../context/user/userContext';
 
 // 3rd Party
 import { Button, TextField } from '@mui/material';
@@ -30,7 +30,7 @@ const Signup = (
   props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   const router = useRouter();
-  const { signup, loginWithGoogle } = useContext(UserContext);
+  const { signup, loginWithGoogle } = useContext(userContext);
 
   const [data, setData] = useState({
     email: '',

@@ -16,7 +16,7 @@ import { useRouter } from 'next/router';
 import { Button, TextField } from '@mui/material';
 
 // Auth
-import UserContext from '../context/user/UserContext';
+import userContext from '../context/user/userContext';
 
 // Components
 import ProtectedRoute from '../components/ProtectedRoute';
@@ -30,7 +30,7 @@ const Login = (
   props: InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
   const router = useRouter();
-  const { login, loginWithGoogle } = useContext(UserContext);
+  const { login, loginWithGoogle } = useContext(userContext);
 
   const [data, setData] = useState({
     email: '',

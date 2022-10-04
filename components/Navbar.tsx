@@ -5,10 +5,10 @@ import { useContext, FunctionComponent } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from '../styles/Navbar.module.css';
-import UserContext from '../context/user/UserContext';
+import userContext from '../context/user/userContext';
 
 const Navbar: FunctionComponent = () => {
-  const { user } = useContext(UserContext);
+  const { user } = useContext(userContext);
   return (
     <nav>
       <div className={styles.navbar}>

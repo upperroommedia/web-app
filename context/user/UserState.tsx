@@ -1,6 +1,6 @@
 /* eslint-disable import/no-duplicates */
 import { useReducer, useEffect, useState, Reducer } from 'react';
-import UserContext from './UserContext';
+import userContext from './userContext';
 import userReducer from './UserReducer';
 import {
   createUserWithEmailAndPassword,
@@ -179,7 +179,7 @@ const UserState = (props: any) => {
   };
 
   return (
-    <UserContext.Provider
+    <userContext.Provider
       value={{
         user: { ...user, ...state },
         login,
@@ -189,7 +189,7 @@ const UserState = (props: any) => {
       }}
     >
       {props.children}
-    </UserContext.Provider>
+    </userContext.Provider>
   );
 };
 

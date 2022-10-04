@@ -3,12 +3,12 @@
  */
 import type { NextPage } from 'next';
 import { useContext, useEffect } from 'react';
-import UserContext from '../context/user/UserContext';
+import userContext from '../context/user/userContext';
 import { useRouter } from 'next/router';
 
 const Logout: NextPage = (props) => {
   const router = useRouter();
-  const { logoutUser } = useContext(UserContext);
+  const { logoutUser } = useContext(userContext);
 
   useEffect(() => {
     logoutUser();

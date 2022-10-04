@@ -45,7 +45,7 @@ import {
   InferGetServerSidePropsType,
 } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
-import UserContext from '../context/user/UserContext';
+import userContext from '../context/user/userContext';
 
 export interface UploadableFile {
   file: File;
@@ -73,7 +73,7 @@ interface UploaderProps {
 const Uploader = (
   props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>
 ) => {
-  const { user } = useContext(UserContext);
+  const { user } = useContext(userContext);
   const [sermonData, setSermonData] = useState<Sermon>(
     props.existingSermon ? props.existingSermon : emptySermon
   );
