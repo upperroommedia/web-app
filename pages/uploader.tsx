@@ -8,15 +8,7 @@ import addNewSeries from './api/addNewSeries';
 import PopUp from '../components/PopUp';
 
 import styles from '../styles/Uploader.module.css';
-import {
-  ChangeEvent,
-  Dispatch,
-  SetStateAction,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from 'react';
+import { ChangeEvent, Dispatch, SetStateAction, useCallback, useContext, useEffect, useState } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
 import TextField from '@mui/material/TextField';
@@ -27,23 +19,12 @@ import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  query,
-} from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
 import Button from '@mui/material/Button';
-import {
-  GetServerSideProps,
-  GetServerSidePropsContext,
-  InferGetServerSidePropsType,
-} from 'next';
+import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
 import userContext from '../context/user/UserContext';
 
@@ -70,13 +51,9 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-const Uploader = (
-  props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>
-) => {
+const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useContext(userContext);
-  const [sermonData, setSermonData] = useState<Sermon>(
-    props.existingSermon ? props.existingSermon : emptySermon
-  );
+  const [sermonData, setSermonData] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
   const [duration, setDuration] = useState<number>(0);
@@ -454,11 +431,7 @@ const Uploader = (
                   sermonData.subtitle === ''
                 }
                 onClick={async () => {
-                  if (
-                    file !== undefined &&
-                    date != null &&
-                    user.role === 'admin'
-                  ) {
+                  if (file !== undefined && date != null && user.role === 'admin') {
                     await uploadFile({
                       file: file,
                       setFile: setFile,
@@ -510,9 +483,7 @@ const Uploader = (
                   setSeries(newSeries);
                   setNewSeries('');
                 })
-                .catch((e) =>
-                  setNewSeriesError({ error: true, message: JSON.stringify(e) })
-                );
+                .catch((e) => setNewSeriesError({ error: true, message: JSON.stringify(e) }));
             }}
           >
             Submit
@@ -538,15 +509,13 @@ const Uploader = (
 
 export default Uploader;
 
-export const getServerSideProps: GetServerSideProps = async (
-  ctx: GetServerSidePropsContext
-) => {
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.token) {
+  if (!userCredentials.props.token || userCredentials.props.user?.role !== 'admin') {
     return {
       redirect: {
         permanent: false,
-        destination: '/login',
+        destination: '/',
       },
       props: {},
     };

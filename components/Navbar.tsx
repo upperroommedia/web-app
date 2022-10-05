@@ -37,9 +37,13 @@ const Navbar: FunctionComponent = () => {
       ) : (
         // All Pages that need to be protected
         <>
-          <Link href="/uploader">
-            <a className={styles.nav_link}>Uploader</a>
-          </Link>
+          {user.role === 'admin' ? (
+            <Link href="/uploader">
+              <a className={styles.nav_link}>Uploader</a>
+            </Link>
+          ) : (
+            <></>
+          )}
           <Link href="/logout">
             <a className={styles.nav_link}>Log out</a>
           </Link>
