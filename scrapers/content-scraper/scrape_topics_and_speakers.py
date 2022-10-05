@@ -39,4 +39,4 @@ while page_number < 31:
     url = f'https://dashboard.subsplash.com/-d/#/library/tags/speakers?page={page_number}'
     driver.get(url)
 
-print(arr)
+print([*set(arr)])
