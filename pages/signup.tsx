@@ -2,14 +2,14 @@
  * Page for Signing up the User
  */
 // React
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/router';
 
 // Next
 import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
 
 // Auth
-import userContext from '../context/user/UserContext';
+import useAuth from '../context/user/UserContext';
 
 // 3rd Party
 import { Button, TextField } from '@mui/material';
@@ -24,7 +24,7 @@ import Image from 'next/image';
 
 const Signup = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
-  const { signup, loginWithGoogle } = useContext(userContext);
+  const { signup, loginWithGoogle } = useAuth();
 
   const [data, setData] = useState({
     email: '',

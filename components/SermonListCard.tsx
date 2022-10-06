@@ -1,7 +1,7 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent, useContext, useEffect, useState } from 'react';
+import { FunctionComponent, useEffect, useState } from 'react';
 // import Image from 'next/image';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -20,7 +20,7 @@ import { emptySermon, Sermon } from '../types/Sermon';
 import { firebase } from '../firebase/firebase';
 import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
-import userContext from '../context/user/UserContext';
+import useAuth from '../context/user/UserContext';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -37,7 +37,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   setPlaylist,
 }: // handleSermonClick,
 Props) => {
-  const { user } = useContext(userContext);
+  const { user } = useAuth();
   const [deleteConfirmationPopup, setDeleteConfirmationPopup] = useState<boolean>(false);
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
 
@@ -113,7 +113,7 @@ Props) => {
               />
             )}
             <span style={{ width: '100%' }}></span>
-            {user.role === 'admin' ? (
+            {user?.role === 'admin' ? (
               <>
                 <IconButton style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
                   <EditIcon />

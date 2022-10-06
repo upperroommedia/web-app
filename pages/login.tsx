@@ -2,7 +2,7 @@
  * Page for Logging in the User
  */
 // React
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 
 // Next
 import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
@@ -12,7 +12,7 @@ import { useRouter } from 'next/router';
 import { Button, TextField } from '@mui/material';
 
 // Auth
-import userContext from '../context/user/UserContext';
+import useAuth from '../context/user/UserContext';
 
 // Components
 import ProtectedRoute from '../components/ProtectedRoute';
@@ -24,7 +24,7 @@ import Image from 'next/image';
 
 const Login = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
-  const { login, loginWithGoogle } = useContext(userContext);
+  const { login, loginWithGoogle } = useAuth();
 
   const [data, setData] = useState({
     email: '',

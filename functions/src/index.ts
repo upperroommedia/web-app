@@ -8,7 +8,6 @@ admin.initializeApp();
 
 // To test functions: npm run-script serve
 // To deploy functions: npm run-script deploy
-
 const getDolbyToken = async (): Promise<AxiosResponse> => {
   const data = qs.stringify({
     grant_type: 'client_credentials',
@@ -219,5 +218,17 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
     if (error instanceof Error) message = error.message;
 
     response.send(message);
+  }
+});
+
+export const setUserRole = functions.https.onRequest(async (request, response) => {
+  if (request.body.uid && request.body.role) {
+    admin
+      .auth()
+      .setCustomUserClaims(request.body.uid, request.body.role)
+      .then((message) => response.send(message))
+      .catch((e) => response.send(e));
+  } else {
+    response.send('uid or role do not exist');
   }
 });

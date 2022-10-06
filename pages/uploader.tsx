@@ -8,7 +8,7 @@ import addNewSeries from './api/addNewSeries';
 import PopUp from '../components/PopUp';
 
 import styles from '../styles/Uploader.module.css';
-import { ChangeEvent, Dispatch, SetStateAction, useCallback, useContext, useEffect, useState } from 'react';
+import { ChangeEvent, Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
 
 import TextField from '@mui/material/TextField';
@@ -26,7 +26,7 @@ import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
-import userContext from '../context/user/UserContext';
+import useAuth from '../context/user/UserContext';
 
 export interface UploadableFile {
   file: File;
@@ -52,7 +52,7 @@ interface UploaderProps {
 }
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
-  const { user } = useContext(userContext);
+  const { user } = useAuth();
   const [sermonData, setSermonData] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
@@ -431,7 +431,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   sermonData.subtitle === ''
                 }
                 onClick={async () => {
-                  if (file !== undefined && date != null && user.role === 'admin') {
+                  if (file !== undefined && date != null && user?.role === 'admin') {
                     await uploadFile({
                       file: file,
                       setFile: setFile,
@@ -451,7 +451,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                         clearForm();
                       })
                       .catch((e) => setUploadProgress(JSON.stringify(e)));
-                  } else if (user.role !== 'admin') {
+                  } else if (user?.role !== 'admin') {
                     setUploadProgress('You do not have permission to upload');
                   }
                 }}
