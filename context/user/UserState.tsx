@@ -14,13 +14,7 @@ import firebase from 'firebase/auth';
 import { auth } from '../../firebase/firebase';
 import nookies from 'nookies';
 
-import {
-  GET_USER,
-  SET_LOADING,
-  LOGOUT,
-  userCredentials,
-  AuthState,
-} from '../types';
+import { GET_USER, SET_LOADING, LOGOUT, userCredentials, AuthState } from '../types';
 import { setDoc, doc, getFirestore, getDoc } from 'firebase/firestore';
 import { firebase as projectFirebase } from '../../firebase/firebase';
 
@@ -34,10 +28,7 @@ const UserState = (props: any) => {
   };
   const [user, setUser] = useState<firebase.User | null>(null);
 
-  const [state, dispatch] = useReducer<Reducer<AuthState, any>>(
-    userReducer,
-    initialState
-  );
+  const [state, dispatch] = useReducer<Reducer<AuthState, any>>(userReducer, initialState);
 
   const addUserToDb = async (uid: string, email: string, role: string) => {
     await setDoc(doc(db, 'users', uid), {
@@ -65,6 +56,7 @@ const UserState = (props: any) => {
         dispatch({ dispatch: LOGOUT });
       } else {
         const token = await user.getIdToken();
+        const firestoreUser = await fetchUserFromDb(user.uid)
         setUser(user);
         nookies.destroy(null, 'token');
         nookies.set(null, 'token', token, { path: '/' });
@@ -72,13 +64,14 @@ const UserState = (props: any) => {
           type: GET_USER,
           payload: {
             username: user.email,
-            role: state.role,
+            role: firestoreUser?.role,
           },
         });
       }
     });
   }, []);
 
+  // move ^
   useEffect(() => {
     const handle = setInterval(async () => {
       // eslint-disable-next-line no-console
@@ -98,11 +91,7 @@ const UserState = (props: any) => {
   const login = async (loginForm: userCredentials) => {
     setLoading();
     try {
-      await signInWithEmailAndPassword(
-        auth,
-        loginForm.email,
-        loginForm.password
-      ).then(async (res) => {
+      await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password).then(async (res) => {
         const user = await fetchUserFromDb(res.user.uid);
         dispatch({
           type: GET_USER,
@@ -151,11 +140,7 @@ const UserState = (props: any) => {
   const signup = async (loginForm: userCredentials) => {
     setLoading();
     try {
-      await createUserWithEmailAndPassword(
-        auth,
-        loginForm.email,
-        loginForm.password
-      ).then(
+      await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password).then(
         async (res) => await addUserToDb(res.user.uid, loginForm.email, 'user')
       );
     } catch (error: any) {
