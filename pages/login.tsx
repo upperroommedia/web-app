@@ -122,7 +122,7 @@ const Login = (props: InferGetServerSidePropsType<typeof getServerSideProps>) =>
 
 export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.token) {
+  if (!userCredentials.props.uid) {
     return { props: {} };
   }
   return {
