@@ -1,11 +1,10 @@
-import { doc, getFirestore, setDoc } from 'firebase/firestore';
+import { arrayUnion, doc, getFirestore, setDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytesResumable } from 'firebase/storage';
 import { firebase, storage } from '../../firebase/firebase';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../uploader';
-import { getAuth } from 'firebase/auth';
 import { Sermon, sermonConverter } from '../../types/Sermon';
 
 interface uploadFileProps {
@@ -18,17 +17,28 @@ interface uploadFileProps {
   subtitle: string;
   date: Date;
   description: string;
+  series: string;
   durationSeconds: number;
   speaker: Array<string>;
   scripture: string;
   topic: Array<string>;
 }
 
-const uploadFile = (props: uploadFileProps) => {
-  getAuth();
+const uploadFile = async (props: uploadFileProps) => {
   const db = getFirestore(firebase);
   const id = uuidv4();
   const sermonRef = ref(storage, `sermons/${id}`);
+
+  if (props.series !== '') {
+    const seriesRef = doc(db, 'series', props.series);
+    try {
+      await updateDoc(seriesRef, {
+        sermonIds: arrayUnion(id),
+      });
+    } catch (err) {
+      props.setUploadProgress(`Error: ${err}`);
+    }
+  }
   // const sermonRef = ref(storage, `sermons/${file.name}`);
   const uploadTask = uploadBytesResumable(sermonRef, props.file.file);
   const sermonData: Sermon = {
@@ -37,6 +47,7 @@ const uploadFile = (props: uploadFileProps) => {
     durationSeconds: props.durationSeconds,
     dateMillis: props.date.getTime(),
     description: props.description,
+    series: props.series,
     speaker: props.speaker,
     scripture: props.scripture,
     topic: props.topic,
@@ -62,10 +73,7 @@ const uploadFile = (props: uploadFileProps) => {
       // addDoc(collection(db, 'sermons'), sermonData);
       // with custom id so it doesnt duplicate upload
       try {
-        await setDoc(
-          doc(db, 'sermons', id).withConverter(sermonConverter),
-          sermonData
-        );
+        await setDoc(doc(db, 'sermons', id).withConverter(sermonConverter), sermonData);
         props.setUploadProgress('Uploaded!');
       } catch (error) {
         props.setUploadProgress(`Error: ${error}`);

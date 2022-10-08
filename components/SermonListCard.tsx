@@ -1,29 +1,73 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent } from 'react';
+import { FunctionComponent, useEffect, useState } from 'react';
 // import Image from 'next/image';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import styles from '../styles/SermonListCard.module.css';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
+import { Button, Checkbox } from '@mui/material';
 // import { Sermon } from '../types/Sermon';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
+import { deleteDoc, doc, getFirestore } from 'firebase/firestore';
+
+import { emptySermon, Sermon } from '../types/Sermon';
+import { firebase } from '../firebase/firebase';
+import PopUp from './PopUp';
+import EditSermonForm from './EditSermonForm';
+import useAuth from '../context/user/UserContext';
 
 interface Props {
   sermon: SermonWithMetadata;
   playing: boolean;
+  playlist: Sermon[];
+  setPlaylist: (playlist: Sermon[]) => void;
   // handleSermonClick: (sermon: Sermon) => void;
 }
 
 const SermonListCard: FunctionComponent<Props> = ({
   sermon,
   playing,
+  playlist,
+  setPlaylist,
 }: // handleSermonClick,
 Props) => {
+  const { user } = useAuth();
+  const [deleteConfirmationPopup, setDeleteConfirmationPopup] = useState<boolean>(false);
+  const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
+
+  const [updatedSermon, setUpdatedSermon] = useState<Sermon>(emptySermon);
+
+  const [deleteChecked, setDeleteChecked] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (updatedSermon !== emptySermon) {
+      const index = playlist.findIndex((object) => {
+        return object.key === sermon.key;
+      });
+      const newPlaylist = [...playlist];
+      newPlaylist[index] = updatedSermon;
+      setPlaylist(newPlaylist);
+    }
+  }, [updatedSermon]);
+
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
+  const db = getFirestore(firebase);
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'sermons', id));
+      setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
+    } catch (error) {
+      alert(error);
+    }
+  };
+
   return (
     <div
       onClick={(e) => {
@@ -36,9 +80,7 @@ Props) => {
       <div className={styles.cardContent}>
         <div className={styles.divImage}></div>
         <div className={styles.divText}>
-          <h1
-            className={styles.title}
-          >{`${sermon.title}: ${sermon.subtitle}`}</h1>
+          <h1 className={styles.title}>{`${sermon.title}: ${sermon.subtitle}`}</h1>
           <p className={styles.description}>{sermon.description}</p>
           <div className={styles.bottomDiv}>
             <IconButton
@@ -57,9 +99,8 @@ Props) => {
               {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
                 <>
                   <span className={styles.timeLeft}>
-                    {formatRemainingTime(
-                      Math.floor(sermon.durationSeconds) - sermon.currentSecond
-                    ) + (playing || sermon.currentSecond > 0 ? ' left' : '')}
+                    {formatRemainingTime(Math.floor(sermon.durationSeconds) - sermon.currentSecond) +
+                      (playing || sermon.currentSecond > 0 ? ' left' : '')}
                   </span>
                 </>
               ) : (
@@ -69,15 +110,59 @@ Props) => {
                 </>
               )}
             </div>
-            {sermon.currentSecond < Math.floor(sermon.durationSeconds) &&
-              (playing || sermon.currentSecond > 0) && (
-                <progress
-                  className={styles.songProgress}
-                  value={sermon.currentSecond}
-                  max={Math.floor(sermon.durationSeconds)}
-                />
-              )}
+            {sermon.currentSecond < Math.floor(sermon.durationSeconds) && (playing || sermon.currentSecond > 0) && (
+              <progress
+                className={styles.songProgress}
+                value={sermon.currentSecond}
+                max={Math.floor(sermon.durationSeconds)}
+              />
+            )}
             <span style={{ width: '100%' }}></span>
+            {user?.role === 'admin' ? (
+              <>
+                <IconButton style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
+                  <EditIcon />
+                </IconButton>
+                <IconButton style={{ color: 'red' }} onClick={() => setDeleteConfirmationPopup(true)}>
+                  <DeleteIcon />
+                </IconButton>
+              </>
+            ) : (
+              <></>
+            )}
+            <PopUp
+              title={'Are you sure you want to permanently delete this sermon?'}
+              open={deleteConfirmationPopup}
+              setOpen={() => setDeleteConfirmationPopup(false)}
+              button={
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    handleDelete(sermon.key).then(() => {
+                      setDeleteConfirmationPopup(false);
+                      setDeleteChecked(false);
+                    });
+                  }}
+                  color="primary"
+                  disabled={!deleteChecked}
+                >
+                  Delete Forever
+                </Button>
+              }
+            >
+              <div>
+                <div style={{ display: 'flex' }} onClick={() => setDeleteChecked(!deleteChecked)}>
+                  <Checkbox checked={deleteChecked} />
+                  <p>I understand that deleting is permanent and cannot be undone</p>
+                </div>
+              </div>
+            </PopUp>
+            <EditSermonForm
+              open={editFormPopup}
+              setOpen={() => setEditFormPopup(false)}
+              sermon={sermon}
+              setUpdatedSermon={setUpdatedSermon}
+            />
           </div>
         </div>
       </div>

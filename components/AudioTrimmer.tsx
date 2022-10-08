@@ -2,14 +2,7 @@
 // Specifically, it allows the user to select a start and stop timestamp for the audio file.
 // The start timestamp is the time is used in the backend to actually trim the file
 
-import {
-  FunctionComponent,
-  MouseEvent,
-  SetStateAction,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { FunctionComponent, MouseEvent, SetStateAction, useEffect, useRef, useState } from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
 
 interface AudioTrimmerProps {
@@ -21,11 +14,7 @@ interface AudioTrimmerProps {
 // TODO: Impelement loop which will make playhead stay between start and end trim
 // TODO: THIS ENTIRE FILE NEEDS TO BE REFACTORED
 
-const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
-  url,
-  duration,
-  setDuration,
-}) => {
+const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, setDuration }) => {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [startTrim, setStartTrim] = useState<number>(0);
@@ -49,20 +38,14 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
     setIsPlaying(!audioPlayer.current.paused);
   };
   useEffect(() => {
-    audioPlayer.current.addEventListener(
-      'loadedmetadata',
-      handleMetaDataLoaded
-    );
+    audioPlayer.current.addEventListener('loadedmetadata', handleMetaDataLoaded);
 
     audioPlayer.current.addEventListener('timeupdate', handleTimeUpdate);
     audioPlayer.current.addEventListener('ended', handleComplete);
 
     // TODO: Ensure that this cleanup is all that is required for audio
     return () => {
-      audioPlayer.current.removeEventListener(
-        'loadedmetadata',
-        handleMetaDataLoaded
-      );
+      audioPlayer.current.removeEventListener('loadedmetadata', handleMetaDataLoaded);
       audioPlayer.current.removeEventListener('timeupdate', handleTimeUpdate);
       audioPlayer.current.removeEventListener('ended', handleComplete);
       audioPlayer.current.pause();
@@ -73,12 +56,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
     const hours: number = Math.floor(sec / 3600); // get hours
     const minutes: number = Math.floor((sec - hours * 3600) / 60); // get minutes
     const seconds: number = Math.floor(sec - hours * 3600 - minutes * 60); //  get seconds
-    return (
-      (hours > 0 ? hours + ':' : '') +
-      String(minutes).padStart(2, '0') +
-      ':' +
-      String(seconds).padStart(2, '0')
-    ); // Return is HH : MM : SS
+    return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
   };
 
   const togglePlayPause = () => {
@@ -98,14 +76,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   const forwardToEnd = () => {
     audioPlayer.current.currentTime = stopTrim;
   };
-  const MouseDown = (
-    e: MouseEvent,
-    booleanCallback: { (value: SetStateAction<boolean>): void }
-  ) => {
-    const time = calculateTimeFromPosition(
-      e.pageX,
-      scrubberContainer!.current!
-    );
+  const MouseDown = (e: MouseEvent, booleanCallback: { (value: SetStateAction<boolean>): void }) => {
+    const time = calculateTimeFromPosition(e.pageX, scrubberContainer!.current!);
     audioPlayer.current.currentTime = time;
     setScrubbingTime(time);
     booleanCallback(true);
@@ -129,10 +101,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
     if (isMovingStopTrim) setIsMovingStopTrim(false);
   };
   const MouseMove = (e: MouseEvent) => {
-    if (
-      scrubberContainer.current &&
-      (isScrubbing || isMovingStartTrim || isMovingStopTrim)
-    ) {
+    if (scrubberContainer.current && (isScrubbing || isMovingStartTrim || isMovingStopTrim)) {
       let time = calculateTimeFromPosition(e.pageX, scrubberContainer.current);
       if (isMovingStartTrim) {
         time = time < stopTrim ? time : stopTrim;
@@ -147,13 +116,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
     }
   };
 
-  const calculateTimeFromPosition = (
-    mousePageX: number,
-    container: HTMLDivElement
-  ) => {
-    let time =
-      ((mousePageX - container.offsetLeft + 1) / container.offsetWidth) *
-      duration;
+  const calculateTimeFromPosition = (mousePageX: number, container: HTMLDivElement) => {
+    let time = ((mousePageX - container.offsetLeft + 1) / container.offsetWidth) * duration;
     if (time < 0) time = 0;
     else if (time > duration) time = duration;
     return time;
@@ -189,9 +153,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
             <div
               className={styles.audio_scrubber_container}
               style={{
-                left: isScrubbing
-                  ? calculateTimePercentage(scrubbingTime)
-                  : calculateTimePercentage(currentTime),
+                left: isScrubbing ? calculateTimePercentage(scrubbingTime) : calculateTimePercentage(currentTime),
               }}
             >
               <div className={styles.audio_scrubber}>

@@ -1,13 +1,10 @@
-import {
-  Timestamp,
-  QueryDocumentSnapshot,
-  SnapshotOptions,
-} from 'firebase/firestore';
+import { Timestamp, QueryDocumentSnapshot, SnapshotOptions } from 'firebase/firestore';
 
 export interface Sermon {
   key: string;
   title: string;
   description: string;
+  series: string;
   speaker: Array<string>;
   subtitle: string;
   scripture: string;
@@ -17,10 +14,14 @@ export interface Sermon {
   dateString?: string;
 }
 
-export interface FirebaseSermon
-  extends Omit<Sermon, 'dateMillis' | 'dateString'> {
+export interface FirebaseSermon extends Omit<Sermon, 'dateMillis' | 'dateString'> {
   date: Timestamp;
 }
+
+export const getDateString = (date: Date) => {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[date.getMonth()]} ${date.getDay()}`;
+};
 
 /* This converter takes care of converting a Sermon to a FirebaseSermon on upload
  *  and a FirebaseSermon to a Sermon on download.
@@ -29,28 +30,9 @@ export const sermonConverter = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
     return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
-  fromFirestore: (
-    snapshot: QueryDocumentSnapshot<FirebaseSermon>,
-    options: SnapshotOptions
-  ): Sermon => {
+  fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>, options: SnapshotOptions): Sermon => {
     const { date, ...data } = snapshot.data(options);
-    const getDateString = (date: Date) => {
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      return `${months[date.getMonth()]} ${date.getDay()}`;
-    };
+
     return {
       ...data,
       dateMillis: snapshot.data(options).date.toMillis(),
@@ -63,9 +45,10 @@ export const emptySermon: Sermon = {
   key: '',
   title: '',
   subtitle: '',
+  series: '',
+  description: '',
   dateMillis: 0,
   durationSeconds: 0,
-  description: '',
   speaker: [],
   scripture: '',
   topic: [],

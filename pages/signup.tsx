@@ -2,18 +2,14 @@
  * Page for Signing up the User
  */
 // React
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/router';
 
 // Next
-import type {
-  GetServerSideProps,
-  InferGetServerSidePropsType,
-  GetServerSidePropsContext,
-} from 'next';
+import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
 
 // Auth
-import UserContext from '../context/user/UserContext';
+import useAuth from '../context/user/UserContext';
 
 // 3rd Party
 import { Button, TextField } from '@mui/material';
@@ -23,11 +19,12 @@ import ProtectedRoute from '../components/ProtectedRoute';
 import PopUp from '../components/PopUp';
 import AuthErrors from '../components/AuthErrors';
 
-const Signup = (
-  props: InferGetServerSidePropsType<typeof getServerSideProps>
-) => {
+import styles from '../styles/SignInWithGoogleButton.module.css';
+import Image from 'next/image';
+
+const Signup = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
-  const { signup } = useContext(UserContext);
+  const { signup, loginWithGoogle } = useAuth();
 
   const [data, setData] = useState({
     email: '',
@@ -38,7 +35,6 @@ const Signup = (
   const [errorMessage, setErrorMessage] = useState('');
 
   const handleSignup = async (e: any) => {
-    e.preventDefault();
     const res = await signup(data);
     const authResult = AuthErrors(res);
     if (authResult.authFailure) {
@@ -47,6 +43,17 @@ const Signup = (
       setOpen(true);
     }
     router.push(authResult.dest);
+  };
+
+  const handleLoginWithGoogle = async () => {
+    try {
+      await loginWithGoogle();
+      router.push('/');
+    } catch {
+      setTitle('Error');
+      setErrorMessage('Something went wrong. Please try again.');
+      setOpen(true);
+    }
   };
 
   return (
@@ -59,10 +66,7 @@ const Signup = (
       }}
     >
       <h1 className="text-center my-3 ">Signup</h1>
-      <form
-        style={{ height: '100%', width: '300px', margin: '20px' }}
-        onSubmit={handleSignup}
-      >
+      <div style={{ height: '100%', width: '300px', margin: '20px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <TextField
             fullWidth
@@ -99,22 +103,32 @@ const Signup = (
           type="submit"
           style={{ marginTop: '30px' }}
           size="medium"
+          onClick={handleSignup}
         >
           SignUp
         </Button>
+        <p style={{ textAlign: 'center' }}>or</p>
+        <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
+          <div className={styles.google_icon_wrapper}>
+            <div className={styles.google_icon}>
+              <Image src="/google-logo.svg" width="30px" height="30px" />
+            </div>
+          </div>
+          <p className={styles.btn_text}>
+            <b>Sign in with google</b>
+          </p>
+        </div>
         <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
           {errorMessage}
         </PopUp>
-      </form>
+      </div>
     </div>
   );
 };
 
-export const getServerSideProps: GetServerSideProps = async (
-  ctx: GetServerSidePropsContext
-) => {
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
-  if (userCredentials.props.token) {
+  if (userCredentials.props.uid) {
     return {
       redirect: {
         permanent: false,

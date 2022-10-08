@@ -19,8 +19,7 @@ interface Props {
 }
 
 const Sermons: NextPage<Props> = ({ sermons }: Props) => {
-  const { playing, playlist, setPlaylist, currentSermon, currentSecond } =
-    useAudioPlayer();
+  const { playing, playlist, setPlaylist, currentSermon, currentSecond } = useAudioPlayer();
 
   useEffect(() => {
     setPlaylist(sermons);
@@ -52,11 +51,19 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
                   sermon={{ ...sermon, currentSecond }}
                   playing={playing}
                   key={key}
+                  playlist={playlist}
+                  setPlaylist={setPlaylist}
                 />
               );
             } else {
               return (
-                <SermonListCard sermon={sermon} playing={false} key={key} />
+                <SermonListCard
+                  sermon={sermon}
+                  playing={false}
+                  key={key}
+                  playlist={playlist}
+                  setPlaylist={setPlaylist}
+                />
               );
             }
           })}
@@ -68,19 +75,21 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
 };
 
 export const getServerSideProps: GetServerSideProps = async (context) => {
-  const db = getFirestore(firebase);
-  // Firestore data converter to convert the queried data to the expected type
-  const sermonsQuery = query(collection(db, 'sermons')).withConverter(
-    sermonConverter
-  );
-  const sermons: Sermon[] = [];
-  const sermonsQuerySnapshot = await getDocs(sermonsQuery);
-  sermonsQuerySnapshot.forEach((doc) => {
-    sermons.push(doc.data());
-  });
-  return {
-    props: { sermons: sermons },
-  };
+  try {
+    const db = getFirestore(firebase);
+    // Firestore data converter to convert the queried data to the expected type
+    const sermonsQuery = query(collection(db, 'sermons')).withConverter(sermonConverter);
+    const sermonsQuerySnapshot = await getDocs(sermonsQuery);
+    const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
+
+    return {
+      props: { sermons: sermons },
+    };
+  } catch (error) {
+    return {
+      props: { sermons: [] },
+    };
+  }
 };
 
 export default Sermons;
