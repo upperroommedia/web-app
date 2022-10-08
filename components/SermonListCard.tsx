@@ -20,6 +20,7 @@ import { emptySermon, Sermon } from '../types/Sermon';
 import { firebase } from '../firebase/firebase';
 import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
+import useAuth from '../context/user/UserContext';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -36,6 +37,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   setPlaylist,
 }: // handleSermonClick,
 Props) => {
+  const { user } = useAuth();
   const [deleteConfirmationPopup, setDeleteConfirmationPopup] = useState<boolean>(false);
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
 
@@ -58,7 +60,12 @@ Props) => {
   const db = getFirestore(firebase);
 
   const handleDelete = async (id: string) => {
-    await deleteDoc(doc(db, 'sermons', id)).then(() => setPlaylist(playlist.filter((obj) => obj.key !== sermon.key)));
+    try {
+      await deleteDoc(doc(db, 'sermons', id));
+      setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
+    } catch (error) {
+      alert(error);
+    }
   };
 
   return (
@@ -111,12 +118,18 @@ Props) => {
               />
             )}
             <span style={{ width: '100%' }}></span>
-            <IconButton style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
-              <EditIcon />
-            </IconButton>
-            <IconButton style={{ color: 'red' }} onClick={() => setDeleteConfirmationPopup(true)}>
-              <DeleteIcon />
-            </IconButton>
+            {user?.role === 'admin' ? (
+              <>
+                <IconButton style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
+                  <EditIcon />
+                </IconButton>
+                <IconButton style={{ color: 'red' }} onClick={() => setDeleteConfirmationPopup(true)}>
+                  <DeleteIcon />
+                </IconButton>
+              </>
+            ) : (
+              <></>
+            )}
             <PopUp
               title={'Are you sure you want to permanently delete this sermon?'}
               open={deleteConfirmationPopup}

@@ -5,7 +5,6 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../uploader';
-import { getAuth } from 'firebase/auth';
 import { Sermon, sermonConverter } from '../../types/Sermon';
 
 interface uploadFileProps {
@@ -26,7 +25,6 @@ interface uploadFileProps {
 }
 
 const uploadFile = async (props: uploadFileProps) => {
-  getAuth();
   const db = getFirestore(firebase);
   const id = uuidv4();
   const sermonRef = ref(storage, `sermons/${id}`);
