@@ -137,7 +137,7 @@ export const trimAudio = functions.https.onRequest(async (_request, response) =>
     response.send(transcodeResponse.data);
   } catch (error) {
     functions.logger.log(error);
-    response.send(error);
+    response.send('There was an error trimming the audio, please check the logs');
   }
   functions.logger.info('DONE WITH TRIM AUDIO FUNCITON');
 });
