@@ -143,7 +143,6 @@ export const trimAudio = functions.https.onRequest(async (_request, response) =>
 });
 
 export const uploadToSubsplash = functions.https.onRequest(async (request, response) => {
-  console.log('Request: ' + JSON.stringify(request.body, null, 2));
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
     response.send('Email or Password are not set in .env file');
     return;
@@ -178,7 +177,6 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
       }
       tags = tags.concat(request.body.topics.map((topic: string) => `topic:${topic}`));
     }
-    console.log('Tags: ' + tags);
     const data = JSON.stringify({
       app_key: '9XTSHD',
       scriptures: [],
@@ -197,7 +195,6 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
         ],
       },
     });
-    console.log('Request: ' + data);
     config = {
       method: 'post',
       url: 'https://core.subsplash.com/media/v1/media-items',

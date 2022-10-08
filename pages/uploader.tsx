@@ -72,20 +72,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
-  const [speakerError, setSpeakerError] = useState<{
-    error: boolean;
-    message: string;
-  }>({ error: false, message: '' });
+  const [speakerError, setSpeakerError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
+  const [topicError, setTopicError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
 
-  const [topicError, setTopicError] = useState<{
-    error: boolean;
-    message: string;
-  }>({ error: false, message: '' });
-
-  const [newSeriesError, setNewSeriesError] = useState<{
-    error: boolean;
-    message: string;
-  }>({ error: false, message: '' });
+  const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
+    error: false,
+    message: '',
+  });
 
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
 
@@ -188,6 +181,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   });
 
   const clearForm = () => {
+    setSpeakerError({ error: false, message: '' });
+    setTopicError({ error: false, message: '' });
     setSermonData(emptySermon);
     setDate(new Date());
     setSpeaker([]);
@@ -432,25 +427,25 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 }
                 onClick={async () => {
                   if (file !== undefined && date != null && user?.role === 'admin') {
-                    await uploadFile({
-                      file: file,
-                      setFile: setFile,
-                      setUploadProgress: setUploadProgress,
-                      title: sermonData.title,
-                      subtitle: sermonData.subtitle,
-                      durationSeconds: duration,
-                      date,
-                      description: sermonData.description,
-                      speaker,
-                      scripture: sermonData.scripture,
-                      topic,
-                      series,
-                    })
-                      .then(() => {
-                        setSpeakerError({ error: false, message: '' });
-                        clearForm();
-                      })
-                      .catch((e) => setUploadProgress(JSON.stringify(e)));
+                    try {
+                      await uploadFile({
+                        file: file,
+                        setFile: setFile,
+                        setUploadProgress: setUploadProgress,
+                        title: sermonData.title,
+                        subtitle: sermonData.subtitle,
+                        durationSeconds: duration,
+                        date,
+                        description: sermonData.description,
+                        speaker,
+                        scripture: sermonData.scripture,
+                        topic,
+                        series,
+                      });
+                      clearForm();
+                    } catch (error) {
+                      setUploadProgress(JSON.stringify(error));
+                    }
                   } else if (user?.role !== 'admin') {
                     setUploadProgress('You do not have permission to upload');
                   }
@@ -476,14 +471,15 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             variant="contained"
             disabled={newSeries === '' || seriesArray.includes(newSeries)}
             onClick={async () => {
-              await addNewSeries(newSeries)
-                .then(() => {
-                  setNewSeriesPopup(false);
-                  seriesArray.push(newSeries);
-                  setSeries(newSeries);
-                  setNewSeries('');
-                })
-                .catch((e) => setNewSeriesError({ error: true, message: JSON.stringify(e) }));
+              try {
+                await addNewSeries(newSeries);
+                setNewSeriesPopup(false);
+                seriesArray.push(newSeries);
+                setSeries(newSeries);
+                setNewSeries('');
+              } catch (error) {
+                setNewSeriesError({ error: true, message: JSON.stringify(error) });
+              }
             }}
           >
             Submit
@@ -511,7 +507,6 @@ export default Uploader;
 
 export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
-  console.log('userCredentials', userCredentials);
   if (!userCredentials.props.uid || userCredentials.props.customClaims?.role !== 'admin') {
     return {
       redirect: {

@@ -60,7 +60,12 @@ Props) => {
   const db = getFirestore(firebase);
 
   const handleDelete = async (id: string) => {
-    await deleteDoc(doc(db, 'sermons', id)).then(() => setPlaylist(playlist.filter((obj) => obj.key !== sermon.key)));
+    try {
+      await deleteDoc(doc(db, 'sermons', id));
+      setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
+    } catch (error) {
+      alert(error);
+    }
   };
 
   return (

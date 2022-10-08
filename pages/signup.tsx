@@ -46,7 +46,14 @@ const Signup = (props: InferGetServerSidePropsType<typeof getServerSideProps>) =
   };
 
   const handleLoginWithGoogle = async () => {
-    await loginWithGoogle().then(() => router.push('/'));
+    try {
+      await loginWithGoogle();
+      router.push('/');
+    } catch {
+      setTitle('Error');
+      setErrorMessage('Something went wrong. Please try again.');
+      setOpen(true);
+    }
   };
 
   return (
