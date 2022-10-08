@@ -4,11 +4,11 @@ import { GetSignedUrlConfig } from '@google-cloud/storage';
 import axios, { AxiosResponse, AxiosRequestConfig } from 'axios';
 import qs from 'qs';
 import FormData from 'form-data';
+import { ROLES } from '../../context/types';
 admin.initializeApp();
 
 // To test functions: npm run-script serve
 // To deploy functions: npm run-script deploy
-
 const getDolbyToken = async (): Promise<AxiosResponse> => {
   const data = qs.stringify({
     grant_type: 'client_credentials',
@@ -143,7 +143,6 @@ export const trimAudio = functions.https.onRequest(async (_request, response) =>
 });
 
 export const uploadToSubsplash = functions.https.onRequest(async (request, response) => {
-  console.log('Request: ' + JSON.stringify(request.body, null, 2));
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
     response.send('Email or Password are not set in .env file');
     return;
@@ -178,7 +177,6 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
       }
       tags = tags.concat(request.body.topics.map((topic: string) => `topic:${topic}`));
     }
-    console.log('Tags: ' + tags);
     const data = JSON.stringify({
       app_key: '9XTSHD',
       scriptures: [],
@@ -197,7 +195,6 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
         ],
       },
     });
-    console.log('Request: ' + data);
     config = {
       method: 'post',
       url: 'https://core.subsplash.com/media/v1/media-items',
@@ -219,5 +216,28 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
     if (error instanceof Error) message = error.message;
 
     response.send(message);
+  }
+});
+
+export const setUserRole = functions.https.onCall(async (data: { email: string; role: string }, context) => {
+  if (context.auth?.token.role !== 'admin') {
+    return { status: 'Not Authorized' };
+  }
+  if (!ROLES.includes(data.role)) {
+    return { status: `Invalid Role: Should be either ${ROLES.join(', ')}` };
+  }
+  try {
+    const user = await admin.auth().getUserByEmail(data.email);
+    if (user.customClaims?.role === data.role) {
+      return { status: `User is already role: ${data.role}` };
+    } else {
+      await admin.auth().setCustomUserClaims(user.uid, { role: data.role });
+      return { status: 'Success!' };
+    }
+  } catch (e) {
+    if (e instanceof Error) {
+      return { status: e.message };
+    }
+    return { status: JSON.stringify(e) };
   }
 });

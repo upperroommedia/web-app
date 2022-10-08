@@ -19,12 +19,14 @@ import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
-import { getAuth } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
 import Button from '@mui/material/Button';
+import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
+import ProtectedRoute from '../components/ProtectedRoute';
+import useAuth from '../context/user/UserContext';
 
 export interface UploadableFile {
   file: File;
@@ -43,14 +45,14 @@ let Url: any;
 if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
-interface Props {
+interface UploaderProps {
   existingSermon?: Sermon;
   setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-const Uploader = (props: Props) => {
-  getAuth();
+const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
+  const { user } = useAuth();
   const [sermonData, setSermonData] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
@@ -70,20 +72,13 @@ const Uploader = (props: Props) => {
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
-  const [speakerError, setSpeakerError] = useState<{
-    error: boolean;
-    message: string;
-  }>({ error: false, message: '' });
+  const [speakerError, setSpeakerError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
+  const [topicError, setTopicError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
 
-  const [topicError, setTopicError] = useState<{
-    error: boolean;
-    message: string;
-  }>({ error: false, message: '' });
-
-  const [newSeriesError, setNewSeriesError] = useState<{
-    error: boolean;
-    message: string;
-  }>({ error: false, message: '' });
+  const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
+    error: false,
+    message: '',
+  });
 
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
 
@@ -186,6 +181,8 @@ const Uploader = (props: Props) => {
   });
 
   const clearForm = () => {
+    setSpeakerError({ error: false, message: '' });
+    setTopicError({ error: false, message: '' });
     setSermonData(emptySermon);
     setDate(new Date());
     setSpeaker([]);
@@ -429,23 +426,28 @@ const Uploader = (props: Props) => {
                   sermonData.subtitle === ''
                 }
                 onClick={async () => {
-                  if (file !== undefined && date != null) {
-                    await uploadFile({
-                      file: file,
-                      setFile: setFile,
-                      setUploadProgress: setUploadProgress,
-                      title: sermonData.title,
-                      subtitle: sermonData.subtitle,
-                      durationSeconds: duration,
-                      date,
-                      description: sermonData.description,
-                      speaker,
-                      scripture: sermonData.scripture,
-                      topic,
-                      series,
-                    }).then(() => {
+                  if (file !== undefined && date != null && user?.role === 'admin') {
+                    try {
+                      await uploadFile({
+                        file: file,
+                        setFile: setFile,
+                        setUploadProgress: setUploadProgress,
+                        title: sermonData.title,
+                        subtitle: sermonData.subtitle,
+                        durationSeconds: duration,
+                        date,
+                        description: sermonData.description,
+                        speaker,
+                        scripture: sermonData.scripture,
+                        topic,
+                        series,
+                      });
                       clearForm();
-                    });
+                    } catch (error) {
+                      setUploadProgress(JSON.stringify(error));
+                    }
+                  } else if (user?.role !== 'admin') {
+                    setUploadProgress('You do not have permission to upload');
                   }
                 }}
               />
@@ -468,14 +470,16 @@ const Uploader = (props: Props) => {
           <Button
             variant="contained"
             disabled={newSeries === '' || seriesArray.includes(newSeries)}
-            onClick={() => {
-              addNewSeries(newSeries).then(() => {
+            onClick={async () => {
+              try {
+                await addNewSeries(newSeries);
                 setNewSeriesPopup(false);
                 seriesArray.push(newSeries);
                 setSeries(newSeries);
-                setUserHasTypedInSeries(false);
                 setNewSeries('');
-              });
+              } catch (error) {
+                setNewSeriesError({ error: true, message: JSON.stringify(error) });
+              }
             }}
           >
             Submit
@@ -500,3 +504,17 @@ const Uploader = (props: Props) => {
 };
 
 export default Uploader;
+
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+  const userCredentials = await ProtectedRoute(ctx);
+  if (!userCredentials.props.uid || userCredentials.props.customClaims?.role !== 'admin') {
+    return {
+      redirect: {
+        permanent: false,
+        destination: '/',
+      },
+      props: {},
+    };
+  }
+  return { props: {} };
+};

@@ -1,7 +1,6 @@
 import { doc, getFirestore, updateDoc } from 'firebase/firestore';
 import { firebase } from '../../firebase/firebase';
 
-import { getAuth } from 'firebase/auth';
 import { sermonConverter } from '../../types/Sermon';
 
 interface editSermonProps {
@@ -17,7 +16,6 @@ interface editSermonProps {
 }
 
 const editSermon = async (props: editSermonProps) => {
-  getAuth();
   const db = getFirestore(firebase);
   const sermonRef = doc(db, 'sermons', props.key);
 

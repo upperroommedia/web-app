@@ -21,8 +21,8 @@ const AuthErrors = (error: string) => {
         ''
       );
     case undefined:
-      // No Error Login or SignUp Succeeded
-      return createErrorObject('', '', false, '/uploader');
+      // Login or SignUp Succeeded
+      return createErrorObject('', '', false, '/');
     default:
       return createErrorObject('Wrong Credentials', 'Double check your username and password', true, '');
   }

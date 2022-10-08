@@ -1,13 +1,47 @@
 .navbar {
+  display: flex;
+  justify-content: space-between;
+}
+
+.navbar_menu {
   /* background-color: lightblue; */
   justify-content: flex-start;
   align-items: center;
   display: flex;
   margin-top: 1rem;
 }
+.navbar_header_container {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.navbar_links {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
 
 .nav_link {
   padding: 1rem;
+}
+
+.user_info {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 15px;
+  margin-right: 20px;
+}
+
+.profile_pic {
+  position: relative;
+  /* background-color: #faecde; */
+  min-width: 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
 }
 
 .title {
