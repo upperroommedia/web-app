@@ -4,6 +4,7 @@ import { GetSignedUrlConfig } from '@google-cloud/storage';
 import axios, { AxiosResponse, AxiosRequestConfig } from 'axios';
 import qs from 'qs';
 import FormData from 'form-data';
+import { ROLES } from '../../context/types';
 admin.initializeApp();
 
 // To test functions: npm run-script serve
@@ -221,14 +222,25 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
   }
 });
 
-export const setUserRole = functions.https.onRequest(async (request, response) => {
-  if (request.body.uid && request.body.role) {
-    admin
-      .auth()
-      .setCustomUserClaims(request.body.uid, request.body.role)
-      .then((message) => response.send(message))
-      .catch((e) => response.send(e));
-  } else {
-    response.send('uid or role do not exist');
+export const setUserRole = functions.https.onCall(async (data: { email: string; role: string }, context) => {
+  if (context.auth?.token.role !== 'admin') {
+    return { status: 'Not Authorized' };
+  }
+  if (!ROLES.includes(data.role)) {
+    return { status: `Invalid Role: Should be either ${ROLES.join(', ')}` };
+  }
+  try {
+    const user = await admin.auth().getUserByEmail(data.email);
+    if (user.customClaims?.role === data.role) {
+      return { status: `User is already role: ${data.role}` };
+    } else {
+      await admin.auth().setCustomUserClaims(user.uid, { role: data.role });
+      return { status: 'Success!' };
+    }
+  } catch (e) {
+    if (e instanceof Error) {
+      return { status: e.message };
+    }
+    return { status: JSON.stringify(e) };
   }
 });
