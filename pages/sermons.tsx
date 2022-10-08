@@ -75,17 +75,21 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
 };
 
 export const getServerSideProps: GetServerSideProps = async (context) => {
-  const db = getFirestore(firebase);
-  // Firestore data converter to convert the queried data to the expected type
-  const sermonsQuery = query(collection(db, 'sermons')).withConverter(sermonConverter);
-  const sermons: Sermon[] = [];
-  const sermonsQuerySnapshot = await getDocs(sermonsQuery);
-  sermonsQuerySnapshot.forEach((doc) => {
-    sermons.push(doc.data());
-  });
-  return {
-    props: { sermons: sermons },
-  };
+  try {
+    const db = getFirestore(firebase);
+    // Firestore data converter to convert the queried data to the expected type
+    const sermonsQuery = query(collection(db, 'sermons')).withConverter(sermonConverter);
+    const sermonsQuerySnapshot = await getDocs(sermonsQuery);
+    const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
+
+    return {
+      props: { sermons: sermons },
+    };
+  } catch (error) {
+    return {
+      props: { sermons: [] },
+    };
+  }
 };
 
 export default Sermons;
