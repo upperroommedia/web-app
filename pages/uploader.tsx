@@ -8,8 +8,7 @@ import addNewSeries from './api/addNewSeries';
 import PopUp from '../components/PopUp';
 
 import styles from '../styles/Uploader.module.css';
-import { ChangeEvent, Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
-import { FileError, FileRejection, useDropzone } from 'react-dropzone';
+import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
@@ -27,24 +26,8 @@ import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
+import DropZone, { UploadableFile } from '../components/DropZone';
 
-export interface UploadableFile {
-  file: File;
-  name: string;
-  preview: string;
-  errors: FileError[];
-}
-// TODO: figure out how to type this properly
-// let Url: {
-//   new (url: string | URL, base?: string | URL | undefined): URL;
-//   createObjectURL: any;
-//   prototype?: URL;
-//   revokeObjectURL?: (url: string) => void;
-// };
-let Url: any;
-if (typeof window !== 'undefined') {
-  Url = window.URL || window.webkitURL;
-}
 interface UploaderProps {
   existingSermon?: Sermon;
   setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
@@ -139,47 +122,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     );
   };
 
-  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
-    // Do something with the files
-    if (rejectedFiles.length > 0) {
-      // console.log(rejectedFiles[0].errors[0]);
-      setFile(undefined);
-      return;
-    }
-    // const reader = new FileReader();
-    // reader.readAsDataURL(acceptedFiles[0]);
-    // reader.addEventListener('progress', function (pe) {
-    //   if (pe.lengthComputable) {
-    //     console.log('Progress:', pe.loaded, 'Total:', pe.total);
-    //   }
-    // });
-    // reader.addEventListener(
-    //   'load',
-    //   function () {
-    const mappedAccepted = {
-      file: acceptedFiles[0],
-      // preview: reader.result as string,
-      preview: Url.createObjectURL(acceptedFiles[0]),
-      name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
-      errors: [],
-    };
-    setFile(mappedAccepted);
-    //   },
-    //   false
-    // );
-    // const mappedAccepted2 = acceptedFiles.map((file) => ({
-    //   file,
-    //   errors: [],
-    // }));
-    // setFile((curr) => [...curr, mappedAccepted, ...rejectedFiles]);
-  }, []);
-
-  const { getRootProps, getInputProps } = useDropzone({
-    onDrop,
-    multiple: false,
-    accept: ['audio/*'],
-  });
-
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
@@ -213,6 +155,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           gap: '1ch',
           margin: 'auto',
           maxWidth: '900px',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
         <h1>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
@@ -397,66 +341,63 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             </Button>
           </div>
         ) : (
-          <div className={styles.form}>
+          <>
             {file ? (
-              <>
+              <div>
                 <AudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
                 <div style={{ display: 'flex' }}>
                   <button type="button" className={styles.button} onClick={() => setFile(undefined)}>
                     Clear File
                   </button>
                 </div>
-              </>
-            ) : (
-              <div className={styles.dragAndDrop} {...getRootProps()}>
-                <input type="hidden" {...getInputProps()} />
-                <p>Drag &apos;n&apos; drop audio files here, or click to select files</p>
               </div>
+            ) : (
+              <DropZone setFile={setFile} />
             )}
-            <div style={{ display: 'flex' }}>
-              <input
-                className={styles.button}
-                type="button"
-                value="Upload"
-                disabled={
-                  file === undefined ||
-                  sermonData.title === '' ||
-                  date === null ||
-                  speaker.length === 0 ||
-                  sermonData.subtitle === ''
-                }
-                onClick={async () => {
-                  if (file !== undefined && date != null && user?.role === 'admin') {
-                    try {
-                      await uploadFile({
-                        file: file,
-                        setFile: setFile,
-                        setUploadProgress: setUploadProgress,
-                        title: sermonData.title,
-                        subtitle: sermonData.subtitle,
-                        durationSeconds: duration,
-                        date,
-                        description: sermonData.description,
-                        speaker,
-                        scripture: sermonData.scripture,
-                        topic,
-                        series,
-                      });
-                      clearForm();
-                    } catch (error) {
-                      setUploadProgress(JSON.stringify(error));
-                    }
-                  } else if (user?.role !== 'admin') {
-                    setUploadProgress('You do not have permission to upload');
-                  }
-                }}
-              />
-              <button type="button" className={styles.button} onClick={() => clearForm()}>
-                Clear Form
-              </button>
-            </div>
-          </div>
+          </>
         )}
+        <div style={{ display: 'flex' }}>
+          <input
+            className={styles.button}
+            type="button"
+            value="Upload"
+            disabled={
+              file === undefined ||
+              sermonData.title === '' ||
+              date === null ||
+              speaker.length === 0 ||
+              sermonData.subtitle === ''
+            }
+            onClick={async () => {
+              if (file !== undefined && date != null && user?.role === 'admin') {
+                try {
+                  await uploadFile({
+                    file: file,
+                    setFile: setFile,
+                    setUploadProgress: setUploadProgress,
+                    title: sermonData.title,
+                    subtitle: sermonData.subtitle,
+                    durationSeconds: duration,
+                    date,
+                    description: sermonData.description,
+                    speaker,
+                    scripture: sermonData.scripture,
+                    topic,
+                    series,
+                  });
+                  clearForm();
+                } catch (error) {
+                  setUploadProgress(JSON.stringify(error));
+                }
+              } else if (user?.role !== 'admin') {
+                setUploadProgress('You do not have permission to upload');
+              }
+            }}
+          />
+          <button type="button" className={styles.button} onClick={() => clearForm()}>
+            Clear Form
+          </button>
+        </div>
       </Box>
       <PopUp
         title={'Add new series'}
