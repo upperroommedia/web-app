@@ -9,7 +9,7 @@ import BottomAudioBar from '../components/BottomAudioBar';
 
 import { Sermon, sermonConverter } from '../types/Sermon';
 
-import { collection, getDocs, getFirestore, query } from 'firebase/firestore';
+import { collection, getDocs, getFirestore, query, limit } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { useEffect } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
@@ -78,7 +78,7 @@ export const getServerSideProps: GetServerSideProps = async (context) => {
   try {
     const db = getFirestore(firebase);
     // Firestore data converter to convert the queried data to the expected type
-    const sermonsQuery = query(collection(db, 'sermons')).withConverter(sermonConverter);
+    const sermonsQuery = query(collection(db, 'sermons'), limit(3)).withConverter(sermonConverter);
     const sermonsQuerySnapshot = await getDocs(sermonsQuery);
     const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
 
