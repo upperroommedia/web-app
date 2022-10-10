@@ -31,6 +31,7 @@ export const sermonConverter = {
     return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>, options: SnapshotOptions): Sermon => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data(options);
 
     return {

@@ -5,7 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { ROLES } from '../context/types';
 import ProtectedRoute from '../components/ProtectedRoute';
 
-const Admin: NextPage = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
+const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const [email, setEmail] = useState<string>('');
   const [role, setRole] = useState<string>(ROLES[0]);
   const [message, setMessage] = useState<string>('');

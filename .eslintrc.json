@@ -3,12 +3,7 @@
     "browser": true,
     "es2021": true
   },
-  "extends": [
-    "plugin:react/recommended",
-    "standard",
-    "plugin:prettier/recommended",
-    "plugin:@next/next/recommended"
-  ],
+  "extends": ["plugin:react/recommended", "standard", "plugin:prettier/recommended", "plugin:@next/next/recommended"],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
     "ecmaFeatures": {
@@ -23,7 +18,9 @@
     "react/no-danger": "off", // it's self explainatory that no-danger should be used sparingly
     "react/react-in-jsx-scope": "off", // next.js does not require react in most components
     "no-console": "warn", // no console statements allowed
-    "prettier/prettier": "off" // don't show prettier errors as it will be fixed when saved anyway
+    "prettier/prettier": "off", // don't show prettier errors as it will be fixed when saved anyway
+    "no-unused-vars": "off",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
   },
   "settings": {
     "react": {

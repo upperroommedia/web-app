@@ -343,9 +343,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         ) : (
           <>
             {file ? (
-              <div>
+              <div style={{ width: '100%' }}>
                 <AudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
-                <div style={{ display: 'flex' }}>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <button type="button" className={styles.button} onClick={() => setFile(undefined)}>
                     Clear File
                   </button>

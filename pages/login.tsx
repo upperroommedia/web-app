@@ -22,7 +22,7 @@ import PopUp from '../components/PopUp';
 import styles from '../styles/SignInWithGoogleButton.module.css';
 import Image from 'next/image';
 
-const Login = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
+const Login = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
   const { login, loginWithGoogle } = useAuth();
 

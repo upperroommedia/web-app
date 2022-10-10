@@ -1,12 +1,33 @@
+.outer_container {
+  --handle_width: 15px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  touch-action: pan-y;
+  padding: 0 var(--handle_width);
+}
+
 .audio_container {
-  --thumb_height: 20px;
-  width: 1000px;
-  height: 200px;
+  --thumb_text_size: 0.75rem;
+  --thumb_arrow_height: 5px;
+  --thumb_height: calc(var(--thumb_text_size) + var(--thumb_arrow_height));
+  /* width: 100%; */
+  height: 100px;
+  padding: 0 10px;
   margin-top: var(--thumb_height);
   /* background-color: lightblue; */
   background-image: url('https://audiotrimmer.com/waves/scrubbg.png');
   background-size: cover;
   position: relative;
+}
+
+.scrubber_container {
+  /* display: flex; */
+  gap: 10px;
+  align-items: end;
+  /* justify-content: center; */
+  /* background-color: blue; */
 }
 
 .trim_area {
@@ -15,7 +36,6 @@
   /* left: 25%;
   right: 25%; */
   background-color: rgba(66, 176, 245, 0.2);
-  --handle_width: 15px;
   position: absolute;
 }
 
@@ -80,18 +100,38 @@
 }
 
 .audio_scrubber_thumb {
+  display: flex;
+  justify-content: center;
   cursor: move;
-  --width: 20px;
-  width: var(--width);
-  height: var(--thumb_height);
-  background-color: red;
-  clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+  width: fit-content;
+  border-radius: 5px;
+  background-color: #ff7070;
   position: relative;
-  top: calc(-1 * var(--thumb_height));
-  left: calc(-0.5 * (var(--width) - var(--scrubber_width)));
+  top: calc(-1 * (var(--thumb_height)));
+  transform: translateX(calc(-50% + var(--scrubber_width) / 2));
+}
+
+.audio_scrubber_thumb::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  border: var(--thumb_arrow_height) solid transparent;
+  border-top-color: #ff7070;
+  clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+}
+
+.audio_scrubber_text {
+  margin: 0px 3px;
+  font-size: var(--thumb_text_size);
 }
 
 .time_label {
   width: 70px;
   /* background-color: red; */
+}
+
+.button_container {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
 }

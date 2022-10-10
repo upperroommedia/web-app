@@ -5,7 +5,7 @@ import Footer from '../components/Footer';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import { UserProvider } from '../context/user/UserContext';
 
-function MyApp({ Component, pageProps: { session, ...pageProps } }: AppProps) {
+function MyApp({ Component, pageProps: { _session, ...pageProps } }: AppProps) {
   return (
     <UserProvider>
       <Navbar />

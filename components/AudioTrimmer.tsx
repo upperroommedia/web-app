@@ -1,8 +1,16 @@
 // An audio trimmer component that allows the user to trim audio files.
 // Specifically, it allows the user to select a start and stop timestamp for the audio file.
 // The start timestamp is the time is used in the backend to actually trim the file
-
-import { FunctionComponent, MouseEvent, SetStateAction, useEffect, useRef, useState } from 'react';
+import {
+  FunctionComponent,
+  Touch,
+  SetStateAction,
+  useEffect,
+  useRef,
+  useState,
+  Dispatch,
+  MutableRefObject,
+} from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
 
 interface AudioTrimmerProps {
@@ -14,40 +22,120 @@ interface AudioTrimmerProps {
 // TODO: Impelement loop which will make playhead stay between start and end trim
 // TODO: THIS ENTIRE FILE NEEDS TO BE REFACTORED
 
+enum CLICK_TARGET {
+  'SCRUBBER',
+  'START_TRIM',
+  'END_TRIM',
+}
+
+let clickTarget = CLICK_TARGET.SCRUBBER;
+
+function useStateRef<T>(initialValue: T): [T, Dispatch<SetStateAction<T>>, MutableRefObject<T>] {
+  const [value, setValue] = useState(initialValue);
+  const ref = useRef(value);
+
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+
+  return [value, setValue, ref];
+}
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, setDuration }) => {
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [startTrim, setStartTrim] = useState<number>(0);
-  const [stopTrim, setStopTrim] = useState<number>(duration);
-  const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
-  const [isMovingStartTrim, setIsMovingStartTrim] = useState<boolean>(false);
-  const [isMovingStopTrim, setIsMovingStopTrim] = useState<boolean>(false);
-  const [scrubbingTime, setScrubbingTime] = useState<number>(currentTime);
+  const [startTrim, setStartTrim, startTrimRef] = useStateRef<number>(0);
+  const [stopTrim, setStopTrim, stopTrimRef] = useStateRef<number>(duration);
+  const isScrubbingRef = useRef<boolean>(false);
   const audioPlayer = useRef<HTMLAudioElement>(new Audio(url)); // reference for our audio component
   const scrubberContainer = useRef<HTMLDivElement>(null);
 
-  function handleMetaDataLoaded() {
+  const handleMetaDataLoaded = () => {
     setStopTrim(audioPlayer.current.duration);
     setDuration(audioPlayer.current.duration);
-  }
+  };
 
-  function handleTimeUpdate() {
-    setCurrentTime(audioPlayer.current.currentTime);
-  }
+  const handlePlay = () => {
+    setIsPlaying(true);
+  };
+
+  const handlePause = () => {
+    setIsPlaying(false);
+  };
+
+  const handleTimeUpdate = () => {
+    // TODO(1): See why this doesn't update properly on phone
+    const currentTime = audioPlayer.current.currentTime;
+    if (!isScrubbingRef.current && currentTime >= stopTrimRef.current) {
+      audioPlayer.current.currentTime = startTrimRef.current;
+      audioPlayer.current.pause();
+    }
+    setCurrentTime(currentTime);
+  };
   const handleComplete = () => {
     setIsPlaying(!audioPlayer.current.paused);
   };
+
+  const handleMouseUp = () => {
+    isScrubbingRef.current = false;
+  };
+
+  const handleMove = (e: MouseEvent | TouchEvent) => {
+    if (scrubberContainer.current && isScrubbingRef.current) {
+      let event: MouseEvent | Touch;
+      if ('touches' in e) {
+        event = e.touches[0];
+      } else {
+        event = e;
+      }
+      let time = calculateTimeFromPosition(event.pageX, scrubberContainer.current);
+      if (clickTarget === CLICK_TARGET.START_TRIM) {
+        time = time < stopTrimRef.current ? time : stopTrimRef.current;
+        setStartTrim(time);
+      } else if (clickTarget === CLICK_TARGET.END_TRIM) {
+        time = time > startTrimRef.current ? time : startTrimRef.current;
+        setStopTrim(time);
+        time = time - 5;
+        time = time > startTrimRef.current ? time : startTrimRef.current;
+      }
+      if (time > stopTrimRef.current) {
+        setStopTrim(time);
+      } else if (time < startTrimRef.current) {
+        setStartTrim(time);
+      }
+      audioPlayer.current.currentTime = time;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
+
   useEffect(() => {
     audioPlayer.current.addEventListener('loadedmetadata', handleMetaDataLoaded);
-
+    audioPlayer.current.addEventListener('play', handlePlay);
+    audioPlayer.current.addEventListener('pause', handlePause);
     audioPlayer.current.addEventListener('timeupdate', handleTimeUpdate);
     audioPlayer.current.addEventListener('ended', handleComplete);
+    addEventListener('touchmove', (event) => {
+      handleMove(event);
+    });
+    addEventListener('mousemove', (event) => {
+      handleMove(event);
+    });
+    addEventListener('mouseup', handleMouseUp);
 
     // TODO: Ensure that this cleanup is all that is required for audio
     return () => {
       audioPlayer.current.removeEventListener('loadedmetadata', handleMetaDataLoaded);
+      audioPlayer.current.removeEventListener('play', handlePlay);
+      audioPlayer.current.removeEventListener('pause', handlePause);
       audioPlayer.current.removeEventListener('timeupdate', handleTimeUpdate);
       audioPlayer.current.removeEventListener('ended', handleComplete);
+      removeEventListener('touchmove', (event) => {
+        handleMove(event);
+      });
+      removeEventListener('mousemove', (event) => {
+        handleMove(event);
+      });
+      removeEventListener('mouseup', handleMouseUp);
       audioPlayer.current.pause();
     };
   }, []);
@@ -60,9 +148,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
   };
 
   const togglePlayPause = () => {
-    const prevValue = isPlaying;
-    setIsPlaying(!prevValue);
-    if (!prevValue) {
+    if (audioPlayer.current.paused) {
       audioPlayer.current.play();
     } else {
       audioPlayer.current.pause();
@@ -76,47 +162,44 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
   const forwardToEnd = () => {
     audioPlayer.current.currentTime = stopTrim;
   };
-  const MouseDown = (e: MouseEvent, booleanCallback: { (value: SetStateAction<boolean>): void }) => {
-    const time = calculateTimeFromPosition(e.pageX, scrubberContainer!.current!);
+
+  const MouseDown = (e: React.MouseEvent | React.TouchEvent, target: CLICK_TARGET) => {
+    isScrubbingRef.current = true;
+    let event: React.MouseEvent | Touch;
+    if ('touches' in e) {
+      event = e.touches[0];
+    } else {
+      event = e;
+    }
+
+    let time = calculateTimeFromPosition(event.pageX, scrubberContainer!.current!);
+    if (target === CLICK_TARGET.SCRUBBER) {
+      time > stopTrim
+        ? (target = CLICK_TARGET.END_TRIM)
+        : time < startTrim
+        ? (target = CLICK_TARGET.START_TRIM)
+        : (target = CLICK_TARGET.SCRUBBER);
+    }
+    clickTarget = target;
+
+    if (clickTarget === CLICK_TARGET.START_TRIM) {
+      setStartTrim(time);
+    } else if (clickTarget === CLICK_TARGET.END_TRIM) {
+      setStopTrim(time);
+      time = time - 5;
+      time = time > startTrim ? time : startTrim;
+    }
     audioPlayer.current.currentTime = time;
-    setScrubbingTime(time);
-    booleanCallback(true);
-    if (audioPlayer.current.paused) {
-      setIsPlaying(true);
-      audioPlayer.current.play();
+    if (!audioPlayer.current.paused) {
+      audioPlayer.current.pause();
     }
+
     e.stopPropagation();
-  };
-  // const StartTrimMouseDown = (e: MouseEvent) => {
-  //   setIsMovingStartTrim(true);
-  //   e.stopPropagation();
-  // };
-  // const StopTrimMouseDown = (e: MouseEvent) => {
-  //   setIsMovingStopTrim(true);
-  //   e.stopPropagation();
-  // };
-  const MouseUp = () => {
-    if (isScrubbing) setIsScrubbing(false);
-    if (isMovingStartTrim) setIsMovingStartTrim(false);
-    if (isMovingStopTrim) setIsMovingStopTrim(false);
-  };
-  const MouseMove = (e: MouseEvent) => {
-    if (scrubberContainer.current && (isScrubbing || isMovingStartTrim || isMovingStopTrim)) {
-      let time = calculateTimeFromPosition(e.pageX, scrubberContainer.current);
-      if (isMovingStartTrim) {
-        time = time < stopTrim ? time : stopTrim;
-        setStartTrim(time);
-      } else if (isMovingStopTrim) {
-        time = time > startTrim ? time : startTrim;
-        setStopTrim(time);
-      }
-      setScrubbingTime(time);
-      audioPlayer.current.currentTime = time;
-      e.stopPropagation();
-    }
+    e.preventDefault();
   };
 
   const calculateTimeFromPosition = (mousePageX: number, container: HTMLDivElement) => {
+    const duration = audioPlayer.current.duration;
     let time = ((mousePageX - container.offsetLeft + 1) / container.offsetWidth) * duration;
     if (time < 0) time = 0;
     else if (time > duration) time = duration;
@@ -128,36 +211,25 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
     return `${(currentTime / duration) * 100}%`;
   };
   return (
-    <>
-      <h1>Audio Trimmer</h1>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'end',
-          gap: '10px',
-          justifyContent: 'center',
-          // backgroundColor: 'blue',
-        }}
-        onMouseMove={(e) => MouseMove(e)}
-        // TODO: Put the mouse up event on the body
-        onMouseUp={MouseUp}
-      >
-        {/* current time */}
-        <div className={styles.time_label}>{calculateTime(currentTime)}</div>
+    <div className={styles.outer_container}>
+      <div className={styles.scrubber_container}>
         <div
+          onTouchStart={(e) => MouseDown(e, CLICK_TARGET.SCRUBBER)}
           onMouseDown={(e) => {
-            MouseDown(e, setIsScrubbing);
+            MouseDown(e, CLICK_TARGET.SCRUBBER);
           }}
         >
           <div ref={scrubberContainer} className={styles.audio_container}>
             <div
               className={styles.audio_scrubber_container}
               style={{
-                left: isScrubbing ? calculateTimePercentage(scrubbingTime) : calculateTimePercentage(currentTime),
+                left: calculateTimePercentage(currentTime),
               }}
             >
               <div className={styles.audio_scrubber}>
-                <div className={styles.audio_scrubber_thumb}></div>
+                <div className={styles.audio_scrubber_thumb}>
+                  <span className={styles.audio_scrubber_text}>{calculateTime(currentTime)}</span>
+                </div>
               </div>
             </div>
             <div
@@ -169,37 +241,24 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
             >
               <div
                 className={`${styles.handle} ${styles.left_handle}`}
+                onTouchStart={(e) => MouseDown(e, CLICK_TARGET.START_TRIM)}
                 onMouseDown={(e) => {
-                  MouseDown(e, setIsMovingStartTrim);
+                  MouseDown(e, CLICK_TARGET.START_TRIM);
                 }}
               ></div>
               <div
                 className={`${styles.handle} ${styles.right_handle}`}
+                onTouchStart={(e) => MouseDown(e, CLICK_TARGET.END_TRIM)}
                 onMouseDown={(e) => {
-                  MouseDown(e, setIsMovingStopTrim);
+                  MouseDown(e, CLICK_TARGET.END_TRIM);
                 }}
               ></div>
             </div>
           </div>
         </div>
-        {/* duration */}
-        <div className={styles.time_label}>{calculateTime(duration)}</div>
       </div>
-      {/* <input
-        type="range"
-        className={styles.range}
-        value={currentTime}
-        step="1"
-        min="0"
-        max={duration}
-        onChange={(e) => onScrub(e.target.value)}
-        onMouseUp={onScrubEnd}
-        onKeyUp={onScrubEnd}
-        // style={{ background-image: url("https://audiotrimmer.com/waves/scrubbg.png")}}
-        // style={{styles.range}}
-      /> */}
       {/* TODO: Style this better */}
-      <div style={{ display: 'flex' }}>
+      <div className={styles.button_container}>
         <button type="button" onClick={rewindToStart}>
           Rewind
         </button>
@@ -210,13 +269,13 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
           Forward
         </button>
       </div>
-      <div style={{ display: 'flex', gap: '10px' }}>
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
         {/* start time */}
         <div>Trim Start: {calculateTime(startTrim)}</div>
         {/* end time */}
         <div>Trim Stop: {calculateTime(stopTrim)}</div>
       </div>
-    </>
+    </div>
   );
 };
 
