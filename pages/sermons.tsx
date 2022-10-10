@@ -7,10 +7,8 @@ import type { GetServerSideProps, NextPage } from 'next';
 import SermonListCard from '../components/SermonListCard';
 import BottomAudioBar from '../components/BottomAudioBar';
 
-import { Sermon, sermonConverter } from '../types/Sermon';
+import { Sermon } from '../types/Sermon';
 
-import { collection, getDocs, getFirestore, query, limit } from 'firebase/firestore';
-import { firebase } from '../firebase/firebase';
 import { useEffect } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 
@@ -75,7 +73,6 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
 };
 
 export const getServerSideProps: GetServerSideProps = async (context) => {
-  try {
     // const db = getFirestore(firebase);
     // // Firestore data converter to convert the queried data to the expected type
     // //
@@ -86,11 +83,7 @@ export const getServerSideProps: GetServerSideProps = async (context) => {
     return {
       props: { sermons: [] },
     };
-  } catch (error) {
-    return {
-      props: { sermons: [] },
-    };
-  }
+
 };
 
 export default Sermons;
