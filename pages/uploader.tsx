@@ -177,7 +177,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     multiple: false,
-    accept: ['audio/*'],
+    accept: { 'audio/*': [".mp3", ".wav", ".flac"]},
   });
 
   const clearForm = () => {
