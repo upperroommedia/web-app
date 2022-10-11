@@ -13,7 +13,6 @@
     "prepare": "husky install"
   },
   "dependencies": {
-    "classnames": "^2.3.2",
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
     "@firebase/app-types": "^0.8.0",
@@ -21,6 +20,7 @@
     "@mui/material": "^5.10.8",
     "@mui/system": "^5.10.8",
     "@mui/x-date-pickers": "^5.0.4",
+    "classnames": "^2.3.2",
     "date-fns": "^2.29.3",
     "firebase": "^9.11.0",
     "firebase-admin": "^11.1.0",
@@ -30,6 +30,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-dropzone": "^14.2.2",
+    "sharp": "^0.31.1",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
