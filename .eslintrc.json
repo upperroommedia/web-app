@@ -3,12 +3,7 @@
     "browser": true,
     "es2021": true
   },
-  "extends": [
-    "plugin:react/recommended",
-    "standard",
-    "plugin:prettier/recommended",
-    "plugin:@next/next/recommended"
-  ],
+  "extends": ["plugin:react/recommended", "standard", "plugin:prettier/recommended", "plugin:@next/next/recommended"],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
     "ecmaFeatures": {
@@ -17,9 +12,19 @@
     "ecmaVersion": "latest",
     "sourceType": "module"
   },
-  "plugins": ["react", "@typescript-eslint"],
+  "plugins": ["react", "@typescript-eslint", "mui"],
 
   "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          "@mui/*/*/*",
+          "!@mui/material/test-utils/*",
+          "@mui/material$npm install eslint-plugin-mui --save-dev"
+        ]
+      }
+    ],
     "react/no-danger": "off", // it's self explainatory that no-danger should be used sparingly
     "react/react-in-jsx-scope": "off", // next.js does not require react in most components
     "no-console": "warn", // no console statements allowed

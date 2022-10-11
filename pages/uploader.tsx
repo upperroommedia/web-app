@@ -1,12 +1,10 @@
 /**
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
-import AudioTrimmer from '../components/AudioTrimmer';
+import dynamic from 'next/dynamic';
 import uploadFile from './api/uploadFile';
 import editSermon from './api/editSermon';
 import addNewSeries from './api/addNewSeries';
-import PopUp from '../components/PopUp';
-
 import styles from '../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { FileError, FileRejection, useDropzone } from 'react-dropzone';
@@ -15,7 +13,8 @@ import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { DesktopDatePicker } from '@mui/x-date-pickers/DesktopDatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
@@ -27,6 +26,9 @@ import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
+
+const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
+const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
 export interface UploadableFile {
   file: File;
@@ -177,7 +179,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     multiple: false,
-    accept: { 'audio/*': [".mp3", ".wav", ".flac"]},
+    accept: { 'audio/*': ['.mp3', '.wav', '.flac'] },
   });
 
   const clearForm = () => {
@@ -400,7 +402,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <div className={styles.form}>
             {file ? (
               <>
-                <AudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
+                <DynamicAudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
                 <div style={{ display: 'flex' }}>
                   <button type="button" className={styles.button} onClick={() => setFile(undefined)}>
                     Clear File
@@ -458,7 +460,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </div>
         )}
       </Box>
-      <PopUp
+      <DynamicPopUp
         title={'Add new series'}
         open={newSeriesPopup}
         setOpen={() => setNewSeriesPopup(false)}
@@ -497,7 +499,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             label={newSeriesError.error ? newSeriesError.message : 'Series'}
           />
         </div>
-      </PopUp>
+      </DynamicPopUp>
       <p style={{ textAlign: 'center' }}>{uploadProgress}</p>
     </form>
   );
