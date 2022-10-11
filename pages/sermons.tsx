@@ -4,13 +4,23 @@
 import type { GetServerSideProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
-import { Sermon } from '../types/Sermon';
+import { Sermon, sermonConverter } from '../types/Sermon';
+
+import { collection, getDocs, getFirestore, query, limit } from 'firebase/firestore';
+import { firebase } from '../firebase/firebase';
+import { useEffect } from 'react';
+import useAudioPlayer from '../context/audio/audioPlayerContext';
 
 interface Props {
   sermons: Sermon[];
 }
 
 const Sermons: NextPage<Props> = ({ sermons }: Props) => {
+  const { setPlaylist } = useAudioPlayer();
+
+  useEffect(() => {
+    setPlaylist(sermons);
+  }, []);
 
   // const handleSermonClick = (sermon: Sermon) => {
   //   // console.log('handle click');
@@ -30,7 +40,7 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
             // gap: '3px',
           }}
         >
-          {sermons}
+          
         </div>
       </div>
     </>
@@ -38,17 +48,22 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
 };
 
 export const getServerSideProps: GetServerSideProps = async (context) => {
-    // const db = getFirestore(firebase);
-    // // Firestore data converter to convert the queried data to the expected type
-    // //
-    // const sermonsQuery = query(collection(db, 'sermons'), limit(3)).withConverter(sermonConverter);
-    // const sermonsQuerySnapshot = await getDocs(sermonsQuery);
-    // const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
+  try {
+    const db = getFirestore(firebase);
+    // Firestore data converter to convert the queried data to the expected type
+    //
+    const sermonsQuery = query(collection(db, 'sermons'), limit(3)).withConverter(sermonConverter);
+    const sermonsQuerySnapshot = await getDocs(sermonsQuery);
+    const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
 
+    return {
+      props: { sermons: sermons },
+    };
+  } catch (error) {
     return {
       props: { sermons: [] },
     };
-
+  }
 };
 
 export default Sermons;
