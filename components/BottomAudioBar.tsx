@@ -31,7 +31,6 @@ const BottomAudioBar: FunctionComponent = () => {
 
   // will fire when global play state changes
   useEffect(() => {
-    console.log(previousSermon, nextSermon, togglePlaying);
     if (currentSermon.url == null) {
       getDownloadURL(ref(storage, `sermons/${currentSermon.key}`))
         .then((url) => {
