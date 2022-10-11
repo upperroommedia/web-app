@@ -1,4 +1,8 @@
-import { DialogTitle, DialogContent, DialogActions, Dialog, Button } from '@mui/material';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import Dialog from '@mui/material/Dialog';
+import Button from '@mui/material/Button';
+import DialogTitle from '@mui/material/DialogTitle';
 import { ReactElement } from 'react';
 
 interface PopUpInfo {

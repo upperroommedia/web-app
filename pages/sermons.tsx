@@ -1,11 +1,11 @@
 /**
  * Sermons page for viewing all sermons test
  */
+import dynamic from 'next/dynamic';
 import type { GetServerSideProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
 import SermonListCard from '../components/SermonListCard';
-import BottomAudioBar from '../components/BottomAudioBar';
 
 import { Sermon, sermonConverter } from '../types/Sermon';
 
@@ -14,6 +14,7 @@ import { firebase } from '../firebase/firebase';
 import { useEffect } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 
+const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface Props {
   sermons: Sermon[];
 }
@@ -69,7 +70,7 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
           })}
         </div>
       </div>
-      {currentSermon && <BottomAudioBar />}
+      {currentSermon && <DynamicBottomAudioBar />}
     </>
   );
 };
