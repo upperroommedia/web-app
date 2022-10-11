@@ -6,7 +6,12 @@ import { ChangeEvent, FunctionComponent, MouseEvent, useEffect, useRef, useState
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { formatTime } from '../utils/audioUtils';
 import styles from '../styles/BottomAudioBar.module.css';
-import { SkipNext, SkipPrevious, PlayCircle, PauseCircle, Replay30, Forward30 } from '@mui/icons-material';
+import Replay30Icon from '@mui/icons-material/Replay30';
+import Forward30Icon from '@mui/icons-material/Forward30';
+import PauseCircleIcon from '@mui/icons-material/PauseCircle';
+import PlayCircleIcon from '@mui/icons-material/PlayCircle';
+import SkipNextIcon from '@mui/icons-material/SkipNext';
+import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
 import { getDownloadURL, ref } from 'firebase/storage';
 import { storage } from '../firebase/firebase';
 
@@ -26,6 +31,7 @@ const BottomAudioBar: FunctionComponent = () => {
 
   // will fire when global play state changes
   useEffect(() => {
+    console.log(previousSermon, nextSermon, togglePlaying);
     if (currentSermon.url == null) {
       getDownloadURL(ref(storage, `sermons/${currentSermon.key}`))
         .then((url) => {
@@ -75,11 +81,11 @@ const BottomAudioBar: FunctionComponent = () => {
       <h1 className={styles.title}>{currentSermon.title}</h1>
       <div className={styles['vertical-container']}>
         <div className={styles['controls-container']}>
-          <Replay30 onClick={rewind30Seconds} />
-          <SkipPrevious onClick={previousSermon} />
-          {playing ? <PauseCircle onClick={() => togglePlaying()} /> : <PlayCircle onClick={() => togglePlaying()} />}
-          <SkipNext onClick={nextSermon} />
-          <Forward30 onClick={forward30Seconds} />
+          <Replay30Icon onClick={rewind30Seconds} />
+          <SkipPreviousIcon onClick={previousSermon} />
+          {playing ? <PauseCircleIcon onClick={() => togglePlaying()} /> : <PlayCircleIcon onClick={() => togglePlaying()} />}
+          <SkipNextIcon onClick={nextSermon} />
+          <Forward30Icon onClick={forward30Seconds} />
         </div>
         <div className={styles['progress-container']}>
           {/* TODO: Scroll overflow text */}
