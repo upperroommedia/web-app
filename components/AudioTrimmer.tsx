@@ -20,7 +20,6 @@ interface AudioTrimmerProps {
   duration: number;
   setDuration: React.Dispatch<SetStateAction<number>>;
 }
-// TODO: Seperate into components
 
 enum CLICK_TARGET {
   'SCRUBBER',
@@ -45,8 +44,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [startTrim, setStartTrim, startTrimRef] = useStateRef<number>(0);
   const [stopTrim, setStopTrim, stopTrimRef] = useStateRef<number>(duration);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isSeeking, setIsSeeking] = useState<boolean>(false);
   const previousPlayingStateRef = useRef<boolean>(false);
   const isScrubbingRef = useRef<boolean>(false);
   const clickOffsetRef = useRef<number>(0);
@@ -67,7 +64,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
   };
 
   const handleTimeUpdate = () => {
-    // TODO(1): See why this doesn't update properly on phone
     if (isScrubbingRef.current) return;
     const currentTime = audioPlayer.current.currentTime;
     if (currentTime >= stopTrimRef.current) {
@@ -119,20 +115,10 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
     }
   };
 
-  const handleSeeking = () => {
-    setIsSeeking(true);
-  };
-
-  const handleSeeked = () => {
-    setIsSeeking(false);
-  };
-
   useEffect(() => {
     audioPlayer.current.addEventListener('loadedmetadata', handleMetaDataLoaded);
     audioPlayer.current.addEventListener('play', handlePlay);
     audioPlayer.current.addEventListener('pause', handlePause);
-    audioPlayer.current.addEventListener('seeking', handleSeeking);
-    audioPlayer.current.addEventListener('seeked', handleSeeked);
     audioPlayer.current.addEventListener('timeupdate', handleTimeUpdate);
     audioPlayer.current.addEventListener('ended', handleComplete);
     addEventListener('touchmove', handleMove);
@@ -140,14 +126,11 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
     addEventListener('mouseup', handleMouseUp);
     addEventListener('touchend', handleMouseUp);
 
-    // TODO: Ensure that this cleanup is all that is required for audio
     return () => {
       audioPlayer.current.removeEventListener('loadedmetadata', handleMetaDataLoaded);
       audioPlayer.current.removeEventListener('play', handlePlay);
       audioPlayer.current.removeEventListener('pause', handlePause);
       audioPlayer.current.removeEventListener('timeupdate', handleTimeUpdate);
-      audioPlayer.current.removeEventListener('seeking', handleSeeking);
-      audioPlayer.current.removeEventListener('seeked', handleSeeked);
       audioPlayer.current.removeEventListener('ended', handleComplete);
       removeEventListener('touchmove', handleMove);
       removeEventListener('mousemove', handleMove);
@@ -288,7 +271,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
           </div>
         </div>
       </div>
-      {/* TODO: Style this better */}
       <div className={styles.button_container}>
         <SkipPrevious onClick={rewindToStart} />
         {isPlaying ? <PauseCircle onClick={togglePlayPause} /> : <PlayCircle onClick={togglePlayPause} />}
