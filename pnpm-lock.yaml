@@ -18,6 +18,7 @@ specifiers:
   '@types/uuid': ^8.3.4
   '@typescript-eslint/eslint-plugin': ^5.11.0
   '@typescript-eslint/parser': ^5.11.0
+  classnames: ^2.3.2
   date-fns: ^2.28.0
   eslint: ^7.32.0
   eslint-config-next: ^12.0.10
@@ -53,6 +54,7 @@ dependencies:
   '@mui/material': 5.10.3_titwvkc46l3gbib3qm54euaxya
   '@mui/system': 5.10.3_zwjfkijc33el6gejbqsqswd66e
   '@mui/x-date-pickers': 5.0.0_6s7bgdissist35qunmo7qzaxza
+  classnames: 2.3.2
   date-fns: 2.29.2
   firebase: 9.9.4
   firebase-admin: 11.0.1_@firebase+app-types@0.7.0
@@ -2637,6 +2639,10 @@ packages:
     engines: {node: '>= 0.3.0'}
     dependencies:
       json-parse-helpfulerror: 1.0.3
+    dev: false
+
+  /classnames/2.3.2:
+    resolution: {integrity: sha512-CSbhY4cFEJRe6/GQzIk5qXZ4Jeg5pcsP7b5peFSDpffpe1cqjASH/n9UTjBwOp6XpMSTwQ8Za2K5V02ueA7Tmw==}
     dev: false
 
   /clean-stack/2.2.0:

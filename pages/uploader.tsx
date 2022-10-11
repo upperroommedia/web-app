@@ -17,6 +17,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
+import { Cancel } from '@mui/icons-material';
 
 import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
@@ -344,12 +345,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <>
             {file ? (
               <div style={{ width: '100%' }}>
-                <AudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  <button type="button" className={styles.button} onClick={() => setFile(undefined)}>
-                    Clear File
-                  </button>
+                <div style={{ display: 'flex', justifyContent: 'right' }}>
+                  <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)}></Cancel>
                 </div>
+                <AudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
               </div>
             ) : (
               <DropZone setFile={setFile} />
