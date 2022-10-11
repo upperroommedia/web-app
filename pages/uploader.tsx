@@ -15,7 +15,8 @@ import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { DesktopDatePicker } from '@mui/x-date-pickers/DesktopDatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
@@ -177,7 +178,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     multiple: false,
-    accept: { 'audio/*': [".mp3", ".wav", ".flac"]},
+    accept: { 'audio/*': ['.mp3', '.wav', '.flac'] },
   });
 
   const clearForm = () => {
