@@ -9,7 +9,8 @@ import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSideProp
 import { useRouter } from 'next/router';
 
 // 3rd Party Components
-import { Button, TextField } from '@mui/material';
+import Button from '@mui/material/Button';
+import TextField from '@mui/material/TextField';
 
 // Auth
 import useAuth from '../context/user/UserContext';
