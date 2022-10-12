@@ -75,7 +75,7 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
   );
 };
 
-export const getServerSideProps: GetServerSideProps = async (context) => {
+export const getServerSideProps: GetServerSideProps = async (_context) => {
   try {
     const db = getFirestore(firebase);
     // Firestore data converter to convert the queried data to the expected type
