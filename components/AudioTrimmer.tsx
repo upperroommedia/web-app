@@ -200,7 +200,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
       time = time - 5;
       time = time > startTrim ? time : startTrim;
     }
-    // audioPlayer.current.currentTime = time;
     setCurrentTime(time);
 
     e.stopPropagation();
@@ -219,8 +218,73 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
     if (right) return `${100 - (currentTime / duration) * 100}%`;
     return `${(currentTime / duration) * 100}%`;
   };
-  return (
-    <div className={styles.outer_container}>
+
+  const RenderScrubber = () => {
+    return (
+      <div
+        className={styles.audio_scrubber_container}
+        style={{
+          left: calculateTimePercentage(currentTime),
+        }}
+      >
+        <div className={styles.audio_scrubber}>
+          <div className={styles.audio_scrubber_thumb}>
+            <span className={styles.audio_scrubber_text}>{calculateTime(currentTime)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const RenderTrimAreas = () => {
+    return (
+      <>
+        <div
+          className={classNames(styles.outside_trim_area, styles.left_container)}
+          style={{ left: 0, right: calculateTimePercentage(startTrim, true) }}
+        ></div>
+        <div
+          className={classNames(styles.outside_trim_area, styles.right_container)}
+          style={{ left: calculateTimePercentage(stopTrim), right: 0 }}
+        ></div>
+        <div
+          className={styles.trim_area}
+          style={{
+            left: calculateTimePercentage(startTrim),
+            right: calculateTimePercentage(stopTrim, true),
+          }}
+        >
+          <div
+            className={classNames(styles.handle, styles.left_handle)}
+            onTouchStart={(e) => MouseDown(e, CLICK_TARGET.START_TRIM)}
+            onMouseDown={(e) => {
+              MouseDown(e, CLICK_TARGET.START_TRIM);
+            }}
+          ></div>
+          <div
+            className={classNames(styles.handle, styles.right_handle)}
+            onTouchStart={(e) => MouseDown(e, CLICK_TARGET.END_TRIM)}
+            onMouseDown={(e) => {
+              MouseDown(e, CLICK_TARGET.END_TRIM);
+            }}
+          ></div>
+        </div>
+      </>
+    );
+  };
+
+  const RenderControls = () => {
+    return (
+      <div className={styles.button_container}>
+        <SkipPrevious onClick={rewindToStart} />
+        {isPlaying ? <PauseCircle onClick={togglePlayPause} /> : <PlayCircle onClick={togglePlayPause} />}
+        <SkipNext onClick={forwardToEnd} />
+      </div>
+    );
+  };
+
+  const RenderTrimmer = ({ children }: React.ComponentProps<React.FC>) => {
+    return (
       <div className={styles.scrubber_container}>
         <div
           onTouchStart={(e) => MouseDown(e, CLICK_TARGET.SCRUBBER)}
@@ -229,60 +293,22 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
           }}
         >
           <div ref={scrubberContainer} className={styles.audio_container}>
-            <div
-              className={styles.audio_scrubber_container}
-              style={{
-                left: calculateTimePercentage(currentTime),
-              }}
-            >
-              <div className={styles.audio_scrubber}>
-                <div className={styles.audio_scrubber_thumb}>
-                  <span className={styles.audio_scrubber_text}>{calculateTime(currentTime)}</span>
-                </div>
-              </div>
-            </div>
-            <div
-              className={classNames(styles.outside_trim_area, styles.left_container)}
-              style={{ left: 0, right: calculateTimePercentage(startTrim, true) }}
-            ></div>
-            <div
-              className={classNames(styles.outside_trim_area, styles.right_container)}
-              style={{ left: calculateTimePercentage(stopTrim), right: 0 }}
-            ></div>
-            <div
-              className={styles.trim_area}
-              style={{
-                left: calculateTimePercentage(startTrim),
-                right: calculateTimePercentage(stopTrim, true),
-              }}
-            >
-              <div
-                className={classNames(styles.handle, styles.left_handle)}
-                onTouchStart={(e) => MouseDown(e, CLICK_TARGET.START_TRIM)}
-                onMouseDown={(e) => {
-                  MouseDown(e, CLICK_TARGET.START_TRIM);
-                }}
-              ></div>
-              <div
-                className={classNames(styles.handle, styles.right_handle)}
-                onTouchStart={(e) => MouseDown(e, CLICK_TARGET.END_TRIM)}
-                onMouseDown={(e) => {
-                  MouseDown(e, CLICK_TARGET.END_TRIM);
-                }}
-              ></div>
-            </div>
+            {children}
           </div>
         </div>
       </div>
-      <div className={styles.button_container}>
-        <SkipPrevious onClick={rewindToStart} />
-        {isPlaying ? <PauseCircle onClick={togglePlayPause} /> : <PlayCircle onClick={togglePlayPause} />}
-        <SkipNext onClick={forwardToEnd} />
-      </div>
+    );
+  };
+
+  return (
+    <div className={styles.outer_container}>
+      <RenderTrimmer>
+        <RenderScrubber />
+        <RenderTrimAreas />
+      </RenderTrimmer>
+      <RenderControls />
       <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-        {/* start time */}
         <div>Trim Start: {calculateTime(startTrim)}</div>
-        {/* end time */}
         <div>Trim Stop: {calculateTime(stopTrim)}</div>
       </div>
     </div>
