@@ -13,7 +13,10 @@ import {
 } from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
 import classNames from 'classnames';
-import { SkipNext, SkipPrevious, PlayCircle, PauseCircle } from '@mui/icons-material';
+import SkipNext from '@mui/icons-material/SkipNext';
+import SkipPrevious from '@mui/icons-material/SkipPrevious';
+import PlayCircle from '@mui/icons-material/PlayCircle';
+import PauseCircle from '@mui/icons-material/PauseCircle';
 
 interface AudioTrimmerProps {
   url: string;

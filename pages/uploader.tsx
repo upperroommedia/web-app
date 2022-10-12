@@ -17,7 +17,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DesktopDatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
-import { Cancel } from '@mui/icons-material';
+import Cancel from '@mui/icons-material/Cancel';
 
 import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
