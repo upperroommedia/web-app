@@ -20,7 +20,7 @@ export interface FirebaseSermon extends Omit<Sermon, 'dateMillis' | 'dateString'
 
 export const getDateString = (date: Date) => {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[date.getMonth()]} ${date.getDay()}`;
+  return `${months[date.getMonth()]} ${date.getDate()}`;
 };
 
 /* This converter takes care of converting a Sermon to a FirebaseSermon on upload
