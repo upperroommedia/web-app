@@ -42,6 +42,14 @@ function useStateRef<T>(initialValue: T): [T, Dispatch<SetStateAction<T>>, Mutab
 
   return [value, setValue, ref];
 }
+
+const calculateTime = (sec: number) => {
+  const hours: number = Math.floor(sec / 3600); // get hours
+  const minutes: number = Math.floor((sec - hours * 3600) / 60); // get minutes
+  const seconds: number = Math.floor(sec - hours * 3600 - minutes * 60); //  get seconds
+  return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
+};
+
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, setDuration }) => {
   const [currentTime, setCurrentTime, currentTimeRef] = useStateRef<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -142,13 +150,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
       audioPlayer.current.pause();
     };
   }, []);
-
-  const calculateTime = (sec: number) => {
-    const hours: number = Math.floor(sec / 3600); // get hours
-    const minutes: number = Math.floor((sec - hours * 3600) / 60); // get minutes
-    const seconds: number = Math.floor(sec - hours * 3600 - minutes * 60); //  get seconds
-    return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
-  };
 
   const togglePlayPause = () => {
     if (audioPlayer.current.paused) {

@@ -12,7 +12,8 @@ import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSideProp
 import useAuth from '../context/user/UserContext';
 
 // 3rd Party
-import { Button, TextField } from '@mui/material';
+import Button from '@mui/material/Button';
+import TextField from '@mui/material/TextField';
 
 // Components
 import ProtectedRoute from '../components/ProtectedRoute';
