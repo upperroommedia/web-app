@@ -23,7 +23,7 @@ import AuthErrors from '../components/AuthErrors';
 import styles from '../styles/SignInWithGoogleButton.module.css';
 import Image from 'next/image';
 
-const Signup = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
+const Signup = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const router = useRouter();
   const { signup, loginWithGoogle } = useAuth();
 
@@ -35,7 +35,7 @@ const Signup = (props: InferGetServerSidePropsType<typeof getServerSideProps>) =
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleSignup = async (e: any) => {
+  const handleSignup = async (_e: any) => {
     const res = await signup(data);
     const authResult = AuthErrors(res);
     if (authResult.authFailure) {
