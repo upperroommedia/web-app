@@ -11,7 +11,6 @@ interface editSermonProps {
   description: string;
   series: string;
   speaker: Array<string>;
-  scripture: string;
   topic: Array<string>;
 }
 
@@ -26,7 +25,6 @@ const editSermon = async (props: editSermonProps) => {
     description: props.description,
     series: props.series,
     speaker: props.speaker,
-    scripture: props.scripture,
     topic: props.topic,
   });
 };

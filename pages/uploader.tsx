@@ -136,7 +136,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getFullYear() === date?.getFullYear() &&
       sermon1.series === series &&
       JSON.stringify(sermon1.speaker) === JSON.stringify(speaker) &&
-      sermon1.scripture === sermon2.scripture &&
       JSON.stringify(sermon1.topic) === JSON.stringify(topic)
     );
   };
@@ -329,15 +328,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             />
           )}
         />
-        <TextField
-          fullWidth
-          id="scripture-input"
-          label="Scripture"
-          name="scripture"
-          variant="outlined"
-          value={sermonData.scripture}
-          onChange={handleChange}
-        />
         <Autocomplete
           fullWidth
           value={topic}
@@ -372,7 +362,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   date,
                   description: sermonData.description,
                   speaker,
-                  scripture: sermonData.scripture,
                   topic,
                   series,
                 }).then(() => {
@@ -384,7 +373,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     durationSeconds: sermonData.durationSeconds,
                     description: sermonData.description,
                     speaker,
-                    scripture: sermonData.scripture,
                     topic,
                     series,
                     dateString: getDateString(date),
@@ -440,7 +428,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                         date,
                         description: sermonData.description,
                         speaker,
-                        scripture: sermonData.scripture,
                         topic,
                         series,
                       });

@@ -179,7 +179,6 @@ export const uploadToSubsplash = functions.https.onRequest(async (request, respo
     }
     const data = JSON.stringify({
       app_key: '9XTSHD',
-      scriptures: [],
       tags: tags,
       title: request.body.title,
       subtitle: request.body.subtitle,

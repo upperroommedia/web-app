@@ -20,7 +20,6 @@ interface uploadFileProps {
   series: string;
   durationSeconds: number;
   speaker: Array<string>;
-  scripture: string;
   topic: Array<string>;
 }
 
@@ -49,7 +48,6 @@ const uploadFile = async (props: uploadFileProps) => {
     description: props.description,
     series: props.series,
     speaker: props.speaker,
-    scripture: props.scripture,
     topic: props.topic,
     key: sermonRef.name,
   };
