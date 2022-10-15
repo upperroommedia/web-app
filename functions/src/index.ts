@@ -3,11 +3,13 @@
 
 import * as admin from 'firebase-admin';
 import uploadToSubsplash from './uploadToSubsplash';
-import trimAudioOnStorage from './trimAudioOnStorage';
+// import trimAudioOnStorage from './trimAudioOnStorage';
 import setUserRole from './setUserRole';
+import addintrooutro from './addIntroOutro';
 
 admin.initializeApp();
 
 exports.uploadToSubsplash = uploadToSubsplash;
-exports.trimAudioOnStorage = trimAudioOnStorage;
+// exports.trimAudioOnStorage = trimAudioOnStorage;
 exports.setUserRole = setUserRole;
+exports.addintrooutro = addintrooutro;
