@@ -42,6 +42,7 @@ const addIntroOutro = onObjectFinalized(async (storageEvent) => {
     // This is a folder
     return;
   }
+  logger.info('Processing file: ' + fileName);
   const bucket = storage().bucket();
   try {
     const sermonMetadataSnapshot = await firestore().collection('sermons/').doc(path.basename(fileName)).get();
