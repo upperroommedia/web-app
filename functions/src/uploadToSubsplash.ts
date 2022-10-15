@@ -13,7 +13,7 @@ interface INCOMING_DATA {
   description?: string;
 }
 
-const createAxiosConfig = (endpoint_url: string, bearerToken: string, data: any): AxiosRequestConfig => {
+const createAxiosConfig = (endpoint_url: string, bearerToken: string, data: unknown): AxiosRequestConfig => {
   return {
     method: 'post',
     url: endpoint_url,
