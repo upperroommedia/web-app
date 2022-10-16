@@ -4,7 +4,7 @@ import { firebase, storage } from '../../firebase/firebase';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Dispatch, SetStateAction } from 'react';
-import { UploadableFile } from '../uploader';
+import { UploadableFile } from '../../components/DropZone';
 import { Sermon, sermonConverter } from '../../types/Sermon';
 
 interface uploadFileProps {
@@ -39,7 +39,7 @@ const uploadFile = async (props: uploadFileProps) => {
       props.setUploadProgress(`Error: ${err}`);
     }
   }
-  // const sermonRef = ref(storage, `sermons/${file.name}`);
+
   const uploadTask = uploadBytesResumable(sermonRef, props.file.file);
   const sermonData: Sermon = {
     title: props.title,
