@@ -18,7 +18,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
-import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, getFirestore, limit, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
@@ -112,7 +112,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       const seriesQuerySnapshot = await getDocs(seriesQuery);
       setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
 
-      const speakersQuery = query(collection(db, 'speakers'));
+      const speakersQuery = query(collection(db, 'speakers'), limit(5));
       const speakersQuerySnapshot = await getDocs(speakersQuery);
       setSpeakersArray(speakersQuerySnapshot.docs.map((doc) => doc.data().name));
 
