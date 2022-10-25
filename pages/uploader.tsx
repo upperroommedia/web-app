@@ -18,7 +18,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 
-import { collection, doc, getDoc, getDocs, getFirestore, limit, query } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
 import { firebase } from '../firebase/firebase';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
@@ -26,6 +26,12 @@ import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
 import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
+
+import algoliasearch from 'algoliasearch/lite';
+import { InstantSearch } from 'react-instantsearch-hooks-web';
+import SpeakersAutocomplete from '../components/SpeakersAutocomplete';
+import { getAlgoliaResults } from '@algolia/autocomplete-js';
+import SpeakerItem from '../components/SpeakerItem';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -52,6 +58,13 @@ interface UploaderProps {
   setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
+const NEXT_PUBLIC_ALGOLIA_APP_ID = process.env.NEXT_PUBLIC_ALGOLIA_APP_ID;
+const NEXT_PUBLIC_ALGOLIA_API_KEY = process.env.NEXT_PUBLIC_ALGOLIA_API_KEY;
+const NEXT_PUBLIC_ALGOLIA_INDEX_NAME = process.env.NEXT_PUBLIC_ALGOLIA_INDEX_NAME;
+const searchClient =
+  NEXT_PUBLIC_ALGOLIA_APP_ID && NEXT_PUBLIC_ALGOLIA_API_KEY && NEXT_PUBLIC_ALGOLIA_INDEX_NAME
+    ? algoliasearch(NEXT_PUBLIC_ALGOLIA_APP_ID, NEXT_PUBLIC_ALGOLIA_API_KEY)
+    : undefined;
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
@@ -62,7 +75,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
   const [seriesArray, setSeriesArray] = useState<string[]>([]);
-  const [speakersArray, setSpeakersArray] = useState<string[]>([]);
+  const [autocompleteSpeakers, setAutocompleteSpeakers] = useState<string[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
@@ -111,10 +124,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       const seriesQuery = query(collection(db, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
       setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
-
-      const speakersQuery = query(collection(db, 'speakers'), limit(5));
-      const speakersQuerySnapshot = await getDocs(speakersQuery);
-      setSpeakersArray(speakersQuerySnapshot.docs.map((doc) => doc.data().name));
 
       const topicsRef = doc(db, 'topics', 'topicsDoc');
       const topicsSnap = await getDoc(topicsRef);
@@ -204,6 +213,35 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const handleDateChange = (newValue: Date) => {
     setDate(newValue);
   };
+
+  useEffect(() => {
+    if (autocompleteSpeakers.length > 3) {
+      setSpeakerError({
+        error: true,
+        message: 'Can only add up to 3 speakers',
+      });
+    } else {
+      setSpeakerError({
+        error: false,
+        message: '',
+      });
+    }
+    // doing twice to avoid flashes
+    if (new Set(autocompleteSpeakers).size !== autocompleteSpeakers.length) {
+      setSpeaker((oldSpeaker) =>
+        oldSpeaker.filter((s) => {
+          return oldSpeaker.lastIndexOf(s) === oldSpeaker.indexOf(s);
+        })
+      );
+      setAutocompleteSpeakers((oldSpeaker) =>
+        oldSpeaker.filter((s) => {
+          return oldSpeaker.lastIndexOf(s) === oldSpeaker.indexOf(s);
+        })
+      );
+    } else {
+      setSpeaker(autocompleteSpeakers);
+    }
+  }, [autocompleteSpeakers]);
 
   return (
     <form className={styles.container}>
@@ -299,35 +337,39 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             <AddIcon />
           </IconButton>
         </div>
-        <Autocomplete
-          fullWidth
-          value={speaker}
-          onBlur={() => {
-            setSpeakerError({ error: false, message: '' });
-          }}
-          onChange={(_, newValue) => {
-            if (newValue !== null && newValue.length <= 3) {
-              setSpeaker(newValue);
-            } else if (newValue.length >= 4) {
-              setSpeakerError({
-                error: true,
-                message: 'Can only add up to 3 speakers',
-              });
-            }
-          }}
-          id="speaker-input"
-          options={speakersArray}
-          multiple
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              required
-              label="Speaker(s)"
-              error={speakerError.error}
-              helperText={speakerError.message}
+        {searchClient && NEXT_PUBLIC_ALGOLIA_INDEX_NAME ? (
+          <InstantSearch searchClient={searchClient} indexName={NEXT_PUBLIC_ALGOLIA_INDEX_NAME}>
+            <SpeakersAutocomplete
+              className="autocomplete"
+              placeholder="Speaker(s)"
+              openOnFocus={true}
+              getSources={({ query }: any) => [
+                {
+                  sourceId: 'speakers',
+                  getItems() {
+                    return getAlgoliaResults({
+                      searchClient,
+                      queries: [
+                        {
+                          indexName: NEXT_PUBLIC_ALGOLIA_INDEX_NAME,
+                          query,
+                        },
+                      ],
+                    });
+                  },
+                  templates: {
+                    item({ item }: any) {
+                      return <SpeakerItem hit={item} setSpeaker={setAutocompleteSpeakers} />;
+                    },
+                  },
+                },
+              ]}
             />
-          )}
-        />
+          </InstantSearch>
+        ) : null}
+
+        {speakerError.error && <p style={{ color: 'red' }}>{speakerError.message}</p>}
+        {speaker}
         <Autocomplete
           fullWidth
           value={topic}
