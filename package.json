@@ -11,9 +11,9 @@
     "start": "next start",
     "lint": "next lint",
     "style:all": "tsc && pnpm run style:lint && pnpm run style:prettier",
-    "style:lint": "eslint '**/*.{js,jsx,ts,tsx}'",
-    "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}'",
-    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}'"
+    "style:lint": "eslint '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
+    "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
+    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore"
   },
   "dependencies": {
     "@emotion/react": "^11.10.4",
