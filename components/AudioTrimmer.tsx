@@ -317,7 +317,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
         <RenderTrimAreas />
       </RenderTrimmer>
       <RenderControls />
-      <audio src={url} controls></audio>
       <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
         <div>Trim Start: {calculateTime(trimStart)}</div>
         <div>Trim Stop: {calculateTime(stopTrim)}</div>
