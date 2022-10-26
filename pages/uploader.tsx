@@ -18,7 +18,7 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
-import firestore, { collection, doc, getDoc, getDocs, query } from '../firebase/firestore';
+import firestore, { collection, doc, getDoc, getDocs, query, limit } from '../firebase/firestore';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
 import Button from '@mui/material/Button';
@@ -94,7 +94,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       const seriesQuerySnapshot = await getDocs(seriesQuery);
       setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
 
-      const speakersQuery = query(collection(firestore, 'speakers'));
+      const speakersQuery = query(collection(firestore, 'speakers'), limit(5));
       const speakersQuerySnapshot = await getDocs(speakersQuery);
       setSpeakersArray(speakersQuerySnapshot.docs.map((doc) => doc.data().name));
 
