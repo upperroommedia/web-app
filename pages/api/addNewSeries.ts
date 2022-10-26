@@ -1,9 +1,7 @@
-import { doc, getFirestore, setDoc } from 'firebase/firestore';
-import { firebase } from '../../firebase/firebase';
+import firestore, { doc, setDoc } from '../../firebase/firestore';
 
 const addNewSeries = async (value: string) => {
-  const db = getFirestore(firebase);
-  await setDoc(doc(db, 'series', value), {
+  await setDoc(doc(firestore, 'series', value), {
     name: value,
   });
 };

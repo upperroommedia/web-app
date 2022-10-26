@@ -1,5 +1,5 @@
 import { useContext, createContext, useEffect, useState } from 'react';
-import firebase, {
+import adminFirebase, {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
   signInWithEmailAndPassword,
@@ -7,11 +7,11 @@ import firebase, {
   signOut,
   //   IdTokenResult,
 } from 'firebase/auth';
+import auth from '../../firebase/auth';
 import { userCredentials } from '../types';
-import { auth } from '../../firebase/firebase';
 import nookies from 'nookies';
 
-interface User extends firebase.User {
+interface User extends adminFirebase.User {
   role?: string;
 }
 interface Context {

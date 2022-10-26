@@ -20,8 +20,9 @@ import PauseCircle from '@mui/icons-material/PauseCircle';
 
 interface AudioTrimmerProps {
   url: string;
-  duration: number;
-  setDuration: React.Dispatch<SetStateAction<number>>;
+  trimStart: number;
+  setTrimStart: Dispatch<SetStateAction<number>>;
+  setTrimDuration: Dispatch<SetStateAction<number>>;
 }
 
 enum CLICK_TARGET {
@@ -50,20 +51,27 @@ const calculateTime = (sec: number) => {
   return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
 };
 
-const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, setDuration }) => {
+const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, setTrimStart, setTrimDuration }) => {
   const [currentTime, setCurrentTime, currentTimeRef] = useStateRef<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [startTrim, setStartTrim, startTrimRef] = useStateRef<number>(0);
-  const [stopTrim, setStopTrim, stopTrimRef] = useStateRef<number>(duration);
+  const trimStartRef = useRef<number>(trimStart);
+  const [stopTrim, setStopTrim, stopTrimRef] = useStateRef<number>(0);
   const previousPlayingStateRef = useRef<boolean>(false);
   const isScrubbingRef = useRef<boolean>(false);
   const clickOffsetRef = useRef<number>(0);
   const audioPlayer = useRef<HTMLAudioElement>(new Audio(url)); // reference for our audio component
   const scrubberContainer = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (trimStartRef.current !== trimStart) {
+      trimStartRef.current = trimStart;
+    }
+    setTrimDuration(stopTrim - trimStart);
+  }, [trimStart, stopTrim]);
+
   const handleMetaDataLoaded = () => {
     setStopTrim(audioPlayer.current.duration);
-    setDuration(audioPlayer.current.duration);
+    setTrimDuration(audioPlayer.current.duration);
   };
 
   const handlePlay = () => {
@@ -78,7 +86,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
     if (isScrubbingRef.current) return;
     const currentTime = audioPlayer.current.currentTime;
     if (currentTime >= stopTrimRef.current) {
-      audioPlayer.current.currentTime = startTrimRef.current;
+      audioPlayer.current.currentTime = trimStartRef.current;
       audioPlayer.current.pause();
     }
     setCurrentTime(currentTime);
@@ -107,17 +115,17 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
       let time = calculateTimeFromPosition(event.pageX - clickOffsetRef.current, scrubberContainer.current);
       if (clickTarget === CLICK_TARGET.START_TRIM) {
         time = time < stopTrimRef.current ? time : stopTrimRef.current;
-        setStartTrim(time);
+        setTrimStart(time);
       } else if (clickTarget === CLICK_TARGET.END_TRIM) {
-        time = time > startTrimRef.current ? time : startTrimRef.current;
+        time = time > trimStartRef.current ? time : trimStartRef.current;
         setStopTrim(time);
         time = time - 5;
-        time = time > startTrimRef.current ? time : startTrimRef.current;
+        time = time > trimStartRef.current ? time : trimStartRef.current;
       }
       if (time > stopTrimRef.current) {
         setStopTrim(time);
-      } else if (time < startTrimRef.current) {
-        setStartTrim(time);
+      } else if (time < trimStartRef.current) {
+        setTrimStart(time);
       }
       // audioPlayer.current.currentTime = time;
       setCurrentTime(time);
@@ -160,7 +168,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
   };
 
   const rewindToStart = () => {
-    audioPlayer.current.currentTime = startTrim;
+    audioPlayer.current.currentTime = trimStart;
   };
 
   const forwardToEnd = () => {
@@ -188,18 +196,18 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
     if (target === CLICK_TARGET.SCRUBBER) {
       time > stopTrim
         ? (target = CLICK_TARGET.END_TRIM)
-        : time < startTrim
+        : time < trimStart
         ? (target = CLICK_TARGET.START_TRIM)
         : (target = CLICK_TARGET.SCRUBBER);
     }
     clickTarget = target;
 
     if (clickTarget === CLICK_TARGET.START_TRIM) {
-      setStartTrim(time);
+      setTrimStart(time);
     } else if (clickTarget === CLICK_TARGET.END_TRIM) {
       setStopTrim(time);
       time = time - 5;
-      time = time > startTrim ? time : startTrim;
+      time = time > trimStart ? time : trimStart;
     }
     setCurrentTime(time);
 
@@ -216,6 +224,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
   };
 
   const calculateTimePercentage = (currentTime: number, right = false) => {
+    const duration = audioPlayer.current.duration;
     if (right) return `${100 - (currentTime / duration) * 100}%`;
     return `${(currentTime / duration) * 100}%`;
   };
@@ -242,7 +251,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
       <>
         <div
           className={classNames(styles.outside_trim_area, styles.left_container)}
-          style={{ left: 0, right: calculateTimePercentage(startTrim, true) }}
+          style={{ left: 0, right: calculateTimePercentage(trimStart, true) }}
         ></div>
         <div
           className={classNames(styles.outside_trim_area, styles.right_container)}
@@ -251,7 +260,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
         <div
           className={styles.trim_area}
           style={{
-            left: calculateTimePercentage(startTrim),
+            left: calculateTimePercentage(trimStart),
             right: calculateTimePercentage(stopTrim, true),
           }}
         >
@@ -308,8 +317,9 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, duration, set
         <RenderTrimAreas />
       </RenderTrimmer>
       <RenderControls />
+      <audio src={url} controls></audio>
       <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-        <div>Trim Start: {calculateTime(startTrim)}</div>
+        <div>Trim Start: {calculateTime(trimStart)}</div>
         <div>Trim Stop: {calculateTime(stopTrim)}</div>
       </div>
     </div>

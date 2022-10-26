@@ -1,4 +1,4 @@
-import { Timestamp, QueryDocumentSnapshot, SnapshotOptions } from 'firebase/firestore';
+import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from '../firebase/firestore';
 
 export interface Sermon {
   key: string;
@@ -26,18 +26,18 @@ export const getDateString = (date: Date) => {
 /* This converter takes care of converting a Sermon to a FirebaseSermon on upload
  *  and a FirebaseSermon to a Sermon on download.
  */
-export const sermonConverter = {
+export const sermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
     return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
-  fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>, options: SnapshotOptions): Sermon => {
+  fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { date, ...data } = snapshot.data(options);
+    const { date, ...data } = snapshot.data();
 
     return {
       ...data,
-      dateMillis: snapshot.data(options).date.toMillis(),
-      dateString: getDateString(snapshot.data(options).date.toDate()),
+      dateMillis: snapshot.data().date.toMillis(),
+      dateString: getDateString(snapshot.data().date.toDate()),
     };
   },
 };

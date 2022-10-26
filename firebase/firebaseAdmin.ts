@@ -1,4 +1,5 @@
 import * as firebaseAdmin from 'firebase-admin';
+import { isDevelopment } from './firebase';
 
 const privateKey = process.env.PRIVATE_KEY;
 const clientEmail = process.env.CLIENT_EMAIL;
@@ -12,6 +13,10 @@ if (!privateKey || !clientEmail || !projectId) {
 }
 
 if (!firebaseAdmin.apps.length) {
+  if (isDevelopment) {
+    console.log('Setting Admin SDK to use emulator');
+    process.env.FIREBASE_AUTH_EMULATOR_HOST = 'localhost:9099';
+  }
   firebaseAdmin.initializeApp({
     credential: firebaseAdmin.credential.cert({
       projectId: projectId,
@@ -21,5 +26,4 @@ if (!firebaseAdmin.apps.length) {
     databaseURL: `https://${projectId}.firebaseio.com`,
   });
 }
-
-export { firebaseAdmin };
+export default firebaseAdmin;

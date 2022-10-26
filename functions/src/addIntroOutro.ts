@@ -1,13 +1,12 @@
 import { logger } from 'firebase-functions/v2';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { storage, firestore } from 'firebase-admin';
-import { Bucket } from '@google-cloud/storage';
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-const mergeAndUploadAudioFiles = (inputs: string[], outputFileName: string, bucket: Bucket) => {
+const mergeAndUploadAudioFiles = (inputs: string[], outputFileName: string): Promise<string> => {
   const tmpFilePath = path.join(os.tmpdir(), outputFileName);
   if (!fs.existsSync(os.tmpdir())) {
     fs.mkdirSync(os.tmpdir());
@@ -16,51 +15,60 @@ const mergeAndUploadAudioFiles = (inputs: string[], outputFileName: string, buck
   inputs.forEach((input) => {
     proc.input(input);
   });
-  proc.mergeToFile(tmpFilePath);
-  proc
-    .on('end', async function () {
-      logger.log('files have been merged succesfully');
-      const outputFilePath = `processed-sermons/${outputFileName}`;
-      await bucket.upload(tmpFilePath, {
-        destination: outputFilePath,
+  return new Promise((resolve, reject) => {
+    proc.mergeToFile(tmpFilePath);
+    proc
+      .on('end', async function () {
+        resolve(tmpFilePath);
+      })
+      .on('error', function (err) {
+        return reject(err);
       });
-      fs.unlinkSync(tmpFilePath);
-    })
-    .on('error', function (err) {
-      logger.log('an error happened: ' + err.message);
-    });
+  });
 };
 
 const addIntroOutro = onObjectFinalized(async (storageEvent) => {
   const data = storageEvent.data;
-  const fileName = data.name ? data.name : '';
-  if (!fileName.startsWith('sermons/')) {
+  const filePath = data.name ? data.name : '';
+  if (!filePath.startsWith('sermons/')) {
     // Not a sermon
     return;
   }
-  if (fileName.endsWith('sermons/')) {
+  if (filePath.endsWith('sermons/')) {
     // This is a folder
     return;
   }
+  const fileName = path.basename(filePath);
   logger.info('Processing file: ' + fileName);
   const bucket = storage().bucket();
+  const db = firestore();
   try {
-    const sermonMetadataSnapshot = await firestore().collection('sermons/').doc(path.basename(fileName)).get();
-    const sermonMetadata = sermonMetadataSnapshot.data();
-    if (!sermonMetadata) {
-      logger.error('Sermon metadata not found');
-      return;
-    }
-    const category = sermonMetadata.subtitle ? sermonMetadata.subtitle : '';
-    const [introMetaData] = await bucket.file(`intros/${category}_intro.m4a`).getMetadata();
-    const [outroMetaData] = await bucket.file(`outros/${category}_outro.m4a`).getMetadata();
-    if (data.mediaLink) {
-      const outputFileName = 'intro_outro-' + path.basename(fileName);
-      mergeAndUploadAudioFiles(
-        [introMetaData.mediaLink, data.mediaLink, outroMetaData.mediaLink],
-        outputFileName,
-        bucket
-      );
+    logger.log(data.metadata);
+    logger.log('introURL', data.metadata?.introUrl);
+    logger.log('herherherherh');
+    if (data.metadata && data.mediaLink) {
+      logger.log('testing logging');
+      const audioFilesToMerge = [];
+      if (data.metadata.introUrl) {
+        audioFilesToMerge.push(data.metadata.introUrl);
+        logger.log('introUrl', data.metadata.introUrl);
+      }
+      audioFilesToMerge.push(data.mediaLink);
+      if (data.metadata.outroUrl) {
+        audioFilesToMerge.push(data.metadata.outroUrl);
+        logger.log('outroUrl', data.metadata.outroUrl);
+      }
+      if (audioFilesToMerge.length > 1) {
+        logger.log('Merging audio files', audioFilesToMerge);
+        const outputFileName = 'intro_outro-' + fileName + '.mp3';
+        const tmpFilePath = await mergeAndUploadAudioFiles(audioFilesToMerge, outputFileName);
+        await bucket.upload(tmpFilePath, {
+          destination: `processed-sermons/${fileName}`,
+        });
+        await db.collection('sermons').doc(fileName).update({ processed: true });
+        fs.unlinkSync(tmpFilePath);
+        logger.log('Files have been merged succesfully');
+      }
     }
   } catch (e) {
     logger.error(e);

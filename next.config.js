@@ -10,5 +10,9 @@ const nextConfig = withBundleAnalyzer({
     domains: ['lh3.googleusercontent.com'],
     formats: ['image/avif', 'image/webp'],
   },
+  i18n: {
+    locales: ['en'],
+    defaultLocale: 'en',
+  },
 });
 module.exports = nextConfig;

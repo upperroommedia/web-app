@@ -1,7 +1,6 @@
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType, NextPage } from 'next';
 import { useState } from 'react';
-import { functions } from '../firebase/firebase';
-import { httpsCallable } from 'firebase/functions';
+import functions, { httpsCallable } from '../firebase/functions';
 import { ROLES } from '../context/types';
 import ProtectedRoute from '../components/ProtectedRoute';
 
