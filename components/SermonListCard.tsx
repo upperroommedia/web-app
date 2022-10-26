@@ -14,10 +14,9 @@ import { Button, Checkbox } from '@mui/material';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
-import { deleteDoc, doc, getFirestore } from 'firebase/firestore';
-
+import firestore, { deleteDoc, doc } from '../firebase/firestore';
+import storage, { deleteObject, ref } from '../firebase/storage';
 import { emptySermon, Sermon } from '../types/Sermon';
-import { firebase } from '../firebase/firebase';
 import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
 import useAuth from '../context/user/UserContext';
@@ -57,11 +56,11 @@ Props) => {
   }, [updatedSermon]);
 
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
-  const db = getFirestore(firebase);
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'sermons', id));
+      await deleteObject(ref(storage, `sermons/${id}`));
+      await deleteDoc(doc(firestore, 'sermons', id));
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
       alert(error);
@@ -84,6 +83,7 @@ Props) => {
           <p className={styles.description}>{sermon.description}</p>
           <div className={styles.bottomDiv}>
             <IconButton
+              aria-label="toggle play/pause"
               onClick={(e) => {
                 e.preventDefault();
                 setCurrentSermon(sermon);
@@ -120,10 +120,18 @@ Props) => {
             <span style={{ width: '100%' }}></span>
             {user?.role === 'admin' ? (
               <>
-                <IconButton style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
+                <IconButton
+                  aria-label="edit sermon"
+                  style={{ color: 'lightblue' }}
+                  onClick={() => setEditFormPopup(true)}
+                >
                   <EditIcon />
                 </IconButton>
-                <IconButton style={{ color: 'red' }} onClick={() => setDeleteConfirmationPopup(true)}>
+                <IconButton
+                  aria-label="delete sermon"
+                  style={{ color: 'red' }}
+                  onClick={() => setDeleteConfirmationPopup(true)}
+                >
                   <DeleteIcon />
                 </IconButton>
               </>
@@ -136,6 +144,7 @@ Props) => {
               setOpen={() => setDeleteConfirmationPopup(false)}
               button={
                 <Button
+                  aria-label="confirm delete sermon"
                   variant="contained"
                   onClick={() => {
                     handleDelete(sermon.key).then(() => {

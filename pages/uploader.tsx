@@ -18,8 +18,7 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
-import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
-import { firebase } from '../firebase/firebase';
+import firestore, { collection, doc, getDoc, getDocs, query } from '../firebase/firestore';
 import { Sermon, emptySermon, getDateString } from '../types/Sermon';
 
 import Button from '@mui/material/Button';
@@ -42,12 +41,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [sermonData, setSermonData] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
-  const [duration, setDuration] = useState<number>(0);
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
   const [seriesArray, setSeriesArray] = useState<string[]>([]);
   const [speakersArray, setSpeakersArray] = useState<string[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
+  const [trimStart, setTrimStart] = useState<number>(0);
+  const [trimDuration, setTrimDuration] = useState<number>(0);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(new Date(props.existingSermon ? props.existingSermon.dateMillis : new Date()));
@@ -85,22 +85,20 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   useEffect(() => {
     const fetchData = async () => {
-      const db = getFirestore(firebase);
-
-      const subtitlesRef = doc(db, 'subtitles', 'subtitlesDoc');
+      const subtitlesRef = doc(firestore, 'subtitles', 'subtitlesDoc');
       const subtitlesSnap = await getDoc(subtitlesRef);
       const subtitlesData = subtitlesSnap.data();
       setSubtitlesArray(subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []);
 
-      const seriesQuery = query(collection(db, 'series'));
+      const seriesQuery = query(collection(firestore, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
       setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
 
-      const speakersQuery = query(collection(db, 'speakers'));
+      const speakersQuery = query(collection(firestore, 'speakers'));
       const speakersQuerySnapshot = await getDocs(speakersQuery);
       setSpeakersArray(speakersQuerySnapshot.docs.map((doc) => doc.data().name));
 
-      const topicsRef = doc(db, 'topics', 'topicsDoc');
+      const topicsRef = doc(firestore, 'topics', 'topicsDoc');
       const topicsSnap = await getDoc(topicsRef);
       const topicsData = topicsSnap.data();
       setTopicsArray(topicsData ? topicsSnap.data()?.topicsArray : []);
@@ -197,7 +195,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             options={subtitlesArray}
           />
           <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
-            {/* TODO: Use date invalid for disabling the button */}
             <DesktopDatePicker
               label="Date"
               inputFormat="MM/dd/yyyy"
@@ -350,7 +347,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 <div style={{ display: 'flex', justifyContent: 'right' }}>
                   <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)}></Cancel>
                 </div>
-                <DynamicAudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
+                <DynamicAudioTrimmer
+                  url={file.preview}
+                  trimStart={trimStart}
+                  setTrimStart={setTrimStart}
+                  setTrimDuration={setTrimDuration}
+                />
               </div>
             ) : (
               <DropZone setFile={setFile} />
@@ -378,13 +380,14 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     setUploadProgress: setUploadProgress,
                     title: sermonData.title,
                     subtitle: sermonData.subtitle,
-                    durationSeconds: duration,
+                    durationSeconds: trimDuration,
                     date,
                     description: sermonData.description,
                     speaker,
                     scripture: sermonData.scripture,
                     topic,
                     series,
+                    trimStart,
                   });
                   clearForm();
                 } catch (error) {

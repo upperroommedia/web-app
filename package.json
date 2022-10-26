@@ -2,7 +2,10 @@
   "name": "web-app",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "build-functions": "cd functions && pnpm build",
+    "next-dev": "next dev",
+    "start-emulators": "pnpm run build-functions && firebase emulators:start --import=./dir --export-on-exit=./dir",
+    "dev": "pnpm run next-dev & pnpm run start-emulators",
     "analyze": "ANALYZE=true next build",
     "build": "next build",
     "start": "next start",
@@ -10,8 +13,7 @@
     "style:all": "tsc && pnpm run style:lint && pnpm run style:prettier",
     "style:lint": "eslint '**/*.{js,jsx,ts,tsx}'",
     "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}'",
-    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}'",
-    "prepare": "husky install"
+    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}'"
   },
   "dependencies": {
     "@emotion/react": "^11.10.4",
@@ -58,7 +60,6 @@
     "eslint-plugin-promise": "^5.2.0",
     "eslint-plugin-react": "^7.31.10",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "husky": "^7.0.4",
     "prettier": "^2.7.1",
     "prop-types": "^15.8.1",
     "typescript": "^4.8.4"

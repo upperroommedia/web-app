@@ -21,7 +21,7 @@ const Navbar: FunctionComponent = () => {
         {user && (
           <div className={styles.user_info}>
             <div className={styles.profile_pic}>
-              <Image src={photoSrc} layout="fill"></Image>
+              <Image src={photoSrc} layout="fill" alt="User profile picture"></Image>
             </div>
             <p>{displayName}</p>
           </div>

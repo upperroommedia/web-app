@@ -12,8 +12,10 @@ import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
-import { getDownloadURL, ref } from 'firebase/storage';
-import { storage } from '../firebase/firebase';
+import { getDownloadURL, getStorage, ref } from 'firebase/storage';
+import firebase from '../firebase/firebase';
+
+const storage = getStorage(firebase);
 
 const BottomAudioBar: FunctionComponent = () => {
   const {
@@ -32,7 +34,7 @@ const BottomAudioBar: FunctionComponent = () => {
   // will fire when global play state changes
   useEffect(() => {
     if (currentSermon.url == null) {
-      getDownloadURL(ref(storage, `sermons/${currentSermon.key}`))
+      getDownloadURL(ref(storage, `processed-sermons/${currentSermon.key}`))
         .then((url) => {
           setCurrentSermonUrl(url);
         })
@@ -82,26 +84,32 @@ const BottomAudioBar: FunctionComponent = () => {
         <div className={styles['controls-container']}>
           <Replay30Icon onClick={rewind30Seconds} />
           <SkipPreviousIcon onClick={previousSermon} />
-          {playing ? <PauseCircleIcon onClick={() => togglePlaying()} /> : <PlayCircleIcon onClick={() => togglePlaying()} />}
+          {playing ? (
+            <PauseCircleIcon onClick={() => togglePlaying()} />
+          ) : (
+            <PlayCircleIcon onClick={() => togglePlaying()} />
+          )}
           <SkipNextIcon onClick={nextSermon} />
           <Forward30Icon onClick={forward30Seconds} />
         </div>
         <div className={styles['progress-container']}>
           {/* TODO: Scroll overflow text */}
-          <h4 className={styles['current-time']}>{formatTime(seekTime >= 0 ? seekTime : currentSecond)}</h4>
-          <input
-            className={styles.slider}
-            type="range"
-            min="1"
-            step={1}
-            max={currentSermon.durationSeconds}
-            value={seekTime >= 0 ? seekTime : currentSecond}
-            id="myRange"
-            onInput={handleSliderScrub}
-            onMouseUp={handleMouseUp}
-          ></input>
+          <span className={styles['current-time']}>{formatTime(seekTime >= 0 ? seekTime : currentSecond)}</span>
+          <label htmlFor="audio-slider" className={styles['audio-slider-label']}>
+            <input
+              className={styles.slider}
+              type="range"
+              min="1"
+              step={1}
+              max={currentSermon.durationSeconds}
+              value={seekTime >= 0 ? seekTime : currentSecond}
+              id="myRange"
+              onInput={handleSliderScrub}
+              onMouseUp={handleMouseUp}
+            ></input>
+          </label>
           <audio ref={audioPlayer} src={currentSermon.url} onTimeUpdate={onPlaying}></audio>
-          <h4 className={styles.duration}>{formatTime(currentSermon.durationSeconds)}</h4>
+          <span className={styles.duration}>{formatTime(currentSermon.durationSeconds)}</span>
         </div>
       </div>
     </div>
