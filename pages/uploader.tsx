@@ -215,17 +215,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
 
   useEffect(() => {
-    if (autocompleteSpeakers.length > 3) {
-      setSpeakerError({
-        error: true,
-        message: 'Can only add up to 3 speakers',
-      });
-    } else {
-      setSpeakerError({
-        error: false,
-        message: '',
-      });
-    }
     // doing twice to avoid flashes
     if (new Set(autocompleteSpeakers).size !== autocompleteSpeakers.length) {
       setSpeaker((oldSpeaker) =>
@@ -242,6 +231,20 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       setSpeaker(autocompleteSpeakers);
     }
   }, [autocompleteSpeakers]);
+
+  useEffect(() => {
+    if (speaker.length > 3) {
+      setSpeakerError({
+        error: true,
+        message: 'Can only add up to 3 speakers',
+      });
+    } else {
+      setSpeakerError({
+        error: false,
+        message: '',
+      });
+    }
+  }, [speaker]);
 
   return (
     <form className={styles.container}>
@@ -368,8 +371,21 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </InstantSearch>
         ) : null}
 
+        {speaker.map((s) => {
+          return (
+            <p
+              key={s}
+              onClick={() => {
+                setSpeaker((oldSpeaker) => oldSpeaker.filter((sp) => sp !== s));
+                setAutocompleteSpeakers((oldSpeaker) => oldSpeaker.filter((sp) => sp !== s));
+              }}
+              style={{ cursor: 'pointer' }}
+            >
+              {s}
+            </p>
+          );
+        })}
         {speakerError.error && <p style={{ color: 'red' }}>{speakerError.message}</p>}
-        {speaker}
         <Autocomplete
           fullWidth
           value={topic}
@@ -455,6 +471,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   sermonData.title === '' ||
                   date === null ||
                   speaker.length === 0 ||
+                  speaker.length > 3 ||
                   sermonData.subtitle === ''
                 }
                 onClick={async () => {
