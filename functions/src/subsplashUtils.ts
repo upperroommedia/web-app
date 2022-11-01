@@ -1,5 +1,5 @@
-import FormData from 'form-data';
 import axios, { AxiosRequestConfig } from 'axios';
+import FormData from '../node_modules/form-data';
 
 export const authenticateSubsplash = async (): Promise<string> => {
   const formData = new FormData();
