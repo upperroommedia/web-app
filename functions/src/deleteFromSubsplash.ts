@@ -2,9 +2,9 @@ import axios from 'axios';
 import { logger, https } from 'firebase-functions';
 import { HttpsError, FunctionsErrorCode } from 'firebase-functions/v2/https';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-const deleteFromSubsplash = https.onCall(async (data: string, context): Promise<any> => {
+const deleteFromSubsplash = https.onCall(async (data: string, context): Promise<HttpsError | string | number> => {
   if (context.auth?.token.role !== 'admin') {
-    return { status: 'Not Authorized' };
+    return 'Not Authorized';
   }
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
     return 'Email or Password are not set in .env file';
