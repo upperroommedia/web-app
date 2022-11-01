@@ -198,7 +198,7 @@ Props) => {
                       title: sermon.title,
                       subtitle: sermon.subtitle,
                       speakers: sermon.speaker,
-                      autoPublish: false,
+                      autoPublish: autoPublish,
                       audioTitle: sermon.title,
                       audioUrl: url,
                       topics: sermon.topic,
