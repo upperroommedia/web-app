@@ -4,14 +4,28 @@ import { storage, firestore } from 'firebase-admin';
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import os from 'os';
-import fs from 'fs';
+import { createWriteStream, existsSync, mkdirSync, unlink } from 'fs';
 import { Bucket } from '@google-cloud/storage';
+import axios from 'axios';
+const tempFiles: string[] = [];
+
+type filePaths = {
+  INTRO: string | undefined;
+  CONTENT: string;
+  OUTRO: string | undefined;
+};
 
 const createTempFile = (fileName: string) => {
-  if (!fs.existsSync(os.tmpdir())) {
-    fs.mkdirSync(os.tmpdir());
+  try {
+    if (!existsSync(os.tmpdir())) {
+      mkdirSync(os.tmpdir());
+    }
+    const filePath = path.join(os.tmpdir(), fileName);
+    tempFiles.push(filePath);
+    return filePath;
+  } catch (err) {
+    throw new Error(`Error creating temp file: ${err}`);
   }
-  return path.join(os.tmpdir(), fileName);
 };
 
 const trimAndTranscode = (filePath: string, startTime?: number, duration?: number): Promise<string> => {
@@ -31,7 +45,7 @@ const trimAndTranscode = (filePath: string, startTime?: number, duration?: numbe
   });
 };
 
-const mergeAndUploadAudioFiles = (inputs: string[], outputFileName: string): Promise<string> => {
+const mergeFiles = (inputs: string[], outputFileName: string): Promise<string> => {
   const tmpFilePath = createTempFile(outputFileName);
   const proc = ffmpeg().format('mp3');
   inputs.forEach((input) => {
@@ -59,6 +73,7 @@ const uploadSermon = async (
   await bucket.upload(inputFilePath, { destination: destinationFilePath });
   await bucket.file(destinationFilePath).setMetadata({ contentType: 'audio/mpeg', metadata: customMetadata });
 };
+
 const getDurationSeconds = (filePath: string): Promise<number> => {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, (err, metadata) => {
@@ -69,6 +84,65 @@ const getDurationSeconds = (filePath: string): Promise<number> => {
     });
   });
 };
+
+async function downloadFile(fileUrl: string, outputLocationPath: string) {
+  const writer = createWriteStream(outputLocationPath);
+
+  return axios({
+    method: 'get',
+    url: fileUrl,
+    responseType: 'stream',
+  }).then((response) => {
+    //ensure that the user can call `then()` only when the file has
+    //been downloaded entirely.
+
+    return new Promise((resolve, reject) => {
+      response.data.pipe(writer);
+      let error: unknown = null;
+      writer.on('error', (err: unknown) => {
+        error = err;
+        writer.close();
+        reject(err);
+      });
+      writer.on('close', () => {
+        if (!error) {
+          resolve(true);
+        }
+        //no need to call the reject here, as it will have been called in the
+        //'error' stream;
+      });
+    });
+  });
+}
+
+const downloadFiles = async (bucket: Bucket, filePaths: filePaths): Promise<filePaths> => {
+  const pathsArray = [];
+  const keys: Array<keyof filePaths> = [];
+  // get key and value of filePaths
+  for (const [key, filePath] of Object.entries(filePaths) as [keyof filePaths, string | undefined][]) {
+    if (filePath) {
+      pathsArray.push(filePath);
+      keys.push(key as keyof filePaths);
+    }
+  }
+  const downloadObjects: filePaths = { CONTENT: '', INTRO: undefined, OUTRO: undefined };
+  logger.log('Before Promise');
+  await Promise.all(
+    pathsArray.map(async (filePath) => {
+      logger.log('Downloading file', filePath);
+      const tmpFilePath = createTempFile(path.basename(filePath));
+      await downloadFile(filePath, tmpFilePath);
+      logger.log('Downloaded file', filePath);
+      const key = keys.shift();
+      if (key) {
+        downloadObjects[key] = tmpFilePath;
+      }
+    })
+  );
+  logger.log('After Promise');
+  return downloadObjects;
+};
+
 const addIntroOutro = onObjectFinalized(async (storageEvent) => {
   const data = storageEvent.data;
   const filePath = data.name ? data.name : '';
@@ -80,63 +154,74 @@ const addIntroOutro = onObjectFinalized(async (storageEvent) => {
     // This is a folder
     return;
   }
+  if (!data.mediaLink) {
+    // This is not a media file
+    return;
+  }
   const bucket = storage().bucket();
   const db = firestore();
   const fileName = path.basename(filePath);
-  const tempFiles: string[] = [];
   logger.info('Processing file: ' + fileName);
+
   try {
     logger.log(data.metadata);
-    logger.log('contentType', data.contentType);
-    if (data.mediaLink) {
-      const processedSermonPath = await trimAndTranscode(
-        data.mediaLink,
-        parseFloat(data.metadata?.startTime || ''),
-        parseFloat(data.metadata?.duration || '')
-      );
-      const audioFilesToMerge = [];
-      const customMetadata: { [key: string]: string } = {};
-      if (data.metadata?.introUrl) {
-        audioFilesToMerge.push(data.metadata.introUrl);
-        customMetadata.introUrl = data.metadata.introUrl;
-        logger.log('introUrl', data.metadata.introUrl);
-      }
-      audioFilesToMerge.push(processedSermonPath);
-      if (data.metadata?.outroUrl) {
-        audioFilesToMerge.push(data.metadata.outroUrl);
-        customMetadata.outroUrl = data.metadata.outroUrl;
-        logger.log('outroUrl', data.metadata.outroUrl);
-      }
-      let durationSeconds = await getDurationSeconds(processedSermonPath);
-      if (data.metadata?.introUrl) {
-        customMetadata.introUrl = data.metadata.introUrl;
-      }
-      await uploadSermon(processedSermonPath, `processed-sermons/${fileName}`, bucket, customMetadata);
-      tempFiles.push(processedSermonPath);
-      if (audioFilesToMerge.length > 1) {
-        logger.log('Merging audio files', audioFilesToMerge);
-        const outputFileName = 'intro_outro-' + fileName;
-        const tmpFilePath = await mergeAndUploadAudioFiles(audioFilesToMerge, outputFileName);
-        const destination = `intro-outro-sermons/${fileName}`;
-        durationSeconds = await getDurationSeconds(tmpFilePath);
-        await uploadSermon(tmpFilePath, destination, bucket);
-        tempFiles.push(tmpFilePath);
-      }
-      console.log('Duration Seconds:', durationSeconds);
-      await db.collection('sermons').doc(fileName).update({ processed: true, durationSeconds: durationSeconds });
-      logger.log('Files have been merged succesfully');
+    const audioFilesToMerge: filePaths = { CONTENT: data.mediaLink, INTRO: undefined, OUTRO: undefined };
+    const customMetadata: { introUrl?: string; outroUrl?: string } = {};
+    if (data.metadata?.introUrl) {
+      audioFilesToMerge.INTRO = data.metadata.introUrl;
+      customMetadata.introUrl = data.metadata.introUrl;
     }
+    if (data.metadata?.outroUrl) {
+      audioFilesToMerge.OUTRO = data.metadata.outroUrl;
+      customMetadata.outroUrl = data.metadata.outroUrl;
+    }
+    logger.log('Audio File Download Paths', audioFilesToMerge);
+    const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge);
+    tempFilePaths.CONTENT = await trimAndTranscode(
+      tempFilePaths.CONTENT,
+      parseFloat(data.metadata?.startTime || ''),
+      parseFloat(data.metadata?.duration || '')
+    );
+    let durationSeconds = await getDurationSeconds(tempFilePaths.CONTENT);
+    await uploadSermon(tempFilePaths.CONTENT, `processed-sermons/${fileName}`, bucket, customMetadata);
+    if (tempFilePaths.INTRO || tempFilePaths.OUTRO) {
+      logger.log('Merging audio files', tempFilePaths);
+      const outputFileName = 'intro_outro-' + fileName;
+
+      //create merge array in order INTRO, CONTENT, OUTRO
+      const filePathsArray: string[] = [];
+      if (tempFilePaths.INTRO) filePathsArray.push(tempFilePaths.INTRO);
+      filePathsArray.push(tempFilePaths.CONTENT);
+      if (tempFilePaths.OUTRO) filePathsArray.push(tempFilePaths.OUTRO);
+
+      //merge files
+      const tmpFilePath = await mergeFiles(filePathsArray, outputFileName);
+
+      //upload merged file
+      const destination = `intro-outro-sermons/${fileName}`;
+      durationSeconds = await getDurationSeconds(tmpFilePath);
+      await uploadSermon(tmpFilePath, destination, bucket);
+    }
+    await db.collection('sermons').doc(fileName).update({ processed: true, durationSeconds: durationSeconds });
+    logger.log('Files have been merged succesfully');
   } catch (e) {
     logger.error(e);
   } finally {
-    tempFiles.forEach((file) => {
-      try {
+    try {
+      await tempFiles.map(async (file) => {
         logger.log('Deleting file: ' + file);
-        fs.unlinkSync(file);
-      } catch (error) {
-        logger.error(error);
-      }
-    });
+        await new Promise((resolve, reject) => {
+          unlink(file, (err) => {
+            if (err) {
+              reject(err);
+            }
+            resolve('success');
+          });
+        });
+      });
+    } catch (error) {
+      logger.error(error);
+    }
   }
 });
 
