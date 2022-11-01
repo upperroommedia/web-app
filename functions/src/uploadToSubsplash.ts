@@ -1,8 +1,8 @@
 import { logger, https } from 'firebase-functions';
-import FormData from 'form-data';
-import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosResponse } from 'axios';
+import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 
-interface INCOMING_DATA {
+export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   title: string;
   subtitle: string;
   speakers: string[];
@@ -13,25 +13,9 @@ interface INCOMING_DATA {
   description?: string;
 }
 
-const createAxiosConfig = (endpoint_url: string, bearerToken: string, data: unknown): AxiosRequestConfig => {
-  return {
-    method: 'post',
-    url: endpoint_url,
-    headers: {
-      'Cache-Control': 'no-cache',
-      Authority: 'core.subsplash.com',
-      Origin: 'https://dashboard.subsplash.com',
-      Referer: 'https://dashboard.subsplash.com/',
-      'Content-Type': 'application/vnd.api+json',
-      Authorization: `Bearer ${bearerToken}`,
-    },
-    data: data,
-  };
-};
-
 const createAudioRef = async (title: string, bearerToken: string): Promise<string> => {
   const data = { app_key: '9XTSHD', title: title };
-  const axiosConfig = createAxiosConfig(' https://core.subsplash.com/files/v1/audios', bearerToken, data);
+  const axiosConfig = createAxiosConfig(' https://core.subsplash.com/files/v1/audios', bearerToken, 'POST', data);
   return (await axios(axiosConfig)).data.id;
 };
 
@@ -48,11 +32,11 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
       },
     },
   };
-  const axiosConfig = createAxiosConfig('https://core.subsplash.com/transcoder/v1/jobs', bearerToken, data);
+  const axiosConfig = createAxiosConfig('https://core.subsplash.com/transcoder/v1/jobs', bearerToken, 'POST', data);
   return await axios(axiosConfig);
 };
 
-const uploadToSubsplash = https.onCall(async (data: INCOMING_DATA, context) => {
+const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA, context): Promise<unknown> => {
   if (context.auth?.token.role !== 'admin') {
     return { status: 'Not Authorized' };
   }
@@ -61,21 +45,7 @@ const uploadToSubsplash = https.onCall(async (data: INCOMING_DATA, context) => {
   }
   logger.log('data', data);
   try {
-    const formData = new FormData();
-    formData.append('grant_type', 'password');
-    formData.append('scope', 'app:9XTSHD');
-    formData.append('email', process.env.EMAIL);
-    formData.append('password', process.env.PASSWORD);
-
-    let config: AxiosRequestConfig = {
-      method: 'post',
-      url: 'https://core.subsplash.com/accounts/v1/oauth/token',
-      headers: {
-        ...formData.getHeaders(),
-      },
-      data: formData,
-    };
-    const bearerToken = (await axios(config)).data.access_token;
+    const bearerToken = await authenticateSubsplash();
     // create media item with title
     let tags: string[] = [];
     if (Array.isArray(data.speakers)) {
@@ -116,7 +86,12 @@ const uploadToSubsplash = https.onCall(async (data: INCOMING_DATA, context) => {
         audio: { id: audioId },
       },
     });
-    config = createAxiosConfig('https://core.subsplash.com/media/v1/media-items', bearerToken, requestData);
+    const config = createAxiosConfig(
+      'https://core.subsplash.com/media/v1/media-items',
+      bearerToken,
+      'POST',
+      requestData
+    );
     return (await axios(config)).data;
   } catch (error) {
     logger.error(error);
