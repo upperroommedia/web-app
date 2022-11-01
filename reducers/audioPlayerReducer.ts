@@ -2,6 +2,7 @@ import { Sermon } from '../types/Sermon';
 export interface SermonWithMetadata extends Sermon {
   currentSecond: number;
   url?: string;
+  subsplashId?: string;
 }
 
 export type AudioPlayerState = {
