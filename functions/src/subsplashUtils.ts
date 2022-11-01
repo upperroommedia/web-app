@@ -1,5 +1,7 @@
+// Utils file for subsplash functions
+
 import axios, { AxiosRequestConfig } from 'axios';
-import FormData from '../node_modules/form-data';
+import FormData from 'form-data';
 
 export const authenticateSubsplash = async (): Promise<string> => {
   const formData = new FormData();
