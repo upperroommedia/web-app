@@ -128,17 +128,16 @@ Props) => {
                   <Button
                     aria-label="Upload to Subsplash"
                     onClick={async () => {
-                      console.log(`Deleting sermon ${sermon.title} from subsplash: ${sermon.subsplashId}`);
                       const deleteFromSubsplash = createFunction<string, void>('deleteFromSubsplash');
                       try {
                         setIsUploading(true);
-                        console.log(await deleteFromSubsplash(sermon.subsplashId!));
+                        await deleteFromSubsplash(sermon.subsplashId!);
                         await updateDoc(doc(firestore, 'sermons', sermon.key), {
                           subsplashId: deleteField(),
                         });
                         sermon.subsplashId = undefined;
                         setIsUploading(false);
-                      } catch (error) {
+                      } catch (error: any) {
                         if (error.code === 'functions/not-found') {
                           await updateDoc(doc(firestore, 'sermons', sermon.key), {
                             subsplashId: deleteField(),
@@ -195,7 +194,6 @@ Props) => {
                       'uploadToSubsplash'
                     );
                     const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`));
-                    console.log(url);
                     const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
                       title: sermon.title,
                       subtitle: sermon.subtitle,
@@ -208,8 +206,8 @@ Props) => {
                     };
                     setIsUploading(true);
                     try {
-                      const response = await uploadToSubsplash(data);
-                      console.log(response);
+                      // TODO [1]: Fix return Type
+                      const response = (await uploadToSubsplash(data)) as unknown as { id: string };
                       const id = response.id;
                       const sermonRef = doc(firestore, 'sermons', sermon.key);
                       await setDoc(sermonRef, { subsplashId: id }, { merge: true });
