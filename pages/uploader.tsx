@@ -29,6 +29,7 @@ import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
 import { ISpeaker } from '../types/Speaker';
+import Chip from '@mui/material/Chip';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -40,7 +41,10 @@ interface UploaderProps {
 }
 
 const sortOrder = { square: 0, wide: 1, banner: 2 };
-
+const getSpeakersUnion = (array1: ISpeaker[], array2: ISpeaker[]) => {
+  const difference = array1.filter((s1) => !array2.find((s2) => s1.objectID === s2.objectID));
+  return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
+};
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
   const [sermon, setSermon] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
@@ -275,11 +279,15 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             }
             if (newValue !== null && newValue.length <= 3) {
               updateSermon('speakers', newValue);
-            } else if (newValue.length >= 4) {
+            }
+
+            if (newValue.length >= 4) {
               setSpeakerError({
                 error: true,
                 message: 'Can only add up to 3 speakers',
               });
+            } else if (speakerError.error) {
+              setSpeakerError({ error: false, message: '' });
             }
           }}
           onInputChange={async (_, value) => {
@@ -294,34 +302,99 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               });
           }}
           id="speaker-input"
-          options={speakersArray}
+          options={getSpeakersUnion(sermon.speakers, speakersArray)}
+          isOptionEqualToValue={(option, value) =>
+            value === undefined || option === undefined || option.objectID === value.objectID
+          }
+          renderTags={(speakers, _) => {
+            return speakers.map((speaker) => (
+              <Chip
+                style={{ margin: '3px' }}
+                onDelete={() => {
+                  setSpeakerError({ error: false, message: '' });
+                  setSermon((previousSermon) => {
+                    const previousSpeakers = previousSermon.speakers;
+                    const newSpeakers = previousSpeakers.filter((s) => s.objectID !== speaker.objectID);
+                    return {
+                      ...previousSermon,
+                      speakers: newSpeakers,
+                    };
+                  });
+                }}
+                key={speaker.objectID}
+                label={speaker.name}
+                avatar={
+                  <div
+                    style={{
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      position: 'relative',
+                      width: 24,
+                      height: 24,
+                      backgroundImage: `url(${'/user.png'})`,
+                      backgroundPosition: 'center center',
+                      backgroundSize: 'cover',
+                    }}
+                  >
+                    {sermon.speakers.length > 0 && (
+                      <Image
+                        src={
+                          speaker.images.sort(
+                            (a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
+                              return sortOrder[a.type] - sortOrder[b.type];
+                            }
+                          )[0].downloadLink
+                        }
+                        layout="fill"
+                      />
+                    )}
+                  </div>
+                }
+              />
+            ));
+          }}
           renderOption={(props, option: ISpeaker) => {
             return (
               <li key={option.name} {...props}>
-                <Image
-                  src={
-                    option.images.sort((a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
-                      return sortOrder[a.type] - sortOrder[b.type];
-                    })[0].downloadLink
-                  }
-                  width={30}
-                  height={30}
-                />
+                <div
+                  style={{
+                    borderRadius: '5px',
+                    overflow: 'hidden',
+                    position: 'relative',
+                    width: 30,
+                    height: 30,
+                    marginRight: 15,
+                    backgroundImage: `url(${'/user.png'})`,
+                    backgroundPosition: 'center center',
+                    backgroundSize: 'cover',
+                  }}
+                >
+                  <Image
+                    src={
+                      option.images.sort((a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
+                        return sortOrder[a.type] - sortOrder[b.type];
+                      })[0].downloadLink
+                    }
+                    layout="fill"
+                  />
+                </div>
                 <div>{option.name}</div>
               </li>
             );
           }}
           getOptionLabel={(option: ISpeaker) => option.name}
           multiple
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              required
-              label="Speaker(s)"
-              error={speakerError.error}
-              helperText={speakerError.message}
-            />
-          )}
+          renderInput={(params) => {
+            return (
+              <TextField
+                {...params}
+                required
+                label="Speaker(s)"
+                error={speakerError.error}
+                helperText={speakerError.message}
+              />
+            );
+          }}
         />
         <TextField
           fullWidth
