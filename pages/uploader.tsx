@@ -19,7 +19,7 @@ import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
 import firestore, { collection, doc, getDoc, getDocs, query, limit } from '../firebase/firestore';
-import { Sermon, emptySermon, getDateString } from '../types/Sermon';
+import { Sermon, emptySermon, getDateString, createSermon } from '../types/Sermon';
 
 import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
@@ -318,19 +318,21 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   topic,
                   series,
                 }).then(() => {
-                  props.setUpdatedSermon?.({
-                    key: sermonData.key,
-                    title: sermonData.title,
-                    subtitle: sermonData.subtitle,
-                    dateMillis: date.getTime(),
-                    durationSeconds: sermonData.durationSeconds,
-                    description: sermonData.description,
-                    speaker,
-                    scripture: sermonData.scripture,
-                    topic,
-                    series,
-                    dateString: getDateString(date),
-                  });
+                  props.setUpdatedSermon?.(
+                    createSermon({
+                      key: sermonData.key,
+                      title: sermonData.title,
+                      subtitle: sermonData.subtitle,
+                      dateMillis: date.getTime(),
+                      durationSeconds: sermonData.durationSeconds,
+                      description: sermonData.description,
+                      speaker: speaker,
+                      scripture: sermonData.scripture,
+                      topic: topic,
+                      series,
+                      dateString: getDateString(date),
+                    })
+                  );
                   props.setEditFormOpen?.(false);
                 })
               }

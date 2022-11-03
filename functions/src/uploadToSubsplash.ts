@@ -11,6 +11,7 @@ export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   audioUrl: string;
   topics?: string[];
   description?: string;
+  images: { id: string; type: 'square' | 'wide' | 'banner' }[];
 }
 
 const createAudioRef = async (title: string, bearerToken: string): Promise<string> => {
@@ -78,11 +79,7 @@ const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING
       date: new Date(),
       auto_publish: data.autoPublish ?? false,
       _embedded: {
-        images: [
-          { id: '30b301b5-16f2-4982-b248-6a96a2093a1f', type: 'square' },
-          { id: '3597957d-26e5-4c95-a21f-30d61d0274c5', type: 'wide' },
-          { id: '090bf8b2-3bb7-4826-b4bc-b278b2927228', type: 'banner' },
-        ],
+        images: data.images,
         audio: { id: audioId },
       },
     });

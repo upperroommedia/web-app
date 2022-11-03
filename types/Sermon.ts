@@ -1,5 +1,18 @@
 import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from '../firebase/firestore';
 
+export enum sermonStatusType {
+  ERROR = 'ERROR',
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  PROCESSED = 'PROCESSED',
+  UPLOADED = 'UPLOADED',
+}
+
+export interface sermonStatus {
+  type: sermonStatusType;
+  message?: string;
+}
+
 export interface Sermon {
   key: string;
   title: string;
@@ -12,7 +25,38 @@ export interface Sermon {
   durationSeconds: number;
   topic: Array<string>;
   dateString?: string;
+  status: sermonStatus;
 }
+
+export const createSermon = ({
+  key = '',
+  title = '',
+  subtitle = '',
+  series = '',
+  description = '',
+  dateMillis = 0,
+  durationSeconds = 0,
+  speaker = <string[]>[],
+  scripture = '',
+  topic = <string[]>[],
+  dateString = new Date().toLocaleDateString(),
+  status = { type: sermonStatusType.PENDING },
+}): Sermon => {
+  return {
+    key,
+    title,
+    subtitle,
+    series,
+    description,
+    dateMillis,
+    durationSeconds,
+    speaker,
+    scripture,
+    topic,
+    dateString,
+    status,
+  };
+};
 
 export interface FirebaseSermon extends Omit<Sermon, 'dateMillis' | 'dateString'> {
   date: Timestamp;
@@ -54,4 +98,5 @@ export const emptySermon: Sermon = {
   scripture: '',
   topic: [],
   dateString: undefined,
+  status: { type: sermonStatusType.PENDING },
 };

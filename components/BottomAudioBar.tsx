@@ -49,7 +49,7 @@ const BottomAudioBar: FunctionComponent = () => {
     } else if (!playing && audioPlayer.current) {
       audioPlayer.current.pause();
     }
-  }, [currentSermon.url, playing]);
+  }, [currentSermon?.url, playing]);
 
   const onPlaying = () => {
     const newSecond = Math.floor(audioPlayer.current.currentTime);
@@ -116,4 +116,9 @@ const BottomAudioBar: FunctionComponent = () => {
   );
 };
 
-export default BottomAudioBar;
+const BottomAudioBarWrapper = () => {
+  const { currentSermon } = useAudioPlayer();
+  return <>{currentSermon && <BottomAudioBar />}</>;
+};
+
+export default BottomAudioBarWrapper;

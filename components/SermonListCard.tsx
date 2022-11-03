@@ -9,19 +9,23 @@ import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import styles from '../styles/SermonListCard.module.css';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import { Button, Checkbox, CircularProgress } from '@mui/material';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import CircularProgress from '@mui/material/CircularProgress';
 // import { Sermon } from '../types/Sermon';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
-import firestore, { deleteDoc, deleteField, doc, setDoc, updateDoc } from '../firebase/firestore';
+import firestore, { deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
 import storage, { deleteObject, getDownloadURL, ref } from '../firebase/storage';
-import { emptySermon, Sermon } from '../types/Sermon';
+import { emptySermon, Sermon, sermonStatusType } from '../types/Sermon';
 import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
 import useAuth from '../context/user/UserContext';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
 import { createFunction } from '../utils/createFunction';
+import PublishIcon from '@mui/icons-material/Publish';
+import UnpublishedIcon from '@mui/icons-material/Unpublished';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -43,10 +47,10 @@ Props) => {
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
   const [uploadToSupsplashPopup, setUploadToSupsplashPopup] = useState<boolean>(false);
 
+  const [autoPublish, setAutoPublish] = useState<boolean>(false);
   const [updatedSermon, setUpdatedSermon] = useState<Sermon>(emptySermon);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [deleteChecked, setDeleteChecked] = useState<boolean>(false);
-  const [autoPublish, setAutoPublish] = useState<boolean>(false);
 
   useEffect(() => {
     if (updatedSermon !== emptySermon) {
@@ -60,15 +64,106 @@ Props) => {
   }, [updatedSermon]);
 
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
-
   const handleDelete = async (id: string) => {
     try {
+      await deleteFromSubsplash();
       await deleteObject(ref(storage, `sermons/${id}`));
       await deleteDoc(doc(firestore, 'sermons', id));
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
       alert(error);
     }
+  };
+
+  const uploadToSubsplash = async () => {
+    const uploadToSubsplash = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
+    const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`));
+    const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
+      title: sermon.title,
+      subtitle: sermon.subtitle,
+      speakers: sermon.speaker,
+      autoPublish: autoPublish,
+      audioTitle: sermon.title,
+      audioUrl: url,
+      topics: sermon.topic,
+      description: sermon.description,
+      images: [
+        { id: '30b301b5-16f2-4982-b248-6a96a2093a1f', type: 'square' },
+        { id: '3597957d-26e5-4c95-a21f-30d61d0274c5', type: 'wide' },
+        { id: '090bf8b2-3bb7-4826-b4bc-b278b2927228', type: 'banner' },
+      ],
+    };
+    setIsUploading(true);
+    try {
+      // TODO [1]: Fix return Type
+      const response = (await uploadToSubsplash(data)) as unknown as { id: string };
+      const id = response.id;
+      const sermonRef = doc(firestore, 'sermons', sermon.key);
+      await updateDoc(sermonRef, { subsplashId: id, status: { type: sermonStatusType.UPLOADED } });
+    } catch (error) {
+      alert(error);
+    }
+    setIsUploading(false);
+    setUploadToSupsplashPopup(false);
+  };
+
+  const deleteFromSubsplash = async () => {
+    const deleteFromSubsplashCall = createFunction<string, void>('deleteFromSubsplash');
+    try {
+      setIsUploading(true);
+      await deleteFromSubsplashCall(sermon.subsplashId!);
+      await updateDoc(doc(firestore, 'sermons', sermon.key), {
+        subsplashId: deleteField(),
+        status: { type: sermonStatusType.PROCESSED },
+      });
+      setIsUploading(false);
+    } catch (error: any) {
+      if (error.code === 'functions/not-found') {
+        await updateDoc(doc(firestore, 'sermons', sermon.key), {
+          subsplashId: deleteField(),
+          status: { type: sermonStatusType.PROCESSED },
+        });
+        setIsUploading(false);
+      } else {
+        setIsUploading(false);
+        alert(error);
+      }
+    }
+  };
+
+  const AdminControls: FunctionComponent = () => {
+    if (window.location.pathname !== '/admin' || user?.role !== 'admin') {
+      return null;
+    }
+    return (
+      <div>
+        {sermon.status.type === sermonStatusType.UPLOADED ? (
+          <IconButton aria-label="Upload to Subsplash" onClick={deleteFromSubsplash}>
+            {isUploading ? <CircularProgress size={24} /> : <UnpublishedIcon style={{ color: 'orangered' }} />}
+          </IconButton>
+        ) : (
+          <IconButton
+            aria-label="Upload to Subsplash"
+            style={{ color: 'lightgreen' }}
+            onClick={() => {
+              setUploadToSupsplashPopup(true);
+            }}
+          >
+            <PublishIcon />
+          </IconButton>
+        )}
+        <IconButton aria-label="edit sermon" style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
+          <EditIcon />
+        </IconButton>
+        <IconButton
+          aria-label="delete sermon"
+          style={{ color: 'red' }}
+          onClick={() => setDeleteConfirmationPopup(true)}
+        >
+          <DeleteIcon />
+        </IconButton>
+      </div>
+    );
   };
 
   return (
@@ -122,103 +217,23 @@ Props) => {
               />
             )}
             <span style={{ width: '100%' }}></span>
-            {user?.role === 'admin' ? (
-              <>
-                {sermon.subsplashId ? (
-                  <Button
-                    aria-label="Upload to Subsplash"
-                    onClick={async () => {
-                      const deleteFromSubsplash = createFunction<string, void>('deleteFromSubsplash');
-                      try {
-                        setIsUploading(true);
-                        await deleteFromSubsplash(sermon.subsplashId!);
-                        await updateDoc(doc(firestore, 'sermons', sermon.key), {
-                          subsplashId: deleteField(),
-                        });
-                        sermon.subsplashId = undefined;
-                        setIsUploading(false);
-                      } catch (error: any) {
-                        if (error.code === 'functions/not-found') {
-                          await updateDoc(doc(firestore, 'sermons', sermon.key), {
-                            subsplashId: deleteField(),
-                          });
-                          sermon.subsplashId = undefined;
-                          setIsUploading(false);
-                        } else {
-                          setIsUploading(false);
-                          alert(error);
-                        }
-                      }
-                      // TODO[0]: Replace this with a listener on the firestore database
-                    }}
-                  >
-                    {isUploading ? <CircularProgress size={24} /> : <span>Delete From Subsplash</span>}
-                  </Button>
-                ) : (
-                  <Button
-                    aria-label="Upload to Subsplash"
-                    onClick={() => {
-                      setUploadToSupsplashPopup(true);
-                    }}
-                  >
-                    Upload To Subsplash
-                  </Button>
-                )}
-                <IconButton
-                  aria-label="edit sermon"
-                  style={{ color: 'lightblue' }}
-                  onClick={() => setEditFormPopup(true)}
-                >
-                  <EditIcon />
-                </IconButton>
-                <IconButton
-                  aria-label="delete sermon"
-                  style={{ color: 'red' }}
-                  onClick={() => setDeleteConfirmationPopup(true)}
-                >
-                  <DeleteIcon />
-                </IconButton>
-              </>
+            {[sermonStatusType.PROCESSED, sermonStatusType.UPLOADED].includes(sermon.status.type) ? (
+              <AdminControls />
             ) : (
-              <></>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                  <h3 style={{ margin: 0 }}>{sermon.status.type}</h3>
+                  {sermon.status.type === sermonStatusType.PROCESSING && <CircularProgress size={15} />}
+                </div>
+                {sermon.status.message && <p style={{ margin: 0 }}>{sermon.status.message}</p>}
+              </div>
             )}
             <PopUp
               title={'Upload Sermon to Supsplash?'}
               open={uploadToSupsplashPopup}
               setOpen={() => setUploadToSupsplashPopup(false)}
               button={
-                <Button
-                  aria-label="Confirm Upload to Subsplash"
-                  onClick={async () => {
-                    const uploadToSubsplash = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>(
-                      'uploadToSubsplash'
-                    );
-                    const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`));
-                    const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
-                      title: sermon.title,
-                      subtitle: sermon.subtitle,
-                      speakers: sermon.speaker,
-                      autoPublish: autoPublish,
-                      audioTitle: sermon.title,
-                      audioUrl: url,
-                      topics: sermon.topic,
-                      description: sermon.description,
-                    };
-                    setIsUploading(true);
-                    try {
-                      // TODO [1]: Fix return Type
-                      const response = (await uploadToSubsplash(data)) as unknown as { id: string };
-                      const id = response.id;
-                      const sermonRef = doc(firestore, 'sermons', sermon.key);
-                      await setDoc(sermonRef, { subsplashId: id }, { merge: true });
-                      sermon.subsplashId = id;
-                    } catch (error) {
-                      alert(error);
-                    }
-                    setIsUploading(false);
-                    setUploadToSupsplashPopup(false);
-                  }}
-                >
+                <Button aria-label="Confirm Upload to Subsplash" onClick={uploadToSubsplash}>
                   {isUploading ? <CircularProgress /> : 'Upload'}
                 </Button>
               }
