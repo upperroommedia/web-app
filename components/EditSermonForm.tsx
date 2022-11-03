@@ -4,7 +4,7 @@ import Dialog from '@mui/material/Dialog';
 import Button from '@mui/material/Button';
 import { Dispatch, SetStateAction } from 'react';
 import Uploader from '../pages/uploader';
-import { Sermon } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
 
 interface EditSermonFormInfo {
   open: boolean;

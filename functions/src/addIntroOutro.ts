@@ -8,7 +8,7 @@ import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
-import { sermonStatus, sermonStatusType } from '../../types/Sermon';
+import { sermonStatus, sermonStatusType } from '../../types/SermonTypes';
 const tempFiles = new Set<string>();
 
 type filePaths = {

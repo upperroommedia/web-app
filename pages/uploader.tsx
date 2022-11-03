@@ -19,7 +19,8 @@ import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
 import firestore, { collection, doc, getDoc, getDocs, query } from '../firebase/firestore';
-import { Sermon, emptySermon, getDateString, createSermon } from '../types/Sermon';
+import { emptySermon, getDateString, createSermon } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';

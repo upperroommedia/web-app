@@ -1,4 +1,4 @@
-import { sermonImage } from './Sermon';
+import { sermonImage } from './SermonTypes';
 
 export interface ISpeaker {
   listId: string;

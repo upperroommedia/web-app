@@ -2,7 +2,7 @@ import { logger, https } from 'firebase-functions';
 import axios, { AxiosResponse } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '../../types/Speaker';
-import { sermonImage } from '../../types/Sermon';
+import { sermonImage } from '../../types/SermonTypes';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   title: string;

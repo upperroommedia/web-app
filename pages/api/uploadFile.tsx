@@ -3,7 +3,8 @@ import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } fr
 
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../../components/DropZone';
-import { Sermon, sermonConverter } from '../../types/Sermon';
+import { sermonConverter } from '../../types/Sermon';
+import { Sermon } from '../../types/SermonTypes';
 
 interface uploadFileProps {
   file: UploadableFile;

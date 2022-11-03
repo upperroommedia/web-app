@@ -5,7 +5,8 @@ import dynamic from 'next/dynamic';
 import type { GetServerSideProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
-import { Sermon, sermonConverter, sermonStatusType } from '../types/Sermon';
+import { sermonConverter } from '../types/Sermon';
+import { Sermon, sermonStatusType } from '../types/SermonTypes';
 import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import SermonsList from '../components/SermonsList';
 import Head from 'next/head';
