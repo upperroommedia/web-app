@@ -5,7 +5,7 @@ import { ROLES } from '../context/types';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import firestore, { collection, query } from '../firebase/firestore';
-import { Sermon } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
 import SermonsList from '../components/SermonsList';
 import PopUp from '../components/PopUp';
 import Button from '@mui/material/Button';

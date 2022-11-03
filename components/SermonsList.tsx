@@ -4,7 +4,7 @@
 
 import SermonListCard from './SermonListCard';
 
-import { Sermon } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
 
 import { useEffect } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';

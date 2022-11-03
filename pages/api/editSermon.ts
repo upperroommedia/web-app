@@ -1,6 +1,7 @@
 import firestore, { doc, updateDoc } from '../../firebase/firestore';
 
-import { Sermon, sermonConverter } from '../../types/Sermon';
+import { sermonConverter } from '../../types/Sermon';
+import { Sermon } from '../../types/SermonTypes';
 
 interface IEditSermon extends Omit<Sermon, 'status' | 'durationSeconds' | 'dateMillis'> {}
 
