@@ -1,4 +1,6 @@
 import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from '../firebase/firestore';
+import { ISpeaker } from './Speaker';
+import { v4 as uuidv4 } from 'uuid';
 
 export enum sermonStatusType {
   ERROR = 'ERROR',
@@ -13,34 +15,45 @@ export interface sermonStatus {
   message?: string;
 }
 
+export type sermonImage = {
+  id: string;
+  type: 'square' | 'wide' | 'banner';
+  height: number;
+  width: number;
+  downloadLink: string;
+  title: string;
+};
+
 export interface Sermon {
   key: string;
   title: string;
   description: string;
   series: string;
-  speaker: Array<string>;
+  speakers: ISpeaker[];
   subtitle: string;
   scripture: string;
   dateMillis: number;
   durationSeconds: number;
-  topic: Array<string>;
+  topics: string[];
   dateString?: string;
   status: sermonStatus;
+  images: sermonImage[];
 }
 
 export const createSermon = ({
-  key = '',
+  key = uuidv4(),
   title = '',
   subtitle = '',
   series = '',
   description = '',
   dateMillis = 0,
   durationSeconds = 0,
-  speaker = <string[]>[],
+  speakers = <ISpeaker[]>[],
   scripture = '',
-  topic = <string[]>[],
+  topics = <string[]>[],
   dateString = new Date().toLocaleDateString(),
   status = { type: sermonStatusType.PENDING },
+  images = <sermonImage[]>[],
 }): Sermon => {
   return {
     key,
@@ -50,11 +63,12 @@ export const createSermon = ({
     description,
     dateMillis,
     durationSeconds,
-    speaker,
+    speakers,
     scripture,
-    topic,
+    topics,
     dateString,
     status,
+    images,
   };
 };
 
@@ -87,16 +101,17 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
 };
 
 export const emptySermon: Sermon = {
-  key: '',
+  key: uuidv4(),
   title: '',
   subtitle: '',
   series: '',
   description: '',
   dateMillis: 0,
   durationSeconds: 0,
-  speaker: [],
+  speakers: [],
   scripture: '',
-  topic: [],
-  dateString: undefined,
+  topics: [],
+  dateString: new Date().toLocaleDateString(),
   status: { type: sermonStatusType.PENDING },
+  images: [],
 };

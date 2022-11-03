@@ -23,9 +23,11 @@ import { Sermon, emptySermon, getDateString, createSermon } from '../types/Sermo
 
 import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
+import Image from 'next/image';
 import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
+import { ISpeaker } from '../types/Speaker';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -36,24 +38,22 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
+const sortOrder = { square: 0, wide: 1, banner: 2 };
+
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
-  const [sermonData, setSermonData] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
+  const [sermon, setSermon] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState<string>();
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
   const [seriesArray, setSeriesArray] = useState<string[]>([]);
-  const [speakersArray, setSpeakersArray] = useState<string[]>([]);
+  const [speakersArray, setSpeakersArray] = useState<ISpeaker[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
   const [trimStart, setTrimStart] = useState<number>(0);
-  const [trimDuration, setTrimDuration] = useState<number>(0);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(new Date(props.existingSermon ? props.existingSermon.dateMillis : new Date()));
-  const [speaker, setSpeaker] = useState(props.existingSermon ? props.existingSermon.speaker : []);
-  const [topic, setTopic] = useState(props.existingSermon ? props.existingSermon.topic : []);
-  const [series, setSeries] = useState(props.existingSermon ? props.existingSermon.series : '');
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
@@ -107,35 +107,40 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getDate() === date?.getDate() &&
       sermon1Date.getMonth() === date?.getMonth() &&
       sermon1Date.getFullYear() === date?.getFullYear() &&
-      sermon1.series === series &&
-      JSON.stringify(sermon1.speaker) === JSON.stringify(speaker) &&
+      sermon1.series === sermon.series &&
+      JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
       sermon1.scripture === sermon2.scripture &&
-      JSON.stringify(sermon1.topic) === JSON.stringify(topic)
+      JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
   };
 
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
-    setSermonData(emptySermon);
+    setSermon(emptySermon);
     setDate(new Date());
-    setSpeaker([]);
-    setTopic([]);
-    setSeries('');
     setFile(undefined);
   };
 
-  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setSermonData((prevSermonData) => {
+  const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setSermon((prevSermon) => {
       return {
-        ...prevSermonData,
+        ...prevSermon,
         [event.target.name]: event.target.value,
       };
     });
   };
 
+  const updateSermon = (key: keyof Sermon, value: any) => {
+    setSermon((oldSermon) => ({ ...oldSermon, [key]: value }));
+  };
+
   const handleDateChange = (newValue: Date) => {
     setDate(newValue);
+  };
+
+  const setTrimDuration = (durationSeconds: number) => {
+    updateSermon('durationSeconds', durationSeconds);
   };
 
   const fetchSpeakerResults = async (query: string) => {
@@ -192,7 +197,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           label="Title"
           name="title"
           variant="outlined"
-          value={sermonData.title}
+          value={sermon.title}
           onChange={handleChange}
           required
         />
@@ -200,17 +205,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <Autocomplete
             fullWidth
             id="subtitle-input"
-            value={sermonData.subtitle || null}
+            value={sermon.subtitle || null}
             onChange={(_, newValue) => {
-              newValue === null
-                ? setSermonData((oldSermonData) => ({
-                    ...oldSermonData,
-                    subtitle: '',
-                  }))
-                : setSermonData((oldSermonData) => ({
-                    ...oldSermonData,
-                    subtitle: newValue,
-                  }));
+              newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
             }}
             renderInput={(params) => <TextField required {...params} label="Subtitle" />}
             options={subtitlesArray}
@@ -240,15 +237,15 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           name="description"
           placeholder="Description"
           multiline
-          value={sermonData.description}
+          value={sermon.description}
           onChange={handleChange}
         />
         <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
           <Autocomplete
             fullWidth
-            value={series || null}
+            value={sermon.series || null}
             onChange={(_, newValue) => {
-              newValue === null ? setSeries('') : setSeries(newValue);
+              newValue === null ? updateSermon('series', '') : updateSermon('series', newValue);
             }}
             id="series-input"
             options={seriesArray}
@@ -263,15 +260,20 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             <AddIcon />
           </IconButton>
         </div>
+        {/* <Image src={Logo} width={30} height={30} /> */}
+
         <Autocomplete
           fullWidth
-          value={speaker}
+          value={sermon.speakers}
           onBlur={() => {
             setSpeakerError({ error: false, message: '' });
           }}
           onChange={(_, newValue) => {
+            if (newValue.length === 1) {
+              updateSermon('images', newValue[0].images);
+            }
             if (newValue !== null && newValue.length <= 3) {
-              setSpeaker(newValue);
+              updateSermon('speakers', newValue);
             } else if (newValue.length >= 4) {
               setSpeakerError({
                 error: true,
@@ -283,15 +285,32 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             await fetchSpeakerResults(value)
               .then((response) => response?.json())
               .then((data) => {
-                const res: string[] = [];
-                data.hits.forEach((element: any) => {
-                  res.push(element.name);
+                const res: ISpeaker[] = [];
+                data.hits.forEach((element: ISpeaker) => {
+                  res.push(element);
                 });
                 setSpeakersArray(res);
               });
           }}
           id="speaker-input"
           options={speakersArray}
+          renderOption={(props, option: ISpeaker) => {
+            return (
+              <li key={option.name} {...props}>
+                <Image
+                  src={
+                    option.images.sort((a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
+                      return sortOrder[a.type] - sortOrder[b.type];
+                    })[0].downloadLink
+                  }
+                  width={30}
+                  height={30}
+                />
+                <div>{option.name}</div>
+              </li>
+            );
+          }}
+          getOptionLabel={(option: ISpeaker) => option.name}
           multiple
           renderInput={(params) => (
             <TextField
@@ -309,18 +328,18 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           label="Scripture"
           name="scripture"
           variant="outlined"
-          value={sermonData.scripture}
+          value={sermon.scripture}
           onChange={handleChange}
         />
         <Autocomplete
           fullWidth
-          value={topic}
+          value={sermon.topics}
           onBlur={() => {
             setTopicError({ error: false, message: '' });
           }}
           onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 10) {
-              setTopic(newValue);
+              updateSermon('topics', newValue);
             } else if (newValue.length >= 11) {
               setTopicError({
                 error: true,
@@ -351,28 +370,28 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             <Button
               onClick={() =>
                 editSermon({
-                  key: sermonData.key,
-                  title: sermonData.title,
-                  subtitle: sermonData.subtitle,
-                  date,
-                  description: sermonData.description,
-                  speaker,
-                  scripture: sermonData.scripture,
-                  topic,
-                  series,
+                  key: sermon.key,
+                  title: sermon.title,
+                  subtitle: sermon.subtitle,
+                  description: sermon.description,
+                  speakers: sermon.speakers,
+                  scripture: sermon.scripture,
+                  topics: sermon.topics,
+                  series: sermon.series,
+                  images: sermon.images,
                 }).then(() => {
                   props.setUpdatedSermon?.(
                     createSermon({
-                      key: sermonData.key,
-                      title: sermonData.title,
-                      subtitle: sermonData.subtitle,
+                      key: sermon.key,
+                      title: sermon.title,
+                      subtitle: sermon.subtitle,
                       dateMillis: date.getTime(),
-                      durationSeconds: sermonData.durationSeconds,
-                      description: sermonData.description,
-                      speaker: speaker,
-                      scripture: sermonData.scripture,
-                      topic: topic,
-                      series,
+                      durationSeconds: sermon.durationSeconds,
+                      description: sermon.description,
+                      speakers: sermon.speakers,
+                      scripture: sermon.scripture,
+                      topics: sermon.topics,
+                      series: sermon.series,
                       dateString: getDateString(date),
                     })
                   );
@@ -380,11 +399,11 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 })
               }
               disabled={
-                sermonsEqual(props.existingSermon, sermonData) ||
-                sermonData.title === '' ||
+                sermonsEqual(props.existingSermon, sermon) ||
+                sermon.title === '' ||
                 date === null ||
-                speaker.length === 0 ||
-                sermonData.subtitle === ''
+                sermon.speakers.length === 0 ||
+                sermon.subtitle === ''
               }
               variant="contained"
             >
@@ -417,28 +436,21 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             value="Upload"
             disabled={
               file === undefined ||
-              sermonData.title === '' ||
+              sermon.title === '' ||
               date === null ||
-              speaker.length === 0 ||
-              sermonData.subtitle === ''
+              sermon.speakers.length === 0 ||
+              sermon.subtitle === ''
             }
             onClick={async () => {
               if (file !== undefined && date != null && user?.role === 'admin') {
                 try {
                   await uploadFile({
-                    file: file,
-                    setFile: setFile,
-                    setUploadProgress: setUploadProgress,
-                    title: sermonData.title,
-                    subtitle: sermonData.subtitle,
-                    durationSeconds: trimDuration,
+                    file,
+                    setFile,
+                    setUploadProgress,
                     date,
-                    description: sermonData.description,
-                    speaker,
-                    scripture: sermonData.scripture,
-                    topic,
-                    series,
                     trimStart,
+                    sermon,
                   });
                   clearForm();
                 } catch (error) {
@@ -471,7 +483,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 await addNewSeries(newSeries);
                 setNewSeriesPopup(false);
                 seriesArray.push(newSeries);
-                setSeries(newSeries);
+                updateSermon('series', newSeries);
                 setNewSeries('');
               } catch (error) {
                 setNewSeriesError({ error: true, message: JSON.stringify(error) });
@@ -486,7 +498,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <TextField
             value={newSeries}
             onChange={(e) => {
-              setNewSeries(e.target.value);
+              handleChange(e);
               !userHasTypedInSeries && setUserHasTypedInSeries(true);
             }}
             error={newSeriesError.error}

@@ -22,7 +22,7 @@ interface AudioTrimmerProps {
   url: string;
   trimStart: number;
   setTrimStart: Dispatch<SetStateAction<number>>;
-  setTrimDuration: Dispatch<SetStateAction<number>>;
+  setTrimDuration: (durationSeconds: number) => void;
 }
 
 enum CLICK_TARGET {
