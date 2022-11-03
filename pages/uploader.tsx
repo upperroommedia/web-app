@@ -18,7 +18,7 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
-import firestore, { collection, doc, getDoc, getDocs, query, limit } from '../firebase/firestore';
+import firestore, { collection, doc, getDoc, getDocs, query } from '../firebase/firestore';
 import { Sermon, emptySermon, getDateString, createSermon } from '../types/Sermon';
 
 import Button from '@mui/material/Button';
@@ -93,15 +93,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       const seriesQuery = query(collection(firestore, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
       setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
-
-      const speakersQuery = query(collection(firestore, 'speakers'), limit(5));
-      const speakersQuerySnapshot = await getDocs(speakersQuery);
-      setSpeakersArray(speakersQuerySnapshot.docs.map((doc) => doc.data().name));
-
-      const topicsRef = doc(firestore, 'topics', 'topicsDoc');
-      const topicsSnap = await getDoc(topicsRef);
-      const topicsData = topicsSnap.data();
-      setTopicsArray(topicsData ? topicsSnap.data()?.topicsArray : []);
     };
     fetchData();
   }, []);
@@ -145,6 +136,36 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const handleDateChange = (newValue: Date) => {
     setDate(newValue);
+  };
+
+  const fetchSpeakerResults = async (query: string) => {
+    if (process.env.NEXT_PUBLIC_ALGOLIA_API_KEY && process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
+      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/speakers/query`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-Algolia-API-Key': process.env.NEXT_PUBLIC_ALGOLIA_API_KEY,
+          'X-Algolia-Application-Id': process.env.NEXT_PUBLIC_ALGOLIA_APP_ID,
+        },
+        body: JSON.stringify({ query: query }),
+      });
+      return response;
+    }
+  };
+
+  const fetchTopicsResults = async (query: string) => {
+    if (process.env.NEXT_PUBLIC_ALGOLIA_API_KEY && process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
+      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/topics/query`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-Algolia-API-Key': process.env.NEXT_PUBLIC_ALGOLIA_API_KEY,
+          'X-Algolia-Application-Id': process.env.NEXT_PUBLIC_ALGOLIA_APP_ID,
+        },
+        body: JSON.stringify({ query: query }),
+      });
+      return response;
+    }
   };
 
   return (
@@ -258,6 +279,17 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               });
             }
           }}
+          onInputChange={async (_, value) => {
+            await fetchSpeakerResults(value)
+              .then((response) => response?.json())
+              .then((data) => {
+                const res: string[] = [];
+                data.hits.forEach((element: any) => {
+                  res.push(element.name);
+                });
+                setSpeakersArray(res);
+              });
+          }}
           id="speaker-input"
           options={speakersArray}
           multiple
@@ -295,6 +327,17 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 message: 'Can only add up to 10 topics',
               });
             }
+          }}
+          onInputChange={async (_, value) => {
+            await fetchTopicsResults(value)
+              .then((response) => response?.json())
+              .then((data) => {
+                const res: string[] = [];
+                data.hits.forEach((element: any) => {
+                  res.push(element.name);
+                });
+                setTopicsArray(res);
+              });
           }}
           id="topic-input"
           options={topicsArray}
@@ -336,7 +379,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   props.setEditFormOpen?.(false);
                 })
               }
-              disabled={sermonsEqual(props.existingSermon, sermonData)}
+              disabled={
+                sermonsEqual(props.existingSermon, sermonData) ||
+                sermonData.title === '' ||
+                date === null ||
+                speaker.length === 0 ||
+                sermonData.subtitle === ''
+              }
               variant="contained"
             >
               update sermon
