@@ -8,6 +8,7 @@ import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
+import { sermonStatus, sermonStatusType } from '../../types/Sermon';
 const tempFiles = new Set<string>();
 
 type filePaths = {
@@ -152,8 +153,9 @@ const addIntroOutro = onObjectFinalized(
     const bucket = storage().bucket();
     const db = firestore();
     const fileName = path.basename(filePath);
-
+    const docRef = db.collection('sermons').doc(fileName);
     try {
+      await docRef.update({ status: <sermonStatus>{ type: sermonStatusType.PROCESSING, message: 'Getting Data' } });
       logger.log(data.metadata);
       const audioFilesToMerge: filePaths = { CONTENT: filePath, INTRO: undefined, OUTRO: undefined };
       const customMetadata: { introUrl?: string; outroUrl?: string } = {};
@@ -167,6 +169,9 @@ const addIntroOutro = onObjectFinalized(
       }
       logger.log('Audio File Download Paths', audioFilesToMerge);
       const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge);
+      await docRef.update({
+        status: <sermonStatus>{ type: sermonStatusType.PROCESSING, message: 'Trimming and Transcoding' },
+      });
       tempFilePaths.CONTENT = await trimAndTranscode(
         tempFilePaths.CONTENT,
         parseFloat(data.metadata?.startTime || ''),
@@ -175,6 +180,9 @@ const addIntroOutro = onObjectFinalized(
       let durationSeconds = await getDurationSeconds(tempFilePaths.CONTENT);
       await uploadSermon(tempFilePaths.CONTENT, `processed-sermons/${fileName}`, bucket, customMetadata);
       if (tempFilePaths.INTRO || tempFilePaths.OUTRO) {
+        await docRef.update({
+          status: <sermonStatus>{ type: sermonStatusType.PROCESSING, message: 'Adding Intro and Outro' },
+        });
         logger.log('Merging audio files', tempFilePaths);
         const outputFileName = 'intro_outro-' + fileName;
 
@@ -192,7 +200,11 @@ const addIntroOutro = onObjectFinalized(
         durationSeconds = await getDurationSeconds(tmpFilePath);
         await uploadSermon(tmpFilePath, destination, bucket);
       }
-      await db.collection('sermons').doc(fileName).update({ processed: true, durationSeconds: durationSeconds });
+
+      await docRef.update({
+        status: <sermonStatus>{ type: sermonStatusType.PROCESSED },
+        durationSeconds: durationSeconds,
+      });
       return logger.log('Files have been merged succesfully');
     } catch (e) {
       return logger.error(e);
