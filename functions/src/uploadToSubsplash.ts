@@ -1,17 +1,19 @@
 import { logger, https } from 'firebase-functions';
 import axios, { AxiosResponse } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { ISpeaker } from '../../types/Speaker';
+import { sermonImage } from '../../types/Sermon';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   title: string;
   subtitle: string;
-  speakers: string[];
+  speakers: ISpeaker[];
   autoPublish: boolean;
   audioTitle: string;
   audioUrl: string;
   topics?: string[];
   description?: string;
-  images: { id: string; type: 'square' | 'wide' | 'banner' }[];
+  images: sermonImage[];
 }
 
 const createAudioRef = async (title: string, bearerToken: string): Promise<string> => {
@@ -53,7 +55,7 @@ const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING
       if (data.speakers.length > 3) {
         throw new Error('Too many speakers: Max 3 speakers allowed');
       }
-      tags = tags.concat(data.speakers.map((speaker: string) => `speaker:${speaker}`));
+      tags = tags.concat(data.speakers.map((speaker) => `speaker:${speaker.name}`));
     }
     if (Array.isArray(data.topics)) {
       if (data.topics.length > 10) {
@@ -79,7 +81,12 @@ const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING
       date: new Date(),
       auto_publish: data.autoPublish ?? false,
       _embedded: {
-        images: data.images,
+        images: data.images.map((image) => {
+          return {
+            id: image.id,
+            type: image.type,
+          };
+        }),
         audio: { id: audioId },
       },
     });

@@ -26,6 +26,8 @@ import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubs
 import { createFunction } from '../utils/createFunction';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
+import Image from 'next/image';
+import Logo from '../public/upper_room_media_icon.png';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -66,7 +68,9 @@ Props) => {
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
   const handleDelete = async (id: string) => {
     try {
-      await deleteFromSubsplash();
+      if (sermon.subsplashId) {
+        await deleteFromSubsplash();
+      }
       await deleteObject(ref(storage, `sermons/${id}`));
       await deleteDoc(doc(firestore, 'sermons', id));
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
@@ -81,17 +85,13 @@ Props) => {
     const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
       title: sermon.title,
       subtitle: sermon.subtitle,
-      speakers: sermon.speaker,
+      speakers: sermon.speakers,
       autoPublish: autoPublish,
       audioTitle: sermon.title,
       audioUrl: url,
-      topics: sermon.topic,
+      topics: sermon.topics,
       description: sermon.description,
-      images: [
-        { id: '30b301b5-16f2-4982-b248-6a96a2093a1f', type: 'square' },
-        { id: '3597957d-26e5-4c95-a21f-30d61d0274c5', type: 'wide' },
-        { id: '090bf8b2-3bb7-4826-b4bc-b278b2927228', type: 'banner' },
-      ],
+      images: sermon.images,
     };
     setIsUploading(true);
     try {
@@ -176,7 +176,16 @@ Props) => {
     >
       <hr className={styles['horizontal-line']}></hr>
       <div className={styles.cardContent}>
-        <div className={styles.divImage}></div>
+        <div className={styles.divImage}>
+          <Image
+            src={
+              sermon.images.find((image) => image.type === 'square')
+                ? sermon.images.find((image) => image.type === 'square')!.downloadLink
+                : Logo
+            }
+            layout="fill"
+          />
+        </div>
         <div className={styles.divText}>
           <h1 className={styles.title}>{`${sermon.title}: ${sermon.subtitle}`}</h1>
           <p className={styles.description}>{sermon.description}</p>

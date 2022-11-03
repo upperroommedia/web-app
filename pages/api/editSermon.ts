@@ -1,31 +1,20 @@
 import firestore, { doc, updateDoc } from '../../firebase/firestore';
 
-import { sermonConverter } from '../../types/Sermon';
+import { Sermon, sermonConverter } from '../../types/Sermon';
 
-interface editSermonProps {
-  key: string;
-  title: string;
-  subtitle: string;
-  date: Date;
-  description: string;
-  series: string;
-  speaker: Array<string>;
-  scripture: string;
-  topic: Array<string>;
-}
+interface IEditSermon extends Omit<Sermon, 'status' | 'durationSeconds' | 'dateMillis'> {}
 
-const editSermon = async (props: editSermonProps) => {
+const editSermon = async (props: IEditSermon) => {
   const sermonRef = doc(firestore, 'sermons', props.key);
 
   await updateDoc(sermonRef.withConverter(sermonConverter), {
     title: props.title,
     subtitle: props.subtitle,
-    dateMillis: props.date.getTime(),
     description: props.description,
     series: props.series,
-    speaker: props.speaker,
+    speakers: props.speakers,
     scripture: props.scripture,
-    topic: props.topic,
+    topics: props.topics,
   });
 };
 
