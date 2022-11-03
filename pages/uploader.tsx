@@ -111,11 +111,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       const seriesQuery = query(collection(db, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
       setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
-
-      const topicsRef = doc(db, 'topics', 'topicsDoc');
-      const topicsSnap = await getDoc(topicsRef);
-      const topicsData = topicsSnap.data();
-      setTopicsArray(topicsData ? topicsSnap.data()?.topicsArray : []);
     };
     fetchData();
   }, []);
@@ -204,7 +199,22 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const fetchSpeakerResults = async (query: string) => {
     if (process.env.NEXT_PUBLIC_ALGOLIA_API_KEY && process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
-      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/speakers_index/query`;
+      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/speakers/query`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-Algolia-API-Key': process.env.NEXT_PUBLIC_ALGOLIA_API_KEY,
+          'X-Algolia-Application-Id': process.env.NEXT_PUBLIC_ALGOLIA_APP_ID,
+        },
+        body: JSON.stringify({ query: query }),
+      });
+      return response;
+    }
+  };
+
+  const fetchTopicsResults = async (query: string) => {
+    if (process.env.NEXT_PUBLIC_ALGOLIA_API_KEY && process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
+      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/topics/query`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -328,7 +338,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             }
           }}
           onInputChange={async (_, value) => {
-            // setSpeakersArray([]);
             await fetchSpeakerResults(value)
               .then((response) => response?.json())
               .then((data) => {
@@ -376,6 +385,17 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 message: 'Can only add up to 10 topics',
               });
             }
+          }}
+          onInputChange={async (_, value) => {
+            await fetchTopicsResults(value)
+              .then((response) => response?.json())
+              .then((data) => {
+                const res: string[] = [];
+                data.hits.forEach((element: any) => {
+                  res.push(element.name);
+                });
+                setTopicsArray(res);
+              });
           }}
           id="topic-input"
           options={topicsArray}
