@@ -369,14 +369,18 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     backgroundSize: 'cover',
                   }}
                 >
-                  <Image
-                    src={
-                      option.images.sort((a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
-                        return sortOrder[a.type] - sortOrder[b.type];
-                      })[0].downloadLink
-                    }
-                    layout="fill"
-                  />
+                  {option.images && (
+                    <Image
+                      src={
+                        option.images.sort(
+                          (a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
+                            return sortOrder[a.type] - sortOrder[b.type];
+                          }
+                        )[0].downloadLink
+                      }
+                      layout="fill"
+                    />
+                  )}
                 </div>
                 <div>{option.name}</div>
               </li>
@@ -572,7 +576,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <TextField
             value={newSeries}
             onChange={(e) => {
-              handleChange(e);
+              setNewSeries(e.target.value);
               !userHasTypedInSeries && setUserHasTypedInSeries(true);
             }}
             error={newSeriesError.error}
