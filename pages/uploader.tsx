@@ -40,7 +40,6 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-const sortOrder = { square: 0, wide: 1, banner: 2 };
 const getSpeakersUnion = (array1: ISpeaker[], array2: ISpeaker[]) => {
   const difference = array1.filter((s1) => !array2.find((s2) => s1.objectID === s2.objectID));
   return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
@@ -336,15 +335,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                       backgroundSize: 'cover',
                     }}
                   >
-                    {sermon.speakers.length > 0 && (
+                    {speaker.images?.find((image) => image.type === 'square') && (
                       <Image
-                        src={
-                          speaker.images.sort(
-                            (a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
-                              return sortOrder[a.type] - sortOrder[b.type];
-                            }
-                          )[0].downloadLink
-                        }
+                        src={speaker.images.find((image) => image.type === 'square')!.downloadLink}
                         layout="fill"
                       />
                     )}
@@ -354,6 +347,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             ));
           }}
           renderOption={(props, option: ISpeaker) => {
+            const squareImage = option.images?.find((image) => image.type === 'square');
             return (
               <li key={option.name} {...props}>
                 <div
@@ -369,18 +363,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     backgroundSize: 'cover',
                   }}
                 >
-                  {option.images && (
-                    <Image
-                      src={
-                        option.images.sort(
-                          (a: { type: keyof typeof sortOrder }, b: { type: keyof typeof sortOrder }) => {
-                            return sortOrder[a.type] - sortOrder[b.type];
-                          }
-                        )[0].downloadLink
-                      }
-                      layout="fill"
-                    />
-                  )}
+                  {squareImage && <Image src={squareImage.downloadLink} layout="fill" />}
                 </div>
                 <div>{option.name}</div>
               </li>
