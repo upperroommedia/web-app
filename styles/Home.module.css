@@ -8,6 +8,18 @@
   margin-bottom: 100px;
 }
 
+@media only screen and (max-width: 768px) {
+  .container {
+    width: 350px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .loading {
+    text-align: left;
+  }
+}
+
 .rotating {
   animation: loading 5s linear infinite;
 }
@@ -23,6 +35,7 @@
 
 .loading {
   font-size: 40px;
+  width: 350px;
 }
 
 .loading:after {

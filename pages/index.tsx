@@ -18,6 +18,7 @@ const Home: NextPage = () => (
       <Image src={Gear} height={300} width={300} />
     </div>
     <h1 className={styles.loading}>Work in progress</h1>
+    <h1>Please come back at a later date</h1>
   </div>
 );
 
