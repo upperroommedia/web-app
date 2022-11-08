@@ -17,7 +17,7 @@ const Home: NextPage = () => (
     <div className={styles.rotating}>
       <Image src={Gear} height={300} width={300} />
     </div>
-    <h1>Work in progress...</h1>
+    <h1 className={styles.loading}>Work in progress</h1>
   </div>
 );
 
