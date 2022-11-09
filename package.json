@@ -34,6 +34,7 @@
     "react-dom": "^18.2.0",
     "react-dropzone": "^14.2.2",
     "react-firebase-hooks": "^5.0.3",
+    "react-image-crop": "^10.0.8",
     "sharp": "^0.31.1",
     "uuid": "^9.0.0"
   },
