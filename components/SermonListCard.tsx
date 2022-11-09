@@ -179,7 +179,7 @@ Props) => {
         <div className={styles.divImage}>
           <Image
             src={
-              sermon.images.find((image) => image.type === 'square')
+              sermon.images?.find((image) => image.type === 'square')
                 ? sermon.images.find((image) => image.type === 'square')!.downloadLink
                 : Logo
             }
