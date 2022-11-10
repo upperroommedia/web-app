@@ -22,8 +22,8 @@ const centerAspectCrop = (mediaWidth: number, mediaHeight: number, aspect: numbe
   );
 };
 
-const ImageUploader = () => {
-  const [imgSrc, setImgSrc] = useState('');
+const ImageUploader = (props: { imgSrc?: string }) => {
+  const [imgSrc, setImgSrc] = useState(props.imgSrc ? props.imgSrc : '');
   const imgRef = useRef<HTMLImageElement>(null);
   const [crop, setCrop] = useState<Crop>();
   const [scale, setScale] = useState(1);
