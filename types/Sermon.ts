@@ -1,7 +1,8 @@
 import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from '../firebase/firestore';
 import { ISpeaker } from './Speaker';
 import { v4 as uuidv4 } from 'uuid';
-import { Sermon, sermonImage, sermonStatusType } from './SermonTypes';
+import { Sermon, sermonStatusType } from './SermonTypes';
+import { ImageType } from './Image';
 
 export const createSermon = ({
   key = uuidv4(),
@@ -16,7 +17,7 @@ export const createSermon = ({
   topics = <string[]>[],
   dateString = new Date().toLocaleDateString(),
   status = { type: sermonStatusType.PENDING },
-  images = <sermonImage[]>[],
+  images = <ImageType[]>[],
 }): Sermon => {
   return {
     key,
