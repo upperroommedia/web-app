@@ -8,6 +8,8 @@ import addintrooutro from './addIntroOutro';
 import deleteFromSubsplash from './deleteFromSubsplash';
 import uploadimage from './handleImageUpload';
 import getimage from './getImage';
+import listusers from './listUsers';
+import setUserRoleOnCreate from './setUserRoleOnCreate';
 
 admin.initializeApp();
 
@@ -17,3 +19,5 @@ exports.setUserRole = setUserRole;
 exports.addintrooutro = addintrooutro;
 exports.uploadimage = uploadimage;
 exports.getimage = getimage;
+exports.listusers = listusers;
+exports.setuserroleoncreate = setUserRoleOnCreate;
