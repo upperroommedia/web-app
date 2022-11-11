@@ -4,7 +4,7 @@ import functions, { httpsCallable } from '../firebase/functions';
 import { ROLES } from '../context/types';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useCollection } from 'react-firebase-hooks/firestore';
-import firestore, { collection, query } from '../firebase/firestore';
+import firestore, { collection, getDocs, limit, query } from '../firebase/firestore';
 import { Sermon } from '../types/SermonTypes';
 import SermonsList from '../components/SermonsList';
 import PopUp from '../components/PopUp';
@@ -12,11 +12,41 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import Box from '@mui/material/Box';
+import { ISpeaker } from '../types/Speaker';
+import SpeakerTable from '../components/SpeakerTable';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+const TabPanel = (props: TabPanelProps) => {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`simple-tabpanel-${index}`}
+      aria-labelledby={`simple-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+};
 
 const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
+  const [tab, setTab] = useState<number>(0);
   const [email, setEmail] = useState<string>('');
   const [role, setRole] = useState<string>(ROLES[0]);
   const [message, setMessage] = useState<string>('');
+  const [speakers, setSpeakers] = useState<ISpeaker[]>([]);
+
   const sermonsRef = collection(firestore, 'sermons');
   const q = query(sermonsRef);
   const [sermons, loading, error] = useCollection(q, {
@@ -31,19 +61,48 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     });
   };
 
+  const fetchSpeakers = async () => {
+    const q = query(collection(firestore, 'speakers'), limit(100));
+    const querySnapshot = await getDocs(q);
+    querySnapshot.forEach((doc) => {
+      // doc.data() is never undefined for query doc snapshots
+      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as unknown as ISpeaker]);
+    });
+  };
+
   return (
     <>
-      <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-        <Button variant="outlined" onClick={() => setShowPopUp(true)}>
-          Set User Role
-        </Button>
+      <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs value={tab} onChange={(_, newValue) => setTab(newValue)} aria-label="basic tabs example">
+          <Tab label="Users" />
+          <Tab label="Speakers" />
+          <Tab label="Topics" />
+        </Tabs>
+      </Box>
+      <TabPanel value={tab} index={0}>
+        <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+          <Button variant="outlined" onClick={() => setShowPopUp(true)}>
+            Set User Role
+          </Button>
 
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-          {error && <strong>Error: {JSON.stringify(error)}</strong>}
-          {loading && <span>Collection: Loading...</span>}
-          {sermons && <SermonsList sermons={sermons.docs.map((doc) => doc.data() as Sermon)} />}
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+            {error && <strong>Error: {JSON.stringify(error)}</strong>}
+            {loading && <span>Collection: Loading...</span>}
+            {sermons && <SermonsList sermons={sermons.docs.map((doc) => doc.data() as Sermon)} />}
+          </div>
         </div>
-      </div>
+      </TabPanel>
+      <TabPanel value={tab} index={1}>
+        <div>
+          <p>Manage Speakers</p>
+          <button onClick={fetchSpeakers}>fetch speakers</button>
+          <SpeakerTable speakers={speakers} />
+        </div>
+      </TabPanel>
+      <TabPanel value={tab} index={2}>
+        Manage Topics
+      </TabPanel>
+
       <PopUp
         title="Set User Role"
         open={showPopUp}

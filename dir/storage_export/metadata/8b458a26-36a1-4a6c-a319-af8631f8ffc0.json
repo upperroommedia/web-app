@@ -1,0 +1,15 @@
+{
+  "name": "var/folders/r5/m6x6kbdx41vdk5cnhfn_kq_00000gn/T/temp-image.mp3",
+  "bucket": "test",
+  "metageneration": 1,
+  "generation": 1668127166624,
+  "contentType": "application/octet-stream",
+  "storageClass": "STANDARD",
+  "downloadTokens": [],
+  "etag": "NeKwAIy3DGZaPfQ9+HkxGOFTPK8",
+  "timeCreated": "2022-11-11T00:39:26.624Z",
+  "updated": "2022-11-11T00:39:26.624Z",
+  "size": 33387,
+  "md5Hash": "5vBjf78GKtwwOM4xdfKKsA==",
+  "crc32c": "2315512029"
+}

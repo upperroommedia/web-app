@@ -2,6 +2,9 @@
   "buckets": [
     {
       "id": "urm-app.appspot.com"
+    },
+    {
+      "id": "test"
     }
   ]
 }

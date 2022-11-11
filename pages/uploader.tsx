@@ -30,6 +30,9 @@ import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
 import { ISpeaker } from '../types/Speaker';
 import Chip from '@mui/material/Chip';
+import ImageUploader from '../components/ImageUploader';
+import { createFunction } from '../utils/createFunction';
+import { GetImageInputType } from '../functions/src/getImage';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -71,6 +74,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   });
 
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
+
+  const [editImagePopup, setEditImagePopup] = useState<boolean>(false);
+  const [imageToEditSrc, setImageToEditSrc] = useState<string>();
 
   useEffect(() => {
     if (!userHasTypedInSeries) {
@@ -275,8 +281,37 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onBlur={() => {
             setSpeakerError({ error: false, message: '' });
           }}
-          onChange={(_, newValue) => {
+          onChange={async (_, newValue) => {
             if (newValue.length === 1) {
+              newValue.map(async (newSpeaker) => {
+                const downloadLink = newSpeaker.images.find((image) => image.type === 'square')?.downloadLink;
+                if (!downloadLink) {
+                  return newSpeaker;
+                }
+                try {
+                  // TODO: handle return types to ensure if blob or error
+                  console.log('in try');
+                  const getImage = createFunction<GetImageInputType, any>('getimage');
+                  const i = await getImage({
+                    url: downloadLink,
+                  });
+                  console.log(i)
+                  // const blob = new Blob([i]);
+
+                  // console.log(await blob.text());
+                  // const url = URL.createObjectURL(blob);
+                  newSpeaker.images = newSpeaker.images.map((image) => {
+                    // if (image.type === 'square') {
+                    //   console.log('gettng square image');
+                    //   image.downloadLink = url;
+                    // }
+                    return image;
+                  });
+                } catch (e) {
+                  alert(e);
+                }
+                return newSpeaker;
+              });
               updateSermon('images', newValue[0].images);
             }
             if (newValue !== null && newValue.length <= 3) {
@@ -529,7 +564,32 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             Clear Form
           </button>
         </div>
+        <p style={{ textAlign: 'center' }}>{uploadProgress}</p>
       </Box>
+      <div>
+        <h1>Images</h1>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          {sermon.speakers.length > 0 &&
+            sermon.speakers[0].images.map((image) => {
+              return (
+                <>
+                  <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}:</span>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    key={image.id}
+                    src={image.downloadLink}
+                    height="100px"
+                    width="100px"
+                    onClick={() => {
+                      setImageToEditSrc(image.downloadLink);
+                      setEditImagePopup(true);
+                    }}
+                  />
+                </>
+              );
+            })}
+        </div>
+      </div>
       <DynamicPopUp
         title={'Add new series'}
         open={newSeriesPopup}
@@ -570,7 +630,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           />
         </div>
       </DynamicPopUp>
-      <p style={{ textAlign: 'center' }}>{uploadProgress}</p>
+      <DynamicPopUp title="Edit Image" open={editImagePopup} setOpen={setEditImagePopup}>
+        <ImageUploader imgSrc={imageToEditSrc} />
+      </DynamicPopUp>
     </form>
   );
 };
