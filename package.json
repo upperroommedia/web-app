@@ -2,7 +2,7 @@
   "name": "web-app",
   "private": true,
   "scripts": {
-    "build-functions": "cd functions && pnpm build",
+    "build-functions": "pnpm --prefix ./functions run build",
     "next-dev": "next dev",
     "start-emulators": "pnpm run build-functions && firebase emulators:start --import=./dir --export-on-exit=./dir",
     "dev": "pnpm run next-dev & pnpm run start-emulators",

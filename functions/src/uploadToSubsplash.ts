@@ -2,7 +2,7 @@ import { logger, https } from 'firebase-functions';
 import axios, { AxiosResponse } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '../../types/Speaker';
-import { sermonImage } from '../../types/SermonTypes';
+import { ImageType } from '../../types/Image';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   title: string;
@@ -13,7 +13,7 @@ export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   audioUrl: string;
   topics?: string[];
   description?: string;
-  images: sermonImage[];
+  images: ImageType[];
 }
 
 const createAudioRef = async (title: string, bearerToken: string): Promise<string> => {

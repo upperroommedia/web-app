@@ -265,7 +265,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </IconButton>
         </div>
         {/* <Image src={Logo} width={30} height={30} /> */}
-
+        <div style={{ background: 'red', width: '75px', height: '75px' }}>75px</div>
+        <div style={{ background: 'red', width: '100px', height: '100px' }}>100px</div>
+        <div style={{ background: 'red', width: '150px', height: '150px' }}>150px</div>
+        <div style={{ background: 'red', width: '200px', height: '200px' }}>200px</div>
         <Autocomplete
           fullWidth
           value={sermon.speakers}

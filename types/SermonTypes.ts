@@ -1,3 +1,4 @@
+import { ImageType } from './Image';
 import { ISpeaker } from './Speaker';
 
 export enum sermonStatusType {
@@ -13,15 +14,6 @@ export interface sermonStatus {
   message?: string;
 }
 
-export type sermonImage = {
-  id: string;
-  type: 'square' | 'wide' | 'banner';
-  height: number;
-  width: number;
-  downloadLink: string;
-  title: string;
-};
-
 export interface Sermon {
   key: string;
   title: string;
@@ -35,5 +27,5 @@ export interface Sermon {
   topics: string[];
   dateString?: string;
   status: sermonStatus;
-  images: sermonImage[];
+  images: ImageType[];
 }
