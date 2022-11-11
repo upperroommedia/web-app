@@ -22,6 +22,7 @@
     "@mui/icons-material": "^5.10.9",
     "@mui/material": "^5.10.9",
     "@mui/system": "^5.10.9",
+    "@mui/utils": "^5.10.9",
     "@mui/x-date-pickers": "^5.0.4",
     "classnames": "^2.3.2",
     "date-fns": "^2.29.3",

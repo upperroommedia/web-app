@@ -8,6 +8,7 @@ specifiers:
   '@mui/icons-material': ^5.10.9
   '@mui/material': ^5.10.9
   '@mui/system': ^5.10.9
+  '@mui/utils': ^5.10.9
   '@mui/x-date-pickers': ^5.0.4
   '@next/bundle-analyzer': ^12.3.1
   '@next/eslint-plugin-next': ^12.3.1
@@ -56,6 +57,7 @@ dependencies:
   '@mui/icons-material': 5.10.9_590563b4c8e0ccfeeb0c41b2609a37ea
   '@mui/material': 5.10.9_c97e2560665036eb1ffffd58842f0cec
   '@mui/system': 5.10.9_4fec8fed7361b73e74496ce75eda4e8e
+  '@mui/utils': 5.10.9_react@18.2.0
   '@mui/x-date-pickers': 5.0.4_e98ad8e3327027f31abc628ab4c2d5b8
   classnames: 2.3.2
   date-fns: 2.29.3
@@ -1434,20 +1436,6 @@ packages:
       '@types/react': 17.0.50
     dev: false
 
-  /@mui/utils/5.10.3_react@18.2.0:
-    resolution: {integrity: sha512-4jXMDPfx6bpMVuheLaOpKTjpzw39ogAZLeaLj5+RJec3E37/hAZMYjURfblLfTWMMoGoqkY03mNsZaEwNobBow==}
-    engines: {node: '>=12.0.0'}
-    peerDependencies:
-      react: ^17.0.0 || ^18.0.0
-    dependencies:
-      '@babel/runtime': 7.19.0
-      '@types/prop-types': 15.7.5
-      '@types/react-is': 17.0.3
-      prop-types: 15.8.1
-      react: 18.2.0
-      react-is: 18.2.0
-    dev: false
-
   /@mui/utils/5.10.9_react@18.2.0:
     resolution: {integrity: sha512-2tdHWrq3+WCy+G6TIIaFx3cg7PorXZ71P375ExuX61od1NOAJP1mK90VxQ8N4aqnj2vmO3AQDkV4oV2Ktvt4bA==}
     engines: {node: '>=12.0.0'}
@@ -1500,7 +1488,7 @@ packages:
       '@emotion/styled': 11.10.4_ba47d0a29c4615c13bfdf98fad005823
       '@mui/material': 5.10.9_c97e2560665036eb1ffffd58842f0cec
       '@mui/system': 5.10.9_4fec8fed7361b73e74496ce75eda4e8e
-      '@mui/utils': 5.10.3_react@18.2.0
+      '@mui/utils': 5.10.9_react@18.2.0
       '@types/react-transition-group': 4.4.5
       clsx: 1.2.1
       date-fns: 2.29.3

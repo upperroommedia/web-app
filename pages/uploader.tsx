@@ -31,6 +31,8 @@ import DropZone, { UploadableFile } from '../components/DropZone';
 import { ISpeaker } from '../types/Speaker';
 import Chip from '@mui/material/Chip';
 import ImageUploader from '../components/ImageUploader';
+import { createFunction } from '../utils/createFunction';
+import { GetImageInputType } from '../functions/src/getImage';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -276,8 +278,37 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onBlur={() => {
             setSpeakerError({ error: false, message: '' });
           }}
-          onChange={(_, newValue) => {
+          onChange={async (_, newValue) => {
             if (newValue.length === 1) {
+              newValue.map(async (newSpeaker) => {
+                const downloadLink = newSpeaker.images.find((image) => image.type === 'square')?.downloadLink;
+                if (!downloadLink) {
+                  return newSpeaker;
+                }
+                try {
+                  // TODO: handle return types to ensure if blob or error
+                  console.log('in try');
+                  const getImage = createFunction<GetImageInputType, any>('getimage');
+                  const i = await getImage({
+                    url: downloadLink,
+                  });
+                  console.log(i)
+                  // const blob = new Blob([i]);
+
+                  // console.log(await blob.text());
+                  // const url = URL.createObjectURL(blob);
+                  newSpeaker.images = newSpeaker.images.map((image) => {
+                    // if (image.type === 'square') {
+                    //   console.log('gettng square image');
+                    //   image.downloadLink = url;
+                    // }
+                    return image;
+                  });
+                } catch (e) {
+                  alert(e);
+                }
+                return newSpeaker;
+              });
               updateSermon('images', newValue[0].images);
             }
             if (newValue !== null && newValue.length <= 3) {
