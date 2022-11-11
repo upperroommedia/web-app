@@ -37,11 +37,15 @@ export const UserProvider = ({ children }: any) => {
         nookies.destroy(null, 'token');
         nookies.set(null, 'token', '', { path: '/' });
       } else {
-        const token = await user.getIdToken();
-        const role = (await user.getIdTokenResult()).claims.role as string;
-        setUser({ ...user, role });
-        nookies.destroy(null, 'token');
-        nookies.set(null, 'token', token, { path: '/' });
+        try {
+          const token = await user.getIdToken();
+          const role = (await user.getIdTokenResult()).claims.role as string;
+          setUser({ ...user, role });
+          nookies.destroy(null, 'token');
+          nookies.set(null, 'token', token, { path: '/' });
+        } catch (e) {
+          return e;
+        }
       }
     });
     const handle = setInterval(async () => {

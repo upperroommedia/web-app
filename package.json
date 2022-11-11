@@ -3,8 +3,9 @@
   "private": true,
   "scripts": {
     "build-functions": "cd functions && pnpm build",
+    "build-functions-watch": "cd functions && pnpm build-watch",
     "next-dev": "next dev",
-    "start-emulators": "pnpm run build-functions && firebase emulators:start --import=./dir --export-on-exit=./dir",
+    "start-emulators": "pnpm run build-functions-watch & firebase emulators:start --import=./dir --export-on-exit=./dir",
     "dev": "pnpm run next-dev & pnpm run start-emulators",
     "analyze": "ANALYZE=true next build",
     "build": "next build",
