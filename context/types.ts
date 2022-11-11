@@ -3,4 +3,4 @@ export interface userCredentials {
   password: string;
 }
 
-export const ROLES = ['user', 'admin'];
+export const ROLES = ['user', 'admin', 'uploader']
