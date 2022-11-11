@@ -62,7 +62,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   };
 
   const fetchSpeakers = async () => {
-    const q = query(collection(firestore, 'speakers'), limit(25));
+    const q = query(collection(firestore, 'speakers'), limit(100));
     const querySnapshot = await getDocs(q);
     querySnapshot.forEach((doc) => {
       // doc.data() is never undefined for query doc snapshots
