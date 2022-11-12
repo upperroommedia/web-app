@@ -36,7 +36,7 @@ def getTags(type: str):
       clean_tags.append(filtered_tag)
       
   file_name = f'subsplash{type.capitalize()}Tags.json'
-  file_path = os.path.join(os.path.dirname(__file__), '../data', file_name)
+  file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data', file_name))
   with open(file_path, 'w') as file:
     print(f"Wrote results to: {file_path}")
     file.write(json.dumps(clean_tags, indent=4))
