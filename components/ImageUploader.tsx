@@ -46,14 +46,13 @@ const ImageUploader = (props: Props) => {
       const getImage = createFunction<GetImageInputType, GetImageOutputType>('getimage');
       try {
         const imageResponse = await getImage({ url });
-        if (imageResponse.status === 'success' && imageResponse.buffer) {
-          const imageBuffer = Buffer.from(imageResponse.buffer.data);
-          url = URL.createObjectURL(new Blob([imageBuffer], { type: 'image/jpeg' }));
-        } else {
-          throw new Error(imageResponse.message);
-        }
+        const imageBuffer = Buffer.from(imageResponse.buffer.data);
+        url = URL.createObjectURL(new Blob([imageBuffer], { type: 'image/jpeg' }));
       } catch (error) {
-        alert(error);
+        // TODO: Handle error
+        if (error && error.message) {
+          alert(error.message);
+        }
       }
     }
     return url;
