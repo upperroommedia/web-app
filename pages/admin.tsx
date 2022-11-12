@@ -107,7 +107,6 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   return (
     <>
       <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-        <button onClick={fetchUsers}>fetchusers</button>
         <Tabs value={tab} onChange={(_, newValue) => setTab(newValue)} aria-label="basic tabs example">
           <Tab label="Sermons" />
           <Tab label="Users" />
@@ -125,10 +124,11 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       </TabPanel>
       <TabPanel value={tab} index={1}>
         <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+          <button onClick={fetchUsers}>fetchusers</button>
+          <UserTable users={users} handleRoleChange={handleRoleChange} />
           <Button variant="outlined" onClick={() => setShowPopUp(true)}>
             Set User Role
           </Button>
-          <UserTable users={users} handleRoleChange={handleRoleChange} />
         </div>
       </TabPanel>
       <TabPanel value={tab} index={2}>

@@ -31,8 +31,6 @@ import DropZone, { UploadableFile } from '../components/DropZone';
 import { ISpeaker } from '../types/Speaker';
 import Chip from '@mui/material/Chip';
 import ImageUploader from '../components/ImageUploader';
-import { createFunction } from '../utils/createFunction';
-import { GetImageInputType } from '../functions/src/getImage';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -51,7 +49,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const { user } = useAuth();
   const [sermon, setSermon] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
   const [file, setFile] = useState<UploadableFile>();
-  const [uploadProgress, setUploadProgress] = useState<string>();
+  const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
   const [seriesArray, setSeriesArray] = useState<string[]>([]);
@@ -76,7 +74,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
 
   const [editImagePopup, setEditImagePopup] = useState<boolean>(false);
-  const [imageToEditSrc, setImageToEditSrc] = useState<string>();
+  const [imageToEdit, setImageToEdit] = useState({ url: '', imageIndex: 0 });
 
   useEffect(() => {
     if (!userHasTypedInSeries) {
@@ -270,11 +268,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             <AddIcon />
           </IconButton>
         </div>
-        {/* <Image src={Logo} width={30} height={30} /> */}
-        <div style={{ background: 'red', width: '75px', height: '75px' }}>75px</div>
-        <div style={{ background: 'red', width: '100px', height: '100px' }}>100px</div>
-        <div style={{ background: 'red', width: '150px', height: '150px' }}>150px</div>
-        <div style={{ background: 'red', width: '200px', height: '200px' }}>200px</div>
         <Autocomplete
           fullWidth
           value={sermon.speakers}
@@ -283,35 +276,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           }}
           onChange={async (_, newValue) => {
             if (newValue.length === 1) {
-              newValue.map(async (newSpeaker) => {
-                const downloadLink = newSpeaker.images.find((image) => image.type === 'square')?.downloadLink;
-                if (!downloadLink) {
-                  return newSpeaker;
-                }
-                try {
-                  // TODO: handle return types to ensure if blob or error
-                  console.log('in try');
-                  const getImage = createFunction<GetImageInputType, any>('getimage');
-                  const i = await getImage({
-                    url: downloadLink,
-                  });
-                  console.log(i)
-                  // const blob = new Blob([i]);
-
-                  // console.log(await blob.text());
-                  // const url = URL.createObjectURL(blob);
-                  newSpeaker.images = newSpeaker.images.map((image) => {
-                    // if (image.type === 'square') {
-                    //   console.log('gettng square image');
-                    //   image.downloadLink = url;
-                    // }
-                    return image;
-                  });
-                } catch (e) {
-                  alert(e);
-                }
-                return newSpeaker;
-              });
               updateSermon('images', newValue[0].images);
             }
             if (newValue !== null && newValue.length <= 3) {
@@ -553,10 +517,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   });
                   clearForm();
                 } catch (error) {
-                  setUploadProgress(JSON.stringify(error));
+                  setUploadProgress({ error: true, message: `Error uploading file: ${error}` });
                 }
               } else if (user?.role !== 'admin') {
-                setUploadProgress('You do not have permission to upload');
+                setUploadProgress({ error: true, message: 'You do not have permission to upload' });
               }
             }}
           />
@@ -564,28 +528,27 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             Clear Form
           </button>
         </div>
-        <p style={{ textAlign: 'center' }}>{uploadProgress}</p>
+        <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>{uploadProgress.message}</p>
       </Box>
-      <div>
-        <h1>Images</h1>
+      <div style={{ margin: '0px 40px' }}>
+        <h1 style={{ textAlign: 'center' }}>Images</h1>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           {sermon.speakers.length > 0 &&
-            sermon.speakers[0].images.map((image) => {
+            sermon.speakers[0].images.map((image, index) => {
               return (
-                <>
-                  <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}:</span>
+                <div key={image.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}</span>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    key={image.id}
                     src={image.downloadLink}
                     height="100px"
                     width="100px"
                     onClick={() => {
-                      setImageToEditSrc(image.downloadLink);
+                      setImageToEdit({ url: image.downloadLink, imageIndex: index });
                       setEditImagePopup(true);
                     }}
                   />
-                </>
+                </div>
               );
             })}
         </div>
@@ -630,8 +593,22 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           />
         </div>
       </DynamicPopUp>
-      <DynamicPopUp title="Edit Image" open={editImagePopup} setOpen={setEditImagePopup}>
-        <ImageUploader imgSrc={imageToEditSrc} />
+      <DynamicPopUp
+        title="Edit Image"
+        open={editImagePopup}
+        setOpen={setEditImagePopup}
+        dialogProps={{ fullWidth: true }}
+      >
+        <ImageUploader
+          imgSrc={imageToEdit.url}
+          updateSermonImage={(imgSrc: string) => {
+            const newImages = [...sermon.images];
+            newImages[imageToEdit.imageIndex].downloadLink = imgSrc;
+            newImages[imageToEdit.imageIndex].subsplashId = undefined;
+            updateSermon('images', newImages);
+            setEditImagePopup(false);
+          }}
+        />
       </DynamicPopUp>
     </form>
   );

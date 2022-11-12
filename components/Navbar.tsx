@@ -6,7 +6,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import styles from '../styles/Navbar.module.css';
 import useAuth from '../context/user/UserContext';
-import ImageUploader from './ImageUploader';
 
 const Navbar: FunctionComponent = () => {
   const { user } = useAuth();
@@ -14,7 +13,6 @@ const Navbar: FunctionComponent = () => {
   const photoSrc = user?.photoURL || '/user.png';
   return (
     <nav>
-      <ImageUploader />
       <div className={styles.navbar}>
         <div className={styles.navbar_header_container}>
           <h1 className={styles.title}>Upper Room Media</h1>

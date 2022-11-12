@@ -1,149 +1,139 @@
-import { useState, useRef } from 'react';
+import Button from '@mui/material/Button';
+import Slider from '@mui/material/Slider';
+import Typography from '@mui/material/Typography';
+import { useState, useEffect, useCallback } from 'react';
+import getCroppedImg from '../utils/cropImage';
 
-import ReactCrop, { centerCrop, makeAspectCrop, Crop, PixelCrop } from 'react-image-crop';
+import Cropper from 'react-easy-crop';
+import { GetImageInputType, GetImageOutputType } from '../functions/src/getImage';
+import { createFunction } from '../utils/createFunction';
+import styles from '../styles/Cropper.module.css';
 
-import 'react-image-crop/dist/ReactCrop.css';
+interface Props {
+  imgSrc: string;
+  updateSermonImage: (imgSrc: string) => void;
+}
 
-const TO_RADIANS = Math.PI / 180;
+const ImageUploader = (props: Props) => {
+  const [imgSrc, setImgSrc] = useState('');
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [rotation, setRotation] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
-const centerAspectCrop = (mediaWidth: number, mediaHeight: number, aspect: number) => {
-  return centerCrop(
-    makeAspectCrop(
-      {
-        unit: '%',
-        width: 90,
-      },
-      aspect,
-      mediaWidth,
-      mediaHeight
-    ),
-    mediaWidth,
-    mediaHeight
-  );
-};
+  const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  }, []);
 
-const ImageUploader = (props: { imgSrc?: string }) => {
-  const [imgSrc, setImgSrc] = useState(props.imgSrc ? props.imgSrc : '');
-  const imgRef = useRef<HTMLImageElement>(null);
-  const [crop, setCrop] = useState<Crop>();
-  const [scale, setScale] = useState(1);
-  const [rotate, setRotate] = useState(0);
-  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    const g = async () => {
+      if (props.imgSrc) setImgSrc(await getImageSrc(props.imgSrc));
+    };
+    g();
+  }, []);
 
   function onSelectFile(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files.length > 0) {
-      setCrop(undefined); // Makes crop preview update between images.
+      setCrop({ x: 0, y: 0 }); // Makes crop preview update between images.
       const reader = new FileReader();
       reader.addEventListener('load', () => setImgSrc(reader.result?.toString() || ''));
       reader.readAsDataURL(e.target.files[0]);
     }
   }
 
-  function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
-    const { width, height } = e.currentTarget;
-    setCrop(centerAspectCrop(width, height, 1));
-  }
-
-  function getCroppedImage(crop: PixelCrop) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const image = imgRef.current;
-    if (ctx && image) {
-      const scaleX = image.naturalWidth / image.width;
-      const scaleY = image.naturalHeight / image.height;
-      const pixelRatio = window.devicePixelRatio;
-      canvas.width = Math.floor(crop.width * scaleX * pixelRatio);
-      canvas.height = Math.floor(crop.height * scaleY * pixelRatio);
-      ctx.scale(pixelRatio, pixelRatio);
-      ctx.imageSmoothingQuality = 'high';
-      const cropX = crop.x * scaleX;
-      const cropY = crop.y * scaleY;
-      const rotateRads = rotate * TO_RADIANS;
-      const centerX = image.naturalWidth / 2;
-      const centerY = image.naturalHeight / 2;
-      ctx.save();
-      ctx.translate(-cropX, -cropY);
-      ctx.translate(centerX, centerY);
-      ctx.rotate(rotateRads);
-      ctx.scale(scale, scale);
-      ctx.translate(-centerX, -centerY);
-      ctx.drawImage(
-        image,
-        0,
-        0,
-        image.naturalWidth,
-        image.naturalHeight,
-        0,
-        0,
-        image.naturalWidth,
-        image.naturalHeight
-      );
-
-      return new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => {
-          if (!blob) {
-            reject(new Error('Canvas is empty'));
-            return;
-          }
-          const croppedImageUrl = window.URL.createObjectURL(blob);
-          setUrl(croppedImageUrl);
-          resolve(croppedImageUrl);
-        }, 'image/jpeg');
-      });
+  const getImageSrc = async (url: string) => {
+    if (url.includes('https://core.subsplash.com')) {
+      const getImage = createFunction<GetImageInputType, GetImageOutputType>('getimage');
+      try {
+        const imageResponse = await getImage({ url });
+        if (imageResponse.status === 'success' && imageResponse.buffer) {
+          const imageBuffer = Buffer.from(imageResponse.buffer.data);
+          url = URL.createObjectURL(new Blob([imageBuffer], { type: 'image/jpeg' }));
+        } else {
+          throw new Error(imageResponse.message);
+        }
+      } catch (error) {
+        alert(error);
+      }
     }
-  }
+    return url;
+  };
 
   return (
-    <div className="App">
-      <div className="Crop-Controls">
-        <input type="file" accept="image/*" onChange={onSelectFile} />
-        <div>
-          <label>Scale: </label>
-          <input
-            type="range"
-            value={scale}
-            min=".5"
-            max="5"
-            step=".1"
-            disabled={!imgSrc}
-            onChange={(e) => setScale(Number(e.target.value))}
+    <div>
+      <input type="file" accept="image/*" onChange={onSelectFile} />
+      <div className={styles.cropContainer}>
+        {imgSrc && (
+          <Cropper
+            image={imgSrc}
+            crop={crop}
+            rotation={rotation}
+            zoom={zoom}
+            aspect={1}
+            onCropChange={setCrop}
+            onRotationChange={setRotation}
+            onCropComplete={onCropComplete}
+            onZoomChange={setZoom}
           />
-          <span>{scale}</span>
-        </div>
-        <div>
-          <label>Rotate: </label>
-          <input
-            type="range"
-            value={rotate}
-            min="-180"
-            max="180"
-            step="30"
-            disabled={!imgSrc}
-            onChange={(e) => setRotate(Math.min(180, Math.max(-180, Number(e.target.value))))}
-          />
-          <span>{rotate}°</span>
-        </div>
+        )}
       </div>
-      {!!imgSrc && (
-        <ReactCrop
-          crop={crop}
-          onChange={(_, percentCrop) => setCrop(percentCrop)}
-          aspect={1}
-          onComplete={(crop) => getCroppedImage(crop)}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imgRef}
-            alt="Crop me"
-            src={imgSrc}
-            style={{ transform: `scale(${scale}) rotate(${rotate}deg)`, maxWidth: '300px', maxHeight: '300px' }}
-            onLoad={onImageLoad}
+      <div className={styles.controls}>
+        <div className={styles.sliderContainer}>
+          <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
+            Zoom
+          </Typography>
+          <Slider
+            value={zoom}
+            min={1}
+            max={3}
+            step={0.1}
+            aria-labelledby="Zoom"
+            classes={{ root: styles.slider }}
+            onChange={(e, zoom) => {
+              if (typeof zoom === 'number') {
+                setZoom(zoom);
+              }
+            }}
           />
-        </ReactCrop>
-      )}
-      <a href={url} download>
-        download
-      </a>
+        </div>
+        <div className={styles.sliderContainer}>
+          <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
+            Rotation
+          </Typography>
+          <Slider
+            value={rotation}
+            min={0}
+            max={360}
+            step={1}
+            aria-labelledby="Rotation"
+            classes={{ root: styles.slider }}
+            onChange={(e, rotation) => {
+              if (typeof rotation === 'number') {
+                setRotation(rotation);
+              }
+            }}
+          />
+        </div>
+        <Button
+          onClick={async () => {
+            if (imgSrc && croppedAreaPixels) {
+              const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation);
+              props.updateSermonImage(croppedImage);
+              // download cropped image
+              // const link = document.createElement('a');
+              // link.href = croppedImage;
+              // link.setAttribute('download', 'image.jpg');
+              // document.body.appendChild(link);
+              // link.click();
+            }
+          }}
+          variant="contained"
+          color="primary"
+          classes={{ root: styles.cropButton }}
+        >
+          Crop
+        </Button>
+      </div>
     </div>
   );
 };
