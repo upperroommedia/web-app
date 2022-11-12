@@ -49,10 +49,9 @@ const ImageUploader = (props: Props) => {
         const imageBuffer = Buffer.from(imageResponse.buffer.data);
         url = URL.createObjectURL(new Blob([imageBuffer], { type: 'image/jpeg' }));
       } catch (error) {
-        // TODO: Handle error
-        if (error && error.message) {
-          alert(error.message);
-        }
+        // TODO: Fix this better since the error is HttpsError from firebase-functions not Error
+        const httpError = error as Error;
+        alert(httpError.message);
       }
     }
     return url;
