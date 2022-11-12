@@ -82,14 +82,18 @@ const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING
       auto_publish: data.autoPublish ?? false,
       _embedded: {
         images: data.images.map((image) => {
-          return {
-            id: image.id,
-            type: image.type,
-          };
+          if (image.subsplashId) {
+            return {
+              id: image.subsplashId,
+              type: image.type,
+            };
+          }
+          return;
         }),
         audio: { id: audioId },
       },
     });
+    logger.log('request data', requestData);
     const config = createAxiosConfig(
       'https://core.subsplash.com/media/v1/media-items',
       bearerToken,

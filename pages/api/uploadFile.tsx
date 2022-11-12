@@ -5,11 +5,12 @@ import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../../components/DropZone';
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
+import { ImageType } from '../../types/Image';
 
 interface uploadFileProps {
   file: UploadableFile;
   setFile: Dispatch<SetStateAction<UploadableFile | undefined>>;
-  setUploadProgress: Dispatch<SetStateAction<string | undefined>>;
+  setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string }>>;
   date: Date;
   trimStart: number;
   sermon: Sermon;
@@ -20,13 +21,9 @@ const uploadFile = async (props: uploadFileProps) => {
 
   if (props.sermon.series !== '') {
     const seriesRef = doc(firestore, 'series', props.sermon.series);
-    try {
-      await updateDoc(seriesRef, {
-        sermonIds: arrayUnion(props.sermon.key),
-      });
-    } catch (err) {
-      props.setUploadProgress(`Error: ${err}`);
-    }
+    await updateDoc(seriesRef, {
+      sermonIds: arrayUnion(props.sermon.key),
+    });
   }
   // const sermonRef = ref(storage, `sermons/${file.name}`);
   const metadata: UploadMetadata = {
@@ -37,18 +34,23 @@ const uploadFile = async (props: uploadFileProps) => {
       outroUrl: await getDownloadURL(ref(storage, `outros/${props.sermon.subtitle}_outro.m4a`)),
     },
   };
-  try {
-    await setDoc(doc(firestore, 'sermons', props.sermon.key).withConverter(sermonConverter), props.sermon);
-  } catch (err) {
-    props.setUploadProgress(`Error: ${err}`);
-  }
+  props.sermon.images = await Promise.all(
+    props.sermon.images.map(async (image): Promise<ImageType> => {
+      if (!image.subsplashId) {
+        // TODO[1] Upload image to subsplash and get subsplashId
+        throw new Error('Image does not have subsplashId please fix this before uploading');
+      }
+      return image;
+    })
+  );
+  await setDoc(doc(firestore, 'sermons', props.sermon.key).withConverter(sermonConverter), props.sermon);
   const uploadTask = uploadBytesResumable(sermonRef, props.file.file, metadata);
 
   uploadTask.on(
     'state_changed',
     (snapshot) => {
       const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-      props.setUploadProgress(`${Math.round(progress)}%`);
+      props.setUploadProgress({ error: false, message: `${Math.round(progress)}%` });
       switch (snapshot.state) {
         case 'paused':
           break;
@@ -56,14 +58,12 @@ const uploadFile = async (props: uploadFileProps) => {
           break;
       }
     },
-    (error) => {
-      props.setUploadProgress(`Error: ${error}`);
-      deleteDoc(doc(firestore, 'sermons', props.sermon.key)).catch((err) => {
-        props.setUploadProgress(`Error: ${err}`);
-      });
+    async (error) => {
+      await deleteDoc(doc(firestore, 'sermons', props.sermon.key));
+      throw error;
     },
     async () => {
-      props.setUploadProgress('Uploaded!');
+      props.setUploadProgress({ error: false, message: 'Uploaded!' });
     }
   );
 };

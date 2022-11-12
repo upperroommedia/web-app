@@ -44,6 +44,7 @@ specifiers:
   react: ^18.2.0
   react-dom: ^18.2.0
   react-dropzone: ^14.2.2
+  react-easy-crop: ^4.6.2
   react-firebase-hooks: ^5.0.3
   react-image-crop: ^10.0.8
   sharp: ^0.31.1
@@ -57,6 +58,7 @@ dependencies:
   '@mui/icons-material': 5.10.9_lecwhngi4dgp52ymigzgbgrx5i
   '@mui/material': 5.10.9_zf7ckydgka3owh777vmiilym5q
   '@mui/system': 5.10.9_j7wi73ltmg3t45cjnttv5wsory
+  '@mui/utils': 5.10.9_react@18.2.0
   '@mui/x-date-pickers': 5.0.4_5gfnryzsoat7ggv4mkfljqwvxa
   classnames: 2.3.2
   date-fns: 2.29.3
@@ -68,6 +70,7 @@ dependencies:
   react: 18.2.0
   react-dom: 18.2.0_react@18.2.0
   react-dropzone: 14.2.2_react@18.2.0
+  react-easy-crop: 4.6.2_biqbaboplfbrettd7655fr4n2y
   react-firebase-hooks: 5.0.3_u2feipd653rlxyqvdrxbokrhia
   react-image-crop: 10.0.8_react@18.2.0
   sharp: 0.31.1
@@ -1462,19 +1465,11 @@ packages:
       '@date-io/dayjs': 2.15.0
       '@date-io/luxon': 2.15.0
       '@date-io/moment': 2.15.0
-<<<<<<< HEAD
       '@emotion/react': 11.10.4_htzqphl4s4u74opkneb2rfgozi
       '@emotion/styled': 11.10.4_xjd5biu4iyk4co757gh22acyem
       '@mui/material': 5.10.9_zf7ckydgka3owh777vmiilym5q
       '@mui/system': 5.10.9_j7wi73ltmg3t45cjnttv5wsory
-      '@mui/utils': 5.10.3_react@18.2.0
-=======
-      '@emotion/react': 11.10.4_3cf3079d7c9729fe39ea6903a894ceca
-      '@emotion/styled': 11.10.4_ba47d0a29c4615c13bfdf98fad005823
-      '@mui/material': 5.10.9_c97e2560665036eb1ffffd58842f0cec
-      '@mui/system': 5.10.9_4fec8fed7361b73e74496ce75eda4e8e
       '@mui/utils': 5.10.9_react@18.2.0
->>>>>>> 7df2808f1c4a3dcecc61b4f13f3b7ed6b1c38973
       '@types/react-transition-group': 4.4.5
       clsx: 1.2.1
       date-fns: 2.29.3
@@ -6288,6 +6283,10 @@ packages:
     engines: {node: '>=8'}
     dev: false
 
+  /normalize-wheel/1.0.1:
+    resolution: {integrity: sha512-1OnlAPZ3zgrk8B91HyRj+eVv+kS5u+Z0SCsak6Xil/kmgEia50ga7zfkumayonZrImffAxPU/5WcyGhzetHNPA==}
+    dev: false
+
   /npmlog/6.0.2:
     resolution: {integrity: sha512-/vBvz5Jfr9dT/aFWd0FIRf+T/Q2WBsLENygUaFUqstqsycmZAP/t5BvFJTK0viFmSUxiUKTUplWy5vt+rvKIxg==}
     engines: {node: ^12.13.0 || ^14.15.0 || >=16.0.0}
@@ -6921,6 +6920,18 @@ packages:
       file-selector: 0.6.0
       prop-types: 15.8.1
       react: 18.2.0
+    dev: false
+
+  /react-easy-crop/4.6.2_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-qTGU3TWPwdAdNJsbM0OLbDx+Vjes9vWOnm1AUBiVp4GOzZacBQbUzVE9jYprFoWRrJZSn3GEwnxk0YhLAvdiYQ==}
+    peerDependencies:
+      react: '>=16.4.0'
+      react-dom: '>=16.4.0'
+    dependencies:
+      normalize-wheel: 1.0.1
+      react: 18.2.0
+      react-dom: 18.2.0_react@18.2.0
+      tslib: 2.0.1
     dev: false
 
   /react-firebase-hooks/5.0.3_u2feipd653rlxyqvdrxbokrhia:
@@ -7839,6 +7850,10 @@ packages:
   /tslib/1.14.1:
     resolution: {integrity: sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg==}
     dev: true
+
+  /tslib/2.0.1:
+    resolution: {integrity: sha512-SgIkNheinmEBgx1IUNirK0TUD4X9yjjBRTqqjggWCU3pUEqIk3/Uwl3yRixYKT6WjQuGiwDv4NomL3wqRCj+CQ==}
+    dev: false
 
   /tslib/2.4.0:
     resolution: {integrity: sha512-d6xOpEDfsi2CZVlPQzGeux8XMwLT9hssAsaPYExaQMuYskwb+x1x7J371tWlbBdWHroy99KnVB6qIkUbs5X3UQ==}
