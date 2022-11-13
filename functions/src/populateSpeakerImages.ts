@@ -43,7 +43,7 @@ const streamDataToStorage = async (stream: Stream, destinationFile: File): Promi
   });
 };
 const populateSpeakerImages = onCall(
-  { timeoutSeconds: 540 },
+  { timeoutSeconds: 540, memory: '1GiB' },
   async (request: CallableRequest<populateSpeakerImagesInputType>): Promise<void> => {
     if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');
