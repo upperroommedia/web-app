@@ -39,7 +39,7 @@ const getImageDimensions = async (file: File): Promise<{ width: number; height: 
 
 const streamDataToStorage = async (stream: Stream, destinationFile: File): Promise<void> => {
   return new Promise<void>((resolve) => {
-    stream.pipe(destinationFile.createWriteStream()).on('finish', resolve);
+    stream.pipe(destinationFile.createWriteStream()).on('close', resolve);
   });
 };
 const populateSpeakerImages = onCall(
