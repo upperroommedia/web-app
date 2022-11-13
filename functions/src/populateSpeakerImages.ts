@@ -101,7 +101,7 @@ const populateSpeakerImages = onCall(
             // map over images and upload them to storage
             // create metadata for each image
             const images: ImageType[] = await Promise.all(
-              subsplashImages.map(async (image: any): Promise<ImageType> => {
+              subsplashImages.map(async (image: any): Promise<ImageType | undefined> => {
                 const imageId = image.id;
                 let width = image.width;
                 let height = image.height;
@@ -119,6 +119,10 @@ const populateSpeakerImages = onCall(
                 });
                 const destinationFilePath = `speaker-images/${imageId}-${type}.${contentType.split('/')[1]}`;
                 const file = bucket.file(destinationFilePath);
+                if ((await file.exists())[0]) {
+                  logger.warn(`Image ${imageId} already exists ... skipping to next image`);
+                  return;
+                }
 
                 // stream image to storage bucket
                 logger.log(`Uploading ${type} ${contentType} ${width}x${height} image ${imageId} for ${speakerName}`);
@@ -168,7 +172,7 @@ const populateSpeakerImages = onCall(
             const speakerData: ISpeaker = {
               id: speakerId,
               name: speakerName,
-              images: images,
+              images: images.filter((image) => image !== undefined),
               tagId: speakerId,
             };
             logger.log(`Updating firestore document speakers/${speakerId} with ${JSON.stringify(speakerData)}`);
