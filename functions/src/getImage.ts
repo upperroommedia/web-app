@@ -13,8 +13,9 @@ export interface GetImageOutputType {
 }
 
 const getimage = onCall(async (request: CallableRequest<GetImageInputType>): Promise<GetImageOutputType> => {
+  logger.log('getimage', request);
   if (request.auth?.token.role !== 'admin') {
-    throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
   const data = request.data;
   logger.log('URL', data.url);
@@ -23,7 +24,6 @@ const getimage = onCall(async (request: CallableRequest<GetImageInputType>): Pro
     method: 'GET',
     responseType: 'arraybuffer',
   };
-  logger.log('Axios config', uploadConfig);
   try {
     logger.log('uploadConfig', uploadConfig);
     const axiosResponse = await axios(uploadConfig);
@@ -36,14 +36,18 @@ const getimage = onCall(async (request: CallableRequest<GetImageInputType>): Pro
     return { buffer: imageBuffer };
   } catch (error) {
     if (error instanceof HttpsError) {
+      logger.error('HttpsError', error);
       throw error;
     }
     if (axios.isAxiosError(error)) {
-      throw new HttpsError('internal', error.message, error.toJSON());
+      logger.error('AxiosError', error);
+      throw new HttpsError('internal', error.message, error.name);
     }
     if (error instanceof Error) {
+      logger.error('Error', error);
       throw new HttpsError('internal', error.message);
     }
+    logger.error('Unknown Error', error);
     throw new HttpsError('internal', 'Unknown error');
   }
 });
