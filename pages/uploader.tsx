@@ -42,7 +42,7 @@ interface UploaderProps {
 }
 
 const getSpeakersUnion = (array1: ISpeaker[], array2: ISpeaker[]) => {
-  const difference = array1.filter((s1) => !array2.find((s2) => s1.objectID === s2.objectID));
+  const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
   return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
 };
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
@@ -305,7 +305,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           id="speaker-input"
           options={getSpeakersUnion(sermon.speakers, speakersArray)}
           isOptionEqualToValue={(option, value) =>
-            value === undefined || option === undefined || option.objectID === value.objectID
+            value === undefined || option === undefined || option.id === value.id
           }
           renderTags={(speakers, _) => {
             return speakers.map((speaker) => (
@@ -315,14 +315,14 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   setSpeakerError({ error: false, message: '' });
                   setSermon((previousSermon) => {
                     const previousSpeakers = previousSermon.speakers;
-                    const newSpeakers = previousSpeakers.filter((s) => s.objectID !== speaker.objectID);
+                    const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
                     return {
                       ...previousSermon,
                       speakers: newSpeakers,
                     };
                   });
                 }}
-                key={speaker.objectID}
+                key={speaker.id}
                 label={speaker.name}
                 avatar={
                   <div

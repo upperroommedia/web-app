@@ -42,14 +42,14 @@ const streamDataToStorage = async (stream: Stream, destinationFile: File): Promi
     stream.pipe(destinationFile.createWriteStream()).on('finish', resolve);
   });
 };
-
 const populateSpeakerImages = onCall(
+  { timeoutSeconds: 540 },
   async (request: CallableRequest<populateSpeakerImagesInputType>): Promise<void> => {
     if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');
     }
     try {
-      logger.log('hi');
+      logger.log('Populating Speaker Images');
       let page_number = 1;
       const page_size = 100;
       let loop = true;
@@ -166,6 +166,7 @@ const populateSpeakerImages = onCall(
 
             // update speaker tag with image url
             const speakerData: ISpeaker = {
+              id: speakerId,
               name: speakerName,
               images: images,
               tagId: speakerId,

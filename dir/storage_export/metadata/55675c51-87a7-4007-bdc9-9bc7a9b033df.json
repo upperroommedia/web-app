@@ -1,0 +1,21 @@
+{
+  "name": "speaker-images/b77d428a-c0ae-499f-8290-fb6a2eebf3a9-wide.jpeg",
+  "bucket": "urm-app-images",
+  "metageneration": 2,
+  "generation": 1668323702351,
+  "contentType": "image/jpeg",
+  "storageClass": "STANDARD",
+  "downloadTokens": [],
+  "etag": "fKmdmol8syCWiHh6QLBFG2cIJqM",
+  "timeCreated": "2022-11-13T07:15:02.351Z",
+  "updated": "2022-11-13T07:15:02.361Z",
+  "size": 128612,
+  "md5Hash": "dVi1sjRP4cM8jV3zc6IsSg==",
+  "crc32c": "1205912257",
+  "customMetadata": {
+    "width": "1600",
+    "height": "852",
+    "average_color_hex": "#a98d8d",
+    "vibrant_color_hex": "#914652"
+  }
+}
