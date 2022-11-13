@@ -4,7 +4,7 @@ const createImage = (url: string): Promise<HTMLImageElement> =>
     const image = new Image();
     image.addEventListener('load', () => resolve(image));
     image.addEventListener('error', (error) => reject(error));
-    image.setAttribute('crossOrigin', 'anonymous'); // needed to avoid cross-origin issues on CodeSandbox
+    image.crossOrigin = 'anonymous'; // needed to avoid cross-origin issues
     image.src = url;
   });
 
@@ -34,6 +34,8 @@ export default async function getCroppedImg(
   flip = { horizontal: false, vertical: false }
 ): Promise<string> {
   const image = await createImage(imageSrc);
+
+  console.log('asdfj');
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
 
@@ -75,11 +77,13 @@ export default async function getCroppedImg(
 
   // As a blob
   return new Promise((resolve, reject) => {
+    console.log('canvas.toBlob');
     canvas.toBlob((file) => {
       if (!file) {
         reject(new Error('Canvas is empty'));
         return;
       }
+      console.log('resolve');
       resolve(URL.createObjectURL(file));
     }, 'image/jpeg');
   });

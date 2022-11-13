@@ -1,12 +1,10 @@
 import Button from '@mui/material/Button';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import getCroppedImg from '../utils/cropImage';
 
 import Cropper from 'react-easy-crop';
-import { GetImageInputType, GetImageOutputType } from '../functions/src/getImage';
-import { createFunction } from '../utils/createFunction';
 import styles from '../styles/Cropper.module.css';
 
 interface Props {
@@ -15,7 +13,7 @@ interface Props {
 }
 
 const ImageUploader = (props: Props) => {
-  const [imgSrc, setImgSrc] = useState('');
+  const [imgSrc, setImgSrc] = useState(props.imgSrc);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -23,13 +21,6 @@ const ImageUploader = (props: Props) => {
 
   const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);
-  }, []);
-
-  useEffect(() => {
-    const g = async () => {
-      if (props.imgSrc) setImgSrc(await getImageSrc(props.imgSrc));
-    };
-    g();
   }, []);
 
   function onSelectFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -41,21 +32,21 @@ const ImageUploader = (props: Props) => {
     }
   }
 
-  const getImageSrc = async (url: string) => {
-    if (url.includes('https://core.subsplash.com')) {
-      const getImage = createFunction<GetImageInputType, GetImageOutputType>('getimage');
-      try {
-        const imageResponse = await getImage({ url });
-        const imageBuffer = Buffer.from(imageResponse.buffer.data);
-        url = URL.createObjectURL(new Blob([imageBuffer], { type: 'image/jpeg' }));
-      } catch (error) {
-        // TODO: Fix this better since the error is HttpsError from firebase-functions not Error
-        const httpError = error as Error;
-        alert(httpError.message);
-      }
-    }
-    return url;
-  };
+  // const getImageSrc = async (url: string) => {
+  //   if (url.includes('https://core.subsplash.com')) {
+  //     const getImage = createFunction<GetImageInputType, GetImageOutputType>('getimage');
+  //     try {
+  //       const imageResponse = await getImage({ url });
+  //       const imageBuffer = Buffer.from(imageResponse.buffer.data);
+  //       url = URL.createObjectURL(new Blob([imageBuffer], { type: 'image/jpeg' }));
+  //     } catch (error) {
+  //       // TODO: Fix this better since the error is HttpsError from firebase-functions not Error
+  //       const httpError = error as Error;
+  //       alert(httpError.message);
+  //     }
+  //   }
+  //   return url;
+  // };
 
   return (
     <div>
