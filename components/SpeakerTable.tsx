@@ -193,7 +193,7 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((speaker) => {
                     return (
-                      <TableRow hover onClick={() => handleClick(speaker)} tabIndex={-1} key={speaker.name}>
+                      <TableRow hover onClick={() => handleClick(speaker)} tabIndex={-1} key={speaker.id}>
                         <TableCell component="th" id={speaker.name} scope="row" padding="none">
                           {speaker.name}
                         </TableCell>
