@@ -1,19 +1,19 @@
 {
-  "name": "processed-sermons/315f1496-a973-4234-85fd-9769ce5950ec",
+  "name": "processed-sermons/744d2c0d-6dcf-4bf9-8957-78b001fc53b7",
   "bucket": "urm-app.appspot.com",
   "metageneration": 2,
-  "generation": 1668116125499,
+  "generation": 1668239214044,
   "contentType": "audio/mpeg",
   "storageClass": "STANDARD",
   "downloadTokens": [],
-  "etag": "DZwh/H3nv7SoZ/+KkgLU3V6aF2Q",
+  "etag": "OmI880rIfv1TFbuGe/f2ErNwNCU",
   "customMetadata": {
     "introUrl": "http://localhost:9199/v0/b/urm-app.appspot.com/o/intros%2FSunday%20Homilies_intro.m4a?alt=media&token=ae3e1b6d-ed23-4e4f-bb95-a590178ae5e6",
     "outroUrl": "http://localhost:9199/v0/b/urm-app.appspot.com/o/outros%2FSunday%20Homilies_outro.m4a?alt=media&token=f2072910-470b-4c12-9544-257b91b9fdc3"
   },
-  "timeCreated": "2022-11-10T21:35:25.499Z",
-  "updated": "2022-11-10T21:35:25.519Z",
-  "size": 2064895,
-  "md5Hash": "/1SBp5aisV6WUojfg5QrWw==",
-  "crc32c": "100794976"
+  "timeCreated": "2022-11-12T07:46:54.044Z",
+  "updated": "2022-11-12T07:46:54.049Z",
+  "size": 70890,
+  "md5Hash": "lcY4DTfGJIpsVR5n1y+bYQ==",
+  "crc32c": "1747365217"
 }

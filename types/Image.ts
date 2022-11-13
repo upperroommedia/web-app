@@ -7,6 +7,8 @@ export type ImageType = {
   downloadLink: string;
   name: string;
   subsplashId?: string;
+  averageColorHex?: string;
+  vibrantColorHex?: string;
 };
 
 export type ImagesType = {

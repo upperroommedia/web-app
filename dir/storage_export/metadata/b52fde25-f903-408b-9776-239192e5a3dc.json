@@ -1,0 +1,17 @@
+{
+  "name": "test.jpg",
+  "bucket": "urm-app.appspot.com",
+  "metageneration": 3,
+  "generation": 1668216407045,
+  "contentType": "image/jpeg",
+  "storageClass": "STANDARD",
+  "downloadTokens": [
+    "3e9a7d50-a6de-45d6-8f0e-34ab4b9193d4"
+  ],
+  "etag": "iO7st/Il5QRYP8jTim1sXgG9HRg",
+  "timeCreated": "2022-11-12T01:26:47.045Z",
+  "updated": "2022-11-12T01:41:29.838Z",
+  "size": 25613,
+  "md5Hash": "Rrtn1l6zQ0t5Qf6YSYXnMg==",
+  "crc32c": "3730048046"
+}

@@ -198,26 +198,28 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
                           {speaker.name}
                         </TableCell>
                         <TableCell>{speaker.listId ? speaker.listId : 'No list'}</TableCell>
-                        <TableCell align="right">
-                          <div
-                            style={{
-                              borderRadius: '2px',
-                              overflow: 'hidden',
-                              position: 'relative',
-                              width: 50,
-                              height: 50,
-                              backgroundImage: `url(${'/user.png'})`,
-                              backgroundPosition: 'center center',
-                              backgroundSize: 'cover',
-                            }}
-                          >
-                            {speaker.images?.find((image) => image.type === 'square') && (
-                              <Image
-                                src={speaker.images.find((image) => image.type === 'square')!.downloadLink}
-                                layout="fill"
-                              />
-                            )}
-                          </div>
+                        <TableCell align="right" style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
+                          {['banner', 'wide', 'square'].map((type, i) => {
+                            const image = speaker.images?.find((image) => image.type === type);
+                            return (
+                              <div
+                                key={image?.id || i}
+                                style={{
+                                  borderRadius: '2px',
+                                  overflow: 'hidden',
+                                  position: 'relative',
+                                  width: 50,
+                                  height: 50,
+                                  // backgroundImage: `url(${'/user.png'})`,
+                                  // backgroundPosition: 'center center',
+                                  // backgroundSize: 'cover',
+                                  backgroundColor: image?.averageColorHex || '#f3f1f1',
+                                }}
+                              >
+                                {image && <Image src={image.downloadLink} layout="fill" objectFit="contain" />}
+                              </div>
+                            );
+                          })}
                         </TableCell>
                       </TableRow>
                     );
@@ -245,18 +247,65 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
           />
         </Paper>
       </Box>
-      <DynamicPopUp title="Speaker Details" open={speakerDetailsPopup} setOpen={setSpeakerDetailsPopup}>
-        <div>
+      <DynamicPopUp
+        title="Speaker Details"
+        open={speakerDetailsPopup}
+        setOpen={setSpeakerDetailsPopup}
+        dialogProps={{ fullWidth: true, maxWidth: 'lg' }}
+      >
+        <div style={{ textAlign: 'center' }}>
           <h2>{selectedSpeaker?.name}</h2>
-          <h2>Images:</h2>
-          {selectedSpeaker?.images
-            ? selectedSpeaker?.images?.map((image) => {
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px,100%), 1fr))',
+              alignItems: 'center',
+              justifyItems: 'center',
+              gap: '10px',
+            }}
+          >
+            {['square', 'wide', 'banner'].map((type, i) => {
+              const image = selectedSpeaker?.images?.find((image) => image.type === type);
+              if (!image)
                 return (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img key={selectedSpeaker?.name} src={image.downloadLink} width="200px" height="auto" />
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      borderRadius: '2px',
+                      overflow: 'hidden',
+                      position: 'relative',
+                      width: 300,
+                      height: 300,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      backgroundColor: '#f3f1f1',
+                    }}
+                  >
+                    <span>Add image +</span>
+                  </div>
                 );
-              })
-            : 'add an image'}
+              return (
+                <div
+                  key={image.id}
+                  style={{
+                    borderRadius: '2px',
+                    overflow: 'hidden',
+                    position: 'relative',
+                    width: 300,
+                    height: 300,
+                    // aspectRatio: image.width / image.height,
+                    // backgroundImage: `url(${'/user.png'})`,
+                    // backgroundPosition: 'center center',
+                    // backgroundSize: 'cover',
+                    backgroundColor: image.averageColorHex || '#f3f1f1',
+                  }}
+                >
+                  <Image src={image.downloadLink} layout="fill" objectFit="contain" />
+                </div>
+              );
+            })}
+          </div>
         </div>
       </DynamicPopUp>
     </>

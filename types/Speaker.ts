@@ -1,8 +1,8 @@
 import { ImageType } from './Image';
 
 export interface ISpeaker {
-  listId: string;
+  listId?: string;
+  tagId?: string;
   name: string;
-  objectID: string;
   images: ImageType[];
 }

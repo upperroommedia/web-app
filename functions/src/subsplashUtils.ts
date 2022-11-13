@@ -35,7 +35,8 @@ export const createAxiosConfig = (
   endpoint_url: string,
   bearerToken: string,
   method: HTTPMethod,
-  data?: unknown
+  data?: unknown,
+  additionalHeaders?: any
 ): AxiosRequestConfig => {
   const headers: Headers = {
     'Cache-Control': 'no-cache',
@@ -43,6 +44,7 @@ export const createAxiosConfig = (
     Origin: 'https://dashboard.subsplash.com',
     Referer: 'https://dashboard.subsplash.com/',
     Authorization: `Bearer ${bearerToken}`,
+    ...additionalHeaders,
   };
   if (data) {
     headers['Content-Type'] = 'application/vnd.api+json';
