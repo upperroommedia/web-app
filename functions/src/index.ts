@@ -10,6 +10,7 @@ import uploadimage from './handleImageUpload';
 import getimage from './getImage';
 import listusers from './listUsers';
 import setUserRoleOnCreate from './setUserRoleOnCreate';
+import populatespeakerimages from './populateSpeakerImages';
 
 admin.initializeApp();
 
@@ -21,3 +22,4 @@ exports.uploadimage = uploadimage;
 exports.getimage = getimage;
 exports.listusers = listusers;
 exports.setuserroleoncreate = setUserRoleOnCreate;
+exports.populatespeakerimages = populatespeakerimages;
