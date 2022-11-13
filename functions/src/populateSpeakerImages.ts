@@ -137,16 +137,16 @@ const populateSpeakerImages = onCall(
                 }
                 logger.log(`Dimensions ${width}x${height} for ${type} image ${imageId} for ${speakerName}`);
                 // update storage metadata
-                logger.log(`Updating metadata for ${destinationFilePath}`);
-                await file.setMetadata({
-                  contentType: contentType,
-                  metadata: {
-                    width: width,
-                    height: height,
-                    average_color_hex: averageColorHex,
-                    vibrant_color_hex: vibrantColorHex,
-                  },
-                });
+                // logger.log(`Updating metadata for ${destinationFilePath}`);
+                // await file.setMetadata({
+                //   contentType: contentType,
+                //   metadata: {
+                //     width: width,
+                //     height: height,
+                //     average_color_hex: averageColorHex,
+                //     vibrant_color_hex: vibrantColorHex,
+                //   },
+                // });
 
                 // create firestore Image object
                 const publicUrl = file.publicUrl();
@@ -177,6 +177,7 @@ const populateSpeakerImages = onCall(
             };
             logger.log(`Updating firestore document speakers/${speakerId} with ${JSON.stringify(speakerData)}`);
             await firestoreSpeakers.doc(speakerId).set(speakerData, { merge: true });
+            logger.log(`Updated firestore document speakers/${speakerId} with ${JSON.stringify(speakerData)}`);
           })
         );
         logger.log('promises', promises);
