@@ -14,7 +14,7 @@ const nextConfig = withBundleAnalyzer({
       '127.0.0.1',
       'https://storage.googleapis.com/urm-app-images',
     ],
-    formats: ['image/avif', 'image/webp', 'image/jpeg', 'image/png'],
+    formats: ['image/avif', 'image/webp'],
   },
   i18n: {
     locales: ['en'],
