@@ -6,4 +6,5 @@ export interface ISpeaker {
   tagId?: string;
   name: string;
   images: ImageType[];
+  sermonCount: number;
 }

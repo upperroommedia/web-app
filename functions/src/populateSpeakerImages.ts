@@ -84,6 +84,8 @@ const populateSpeakerImages = onCall(
           ...speakers.map(async (speaker: any) => {
             const speakerId = speaker.id;
             const speakerName = speaker.title;
+            const speakerSermonCount = speaker.tagging_count;
+
             logger.log(`Retrieving sermons for ${speakerName}`);
             const getSermonItemAxiosConfig = createAxiosConfig(
               `https://core.subsplash.com/tags/v1/taggings?filter%5Bapp_key%5D=9XTSHD&filter%5Btag.id%5D=${speakerId}&include=media-item&page%5Bsize%5D=1&sort=-created_at`,
@@ -174,6 +176,7 @@ const populateSpeakerImages = onCall(
               name: speakerName,
               images: images.filter((image) => image !== undefined),
               tagId: speakerId,
+              sermonCount: speakerSermonCount,
             };
             logger.log(`Updating firestore document speakers/${speakerId} with ${JSON.stringify(speakerData)}`);
             await firestoreSpeakers.doc(speakerId).set(speakerData, { merge: true });
