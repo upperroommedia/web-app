@@ -19,6 +19,7 @@ import { ISpeaker } from '../types/Speaker';
 import SpeakerTable from '../components/SpeakerTable';
 import { createFunction } from '../utils/createFunction';
 import UserTable from '../components/UserTable';
+import { fetchSpeakerResults } from './uploader';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -83,21 +84,6 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     });
   };
 
-  const fetchSpeakerResults = async (query: string) => {
-    if (process.env.NEXT_PUBLIC_ALGOLIA_API_KEY && process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
-      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/speakers/query`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'X-Algolia-API-Key': process.env.NEXT_PUBLIC_ALGOLIA_API_KEY,
-          'X-Algolia-Application-Id': process.env.NEXT_PUBLIC_ALGOLIA_APP_ID,
-        },
-        body: JSON.stringify({ query: query }),
-      });
-      return response;
-    }
-  };
-
   const fetchUsers = async () => {
     const getImage = createFunction<any, any>('listusers');
     const res = await getImage({});
@@ -141,16 +127,14 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
               setSpeakersLoading(true);
               clearTimeout(timer);
               const newTimer = setTimeout(async () => {
-                fetchSpeakerResults(e.target.value)
-                  .then((response) => response?.json())
-                  .then((data) => {
-                    const res: ISpeaker[] = [];
-                    data.hits.forEach((element: ISpeaker) => {
-                      res.push(element);
-                    });
-                    setSpeakers(res);
-                    setSpeakersLoading(false);
+                await fetchSpeakerResults(e.target.value).then((data) => {
+                  const res: ISpeaker[] = [];
+                  data?.hits.forEach((element: ISpeaker) => {
+                    res.push(element);
                   });
+                  setSpeakers(res);
+                  setSpeakersLoading(false);
+                });
               }, 300);
               setTimer(newTimer);
             }}

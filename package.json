@@ -17,6 +17,8 @@
     "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore"
   },
   "dependencies": {
+    "@algolia/cache-in-memory": "^4.14.2",
+    "@algolia/client-search": "^4.14.2",
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
     "@firebase/app-types": "^0.8.0",
@@ -25,6 +27,7 @@
     "@mui/system": "^5.10.9",
     "@mui/utils": "^5.10.9",
     "@mui/x-date-pickers": "^5.0.4",
+    "algoliasearch": "^4.14.2",
     "classnames": "^2.3.2",
     "date-fns": "^2.29.3",
     "firebase": "^9.12.0",

@@ -32,6 +32,9 @@ import { ISpeaker } from '../types/Speaker';
 import Chip from '@mui/material/Chip';
 import ImageUploader from '../components/ImageUploader';
 
+import algoliasearch from 'algoliasearch';
+import { createInMemoryCache } from '@algolia/cache-in-memory';
+
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -45,6 +48,26 @@ const getSpeakersUnion = (array1: ISpeaker[], array2: ISpeaker[]) => {
   const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
   return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
 };
+
+const client =
+  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
+        responsesCache: createInMemoryCache(),
+        requestsCache: createInMemoryCache({ serializable: false }),
+      })
+    : undefined;
+const speakersIndex = client?.initIndex('speakers');
+const topicsIndex = client?.initIndex('topics');
+
+export const fetchSpeakerResults = async (query: string) => {
+  if (speakersIndex) {
+    const response = await speakersIndex.search<ISpeaker>(query, {
+      hitsPerPage: 25,
+    });
+    return response;
+  }
+};
+
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
   const [sermon, setSermon] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
@@ -56,6 +79,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [speakersArray, setSpeakersArray] = useState<ISpeaker[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
   const [trimStart, setTrimStart] = useState<number>(0);
+
+  const [timer, setTimer] = useState<NodeJS.Timeout>();
 
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(new Date(props.existingSermon ? props.existingSermon.dateMillis : new Date()));
@@ -151,31 +176,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     updateSermon('durationSeconds', durationSeconds);
   };
 
-  const fetchSpeakerResults = async (query: string) => {
-    if (process.env.NEXT_PUBLIC_ALGOLIA_API_KEY && process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
-      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/speakers/query`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'X-Algolia-API-Key': process.env.NEXT_PUBLIC_ALGOLIA_API_KEY,
-          'X-Algolia-Application-Id': process.env.NEXT_PUBLIC_ALGOLIA_APP_ID,
-        },
-        body: JSON.stringify({ query: query }),
-      });
-      return response;
-    }
-  };
-
   const fetchTopicsResults = async (query: string) => {
-    if (process.env.NEXT_PUBLIC_ALGOLIA_API_KEY && process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
-      const url = `https://${process.env.NEXT_PUBLIC_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/topics/query`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'X-Algolia-API-Key': process.env.NEXT_PUBLIC_ALGOLIA_API_KEY,
-          'X-Algolia-Application-Id': process.env.NEXT_PUBLIC_ALGOLIA_APP_ID,
-        },
-        body: JSON.stringify({ query: query }),
+    if (topicsIndex) {
+      const response = await topicsIndex.search(query, {
+        hitsPerPage: 5,
       });
       return response;
     }
@@ -292,15 +296,17 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             }
           }}
           onInputChange={async (_, value) => {
-            await fetchSpeakerResults(value)
-              .then((response) => response?.json())
-              .then((data) => {
+            clearTimeout(timer);
+            const newTimer = setTimeout(async () => {
+              await fetchSpeakerResults(value).then((data) => {
                 const res: ISpeaker[] = [];
-                data.hits.forEach((element: ISpeaker) => {
+                data?.hits.forEach((element: ISpeaker) => {
                   res.push(element);
                 });
                 setSpeakersArray(res);
               });
+            }, 300);
+            setTimer(newTimer);
           }}
           id="speaker-input"
           options={getSpeakersUnion(sermon.speakers, speakersArray)}
@@ -411,15 +417,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             }
           }}
           onInputChange={async (_, value) => {
-            await fetchTopicsResults(value)
-              .then((response) => response?.json())
-              .then((data) => {
-                const res: string[] = [];
-                data.hits.forEach((element: any) => {
-                  res.push(element.name);
-                });
-                setTopicsArray(res);
+            await fetchTopicsResults(value).then((data) => {
+              const res: string[] = [];
+              data?.hits.forEach((element: any) => {
+                res.push(element.name);
               });
+              setTopicsArray(res);
+            });
           }}
           id="topic-input"
           options={topicsArray}
