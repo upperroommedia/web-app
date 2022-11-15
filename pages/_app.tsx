@@ -11,7 +11,7 @@ function MyApp({ Component, pageProps: { ...pageProps } }: AppProps) {
     <UserProvider>
       <Navbar />
       <AudioPlayerProvider>
-        <NextNProgress />
+        <NextNProgress options={{ showSpinner: false }} />
         <Component {...pageProps} />
       </AudioPlayerProvider>
       <Footer />

@@ -35,7 +35,7 @@ const Signup = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) 
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleSignup = async (_e: any) => {
+  const handleSignup = async () => {
     const res = await signup(data);
     const authResult = AuthErrors(res);
     if (authResult.authFailure) {
@@ -68,57 +68,64 @@ const Signup = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) 
     >
       <h1 className="text-center my-3 ">Signup</h1>
       <div style={{ height: '100%', width: '300px', margin: '20px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <TextField
-            fullWidth
-            type="email"
-            placeholder="Enter email"
-            required
-            onChange={(e: any) =>
-              setData({
-                ...data,
-                email: e.target.value,
-              })
-            }
-            value={data.email}
-            size="small"
-          />
-          <TextField
-            fullWidth
-            type="password"
-            placeholder="Password"
-            required
-            onChange={(e: any) =>
-              setData({
-                ...data,
-                password: e.target.value,
-              })
-            }
-            value={data.password}
-            size="small"
-          />
-        </div>
-        <Button
-          fullWidth
-          variant="contained"
-          type="submit"
-          style={{ marginTop: '30px' }}
-          size="medium"
-          onClick={handleSignup}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSignup();
+          }}
         >
-          SignUp
-        </Button>
-        <p style={{ textAlign: 'center' }}>or</p>
-        <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
-          <div className={styles.google_icon_wrapper}>
-            <div className={styles.google_icon}>
-              <Image src="/google-logo.svg" width="30px" height="30px" />
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <TextField
+              fullWidth
+              type="email"
+              placeholder="Enter email"
+              required
+              onChange={(e: any) =>
+                setData({
+                  ...data,
+                  email: e.target.value,
+                })
+              }
+              value={data.email}
+              size="small"
+            />
+            <TextField
+              fullWidth
+              type="password"
+              placeholder="Password"
+              required
+              onChange={(e: any) =>
+                setData({
+                  ...data,
+                  password: e.target.value,
+                })
+              }
+              value={data.password}
+              size="small"
+            />
           </div>
-          <p className={styles.btn_text}>
-            <b>Sign in with google</b>
-          </p>
-        </div>
+          <Button
+            fullWidth
+            variant="contained"
+            type="submit"
+            style={{ marginTop: '30px' }}
+            size="medium"
+            onClick={handleSignup}
+          >
+            SignUp
+          </Button>
+          <p style={{ textAlign: 'center' }}>or</p>
+          <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
+            <div className={styles.google_icon_wrapper}>
+              <div className={styles.google_icon}>
+                <Image src="/google-logo.svg" width="30px" height="30px" />
+              </div>
+            </div>
+            <p className={styles.btn_text}>
+              <b>Sign in with google</b>
+            </p>
+          </div>
+        </form>
         <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
           {errorMessage}
         </PopUp>
