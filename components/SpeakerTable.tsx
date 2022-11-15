@@ -28,38 +28,10 @@ const stableSort = (array: ISpeaker[], order: Order, orderBy: keyof ISpeaker) =>
     return order === 'asc'
       ? array.sort((a, b) => a.name.localeCompare(b.name))
       : array.sort((a, b) => b.name.localeCompare(a.name));
-  } else if (orderBy === 'listId') {
+  } else if (orderBy === 'sermonCount') {
     return order === 'asc'
-      ? array.sort((a, b) => {
-          if (a.listId && !b.listId) {
-            return 1;
-          } else if (b.listId && !a.listId) {
-            return -1;
-          } else return 0;
-        })
-      : array.sort((a, b) => {
-          if (a.listId && !b.listId) {
-            return -1;
-          } else if (b.listId && !a.listId) {
-            return 1;
-          } else return 0;
-        });
-  } else if (orderBy === 'images') {
-    return order === 'asc'
-      ? array.sort((a, b) => {
-          if (a.images && !b.images) {
-            return 1;
-          } else if (b.images && !a.images) {
-            return -1;
-          } else return 0;
-        })
-      : array.sort((a, b) => {
-          if (a.images && !b.images) {
-            return -1;
-          } else if (b.images && !a.images) {
-            return 1;
-          } else return 0;
-        });
+      ? array.sort((a, b) => a.sermonCount - b.sermonCount)
+      : array.sort((a, b) => b.sermonCount - a.sermonCount);
   }
   return array;
 };
@@ -77,6 +49,12 @@ const headCells: readonly HeadCell[] = [
     numeric: false,
     disablePadding: false,
     label: 'Name',
+  },
+  {
+    id: 'sermonCount',
+    numeric: true,
+    disablePadding: false,
+    label: 'Sermon Count',
   },
   {
     id: 'listId',
@@ -109,7 +87,7 @@ const SpeakerTableHead = (props: SpeakerTableProps) => {
     <TableHead>
       <TableRow>
         {headCells.map((headCell) =>
-          headCell.id === 'name' ? (
+          headCell.id === 'name' || headCell.id === 'sermonCount' ? (
             <TableCell key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
               <TableSortLabel
                 onClick={createSortHandler(headCell.id)}
@@ -323,6 +301,7 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
                         <TableCell component="th" id={speaker.name} scope="row" padding="none">
                           {speaker.name}
                         </TableCell>
+                        <TableCell>{speaker.sermonCount}</TableCell>
                         <TableCell>{speaker.listId ? speaker.listId : 'No list'}</TableCell>
                         <TableCell align="right" style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
                           {['banner', 'wide', 'square'].map((type, i) => {
