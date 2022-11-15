@@ -6,11 +6,13 @@ import Link from 'next/link';
 import Image from 'next/image';
 import styles from '../styles/Navbar.module.css';
 import useAuth from '../context/user/UserContext';
+import { useRouter } from 'next/router';
 
 const Navbar: FunctionComponent = () => {
   const { user } = useAuth();
   const displayName = user?.displayName || user?.email;
   const photoSrc = user?.photoURL || '/user.png';
+  const path = useRouter().asPath;
   return (
     <nav>
       <div className={styles.navbar}>
@@ -29,22 +31,62 @@ const Navbar: FunctionComponent = () => {
       </div>
       <div className={styles.navbar_links}>
         <Link href="/">
-          <a className={styles.nav_link}>Home</a>
+          <a
+            className={styles.nav_link}
+            style={{
+              color: path === '/' ? 'blue' : 'black',
+              textDecoration: path === '/' ? 'underline' : 'none',
+            }}
+          >
+            Home
+          </a>
         </Link>
         <Link href="/sermons">
-          <a className={styles.nav_link}>Sermons</a>
+          <a
+            className={styles.nav_link}
+            style={{
+              color: path === '/sermons' ? 'blue' : 'black',
+              textDecoration: path === '/sermons' ? 'underline' : 'none',
+            }}
+          >
+            Sermons
+          </a>
         </Link>
         <Link href="/about">
-          <a className={styles.nav_link}>About</a>
+          <a
+            className={styles.nav_link}
+            style={{
+              color: path === '/about' ? 'blue' : 'black',
+              textDecoration: path === '/about' ? 'underline' : 'none',
+            }}
+          >
+            About
+          </a>
         </Link>
 
         {!user ? (
           <>
             <Link href="/login">
-              <a className={styles.nav_link}>Login</a>
+              <a
+                className={styles.nav_link}
+                style={{
+                  color: path === '/login' ? 'blue' : 'black',
+                  textDecoration: path === '/login' ? 'underline' : 'none',
+                }}
+              >
+                Login
+              </a>
             </Link>
             <Link href="/signup">
-              <a className={styles.nav_link}>Sign Up</a>
+              <a
+                className={styles.nav_link}
+                style={{
+                  color: path === '/signup' ? 'blue' : 'black',
+                  textDecoration: path === '/signup' ? 'underline' : 'none',
+                }}
+              >
+                Sign Up
+              </a>
             </Link>
           </>
         ) : (
@@ -53,10 +95,26 @@ const Navbar: FunctionComponent = () => {
             {user?.role === 'admin' ? (
               <>
                 <Link href="/uploader">
-                  <a className={styles.nav_link}>Uploader</a>
+                  <a
+                    className={styles.nav_link}
+                    style={{
+                      color: path === '/uploader' ? 'blue' : 'black',
+                      textDecoration: path === '/uploader' ? 'underline' : 'none',
+                    }}
+                  >
+                    Uploader
+                  </a>
                 </Link>
                 <Link href="/admin">
-                  <a className={styles.nav_link}>Admin</a>
+                  <a
+                    className={styles.nav_link}
+                    style={{
+                      color: path === '/admin' ? 'blue' : 'black',
+                      textDecoration: path === '/admin' ? 'underline' : 'none',
+                    }}
+                  >
+                    Admin
+                  </a>
                 </Link>
               </>
             ) : (
