@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, useEffect, useState, Dispatch, SetStateAction } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -15,6 +15,11 @@ import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
 import { ISpeaker } from '../types/Speaker';
 import { visuallyHidden } from '@mui/utils';
+import FormGroup from '@mui/material/FormGroup';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+import Button from '@mui/material/Button';
+import Menu from '@mui/material/Menu';
 
 type Order = 'asc' | 'desc';
 
@@ -103,28 +108,60 @@ const SpeakerTableHead = (props: SpeakerTableProps) => {
   return (
     <TableHead>
       <TableRow>
-        {headCells.map((headCell) => (
-          <TableCell key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
-            <TableSortLabel
-              onClick={createSortHandler(headCell.id)}
-              active={orderBy === headCell.id}
-              direction={orderBy === headCell.id ? order : 'asc'}
-            >
-              {headCell.label}
-              {orderBy === headCell.id ? (
-                <Box component="span" sx={visuallyHidden}>
-                  {order === 'desc' ? 'sorted descending' : 'sorted ascending'}
-                </Box>
-              ) : null}
-            </TableSortLabel>
-          </TableCell>
-        ))}
+        {headCells.map((headCell) =>
+          headCell.id === 'name' ? (
+            <TableCell key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
+              <TableSortLabel
+                onClick={createSortHandler(headCell.id)}
+                active={orderBy === headCell.id}
+                direction={orderBy === headCell.id ? order : 'asc'}
+              >
+                {headCell.label}
+                {orderBy === headCell.id ? (
+                  <Box component="span" sx={visuallyHidden}>
+                    {order === 'desc' ? 'sorted descending' : 'sorted ascending'}
+                  </Box>
+                ) : null}
+              </TableSortLabel>
+            </TableCell>
+          ) : (
+            <TableCell key={headCell.id}>{headCell.label}</TableCell>
+          )
+        )}
       </TableRow>
     </TableHead>
   );
 };
 
-const SpeakerTableToolbar = () => {
+export interface Filters {
+  none: boolean;
+  hasListId: boolean;
+  hasSquareImage: boolean;
+  hasWideImage: boolean;
+  hasBannerImage: boolean;
+}
+
+enum FilterLabels {
+  none = 'No Filter',
+  hasListId = 'Contains List Id',
+  hasSquareImage = 'Contains Square Image',
+  hasWideImage = 'Contains Wide Image',
+  hasBannerImage = 'Contains Banner Image',
+}
+
+const SpeakerTableToolbar = (props: {
+  filters: Filters;
+  setFilters: Dispatch<SetStateAction<Filters>>;
+  handleRequestFilter: (filter: string) => void;
+}) => {
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const open = Boolean(anchorEl);
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
   return (
     <Toolbar
       sx={{
@@ -135,6 +172,49 @@ const SpeakerTableToolbar = () => {
       <Typography sx={{ flex: '1 1 100%' }} variant="h6" id="tableTitle" component="div">
         Speakers
       </Typography>
+      <Button
+        id="basic-button"
+        aria-controls={open ? 'basic-menu' : undefined}
+        aria-haspopup="true"
+        aria-expanded={open ? 'true' : undefined}
+        onClick={handleClick}
+      >
+        Filters
+      </Button>
+      <Menu
+        id="basic-menu"
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        MenuListProps={{
+          'aria-labelledby': 'basic-button',
+        }}
+      >
+        <FormGroup sx={{ pl: '1em' }}>
+          {Object.keys(props.filters).map((filter) => {
+            return (
+              <FormControlLabel
+                key={filter}
+                control={<Checkbox checked={props.filters[filter as keyof Filters]} />}
+                label={FilterLabels[filter as keyof Filters]}
+                onClick={() => {
+                  props.setFilters((oldFilters) => ({ ...oldFilters, [filter]: !oldFilters[filter as keyof Filters] }));
+                  if (filter === 'none' && props.filters.none === false) {
+                    props.setFilters({
+                      none: true,
+                      hasListId: false,
+                      hasSquareImage: false,
+                      hasWideImage: false,
+                      hasBannerImage: false,
+                    });
+                  }
+                }}
+                disabled={filter !== 'none' && props.filters.none}
+              />
+            );
+          })}
+        </FormGroup>
+      </Menu>
     </Toolbar>
   );
 };
@@ -144,16 +224,54 @@ const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof ISpeaker>('name');
+  const [filteredSpeakers, setFilteredSpeakers] = useState<ISpeaker[]>(props.speakers);
 
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(5);
   const [speakerDetailsPopup, setSpeakerDetailsPopup] = useState<boolean>(false);
 
+  const [filters, setFilters] = useState<Filters>({
+    none: true,
+    hasListId: false,
+    hasSquareImage: false,
+    hasWideImage: false,
+    hasBannerImage: false,
+  });
+
   const handleRequestSort = (_: any, property: keyof ISpeaker) => {
     const isAsc = order === 'asc';
     setOrder(isAsc ? 'desc' : 'asc');
     setOrderBy(property);
+  };
+
+  const handleRequestFilter = () => {
+    let filtered = props.speakers;
+    if (filters.none) {
+      setFilteredSpeakers(props.speakers);
+      return;
+    }
+    if (filters.hasListId) {
+      filtered = filtered.filter((speaker) => speaker.listId !== undefined);
+    } else {
+      filtered = filtered.filter((speaker) => speaker.listId === undefined);
+    }
+    if (filters.hasSquareImage) {
+      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'square') !== undefined);
+    } else {
+      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'square') === undefined);
+    }
+    if (filters.hasWideImage) {
+      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'wide') !== undefined);
+    } else {
+      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'wide') === undefined);
+    }
+    if (filters.hasBannerImage) {
+      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'banner') !== undefined);
+    } else {
+      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'banner') === undefined);
+    }
+    setFilteredSpeakers(filtered);
   };
 
   const handleClick = (speaker: ISpeaker) => {
@@ -171,25 +289,33 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
   };
 
   // Avoid a layout jump when reaching the last page with empty rows.
-  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.speakers.length) : 0;
+  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - filteredSpeakers.length) : 0;
+
+  useEffect(() => {
+    setFilteredSpeakers(props.speakers);
+  }, [props.speakers]);
+
+  useEffect(() => {
+    handleRequestFilter();
+  }, [filters]);
 
   return (
     <>
       <Box sx={{ width: '100%' }}>
         <Paper sx={{ width: '100%', mb: 2 }}>
-          <SpeakerTableToolbar />
+          <SpeakerTableToolbar filters={filters} setFilters={setFilters} handleRequestFilter={handleRequestFilter} />
           <TableContainer>
             <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
               <SpeakerTableHead
                 order={order}
                 orderBy={orderBy}
                 onRequestSort={handleRequestSort}
-                rowCount={props.speakers.length}
+                rowCount={filteredSpeakers.length}
               />
               <TableBody>
                 {/* if you don't need to support IE11, you can replace the `stableSort` call with:
               rows.sort(getComparator(order, orderBy)).slice() */}
-                {stableSort(props.speakers, order, orderBy)
+                {stableSort(filteredSpeakers, order, orderBy)
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((speaker) => {
                     return (
@@ -210,9 +336,6 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
                                   position: 'relative',
                                   width: 50,
                                   height: 50,
-                                  // backgroundImage: `url(${'/user.png'})`,
-                                  // backgroundPosition: 'center center',
-                                  // backgroundSize: 'cover',
                                   backgroundColor: image?.averageColorHex || '#f3f1f1',
                                 }}
                               >
@@ -239,7 +362,7 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
           <TablePagination
             rowsPerPageOptions={[5, 10, 25]}
             component="div"
-            count={props.speakers.length}
+            count={filteredSpeakers.length}
             rowsPerPage={rowsPerPage}
             page={page}
             onPageChange={handleChangePage}
