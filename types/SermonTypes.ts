@@ -21,7 +21,6 @@ export interface Sermon {
   series: string;
   speakers: ISpeaker[];
   subtitle: string;
-  scripture: string;
   dateMillis: number;
   durationSeconds: number;
   topics: string[];

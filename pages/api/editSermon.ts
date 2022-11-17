@@ -14,7 +14,6 @@ const editSermon = async (props: IEditSermon) => {
     description: props.description,
     series: props.series,
     speakers: props.speakers,
-    scripture: props.scripture,
     topics: props.topics,
   });
 };
