@@ -76,7 +76,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
 
   const [totalSpeakers, setTotalSpeakers] = useState<number>(0);
   const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
-  const [sortProperty, setSortPropery] = useState<keyof ISpeaker>('sermonCount');
+  const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const [page, setPage] = useState<number>(0);
@@ -137,6 +137,8 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     setRowsPerPage(parseInt(event.target.value, 10));
     setLastSpeaker(undefined);
     setPage(0);
+    setSortProperty('sermonCount')
+    setSortOrder('desc')
     const q = query(
       collection(firestore, 'speakers'),
       limit(parseInt(event.target.value, 10)),
@@ -194,7 +196,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       setVisitedPages([]);
     }
     setLastSpeaker(undefined);
-    setSortPropery(property);
+    setSortProperty(property);
     setSortOrder(order);
     setPage(0);
     const q = query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order));
@@ -277,7 +279,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
               sortOrder={sortOrder}
               setSortOrder={setSortOrder}
               sortProperty={sortProperty}
-              setSortProperty={setSortPropery}
+              setSortProperty={setSortProperty}
             />
           )}
         </div>
