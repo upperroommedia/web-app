@@ -1,10 +1,20 @@
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType, NextPage } from 'next';
-import { useState } from 'react';
+import { ChangeEvent, useEffect, useState } from 'react';
 import functions, { httpsCallable } from '../firebase/functions';
 import { ROLES } from '../context/types';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useCollection } from 'react-firebase-hooks/firestore';
-import firestore, { collection, getDocs, limit, query } from '../firebase/firestore';
+import firestore, {
+  collection,
+  DocumentData,
+  Query,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  QueryDocumentSnapshot,
+  startAfter,
+} from '../firebase/firestore';
 import { Sermon } from '../types/SermonTypes';
 import SermonsList from '../components/SermonsList';
 import PopUp from '../components/PopUp';
@@ -26,6 +36,8 @@ interface TabPanelProps {
   index: number;
   value: number;
 }
+
+export type Order = 'asc' | 'desc';
 
 const TabPanel = (props: TabPanelProps) => {
   const { children, value, index, ...other } = props;
@@ -62,6 +74,18 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   const [users, setUsers] = useState<User[]>([]);
   const [showPopUp, setShowPopUp] = useState<boolean>(false);
 
+  const [totalSpeakers, setTotalSpeakers] = useState<number>(0);
+  const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
+  const [sortProperty, setSortPropery] = useState<keyof ISpeaker>('sermonCount');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  const [page, setPage] = useState<number>(0);
+  const [visitedPages, setVisitedPages] = useState<number[]>([0]);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [speakerInput, setSpeakerInput] = useState<string>('');
+
+  const [queryState, setQueryState] = useState<Query<DocumentData>>();
+
   const sermonsRef = collection(firestore, 'sermons');
   const q = query(sermonsRef);
   const [sermons, loading, error] = useCollection(q, {
@@ -75,20 +99,123 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     });
   };
 
-  const fetchSpeakers = async () => {
-    const q = query(collection(firestore, 'speakers'), limit(100));
-    const querySnapshot = await getDocs(q);
-    querySnapshot.forEach((doc) => {
-      // doc.data() is never undefined for query doc snapshots
-      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as unknown as ISpeaker]);
-    });
-  };
-
   const fetchUsers = async () => {
     const getImage = createFunction<any, any>('listusers');
     const res = await getImage({});
     setUsers(res.result);
   };
+
+  const handlePageChange = async (newPage: number) => {
+    if (visitedPages.includes(newPage)) {
+      setPage(newPage);
+      return;
+    }
+    setVisitedPages([...visitedPages, newPage]);
+    setPage(newPage);
+    if (speakerInput === '' && queryState) {
+      const q =
+        sortProperty && sortOrder
+          ? query(
+              collection(firestore, 'speakers'),
+              limit(rowsPerPage),
+              orderBy(sortProperty, sortOrder),
+              startAfter(lastSpeaker)
+            )
+          : query(collection(firestore, 'speakers'), limit(rowsPerPage), startAfter(lastSpeaker));
+      const querySnapshot = await getDocs(q);
+      querySnapshot.forEach((doc) => {
+        setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as unknown as ISpeaker]);
+      });
+      setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+    } else {
+      const result = await getSpeakersAlgolia(speakerInput, newPage);
+      setSpeakers([...speakers, ...result]);
+    }
+  };
+
+  const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setLastSpeaker(undefined);
+    setPage(0);
+    const q = query(
+      collection(firestore, 'speakers'),
+      limit(parseInt(event.target.value, 10)),
+      orderBy('sermonCount', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    const res: ISpeaker[] = [];
+    querySnapshot.forEach((doc) => {
+      res.push(doc.data() as unknown as ISpeaker);
+    });
+    setQueryState(
+      query(
+        collection(firestore, 'speakers'),
+        limit(rowsPerPage),
+        orderBy('sermonCount', 'desc'),
+        startAfter(lastSpeaker)
+      )
+    );
+    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+    setSpeakers(res);
+  };
+
+  const getSpeakersAlgolia = async (query: string, newPage?: number) => {
+    const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
+    result?.nbHits && setTotalSpeakers(result.nbHits);
+    setSpeakersLoading(false);
+    const arr: ISpeaker[] = [];
+    result?.hits.forEach((element: ISpeaker) => {
+      arr.push(element);
+    });
+    return arr;
+  };
+
+  const getSpeakersFirebase = async () => {
+    const q = lastSpeaker
+      ? query(
+          collection(firestore, 'speakers'),
+          limit(rowsPerPage),
+          orderBy('sermonCount', 'desc'),
+          startAfter(lastSpeaker)
+        )
+      : query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy('sermonCount', 'desc'));
+    setQueryState(q);
+    const querySnapshot = await getDocs(q);
+    querySnapshot.forEach((doc) => {
+      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as unknown as ISpeaker]);
+    });
+    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+    const result = await fetchSpeakerResults('', 1, 0);
+    result?.nbHits && setTotalSpeakers(result.nbHits);
+  };
+
+  const handleSort = async (property: keyof ISpeaker, order: 'asc' | 'desc') => {
+    if (sortProperty !== property || sortOrder !== order) {
+      setVisitedPages([]);
+    }
+    setLastSpeaker(undefined);
+    setSortPropery(property);
+    setSortOrder(order);
+    setPage(0);
+    const q = query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order));
+    const querySnapshot = await getDocs(q);
+    const res: ISpeaker[] = [];
+    querySnapshot.forEach((doc) => {
+      res.push(doc.data() as unknown as ISpeaker);
+    });
+    setQueryState(
+      query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order), startAfter(lastSpeaker))
+    );
+    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+    setSpeakers(res);
+  };
+
+  useEffect(() => {
+    const g = async () => {
+      await getSpeakersFirebase();
+    };
+    g();
+  }, []);
 
   return (
     <>
@@ -120,27 +247,39 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       <TabPanel value={tab} index={2}>
         <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center' }}>
           <p>Manage Speakers</p>
-          <button onClick={fetchSpeakers}>fetch speakers</button>
           <TextField
             placeholder="Search for a speaker"
+            value={speakerInput}
             onChange={(e) => {
+              setSpeakerInput(e.target.value);
               setSpeakersLoading(true);
               clearTimeout(timer);
               const newTimer = setTimeout(async () => {
-                await fetchSpeakerResults(e.target.value).then((data) => {
-                  const res: ISpeaker[] = [];
-                  data?.hits.forEach((element: ISpeaker) => {
-                    res.push(element);
-                  });
-                  setSpeakers(res);
-                  setSpeakersLoading(false);
-                });
+                setSpeakers(await getSpeakersAlgolia(e.target.value));
               }, 300);
               setTimer(newTimer);
             }}
             style={{ paddingBottom: '1em', width: '100%' }}
           />
-          {speakersLoading ? <h2>loading...</h2> : <SpeakerTable speakers={speakers} />}
+          {speakersLoading ? (
+            <h2>loading...</h2>
+          ) : (
+            <SpeakerTable
+              speakers={speakers}
+              rowsPerPage={rowsPerPage}
+              page={page}
+              setPage={setPage}
+              totalSpeakers={totalSpeakers}
+              setTotalSpeakers={setTotalSpeakers}
+              handlePageChange={handlePageChange}
+              handleChangeRowsPerPage={handleChangeRowsPerPage}
+              handleSort={handleSort}
+              sortOrder={sortOrder}
+              setSortOrder={setSortOrder}
+              sortProperty={sortProperty}
+              setSortProperty={setSortPropery}
+            />
+          )}
         </div>
       </TabPanel>
       <TabPanel value={tab} index={3}>

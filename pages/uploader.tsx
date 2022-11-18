@@ -59,10 +59,11 @@ const client =
 const speakersIndex = client?.initIndex('speakers');
 const topicsIndex = client?.initIndex('topics');
 
-export const fetchSpeakerResults = async (query: string) => {
+export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
   if (speakersIndex) {
     const response = await speakersIndex.search<ISpeaker>(query, {
-      hitsPerPage: 25,
+      hitsPerPage,
+      page,
     });
     return response;
   }
@@ -297,7 +298,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onInputChange={async (_, value) => {
             clearTimeout(timer);
             const newTimer = setTimeout(async () => {
-              await fetchSpeakerResults(value).then((data) => {
+              await fetchSpeakerResults(value, 25, 1).then((data) => {
                 const res: ISpeaker[] = [];
                 data?.hits.forEach((element: ISpeaker) => {
                   res.push(element);
