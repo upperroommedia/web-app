@@ -21,12 +21,14 @@ const Navbar: FunctionComponent = () => {
           <Image src="/upper_room_media_icon.png" alt="Upper Room Media Logo" width="100%" height="100%" />
         </div>
         {user && (
-          <div className={styles.user_info}>
-            <div className={styles.profile_pic}>
-              <Image src={photoSrc} layout="fill" alt="User profile picture"></Image>
+          <Link href="/profile">
+            <div className={styles.user_info} style={{ cursor: 'pointer' }}>
+              <div className={styles.profile_pic}>
+                <Image src={photoSrc} layout="fill" alt="User profile picture"></Image>
+              </div>
+              <p>{displayName}</p>
             </div>
-            <p>{displayName}</p>
-          </div>
+          </Link>
         )}
       </div>
       <div className={styles.navbar_links}>

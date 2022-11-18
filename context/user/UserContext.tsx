@@ -12,11 +12,13 @@ import adminFirebase, {
 import auth from '../../firebase/auth';
 import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
-import { setDoc, doc } from 'firebase/firestore';
+import { setDoc, doc, getDoc } from 'firebase/firestore';
 import firestore from '../../firebase/firestore';
 
 interface User extends adminFirebase.User {
   role?: string;
+  firstName: string;
+  lastName: string;
 }
 interface Context {
   user: User | undefined;
@@ -28,6 +30,14 @@ interface Context {
 }
 
 const UserContext = createContext<Context | null>(null);
+
+const getUserInfoFromFirestore = async (uid: string) => {
+  const userRef = doc(firestore, 'users', uid);
+  const userSnap = await getDoc(userRef);
+  if (userSnap.exists()) {
+    return { firstName: userSnap.data().firstName as string, lastName: userSnap.data().lastName as string };
+  }
+};
 
 export const UserProvider = ({ children }: any) => {
   const [user, setUser] = useState<User>();
@@ -45,7 +55,8 @@ export const UserProvider = ({ children }: any) => {
         try {
           const token = await user.getIdToken();
           const role = (await user.getIdTokenResult()).claims.role as string;
-          setUser({ ...user, role });
+          const names = await getUserInfoFromFirestore(user.uid);
+          setUser({ ...user, ...names!, role });
           nookies.destroy(null, 'token');
           nookies.set(null, 'token', token, { path: '/' });
         } catch (e) {
@@ -85,7 +96,7 @@ export const UserProvider = ({ children }: any) => {
       const details = getAdditionalUserInfo(res);
       const email = res.user.email;
       if (details?.isNewUser && email) {
-        await addNewUserToDb(res.user.uid, email, res.user.displayName, '');
+        await addNewUserToDb(res.user.uid, email, res.user.displayName || '', '');
       }
     } catch (error: any) {
       return error.code;
