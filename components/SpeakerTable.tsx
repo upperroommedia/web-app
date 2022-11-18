@@ -15,11 +15,11 @@ import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
 import { ISpeaker } from '../types/Speaker';
 import { visuallyHidden } from '@mui/utils';
-import FormGroup from '@mui/material/FormGroup';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
-import Button from '@mui/material/Button';
-import Menu from '@mui/material/Menu';
+// import FormGroup from '@mui/material/FormGroup';
+// import FormControlLabel from '@mui/material/FormControlLabel';
+// import Checkbox from '@mui/material/Checkbox';
+// import Button from '@mui/material/Button';
+// import Menu from '@mui/material/Menu';
 import { Order } from '../pages/admin';
 
 interface HeadCell {
@@ -105,38 +105,38 @@ export interface Filters {
   hasBannerImage: boolean;
 }
 
-enum FilterLabels {
-  none = 'No Filter',
-  hasListId = 'Contains List Id',
-  hasSquareImage = 'Contains Square Image',
-  hasWideImage = 'Contains Wide Image',
-  hasBannerImage = 'Contains Banner Image',
-}
+// enum FilterLabels {
+//   none = 'No Filter',
+//   hasListId = 'Contains List Id',
+//   hasSquareImage = 'Contains Square Image',
+//   hasWideImage = 'Contains Wide Image',
+//   hasBannerImage = 'Contains Banner Image',
+// }
 
-const SpeakerTableToolbar = (props: {
-  filters: Filters;
-  setFilters: Dispatch<SetStateAction<Filters>>;
-  handleRequestFilter: (filter: string) => void;
-}) => {
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const open = Boolean(anchorEl);
-  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-  const handleClose = () => {
-    setAnchorEl(null);
-  };
-  return (
-    <Toolbar
-      sx={{
-        pl: { sm: 2 },
-        pr: { xs: 1, sm: 1 },
-      }}
-    >
-      <Typography sx={{ flex: '1 1 100%' }} variant="h6" id="tableTitle" component="div">
-        Speakers
-      </Typography>
-      <Button
+const SpeakerTableToolbar = () =>
+  // filters: Filters;
+  // setFilters: Dispatch<SetStateAction<Filters>>;
+  // handleRequestFilter: (filter: string) => void;
+  {
+    // const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+    // const open = Boolean(anchorEl);
+    // const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    //   setAnchorEl(event.currentTarget);
+    // };
+    // const handleClose = () => {
+    //   setAnchorEl(null);
+    // };
+    return (
+      <Toolbar
+        sx={{
+          pl: { sm: 2 },
+          pr: { xs: 1, sm: 1 },
+        }}
+      >
+        <Typography sx={{ flex: '1 1 100%' }} variant="h6" id="tableTitle" component="div">
+          Speakers
+        </Typography>
+        {/* <Button
         id="basic-button"
         aria-controls={open ? 'basic-menu' : undefined}
         aria-haspopup="true"
@@ -178,10 +178,10 @@ const SpeakerTableToolbar = (props: {
             );
           })}
         </FormGroup>
-      </Menu>
-    </Toolbar>
-  );
-};
+      </Menu> */}
+      </Toolbar>
+    );
+  };
 
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 
@@ -201,18 +201,18 @@ const SpeakerTable = (props: {
   setSortProperty: Dispatch<SetStateAction<keyof ISpeaker>>;
 }) => {
   const [filteredSpeakers, setFilteredSpeakers] = useState<ISpeaker[]>(props.speakers);
-  const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
+  // const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
 
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
   const [speakerDetailsPopup, setSpeakerDetailsPopup] = useState<boolean>(false);
 
-  const [filters, setFilters] = useState<Filters>({
-    none: true,
-    hasListId: false,
-    hasSquareImage: false,
-    hasWideImage: false,
-    hasBannerImage: false,
-  });
+  // const [filters, setFilters] = useState<Filters>({
+  //   none: true,
+  //   hasListId: false,
+  //   hasSquareImage: false,
+  //   hasWideImage: false,
+  //   hasBannerImage: false,
+  // });
 
   const handleRequestSort = async (_: any, property: keyof ISpeaker) => {
     const isAsc = props.sortOrder === 'asc';
@@ -222,37 +222,37 @@ const SpeakerTable = (props: {
     await props.handleSort(property, sortOrder);
   };
 
-  const handleRequestFilter = () => {
-    let filtered = props.speakers;
-    props.setPage(0);
-    if (filters.none) {
-      setFilteredSpeakers(props.speakers);
-      props.setTotalSpeakers(initialTotalSpeakers);
-      return;
-    }
-    if (filters.hasListId) {
-      filtered = filtered.filter((speaker) => speaker.listId !== undefined);
-    } else {
-      filtered = filtered.filter((speaker) => speaker.listId === undefined);
-    }
-    if (filters.hasSquareImage) {
-      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'square') !== undefined);
-    } else {
-      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'square') === undefined);
-    }
-    if (filters.hasWideImage) {
-      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'wide') !== undefined);
-    } else {
-      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'wide') === undefined);
-    }
-    if (filters.hasBannerImage) {
-      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'banner') !== undefined);
-    } else {
-      filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'banner') === undefined);
-    }
-    props.setTotalSpeakers(filtered.length);
-    setFilteredSpeakers(filtered);
-  };
+  // const handleRequestFilter = () => {
+  //   let filtered = props.speakers;
+  //   props.setPage(0);
+  //   if (filters.none) {
+  //     setFilteredSpeakers(props.speakers);
+  //     props.setTotalSpeakers(initialTotalSpeakers);
+  //     return;
+  //   }
+  //   if (filters.hasListId) {
+  //     filtered = filtered.filter((speaker) => speaker.listId !== undefined);
+  //   } else {
+  //     filtered = filtered.filter((speaker) => speaker.listId === undefined);
+  //   }
+  //   if (filters.hasSquareImage) {
+  //     filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'square') !== undefined);
+  //   } else {
+  //     filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'square') === undefined);
+  //   }
+  //   if (filters.hasWideImage) {
+  //     filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'wide') !== undefined);
+  //   } else {
+  //     filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'wide') === undefined);
+  //   }
+  //   if (filters.hasBannerImage) {
+  //     filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'banner') !== undefined);
+  //   } else {
+  //     filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'banner') === undefined);
+  //   }
+  //   props.setTotalSpeakers(filtered.length);
+  //   setFilteredSpeakers(filtered);
+  // };
 
   const handleClick = (speaker: ISpeaker) => {
     setSelectedSpeaker(speaker);
@@ -263,15 +263,15 @@ const SpeakerTable = (props: {
     setFilteredSpeakers(props.speakers);
   }, [props.speakers]);
 
-  useEffect(() => {
-    handleRequestFilter();
-  }, [filters]);
+  // useEffect(() => {
+  //   handleRequestFilter();
+  // }, [filters]);
 
   return (
     <>
       <Box sx={{ width: '100%' }}>
         <Paper sx={{ width: '100%', mb: 2 }}>
-          <SpeakerTableToolbar filters={filters} setFilters={setFilters} handleRequestFilter={handleRequestFilter} />
+          <SpeakerTableToolbar />
           <TableContainer>
             <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
               <SpeakerTableHead
