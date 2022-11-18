@@ -63,68 +63,41 @@ const Navbar: FunctionComponent = () => {
             About
           </a>
         </Link>
-
-        {!user ? (
-          <>
-            <Link href="/login">
-              <a
-                className={styles.nav_link}
-                style={{
-                  color: path === '/login' ? 'blue' : 'black',
-                  textDecoration: path === '/login' ? 'underline' : 'none',
-                }}
-              >
-                Login
-              </a>
-            </Link>
-            <Link href="/signup">
-              <a
-                className={styles.nav_link}
-                style={{
-                  color: path === '/signup' ? 'blue' : 'black',
-                  textDecoration: path === '/signup' ? 'underline' : 'none',
-                }}
-              >
-                Sign Up
-              </a>
-            </Link>
-          </>
-        ) : (
-          // All Pages that need to be protected
-          <>
-            {user?.role === 'admin' ? (
-              <>
-                <Link href="/uploader">
-                  <a
-                    className={styles.nav_link}
-                    style={{
-                      color: path === '/uploader' ? 'blue' : 'black',
-                      textDecoration: path === '/uploader' ? 'underline' : 'none',
-                    }}
-                  >
-                    Uploader
-                  </a>
-                </Link>
-                <Link href="/admin">
-                  <a
-                    className={styles.nav_link}
-                    style={{
-                      color: path === '/admin' ? 'blue' : 'black',
-                      textDecoration: path === '/admin' ? 'underline' : 'none',
-                    }}
-                  >
-                    Admin
-                  </a>
-                </Link>
-              </>
-            ) : (
-              <></>
-            )}
+        <>
+          {user?.role === 'admin' ? (
+            <>
+              <Link href="/uploader">
+                <a
+                  className={styles.nav_link}
+                  style={{
+                    color: path === '/uploader' ? 'blue' : 'black',
+                    textDecoration: path === '/uploader' ? 'underline' : 'none',
+                  }}
+                >
+                  Uploader
+                </a>
+              </Link>
+              <Link href="/admin">
+                <a
+                  className={styles.nav_link}
+                  style={{
+                    color: path === '/admin' ? 'blue' : 'black',
+                    textDecoration: path === '/admin' ? 'underline' : 'none',
+                  }}
+                >
+                  Admin
+                </a>
+              </Link>
+            </>
+          ) : (
+            <></>
+          )}
+          {user && (
             <Link href="/logout">
               <a className={styles.nav_link}>Log out</a>
             </Link>
-          </>
-        )}
+          )}
+        </>
       </div>
     </nav>
   );

@@ -5,9 +5,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 
-// Next
-import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
-
 // Auth
 import useAuth from '../context/user/UserContext';
 
@@ -16,20 +13,22 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 
 // Components
-import ProtectedRoute from '../components/ProtectedRoute';
-import PopUp from '../components/PopUp';
-import AuthErrors from '../components/AuthErrors';
+import PopUp from './PopUp';
+import AuthErrors from './AuthErrors';
 
 import styles from '../styles/SignInWithGoogleButton.module.css';
 import Image from 'next/image';
+import { SignupForm } from '../context/types';
 
-const Signup = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
+const Signup = () => {
   const router = useRouter();
   const { signup, loginWithGoogle } = useAuth();
 
-  const [data, setData] = useState({
+  const [data, setData] = useState<SignupForm>({
     email: '',
     password: '',
+    firstName: '',
+    lastName: '',
   });
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -75,6 +74,32 @@ const Signup = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) 
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <TextField
+              fullWidth
+              placeholder="Enter First Name"
+              required
+              onChange={(e: any) =>
+                setData({
+                  ...data,
+                  firstName: e.target.value,
+                })
+              }
+              value={data.firstName}
+              size="small"
+            />
+            <TextField
+              fullWidth
+              placeholder="Enter Last Name"
+              required
+              onChange={(e: any) =>
+                setData({
+                  ...data,
+                  lastName: e.target.value,
+                })
+              }
+              value={data.lastName}
+              size="small"
+            />
             <TextField
               fullWidth
               type="email"
@@ -134,18 +159,4 @@ const Signup = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) 
   );
 };
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  const userCredentials = await ProtectedRoute(ctx);
-  if (userCredentials.props.uid) {
-    return {
-      redirect: {
-        permanent: false,
-        destination: '/uploader',
-      },
-      props: {},
-    };
-  } else {
-    return { props: {} };
-  }
-};
 export default Signup;
