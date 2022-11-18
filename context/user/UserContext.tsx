@@ -1,15 +1,19 @@
 import { useContext, createContext, useEffect, useState } from 'react';
 import adminFirebase, {
   createUserWithEmailAndPassword,
+  getAdditionalUserInfo,
   GoogleAuthProvider,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
   //   IdTokenResult,
 } from 'firebase/auth';
 import auth from '../../firebase/auth';
-import { userCredentials } from '../types';
+import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
+import { setDoc, doc } from 'firebase/firestore';
+import firestore from '../../firebase/firestore';
 
 interface User extends adminFirebase.User {
   role?: string;
@@ -18,8 +22,9 @@ interface Context {
   user: User | undefined;
   login: (loginForm: userCredentials) => Promise<any>;
   loginWithGoogle: () => Promise<any>;
-  signup: (loginForm: userCredentials) => Promise<any>;
+  signup: (loginForm: SignupForm) => Promise<any>;
   logoutUser: () => Promise<void>;
+  resetPassword: (email: string) => Promise<any>;
 }
 
 const UserContext = createContext<Context | null>(null);
@@ -60,6 +65,10 @@ export const UserProvider = ({ children }: any) => {
     };
   }, []);
 
+  const addNewUserToDb = async (uid: string, email: string, firstName: string, lastName: string) => {
+    await setDoc(doc(firestore, 'users', uid), { firstName, lastName, email, uid });
+  };
+
   // Login User
   const login = async (loginForm: userCredentials) => {
     try {
@@ -72,15 +81,21 @@ export const UserProvider = ({ children }: any) => {
   const loginWithGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const res = await signInWithPopup(auth, provider);
+      const details = getAdditionalUserInfo(res);
+      const email = res.user.email;
+      if (details?.isNewUser && email) {
+        await addNewUserToDb(res.user.uid, email, res.user.displayName, '');
+      }
     } catch (error: any) {
       return error.code;
     }
   };
 
-  const signup = async (loginForm: userCredentials) => {
+  const signup = async (loginForm: SignupForm) => {
     try {
-      await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
+      const res = await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
+      await addNewUserToDb(res.user.uid, loginForm.email, loginForm.firstName, loginForm.lastName);
     } catch (error: any) {
       return error.code;
     }
@@ -91,6 +106,14 @@ export const UserProvider = ({ children }: any) => {
     setUser(undefined);
   };
 
+  const resetPassword = async (email: string) => {
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } catch (error: any) {
+      return error;
+    }
+  };
+
   return (
     <UserContext.Provider
       value={{
@@ -99,6 +122,7 @@ export const UserProvider = ({ children }: any) => {
         loginWithGoogle,
         signup,
         logoutUser,
+        resetPassword,
       }}
     >
       {children}

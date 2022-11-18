@@ -1,39 +1,50 @@
-/**
- * Page for Logging in the User
- */
-// React
-import { useState } from 'react';
-
-// Next
-import type { GetServerSideProps, InferGetServerSidePropsType, GetServerSidePropsContext } from 'next';
-import { useRouter } from 'next/router';
-
-// 3rd Party Components
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
-
-// Auth
+import { useRouter } from 'next/router';
+import { useState } from 'react';
 import useAuth from '../context/user/UserContext';
-
-// Components
-import ProtectedRoute from '../components/ProtectedRoute';
-import AuthErrors from '../components/AuthErrors';
-import PopUp from '../components/PopUp';
-
+import AuthErrors from './AuthErrors';
+import PopUp from './PopUp';
 import styles from '../styles/SignInWithGoogleButton.module.css';
 import Image from 'next/image';
+import Alert from '@mui/material/Alert';
+import Collapse from '@mui/material/Collapse';
 
-const Login = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
+const Login = () => {
   const router = useRouter();
-  const { login, loginWithGoogle } = useAuth();
+  const { user, login, loginWithGoogle, resetPassword } = useAuth();
 
   const [data, setData] = useState({
     email: '',
     password: '',
   });
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<boolean>(false);
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+
+  const [forgotPasswordPopup, setForgotPasswordPopup] = useState<boolean>(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState<string>('');
+  const [sentForgotPasswordEmail, setSentForgotPasswordEmail] = useState<string>('');
+  const [forgotPasswordLinkSent, setForgotPasswordLinkSent] = useState<boolean>(false);
+
+  const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    try {
+      const res = await resetPassword(forgotPasswordEmail);
+      const authResult = AuthErrors(res);
+      if (authResult.authFailure) {
+        setTitle(authResult.title);
+        setErrorMessage(authResult.errorMessage);
+        setOpen(true);
+      } else {
+        setSentForgotPasswordEmail(forgotPasswordEmail);
+        setForgotPasswordPopup(false);
+        setForgotPasswordLinkSent(true);
+      }
+    } catch (e) {
+      alert('There was an error, try again');
+    }
+  };
 
   const handleLogin = async () => {
     const res = await login(data);
@@ -73,9 +84,19 @@ const Login = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) =
           handleLogin();
         }}
       >
-        <h1 className="text-center my-3 ">Login</h1>
         <div style={{ height: '100%', width: '300px', margin: '20px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {user?.emailVerified === false && (
+              <Alert severity="info" style={{ marginBottom: '1em' }}>
+                An account verification email has been sent to {user.email}. Please click the link in the email and then
+                login using your new account (may be in spam)
+              </Alert>
+            )}
+            <Collapse in={forgotPasswordLinkSent}>
+              <Alert severity="info" style={{ marginBottom: '1em' }}>
+                A password reset email has been sent to {sentForgotPasswordEmail} (may be in spam)
+              </Alert>
+            </Collapse>
             <TextField
               fullWidth
               type="email"
@@ -115,6 +136,13 @@ const Login = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) =
           >
             Login
           </Button>
+          <Button
+            onClick={() => {
+              setForgotPasswordPopup(true);
+            }}
+          >
+            Forgot Password?
+          </Button>
           <p style={{ textAlign: 'center' }}>or</p>
           <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
             <div className={styles.google_icon_wrapper}>
@@ -128,25 +156,27 @@ const Login = (_props: InferGetServerSidePropsType<typeof getServerSideProps>) =
           </div>
         </div>
       </form>
+      <PopUp open={forgotPasswordPopup} title="Forgot Password" setOpen={setForgotPasswordPopup}>
+        <div className="form">
+          <h1 className="form-title">Forgot Password?</h1>
+          <form style={{ display: 'grid' }} onSubmit={async (e) => await handleForgotPassword(e)}>
+            <TextField
+              onChange={(e) => setForgotPasswordEmail(e.target.value)}
+              value={forgotPasswordEmail}
+              placeholder="Email"
+              type="email"
+            />
+            <Button className="submit-button" type="submit">
+              Send Password Reset
+            </Button>
+          </form>
+        </div>
+      </PopUp>
       <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
         {errorMessage}
       </PopUp>
     </div>
   );
-};
-
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.uid) {
-    return { props: {} };
-  }
-  return {
-    redirect: {
-      permanent: false,
-      destination: '/',
-    },
-    props: {},
-  };
 };
 
 export default Login;
