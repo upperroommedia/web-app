@@ -20,21 +20,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Button from '@mui/material/Button';
 import Menu from '@mui/material/Menu';
-
-type Order = 'asc' | 'desc';
-
-const stableSort = (array: ISpeaker[], order: Order, orderBy: keyof ISpeaker) => {
-  if (orderBy === 'name') {
-    return order === 'asc'
-      ? array.sort((a, b) => a.name.localeCompare(b.name))
-      : array.sort((a, b) => b.name.localeCompare(a.name));
-  } else if (orderBy === 'sermonCount') {
-    return order === 'asc'
-      ? array.sort((a, b) => a.sermonCount - b.sermonCount)
-      : array.sort((a, b) => b.sermonCount - a.sermonCount);
-  }
-  return array;
-};
+import { Order } from '../pages/admin';
 
 interface HeadCell {
   disablePadding: boolean;
@@ -199,14 +185,25 @@ const SpeakerTableToolbar = (props: {
 
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 
-const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
-  const [order, setOrder] = useState<Order>('asc');
-  const [orderBy, setOrderBy] = useState<keyof ISpeaker>('name');
+const SpeakerTable = (props: {
+  speakers: ISpeaker[];
+  page: number;
+  setPage: Dispatch<SetStateAction<number>>;
+  rowsPerPage: number;
+  totalSpeakers: number;
+  setTotalSpeakers: Dispatch<SetStateAction<number>>;
+  handlePageChange: (newPage: number) => void;
+  handleChangeRowsPerPage: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
+  handleSort: (property: keyof ISpeaker, order: Order) => Promise<void>;
+  sortOrder: Order;
+  setSortOrder: Dispatch<SetStateAction<Order>>;
+  sortProperty: keyof ISpeaker;
+  setSortProperty: Dispatch<SetStateAction<keyof ISpeaker>>;
+}) => {
   const [filteredSpeakers, setFilteredSpeakers] = useState<ISpeaker[]>(props.speakers);
+  const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
 
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
   const [speakerDetailsPopup, setSpeakerDetailsPopup] = useState<boolean>(false);
 
   const [filters, setFilters] = useState<Filters>({
@@ -217,16 +214,20 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
     hasBannerImage: false,
   });
 
-  const handleRequestSort = (_: any, property: keyof ISpeaker) => {
-    const isAsc = order === 'asc';
-    setOrder(isAsc ? 'desc' : 'asc');
-    setOrderBy(property);
+  const handleRequestSort = async (_: any, property: keyof ISpeaker) => {
+    const isAsc = props.sortOrder === 'asc';
+    props.setSortOrder(isAsc ? 'desc' : 'asc');
+    props.setSortProperty(property);
+    const sortOrder = props.sortOrder === 'asc' ? 'desc' : 'asc';
+    await props.handleSort(property, sortOrder);
   };
 
   const handleRequestFilter = () => {
     let filtered = props.speakers;
+    props.setPage(0);
     if (filters.none) {
       setFilteredSpeakers(props.speakers);
+      props.setTotalSpeakers(initialTotalSpeakers);
       return;
     }
     if (filters.hasListId) {
@@ -249,6 +250,7 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
     } else {
       filtered = filtered.filter((speaker) => speaker.images.find((image) => image.type === 'banner') === undefined);
     }
+    props.setTotalSpeakers(filtered.length);
     setFilteredSpeakers(filtered);
   };
 
@@ -256,18 +258,6 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
     setSelectedSpeaker(speaker);
     setSpeakerDetailsPopup(true);
   };
-
-  const handleChangePage = (event: unknown, newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event: ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
-
-  // Avoid a layout jump when reaching the last page with empty rows.
-  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - filteredSpeakers.length) : 0;
 
   useEffect(() => {
     setFilteredSpeakers(props.speakers);
@@ -285,16 +275,14 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
           <TableContainer>
             <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
               <SpeakerTableHead
-                order={order}
-                orderBy={orderBy}
+                order={props.sortOrder}
+                orderBy={props.sortProperty}
                 onRequestSort={handleRequestSort}
                 rowCount={filteredSpeakers.length}
               />
               <TableBody>
-                {/* if you don't need to support IE11, you can replace the `stableSort` call with:
-              rows.sort(getComparator(order, orderBy)).slice() */}
-                {stableSort(filteredSpeakers, order, orderBy)
-                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                {props.speakers
+                  .slice(props.page * props.rowsPerPage, props.page * props.rowsPerPage + props.rowsPerPage)
                   .map((speaker) => {
                     return (
                       <TableRow hover onClick={() => handleClick(speaker)} tabIndex={-1} key={speaker.id}>
@@ -326,26 +314,17 @@ const SpeakerTable = (props: { speakers: ISpeaker[] }) => {
                       </TableRow>
                     );
                   })}
-                {emptyRows > 0 && (
-                  <TableRow
-                    style={{
-                      height: 53 * emptyRows,
-                    }}
-                  >
-                    <TableCell colSpan={6} />
-                  </TableRow>
-                )}
               </TableBody>
             </Table>
           </TableContainer>
           <TablePagination
             rowsPerPageOptions={[5, 10, 25]}
             component="div"
-            count={filteredSpeakers.length}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
+            count={props.totalSpeakers}
+            rowsPerPage={props.rowsPerPage}
+            page={props.page}
+            onPageChange={(_, newPage) => props.handlePageChange(newPage)}
+            onRowsPerPageChange={props.handleChangeRowsPerPage}
           />
         </Paper>
       </Box>
