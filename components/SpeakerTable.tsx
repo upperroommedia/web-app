@@ -298,8 +298,8 @@ const SpeakerTable = (props: {
                         <TableCell component="th" id={speaker.name} scope="row" padding="none">
                           {speaker.name}
                         </TableCell>
-                        <TableCell>{speaker.sermonCount}</TableCell>
-                        <TableCell>{speaker.listId ? speaker.listId : 'No list'}</TableCell>
+                        <TableCell>{speaker.sermonCount || 0}</TableCell>
+                        <TableCell>{speaker.listId || 'No list'}</TableCell>
                         <TableCell align="right" style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
                           {['banner', 'wide', 'square'].map((type, i) => {
                             const image = speaker.images?.find((image) => image.type === type);
