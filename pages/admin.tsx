@@ -137,8 +137,8 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     setRowsPerPage(parseInt(event.target.value, 10));
     setLastSpeaker(undefined);
     setPage(0);
-    setSortProperty('sermonCount')
-    setSortOrder('desc')
+    setSortProperty('sermonCount');
+    setSortOrder('desc');
     const q = query(
       collection(firestore, 'speakers'),
       limit(parseInt(event.target.value, 10)),
@@ -268,6 +268,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
           ) : (
             <SpeakerTable
               speakers={speakers}
+              setSpeakers={setSpeakers}
               rowsPerPage={rowsPerPage}
               page={page}
               setPage={setPage}
