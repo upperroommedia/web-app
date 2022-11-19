@@ -21,6 +21,11 @@ import { visuallyHidden } from '@mui/utils';
 // import Button from '@mui/material/Button';
 // import Menu from '@mui/material/Menu';
 import { Order } from '../pages/admin';
+import ImageSelector from './ImageSelector';
+import ImageList from '@mui/material/ImageList';
+import ImageListItem from '@mui/material/ImageListItem';
+import ImageListItemBar from '@mui/material/ImageListItemBar';
+import { ImageType } from '../types/Image';
 
 interface HeadCell {
   disablePadding: boolean;
@@ -187,6 +192,7 @@ const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 
 const SpeakerTable = (props: {
   speakers: ISpeaker[];
+  setSpeakers: Dispatch<SetStateAction<ISpeaker[]>>;
   page: number;
   setPage: Dispatch<SetStateAction<number>>;
   rowsPerPage: number;
@@ -204,7 +210,10 @@ const SpeakerTable = (props: {
   // const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
 
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
+  const [selectedImage, setSelectedImage] = useState<ImageType>();
+
   const [speakerDetailsPopup, setSpeakerDetailsPopup] = useState<boolean>(false);
+  const [imageSelectorPopup, setImageSelectorPopup] = useState<boolean>(false);
 
   // const [filters, setFilters] = useState<Filters>({
   //   none: true,
@@ -336,19 +345,28 @@ const SpeakerTable = (props: {
       >
         <div style={{ textAlign: 'center' }}>
           <h2>{selectedSpeaker?.name}</h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px,100%), 1fr))',
-              alignItems: 'center',
-              justifyItems: 'center',
-              gap: '10px',
-            }}
-          >
-            {['square', 'wide', 'banner'].map((type, i) => {
-              const image = selectedSpeaker?.images?.find((image) => image.type === type);
-              if (!image)
-                return (
+          {selectedSpeaker && (
+            <ImageList sx={{ width: '100%', height: '100%' }} cols={3}>
+              {['square', 'wide', 'banner'].map((type, i) => {
+                const image = selectedSpeaker?.images?.find((image) => image.type === type);
+                return image ? (
+                  <ImageListItem
+                    key={image.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setImageSelectorPopup(true);
+                      setSelectedImage(image);
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`${image.downloadLink}`} alt={image.name} loading="lazy" />
+                    <ImageListItemBar
+                      title={image.name}
+                      subtitle={`${image.type} ${image.width}x${image.height}`}
+                      position="below"
+                    />
+                  </ImageListItem>
+                ) : (
                   <div
                     key={i}
                     style={{
@@ -356,38 +374,34 @@ const SpeakerTable = (props: {
                       borderRadius: '2px',
                       overflow: 'hidden',
                       position: 'relative',
-                      width: 300,
                       height: 300,
                       justifyContent: 'center',
                       alignItems: 'center',
                       backgroundColor: '#f3f1f1',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => {
+                      setImageSelectorPopup(true);
+                      setSelectedImage({ type } as ImageType);
                     }}
                   >
                     <span>Add image +</span>
                   </div>
                 );
-              return (
-                <div
-                  key={image.id}
-                  style={{
-                    borderRadius: '2px',
-                    overflow: 'hidden',
-                    position: 'relative',
-                    width: 300,
-                    height: 300,
-                    // aspectRatio: image.width / image.height,
-                    // backgroundImage: `url(${'/user.png'})`,
-                    // backgroundPosition: 'center center',
-                    // backgroundSize: 'cover',
-                    backgroundColor: image.averageColorHex || '#f3f1f1',
-                  }}
-                >
-                  <Image src={image.downloadLink} layout="fill" objectFit="contain" />
-                </div>
-              );
-            })}
-          </div>
+              })}
+            </ImageList>
+          )}
         </div>
+        {/* </div> */}
+      </DynamicPopUp>
+      <DynamicPopUp title="Select an Image" open={imageSelectorPopup} setOpen={setImageSelectorPopup}>
+        <ImageSelector
+          selectedSpeaker={selectedSpeaker!}
+          selectedImageFromSpeakerDetails={selectedImage!}
+          setImageSelectorPopup={setImageSelectorPopup}
+          setSpeakers={props.setSpeakers}
+          setSpeakerDetailsPopup={setSpeakerDetailsPopup}
+        />
       </DynamicPopUp>
     </>
   );

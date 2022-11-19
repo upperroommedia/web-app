@@ -59,6 +59,8 @@ const populateSpeakerImages = onCall(
       const db = firestore();
       db.settings({ ignoreUndefinedProperties: true });
       const firestoreSpeakers = db.collection('speakers');
+      const firestoreImages = db.collection('images');
+
       logger.log('loop starting');
       const promises = [];
       while (loop) {
@@ -166,6 +168,7 @@ const populateSpeakerImages = onCall(
                   vibrantColorHex: vibrantColorHex,
                 };
                 logger.log(`Final Image: ${JSON.stringify(finalImage)}`);
+                await firestoreImages.add(finalImage);
                 return finalImage;
               })
             );
