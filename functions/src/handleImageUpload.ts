@@ -28,7 +28,7 @@ const adminImageConvertor = {
 
 const handleImageUpload = onObjectFinalized(
   {
-    // bucket: 'urm-app-images',
+    bucket: 'urm-app-images',
     timeoutSeconds: 300,
     memory: '1GiB',
   },

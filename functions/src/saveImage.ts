@@ -1,4 +1,5 @@
-import { https, logger } from 'firebase-functions';
+import { logger } from 'firebase-functions/v2';
+import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import axios, { AxiosRequestConfig } from 'axios';
 import { storage } from 'firebase-admin';
 import { unlink } from 'fs/promises';
@@ -24,34 +25,34 @@ const createTempFile = (fileName: string) => {
   }
 };
 
-const saveImage = https.onCall(async (data: SaveImageInputType, context) => {
-  if (context.auth?.token.role !== 'admin') {
+const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) => {
+  if (request.auth?.token.role !== 'admin') {
     return { status: 'Not Authorized' };
   }
-  logger.log('URL', data.url);
+  logger.log('URL', request.data.url);
   const uploadConfig: AxiosRequestConfig = {
-    url: data.url,
+    url: request.data.url,
     method: 'GET',
     responseType: 'arraybuffer',
   };
   logger.log('Axios config', uploadConfig);
   try {
     logger.log('uploadConfig', uploadConfig);
-    const axiosResponse = await axios(uploadConfig);
+    const axiosResponse = await fetch(request.data.url);
     // logger.log('axiosResponse', axiosResponse);
     const headers = axiosResponse.headers;
     logger.log('headers', headers);
-    const blobType = headers['content-type'];
+    const blobType = headers.get('content-type');
     logger.log('blobType', blobType);
-    const imageBlob = axiosResponse.data;
+    const imageBlob = await axiosResponse.blob();
     logger.log(imageBlob);
-    const tempFilePath = createTempFile(data.name);
+    const tempFilePath = createTempFile(request.data.name);
     logger.log(`Saving image to ${tempFilePath}`);
-    fs.writeFileSync(tempFilePath, Buffer.from(imageBlob));
+    fs.writeFileSync(tempFilePath, Buffer.from(await imageBlob.arrayBuffer()));
     // Upload your data
     // const bucket = storage().bucket();
-    const destinationFilePath = `images/${data.name}`;
-    const bucket = storage().bucket('urm-images');
+    const destinationFilePath = `speaker-images/${request.data.name}`;
+    const bucket = storage().bucket('urm-app-images');
     await bucket.upload(tempFilePath, {
       destination: destinationFilePath,
     });
