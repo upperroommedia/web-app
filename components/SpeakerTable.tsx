@@ -348,7 +348,7 @@ const SpeakerTable = (props: {
           {selectedSpeaker && (
             <ImageList sx={{ width: '100%', height: '100%' }} cols={3}>
               {['square', 'wide', 'banner'].map((type, i) => {
-                const image = selectedSpeaker?.images?.find((image) => image.type === type);
+                const image: ImageType | undefined = selectedSpeaker?.images?.find((image) => image.type === type);
                 return image ? (
                   <ImageListItem
                     key={image.id}
