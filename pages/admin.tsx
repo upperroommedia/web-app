@@ -113,20 +113,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     setVisitedPages([...visitedPages, newPage]);
     setPage(newPage);
     if (speakerInput === '' && queryState) {
-      const q =
-        sortProperty && sortOrder
-          ? query(
-              collection(firestore, 'speakers'),
-              limit(rowsPerPage),
-              orderBy(sortProperty, sortOrder),
-              startAfter(lastSpeaker)
-            )
-          : query(collection(firestore, 'speakers'), limit(rowsPerPage), startAfter(lastSpeaker));
-      const querySnapshot = await getDocs(q);
-      querySnapshot.forEach((doc) => {
-        setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as unknown as ISpeaker]);
-      });
-      setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+      await getMoreSpeakersFirebase();
     } else {
       const result = await getSpeakersAlgolia(speakerInput, newPage);
       setSpeakers([...speakers, ...result]);
@@ -173,20 +160,31 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   };
 
   const getSpeakersFirebase = async () => {
-    const q = lastSpeaker
-      ? query(
-          collection(firestore, 'speakers'),
-          limit(rowsPerPage),
-          orderBy('sermonCount', 'desc'),
-          startAfter(lastSpeaker)
-        )
-      : query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy('sermonCount', 'desc'));
+    const q = query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy('sermonCount', 'desc'));
     setQueryState(q);
     const querySnapshot = await getDocs(q);
+    const res: ISpeaker[] = [];
     querySnapshot.forEach((doc) => {
-      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as unknown as ISpeaker]);
+      res.push(doc.data() as ISpeaker);
     });
+    setSpeakers(res);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+    const result = await fetchSpeakerResults('', 1, 0);
+    result?.nbHits && setTotalSpeakers(result.nbHits);
+  };
+
+  const getMoreSpeakersFirebase = async () => {
+    const q = query(
+      collection(firestore, 'speakers'),
+      limit(rowsPerPage),
+      orderBy('sermonCount', 'desc'),
+      startAfter(lastSpeaker)
+    );
+    const querySnapshot = await getDocs(q);
+    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+    querySnapshot.forEach((doc) => {
+      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as ISpeaker]);
+    });
     const result = await fetchSpeakerResults('', 1, 0);
     result?.nbHits && setTotalSpeakers(result.nbHits);
   };
