@@ -594,7 +594,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       >
         <ImageUploader
           imgSrc={imageToEdit.url}
-          updateSermonImage={(imgSrc: string) => {
+          onFinish={(imgSrc: string) => {
             const newImages = [...sermon.images];
             newImages[imageToEdit.imageIndex].downloadLink = imgSrc;
             newImages[imageToEdit.imageIndex].subsplashId = undefined;

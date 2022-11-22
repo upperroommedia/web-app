@@ -18,6 +18,9 @@ import ImageListItem from '@mui/material/ImageListItem';
 import { ISpeaker } from '../types/Speaker';
 import Button from '@mui/material/Button';
 import InfiniteScroll from 'react-infinite-scroll-component';
+import ImageUploader from './ImageUploader';
+import { createFunction } from '../utils/createFunction';
+import { SaveImageInputType } from '../functions/src/saveImage';
 
 const ImageSelector = (props: {
   setSpeakers: Dispatch<SetStateAction<ISpeaker[]>>;
@@ -111,6 +114,11 @@ const ImageSelector = (props: {
     g();
   }, []);
 
+  const saveImage = (url: string, name: string) => {
+    const saveImage = createFunction<SaveImageInputType, void>('saveimage');
+    saveImage({ url, name });
+  };
+
   return (
     <div>
       <InfiniteScroll
@@ -150,6 +158,14 @@ const ImageSelector = (props: {
             ))}
         </ImageList>
       </InfiniteScroll>
+      <ImageUploader
+        onFinish={async (imgSrc) =>
+          saveImage(
+            imgSrc,
+            `${props.selectedSpeaker.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg`
+          )
+        }
+      />
       <Button
         disabled={selectedImage === undefined || selectedImage.id === props.selectedImageFromSpeakerDetails.id}
         onClick={setSpeakerImage}

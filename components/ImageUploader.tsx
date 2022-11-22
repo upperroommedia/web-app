@@ -8,8 +8,8 @@ import Cropper from 'react-easy-crop';
 import styles from '../styles/Cropper.module.css';
 
 interface Props {
-  imgSrc: string;
-  updateSermonImage: (imgSrc: string) => void;
+  imgSrc?: string;
+  onFinish: (imgSrc: string) => void;
 }
 
 const ImageUploader = (props: Props) => {
@@ -51,78 +51,82 @@ const ImageUploader = (props: Props) => {
   return (
     <div>
       <input type="file" accept="image/*" onChange={onSelectFile} />
-      <div className={styles.cropContainer}>
-        {imgSrc && (
-          <Cropper
-            image={imgSrc}
-            crop={crop}
-            rotation={rotation}
-            zoom={zoom}
-            aspect={1}
-            onCropChange={setCrop}
-            onRotationChange={setRotation}
-            onCropComplete={onCropComplete}
-            onZoomChange={setZoom}
-          />
-        )}
-      </div>
-      <div className={styles.controls}>
-        <div className={styles.sliderContainer}>
-          <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
-            Zoom
-          </Typography>
-          <Slider
-            value={zoom}
-            min={1}
-            max={3}
-            step={0.1}
-            aria-labelledby="Zoom"
-            classes={{ root: styles.slider }}
-            onChange={(e, zoom) => {
-              if (typeof zoom === 'number') {
-                setZoom(zoom);
-              }
-            }}
-          />
-        </div>
-        <div className={styles.sliderContainer}>
-          <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
-            Rotation
-          </Typography>
-          <Slider
-            value={rotation}
-            min={0}
-            max={360}
-            step={1}
-            aria-labelledby="Rotation"
-            classes={{ root: styles.slider }}
-            onChange={(e, rotation) => {
-              if (typeof rotation === 'number') {
-                setRotation(rotation);
-              }
-            }}
-          />
-        </div>
-        <Button
-          onClick={async () => {
-            if (imgSrc && croppedAreaPixels) {
-              const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation);
-              props.updateSermonImage(croppedImage);
-              // download cropped image
-              // const link = document.createElement('a');
-              // link.href = croppedImage;
-              // link.setAttribute('download', 'image.jpg');
-              // document.body.appendChild(link);
-              // link.click();
-            }
-          }}
-          variant="contained"
-          color="primary"
-          classes={{ root: styles.cropButton }}
-        >
-          Crop
-        </Button>
-      </div>
+      {imgSrc && (
+        <>
+          <div className={styles.cropContainer}>
+            (
+            <Cropper
+              image={imgSrc}
+              crop={crop}
+              rotation={rotation}
+              zoom={zoom}
+              aspect={1}
+              onCropChange={setCrop}
+              onRotationChange={setRotation}
+              onCropComplete={onCropComplete}
+              onZoomChange={setZoom}
+            />
+            )
+          </div>
+          <div className={styles.controls}>
+            <div className={styles.sliderContainer}>
+              <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
+                Zoom
+              </Typography>
+              <Slider
+                value={zoom}
+                min={1}
+                max={3}
+                step={0.1}
+                aria-labelledby="Zoom"
+                classes={{ root: styles.slider }}
+                onChange={(e, zoom) => {
+                  if (typeof zoom === 'number') {
+                    setZoom(zoom);
+                  }
+                }}
+              />
+            </div>
+            <div className={styles.sliderContainer}>
+              <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
+                Rotation
+              </Typography>
+              <Slider
+                value={rotation}
+                min={0}
+                max={360}
+                step={1}
+                aria-labelledby="Rotation"
+                classes={{ root: styles.slider }}
+                onChange={(e, rotation) => {
+                  if (typeof rotation === 'number') {
+                    setRotation(rotation);
+                  }
+                }}
+              />
+            </div>
+            <Button
+              onClick={async () => {
+                if (imgSrc && croppedAreaPixels) {
+                  const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation);
+                  props.onFinish(croppedImage);
+                  // download cropped image
+                  // const link = document.createElement('a');
+                  // link.href = croppedImage;
+                  // link.setAttribute('download', 'image.jpg');
+                  // document.body.appendChild(link);
+                  // link.click();
+                }
+              }}
+              variant="contained"
+              color="primary"
+              classes={{ root: styles.cropButton }}
+            >
+              Crop
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 };
