@@ -41,12 +41,14 @@ const getUserInfoFromFirestore = async (uid: string) => {
 
 export const UserProvider = ({ children }: any) => {
   const [user, setUser] = useState<User>();
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as any).nookies = nookies;
     }
     const unsubscribe = auth.onIdTokenChanged(async (user) => {
+      setLoading(true);
       if (!user) {
         setUser(undefined);
         nookies.destroy(null, 'token');
@@ -63,6 +65,7 @@ export const UserProvider = ({ children }: any) => {
           return e;
         }
       }
+      setLoading(false);
     });
     const handle = setInterval(async () => {
       // eslint-disable-next-line no-console
@@ -136,7 +139,7 @@ export const UserProvider = ({ children }: any) => {
         resetPassword,
       }}
     >
-      {children}
+      {!loading && children}
     </UserContext.Provider>
   );
 };

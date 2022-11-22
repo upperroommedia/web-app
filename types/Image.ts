@@ -6,6 +6,7 @@ export type ImageType = {
   width: number;
   downloadLink: string;
   name: string;
+  dateAddedMillis: number;
   subsplashId?: string;
   averageColorHex?: string;
   vibrantColorHex?: string;

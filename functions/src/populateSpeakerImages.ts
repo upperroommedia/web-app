@@ -11,7 +11,7 @@ import { Stream } from 'stream';
 import { existsSync, mkdirSync, unlinkSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { uuid } from 'uuidv4';
+import { v4 } from 'uuid';
 export interface populateSpeakerImagesInputType {
   speakerTagIds?: string[];
 }
@@ -28,7 +28,7 @@ const getImageDimensions = async (file: File): Promise<{ width: number; height: 
   if (!existsSync(os.tmpdir())) {
     mkdirSync(os.tmpdir());
   }
-  const tempFilePath = path.join(os.tmpdir(), uuid());
+  const tempFilePath = path.join(os.tmpdir(), v4());
   await file.download({ destination: tempFilePath });
   // Get Dimensions of the image
   const { width, height } = sizeOf(tempFilePath);
@@ -44,22 +44,38 @@ const streamDataToStorage = async (stream: Stream, destinationFile: File): Promi
 };
 const populateSpeakerImages = onCall(
   { timeoutSeconds: 540, memory: '1GiB' },
-  async (request: CallableRequest<populateSpeakerImagesInputType>): Promise<void> => {
+  async (request: CallableRequest<populateSpeakerImagesInputType>): Promise<string> => {
     if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');
     }
     try {
       logger.log('Populating Speaker Images');
       let page_number = 1;
+      // TODO[0]: UNCOMMENT
+      // const page_size = 100;
       const page_size = 100;
       let loop = true;
       let current = 0;
+      let uploadedImages = 0;
+      const imageIds: { [key: string]: boolean } = {};
       const bearerToken = await authenticateSubsplash();
       const bucket = storage().bucket('urm-app-images');
       const db = firestore();
       db.settings({ ignoreUndefinedProperties: true });
       const firestoreSpeakers = db.collection('speakers');
       const firestoreImages = db.collection('images');
+      const firestoreLists = db.collection('lists');
+
+      const listResponse = (
+        await axios(
+          createAxiosConfig(
+            'https://core.subsplash.com/builder/v1/lists?filter%5Bapp_key%5D=9XTSHD&filter%5Bgenerated%5D=false&filter%5Btype%5D=standard&page%5Bsize%5D=2000&sort=title',
+            bearerToken,
+            'GET',
+            undefined
+          )
+        )
+      ).data;
 
       logger.log('loop starting');
       const promises = [];
@@ -76,7 +92,9 @@ const populateSpeakerImages = onCall(
         current += response.count;
         logger.log(`Retrieved ${current} of ${response.total} speaker tags`);
         page_number += 1;
-        if (current >= response.total) {
+        // TODO[1]: UNCOMMENT
+        if (current >= 10) {
+          // if (current >= response.total) {
           loop = false;
         }
         const speakers = response._embedded.tags;
@@ -123,16 +141,17 @@ const populateSpeakerImages = onCall(
                 });
                 const destinationFilePath = `speaker-images/${imageId}-${type}.${contentType.split('/')[1]}`;
                 const file = bucket.file(destinationFilePath);
-                if ((await file.exists())[0]) {
-                  logger.warn(`Image ${imageId} already exists ... skipping to next image`);
-                  return;
+                const shouldUploadImage = !imageIds[destinationFilePath];
+                if (shouldUploadImage) {
+                  imageIds[destinationFilePath] = true;
+                  // stream image to storage bucket
+                  logger.log(`Uploading ${type} ${contentType} ${width}x${height} image ${imageId} for ${speakerName}`);
+                  await streamDataToStorage(response.data, file);
+                  logger.log(`Uploaded ${type} image ${imageId} for ${speakerName}`);
+                } else {
+                  logger.log(`Image: ${destinationFilePath} was already uploaded, skipping image...`);
                 }
-
-                // stream image to storage bucket
-                logger.log(`Uploading ${type} ${contentType} ${width}x${height} image ${imageId} for ${speakerName}`);
-                await streamDataToStorage(response.data, file);
-                logger.log(`Uploaded ${type} image ${imageId} for ${speakerName}`);
-                // get image dimensions if not provided
+                // Getting dimensions if they don't exist in subslash request data
                 if (!width || !height) {
                   logger.log(`Getting dimensions for ${type} image ${imageId} for ${speakerName}`);
                   const dimensions = await getImageDimensions(file);
@@ -140,17 +159,20 @@ const populateSpeakerImages = onCall(
                   height = dimensions.height;
                 }
                 logger.log(`Dimensions ${width}x${height} for ${type} image ${imageId} for ${speakerName}`);
-                // update storage metadata
-                // logger.log(`Updating metadata for ${destinationFilePath}`);
-                // await file.setMetadata({
-                //   contentType: contentType,
-                //   metadata: {
-                //     width: width,
-                //     height: height,
-                //     average_color_hex: averageColorHex,
-                //     vibrant_color_hex: vibrantColorHex,
-                //   },
-                // });
+                if (shouldUploadImage) {
+                  // get image dimensions if not provided
+                  // update storage metadata
+                  logger.log(`Updating metadata for ${destinationFilePath}`);
+                  await file.setMetadata({
+                    contentType: contentType,
+                    metadata: {
+                      width: width,
+                      height: height,
+                      average_color_hex: averageColorHex,
+                      vibrant_color_hex: vibrantColorHex,
+                    },
+                  });
+                }
 
                 // create firestore Image object
                 const publicUrl = file.publicUrl();
@@ -162,16 +184,34 @@ const populateSpeakerImages = onCall(
                   height: height,
                   width: width,
                   downloadLink: publicUrl,
+                  dateAddedMillis: new Date().getTime(),
                   name: `${speakerName}-${type}.${contentType.split('/')[1]}`,
                   subsplashId: imageId,
                   averageColorHex: averageColorHex,
                   vibrantColorHex: vibrantColorHex,
                 };
                 logger.log(`Final Image: ${JSON.stringify(finalImage)}`);
-                await firestoreImages.add(finalImage);
+                if (shouldUploadImage) {
+                  await firestoreImages.doc(finalImage.id).set(finalImage, { merge: true });
+                  uploadedImages++;
+                }
                 return finalImage;
               })
             );
+
+            let speakerListId;
+            listResponse._embedded.lists.forEach(async (list: any) => {
+              if (list.status === 'published' && list.list_rows_count > 0) {
+                logger.log(`Adding list: ${list.title} to lists collection`);
+                await firestoreLists
+                  .doc(list.id)
+                  .set({ name: list.title, itemCount: list.list_rows_count, id: list.id }, { merge: true });
+              }
+              if (list.title === speakerName) {
+                logger.log(`Found list id: ${list.id} for speaker ${speakerName}`);
+                speakerListId = list.id;
+              }
+            });
 
             // update speaker tag with image url
             const speakerData: ISpeaker = {
@@ -180,6 +220,7 @@ const populateSpeakerImages = onCall(
               images: images.filter((image) => image !== undefined),
               tagId: speakerId,
               sermonCount: speakerSermonCount,
+              listId: speakerListId || '',
             };
             logger.log(`Updating firestore document speakers/${speakerId} with ${JSON.stringify(speakerData)}`);
             await firestoreSpeakers.doc(speakerId).set(speakerData, { merge: true });
@@ -191,7 +232,7 @@ const populateSpeakerImages = onCall(
       logger.log('loop done');
       // wait until all the calls finish
       await Promise.all(promises);
-      logger.log(`Finished updating ${current} speakers`);
+      return `Finished updating ${current} speakers, uploaded ${uploadedImages} images`;
     } catch (error) {
       if (error instanceof HttpsError) {
         throw error;
