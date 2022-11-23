@@ -14,7 +14,8 @@
     "style:all": "tsc && pnpm run style:lint && pnpm run style:prettier",
     "style:lint": "eslint '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
     "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
-    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore"
+    "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
+    "import-from-prod": "gsutil rm -r gs://urm-app.appspot.com/firestore_export && gcloud firestore export gs://urm-app.appspot.com/firestore_export && gsutil -m cp -r gs://urm-app.appspot.com/firestore_export ./dir"
   },
   "dependencies": {
     "@algolia/cache-in-memory": "^4.14.2",
