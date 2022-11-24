@@ -53,7 +53,7 @@ const populateSpeakerImages = onCall(
       let page_number = 1;
       // TODO[0]: UNCOMMENT
       // const page_size = 100;
-      const page_size = 100;
+      const page_size = 2;
       let loop = true;
       let current = 0;
       let uploadedImages = 0;
