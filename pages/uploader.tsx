@@ -30,7 +30,7 @@ import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
 import { ISpeaker } from '../types/Speaker';
 import Chip from '@mui/material/Chip';
-import ImageUploader from '../components/ImageUploader';
+// import ImageUploader from '../components/ImageUploader';
 
 import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
@@ -99,8 +99,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
 
-  const [editImagePopup, setEditImagePopup] = useState<boolean>(false);
-  const [imageToEdit, setImageToEdit] = useState({ url: '', imageIndex: 0 });
+  // const [editImagePopup, setEditImagePopup] = useState<boolean>(false);
+  // const [imageToEdit, setImageToEdit] = useState({ url: '', imageIndex: 0 });
 
   useEffect(() => {
     if (!userHasTypedInSeries) {
@@ -527,7 +527,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         <h1 style={{ textAlign: 'center' }}>Images</h1>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           {sermon.speakers.length > 0 &&
-            sermon.speakers[0].images.map((image, index) => {
+            sermon.speakers[0].images.map((image, _index) => {
               return (
                 <div key={image.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}</span>
@@ -536,10 +536,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     src={image.downloadLink}
                     height="100px"
                     width="100px"
-                    onClick={() => {
-                      setImageToEdit({ url: image.downloadLink, imageIndex: index });
-                      setEditImagePopup(true);
-                    }}
+                    // onClick={() => {
+                    //   setImageToEdit({ url: image.downloadLink, imageIndex: index });
+                    //   setEditImagePopup(true);
+                    // }}
                   />
                 </div>
               );
