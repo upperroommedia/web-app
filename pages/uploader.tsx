@@ -586,7 +586,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           />
         </div>
       </DynamicPopUp>
-      <DynamicPopUp
+      {/* <DynamicPopUp
         title="Edit Image"
         open={editImagePopup}
         setOpen={setEditImagePopup}
@@ -602,7 +602,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             setEditImagePopup(false);
           }}
         />
-      </DynamicPopUp>
+      </DynamicPopUp> */}
     </form>
   );
 };
