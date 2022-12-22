@@ -358,7 +358,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           renderOption={(props, option: ISpeaker) => {
             const squareImage = option.images?.find((image) => image.type === 'square');
             return (
-              <li key={option.name} {...props}>
+              <li key={option.id} {...props}>
                 <div
                   style={{
                     borderRadius: '5px',
@@ -374,7 +374,11 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 >
                   {squareImage && <Image src={sanitize(squareImage.downloadLink)} layout="fill" />}
                 </div>
-                <div>{option.name}</div>
+                {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
+                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+                ) : (
+                  <div>{option.name}</div>
+                )}
               </li>
             );
           }}
