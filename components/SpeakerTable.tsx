@@ -26,6 +26,7 @@ import ImageList from '@mui/material/ImageList';
 import ImageListItem from '@mui/material/ImageListItem';
 import ImageListItemBar from '@mui/material/ImageListItemBar';
 import { ImageType } from '../types/Image';
+import { sanitize } from 'dompurify';
 
 interface HeadCell {
   disablePadding: boolean;
@@ -315,7 +316,9 @@ const SpeakerTable = (props: {
                                   backgroundColor: image?.averageColorHex || '#f3f1f1',
                                 }}
                               >
-                                {image && <Image src={image.downloadLink} layout="fill" objectFit="contain" />}
+                                {image && (
+                                  <Image src={sanitize(image.downloadLink)} layout="fill" objectFit="contain" />
+                                )}
                               </div>
                             );
                           })}
@@ -359,7 +362,7 @@ const SpeakerTable = (props: {
                     }}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`${image.downloadLink}`} alt={image.name} loading="lazy" />
+                    <img src={`${sanitize(image.downloadLink)}`} alt={image.name} loading="lazy" />
                     <ImageListItemBar
                       title={image.name}
                       subtitle={`${image.type} ${image.width}x${image.height}`}
