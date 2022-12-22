@@ -1,11 +1,12 @@
 import { logger } from 'firebase-functions/v2';
-import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import axios, { AxiosRequestConfig } from 'axios';
+import { CallableRequest, onCall } from 'firebase-functions/v2/https';
+import { AxiosRequestConfig } from 'axios';
 import { storage } from 'firebase-admin';
 import { unlink } from 'fs/promises';
 import fs, { existsSync, mkdirSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import handleError from './handleError';
 export interface SaveImageInputType {
   url: string;
   name: string;
@@ -60,10 +61,8 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     // Delete the temporary file (crucial)
     return { status: 'success' };
   } catch (error) {
-    logger.error(error);
-    let message = 'Unknown Error';
-    if (error instanceof Error) message = error.message;
-    return message;
+    handleError(error);
+    return 'Error saving image';
   } finally {
     const promises: Promise<void>[] = [];
     tempFiles.forEach((file) => {

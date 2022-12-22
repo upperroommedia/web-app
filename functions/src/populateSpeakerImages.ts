@@ -16,6 +16,7 @@ export interface populateSpeakerImagesInputType {
   speakerTagIds?: string[];
 }
 import sizeOf from 'image-size';
+import handleError from './handleError';
 
 export interface populateSpeakerImagesOutputType {
   buffer: {
@@ -53,7 +54,7 @@ const populateSpeakerImages = onCall(
       let page_number = 1;
       // TODO[0]: UNCOMMENT
       // const page_size = 100;
-      const page_size = 100;
+      const page_size = 2;
       let loop = true;
       let current = 0;
       let uploadedImages = 0;
@@ -66,6 +67,7 @@ const populateSpeakerImages = onCall(
       const firestoreImages = db.collection('images');
       const firestoreLists = db.collection('lists');
 
+      logger.log('Getting Lists');
       const listResponse = (
         await axios(
           createAxiosConfig(
@@ -76,7 +78,29 @@ const populateSpeakerImages = onCall(
           )
         )
       ).data;
-
+      logger.log(`Found ${listResponse._embedded.lists.length} lists`);
+      const speakerNameToListId: { [key: string]: string } = {};
+      const duplicates = new Set<string>();
+      await Promise.all(
+        listResponse._embedded.lists.map(async (list: any) => {
+          if (list.status === 'published' && list.list_rows_count > 0) {
+            await firestoreLists
+              .doc(list.id)
+              .set({ name: list.title, itemCount: list.list_rows_count, id: list.id }, { merge: true });
+            if (speakerNameToListId[list.title] !== undefined) {
+              duplicates.add(list.title);
+            } else {
+              logger.log(`Adding list: ${list.title} to lists collection`);
+              speakerNameToListId[list.title] = list.id;
+            }
+          }
+        })
+      );
+      logger.log(`Duplicate list names: ${duplicates.size}`);
+      logger.log(
+        `There are ${listResponse._embedded.lists.length - Object.keys(speakerNameToListId).length} unique lists`
+      );
+      // console.log(speakerNameToListId);
       logger.log('loop starting');
       const promises = [];
       while (loop) {
@@ -190,7 +214,7 @@ const populateSpeakerImages = onCall(
                   averageColorHex: averageColorHex,
                   vibrantColorHex: vibrantColorHex,
                 };
-                logger.log(`Final Image: ${JSON.stringify(finalImage)}`);
+                logger.log(`Created image object for ${type} image ${imageId} for ${speakerName}`);
                 if (shouldUploadImage) {
                   await firestoreImages.doc(finalImage.id).set(finalImage, { merge: true });
                   uploadedImages++;
@@ -199,20 +223,6 @@ const populateSpeakerImages = onCall(
               })
             );
 
-            let speakerListId;
-            listResponse._embedded.lists.forEach(async (list: any) => {
-              if (list.status === 'published' && list.list_rows_count > 0) {
-                logger.log(`Adding list: ${list.title} to lists collection`);
-                await firestoreLists
-                  .doc(list.id)
-                  .set({ name: list.title, itemCount: list.list_rows_count, id: list.id }, { merge: true });
-              }
-              if (list.title === speakerName) {
-                logger.log(`Found list id: ${list.id} for speaker ${speakerName}`);
-                speakerListId = list.id;
-              }
-            });
-
             // update speaker tag with image url
             const speakerData: ISpeaker = {
               id: speakerId,
@@ -220,30 +230,21 @@ const populateSpeakerImages = onCall(
               images: images.filter((image) => image !== undefined),
               tagId: speakerId,
               sermonCount: speakerSermonCount,
-              listId: speakerListId || '',
+              listId: speakerNameToListId[speakerName],
             };
             logger.log(`Updating firestore document speakers/${speakerId} with ${JSON.stringify(speakerData)}`);
             await firestoreSpeakers.doc(speakerId).set(speakerData, { merge: true });
             logger.log(`Updated firestore document speakers/${speakerId} with ${JSON.stringify(speakerData)}`);
           })
         );
-        logger.log('promises', promises);
       }
       logger.log('loop done');
       // wait until all the calls finish
       await Promise.all(promises);
       return `Finished updating ${current} speakers, uploaded ${uploadedImages} images`;
     } catch (error) {
-      if (error instanceof HttpsError) {
-        throw error;
-      }
-      if (axios.isAxiosError(error)) {
-        throw new HttpsError('internal', error.message, error.toJSON());
-      }
-      if (error instanceof Error) {
-        throw new HttpsError('internal', error.message);
-      }
-      throw new HttpsError('internal', 'Unknown error');
+      handleError(error);
+      return 'Error updating speakers';
     }
   }
 );
