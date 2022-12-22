@@ -30,6 +30,7 @@ import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
 import { ISpeaker } from '../types/Speaker';
 import Chip from '@mui/material/Chip';
+import { sanitize } from 'dompurify';
 // import ImageUploader from '../components/ImageUploader';
 
 import algoliasearch from 'algoliasearch';
@@ -345,7 +346,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   >
                     {speaker.images?.find((image) => image.type === 'square') && (
                       <Image
-                        src={speaker.images.find((image) => image.type === 'square')!.downloadLink}
+                        src={sanitize(speaker.images.find((image) => image.type === 'square')!.downloadLink)}
                         layout="fill"
                       />
                     )}
@@ -371,7 +372,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     backgroundSize: 'cover',
                   }}
                 >
-                  {squareImage && <Image src={squareImage.downloadLink} layout="fill" />}
+                  {squareImage && <Image src={sanitize(squareImage.downloadLink)} layout="fill" />}
                 </div>
                 <div>{option.name}</div>
               </li>
@@ -533,7 +534,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}</span>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={image.downloadLink}
+                    src={sanitize(image.downloadLink)}
                     height="100px"
                     width="100px"
                     // onClick={() => {
@@ -593,7 +594,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         dialogProps={{ fullWidth: true }}
       >
         <ImageUploader
-          imgSrc={imageToEdit.url}
+          imgSrc={sanitize(imageToEdit.url)}
           onFinish={(imgSrc: string) => {
             const newImages = [...sermon.images];
             newImages[imageToEdit.imageIndex].downloadLink = imgSrc;

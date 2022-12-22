@@ -28,6 +28,7 @@ import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
 import Image from 'next/image';
 import Logo from '../public/upper_room_media_icon.png';
+import { sanitize } from 'dompurify';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -180,7 +181,7 @@ Props) => {
           <Image
             src={
               sermon.images?.find((image) => image.type === 'square')
-                ? sermon.images.find((image) => image.type === 'square')!.downloadLink
+                ? sanitize(sermon.images.find((image) => image.type === 'square')!.downloadLink)
                 : Logo
             }
             layout="fill"

@@ -14,6 +14,7 @@ import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
 import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import firebase from '../firebase/firebase';
+import { sanitize } from 'dompurify';
 
 const storage = getStorage(firebase);
 
@@ -108,7 +109,11 @@ const BottomAudioBar: FunctionComponent = () => {
               onMouseUp={handleMouseUp}
             ></input>
           </label>
-          <audio ref={audioPlayer} src={currentSermon.url} onTimeUpdate={onPlaying}></audio>
+          <audio
+            ref={audioPlayer}
+            src={currentSermon.url ? sanitize(currentSermon.url) : undefined}
+            onTimeUpdate={onPlaying}
+          ></audio>
           <span className={styles.duration}>{formatTime(currentSermon.durationSeconds)}</span>
         </div>
       </div>

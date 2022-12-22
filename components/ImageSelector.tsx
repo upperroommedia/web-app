@@ -21,6 +21,7 @@ import InfiniteScroll from 'react-infinite-scroll-component';
 import ImageUploader from './ImageUploader';
 import { imageStorage, ref, uploadBytes } from '../firebase/storage';
 import { CroppedImageData } from '../utils/cropImage';
+import { sanitize } from 'dompurify';
 
 const ImageSelector = (props: {
   setSpeakers: Dispatch<SetStateAction<ISpeaker[]>>;
@@ -147,7 +148,7 @@ const ImageSelector = (props: {
               <ImageListItem key={image.id}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`${image.downloadLink}?fit=crop&auto=format`}
+                  src={`${sanitize(image.downloadLink)}?fit=crop&auto=format`}
                   width="164px"
                   height="164px"
                   alt={image.id}
