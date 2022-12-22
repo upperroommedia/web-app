@@ -1,6 +1,6 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
-import { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig } from 'axios';
 import { storage } from 'firebase-admin';
 import { unlink } from 'fs/promises';
 import fs, { existsSync, mkdirSync } from 'fs';
@@ -39,17 +39,17 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
   logger.log('Axios config', uploadConfig);
   try {
     logger.log('uploadConfig', uploadConfig);
-    const axiosResponse = await fetch(request.data.url);
+    const axiosResponse = await axios(uploadConfig);
     // logger.log('axiosResponse', axiosResponse);
     const headers = axiosResponse.headers;
     logger.log('headers', headers);
-    const blobType = headers.get('content-type');
+    const blobType = headers['content-type'];
     logger.log('blobType', blobType);
-    const imageBlob = await axiosResponse.blob();
+    const imageBlob = axiosResponse.data;
     logger.log(imageBlob);
     const tempFilePath = createTempFile(request.data.name);
     logger.log(`Saving image to ${tempFilePath}`);
-    fs.writeFileSync(tempFilePath, Buffer.from(await imageBlob.arrayBuffer()));
+    fs.writeFileSync(tempFilePath, Buffer.from(imageBlob));
     // Upload your data
     // const bucket = storage().bucket();
     const destinationFilePath = `speaker-images/${request.data.name}`;

@@ -2,15 +2,23 @@ import Button from '@mui/material/Button';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
 import { useState, useCallback } from 'react';
-import getCroppedImg from '../utils/cropImage';
+import getCroppedImg, { CroppedImageData } from '../utils/cropImage';
 
 import Cropper from 'react-easy-crop';
 import styles from '../styles/Cropper.module.css';
+import { ImageSizeType } from '../types/Image';
 
 interface Props {
   imgSrc?: string;
-  onFinish: (imgSrc: string) => void;
+  onFinish: (croppedImageData: CroppedImageData) => void;
+  type: ImageSizeType;
 }
+
+const typeToAspectRatio = {
+  square: 1,
+  wide: 16 / 9,
+  banner: 480 / 173,
+};
 
 const ImageUploader = (props: Props) => {
   const [imgSrc, setImgSrc] = useState(props.imgSrc);
@@ -60,7 +68,7 @@ const ImageUploader = (props: Props) => {
               crop={crop}
               rotation={rotation}
               zoom={zoom}
-              aspect={1}
+              aspect={typeToAspectRatio[props.type]}
               onCropChange={setCrop}
               onRotationChange={setRotation}
               onCropComplete={onCropComplete}
@@ -108,14 +116,8 @@ const ImageUploader = (props: Props) => {
             <Button
               onClick={async () => {
                 if (imgSrc && croppedAreaPixels) {
-                  const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation);
-                  props.onFinish(croppedImage);
-                  // download cropped image
-                  // const link = document.createElement('a');
-                  // link.href = croppedImage;
-                  // link.setAttribute('download', 'image.jpg');
-                  // document.body.appendChild(link);
-                  // link.click();
+                  const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation, props.type);
+                  croppedImage && props.onFinish(croppedImage);
                 }
               }}
               variant="contained"

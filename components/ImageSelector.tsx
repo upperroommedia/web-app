@@ -19,8 +19,8 @@ import { ISpeaker } from '../types/Speaker';
 import Button from '@mui/material/Button';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import ImageUploader from './ImageUploader';
-import { createFunction } from '../utils/createFunction';
-import { SaveImageInputType } from '../functions/src/saveImage';
+import { imageStorage, ref, uploadBytes } from '../firebase/storage';
+import { CroppedImageData } from '../utils/cropImage';
 
 const ImageSelector = (props: {
   setSpeakers: Dispatch<SetStateAction<ISpeaker[]>>;
@@ -114,9 +114,16 @@ const ImageSelector = (props: {
     g();
   }, []);
 
-  const saveImage = (url: string, name: string) => {
-    const saveImage = createFunction<SaveImageInputType, void>('saveimage');
-    saveImage({ url, name });
+  const saveImage = async (croppedImageData: CroppedImageData, name: string) => {
+    try {
+      const imageRef = ref(imageStorage, `speaker-images/${name}`);
+      await uploadBytes(imageRef, croppedImageData.blob, {
+        contentType: croppedImageData.contentType,
+        customMetadata: { name, size: 'original', type: croppedImageData.type },
+      });
+    } catch (e) {
+      alert(e);
+    }
   };
 
   return (
@@ -165,6 +172,7 @@ const ImageSelector = (props: {
             `${props.selectedSpeaker.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg`
           )
         }
+        type={props.selectedImageFromSpeakerDetails.type}
       />
       <Button
         disabled={selectedImage === undefined || selectedImage.id === props.selectedImageFromSpeakerDetails.id}
