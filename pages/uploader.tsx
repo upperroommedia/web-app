@@ -367,7 +367,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     width: 30,
                     height: 30,
                     marginRight: 15,
-                    backgroundImage: `url(${'/user.png'})`,
+                    backgroundColor: squareImage?.averageColorHex ? squareImage.averageColorHex : undefined,
+                    backgroundImage: squareImage?.averageColorHex ? undefined : `url(${'/user.png'})`,
                     backgroundPosition: 'center center',
                     backgroundSize: 'cover',
                   }}
