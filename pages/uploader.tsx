@@ -299,13 +299,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onInputChange={async (_, value) => {
             clearTimeout(timer);
             const newTimer = setTimeout(async () => {
-              await fetchSpeakerResults(value, 25, 1).then((data) => {
-                const res: ISpeaker[] = [];
-                data?.hits.forEach((element: ISpeaker) => {
-                  res.push(element);
-                });
-                setSpeakersArray(res);
+              const data = await fetchSpeakerResults(value, 25, 0);
+              const res: ISpeaker[] = [];
+              data?.hits.forEach((element: ISpeaker) => {
+                res.push(element);
               });
+              setSpeakersArray(res);
             }, 300);
             setTimer(newTimer);
           }}
@@ -414,13 +413,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             }
           }}
           onInputChange={async (_, value) => {
-            await fetchTopicsResults(value).then((data) => {
-              const res: string[] = [];
-              data?.hits.forEach((element: any) => {
-                res.push(element.name);
-              });
-              setTopicsArray(res);
+            const data = await fetchTopicsResults(value);
+            const res: string[] = [];
+            data?.hits.forEach((element: any) => {
+              res.push(element.name);
             });
+            setTopicsArray(res);
           }}
           id="topic-input"
           options={topicsArray}
@@ -432,8 +430,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         {props.existingSermon ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
-              onClick={() =>
-                editSermon({
+              onClick={async () => {
+                await editSermon({
                   key: sermon.key,
                   title: sermon.title,
                   subtitle: sermon.subtitle,
@@ -442,24 +440,23 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   topics: sermon.topics,
                   series: sermon.series,
                   images: sermon.images,
-                }).then(() => {
-                  props.setUpdatedSermon?.(
-                    createSermon({
-                      key: sermon.key,
-                      title: sermon.title,
-                      subtitle: sermon.subtitle,
-                      dateMillis: date.getTime(),
-                      durationSeconds: sermon.durationSeconds,
-                      description: sermon.description,
-                      speakers: sermon.speakers,
-                      topics: sermon.topics,
-                      series: sermon.series,
-                      dateString: getDateString(date),
-                    })
-                  );
-                  props.setEditFormOpen?.(false);
-                })
-              }
+                });
+                props.setUpdatedSermon?.(
+                  createSermon({
+                    key: sermon.key,
+                    title: sermon.title,
+                    subtitle: sermon.subtitle,
+                    dateMillis: date.getTime(),
+                    durationSeconds: sermon.durationSeconds,
+                    description: sermon.description,
+                    speakers: sermon.speakers,
+                    topics: sermon.topics,
+                    series: sermon.series,
+                    dateString: getDateString(date),
+                  })
+                );
+                props.setEditFormOpen?.(false);
+              }}
               disabled={
                 sermonsEqual(props.existingSermon, sermon) ||
                 sermon.title === '' ||
