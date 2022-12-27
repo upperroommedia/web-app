@@ -14,6 +14,7 @@ import setUserRoleOnCreate from './setUserRoleOnCreate';
 import populatespeakerimages from './populateSpeakerImages';
 import createnewsubsplashlist from './createNewSubsplashList';
 import addToSeries from './addToSeries';
+import uploadToSoundCloud from './uploadToSoundCloud';
 
 admin.initializeApp();
 
@@ -29,3 +30,4 @@ exports.populatespeakerimages = populatespeakerimages;
 exports.createnewsubsplashlist = createnewsubsplashlist;
 exports.addtoseries = addToSeries;
 exports.saveimage = saveimage;
+exports.uploadtosoundcloud = uploadToSoundCloud;
