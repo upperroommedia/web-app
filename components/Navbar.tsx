@@ -18,7 +18,9 @@ const Navbar: FunctionComponent = () => {
       <div className={styles.navbar}>
         <div className={styles.navbar_header_container}>
           <h1 className={styles.title}>Upper Room Media</h1>
-          <Image src="/upper_room_media_icon.png" alt="Upper Room Media Logo" width="100%" height="100%" />
+          <div className={styles.logo}>
+            <Image src="/upper_room_media_icon.png" alt="Upper Room Media Logo" width="100%" height="100%" />
+          </div>
         </div>
         {user && (
           <Link href="/profile">
