@@ -186,6 +186,29 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     }
   };
 
+  const ImagesComponent = ({ sermon }: { sermon: Sermon }) => {
+    if (!sermon.speakers || sermon.speakers.length === 0) {
+      return <></>;
+    }
+    const images = sermon.speakers[0].images;
+    return (
+      <div style={{ margin: '0px 40px' }}>
+        <h2 style={{ textAlign: 'center' }}>Images</h2>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          {images.map((image, _index) => {
+            return (
+              <div key={image.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}</span>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={sanitize(image.downloadLink)} height="100px" width="100px" />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <form className={styles.container}>
       <Box
@@ -427,6 +450,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
           )}
         />
+        <ImagesComponent sermon={sermon} />
         {props.existingSermon ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
@@ -526,29 +550,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         </div>
         <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>{uploadProgress.message}</p>
       </Box>
-      <div style={{ margin: '0px 40px' }}>
-        <h1 style={{ textAlign: 'center' }}>Images</h1>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          {sermon.speakers.length > 0 &&
-            sermon.speakers[0].images.map((image, _index) => {
-              return (
-                <div key={image.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}</span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={sanitize(image.downloadLink)}
-                    height="100px"
-                    width="100px"
-                    // onClick={() => {
-                    //   setImageToEdit({ url: image.downloadLink, imageIndex: index });
-                    //   setEditImagePopup(true);
-                    // }}
-                  />
-                </div>
-              );
-            })}
-        </div>
-      </div>
+
       <DynamicPopUp
         title={'Add new series'}
         open={newSeriesPopup}
