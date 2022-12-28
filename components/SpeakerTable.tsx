@@ -21,12 +21,10 @@ import { visuallyHidden } from '@mui/utils';
 // import Button from '@mui/material/Button';
 // import Menu from '@mui/material/Menu';
 import { Order } from '../pages/admin';
-import ImageSelector from './ImageSelector';
-import ImageList from '@mui/material/ImageList';
-import ImageListItem from '@mui/material/ImageListItem';
-import ImageListItemBar from '@mui/material/ImageListItemBar';
-import { ImageType } from '../types/Image';
 import { sanitize } from 'dompurify';
+import ImageViewer from './ImageViewer';
+import firestore, { doc, updateDoc } from '../firebase/firestore';
+import { ImageType } from '../types/Image';
 
 interface HeadCell {
   disablePadding: boolean;
@@ -211,10 +209,8 @@ const SpeakerTable = (props: {
   // const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
 
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
-  const [selectedImage, setSelectedImage] = useState<ImageType>();
 
   const [speakerDetailsPopup, setSpeakerDetailsPopup] = useState<boolean>(false);
-  const [imageSelectorPopup, setImageSelectorPopup] = useState<boolean>(false);
 
   // const [filters, setFilters] = useState<Filters>({
   //   none: true,
@@ -223,6 +219,46 @@ const SpeakerTable = (props: {
   //   hasWideImage: false,
   //   hasBannerImage: false,
   // });
+
+  const setSpeakerImage = async (newImage: ImageType) => {
+    if (!selectedSpeaker) {
+      return;
+    }
+    try {
+      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id), {
+        images: selectedSpeaker.images.find((image) => image.type === newImage.type)
+          ? selectedSpeaker.images.map((image) => {
+              if (image.type === newImage.type) {
+                return newImage;
+              }
+              return image;
+            })
+          : [...selectedSpeaker.images, newImage],
+      });
+      props.setSpeakers((oldSpeakers) =>
+        oldSpeakers.map((speaker) => {
+          if (speaker.id === selectedSpeaker.id) {
+            const newSpeaker = {
+              ...speaker,
+              images: speaker.images.find((image) => image.type === newImage.type)
+                ? speaker.images.map((image) => {
+                    if (image.type === newImage.type) {
+                      return newImage;
+                    }
+                    return image;
+                  })
+                : [...speaker.images, newImage],
+            };
+            setSelectedSpeaker(newSpeaker);
+            return newSpeaker;
+          }
+          return speaker;
+        })
+      );
+    } catch (e) {
+      alert(e);
+    }
+  };
 
   const handleRequestSort = async (_: any, property: keyof ISpeaker) => {
     const isAsc = props.sortOrder === 'asc';
@@ -348,63 +384,9 @@ const SpeakerTable = (props: {
       >
         <div style={{ textAlign: 'center' }}>
           <h2>{selectedSpeaker?.name}</h2>
-          {selectedSpeaker && (
-            <ImageList sx={{ width: '100%', height: '100%' }} cols={3}>
-              {['square', 'wide', 'banner'].map((type, i) => {
-                const image: ImageType | undefined = selectedSpeaker?.images?.find((image) => image.type === type);
-                return image ? (
-                  <ImageListItem
-                    key={image.id}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => {
-                      setImageSelectorPopup(true);
-                      setSelectedImage(image);
-                    }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`${sanitize(image.downloadLink)}`} alt={image.name} loading="lazy" />
-                    <ImageListItemBar
-                      title={image.name}
-                      subtitle={`${image.type} ${image.width}x${image.height}`}
-                      position="below"
-                    />
-                  </ImageListItem>
-                ) : (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      borderRadius: '2px',
-                      overflow: 'hidden',
-                      position: 'relative',
-                      height: 300,
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      backgroundColor: '#f3f1f1',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => {
-                      setImageSelectorPopup(true);
-                      setSelectedImage({ type } as ImageType);
-                    }}
-                  >
-                    <span>Add image +</span>
-                  </div>
-                );
-              })}
-            </ImageList>
-          )}
+          {selectedSpeaker && <ImageViewer speaker={selectedSpeaker} newImageCallback={setSpeakerImage} />}
         </div>
         {/* </div> */}
-      </DynamicPopUp>
-      <DynamicPopUp title="Select an Image" open={imageSelectorPopup} setOpen={setImageSelectorPopup}>
-        <ImageSelector
-          selectedSpeaker={selectedSpeaker!}
-          selectedImageFromSpeakerDetails={selectedImage!}
-          setImageSelectorPopup={setImageSelectorPopup}
-          setSpeakers={props.setSpeakers}
-          setSpeakerDetailsPopup={setSpeakerDetailsPopup}
-        />
       </DynamicPopUp>
     </>
   );

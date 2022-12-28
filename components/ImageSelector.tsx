@@ -3,8 +3,6 @@ import firestore, {
   collection,
   getDocs,
   limit,
-  updateDoc,
-  doc,
   where,
   QueryDocumentSnapshot,
   DocumentData,
@@ -12,33 +10,34 @@ import firestore, {
   startAfter,
 } from '../firebase/firestore';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
-import { ImageType } from '../types/Image';
-import ImageList from '@mui/material/ImageList';
-import ImageListItem from '@mui/material/ImageListItem';
+import { AspectRatio, ImageType } from '../types/Image';
+import Image from 'next/image';
+// import ImageList from '@mui/material/ImageList';
+// import ImageListItem from '@mui/material/ImageListItem';
 import { ISpeaker } from '../types/Speaker';
 import Button from '@mui/material/Button';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import ImageUploader from './ImageUploader';
 import { imageStorage, ref, uploadBytes } from '../firebase/storage';
 import { CroppedImageData } from '../utils/cropImage';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { sanitize } from 'dompurify';
+import styles from '../styles/ImageSelector.module.css';
 
 const ImageSelector = (props: {
-  setSpeakers: Dispatch<SetStateAction<ISpeaker[]>>;
-  selectedSpeaker: ISpeaker;
+  newImageCallback: (image: ImageType) => void;
+  selectedSpeaker?: ISpeaker;
   selectedImageFromSpeakerDetails: ImageType;
   setImageSelectorPopup: Dispatch<SetStateAction<boolean>>;
-  setSpeakerDetailsPopup: Dispatch<SetStateAction<boolean>>;
 }) => {
   const [images, setImages] = useState<ImageType[]>([]);
   const [selectedImage, setSelectedImage] = useState<ImageType | undefined>(
     props.selectedImageFromSpeakerDetails?.id ===
-      props.selectedSpeaker?.images.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)?.id
-      ? props.selectedSpeaker?.images.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)
+      props.selectedSpeaker?.images?.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)?.id
+      ? props.selectedSpeaker?.images?.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)
       : undefined
   );
   const [lastImage, setLastImage] = useState<QueryDocumentSnapshot<DocumentData>>();
-  const [hasMore] = useState(lastImage === undefined);
 
   const fetchImages = async () => {
     const q = query(
@@ -49,11 +48,7 @@ const ImageSelector = (props: {
     );
     const querySnapshot = await getDocs(q);
     setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    const res: ImageType[] = [];
-    querySnapshot.forEach((doc) => {
-      res.push(doc.data() as ImageType);
-    });
-    setImages(res);
+    setImages(querySnapshot.docs.map((doc) => doc.data() as ImageType));
   };
 
   const fetchMoreImages = async () => {
@@ -69,43 +64,6 @@ const ImageSelector = (props: {
     querySnapshot.forEach((doc) => {
       setImages((oldImages) => [...oldImages, doc.data() as ImageType]);
     });
-  };
-
-  const setSpeakerImage = async () => {
-    try {
-      await updateDoc(doc(firestore, 'speakers', props.selectedSpeaker.id), {
-        images: props.selectedSpeaker.images.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)
-          ? props.selectedSpeaker.images.map((image) => {
-              if (image.type === props.selectedImageFromSpeakerDetails?.type) {
-                return selectedImage;
-              }
-              return image;
-            })
-          : [...props.selectedSpeaker.images, selectedImage],
-      });
-      props.setSpeakers((oldSpeakers) =>
-        oldSpeakers.map((speaker) => {
-          if (speaker.id === props.selectedSpeaker.id) {
-            return {
-              ...speaker,
-              images: speaker.images.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)
-                ? speaker.images.map((image) => {
-                    if (image.type === props.selectedImageFromSpeakerDetails?.type) {
-                      return selectedImage!;
-                    }
-                    return image;
-                  })
-                : [...speaker.images, selectedImage!],
-            };
-          }
-          return speaker;
-        })
-      );
-      props.setImageSelectorPopup(false);
-      props.setSpeakerDetailsPopup(false);
-    } catch (e) {
-      alert(e);
-    }
   };
 
   useEffect(() => {
@@ -127,57 +85,85 @@ const ImageSelector = (props: {
     }
   };
 
+  const InfinitScrollMessage = ({ message }: { message: string }) => {
+    return (
+      <p style={{ flexBasis: '100%', textAlign: 'center' }}>
+        <b>{message}</b>
+      </p>
+    );
+  };
+
   return (
     <div>
       <InfiniteScroll
         dataLength={images.length + 1}
         next={async () => await fetchMoreImages()}
-        hasMore={hasMore}
-        loader={undefined}
-        scrollableTarget="scrollableDiv"
-        endMessage={
-          <p style={{ textAlign: 'center' }}>
-            <b>That{"'"}s all!</b>
-          </p>
-        }
+        hasMore={lastImage !== undefined}
+        loader={<InfinitScrollMessage message="Loading..." />}
+        height="500px"
+        // scrollableTarget="scrollableDiv"
+        style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
+        endMessage={<InfinitScrollMessage message="No More Images" />}
       >
-        <ImageList sx={{ width: 500, height: 450 }} cols={3} rowHeight={164} id="scrollableDiv">
-          {images
-            // .filter((image) => image.type === props.selectedImageFromSpeakerDetails.type)
-            .map((image) => (
-              <ImageListItem key={image.id}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`${sanitize(image.downloadLink)}?fit=crop&auto=format`}
-                  width="164px"
-                  height="164px"
-                  alt={image.id}
-                  loading="lazy"
+        {/* <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', overflow: 'hidden' }} id="scrollableDiv"> */}
+        {images
+          // .filter((image) => image.type === props.selectedImageFromSpeakerDetails.type)
+          .map((image) => (
+            <div
+              key={image.id}
+              className={styles.imageContainer}
+              style={{
+                aspectRatio: AspectRatio[image.type],
+                backgroundColor: image.averageColorHex || '#f3f1f1',
+                boxShadow: selectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
+              }}
+            >
+              <Image
+                src={sanitize(image.downloadLink)}
+                height="164px"
+                alt={image.name}
+                style={{
+                  borderRadius: '5px',
+                  cursor: 'pointer',
+                }}
+                layout="fill"
+                objectFit="contain"
+                onClick={() => {
+                  setSelectedImage(image);
+                }}
+              />
+              {selectedImage?.id === image.id && (
+                <CheckCircleIcon
+                  color="primary"
                   style={{
-                    border: selectedImage?.id === image.id ? '4px solid blue' : 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
+                    position: 'absolute',
+                    backgroundColor: 'white',
+                    borderRadius: '50%',
+                    zIndex: 2,
+                    top: '10px',
+                    right: '10px',
                   }}
-                  onClick={() => {
-                    setSelectedImage(image);
-                  }}
-                />
-              </ImageListItem>
-            ))}
-        </ImageList>
+                ></CheckCircleIcon>
+              )}
+            </div>
+          ))}
+        {/* </div> */}
       </InfiniteScroll>
       <ImageUploader
         onFinish={async (imgSrc) =>
           saveImage(
             imgSrc,
-            `${props.selectedSpeaker.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg`
+            `${props.selectedSpeaker?.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg`
           )
         }
         type={props.selectedImageFromSpeakerDetails.type}
       />
       <Button
         disabled={selectedImage === undefined || selectedImage.id === props.selectedImageFromSpeakerDetails.id}
-        onClick={setSpeakerImage}
+        onClick={() => {
+          selectedImage && props.newImageCallback(selectedImage);
+          props.setImageSelectorPopup(false);
+        }}
       >
         Set Speaker Image
       </Button>

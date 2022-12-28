@@ -1,4 +1,5 @@
-export type ImageSizeType = 'square' | 'wide' | 'banner';
+export const ImageSizes = ['square', 'wide', 'banner'] as const;
+export type ImageSizeType = typeof ImageSizes[number];
 export type ImageType = {
   id: string;
   size: 'thumbnail' | 'small' | 'medium' | 'large' | 'original' | 'cropped';
@@ -13,6 +14,11 @@ export type ImageType = {
   vibrantColorHex?: string;
 };
 
+export const AspectRatio: { [key in ImageSizeType]: number } = {
+  square: 1,
+  wide: 16 / 9,
+  banner: 1920 / 692,
+};
 
 export type resizeType = { width: number; height: number; sizeType: ImageType['size'] };
 export type supportedContentTypes = 'image/jpeg' | 'image/png' | 'image/tiff' | 'image/webp' | 'image/gif';

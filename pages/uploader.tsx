@@ -35,6 +35,8 @@ import { sanitize } from 'dompurify';
 
 import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
+import ImageViewer from '../components/ImageViewer';
+import { ImageType } from '../types/Image';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -186,43 +188,24 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     }
   };
 
-  const ImagesComponent = ({ sermon }: { sermon: Sermon }) => {
-    if (!sermon.speakers || sermon.speakers.length === 0) {
-      return <></>;
-    }
-    const images = sermon.speakers[0].images;
-    return (
-      <div style={{ margin: '0px 40px' }}>
-        <h2 style={{ textAlign: 'center' }}>Images</h2>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          {images.map((image, _index) => {
-            return (
-              <div key={image.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <span>{image.type.charAt(0).toUpperCase() + image.type.slice(1)}</span>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={sanitize(image.downloadLink)} height="100px" width="100px" />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
+  const handleNewImage = (image: ImageType) => {
+    console.log(image);
+    // TODO: update image
   };
 
   return (
     <form className={styles.container}>
+      <h1 style={{ justifySelf: 'center', gridColumn: '1/3' }}>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
       <Box
         sx={{
           display: 'flex',
           flexWrap: 'wrap',
           gap: '1ch',
           margin: 'auto',
-          maxWidth: '900px',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <h1>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
         <TextField
           sx={{
             display: 'block',
@@ -237,7 +220,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onChange={handleChange}
           required
         />
-        <Box sx={{ display: 'flex', color: 'red', gap: '1ch', width: 1 }}>
+        <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
           <Autocomplete
             fullWidth
             id="subtitle-input"
@@ -450,7 +433,20 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
           )}
         />
-        <ImagesComponent sermon={sermon} />
+      </Box>
+      <div style={{}}>
+        <ImageViewer speaker={sermon.speakers[0] || []} newImageCallback={handleNewImage} vertical={true} />
+      </div>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '1ch',
+          margin: 'auto',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         {props.existingSermon ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
@@ -591,23 +587,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           />
         </div>
       </DynamicPopUp>
-      {/* <DynamicPopUp
-        title="Edit Image"
-        open={editImagePopup}
-        setOpen={setEditImagePopup}
-        dialogProps={{ fullWidth: true }}
-      >
-        <ImageUploader
-          imgSrc={sanitize(imageToEdit.url)}
-          onFinish={(imgSrc: string) => {
-            const newImages = [...sermon.images];
-            newImages[imageToEdit.imageIndex].downloadLink = imgSrc;
-            newImages[imageToEdit.imageIndex].subsplashId = undefined;
-            updateSermon('images', newImages);
-            setEditImagePopup(false);
-          }}
-        />
-      </DynamicPopUp> */}
     </form>
   );
 };
