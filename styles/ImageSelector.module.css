@@ -1,0 +1,14 @@
+.imageContainer {
+  height: 164px;
+  border-radius: 5px;
+  position: relative;
+}
+
+.imageContainer:hover {
+  -webkit-filter: brightness(70%);
+  -webkit-transition: all 0.1s ease;
+  -moz-transition: all 0.1s ease;
+  -o-transition: all 0.1s ease;
+  -ms-transition: all 0.1s ease;
+  transition: all 0.1s ease;
+}
