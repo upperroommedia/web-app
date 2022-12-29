@@ -69,7 +69,7 @@ const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>
     const response = (await axios(currentListConfig)).data;
     const currentListCount = response.list_rows_count;
     logger.log('currentListCount', currentListCount);
-    const maxListCount = 200;
+    const maxListCount = 5;
     if (data.mediaItemIds.length > maxListCount) {
       throw new HttpsError('invalid-argument', `Too many items to add. The list size has a max of ${maxListCount}`);
     }

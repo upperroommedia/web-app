@@ -7,11 +7,16 @@ import getCroppedImg, { CroppedImageData } from '../utils/cropImage';
 import Cropper from 'react-easy-crop';
 import styles from '../styles/Cropper.module.css';
 import { ImageSizeType } from '../types/Image';
-
+import OutlinedInput from '@mui/material/OutlinedInput';
+import InputAdornment from '@mui/material/InputAdornment';
+import dynamic from 'next/dynamic';
+const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 interface Props {
   imgSrc?: string;
   onFinish: (croppedImageData: CroppedImageData) => void;
   type: ImageSizeType;
+  title: string;
+  setTitle: (newTitle: string) => void;
 }
 
 const typeToAspectRatio = {
@@ -55,81 +60,104 @@ const ImageUploader = (props: Props) => {
   //   }
   //   return url;
   // };
-
+  if (!imgSrc) {
+    return <input type="file" accept="image/*" onChange={onSelectFile} />;
+  }
   return (
-    <div>
-      <input type="file" accept="image/*" onChange={onSelectFile} />
-      {imgSrc && (
-        <>
-          <div className={styles.cropContainer}>
-            (
-            <Cropper
-              image={imgSrc}
-              crop={crop}
-              rotation={rotation}
-              zoom={zoom}
-              aspect={typeToAspectRatio[props.type]}
-              onCropChange={setCrop}
-              onRotationChange={setRotation}
-              onCropComplete={onCropComplete}
-              onZoomChange={setZoom}
-            />
-            )
-          </div>
-          <div className={styles.controls}>
-            <div className={styles.sliderContainer}>
-              <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
-                Zoom
-              </Typography>
-              <Slider
-                value={zoom}
-                min={1}
-                max={3}
-                step={0.1}
-                aria-labelledby="Zoom"
-                classes={{ root: styles.slider }}
-                onChange={(e, zoom) => {
-                  if (typeof zoom === 'number') {
-                    setZoom(zoom);
-                  }
-                }}
-              />
-            </div>
-            <div className={styles.sliderContainer}>
-              <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
-                Rotation
-              </Typography>
-              <Slider
-                value={rotation}
-                min={0}
-                max={360}
-                step={1}
-                aria-labelledby="Rotation"
-                classes={{ root: styles.slider }}
-                onChange={(e, rotation) => {
-                  if (typeof rotation === 'number') {
-                    setRotation(rotation);
-                  }
-                }}
-              />
-            </div>
-            <Button
-              onClick={async () => {
-                if (imgSrc && croppedAreaPixels) {
-                  const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation, props.type);
-                  croppedImage && props.onFinish(croppedImage);
+    <DynamicPopUp
+      title="Select an Image"
+      open={imgSrc !== undefined}
+      setOpen={(bool) => {
+        if (!bool) {
+          setImgSrc(undefined);
+        }
+      }}
+      dialogProps={{ fullWidth: true, maxWidth: 'lg' }}
+      button={
+        <Button
+          onClick={async () => {
+            if (imgSrc && croppedAreaPixels) {
+              const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation, props.type);
+              croppedImage && props.onFinish(croppedImage);
+            }
+          }}
+          variant="contained"
+          color="primary"
+          classes={{ root: styles.cropButton }}
+        >
+          Crop
+        </Button>
+      }
+    >
+      <div>
+        <div className={styles.cropContainer}>
+          (
+          <Cropper
+            image={imgSrc}
+            crop={crop}
+            rotation={rotation}
+            zoom={zoom}
+            aspect={typeToAspectRatio[props.type]}
+            onCropChange={setCrop}
+            onRotationChange={setRotation}
+            onCropComplete={onCropComplete}
+            onZoomChange={setZoom}
+          />
+          )
+        </div>
+        <div className={styles.controls}>
+          <div className={styles.sliderContainer}>
+            <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
+              Zoom
+            </Typography>
+            <Slider
+              value={zoom}
+              min={1}
+              max={3}
+              step={0.1}
+              aria-labelledby="Zoom"
+              classes={{ root: styles.slider }}
+              onChange={(e, zoom) => {
+                if (typeof zoom === 'number') {
+                  setZoom(zoom);
                 }
               }}
-              variant="contained"
-              color="primary"
-              classes={{ root: styles.cropButton }}
-            >
-              Crop
-            </Button>
+            />
           </div>
-        </>
-      )}
-    </div>
+          <div className={styles.sliderContainer}>
+            <Typography variant="overline" classes={{ root: styles.sliderLabel }}>
+              Rotation
+            </Typography>
+            <Slider
+              value={rotation}
+              min={0}
+              max={360}
+              step={1}
+              aria-labelledby="Rotation"
+              classes={{ root: styles.slider }}
+              onChange={(e, rotation) => {
+                if (typeof rotation === 'number') {
+                  setRotation(rotation);
+                }
+              }}
+            />
+            <OutlinedInput
+              id="outlined-adornment-title"
+              endAdornment={<InputAdornment position="end">{`-${props.type}`}</InputAdornment>}
+              aria-describedby="outlined-title-helper-text"
+              inputProps={{
+                'aria-label': 'title',
+              }}
+              value={props.title}
+              sx={{ width: '100%' }}
+              onChange={(e) => {
+                props.setTitle(e.target.value);
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </DynamicPopUp>
   );
 };
 

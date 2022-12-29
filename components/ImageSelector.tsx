@@ -9,13 +9,12 @@ import firestore, {
   orderBy,
   startAfter,
 } from '../firebase/firestore';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AspectRatio, ImageType } from '../types/Image';
 import Image from 'next/image';
 // import ImageList from '@mui/material/ImageList';
 // import ImageListItem from '@mui/material/ImageListItem';
 import { ISpeaker } from '../types/Speaker';
-import Button from '@mui/material/Button';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import ImageUploader from './ImageUploader';
 import { imageStorage, ref, uploadBytes } from '../firebase/storage';
@@ -25,20 +24,16 @@ import { sanitize } from 'dompurify';
 import styles from '../styles/ImageSelector.module.css';
 
 const ImageSelector = (props: {
-  newImageCallback: (image: ImageType) => void;
   selectedSpeaker?: ISpeaker;
   selectedImageFromSpeakerDetails: ImageType;
-  setImageSelectorPopup: Dispatch<SetStateAction<boolean>>;
+  newSelectedImage: ImageType | undefined;
+  setNewSelectedImage: (image: ImageType) => void;
 }) => {
   const [images, setImages] = useState<ImageType[]>([]);
-  const [selectedImage, setSelectedImage] = useState<ImageType | undefined>(
-    props.selectedImageFromSpeakerDetails?.id ===
-      props.selectedSpeaker?.images?.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)?.id
-      ? props.selectedSpeaker?.images?.find((image) => image.type === props.selectedImageFromSpeakerDetails?.type)
-      : undefined
+  const [title, setTitle] = useState(
+    `${props.selectedSpeaker?.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg` || ''
   );
   const [lastImage, setLastImage] = useState<QueryDocumentSnapshot<DocumentData>>();
-
   const fetchImages = async () => {
     const q = query(
       collection(firestore, 'images'),
@@ -75,11 +70,14 @@ const ImageSelector = (props: {
 
   const saveImage = async (croppedImageData: CroppedImageData, name: string) => {
     try {
+      // TODO make this work
+      console.log('HTETRHERHSDFHWEHSDF');
       const imageRef = ref(imageStorage, `speaker-images/${name}`);
       await uploadBytes(imageRef, croppedImageData.blob, {
         contentType: croppedImageData.contentType,
         customMetadata: { name, size: 'original', type: croppedImageData.type },
       });
+      console.log('Done Uploading', name);
     } catch (e) {
       alert(e);
     }
@@ -115,7 +113,7 @@ const ImageSelector = (props: {
               style={{
                 aspectRatio: AspectRatio[image.type],
                 backgroundColor: image.averageColorHex || '#f3f1f1',
-                boxShadow: selectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
+                boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
               }}
             >
               <Image
@@ -129,10 +127,10 @@ const ImageSelector = (props: {
                 layout="fill"
                 objectFit="contain"
                 onClick={() => {
-                  setSelectedImage(image);
+                  props.setNewSelectedImage(image);
                 }}
               />
-              {selectedImage?.id === image.id && (
+              {props.newSelectedImage?.id === image.id && (
                 <CheckCircleIcon
                   color="primary"
                   style={{
@@ -150,23 +148,11 @@ const ImageSelector = (props: {
         {/* </div> */}
       </InfiniteScroll>
       <ImageUploader
-        onFinish={async (imgSrc) =>
-          saveImage(
-            imgSrc,
-            `${props.selectedSpeaker?.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg`
-          )
-        }
+        onFinish={async (imgSrc) => saveImage(imgSrc, title)}
         type={props.selectedImageFromSpeakerDetails.type}
+        title={title}
+        setTitle={setTitle}
       />
-      <Button
-        disabled={selectedImage === undefined || selectedImage.id === props.selectedImageFromSpeakerDetails.id}
-        onClick={() => {
-          selectedImage && props.newImageCallback(selectedImage);
-          props.setImageSelectorPopup(false);
-        }}
-      >
-        Set Speaker Image
-      </Button>
     </div>
   );
 };
