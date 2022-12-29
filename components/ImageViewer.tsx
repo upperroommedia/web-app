@@ -1,21 +1,24 @@
 import { AspectRatio, ImageSizes, ImageType } from '../types/Image';
 import { sanitize } from 'dompurify';
-import { ISpeaker } from '../types/Speaker';
 import ImageSelector from './ImageSelector';
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import styles from '../styles/ImageViewer.module.css';
+import { ISpeaker } from '../types/Speaker';
+import Button from '@mui/material/Button';
 
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 interface propsType {
-  speaker?: ISpeaker;
+  images: ImageType[];
   newImageCallback: (image: ImageType) => void;
+  speaker?: ISpeaker;
   vertical?: boolean;
 }
 
-function ImageViewer({ speaker, newImageCallback, vertical }: propsType) {
+function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType) {
   const [selectedImage, setSelectedImage] = useState<ImageType>();
+  const [newSelectedImage, setNewSelectedImage] = useState<ImageType>();
   const [imageSelectorPopup, setImageSelectorPopup] = useState<boolean>(false);
   return (
     <>
@@ -30,13 +33,12 @@ function ImageViewer({ speaker, newImageCallback, vertical }: propsType) {
         }}
       >
         {ImageSizes.map((type, i) => {
-          const image: ImageType | undefined = speaker?.images?.find((image) => image.type === type);
+          const image: ImageType | undefined = images.find((image) => image.type === type);
           return image ? (
             <>
-              <div className={styles.imageHover}>
+              <div key={`${image.id}-image`} id={`${image.id}-image`} className={styles.imageHover}>
                 <div
                   className={styles.imageContainer}
-                  key={image.id}
                   style={{
                     aspectRatio: AspectRatio[type],
                     backgroundColor: image.averageColorHex || '#f3f1f1',
@@ -44,12 +46,13 @@ function ImageViewer({ speaker, newImageCallback, vertical }: propsType) {
                   onClick={() => {
                     setImageSelectorPopup(true);
                     setSelectedImage(image);
+                    setNewSelectedImage(image);
                   }}
                 >
                   <Image
                     src={`${sanitize(image.downloadLink)}`}
                     alt={image.name}
-                    style={{ position: 'relative', borderRadius: '5px' }}
+                    style={{ borderRadius: '5px' }}
                     layout="fill"
                     objectFit="contain"
                   />
@@ -57,6 +60,8 @@ function ImageViewer({ speaker, newImageCallback, vertical }: propsType) {
                 <h3 className={styles.imageCover}>Change Image</h3>
               </div>
               <div
+                key={`${image.id}-label`}
+                id={`${image.id}-label`}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -69,9 +74,8 @@ function ImageViewer({ speaker, newImageCallback, vertical }: propsType) {
               </div>
             </>
           ) : (
-            <div className={styles.imageHover}>
+            <div key={i} className={styles.imageHover}>
               <div
-                key={i}
                 style={{
                   display: 'flex',
                   borderRadius: '5px',
@@ -100,12 +104,25 @@ function ImageViewer({ speaker, newImageCallback, vertical }: propsType) {
           open={imageSelectorPopup}
           setOpen={setImageSelectorPopup}
           dialogProps={{ fullWidth: true, maxWidth: 'lg' }}
+          button={
+            <Button
+              variant="contained"
+              color="primary"
+              disabled={selectedImage.id === newSelectedImage?.id}
+              onClick={() => {
+                newSelectedImage && newImageCallback(newSelectedImage);
+                setImageSelectorPopup(false);
+              }}
+            >
+              Set Speaker Image
+            </Button>
+          }
         >
           <ImageSelector
             selectedSpeaker={speaker}
             selectedImageFromSpeakerDetails={selectedImage}
-            setImageSelectorPopup={setImageSelectorPopup}
-            newImageCallback={newImageCallback}
+            newSelectedImage={newSelectedImage}
+            setNewSelectedImage={setNewSelectedImage}
           />
         </DynamicPopUp>
       )}

@@ -384,7 +384,9 @@ const SpeakerTable = (props: {
       >
         <div style={{ textAlign: 'center' }}>
           <h2>{selectedSpeaker?.name}</h2>
-          {selectedSpeaker && <ImageViewer speaker={selectedSpeaker} newImageCallback={setSpeakerImage} />}
+          {selectedSpeaker && (
+            <ImageViewer images={selectedSpeaker.images} speaker={selectedSpeaker} newImageCallback={setSpeakerImage} />
+          )}
         </div>
         {/* </div> */}
       </DynamicPopUp>

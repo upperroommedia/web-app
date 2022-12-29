@@ -9,7 +9,7 @@ interface PopUpInfo {
   title: string;
   open: boolean;
   children: string | ReactElement;
-  setOpen: any;
+  setOpen: (setOpen: boolean) => void;
   button?: ReactElement;
   onClose?: () => void;
   // optional props to pass to Dialog

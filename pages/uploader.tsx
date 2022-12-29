@@ -189,8 +189,19 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
 
   const handleNewImage = (image: ImageType) => {
-    console.log(image);
-    // TODO: update image
+    setSermon((oldSermon) => {
+      let newImages: ImageType[] = [];
+      if (oldSermon.images.find((img) => img.type === image.type)) {
+        newImages = oldSermon.images.map((img) => (img.type === image.type ? image : img));
+      } else {
+        newImages = [...oldSermon.images, image];
+      }
+      console.log(newImages);
+      return {
+        ...oldSermon,
+        images: newImages,
+      };
+    });
   };
 
   return (
@@ -435,7 +446,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         />
       </Box>
       <div style={{}}>
-        <ImageViewer speaker={sermon.speakers[0] || []} newImageCallback={handleNewImage} vertical={true} />
+        <ImageViewer
+          images={sermon.images}
+          speaker={sermon.speakers[0]}
+          newImageCallback={handleNewImage}
+          vertical={true}
+        />
       </div>
       <Box
         sx={{
