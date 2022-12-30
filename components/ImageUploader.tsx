@@ -66,7 +66,7 @@ const ImageUploader = (props: Props) => {
   return (
     <DynamicPopUp
       title="Select an Image"
-      open={imgSrc !== undefined}
+      open={true}
       setOpen={(bool) => {
         if (!bool) {
           setImgSrc(undefined);
