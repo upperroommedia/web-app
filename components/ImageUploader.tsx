@@ -78,7 +78,10 @@ const ImageUploader = (props: Props) => {
           onClick={async () => {
             if (imgSrc && croppedAreaPixels) {
               const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation, props.type);
-              croppedImage && props.onFinish(croppedImage);
+              if (croppedImage) {
+                props.onFinish(croppedImage);
+                setImgSrc(undefined);
+              }
             }
           }}
           variant="contained"

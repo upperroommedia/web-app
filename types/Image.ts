@@ -13,6 +13,9 @@ export type ImageType = {
   averageColorHex?: string;
   vibrantColorHex?: string;
 };
+export const isImageType = (obj: any): obj is ImageType => {
+  return obj.id !== undefined && obj.type !== undefined && obj.size !== undefined;
+};
 
 export const AspectRatio: { [key in ImageSizeType]: number } = {
   square: 1,
