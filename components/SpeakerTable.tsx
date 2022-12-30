@@ -24,7 +24,7 @@ import { Order } from '../pages/admin';
 import { sanitize } from 'dompurify';
 import ImageViewer from './ImageViewer';
 import firestore, { doc, updateDoc } from '../firebase/firestore';
-import { ImageType } from '../types/Image';
+import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 
 interface HeadCell {
   disablePadding: boolean;
@@ -220,6 +220,47 @@ const SpeakerTable = (props: {
   //   hasBannerImage: false,
   // });
 
+  const handleImageUpdate = async (newImage: ImageType | ImageSizeType) => {
+    if (isImageType(newImage)) {
+      await setSpeakerImage(newImage as ImageType);
+    } else {
+      await removeImage(newImage as ImageSizeType);
+    }
+  };
+
+  const removeImage = async (imageType: ImageSizeType) => {
+    if (!selectedSpeaker) {
+      return;
+    }
+    try {
+      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id), {
+        images: selectedSpeaker.images.filter((image) => image.type !== imageType),
+      });
+      props.setSpeakers((oldSpeakers) =>
+        oldSpeakers.map((speaker) => {
+          if (speaker.id === selectedSpeaker.id) {
+            return {
+              ...speaker,
+              images: speaker.images.filter((image) => image.type !== imageType),
+            };
+          }
+          return speaker;
+        })
+      );
+      setSelectedSpeaker((oldSpeaker) => {
+        if (oldSpeaker) {
+          return {
+            ...oldSpeaker,
+            images: oldSpeaker.images.filter((image) => image.type !== imageType),
+          };
+        }
+        return oldSpeaker;
+      });
+    } catch (error) {
+      alert(error);
+    }
+  };
+
   const setSpeakerImage = async (newImage: ImageType) => {
     if (!selectedSpeaker) {
       return;
@@ -385,7 +426,11 @@ const SpeakerTable = (props: {
         <div style={{ textAlign: 'center' }}>
           <h2>{selectedSpeaker?.name}</h2>
           {selectedSpeaker && (
-            <ImageViewer images={selectedSpeaker.images} speaker={selectedSpeaker} newImageCallback={setSpeakerImage} />
+            <ImageViewer
+              images={selectedSpeaker.images}
+              speaker={selectedSpeaker}
+              newImageCallback={handleImageUpdate}
+            />
           )}
         </div>
         {/* </div> */}

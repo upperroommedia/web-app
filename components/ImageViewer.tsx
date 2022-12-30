@@ -1,4 +1,4 @@
-import { AspectRatio, ImageSizes, ImageType } from '../types/Image';
+import { AspectRatio, ImageSizeType, ImageSizes, ImageType } from '../types/Image';
 import { sanitize } from 'dompurify';
 import ImageSelector from './ImageSelector';
 import { useState } from 'react';
@@ -7,11 +7,13 @@ import Image from 'next/image';
 import styles from '../styles/ImageViewer.module.css';
 import { ISpeaker } from '../types/Speaker';
 import Button from '@mui/material/Button';
+import Cancel from '@mui/icons-material/Cancel';
+import Tooltip from '@mui/material/Tooltip';
 
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 interface propsType {
   images: ImageType[];
-  newImageCallback: (image: ImageType) => void;
+  newImageCallback: (image: ImageType | ImageSizeType) => void;
   speaker?: ISpeaker;
   vertical?: boolean;
 }
@@ -58,6 +60,18 @@ function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType)
                   />
                 </div>
                 <h3 className={styles.imageCover}>Change Image</h3>
+                <div className={styles.removeImage} onMouseOver={(e) => e.preventDefault()}>
+                  <Tooltip title="Remove Image" placement="right-start">
+                    <Cancel
+                      sx={{ color: 'red' }}
+                      onClick={() => {
+                        newImageCallback(image.type);
+                        setSelectedImage(undefined);
+                        setNewSelectedImage(undefined);
+                      }}
+                    />
+                  </Tooltip>
+                </div>
               </div>
               <div
                 key={`${image.id}-label`}

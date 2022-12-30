@@ -36,7 +36,7 @@ import { sanitize } from 'dompurify';
 import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import ImageViewer from '../components/ImageViewer';
-import { ImageType } from '../types/Image';
+import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -188,19 +188,28 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     }
   };
 
-  const handleNewImage = (image: ImageType) => {
+  const handleNewImage = (image: ImageType | ImageSizeType) => {
     setSermon((oldSermon) => {
-      let newImages: ImageType[] = [];
-      if (oldSermon.images.find((img) => img.type === image.type)) {
-        newImages = oldSermon.images.map((img) => (img.type === image.type ? image : img));
+      // check if image is ImageType or ImageSizeType
+      if (isImageType(image)) {
+        const castedImage = image as ImageType;
+        let newImages: ImageType[] = [];
+        if (oldSermon.images.find((img) => img.type === castedImage.type)) {
+          newImages = oldSermon.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+        } else {
+          newImages = [...oldSermon.images, castedImage];
+        }
+        return {
+          ...oldSermon,
+          images: newImages,
+        };
       } else {
-        newImages = [...oldSermon.images, image];
+        const imageSizeType = image as ImageSizeType;
+        return {
+          ...oldSermon,
+          images: oldSermon.images.filter((img) => img.type !== imageSizeType),
+        };
       }
-      console.log(newImages);
-      return {
-        ...oldSermon,
-        images: newImages,
-      };
     });
   };
 
@@ -298,7 +307,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           }}
           onChange={async (_, newValue) => {
             if (newValue.length === 1) {
-              updateSermon('images', newValue[0].images);
+              const currentTypes = sermon.images.map((img) => img.type);
+              const newImages = [
+                ...sermon.images,
+                ...newValue[0].images.filter((img) => !currentTypes.includes(img.type)),
+              ];
+              updateSermon('images', newImages);
             }
             if (newValue !== null && newValue.length <= 3) {
               updateSermon('speakers', newValue);
@@ -337,6 +351,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 onDelete={() => {
                   setSpeakerError({ error: false, message: '' });
                   setSermon((previousSermon) => {
+                    const newImages = previousSermon.images.filter((img) => {
+                      return !speaker.images?.find((image) => image.id === img.id);
+                    });
+                    updateSermon('images', newImages);
                     const previousSpeakers = previousSermon.speakers;
                     const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
                     return {
@@ -510,7 +528,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             {file ? (
               <div style={{ width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'right' }}>
-                  <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)}></Cancel>
+                  <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)} />
                 </div>
                 <DynamicAudioTrimmer
                   url={file.preview}

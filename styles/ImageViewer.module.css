@@ -18,7 +18,7 @@
   width: 100%;
 }
 
-.imageHover:hover > div {
+.imageHover:not(:has(.removeImage:hover)):hover > div:first-child {
   -webkit-filter: brightness(60%);
   -webkit-transition: all 0.1s ease;
   -moz-transition: all 0.1s ease;
@@ -26,8 +26,32 @@
   -ms-transition: all 0.1s ease;
   transition: all 0.1s ease;
 }
-.imageHover:hover .imageCover {
+
+.imageHover:not(:has(.removeImage:hover)):hover .imageCover {
   display: block;
+}
+
+.removeImage:hover {
+  -webkit-filter: brightness(60%);
+  -webkit-transition: all 0.1s ease;
+  -moz-transition: all 0.1s ease;
+  -o-transition: all 0.1s ease;
+  -ms-transition: all 0.1s ease;
+  transition: all 0.1s ease;
+}
+
+.removeImage {
+  -webkit-filter: brightness(100%);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 50%;
+  background: white;
 }
 
 .imageCover {

@@ -4,11 +4,13 @@ import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { storage, firestore } from 'firebase-admin';
 import {
+  ImageSizeType,
+  ImageSizes,
   ImageType,
   // resizeType,
   // supportedContentTypes
 } from '../../types/Image';
-
+import { HttpsError } from 'firebase-functions/v2/https';
 // import { FirestoreDataConverter } from '@google-cloud/firestore';
 // import { modifyImage, ResizedImageResult } from './resize-image';
 import fs from 'fs';
@@ -81,6 +83,7 @@ const handleImageUpload = onObjectFinalized(
   async (storageEvent): Promise<void> => {
     const object = storageEvent.data;
     const filePath = object.name ? object.name : '';
+    const metadata = object.metadata;
     logger.log(object);
     logger.log('Object Finalized', filePath);
     if (!filePath.startsWith('speaker-images/') || filePath.endsWith('speaker-images/')) {
@@ -96,9 +99,21 @@ const handleImageUpload = onObjectFinalized(
     if (!object.contentType.startsWith('image/')) {
       return logger.log(`File of type '${object.contentType}' is not an image, no processing is required`);
     }
-    if (object.metadata && object.metadata.resizedImage === 'true') {
+    if (!metadata) {
+      return logger.log('No metadata found for image');
+    }
+    if (metadata.resizedImage === 'true') {
       return logger.log('File is already a resized image, no processing is required');
     }
+    if (metadata.type && !ImageSizes.includes(metadata.type as ImageSizeType)) {
+      return logger.log('File has no type');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const imageName = object.name.split('/').pop();
+    if (!imageName) {
+      throw new HttpsError('invalid-argument', 'Image name is not valid');
+    }
+    logger.log('ImageName', imageName);
     logger.log('Data', object);
 
     let originalFile = '';
@@ -120,7 +135,7 @@ const handleImageUpload = onObjectFinalized(
 
       // uploading to subsplash
       logger.log('uploading to subsplash');
-      const subsplashImageId = await uploadImageToSubsplash(object.name, originalFile);
+      const subsplashImageId = await uploadImageToSubsplash(imageName, originalFile);
 
       // uploading to firestore
       const publicUrl = bucket.file(object.name).publicUrl();
@@ -130,9 +145,9 @@ const handleImageUpload = onObjectFinalized(
         id: subsplashImageId,
         subsplashId: subsplashImageId,
         size: 'original',
-        type: 'square',
+        type: metadata.type as ImageSizeType,
         downloadLink: publicUrl,
-        name: object.name,
+        name: imageName,
         dateAddedMillis: new Date().getTime(),
       };
       logger.log('adding image with metadata to firestore', image);
