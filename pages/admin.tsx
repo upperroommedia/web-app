@@ -213,6 +213,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   useEffect(() => {
     const g = async () => {
       await getSpeakersFirebase();
+      await fetchUsers();
     };
     g();
   }, []);
@@ -237,7 +238,6 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       </TabPanel>
       <TabPanel value={tab} index={1}>
         <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-          <button onClick={fetchUsers}>fetchusers</button>
           <UserTable users={users} handleRoleChange={handleRoleChange} />
           <Button variant="outlined" onClick={() => setShowPopUp(true)}>
             Set User Role
