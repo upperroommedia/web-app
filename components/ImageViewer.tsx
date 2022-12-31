@@ -18,7 +18,7 @@ interface propsType {
   vertical?: boolean;
 }
 
-function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType) {
+const ImageViewer = (props: propsType) => {
   const [selectedImage, setSelectedImage] = useState<ImageType>();
   const [newSelectedImage, setNewSelectedImage] = useState<ImageType>();
   const [imageSelectorPopup, setImageSelectorPopup] = useState<boolean>(false);
@@ -28,14 +28,14 @@ function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType)
         style={{
           height: '100%',
           display: 'grid',
-          gridTemplateColumns: vertical ? '1fr' : 'repeat(3, 1fr)',
+          gridTemplateColumns: props.vertical ? '1fr' : 'repeat(3, 1fr)',
           gap: '10px',
           alignItems: 'center',
           justifyItems: 'center',
         }}
       >
         {ImageSizes.map((type, i) => {
-          const image: ImageType | undefined = images.find((image) => image.type === type);
+          const image: ImageType | undefined = props.images.find((image) => image.type === type);
           return image ? (
             <>
               <div key={`${image.id}-image`} id={`${image.id}-image`} className={styles.imageHover}>
@@ -65,7 +65,7 @@ function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType)
                     <Cancel
                       sx={{ color: 'red' }}
                       onClick={() => {
-                        newImageCallback(image.type);
+                        props.newImageCallback(image.type);
                         setSelectedImage(undefined);
                         setNewSelectedImage(undefined);
                       }}
@@ -79,7 +79,7 @@ function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType)
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gridRowStart: vertical ? 'unset' : 2,
+                  gridRowStart: props.vertical ? 'unset' : 2,
                   alignItems: 'center',
                 }}
               >
@@ -124,16 +124,16 @@ function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType)
               color="primary"
               disabled={selectedImage.id === newSelectedImage?.id}
               onClick={() => {
-                newSelectedImage && newImageCallback(newSelectedImage);
+                newSelectedImage && props.newImageCallback(newSelectedImage);
                 setImageSelectorPopup(false);
               }}
             >
-              Set Speaker Image
+              Set {props.speaker ? 'Speaker' : 'Sermon'} Image
             </Button>
           }
         >
           <ImageSelector
-            selectedSpeaker={speaker}
+            selectedSpeaker={props.speaker}
             selectedImageFromSpeakerDetails={selectedImage}
             newSelectedImage={newSelectedImage}
             setNewSelectedImage={setNewSelectedImage}
@@ -142,6 +142,6 @@ function ImageViewer({ images, newImageCallback, speaker, vertical }: propsType)
       )}
     </>
   );
-}
+};
 
 export default ImageViewer;

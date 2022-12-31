@@ -10,10 +10,11 @@ import { ImageSizeType } from '../types/Image';
 import OutlinedInput from '@mui/material/OutlinedInput';
 import InputAdornment from '@mui/material/InputAdornment';
 import dynamic from 'next/dynamic';
+
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 interface Props {
   imgSrc?: string;
-  onFinish: (croppedImageData: CroppedImageData) => void;
+  onFinish: (croppedImageData: CroppedImageData, name: string) => void;
   type: ImageSizeType;
   title: string;
   setTitle: (newTitle: string) => void;
@@ -27,6 +28,7 @@ const typeToAspectRatio = {
 
 const ImageUploader = (props: Props) => {
   const [imgSrc, setImgSrc] = useState(props.imgSrc);
+  const [imageType, setImageType] = useState('');
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -42,6 +44,8 @@ const ImageUploader = (props: Props) => {
       const reader = new FileReader();
       reader.addEventListener('load', () => setImgSrc(reader.result?.toString() || ''));
       reader.readAsDataURL(e.target.files[0]);
+      props.title === '' && props.setTitle(e.target.files[0].name.split('.')[0]);
+      setImageType(e.target.files[0].type.split('/').pop()!);
     }
   }
 
@@ -79,7 +83,7 @@ const ImageUploader = (props: Props) => {
             if (imgSrc && croppedAreaPixels) {
               const croppedImage = await getCroppedImg(imgSrc, croppedAreaPixels, rotation, props.type);
               if (croppedImage) {
-                props.onFinish(croppedImage);
+                props.onFinish(croppedImage, `${props.title}-${props.type}.${imageType}`);
                 setImgSrc(undefined);
               }
             }
@@ -87,6 +91,7 @@ const ImageUploader = (props: Props) => {
           variant="contained"
           color="primary"
           classes={{ root: styles.cropButton }}
+          disabled={props.title === ''}
         >
           Crop
         </Button>
@@ -146,7 +151,7 @@ const ImageUploader = (props: Props) => {
             />
             <OutlinedInput
               id="outlined-adornment-title"
-              endAdornment={<InputAdornment position="end">{`-${props.type}`}</InputAdornment>}
+              endAdornment={<InputAdornment position="end">{`-${props.type}.${imageType}`}</InputAdornment>}
               aria-describedby="outlined-title-helper-text"
               inputProps={{
                 'aria-label': 'title',

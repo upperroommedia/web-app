@@ -31,7 +31,9 @@ const ImageSelector = (props: {
 }) => {
   const [images, setImages] = useState<ImageType[]>([]);
   const [title, setTitle] = useState(
-    `${props.selectedSpeaker?.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg` || ''
+    (props.selectedSpeaker &&
+      `${props.selectedSpeaker?.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg`) ||
+      ''
   );
   const [lastImage, setLastImage] = useState<QueryDocumentSnapshot<DocumentData>>();
   const fetchImages = async () => {
@@ -143,7 +145,7 @@ const ImageSelector = (props: {
         {/* </div> */}
       </InfiniteScroll>
       <ImageUploader
-        onFinish={async (imgSrc) => saveImage(imgSrc, title)}
+        onFinish={async (imgSrc, name) => saveImage(imgSrc, name)}
         type={props.selectedImageFromSpeakerDetails.type}
         title={title}
         setTitle={setTitle}
