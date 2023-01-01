@@ -15,7 +15,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
-import firestore, { deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
+import firestore, { arrayRemove, deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
 import storage, { deleteObject, getDownloadURL, ref } from '../firebase/storage';
 import { emptySermon } from '../types/Sermon';
 import { Sermon, sermonStatusType } from '../types/SermonTypes';
@@ -67,13 +67,15 @@ Props) => {
   }, [updatedSermon]);
 
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
-  const handleDelete = async (id: string) => {
+  const handleDelete = async () => {
     try {
       if (sermon.subsplashId) {
         await deleteFromSubsplash();
       }
-      await deleteObject(ref(storage, `sermons/${id}`));
-      await deleteDoc(doc(firestore, 'sermons', id));
+      await deleteObject(ref(storage, `sermons/${sermon.key}`));
+      await deleteDoc(doc(firestore, 'sermons', sermon.key));
+      const seriesRef = doc(firestore, 'series', sermon.series);
+      await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
       alert(error);
@@ -264,11 +266,10 @@ Props) => {
                 <Button
                   aria-label="confirm delete sermon"
                   variant="contained"
-                  onClick={() => {
-                    handleDelete(sermon.key).then(() => {
-                      setDeleteConfirmationPopup(false);
-                      setDeleteChecked(false);
-                    });
+                  onClick={async () => {
+                    await handleDelete();
+                    setDeleteConfirmationPopup(false);
+                    setDeleteChecked(false);
                   }}
                   color="primary"
                   disabled={!deleteChecked}
