@@ -113,7 +113,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
     if (newSeries === '') {
       setNewSeriesError({ error: true, message: 'Series cannot be empty' });
-    } else if (seriesArray.includes(newSeries)) {
+    } else if (seriesArray.map((series) => series.toLowerCase()).includes(newSeries.toLowerCase())) {
       setNewSeriesError({ error: true, message: 'Series already exists' });
     } else {
       setNewSeriesError({ error: false, message: '' });
@@ -592,7 +592,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         button={
           <Button
             variant="contained"
-            disabled={newSeries === '' || seriesArray.includes(newSeries)}
+            disabled={
+              newSeries === '' || seriesArray.map((series) => series.toLowerCase()).includes(newSeries.toLowerCase())
+            }
             onClick={async () => {
               try {
                 await addNewSeries(newSeries);
