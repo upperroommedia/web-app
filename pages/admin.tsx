@@ -30,6 +30,11 @@ import SpeakerTable from '../components/SpeakerTable';
 import { createFunction } from '../utils/createFunction';
 import UserTable from '../components/UserTable';
 import { fetchSpeakerResults } from './uploader';
+import { Series } from '../types/Series';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -84,6 +89,8 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   const [rowsPerPage, setRowsPerPage] = useState(5);
   const [speakerInput, setSpeakerInput] = useState<string>('');
 
+  const [series, setSeries] = useState<Series[]>([]);
+
   const [queryState, setQueryState] = useState<Query<DocumentData>>();
 
   const sermonsRef = collection(firestore, 'sermons');
@@ -103,6 +110,14 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     const getImage = createFunction<any, any>('listusers');
     const res = await getImage({});
     setUsers(res.result);
+  };
+
+  const fetchSeries = async () => {
+    const seriesQuery = query(collection(firestore, 'series'));
+    const seriesQuerySnapshot = await getDocs(seriesQuery);
+    seriesQuerySnapshot.docs.forEach((doc) => {
+      setSeries((oldSeries) => [...oldSeries, doc.data() as Series]);
+    });
   };
 
   const handlePageChange = async (newPage: number) => {
@@ -214,6 +229,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     const g = async () => {
       await getSpeakersFirebase();
       await fetchUsers();
+      await fetchSeries();
     };
     g();
   }, []);
@@ -225,6 +241,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
           <Tab label="Sermons" />
           <Tab label="Users" />
           <Tab label="Speakers" />
+          <Tab label="Series" />
           <Tab label="Topics" />
         </Tabs>
       </Box>
@@ -284,6 +301,46 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
         </div>
       </TabPanel>
       <TabPanel value={tab} index={3}>
+        <div>
+          <h2>Manage Series</h2>
+          {series.map((s) => {
+            return (
+              <Accordion key={s.name}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <p>{s.name}</p>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '10px' }}>
+                      <Button color="info" variant="contained" size="small">
+                        <p>Edit Series Name</p>
+                      </Button>
+                      <div style={{ width: '5px' }} />
+                      <Button color="error" variant="contained" size="small">
+                        <p>Delete Series</p>
+                      </Button>
+                    </div>
+                    {sermons &&
+                      s.sermonIds.map((sermonId) => {
+                        return (
+                          <div key={sermonId}>
+                            <SermonsList
+                              sermons={sermons.docs
+                                .filter((doc) => (doc.data() as Sermon).key === sermonId)
+                                .map((doc) => doc.data() as Sermon)}
+                              minimal={true}
+                            />
+                          </div>
+                        );
+                      })}
+                  </div>
+                </AccordionDetails>
+              </Accordion>
+            );
+          })}
+        </div>
+      </TabPanel>
+      <TabPanel value={tab} index={4}>
         Manage Topics
       </TabPanel>
       <PopUp

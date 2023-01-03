@@ -1,0 +1,23 @@
+{
+  "name": "speaker-images/output-onlinepngtools",
+  "bucket": "urm-app-images",
+  "metageneration": 1,
+  "generation": 1672444618195,
+  "contentType": "image/jpeg",
+  "storageClass": "STANDARD",
+  "contentDisposition": "inline",
+  "downloadTokens": [
+    "a7c2dcb1-7700-436a-a7d1-8a7ca48bd395"
+  ],
+  "etag": "uy5Ee34XJrJxZu7OImEOgwBWzko",
+  "customMetadata": {
+    "name": "output-onlinepngtools",
+    "size": "original",
+    "type": "banner"
+  },
+  "timeCreated": "2022-12-30T23:56:58.195Z",
+  "updated": "2022-12-30T23:56:58.195Z",
+  "size": 11135,
+  "md5Hash": "tbXxSYAurL447zHSc2KjCA==",
+  "crc32c": "338975828"
+}

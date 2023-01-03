@@ -35,6 +35,7 @@ interface Props {
   playing: boolean;
   playlist: Sermon[];
   setPlaylist: (playlist: Sermon[]) => void;
+  minimal?: boolean;
   // handleSermonClick: (sermon: Sermon) => void;
 }
 
@@ -43,6 +44,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   playing,
   playlist,
   setPlaylist,
+  minimal
 }: // handleSermonClick,
 Props) => {
   const { user } = useAuth();
@@ -74,8 +76,10 @@ Props) => {
       }
       await deleteObject(ref(storage, `sermons/${sermon.key}`));
       await deleteDoc(doc(firestore, 'sermons', sermon.key));
-      const seriesRef = doc(firestore, 'series', sermon.series);
-      await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+      if (sermon.series !== '') {
+        const seriesRef = doc(firestore, 'series', sermon.series);
+        await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+      }
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
       alert(error);
@@ -193,34 +197,38 @@ Props) => {
           <h1 className={styles.title}>{`${sermon.title}: ${sermon.subtitle}`}</h1>
           <p className={styles.description}>{sermon.description}</p>
           <div className={styles.bottomDiv}>
-            <IconButton
-              aria-label="toggle play/pause"
-              onClick={(e) => {
-                e.preventDefault();
-                setCurrentSermon(sermon);
-                togglePlaying(!playing);
-                // TODO(1): Handle CLICK EVENT
-              }}
-            >
-              {playing ? <PauseCircleIcon /> : <PlayCircleIcon />}
-            </IconButton>
-            <div className={styles.bottomDivText}>
-              <span className={styles.date}>{sermon.dateString}</span>
-              <span>·</span>
-              {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
-                <>
-                  <span className={styles.timeLeft}>
-                    {formatRemainingTime(Math.floor(sermon.durationSeconds) - sermon.currentSecond) +
-                      (playing || sermon.currentSecond > 0 ? ' left' : '')}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>Played</span>
-                  <span style={{ color: 'lightgreen' }}> &#10003;</span>
-                </>
-              )}
-            </div>
+            {!minimal && (
+              <>
+                <IconButton
+                  aria-label="toggle play/pause"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCurrentSermon(sermon);
+                    togglePlaying(!playing);
+                    // TODO(1): Handle CLICK EVENT
+                  }}
+                >
+                  {playing ? <PauseCircleIcon /> : <PlayCircleIcon />}
+                </IconButton>
+                <div className={styles.bottomDivText}>
+                  <span className={styles.date}>{sermon.dateString}</span>
+                  <span>·</span>
+                  {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
+                    <>
+                      <span className={styles.timeLeft}>
+                        {formatRemainingTime(Math.floor(sermon.durationSeconds) - sermon.currentSecond) +
+                          (playing || sermon.currentSecond > 0 ? ' left' : '')}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Played</span>
+                      <span style={{ color: 'lightgreen' }}> &#10003;</span>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
             {sermon.currentSecond < Math.floor(sermon.durationSeconds) && (playing || sermon.currentSecond > 0) && (
               <progress
                 className={styles.songProgress}

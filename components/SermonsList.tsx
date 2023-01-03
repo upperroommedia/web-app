@@ -11,9 +11,10 @@ import useAudioPlayer from '../context/audio/audioPlayerContext';
 
 interface Props {
   sermons: Sermon[];
+  minimal?: boolean;
 }
 
-const SermonsList = ({ sermons }: Props) => {
+const SermonsList = ({ sermons, minimal }: Props) => {
   const { playing, playlist, setPlaylist, currentSermon, currentSecond } = useAudioPlayer();
 
   useEffect(() => {
@@ -36,24 +37,41 @@ const SermonsList = ({ sermons }: Props) => {
         // gap: '3px',
       }}
     >
-      {playlist.map((sermon, i) => {
-        const key = `sermon_list_card_${i}`;
-        if (currentSermon.key === sermon.key) {
-          return (
+      {minimal
+        ? sermons.map((sermon) => (
             <SermonListCard
               sermon={{ ...sermon, currentSecond }}
-              playing={playing}
-              key={key}
+              playing={false}
+              key={sermon.key}
               playlist={playlist}
               setPlaylist={setPlaylist}
+              minimal={true}
             />
-          );
-        } else {
-          return (
-            <SermonListCard sermon={sermon} playing={false} key={key} playlist={playlist} setPlaylist={setPlaylist} />
-          );
-        }
-      })}
+          ))
+        : playlist.map((sermon, i) => {
+            const key = `sermon_list_card_${i}`;
+            if (currentSermon.key === sermon.key) {
+              return (
+                <SermonListCard
+                  sermon={{ ...sermon, currentSecond }}
+                  playing={playing}
+                  key={key}
+                  playlist={playlist}
+                  setPlaylist={setPlaylist}
+                />
+              );
+            } else {
+              return (
+                <SermonListCard
+                  sermon={sermon}
+                  playing={false}
+                  key={key}
+                  playlist={playlist}
+                  setPlaylist={setPlaylist}
+                />
+              );
+            }
+          })}
     </div>
   );
 };
