@@ -14,6 +14,9 @@ import firestore, {
   query,
   QueryDocumentSnapshot,
   startAfter,
+  updateDoc,
+  doc,
+  deleteDoc,
 } from '../firebase/firestore';
 import { Sermon } from '../types/SermonTypes';
 import SermonsList from '../components/SermonsList';
@@ -35,6 +38,7 @@ import Accordion from '@mui/material/Accordion';
 import AccordionSummary from '@mui/material/AccordionSummary';
 import AccordionDetails from '@mui/material/AccordionDetails';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import DeleteEntityPopup from '../components/DeleteEntityPopup';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -90,6 +94,15 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   const [speakerInput, setSpeakerInput] = useState<string>('');
 
   const [series, setSeries] = useState<Series[]>([]);
+  const [selectedSeries, setSelectedSeries] = useState<Series>();
+  const [newSeriesName, setNewSeriesName] = useState<string>('');
+  const [editSeriesPopup, setEditSeriesPopup] = useState<boolean>(false);
+  const [deleteSeriesPopup, setDeleteSeriesPopup] = useState<boolean>(false);
+  const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
+    error: false,
+    message: '',
+  });
+  const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
 
   const [queryState, setQueryState] = useState<Query<DocumentData>>();
 
@@ -225,6 +238,19 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     setSpeakers(res);
   };
 
+  const handleSeriesDelete = async () => {
+    if (selectedSeries) {
+      await deleteDoc(doc(firestore, 'series', selectedSeries.id));
+      selectedSeries.sermonIds.forEach(async (id) => {
+        const sermonRef = doc(firestore, 'sermons', id);
+        await updateDoc(sermonRef, {
+          series: {},
+        });
+      });
+      setSeries((oldSeries) => oldSeries.filter((series) => series.id !== selectedSeries.id));
+    }
+  };
+
   useEffect(() => {
     const g = async () => {
       await getSpeakersFirebase();
@@ -233,6 +259,21 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     };
     g();
   }, []);
+
+  useEffect(() => {
+    if (!userHasTypedInSeries) {
+      setNewSeriesError({ error: false, message: '' });
+      return;
+    }
+
+    if (newSeriesName === '') {
+      setNewSeriesError({ error: true, message: 'Series cannot be empty' });
+    } else if (series.map((series) => series.name.toLowerCase()).includes(newSeriesName.toLowerCase())) {
+      setNewSeriesError({ error: true, message: 'Series already exists' });
+    } else {
+      setNewSeriesError({ error: false, message: '' });
+    }
+  }, [newSeriesName, userHasTypedInSeries, series]);
 
   return (
     <>
@@ -305,18 +346,26 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
           <h2>Manage Series</h2>
           {series.map((s) => {
             return (
-              <Accordion key={s.name}>
+              <Accordion key={s.id} onClick={() => setSelectedSeries(s)}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <p>{s.name}</p>
                 </AccordionSummary>
                 <AccordionDetails>
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '10px' }}>
-                      <Button color="info" variant="contained" size="small">
-                        <p>Edit Series Name</p>
+                      <Button
+                        color="info"
+                        variant="contained"
+                        size="small"
+                        onClick={() => {
+                          setEditSeriesPopup(true);
+                          setNewSeriesName(s.name);
+                        }}
+                      >
+                        <p>Edit Series</p>
                       </Button>
                       <div style={{ width: '5px' }} />
-                      <Button color="error" variant="contained" size="small">
+                      <Button color="error" variant="contained" size="small" onClick={() => setDeleteSeriesPopup(true)}>
                         <p>Delete Series</p>
                       </Button>
                     </div>
@@ -346,7 +395,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       <PopUp
         title="Set User Role"
         open={showPopUp}
-        setOpen={() => setShowPopUp(false)}
+        setOpen={setShowPopUp}
         button={
           <Button variant="outlined" onClick={() => handleRoleChange(email, role)}>
             Submit
@@ -380,6 +429,72 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
           {message}
         </>
       </PopUp>
+      <PopUp
+        title="Edit Series"
+        open={editSeriesPopup}
+        setOpen={setEditSeriesPopup}
+        onClose={() => {
+          setUserHasTypedInSeries(false);
+          setNewSeriesName('');
+          setSelectedSeries(undefined);
+        }}
+        button={
+          <Button
+            variant="contained"
+            disabled={
+              newSeriesName === '' ||
+              series.map((series) => series.name.toLowerCase()).includes(newSeriesName.toLowerCase())
+            }
+            onClick={async () => {
+              try {
+                const seriesRef = doc(firestore, 'series', selectedSeries!.id);
+                await updateDoc(seriesRef, {
+                  name: newSeriesName,
+                });
+                setSeries((oldSeries) =>
+                  oldSeries.map((s) => {
+                    if (s.name === selectedSeries?.name) {
+                      return { ...s, name: newSeriesName };
+                    }
+                    return s;
+                  })
+                );
+                selectedSeries?.sermonIds.forEach((id) => {
+                  const sermonRef = doc(firestore, 'sermons', id);
+                  updateDoc(sermonRef, {
+                    series: { ...selectedSeries, name: newSeriesName },
+                  });
+                });
+                setEditSeriesPopup(false);
+              } catch (e) {
+                alert(e);
+              }
+            }}
+          >
+            Submit
+          </Button>
+        }
+      >
+        <>
+          <div style={{ display: 'flex', padding: '20px', gap: '10px' }}>
+            <TextField
+              value={newSeriesName}
+              onChange={(e) => {
+                setNewSeriesName(e.target.value);
+                !userHasTypedInSeries && setUserHasTypedInSeries(true);
+              }}
+              error={newSeriesError.error}
+              label={newSeriesError.error ? newSeriesError.message : 'Series'}
+            />
+          </div>
+        </>
+      </PopUp>
+      <DeleteEntityPopup
+        entityBeingDeleten="series"
+        handleDelete={handleSeriesDelete}
+        deleteConfirmationPopup={deleteSeriesPopup}
+        setDeleteConfirmationPopup={setDeleteSeriesPopup}
+      />
     </>
   );
 };

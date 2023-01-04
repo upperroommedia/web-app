@@ -37,8 +37,8 @@ const ImageViewer = (props: propsType) => {
         {ImageSizes.map((type, i) => {
           const image: ImageType | undefined = props.images.find((image) => image.type === type);
           return image ? (
-            <>
-              <div key={`${image.id}-image`} id={`${image.id}-image`} className={styles.imageHover}>
+            <div key={`${image.id}-image`}>
+              <div id={`${image.id}-image`} className={styles.imageHover}>
                 <div
                   className={styles.imageContainer}
                   style={{
@@ -86,7 +86,7 @@ const ImageViewer = (props: propsType) => {
                 <h4 style={{ margin: 0 }}>{image.name}</h4>
                 <span>{`${image.type} ${image.width}x${image.height}`}</span>
               </div>
-            </>
+            </div>
           ) : (
             <div key={i} className={styles.imageHover}>
               <div

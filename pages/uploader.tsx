@@ -18,7 +18,16 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
-import firestore, { collection, doc, getDoc, getDocs, query } from '../firebase/firestore';
+import firestore, {
+  arrayRemove,
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  updateDoc,
+} from '../firebase/firestore';
 import { emptySermon, getDateString, createSermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -37,6 +46,7 @@ import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import ImageViewer from '../components/ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
+import { Series } from '../types/Series';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -79,7 +89,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
-  const [seriesArray, setSeriesArray] = useState<string[]>([]);
+  const [seriesArray, setSeriesArray] = useState<Series[]>([]);
   const [speakersArray, setSpeakersArray] = useState<ISpeaker[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
   const [trimStart, setTrimStart] = useState<number>(0);
@@ -113,7 +123,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
     if (newSeries === '') {
       setNewSeriesError({ error: true, message: 'Series cannot be empty' });
-    } else if (seriesArray.map((series) => series.toLowerCase()).includes(newSeries.toLowerCase())) {
+    } else if (seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())) {
       setNewSeriesError({ error: true, message: 'Series already exists' });
     } else {
       setNewSeriesError({ error: false, message: '' });
@@ -129,7 +139,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
       const seriesQuery = query(collection(firestore, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
-      setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
+      setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data() as Series));
     };
     fetchData();
   }, []);
@@ -144,7 +154,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getDate() === date?.getDate() &&
       sermon1Date.getMonth() === date?.getMonth() &&
       sermon1Date.getFullYear() === date?.getFullYear() &&
-      sermon1.series === sermon.series &&
+      sermon1.series.name === sermon.series.name &&
+      sermon1.series.id === sermon.series.id &&
       JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
@@ -283,11 +294,26 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <Autocomplete
             fullWidth
             value={sermon.series || null}
-            onChange={(_, newValue) => {
-              newValue === null ? updateSermon('series', '') : updateSermon('series', newValue);
+            onChange={async (_, newValue) => {
+              if (newValue !== null) {
+                const newSeriesRef = doc(firestore, 'series', newValue.id);
+                await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
+              }
+              if (sermon.series.name !== undefined && newValue === null) {
+                const seriesRef = doc(firestore, 'series', sermon.series.id);
+                await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+              }
+              newValue === null ? updateSermon('series', {} as Series) : updateSermon('series', newValue);
             }}
             id="series-input"
             options={seriesArray}
+            renderOption={(props, option) => <li {...props}>{option.name}</li>}
+            getOptionLabel={(option) => option?.name || ''}
+            isOptionEqualToValue={(option, value) =>
+              value.name === undefined ||
+              option.name === undefined ||
+              (option.name === value.name && option.id === value.id)
+            }
             renderInput={(params) => <TextField {...params} label="Series" />}
           />
           <p style={{ paddingLeft: '10px' }}>or</p>
@@ -580,11 +606,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         </div>
         <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>{uploadProgress.message}</p>
       </Box>
-
       <DynamicPopUp
         title={'Add new series'}
         open={newSeriesPopup}
-        setOpen={() => setNewSeriesPopup(false)}
+        setOpen={setNewSeriesPopup}
         onClose={() => {
           setUserHasTypedInSeries(false);
           setNewSeries('');
@@ -593,14 +618,15 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <Button
             variant="contained"
             disabled={
-              newSeries === '' || seriesArray.map((series) => series.toLowerCase()).includes(newSeries.toLowerCase())
+              newSeries === '' ||
+              seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())
             }
             onClick={async () => {
               try {
-                await addNewSeries(newSeries);
+                const newSeriesId = await addNewSeries(newSeries);
+                const seriesToAdd = { id: newSeriesId, name: newSeries, sermonIds: [] };
                 setNewSeriesPopup(false);
-                seriesArray.push(newSeries);
-                updateSermon('series', newSeries);
+                seriesArray.push(seriesToAdd);
                 setNewSeries('');
               } catch (error) {
                 setNewSeriesError({ error: true, message: JSON.stringify(error) });
