@@ -1,4 +1,4 @@
-import firestore, { arrayUnion, deleteDoc, doc, setDoc, updateDoc } from '../../firebase/firestore';
+import firestore, { deleteDoc, doc, setDoc } from '../../firebase/firestore';
 import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
@@ -19,12 +19,6 @@ interface uploadFileProps {
 const uploadFile = async (props: uploadFileProps) => {
   const sermonRef = ref(storage, `sermons/${props.sermon.key}`);
 
-  if (props.sermon.series !== '') {
-    const seriesRef = doc(firestore, 'series', props.sermon.series);
-    await updateDoc(seriesRef, {
-      sermonIds: arrayUnion(props.sermon.key),
-    });
-  }
   // const sermonRef = ref(storage, `sermons/${file.name}`);
   const metadata: UploadMetadata = {
     customMetadata: {
