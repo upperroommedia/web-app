@@ -29,6 +29,7 @@ import UnpublishedIcon from '@mui/icons-material/Unpublished';
 import Image from 'next/image';
 import Logo from '../public/upper_room_media_icon.png';
 import { sanitize } from 'dompurify';
+import DeleteEntityPopup from './DeleteEntityPopup';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -44,7 +45,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   playing,
   playlist,
   setPlaylist,
-  minimal
+  minimal,
 }: // handleSermonClick,
 Props) => {
   const { user } = useAuth();
@@ -55,7 +56,6 @@ Props) => {
   const [autoPublish, setAutoPublish] = useState<boolean>(false);
   const [updatedSermon, setUpdatedSermon] = useState<Sermon>(emptySermon);
   const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [deleteChecked, setDeleteChecked] = useState<boolean>(false);
 
   useEffect(() => {
     if (updatedSermon !== emptySermon) {
@@ -76,8 +76,8 @@ Props) => {
       }
       await deleteObject(ref(storage, `sermons/${sermon.key}`));
       await deleteDoc(doc(firestore, 'sermons', sermon.key));
-      if (sermon.series !== '') {
-        const seriesRef = doc(firestore, 'series', sermon.series);
+      if (sermon.series?.name !== undefined) {
+        const seriesRef = doc(firestore, 'series', sermon.series.id);
         await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
       }
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
@@ -266,33 +266,12 @@ Props) => {
                 </div>
               </div>
             </PopUp>
-            <PopUp
-              title={'Are you sure you want to permanently delete this sermon?'}
-              open={deleteConfirmationPopup}
-              setOpen={() => setDeleteConfirmationPopup(false)}
-              button={
-                <Button
-                  aria-label="confirm delete sermon"
-                  variant="contained"
-                  onClick={async () => {
-                    await handleDelete();
-                    setDeleteConfirmationPopup(false);
-                    setDeleteChecked(false);
-                  }}
-                  color="primary"
-                  disabled={!deleteChecked}
-                >
-                  Delete Forever
-                </Button>
-              }
-            >
-              <div>
-                <div style={{ display: 'flex' }} onClick={() => setDeleteChecked((previousValue) => !previousValue)}>
-                  <Checkbox checked={deleteChecked} />
-                  <p>I understand that deleting is permanent and cannot be undone</p>
-                </div>
-              </div>
-            </PopUp>
+            <DeleteEntityPopup
+              entityBeingDeleten="sermon"
+              handleDelete={handleDelete}
+              deleteConfirmationPopup={deleteConfirmationPopup}
+              setDeleteConfirmationPopup={setDeleteConfirmationPopup}
+            />
             <EditSermonForm
               open={editFormPopup}
               setOpen={() => setEditFormPopup(false)}
