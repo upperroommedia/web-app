@@ -156,6 +156,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getFullYear() === date?.getFullYear() &&
       sermon1.series.name === sermon.series.name &&
       sermon1.series.id === sermon.series.id &&
+      JSON.stringify(sermon1.images) === JSON.stringify(sermon.images) &&
       JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
@@ -566,45 +567,47 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             ) : (
               <DropZone setFile={setFile} />
             )}
+            <div style={{ display: 'flex' }}>
+              <input
+                className={styles.button}
+                type="button"
+                value="Upload"
+                disabled={
+                  file === undefined ||
+                  sermon.title === '' ||
+                  date === null ||
+                  sermon.speakers.length === 0 ||
+                  sermon.subtitle === ''
+                }
+                onClick={async () => {
+                  if (file !== undefined && date != null && user?.role === 'admin') {
+                    try {
+                      await uploadFile({
+                        file,
+                        setFile,
+                        setUploadProgress,
+                        date,
+                        trimStart,
+                        sermon,
+                      });
+                      clearForm();
+                    } catch (error) {
+                      setUploadProgress({ error: true, message: `Error uploading file: ${error}` });
+                    }
+                  } else if (user?.role !== 'admin') {
+                    setUploadProgress({ error: true, message: 'You do not have permission to upload' });
+                  }
+                }}
+              />
+              <button type="button" className={styles.button} onClick={() => clearForm()}>
+                Clear Form
+              </button>
+            </div>
+            <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
+              {uploadProgress.message}
+            </p>
           </>
         )}
-        <div style={{ display: 'flex' }}>
-          <input
-            className={styles.button}
-            type="button"
-            value="Upload"
-            disabled={
-              file === undefined ||
-              sermon.title === '' ||
-              date === null ||
-              sermon.speakers.length === 0 ||
-              sermon.subtitle === ''
-            }
-            onClick={async () => {
-              if (file !== undefined && date != null && user?.role === 'admin') {
-                try {
-                  await uploadFile({
-                    file,
-                    setFile,
-                    setUploadProgress,
-                    date,
-                    trimStart,
-                    sermon,
-                  });
-                  clearForm();
-                } catch (error) {
-                  setUploadProgress({ error: true, message: `Error uploading file: ${error}` });
-                }
-              } else if (user?.role !== 'admin') {
-                setUploadProgress({ error: true, message: 'You do not have permission to upload' });
-              }
-            }}
-          />
-          <button type="button" className={styles.button} onClick={() => clearForm()}>
-            Clear Form
-          </button>
-        </div>
-        <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>{uploadProgress.message}</p>
       </Box>
       <DynamicPopUp
         title={'Add new series'}
