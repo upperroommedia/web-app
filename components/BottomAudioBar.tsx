@@ -17,7 +17,7 @@ import firebase from '../firebase/firebase';
 import { sanitize } from 'dompurify';
 
 const storage = getStorage(firebase);
-
+// const path = useRouter().asPath;
 const BottomAudioBar: FunctionComponent = () => {
   const {
     currentSermon,
@@ -84,6 +84,7 @@ const BottomAudioBar: FunctionComponent = () => {
       <div className={styles['vertical-container']}>
         <div className={styles['controls-container']}>
           <Replay30Icon onClick={rewind30Seconds} />
+
           <SkipPreviousIcon onClick={previousSermon} />
           {playing ? (
             <PauseCircleIcon onClick={() => togglePlaying()} />

@@ -39,7 +39,8 @@ import AccordionSummary from '@mui/material/AccordionSummary';
 import AccordionDetails from '@mui/material/AccordionDetails';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteEntityPopup from '../components/DeleteEntityPopup';
-
+import dynamic from 'next/dynamic';
+const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
@@ -292,6 +293,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
           {error && <strong>Error: {JSON.stringify(error)}</strong>}
           {loading && <span>Collection: Loading...</span>}
           {sermons && <SermonsList sermons={sermons.docs.map((doc) => doc.data() as Sermon)} />}
+          <DynamicBottomAudioBar />
         </div>
       </TabPanel>
       <TabPanel value={tab} index={1}>

@@ -23,11 +23,13 @@ import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
 import useAuth from '../context/user/UserContext';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
+import { UploadToSoundCloudInputType } from '../functions/src/uploadToSoundCloud';
 import { createFunction } from '../utils/createFunction';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
 import Image from 'next/image';
 import Logo from '../public/upper_room_media_icon.png';
+import SoundCloudLogo from '../public/soundcloud.png';
 import { sanitize } from 'dompurify';
 import DeleteEntityPopup from './DeleteEntityPopup';
 
@@ -56,6 +58,7 @@ Props) => {
   const [autoPublish, setAutoPublish] = useState<boolean>(false);
   const [updatedSermon, setUpdatedSermon] = useState<Sermon>(emptySermon);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState<boolean>(false);
 
   useEffect(() => {
     if (updatedSermon !== emptySermon) {
@@ -83,6 +86,28 @@ Props) => {
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
       alert(error);
+    }
+  };
+
+  const uploadToSoundCloud = async () => {
+    setIsUploadingToSoundCloud(true);
+    const uploadToSoundCloud = createFunction<UploadToSoundCloudInputType, void>('uploadtosoundcloud');
+    const data: UploadToSoundCloudInputType = {
+      title: sermon.title,
+      description: sermon.subtitle,
+      tags: sermon.topics,
+      speakers: sermon.speakers.map((speaker) => speaker.name),
+      // audioUrl: await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`)),
+      audioUrl:
+        'https://storage.googleapis.com/urm-app.appspot.com/processed-sermons/c36c24a2-a7af-42a7-8f6c-98fe3c8fb3a7',
+      imageUrl: sermon.images.find((image) => image.type === 'square')?.downloadLink,
+    };
+    try {
+      await uploadToSoundCloud(data);
+    } catch (error) {
+      alert(error);
+    } finally {
+      setIsUploadingToSoundCloud(false);
     }
   };
 
@@ -144,6 +169,13 @@ Props) => {
     }
     return (
       <div>
+        <IconButton onClick={() => uploadToSoundCloud()}>
+          {isUploadingToSoundCloud ? (
+            <CircularProgress size={24} />
+          ) : (
+            <Image src={SoundCloudLogo} width={24} height={24} />
+          )}
+        </IconButton>
         {sermon.status.type === sermonStatusType.UPLOADED ? (
           <IconButton aria-label="Upload to Subsplash" onClick={deleteFromSubsplash}>
             {isUploading ? <CircularProgress size={24} /> : <UnpublishedIcon style={{ color: 'orangered' }} />}
@@ -236,7 +268,7 @@ Props) => {
                 max={Math.floor(sermon.durationSeconds)}
               />
             )}
-            <span style={{ width: '100%' }}></span>
+            <span style={{ width: '60%' }}></span>
             {[sermonStatusType.PROCESSED, sermonStatusType.UPLOADED].includes(sermon.status.type) ? (
               <AdminControls />
             ) : (
