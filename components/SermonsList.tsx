@@ -50,7 +50,7 @@ const SermonsList = ({ sermons, minimal }: Props) => {
           ))
         : playlist.map((sermon, i) => {
             const key = `sermon_list_card_${i}`;
-            if (currentSermon.key === sermon.key) {
+            if (currentSermon?.key === sermon.key) {
               return (
                 <SermonListCard
                   sermon={{ ...sermon, currentSecond }}
