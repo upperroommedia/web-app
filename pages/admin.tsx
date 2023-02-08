@@ -40,6 +40,7 @@ import AccordionDetails from '@mui/material/AccordionDetails';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteEntityPopup from '../components/DeleteEntityPopup';
 import dynamic from 'next/dynamic';
+import NewSeriesPopup from '../components/NewSeriesPopup';
 const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -104,6 +105,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     message: '',
   });
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
+  const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
   const [queryState, setQueryState] = useState<Query<DocumentData>>();
 
@@ -345,7 +347,19 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       </TabPanel>
       <TabPanel value={tab} index={3}>
         <div>
-          <h2>Manage Series</h2>
+          <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '5px' }}>
+            <h2 style={{ paddingRight: '10px' }}>Manage Series</h2>
+            <Button
+              color="info"
+              variant="contained"
+              size="small"
+              onClick={() => {
+                setNewSeriesPopup(true);
+              }}
+            >
+              <p>Add Series</p>
+            </Button>
+          </div>
           {series.map((s) => {
             return (
               <Accordion key={s.id} onClick={() => setSelectedSeries(s)}>
@@ -497,6 +511,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
         deleteConfirmationPopup={deleteSeriesPopup}
         setDeleteConfirmationPopup={setDeleteSeriesPopup}
       />
+      <NewSeriesPopup newSeriesPopup={newSeriesPopup} setNewSeriesPopup={setNewSeriesPopup} seriesArray={series} />
     </>
   );
 };

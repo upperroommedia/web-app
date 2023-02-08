@@ -4,7 +4,6 @@
 import dynamic from 'next/dynamic';
 import uploadFile from './api/uploadFile';
 import editSermon from './api/editSermon';
-import addNewSeries from './api/addNewSeries';
 import styles from '../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 
@@ -47,8 +46,8 @@ import { createInMemoryCache } from '@algolia/cache-in-memory';
 import ImageViewer from '../components/ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import { Series } from '../types/Series';
+import NewSeriesPopup from '../components/NewSeriesPopup';
 
-const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
 interface UploaderProps {
@@ -99,36 +98,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(new Date(props.existingSermon ? props.existingSermon.dateMillis : new Date()));
 
-  const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
   const [speakerError, setSpeakerError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
   const [topicError, setTopicError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
 
-  const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
-    error: false,
-    message: '',
-  });
-
-  const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
-
   // const [editImagePopup, setEditImagePopup] = useState<boolean>(false);
   // const [imageToEdit, setImageToEdit] = useState({ url: '', imageIndex: 0 });
-
-  useEffect(() => {
-    if (!userHasTypedInSeries) {
-      setNewSeriesError({ error: false, message: '' });
-      return;
-    }
-
-    if (newSeries === '') {
-      setNewSeriesError({ error: true, message: 'Series cannot be empty' });
-    } else if (seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())) {
-      setNewSeriesError({ error: true, message: 'Series already exists' });
-    } else {
-      setNewSeriesError({ error: false, message: '' });
-    }
-  }, [newSeries, userHasTypedInSeries, seriesArray]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -609,49 +585,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </>
         )}
       </Box>
-      <DynamicPopUp
-        title={'Add new series'}
-        open={newSeriesPopup}
-        setOpen={setNewSeriesPopup}
-        onClose={() => {
-          setUserHasTypedInSeries(false);
-          setNewSeries('');
-        }}
-        button={
-          <Button
-            variant="contained"
-            disabled={
-              newSeries === '' ||
-              seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())
-            }
-            onClick={async () => {
-              try {
-                const newSeriesId = await addNewSeries(newSeries);
-                const seriesToAdd = { id: newSeriesId, name: newSeries, sermonIds: [] };
-                setNewSeriesPopup(false);
-                seriesArray.push(seriesToAdd);
-                setNewSeries('');
-              } catch (error) {
-                setNewSeriesError({ error: true, message: JSON.stringify(error) });
-              }
-            }}
-          >
-            Submit
-          </Button>
-        }
-      >
-        <div style={{ display: 'flex', padding: '10px' }}>
-          <TextField
-            value={newSeries}
-            onChange={(e) => {
-              setNewSeries(e.target.value);
-              !userHasTypedInSeries && setUserHasTypedInSeries(true);
-            }}
-            error={newSeriesError.error}
-            label={newSeriesError.error ? newSeriesError.message : 'Series'}
-          />
-        </div>
-      </DynamicPopUp>
+      <NewSeriesPopup newSeriesPopup={newSeriesPopup} setNewSeriesPopup={setNewSeriesPopup} seriesArray={seriesArray} />
     </form>
   );
 };

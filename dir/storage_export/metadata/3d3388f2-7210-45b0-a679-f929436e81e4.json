@@ -1,14 +1,16 @@
 {
   "name": "intro-outro-sermons/7f2da3e4-7961-4081-8fdc-c0a7e7b534e8",
   "bucket": "urm-app.appspot.com",
-  "metageneration": 2,
+  "metageneration": 3,
   "generation": 1672612586346,
   "contentType": "audio/mpeg",
   "storageClass": "STANDARD",
-  "downloadTokens": [],
+  "downloadTokens": [
+    "3158a1d1-42a9-45b5-b92d-1f8e2d63acd5"
+  ],
   "etag": "2hNX3Kp4tSRp5Ra1e+412I7JiDA",
   "timeCreated": "2023-01-01T22:36:26.346Z",
-  "updated": "2023-01-01T22:36:26.362Z",
+  "updated": "2023-02-06T22:53:24.563Z",
   "size": 2110703,
   "md5Hash": "UQ3l6Xo9VzWwiRlZ4oNpmw==",
   "crc32c": "3228942579"

@@ -1,0 +1,19 @@
+{
+  "name": "processed-sermons/bb1361eb-d9b8-4018-beda-9c19679c0cc1",
+  "bucket": "urm-app.appspot.com",
+  "metageneration": 2,
+  "generation": 1675442887404,
+  "contentType": "audio/mpeg",
+  "storageClass": "STANDARD",
+  "downloadTokens": [],
+  "etag": "2MhWphp7z4d8Qa0tD0NMEL9Y/X8",
+  "customMetadata": {
+    "introUrl": "http://localhost:9199/v0/b/urm-app.appspot.com/o/intros%2FSunday%20Homilies_intro.m4a?alt=media&token=c19685a6-e25a-4831-8509-68ec6684d390",
+    "outroUrl": "http://localhost:9199/v0/b/urm-app.appspot.com/o/outros%2FSunday%20Homilies_outro.m4a?alt=media&token=849e566f-07b0-4b97-8c6d-11536f62759f"
+  },
+  "timeCreated": "2023-02-03T16:48:07.404Z",
+  "updated": "2023-02-03T16:48:07.420Z",
+  "size": 845472,
+  "md5Hash": "sUTkk2pU05GB1PlS9bqg/w==",
+  "crc32c": "215863679"
+}
