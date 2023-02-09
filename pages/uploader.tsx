@@ -284,19 +284,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   sermon.series.filter((series) => series.id !== details.option.id)
                 );
               }
-              // if (newValue !== null) {
-              //   newValue.forEach(async (series) => {
-              //     const newSeriesRef = doc(firestore, 'series', series.id);
-              //     await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
-              //   });
-              // }
-              // if (sermon.series.length !== 0 && newValue === null) {
-              //   sermon.series.forEach(async (series) => {
-              //     const seriesRef = doc(firestore, 'series', series.id);
-              //     await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
-              //   });
-              // }
-              // newValue === null ? updateSermon('series', []) : updateSermon('series', newValue);
             }}
             id="series-input"
             options={seriesArray}
