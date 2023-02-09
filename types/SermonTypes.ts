@@ -19,7 +19,7 @@ export interface Sermon {
   key: string;
   title: string;
   description: string;
-  series: Series;
+  series: Series[];
   speakers: ISpeaker[];
   subtitle: string;
   dateMillis: number;

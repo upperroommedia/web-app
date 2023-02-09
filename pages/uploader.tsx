@@ -130,8 +130,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getDate() === date?.getDate() &&
       sermon1Date.getMonth() === date?.getMonth() &&
       sermon1Date.getFullYear() === date?.getFullYear() &&
-      sermon1.series.name === sermon.series.name &&
-      sermon1.series.id === sermon.series.id &&
+      JSON.stringify(sermon1.series) === JSON.stringify(sermon.series) &&
       JSON.stringify(sermon1.images) === JSON.stringify(sermon.images) &&
       JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
@@ -270,17 +269,34 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
           <Autocomplete
             fullWidth
+            multiple
             value={sermon.series || null}
-            onChange={async (_, newValue) => {
-              if (newValue !== null) {
-                const newSeriesRef = doc(firestore, 'series', newValue.id);
+            onChange={async (_, newValue, reason, details) => {
+              if (reason === 'selectOption' && details) {
+                const newSeriesRef = doc(firestore, 'series', details.option.id);
                 await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
-              }
-              if (sermon.series.name !== undefined && newValue === null) {
-                const seriesRef = doc(firestore, 'series', sermon.series.id);
+                updateSermon('series', [...sermon.series, details.option]);
+              } else if (reason === 'removeOption' && details) {
+                const seriesRef = doc(firestore, 'series', details.option.id);
                 await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+                updateSermon(
+                  'series',
+                  sermon.series.filter((series) => series.id !== details.option.id)
+                );
               }
-              newValue === null ? updateSermon('series', {} as Series) : updateSermon('series', newValue);
+              // if (newValue !== null) {
+              //   newValue.forEach(async (series) => {
+              //     const newSeriesRef = doc(firestore, 'series', series.id);
+              //     await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
+              //   });
+              // }
+              // if (sermon.series.length !== 0 && newValue === null) {
+              //   sermon.series.forEach(async (series) => {
+              //     const seriesRef = doc(firestore, 'series', series.id);
+              //     await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+              //   });
+              // }
+              // newValue === null ? updateSermon('series', []) : updateSermon('series', newValue);
             }}
             id="series-input"
             options={seriesArray}
@@ -466,7 +482,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           )}
         />
       </Box>
-      <div style={{}}>
+      <div>
         <ImageViewer
           images={sermon.images}
           speaker={sermon.speakers[0]}
@@ -585,7 +601,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </>
         )}
       </Box>
-      <NewSeriesPopup newSeriesPopup={newSeriesPopup} setNewSeriesPopup={setNewSeriesPopup} seriesArray={seriesArray} />
+      <NewSeriesPopup
+        newSeriesPopup={newSeriesPopup}
+        setNewSeriesPopup={setNewSeriesPopup}
+        seriesArray={seriesArray}
+        setSeriesArray={setSeriesArray}
+      />
     </form>
   );
 };
