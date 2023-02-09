@@ -308,7 +308,7 @@ Props) => {
             />
             <EditSermonForm
               open={editFormPopup}
-              setOpen={() => setEditFormPopup(false)}
+              setOpen={setEditFormPopup}
               sermon={sermon}
               setUpdatedSermon={setUpdatedSermon}
             />
