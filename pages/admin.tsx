@@ -41,6 +41,9 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteEntityPopup from '../components/DeleteEntityPopup';
 import dynamic from 'next/dynamic';
 import NewSeriesPopup from '../components/NewSeriesPopup';
+import { sanitize } from 'dompurify';
+import Image from 'next/image';
+
 const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -97,14 +100,8 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
 
   const [series, setSeries] = useState<Series[]>([]);
   const [selectedSeries, setSelectedSeries] = useState<Series>();
-  const [newSeriesName, setNewSeriesName] = useState<string>('');
   const [editSeriesPopup, setEditSeriesPopup] = useState<boolean>(false);
   const [deleteSeriesPopup, setDeleteSeriesPopup] = useState<boolean>(false);
-  const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
-    error: false,
-    message: '',
-  });
-  const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
   const [queryState, setQueryState] = useState<Query<DocumentData>>();
@@ -263,21 +260,6 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     g();
   }, []);
 
-  useEffect(() => {
-    if (!userHasTypedInSeries) {
-      setNewSeriesError({ error: false, message: '' });
-      return;
-    }
-
-    if (newSeriesName === '') {
-      setNewSeriesError({ error: true, message: 'Series cannot be empty' });
-    } else if (series.map((series) => series.name.toLowerCase()).includes(newSeriesName.toLowerCase())) {
-      setNewSeriesError({ error: true, message: 'Series already exists' });
-    } else {
-      setNewSeriesError({ error: false, message: '' });
-    }
-  }, [newSeriesName, userHasTypedInSeries, series]);
-
   return (
     <>
       <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
@@ -375,7 +357,6 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
                         size="small"
                         onClick={() => {
                           setEditSeriesPopup(true);
-                          setNewSeriesName(s.name);
                         }}
                       >
                         <p>Edit Series</p>
@@ -384,6 +365,27 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
                       <Button color="error" variant="contained" size="small" onClick={() => setDeleteSeriesPopup(true)}>
                         <p>Delete Series</p>
                       </Button>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                      {['banner', 'wide', 'square'].map((type, i) => {
+                        const image = s.images?.find((image) => image.type === type);
+                        return (
+                          <div
+                            key={image?.id || i}
+                            style={{
+                              borderRadius: '2px',
+                              overflow: 'hidden',
+                              position: 'relative',
+                              width: 250,
+                              height: 250,
+                              backgroundColor: image?.averageColorHex || '#f3f1f1',
+                              padding: '20px',
+                            }}
+                          >
+                            {image && <Image src={sanitize(image.downloadLink)} layout="fill" objectFit="contain" />}
+                          </div>
+                        );
+                      })}
                     </div>
                     {sermons &&
                       s.sermonIds.map((sermonId) => {
@@ -445,73 +447,25 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
           {message}
         </>
       </PopUp>
-      <PopUp
-        title="Edit Series"
-        open={editSeriesPopup}
-        setOpen={setEditSeriesPopup}
-        onClose={() => {
-          setUserHasTypedInSeries(false);
-          setNewSeriesName('');
-          setSelectedSeries(undefined);
-        }}
-        button={
-          <Button
-            variant="contained"
-            disabled={
-              newSeriesName === '' ||
-              series.map((series) => series.name.toLowerCase()).includes(newSeriesName.toLowerCase())
-            }
-            onClick={async () => {
-              try {
-                const seriesRef = doc(firestore, 'series', selectedSeries!.id);
-                await updateDoc(seriesRef, {
-                  name: newSeriesName,
-                });
-                setSeries((oldSeries) =>
-                  oldSeries.map((s) => {
-                    if (s.name === selectedSeries?.name) {
-                      return { ...s, name: newSeriesName };
-                    }
-                    return s;
-                  })
-                );
-                selectedSeries?.sermonIds.forEach((id) => {
-                  const sermonRef = doc(firestore, 'sermons', id);
-                  updateDoc(sermonRef, {
-                    series: { ...selectedSeries, name: newSeriesName },
-                  });
-                });
-                setEditSeriesPopup(false);
-              } catch (e) {
-                alert(e);
-              }
-            }}
-          >
-            Submit
-          </Button>
-        }
-      >
-        <>
-          <div style={{ display: 'flex', padding: '20px', gap: '10px' }}>
-            <TextField
-              value={newSeriesName}
-              onChange={(e) => {
-                setNewSeriesName(e.target.value);
-                !userHasTypedInSeries && setUserHasTypedInSeries(true);
-              }}
-              error={newSeriesError.error}
-              label={newSeriesError.error ? newSeriesError.message : 'Series'}
-            />
-          </div>
-        </>
-      </PopUp>
+      <NewSeriesPopup
+        newSeriesPopup={newSeriesPopup}
+        setNewSeriesPopup={setNewSeriesPopup}
+        seriesArray={series}
+        setSeriesArray={setSeries}
+      />
+      <NewSeriesPopup
+        newSeriesPopup={editSeriesPopup}
+        setNewSeriesPopup={setEditSeriesPopup}
+        seriesArray={series}
+        setSeriesArray={setSeries}
+        existingSeries={selectedSeries}
+      />
       <DeleteEntityPopup
         entityBeingDeleten="series"
         handleDelete={handleSeriesDelete}
         deleteConfirmationPopup={deleteSeriesPopup}
         setDeleteConfirmationPopup={setDeleteSeriesPopup}
       />
-      <NewSeriesPopup newSeriesPopup={newSeriesPopup} setNewSeriesPopup={setNewSeriesPopup} seriesArray={series} />
     </>
   );
 };

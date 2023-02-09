@@ -1,8 +1,13 @@
 import { Button, TextField } from '@mui/material';
+import firestore from '../firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import dynamic from 'next/dynamic';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import addNewSeries from '../pages/api/addNewSeries';
-import { Series } from '../types/Series';
+import { ImageSizeType, ImageType, isImageType } from '../types/Image';
+import { emptySeries, Series } from '../types/Series';
+import ImageViewer from './ImageViewer';
+import isEqual from 'lodash/isEqual';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 
@@ -10,25 +15,59 @@ interface NewSeriesPopupProps {
   newSeriesPopup: boolean;
   setNewSeriesPopup: Dispatch<SetStateAction<boolean>>;
   seriesArray: Series[];
+  setSeriesArray: Dispatch<SetStateAction<Series[]>>;
+  existingSeries?: Series | undefined;
 }
 
 const NewSeriesPopup = (props: NewSeriesPopupProps) => {
-  const [newSeries, setNewSeries] = useState<string>('');
+  const [newSeries, setNewSeries] = useState<Series>(props.existingSeries ? props.existingSeries : emptySeries);
   const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
     error: false,
     message: '',
   });
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
+  useEffect(() => {
+    if (props.existingSeries && newSeries.id !== props.existingSeries.id) {
+      setNewSeries(props.existingSeries);
+    }
+  }, [props.existingSeries, newSeries]);
+
+  const handleNewImage = (image: ImageType | ImageSizeType) => {
+    setNewSeries((oldSeries) => {
+      // check if image is ImageType or ImageSizeType
+      if (isImageType(image)) {
+        const castedImage = image as ImageType;
+        let newImages: ImageType[] = [];
+        if (oldSeries.images.find((img) => img.type === castedImage.type)) {
+          newImages = oldSeries.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+        } else {
+          newImages = [...oldSeries.images, castedImage];
+        }
+        return {
+          ...oldSeries,
+          images: newImages,
+        };
+      } else {
+        const imageSizeType = image as ImageSizeType;
+        return {
+          ...oldSeries,
+          images: oldSeries.images.filter((img) => img.type !== imageSizeType),
+        };
+      }
+    });
+  };
 
   useEffect(() => {
     if (!userHasTypedInSeries) {
       setNewSeriesError({ error: false, message: '' });
       return;
     }
-
-    if (newSeries === '') {
+    if (newSeries?.name === '') {
       setNewSeriesError({ error: true, message: 'Series cannot be empty' });
-    } else if (props.seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())) {
+    } else if (
+      newSeries?.name &&
+      props.seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.name.toLowerCase())
+    ) {
       setNewSeriesError({ error: true, message: 'Series already exists' });
     } else {
       setNewSeriesError({ error: false, message: '' });
@@ -37,27 +76,52 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
 
   return (
     <DynamicPopUp
-      title={'Add new series'}
+      title={props.existingSeries ? 'Edit Series' : 'Add new series'}
       open={props.newSeriesPopup}
       setOpen={props.setNewSeriesPopup}
       onClose={() => {
         setUserHasTypedInSeries(false);
-        setNewSeries('');
+        setNewSeries(emptySeries);
       }}
       button={
         <Button
           variant="contained"
           disabled={
-            newSeries === '' ||
-            props.seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())
+            (props.seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.name.toLowerCase()) &&
+              isEqual(props.existingSeries?.images, newSeries.images)) ||
+            newSeries.name === '' ||
+            newSeries.images.length === 0
           }
           onClick={async () => {
             try {
-              const newSeriesId = await addNewSeries(newSeries);
-              const seriesToAdd = { id: newSeriesId, name: newSeries, sermonIds: [] };
-              props.setNewSeriesPopup(false);
-              props.seriesArray.push(seriesToAdd);
-              setNewSeries('');
+              if (props.existingSeries) {
+                const seriesRef = doc(firestore, 'series', newSeries.id);
+                await updateDoc(seriesRef, {
+                  ...newSeries,
+                });
+                props.setSeriesArray((oldSeriesArray) =>
+                  oldSeriesArray.map((s) => {
+                    if (s.id === newSeries.id) {
+                      return { ...newSeries };
+                    }
+                    return s;
+                  })
+                );
+                newSeries?.sermonIds.forEach((id) => {
+                  const sermonRef = doc(firestore, 'sermons', id);
+                  updateDoc(sermonRef, {
+                    series: { ...newSeries },
+                  });
+                });
+                props.setNewSeriesPopup(false);
+                setUserHasTypedInSeries(false);
+              } else {
+                const newSeriesId = await addNewSeries(newSeries);
+                const seriesToAdd = { id: newSeriesId, name: newSeries.name, sermonIds: [], images: newSeries.images };
+                props.setNewSeriesPopup(false);
+                props.seriesArray.push(seriesToAdd);
+                setNewSeries(emptySeries);
+              }
             } catch (error) {
               setNewSeriesError({ error: true, message: JSON.stringify(error) });
             }
@@ -69,14 +133,17 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     >
       <div style={{ display: 'flex', padding: '10px' }}>
         <TextField
-          value={newSeries}
+          value={newSeries.name}
           onChange={(e) => {
-            setNewSeries(e.target.value);
+            setNewSeries((oldSeries) => {
+              return { ...oldSeries, name: e.target.value };
+            });
             !userHasTypedInSeries && setUserHasTypedInSeries(true);
           }}
           error={newSeriesError.error}
           label={newSeriesError.error ? newSeriesError.message : 'Series'}
         />
+        <ImageViewer images={newSeries.images} newImageCallback={handleNewImage} vertical={true} />
       </div>
     </DynamicPopUp>
   );
