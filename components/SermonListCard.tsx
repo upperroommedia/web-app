@@ -79,9 +79,11 @@ Props) => {
       }
       await deleteObject(ref(storage, `sermons/${sermon.key}`));
       await deleteDoc(doc(firestore, 'sermons', sermon.key));
-      if (sermon.series?.name !== undefined) {
-        const seriesRef = doc(firestore, 'series', sermon.series.id);
-        await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+      if (sermon.series.length !== 0) {
+        sermon.series.forEach(async (series) => {
+          const seriesRef = doc(firestore, 'series', series.id);
+          await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+        });
       }
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
