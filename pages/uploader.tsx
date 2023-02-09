@@ -28,7 +28,7 @@ import firestore, {
   updateDoc,
 } from '../firebase/firestore';
 import { emptySermon, getDateString, createSermon } from '../types/Sermon';
-import { Sermon } from '../types/SermonTypes';
+import { Sermon, sermonStatusType } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
@@ -513,6 +513,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     topics: sermon.topics,
                     series: sermon.series,
                     dateString: getDateString(date),
+                    status: { type: sermonStatusType.PROCESSED },
+                    images: sermon.images,
                   })
                 );
                 props.setEditFormOpen?.(false);
