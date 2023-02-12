@@ -24,7 +24,7 @@ import EditSermonForm from './EditSermonForm';
 import useAuth from '../context/user/UserContext';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
 import { UploadToSoundCloudInputType } from '../functions/src/uploadToSoundCloud';
-import { createFunction } from '../utils/createFunction';
+import { createFunction, createFunctionV2 } from '../utils/createFunction';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
 import Image from 'next/image';
@@ -91,7 +91,7 @@ Props) => {
 
   const uploadToSoundCloud = async () => {
     setIsUploadingToSoundCloud(true);
-    const uploadToSoundCloud = createFunction<UploadToSoundCloudInputType, void>('uploadtosoundcloud');
+    const uploadToSoundCloud = createFunctionV2<UploadToSoundCloudInputType, void>('uploadtosoundcloud');
     const data: UploadToSoundCloudInputType = {
       title: sermon.title,
       description: sermon.subtitle,
