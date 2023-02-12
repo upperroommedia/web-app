@@ -18,6 +18,7 @@ const editSermon = async (props: IEditSermon) => {
       description: props.description,
       speakers: props.speakers,
       topics: props.topics,
+      images: props.images,
       date: new Date(props.dateMillis),
     };
     promises.push(editSubsplashSermon(input));
@@ -32,6 +33,7 @@ const editSermon = async (props: IEditSermon) => {
       series: props.series,
       speakers: props.speakers,
       topics: props.topics,
+      images: props.images,
       dateMillis: props.dateMillis,
     })
   );
