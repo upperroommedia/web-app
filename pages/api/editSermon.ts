@@ -23,8 +23,8 @@ const editSermon = async (props: IEditSermon) => {
     };
     promises.push(editSubsplashSermon(input));
   }
-  const sermonRef = doc(firestore, 'sermons', props.key);
 
+  const sermonRef = doc(firestore, 'sermons', props.key).withConverter(sermonConverter);
   promises.push(
     updateDoc(sermonRef.withConverter(sermonConverter), {
       title: props.title,
