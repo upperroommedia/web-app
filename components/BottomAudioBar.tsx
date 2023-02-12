@@ -12,9 +12,12 @@ import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
-import { getDownloadURL, ref } from 'firebase/storage';
-import { storage } from '../firebase/firebase';
+import { getDownloadURL, getStorage, ref } from 'firebase/storage';
+import firebase from '../firebase/firebase';
+import { sanitize } from 'dompurify';
 
+const storage = getStorage(firebase);
+// const path = useRouter().asPath;
 const BottomAudioBar: FunctionComponent = () => {
   const {
     currentSermon,
@@ -32,7 +35,7 @@ const BottomAudioBar: FunctionComponent = () => {
   // will fire when global play state changes
   useEffect(() => {
     if (currentSermon.url == null) {
-      getDownloadURL(ref(storage, `sermons/${currentSermon.key}`))
+      getDownloadURL(ref(storage, `intro-outro-sermons/${currentSermon.key}`))
         .then((url) => {
           setCurrentSermonUrl(url);
         })
@@ -47,7 +50,7 @@ const BottomAudioBar: FunctionComponent = () => {
     } else if (!playing && audioPlayer.current) {
       audioPlayer.current.pause();
     }
-  }, [currentSermon.url, playing]);
+  }, [currentSermon?.url, playing]);
 
   const onPlaying = () => {
     const newSecond = Math.floor(audioPlayer.current.currentTime);
@@ -81,31 +84,47 @@ const BottomAudioBar: FunctionComponent = () => {
       <div className={styles['vertical-container']}>
         <div className={styles['controls-container']}>
           <Replay30Icon onClick={rewind30Seconds} />
+
           <SkipPreviousIcon onClick={previousSermon} />
-          {playing ? <PauseCircleIcon onClick={() => togglePlaying()} /> : <PlayCircleIcon onClick={() => togglePlaying()} />}
+          {playing ? (
+            <PauseCircleIcon onClick={() => togglePlaying()} />
+          ) : (
+            <PlayCircleIcon onClick={() => togglePlaying()} />
+          )}
           <SkipNextIcon onClick={nextSermon} />
           <Forward30Icon onClick={forward30Seconds} />
         </div>
         <div className={styles['progress-container']}>
           {/* TODO: Scroll overflow text */}
-          <h4 className={styles['current-time']}>{formatTime(seekTime >= 0 ? seekTime : currentSecond)}</h4>
-          <input
-            className={styles.slider}
-            type="range"
-            min="1"
-            step={1}
-            max={currentSermon.durationSeconds}
-            value={seekTime >= 0 ? seekTime : currentSecond}
-            id="myRange"
-            onInput={handleSliderScrub}
-            onMouseUp={handleMouseUp}
-          ></input>
-          <audio ref={audioPlayer} src={currentSermon.url} onTimeUpdate={onPlaying}></audio>
-          <h4 className={styles.duration}>{formatTime(currentSermon.durationSeconds)}</h4>
+          <span className={styles['current-time']}>{formatTime(seekTime >= 0 ? seekTime : currentSecond)}</span>
+          <label htmlFor="audio-slider" className={styles['audio-slider-label']}>
+            <input
+              className={styles.slider}
+              type="range"
+              min="1"
+              step={1}
+              max={currentSermon.durationSeconds}
+              value={seekTime >= 0 ? seekTime : currentSecond}
+              id="myRange"
+              onInput={handleSliderScrub}
+              onMouseUp={handleMouseUp}
+            ></input>
+          </label>
+          <audio
+            ref={audioPlayer}
+            src={currentSermon.url ? sanitize(currentSermon.url) : undefined}
+            onTimeUpdate={onPlaying}
+          ></audio>
+          <span className={styles.duration}>{formatTime(currentSermon.durationSeconds)}</span>
         </div>
       </div>
     </div>
   );
 };
 
-export default BottomAudioBar;
+const BottomAudioBarWrapper = () => {
+  const { currentSermon } = useAudioPlayer();
+  return <>{currentSermon && <BottomAudioBar />}</>;
+};
+
+export default BottomAudioBarWrapper;

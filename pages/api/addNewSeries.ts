@@ -1,11 +1,14 @@
-import { doc, getFirestore, setDoc } from 'firebase/firestore';
-import { firebase } from '../../firebase/firebase';
+import firestore, { doc, setDoc } from '../../firebase/firestore';
+import { v4 } from 'uuid';
 
 const addNewSeries = async (value: string) => {
-  const db = getFirestore(firebase);
-  await setDoc(doc(db, 'series', value), {
+  const id = v4();
+  await setDoc(doc(firestore, 'series', id), {
+    id,
     name: value,
+    sermonIds: [],
   });
+  return id;
 };
 
 export default addNewSeries;

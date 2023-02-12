@@ -1,6 +1,6 @@
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
-import Dialog from '@mui/material/Dialog';
+import Dialog, { DialogProps } from '@mui/material/Dialog';
 import Button from '@mui/material/Button';
 import DialogTitle from '@mui/material/DialogTitle';
 import { ReactElement } from 'react';
@@ -9,9 +9,11 @@ interface PopUpInfo {
   title: string;
   open: boolean;
   children: string | ReactElement;
-  setOpen: any;
+  setOpen: (setOpen: boolean) => void;
   button?: ReactElement;
   onClose?: () => void;
+  // optional props to pass to Dialog
+  dialogProps?: Omit<DialogProps, 'open'>;
 }
 
 const PopUp = (props: PopUpInfo) => {
@@ -23,7 +25,7 @@ const PopUp = (props: PopUpInfo) => {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} aria-labelledby="confirm-dialog">
+    <Dialog open={open} onClose={onClose} {...props.dialogProps} aria-labelledby="confirm-dialog">
       <DialogTitle id="confirm-dialog">{title}</DialogTitle>
       <DialogContent>{children}</DialogContent>
       <DialogActions>

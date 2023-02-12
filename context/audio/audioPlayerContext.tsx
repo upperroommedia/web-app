@@ -1,5 +1,5 @@
 import { createContext, useReducer, useContext } from 'react';
-import { Sermon } from '../../types/Sermon';
+import { Sermon } from '../../types/SermonTypes';
 import audioPlayerReducer, { AudioPlayerState, SermonWithMetadata } from '../../reducers/audioPlayerReducer';
 const initialState: AudioPlayerState = {
   playlist: [],
