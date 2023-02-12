@@ -110,7 +110,7 @@ const ImageUploader = (props: Props) => {
             onRotationChange={setRotation}
             onCropComplete={onCropComplete}
             onZoomChange={setZoom}
-            objectFit='auto-cover'
+            objectFit="auto-cover"
           />
           )
         </div>

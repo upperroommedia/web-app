@@ -33,13 +33,14 @@ import SpeakerTable from '../components/SpeakerTable';
 import { createFunction } from '../utils/createFunction';
 import UserTable from '../components/UserTable';
 import { fetchSpeakerResults } from './uploader';
-import { Series } from '../types/Series';
+import { Series, seriesConverter } from '../types/Series';
 import Accordion from '@mui/material/Accordion';
 import AccordionSummary from '@mui/material/AccordionSummary';
 import AccordionDetails from '@mui/material/AccordionDetails';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteEntityPopup from '../components/DeleteEntityPopup';
 import dynamic from 'next/dynamic';
+import { sermonConverter } from '../types/Sermon';
 const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -108,11 +109,10 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   const [queryState, setQueryState] = useState<Query<DocumentData>>();
 
   const sermonsRef = collection(firestore, 'sermons');
-  const q = query(sermonsRef);
+  const q = query(sermonsRef.withConverter(sermonConverter));
   const [sermons, loading, error] = useCollection(q, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
-
   const setUserRole = httpsCallable(functions, 'setUserRole');
   const handleRoleChange = (email: string, role: string) => {
     setUserRole({ email, role }).then((result: any) => {
@@ -243,7 +243,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     if (selectedSeries) {
       await deleteDoc(doc(firestore, 'series', selectedSeries.id));
       selectedSeries.sermonIds.forEach(async (id) => {
-        const sermonRef = doc(firestore, 'sermons', id);
+        const sermonRef = doc(firestore, 'sermons', id).withConverter(sermonConverter);
         await updateDoc(sermonRef, {
           series: {},
         });
@@ -449,7 +449,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
             }
             onClick={async () => {
               try {
-                const seriesRef = doc(firestore, 'series', selectedSeries!.id);
+                const seriesRef = doc(firestore, 'series', selectedSeries!.id).withConverter(seriesConverter);
                 await updateDoc(seriesRef, {
                   name: newSeriesName,
                 });
@@ -462,7 +462,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
                   })
                 );
                 selectedSeries?.sermonIds.forEach((id) => {
-                  const sermonRef = doc(firestore, 'sermons', id);
+                  const sermonRef = doc(firestore, 'sermons', id).withConverter(sermonConverter);
                   updateDoc(sermonRef, {
                     series: { ...selectedSeries, name: newSeriesName },
                   });

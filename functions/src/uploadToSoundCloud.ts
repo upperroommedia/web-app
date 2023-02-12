@@ -1,10 +1,8 @@
 import axios, { AxiosRequestConfig } from 'axios';
-// import { createReadStream } from 'fs';
 import FormData from 'form-data';
 import handleError from './handleError';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-// import { blob } from 'node:stream/consumers';
 
 export interface UploadToSoundCloudInputType {
   audioUrl: string;
@@ -15,14 +13,18 @@ export interface UploadToSoundCloudInputType {
   description: string;
 }
 
-export const uploadToSoundCloud = async ({
+export type UploadToSoundCloudReturnType = {
+  soundCloudTrackId: string;
+};
+
+const uploadToSoundCloud = async ({
   audioUrl,
   imageUrl,
   title,
   speakers,
   tags,
   description,
-}: UploadToSoundCloudInputType) => {
+}: UploadToSoundCloudInputType): Promise<string> => {
   const formData = new FormData();
   const titleWithSpeakers = `${title} (${speakers.join(', ')})`;
   const reformatedTags = tags.map((tag) => `"${tag}"`).join(' ');
@@ -52,25 +54,25 @@ export const uploadToSoundCloud = async ({
     data: formData,
   };
   try {
-    return JSON.stringify((await axios(config)).data);
+    return (await axios(config)).data;
   } catch (error) {
-    handleError(error);
-    return 'Error';
+    return handleError(error);
   }
 };
 
 const uploadToSoundCloudCall = onCall(
-  async (request: CallableRequest<UploadToSoundCloudInputType>): Promise<string> => {
-    logger.log('createNewSubsplashList', request);
+  async (request: CallableRequest<UploadToSoundCloudInputType>): Promise<UploadToSoundCloudReturnType> => {
+    logger.log('uploadToSoundCloud', request);
     if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     try {
       logger.log('Attempting to upload to SoundCloud', request.data);
-      return uploadToSoundCloud(request.data);
+      const response = await uploadToSoundCloud(request.data);
+      logger.log('SoundCloud response', response);
+      return { soundCloudTrackId: response };
     } catch (error) {
-      handleError(error);
-      return 'Error';
+      return handleError(error);
     }
   }
 );

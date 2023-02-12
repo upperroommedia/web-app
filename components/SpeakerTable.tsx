@@ -13,7 +13,7 @@ import TableSortLabel from '@mui/material/TableSortLabel';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
-import { ISpeaker } from '../types/Speaker';
+import { ISpeaker, speakerConverter } from '../types/Speaker';
 import { visuallyHidden } from '@mui/utils';
 // import FormGroup from '@mui/material/FormGroup';
 // import FormControlLabel from '@mui/material/FormControlLabel';
@@ -233,7 +233,7 @@ const SpeakerTable = (props: {
       return;
     }
     try {
-      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id), {
+      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
         images: selectedSpeaker.images.filter((image) => image.type !== imageType),
       });
       props.setSpeakers((oldSpeakers) =>
@@ -266,7 +266,7 @@ const SpeakerTable = (props: {
       return;
     }
     try {
-      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id), {
+      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
         images: selectedSpeaker.images.find((image) => image.type === newImage.type)
           ? selectedSpeaker.images.map((image) => {
               if (image.type === newImage.type) {

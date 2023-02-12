@@ -17,13 +17,13 @@ import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
 import firestore, { arrayRemove, deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
 import storage, { deleteObject, getDownloadURL, ref } from '../firebase/storage';
-import { emptySermon } from '../types/Sermon';
-import { Sermon, sermonStatusType } from '../types/SermonTypes';
+import { emptySermon, sermonConverter } from '../types/Sermon';
+import { Sermon, sermonStatusType, uploadStatus } from '../types/SermonTypes';
 import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
 import useAuth from '../context/user/UserContext';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
-import { UploadToSoundCloudInputType } from '../functions/src/uploadToSoundCloud';
+import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { createFunction, createFunctionV2 } from '../utils/createFunction';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
@@ -32,6 +32,8 @@ import Logo from '../public/upper_room_media_icon.png';
 import SoundCloudLogo from '../public/soundcloud.png';
 import { sanitize } from 'dompurify';
 import DeleteEntityPopup from './DeleteEntityPopup';
+import { seriesConverter } from '../types/Series';
+import { Tooltip } from '@mui/material';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -75,14 +77,18 @@ Props) => {
   const handleDelete = async () => {
     try {
       if (sermon.subsplashId) {
-        await deleteFromSubsplash();
+        await Promise.allSettled([deleteFromSubsplash(), deleteFromSoundCloud()]);
       }
-      await deleteObject(ref(storage, `sermons/${sermon.key}`));
-      await deleteDoc(doc(firestore, 'sermons', sermon.key));
+      const firebasePromises = [
+        deleteObject(ref(storage, `sermons/${sermon.key}`)),
+        deleteDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter)),
+      ];
+
       if (sermon.series?.name !== undefined) {
-        const seriesRef = doc(firestore, 'series', sermon.series.id);
-        await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+        const seriesRef = doc(firestore, 'series', sermon.series.id).withConverter(seriesConverter);
+        firebasePromises.push(updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) }));
       }
+      await Promise.allSettled(firebasePromises);
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
       alert(error);
@@ -91,7 +97,9 @@ Props) => {
 
   const uploadToSoundCloud = async () => {
     setIsUploadingToSoundCloud(true);
-    const uploadToSoundCloud = createFunctionV2<UploadToSoundCloudInputType, void>('uploadtosoundcloud');
+    const uploadToSoundCloud = createFunctionV2<UploadToSoundCloudInputType, UploadToSoundCloudReturnType>(
+      'uploadtosoundcloud'
+    );
     const data: UploadToSoundCloudInputType = {
       title: sermon.title,
       description: sermon.subtitle,
@@ -101,12 +109,36 @@ Props) => {
       imageUrl: sermon.images.find((image) => image.type === 'square')?.downloadLink,
     };
     try {
-      await uploadToSoundCloud(data);
+      const result = await uploadToSoundCloud(data);
+      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+      await updateDoc(sermonRef, {
+        soundCloudTrackId: result.soundCloudTrackId,
+        status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
+      });
     } catch (error) {
       alert(error);
     } finally {
       setIsUploadingToSoundCloud(false);
     }
+  };
+
+  const deleteFromSoundCloud = async () => {
+    if (sermon.soundCloudTrackId === undefined) {
+      return;
+    }
+    setIsUploadingToSoundCloud(true);
+    const deleteFromSoundCloud = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
+    try {
+      await deleteFromSoundCloud({ soundCloudTrackId: sermon.soundCloudTrackId });
+      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+      await updateDoc(sermonRef, {
+        soundCloudTrackId: deleteField(),
+        status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+      });
+    } catch (error) {
+      alert(error);
+    }
+    setIsUploadingToSoundCloud(false);
   };
 
   const uploadToSubsplash = async () => {
@@ -122,14 +154,15 @@ Props) => {
       topics: sermon.topics,
       description: sermon.description,
       images: sermon.images,
+      date: new Date(sermon.dateMillis),
     };
     setIsUploading(true);
     try {
       // TODO [1]: Fix return Type
       const response = (await uploadToSubsplash(data)) as unknown as { id: string };
       const id = response.id;
-      const sermonRef = doc(firestore, 'sermons', sermon.key);
-      await updateDoc(sermonRef, { subsplashId: id, status: { type: sermonStatusType.UPLOADED } });
+      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+      await updateDoc(sermonRef, { subsplashId: id, status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });
     } catch (error) {
       alert(error);
     }
@@ -142,16 +175,16 @@ Props) => {
     try {
       setIsUploading(true);
       await deleteFromSubsplashCall(sermon.subsplashId!);
-      await updateDoc(doc(firestore, 'sermons', sermon.key), {
+      await updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
         subsplashId: deleteField(),
-        status: { type: sermonStatusType.PROCESSED },
+        status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
       });
       setIsUploading(false);
     } catch (error: any) {
       if (error.code === 'functions/not-found') {
-        await updateDoc(doc(firestore, 'sermons', sermon.key), {
+        await updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
           subsplashId: deleteField(),
-          status: { type: sermonStatusType.PROCESSED },
+          status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
         });
         setIsUploading(false);
       } else {
@@ -167,38 +200,56 @@ Props) => {
     }
     return (
       <div>
-        <IconButton onClick={() => uploadToSoundCloud()}>
-          {isUploadingToSoundCloud ? (
-            <CircularProgress size={24} />
-          ) : (
-            <Image src={SoundCloudLogo} width={24} height={24} />
-          )}
-        </IconButton>
-        {sermon.status.type === sermonStatusType.UPLOADED ? (
-          <IconButton aria-label="Upload to Subsplash" onClick={deleteFromSubsplash}>
-            {isUploading ? <CircularProgress size={24} /> : <UnpublishedIcon style={{ color: 'orangered' }} />}
-          </IconButton>
+        {isUploadingToSoundCloud ? (
+          <CircularProgress size={24} />
+        ) : sermon.status.soundCloud === uploadStatus.UPLOADED ? (
+          <Tooltip title="Remove From Soundcloud">
+            <IconButton aria-label="Upload to Subsplash" onClick={deleteFromSoundCloud}>
+              <UnpublishedIcon style={{ color: 'orangered' }} />
+            </IconButton>
+          </Tooltip>
         ) : (
-          <IconButton
-            aria-label="Upload to Subsplash"
-            style={{ color: 'lightgreen' }}
-            onClick={() => {
-              setUploadToSupsplashPopup(true);
-            }}
-          >
-            <PublishIcon />
-          </IconButton>
+          <Tooltip title="Upload to Soundcloud">
+            <IconButton onClick={() => uploadToSoundCloud()}>
+              <Image src={SoundCloudLogo} width={24} height={24} />
+            </IconButton>
+          </Tooltip>
         )}
-        <IconButton aria-label="edit sermon" style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
-          <EditIcon />
-        </IconButton>
-        <IconButton
-          aria-label="delete sermon"
-          style={{ color: 'red' }}
-          onClick={() => setDeleteConfirmationPopup(true)}
-        >
-          <DeleteIcon />
-        </IconButton>
+        {isUploading ? (
+          <CircularProgress size={24} />
+        ) : sermon.status.subsplash === uploadStatus.UPLOADED ? (
+          <Tooltip title="Remove From Subsplash">
+            <IconButton aria-label="Upload to Subsplash" onClick={deleteFromSubsplash}>
+              <UnpublishedIcon style={{ color: 'orangered' }} />
+            </IconButton>
+          </Tooltip>
+        ) : (
+          <Tooltip title="Upload to Subsplash">
+            <IconButton
+              aria-label="Upload to Subsplash"
+              style={{ color: 'lightgreen' }}
+              onClick={() => {
+                setUploadToSupsplashPopup(true);
+              }}
+            >
+              <PublishIcon />
+            </IconButton>
+          </Tooltip>
+        )}
+        <Tooltip title="Edit Sermon">
+          <IconButton aria-label="edit sermon" style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
+            <EditIcon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Delete Sermon From All Systems">
+          <IconButton
+            aria-label="delete sermon"
+            style={{ color: 'red' }}
+            onClick={() => setDeleteConfirmationPopup(true)}
+          >
+            <DeleteIcon />
+          </IconButton>
+        </Tooltip>
       </div>
     );
   };
@@ -267,13 +318,13 @@ Props) => {
               />
             )}
             <span style={{ width: '60%' }}></span>
-            {[sermonStatusType.PROCESSED, sermonStatusType.UPLOADED].includes(sermon.status.type) ? (
+            {sermon.status.audioStatus === sermonStatusType.PROCESSED ? (
               <AdminControls />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                  <h3 style={{ margin: 0 }}>{sermon.status.type}</h3>
-                  {sermon.status.type === sermonStatusType.PROCESSING && <CircularProgress size={15} />}
+                  <h3 style={{ margin: 0 }}>{sermon.status.audioStatus}</h3>
+                  {sermon.status.audioStatus === sermonStatusType.PROCESSING && <CircularProgress size={15} />}
                 </div>
                 {sermon.status.message && <p style={{ margin: 0 }}>{sermon.status.message}</p>}
               </div>

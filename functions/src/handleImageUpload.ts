@@ -18,6 +18,7 @@ import os from 'os';
 import mkdirp from 'mkdirp';
 import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
+import { firestoreAdminImagesConverter } from './firestoreDataConverter';
 // import { resize } from 'imagemagick';
 
 // const adminImageConvertor = {
@@ -151,7 +152,11 @@ const handleImageUpload = onObjectFinalized(
         dateAddedMillis: new Date().getTime(),
       };
       logger.log('adding image with metadata to firestore', image);
-      await firestore().collection('images').doc(subsplashImageId).set(image);
+      await firestore()
+        .collection('images')
+        .withConverter(firestoreAdminImagesConverter)
+        .doc(subsplashImageId)
+        .set(image);
     } catch (e) {
       return logger.error(e);
     } finally {

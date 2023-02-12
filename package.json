@@ -4,9 +4,9 @@
   "scripts": {
     "build-functions": "cd functions && pnpm build",
     "build-functions-watch": "cd functions && pnpm build-watch",
-    "next-dev": "next dev",
+    "next-dev": " next dev & pnpm run start-emulators",
     "start-emulators": "pnpm run build-functions-watch & firebase emulators:start --import=./dir --export-on-exit=./dir",
-    "dev": "pnpm run next-dev & pnpm run start-emulators",
+    "dev": "pnpm kill-port 8080 9909 4000 3000 5001 && pnpm run next-dev",
     "analyze": "ANALYZE=true next build",
     "build": "next build",
     "start": "next start",
@@ -75,6 +75,7 @@
     "eslint-plugin-promise": "^5.2.0",
     "eslint-plugin-react": "^7.31.10",
     "eslint-plugin-react-hooks": "^4.6.0",
+    "kill-port": "^2.0.1",
     "prettier": "^2.7.1",
     "prop-types": "^15.8.1",
     "typescript": "^4.8.4"
