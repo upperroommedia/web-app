@@ -97,9 +97,7 @@ Props) => {
       description: sermon.subtitle,
       tags: sermon.topics,
       speakers: sermon.speakers.map((speaker) => speaker.name),
-      // audioUrl: await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`)),
-      audioUrl:
-        'https://storage.googleapis.com/urm-app.appspot.com/processed-sermons/c36c24a2-a7af-42a7-8f6c-98fe3c8fb3a7',
+      audioUrl: await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`)),
       imageUrl: sermon.images.find((image) => image.type === 'square')?.downloadLink,
     };
     try {
