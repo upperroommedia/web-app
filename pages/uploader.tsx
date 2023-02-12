@@ -18,15 +18,35 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
-import { collection, doc, getDoc, getDocs, getFirestore, query } from 'firebase/firestore';
-import { firebase } from '../firebase/firebase';
-import { Sermon, emptySermon, getDateString } from '../types/Sermon';
+import firestore, {
+  arrayRemove,
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  updateDoc,
+} from '../firebase/firestore';
+import { emptySermon, getDateString, createSermon } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
+import Image from 'next/image';
 import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
+import { ISpeaker } from '../types/Speaker';
+import Chip from '@mui/material/Chip';
+import { sanitize } from 'dompurify';
+// import ImageUploader from '../components/ImageUploader';
+
+import algoliasearch from 'algoliasearch';
+import { createInMemoryCache } from '@algolia/cache-in-memory';
+import ImageViewer from '../components/ImageViewer';
+import { ImageSizeType, ImageType, isImageType } from '../types/Image';
+import { Series } from '../types/Series';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -37,23 +57,47 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
+const getSpeakersUnion = (array1: ISpeaker[], array2: ISpeaker[]) => {
+  const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
+  return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
+};
+
+const client =
+  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
+        responsesCache: createInMemoryCache(),
+        requestsCache: createInMemoryCache({ serializable: false }),
+      })
+    : undefined;
+const speakersIndex = client?.initIndex('speakers');
+const topicsIndex = client?.initIndex('topics');
+
+export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
+  if (speakersIndex) {
+    const response = await speakersIndex.search<ISpeaker>(query, {
+      hitsPerPage,
+      page,
+    });
+    return response;
+  }
+};
+
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
-  const [sermonData, setSermonData] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
+  const [sermon, setSermon] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
   const [file, setFile] = useState<UploadableFile>();
-  const [uploadProgress, setUploadProgress] = useState<string>();
-  const [duration, setDuration] = useState<number>(0);
+  const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
-  const [seriesArray, setSeriesArray] = useState<string[]>([]);
-  const [speakersArray, setSpeakersArray] = useState<string[]>([]);
+  const [seriesArray, setSeriesArray] = useState<Series[]>([]);
+  const [speakersArray, setSpeakersArray] = useState<ISpeaker[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
+  const [trimStart, setTrimStart] = useState<number>(0);
+
+  const [timer, setTimer] = useState<NodeJS.Timeout>();
 
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(new Date(props.existingSermon ? props.existingSermon.dateMillis : new Date()));
-  const [speaker, setSpeaker] = useState(props.existingSermon ? props.existingSermon.speaker : []);
-  const [topic, setTopic] = useState(props.existingSermon ? props.existingSermon.topic : []);
-  const [series, setSeries] = useState(props.existingSermon ? props.existingSermon.series : '');
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
@@ -68,6 +112,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
 
+  // const [editImagePopup, setEditImagePopup] = useState<boolean>(false);
+  // const [imageToEdit, setImageToEdit] = useState({ url: '', imageIndex: 0 });
+
   useEffect(() => {
     if (!userHasTypedInSeries) {
       setNewSeriesError({ error: false, message: '' });
@@ -76,7 +123,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
     if (newSeries === '') {
       setNewSeriesError({ error: true, message: 'Series cannot be empty' });
-    } else if (seriesArray.includes(newSeries)) {
+    } else if (seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())) {
       setNewSeriesError({ error: true, message: 'Series already exists' });
     } else {
       setNewSeriesError({ error: false, message: '' });
@@ -85,25 +132,14 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   useEffect(() => {
     const fetchData = async () => {
-      const db = getFirestore(firebase);
-
-      const subtitlesRef = doc(db, 'subtitles', 'subtitlesDoc');
+      const subtitlesRef = doc(firestore, 'subtitles', 'subtitlesDoc');
       const subtitlesSnap = await getDoc(subtitlesRef);
       const subtitlesData = subtitlesSnap.data();
       setSubtitlesArray(subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []);
 
-      const seriesQuery = query(collection(db, 'series'));
+      const seriesQuery = query(collection(firestore, 'series'));
       const seriesQuerySnapshot = await getDocs(seriesQuery);
-      setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data().name));
-
-      const speakersQuery = query(collection(db, 'speakers'));
-      const speakersQuerySnapshot = await getDocs(speakersQuery);
-      setSpeakersArray(speakersQuerySnapshot.docs.map((doc) => doc.data().name));
-
-      const topicsRef = doc(db, 'topics', 'topicsDoc');
-      const topicsSnap = await getDoc(topicsRef);
-      const topicsData = topicsSnap.data();
-      setTopicsArray(topicsData ? topicsSnap.data()?.topicsArray : []);
+      setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data() as Series));
     };
     fetchData();
   }, []);
@@ -118,51 +154,90 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getDate() === date?.getDate() &&
       sermon1Date.getMonth() === date?.getMonth() &&
       sermon1Date.getFullYear() === date?.getFullYear() &&
-      sermon1.series === series &&
-      JSON.stringify(sermon1.speaker) === JSON.stringify(speaker) &&
-      sermon1.scripture === sermon2.scripture &&
-      JSON.stringify(sermon1.topic) === JSON.stringify(topic)
+      sermon1.series.name === sermon.series.name &&
+      sermon1.series.id === sermon.series.id &&
+      JSON.stringify(sermon1.images) === JSON.stringify(sermon.images) &&
+      JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
+      JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
   };
 
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
-    setSermonData(emptySermon);
+    setSermon(emptySermon);
     setDate(new Date());
-    setSpeaker([]);
-    setTopic([]);
-    setSeries('');
     setFile(undefined);
   };
 
-  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setSermonData((prevSermonData) => {
+  const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setSermon((prevSermon) => {
       return {
-        ...prevSermonData,
+        ...prevSermon,
         [event.target.name]: event.target.value,
       };
     });
+  };
+
+  const updateSermon = (key: keyof Sermon, value: any) => {
+    setSermon((oldSermon) => ({ ...oldSermon, [key]: value }));
   };
 
   const handleDateChange = (newValue: Date) => {
     setDate(newValue);
   };
 
+  const setTrimDuration = (durationSeconds: number) => {
+    updateSermon('durationSeconds', durationSeconds);
+  };
+
+  const fetchTopicsResults = async (query: string) => {
+    if (topicsIndex) {
+      const response = await topicsIndex.search(query, {
+        hitsPerPage: 5,
+      });
+      return response;
+    }
+  };
+
+  const handleNewImage = (image: ImageType | ImageSizeType) => {
+    setSermon((oldSermon) => {
+      // check if image is ImageType or ImageSizeType
+      if (isImageType(image)) {
+        const castedImage = image as ImageType;
+        let newImages: ImageType[] = [];
+        if (oldSermon.images.find((img) => img.type === castedImage.type)) {
+          newImages = oldSermon.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+        } else {
+          newImages = [...oldSermon.images, castedImage];
+        }
+        return {
+          ...oldSermon,
+          images: newImages,
+        };
+      } else {
+        const imageSizeType = image as ImageSizeType;
+        return {
+          ...oldSermon,
+          images: oldSermon.images.filter((img) => img.type !== imageSizeType),
+        };
+      }
+    });
+  };
+
   return (
     <form className={styles.container}>
+      <h1 style={{ justifySelf: 'center', gridColumn: '1/3' }}>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
       <Box
         sx={{
           display: 'flex',
           flexWrap: 'wrap',
           gap: '1ch',
           margin: 'auto',
-          maxWidth: '900px',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <h1>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
         <TextField
           sx={{
             display: 'block',
@@ -173,31 +248,22 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           label="Title"
           name="title"
           variant="outlined"
-          value={sermonData.title}
+          value={sermon.title}
           onChange={handleChange}
           required
         />
-        <Box sx={{ display: 'flex', color: 'red', gap: '1ch', width: 1 }}>
+        <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
           <Autocomplete
             fullWidth
             id="subtitle-input"
-            value={sermonData.subtitle || null}
+            value={sermon.subtitle || null}
             onChange={(_, newValue) => {
-              newValue === null
-                ? setSermonData((oldSermonData) => ({
-                    ...oldSermonData,
-                    subtitle: '',
-                  }))
-                : setSermonData((oldSermonData) => ({
-                    ...oldSermonData,
-                    subtitle: newValue,
-                  }));
+              newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
             }}
             renderInput={(params) => <TextField required {...params} label="Subtitle" />}
             options={subtitlesArray}
           />
           <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
-            {/* TODO: Use date invalid for disabling the button */}
             <DesktopDatePicker
               label="Date"
               inputFormat="MM/dd/yyyy"
@@ -222,18 +288,33 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           name="description"
           placeholder="Description"
           multiline
-          value={sermonData.description}
+          value={sermon.description}
           onChange={handleChange}
         />
         <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
           <Autocomplete
             fullWidth
-            value={series || null}
-            onChange={(_, newValue) => {
-              newValue === null ? setSeries('') : setSeries(newValue);
+            value={sermon.series || null}
+            onChange={async (_, newValue) => {
+              if (newValue !== null) {
+                const newSeriesRef = doc(firestore, 'series', newValue.id);
+                await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
+              }
+              if (sermon.series.name !== undefined && newValue === null) {
+                const seriesRef = doc(firestore, 'series', sermon.series.id);
+                await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+              }
+              newValue === null ? updateSermon('series', {} as Series) : updateSermon('series', newValue);
             }}
             id="series-input"
             options={seriesArray}
+            renderOption={(props, option) => <li {...props}>{option.name}</li>}
+            getOptionLabel={(option) => option?.name || ''}
+            isOptionEqualToValue={(option, value) =>
+              value.name === undefined ||
+              option.name === undefined ||
+              (option.name === value.name && option.id === value.id)
+            }
             renderInput={(params) => <TextField {...params} label="Series" />}
           />
           <p style={{ paddingLeft: '10px' }}>or</p>
@@ -247,57 +328,159 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         </div>
         <Autocomplete
           fullWidth
-          value={speaker}
+          value={sermon.speakers}
           onBlur={() => {
             setSpeakerError({ error: false, message: '' });
           }}
-          onChange={(_, newValue) => {
+          onChange={async (_, newValue) => {
+            if (newValue.length === 1) {
+              const currentTypes = sermon.images.map((img) => img.type);
+              const newImages = [
+                ...sermon.images,
+                ...newValue[0].images.filter((img) => !currentTypes.includes(img.type)),
+              ];
+              updateSermon('images', newImages);
+            }
             if (newValue !== null && newValue.length <= 3) {
-              setSpeaker(newValue);
-            } else if (newValue.length >= 4) {
+              updateSermon('speakers', newValue);
+            }
+
+            if (newValue.length >= 4) {
               setSpeakerError({
                 error: true,
                 message: 'Can only add up to 3 speakers',
               });
+            } else if (speakerError.error) {
+              setSpeakerError({ error: false, message: '' });
             }
           }}
+          onInputChange={async (_, value) => {
+            clearTimeout(timer);
+            const newTimer = setTimeout(async () => {
+              const data = await fetchSpeakerResults(value, 25, 0);
+              const res: ISpeaker[] = [];
+              data?.hits.forEach((element: ISpeaker) => {
+                res.push(element);
+              });
+              setSpeakersArray(res);
+            }, 300);
+            setTimer(newTimer);
+          }}
           id="speaker-input"
-          options={speakersArray}
+          options={getSpeakersUnion(sermon.speakers, speakersArray)}
+          isOptionEqualToValue={(option, value) =>
+            value === undefined || option === undefined || option.id === value.id
+          }
+          renderTags={(speakers, _) => {
+            return speakers.map((speaker) => (
+              <Chip
+                style={{ margin: '3px' }}
+                onDelete={() => {
+                  setSpeakerError({ error: false, message: '' });
+                  setSermon((previousSermon) => {
+                    const newImages = previousSermon.images.filter((img) => {
+                      return !speaker.images?.find((image) => image.id === img.id);
+                    });
+                    updateSermon('images', newImages);
+                    const previousSpeakers = previousSermon.speakers;
+                    const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
+                    return {
+                      ...previousSermon,
+                      speakers: newSpeakers,
+                    };
+                  });
+                }}
+                key={speaker.id}
+                label={speaker.name}
+                avatar={
+                  <div
+                    style={{
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      position: 'relative',
+                      width: 24,
+                      height: 24,
+                      backgroundImage: `url(${'/user.png'})`,
+                      backgroundPosition: 'center center',
+                      backgroundSize: 'cover',
+                    }}
+                  >
+                    {speaker.images?.find((image) => image.type === 'square') && (
+                      <Image
+                        src={sanitize(speaker.images.find((image) => image.type === 'square')!.downloadLink)}
+                        layout="fill"
+                      />
+                    )}
+                  </div>
+                }
+              />
+            ));
+          }}
+          renderOption={(props, option: ISpeaker) => {
+            const squareImage = option.images?.find((image) => image.type === 'square');
+            return (
+              <li key={option.id} {...props}>
+                <div
+                  style={{
+                    borderRadius: '5px',
+                    overflow: 'hidden',
+                    position: 'relative',
+                    width: 30,
+                    height: 30,
+                    marginRight: 15,
+                    backgroundColor: squareImage?.averageColorHex ? squareImage.averageColorHex : undefined,
+                    backgroundImage: squareImage?.averageColorHex ? undefined : `url(${'/user.png'})`,
+                    backgroundPosition: 'center center',
+                    backgroundSize: 'cover',
+                  }}
+                >
+                  {squareImage && <Image src={sanitize(squareImage.downloadLink)} layout="fill" />}
+                </div>
+                {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
+                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+                ) : (
+                  <div>{option.name}</div>
+                )}
+              </li>
+            );
+          }}
+          getOptionLabel={(option: ISpeaker) => option.name}
           multiple
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              required
-              label="Speaker(s)"
-              error={speakerError.error}
-              helperText={speakerError.message}
-            />
-          )}
-        />
-        <TextField
-          fullWidth
-          id="scripture-input"
-          label="Scripture"
-          name="scripture"
-          variant="outlined"
-          value={sermonData.scripture}
-          onChange={handleChange}
+          renderInput={(params) => {
+            return (
+              <TextField
+                {...params}
+                required
+                label="Speaker(s)"
+                error={speakerError.error}
+                helperText={speakerError.message}
+              />
+            );
+          }}
         />
         <Autocomplete
           fullWidth
-          value={topic}
+          value={sermon.topics}
           onBlur={() => {
             setTopicError({ error: false, message: '' });
           }}
           onChange={(_, newValue) => {
             if (newValue !== null && newValue.length <= 10) {
-              setTopic(newValue);
+              updateSermon('topics', newValue);
             } else if (newValue.length >= 11) {
               setTopicError({
                 error: true,
                 message: 'Can only add up to 10 topics',
               });
             }
+          }}
+          onInputChange={async (_, value) => {
+            const data = await fetchTopicsResults(value);
+            const res: string[] = [];
+            data?.hits.forEach((element: any) => {
+              res.push(element.name);
+            });
+            setTopicsArray(res);
           }}
           id="topic-input"
           options={topicsArray}
@@ -306,38 +489,62 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
           )}
         />
+      </Box>
+      <div style={{}}>
+        <ImageViewer
+          images={sermon.images}
+          speaker={sermon.speakers[0]}
+          newImageCallback={handleNewImage}
+          vertical={true}
+        />
+      </div>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '1ch',
+          margin: 'auto',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         {props.existingSermon ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
-              onClick={() =>
-                editSermon({
-                  key: sermonData.key,
-                  title: sermonData.title,
-                  subtitle: sermonData.subtitle,
-                  date,
-                  description: sermonData.description,
-                  speaker,
-                  scripture: sermonData.scripture,
-                  topic,
-                  series,
-                }).then(() => {
-                  props.setUpdatedSermon?.({
-                    key: sermonData.key,
-                    title: sermonData.title,
-                    subtitle: sermonData.subtitle,
+              onClick={async () => {
+                await editSermon({
+                  key: sermon.key,
+                  title: sermon.title,
+                  subtitle: sermon.subtitle,
+                  description: sermon.description,
+                  speakers: sermon.speakers,
+                  topics: sermon.topics,
+                  series: sermon.series,
+                  images: sermon.images,
+                });
+                props.setUpdatedSermon?.(
+                  createSermon({
+                    key: sermon.key,
+                    title: sermon.title,
+                    subtitle: sermon.subtitle,
                     dateMillis: date.getTime(),
-                    durationSeconds: sermonData.durationSeconds,
-                    description: sermonData.description,
-                    speaker,
-                    scripture: sermonData.scripture,
-                    topic,
-                    series,
+                    durationSeconds: sermon.durationSeconds,
+                    description: sermon.description,
+                    speakers: sermon.speakers,
+                    topics: sermon.topics,
+                    series: sermon.series,
                     dateString: getDateString(date),
-                  });
-                  props.setEditFormOpen?.(false);
-                })
+                  })
+                );
+                props.setEditFormOpen?.(false);
+              }}
+              disabled={
+                sermonsEqual(props.existingSermon, sermon) ||
+                sermon.title === '' ||
+                date === null ||
+                sermon.speakers.length === 0 ||
+                sermon.subtitle === ''
               }
-              disabled={sermonsEqual(props.existingSermon, sermonData)}
               variant="contained"
             >
               update sermon
@@ -348,62 +555,64 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             {file ? (
               <div style={{ width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'right' }}>
-                  <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)}></Cancel>
+                  <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)} />
                 </div>
-                <DynamicAudioTrimmer url={file.preview} duration={duration} setDuration={setDuration} />
+                <DynamicAudioTrimmer
+                  url={file.preview}
+                  trimStart={trimStart}
+                  setTrimStart={setTrimStart}
+                  setTrimDuration={setTrimDuration}
+                />
               </div>
             ) : (
               <DropZone setFile={setFile} />
             )}
+            <div style={{ display: 'flex' }}>
+              <input
+                className={styles.button}
+                type="button"
+                value="Upload"
+                disabled={
+                  file === undefined ||
+                  sermon.title === '' ||
+                  date === null ||
+                  sermon.speakers.length === 0 ||
+                  sermon.subtitle === ''
+                }
+                onClick={async () => {
+                  if (file !== undefined && date != null && user?.role === 'admin') {
+                    try {
+                      await uploadFile({
+                        file,
+                        setFile,
+                        setUploadProgress,
+                        date,
+                        trimStart,
+                        sermon,
+                      });
+                      clearForm();
+                    } catch (error) {
+                      setUploadProgress({ error: true, message: `Error uploading file: ${error}` });
+                    }
+                  } else if (user?.role !== 'admin') {
+                    setUploadProgress({ error: true, message: 'You do not have permission to upload' });
+                  }
+                }}
+              />
+              <button type="button" className={styles.button} onClick={() => clearForm()}>
+                Clear Form
+              </button>
+            </div>
+            <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
+              {uploadProgress.message}
+            </p>
           </>
         )}
-        <div style={{ display: 'flex' }}>
-          <input
-            className={styles.button}
-            type="button"
-            value="Upload"
-            disabled={
-              file === undefined ||
-              sermonData.title === '' ||
-              date === null ||
-              speaker.length === 0 ||
-              sermonData.subtitle === ''
-            }
-            onClick={async () => {
-              if (file !== undefined && date != null && user?.role === 'admin') {
-                try {
-                  await uploadFile({
-                    file: file,
-                    setFile: setFile,
-                    setUploadProgress: setUploadProgress,
-                    title: sermonData.title,
-                    subtitle: sermonData.subtitle,
-                    durationSeconds: duration,
-                    date,
-                    description: sermonData.description,
-                    speaker,
-                    scripture: sermonData.scripture,
-                    topic,
-                    series,
-                  });
-                  clearForm();
-                } catch (error) {
-                  setUploadProgress(JSON.stringify(error));
-                }
-              } else if (user?.role !== 'admin') {
-                setUploadProgress('You do not have permission to upload');
-              }
-            }}
-          />
-          <button type="button" className={styles.button} onClick={() => clearForm()}>
-            Clear Form
-          </button>
-        </div>
       </Box>
       <DynamicPopUp
         title={'Add new series'}
         open={newSeriesPopup}
-        setOpen={() => setNewSeriesPopup(false)}
+        setOpen={setNewSeriesPopup}
         onClose={() => {
           setUserHasTypedInSeries(false);
           setNewSeries('');
@@ -411,13 +620,16 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         button={
           <Button
             variant="contained"
-            disabled={newSeries === '' || seriesArray.includes(newSeries)}
+            disabled={
+              newSeries === '' ||
+              seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())
+            }
             onClick={async () => {
               try {
-                await addNewSeries(newSeries);
+                const newSeriesId = await addNewSeries(newSeries);
+                const seriesToAdd = { id: newSeriesId, name: newSeries, sermonIds: [] };
                 setNewSeriesPopup(false);
-                seriesArray.push(newSeries);
-                setSeries(newSeries);
+                seriesArray.push(seriesToAdd);
                 setNewSeries('');
               } catch (error) {
                 setNewSeriesError({ error: true, message: JSON.stringify(error) });
@@ -440,7 +652,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           />
         </div>
       </DynamicPopUp>
-      <p style={{ textAlign: 'center' }}>{uploadProgress}</p>
     </form>
   );
 };

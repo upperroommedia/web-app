@@ -1,0 +1,19 @@
+{
+  "name": "sermons/32e2dc14-fb46-4011-8aa9-5afaebaecd6e",
+  "bucket": "urm-app.appspot.com",
+  "metageneration": 1,
+  "generation": 1669159831214,
+  "contentType": "application/octet-stream",
+  "storageClass": "STANDARD",
+  "contentDisposition": "inline",
+  "downloadTokens": [
+    "a5d8feff-0307-459e-b9fe-306850db1174"
+  ],
+  "etag": "t/HltU6yJBJcU02lxqfxoUAgR3A",
+  "customMetadata": {},
+  "timeCreated": "2022-11-22T23:30:31.214Z",
+  "updated": "2022-11-22T23:30:31.214Z",
+  "size": 262144,
+  "md5Hash": "A7726+rGQLavXn0kbnWa3g==",
+  "crc32c": "2436396486"
+}

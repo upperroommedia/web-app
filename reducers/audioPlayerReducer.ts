@@ -1,7 +1,8 @@
-import { Sermon } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
 export interface SermonWithMetadata extends Sermon {
   currentSecond: number;
   url?: string;
+  subsplashId?: string;
 }
 
 export type AudioPlayerState = {
