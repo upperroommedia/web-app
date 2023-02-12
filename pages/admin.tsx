@@ -18,7 +18,6 @@ import firestore, {
   doc,
   deleteDoc,
 } from '../firebase/firestore';
-import { Sermon } from '../types/SermonTypes';
 import SermonsList from '../components/SermonsList';
 import PopUp from '../components/PopUp';
 import Button from '@mui/material/Button';
@@ -28,7 +27,7 @@ import MenuItem from '@mui/material/MenuItem';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Box from '@mui/material/Box';
-import { ISpeaker } from '../types/Speaker';
+import { ISpeaker, speakerConverter } from '../types/Speaker';
 import SpeakerTable from '../components/SpeakerTable';
 import { createFunction } from '../utils/createFunction';
 import UserTable from '../components/UserTable';
@@ -127,10 +126,10 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   };
 
   const fetchSeries = async () => {
-    const seriesQuery = query(collection(firestore, 'series'));
+    const seriesQuery = query(collection(firestore, 'series').withConverter(seriesConverter));
     const seriesQuerySnapshot = await getDocs(seriesQuery);
     seriesQuerySnapshot.docs.forEach((doc) => {
-      setSeries((oldSeries) => [...oldSeries, doc.data() as Series]);
+      setSeries((oldSeries) => [...oldSeries, doc.data()]);
     });
   };
 
@@ -159,11 +158,11 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       collection(firestore, 'speakers'),
       limit(parseInt(event.target.value, 10)),
       orderBy('sermonCount', 'desc')
-    );
+    ).withConverter(speakerConverter);
     const querySnapshot = await getDocs(q);
     const res: ISpeaker[] = [];
     querySnapshot.forEach((doc) => {
-      res.push(doc.data() as unknown as ISpeaker);
+      res.push(doc.data());
     });
     setQueryState(
       query(
@@ -189,12 +188,16 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
   };
 
   const getSpeakersFirebase = async () => {
-    const q = query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy('sermonCount', 'desc'));
+    const q = query(
+      collection(firestore, 'speakers').withConverter(speakerConverter),
+      limit(rowsPerPage),
+      orderBy('sermonCount', 'desc')
+    );
     setQueryState(q);
     const querySnapshot = await getDocs(q);
     const res: ISpeaker[] = [];
     querySnapshot.forEach((doc) => {
-      res.push(doc.data() as ISpeaker);
+      res.push(doc.data());
     });
     setSpeakers(res);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
@@ -208,11 +211,11 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
       limit(rowsPerPage),
       orderBy('sermonCount', 'desc'),
       startAfter(lastSpeaker)
-    );
+    ).withConverter(speakerConverter);
     const querySnapshot = await getDocs(q);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     querySnapshot.forEach((doc) => {
-      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data() as ISpeaker]);
+      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data()]);
     });
     const result = await fetchSpeakerResults('', 1, 0);
     result?.nbHits && setTotalSpeakers(result.nbHits);
@@ -226,11 +229,15 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
     setSortProperty(property);
     setSortOrder(order);
     setPage(0);
-    const q = query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order));
+    const q = query(
+      collection(firestore, 'speakers').withConverter(speakerConverter),
+      limit(rowsPerPage),
+      orderBy(property, order)
+    );
     const querySnapshot = await getDocs(q);
     const res: ISpeaker[] = [];
     querySnapshot.forEach((doc) => {
-      res.push(doc.data() as unknown as ISpeaker);
+      res.push(doc.data());
     });
     setQueryState(
       query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order), startAfter(lastSpeaker))
@@ -292,7 +299,7 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
           <h2>Manage Sermons</h2>
           {error && <strong>Error: {JSON.stringify(error)}</strong>}
           {loading && <span>Collection: Loading...</span>}
-          {sermons && <SermonsList sermons={sermons.docs.map((doc) => doc.data() as Sermon)} />}
+          {sermons && <SermonsList sermons={sermons.docs.map((doc) => doc.data())} />}
           <DynamicBottomAudioBar />
         </div>
       </TabPanel>
@@ -377,8 +384,8 @@ const Admin: NextPage = (_props: InferGetServerSidePropsType<typeof getServerSid
                           <div key={sermonId}>
                             <SermonsList
                               sermons={sermons.docs
-                                .filter((doc) => (doc.data() as Sermon).key === sermonId)
-                                .map((doc) => doc.data() as Sermon)}
+                                .filter((doc) => doc.data().key === sermonId)
+                                .map((doc) => doc.data())}
                               minimal={true}
                             />
                           </div>
