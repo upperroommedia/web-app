@@ -54,6 +54,7 @@ const calculateTime = (sec: number) => {
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, setTrimStart, setTrimDuration }) => {
   const [currentTime, setCurrentTime, currentTimeRef] = useStateRef<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+
   const trimStartRef = useRef<number>(trimStart);
   const [stopTrim, setStopTrim, stopTrimRef] = useStateRef<number>(0);
   const previousPlayingStateRef = useRef<boolean>(false);
@@ -61,6 +62,11 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
   const clickOffsetRef = useRef<number>(0);
   const audioPlayer = useRef<HTMLAudioElement>(new Audio(url)); // reference for our audio component
   const scrubberContainer = useRef<HTMLDivElement>(null);
+
+  const [trimStartMinutes, setTrimStartMinutes] = useState<number>(0);
+  const [trimStartSeconds, setTrimStartSeconds] = useState<number>(0);
+  const [trimEndMinutes, setTrimEndMinutes] = useState<number>(0);
+  const [trimEndSeconds, setTrimEndSeconds] = useState<number>(0);
 
   useEffect(() => {
     if (trimStartRef.current !== trimStart) {
@@ -71,6 +77,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
 
   const handleMetaDataLoaded = () => {
     setStopTrim(audioPlayer.current.duration);
+    setTrimEndMinutes(Math.floor(audioPlayer.current.duration / 60));
+    setTrimEndSeconds(Math.floor(audioPlayer.current.duration % 60));
     setTrimDuration(audioPlayer.current.duration);
   };
 
@@ -116,16 +124,24 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
       if (clickTarget === CLICK_TARGET.START_TRIM) {
         time = time < stopTrimRef.current ? time : stopTrimRef.current;
         setTrimStart(time);
+        setTrimStartMinutes(Math.floor(time / 60));
+        setTrimStartSeconds(Math.floor(time % 60));
       } else if (clickTarget === CLICK_TARGET.END_TRIM) {
         time = time > trimStartRef.current ? time : trimStartRef.current;
         setStopTrim(time);
+        setTrimEndMinutes(Math.floor(time / 60));
+        setTrimEndSeconds(Math.floor(time % 60));
         time = time - 5;
         time = time > trimStartRef.current ? time : trimStartRef.current;
       }
       if (time > stopTrimRef.current) {
         setStopTrim(time);
+        setTrimEndMinutes(Math.floor(time / 60));
+        setTrimEndSeconds(Math.floor(time % 60));
       } else if (time < trimStartRef.current) {
         setTrimStart(time);
+        setTrimStartMinutes(Math.floor(time / 60));
+        setTrimStartSeconds(Math.floor(time % 60));
       }
       // audioPlayer.current.currentTime = time;
       setCurrentTime(time);
@@ -204,8 +220,12 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
 
     if (clickTarget === CLICK_TARGET.START_TRIM) {
       setTrimStart(time);
+      setTrimStartMinutes(Math.floor(time / 60));
+      setTrimStartSeconds(Math.floor(time % 60));
     } else if (clickTarget === CLICK_TARGET.END_TRIM) {
       setStopTrim(time);
+      setTrimEndMinutes(Math.floor(time / 60));
+      setTrimEndSeconds(Math.floor(time % 60));
       time = time - 5;
       time = time > trimStart ? time : trimStart;
     }
@@ -317,9 +337,59 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
         <RenderTrimAreas />
       </RenderTrimmer>
       <RenderControls />
-      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-        <div>Trim Start: {calculateTime(trimStart)}</div>
-        <div>Trim Stop: {calculateTime(stopTrim)}</div>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div>Trim Start:</div>
+        <input
+          type="number"
+          style={{ width: '25px' }}
+          value={trimStartMinutes}
+          onChange={(e) => {
+            const num = Number(e.target.value);
+            if (num >= 0 && (trimStart % 60) + num * 60 < audioPlayer.current.duration) {
+              setTrimStartMinutes(num);
+              setTrimStart((oldTrimStart) => (oldTrimStart % 60) + num * 60);
+            }
+          }}
+        />
+        <span>:</span>
+        <input
+          type="number"
+          value={trimStartSeconds}
+          style={{ width: '25px' }}
+          onChange={(e) => {
+            const num = Number(e.target.value);
+            if (num >= 0 && num < 60 && trimStart - (trimStart % 60) + num < audioPlayer.current.duration) {
+              setTrimStartSeconds(num);
+              setTrimStart((oldTrimStart) => oldTrimStart - (oldTrimStart % 60) + num);
+            }
+          }}
+        />
+        <div style={{ paddingLeft: '10px' }}>Trim Stop:</div>
+        <input
+          type="number"
+          style={{ width: '25px' }}
+          value={trimEndMinutes}
+          onChange={(e) => {
+            const num = Number(e.target.value);
+            if (num >= 0 && (trimStart % 60) + num * 60 < audioPlayer.current.duration) {
+              setTrimEndMinutes(num);
+              setStopTrim((oldTrimStart) => (oldTrimStart % 60) + num * 60);
+            }
+          }}
+        />
+        <span>:</span>
+        <input
+          type="number"
+          value={trimEndSeconds}
+          style={{ width: '25px' }}
+          onChange={(e) => {
+            const num = Number(e.target.value);
+            if (num >= 0 && num < 60 && trimStart - (trimStart % 60) + num < audioPlayer.current.duration) {
+              setTrimEndSeconds(num);
+              setStopTrim((oldTrimStart) => oldTrimStart - (oldTrimStart % 60) + num);
+            }
+          }}
+        />
       </div>
     </div>
   );
