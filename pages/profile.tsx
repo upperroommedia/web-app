@@ -33,6 +33,9 @@ export default function Profile() {
         <Typography align="center" variant="body1">
           Email: {user.email}
         </Typography>
+        <Typography align="center" variant="body1">
+          Role: {user.role ? user.role : 'No role assigned'}
+        </Typography>
         <MediumButton onClick={() => logoutUser()}>Logout</MediumButton>
       </Box>
     );
