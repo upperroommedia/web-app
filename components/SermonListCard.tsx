@@ -28,7 +28,7 @@ import { createFunction, createFunctionV2 } from '../utils/createFunction';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
 import Image from 'next/image';
-import Logo from '../public/upper_room_media_icon.png';
+import Logo from '../public/URM_icon.png';
 import SoundCloudLogo from '../public/soundcloud.png';
 import { sanitize } from 'dompurify';
 import DeleteEntityPopup from './DeleteEntityPopup';
