@@ -15,7 +15,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 // import { modifyImage, ResizedImageResult } from './resize-image';
 import fs from 'fs';
 import os from 'os';
-import mkdir from 'mkdirp';
+import { mkdirp } from 'mkdirp';
 import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
@@ -125,7 +125,7 @@ const handleImageUpload = onObjectFinalized(
 
       // Create the temp directory where the storage file will be downloaded.
       logger.log(`Creating temporary directory: '${tempLocalDir}'`);
-      await mkdir(tempLocalDir);
+      await mkdirp(tempLocalDir);
       logger.log(`Created temporary directory: '${tempLocalDir}'`);
 
       // Download file from bucket.
