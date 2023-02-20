@@ -409,7 +409,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     {speaker.images?.find((image) => image.type === 'square') && (
                       <Image
                         src={sanitize(speaker.images.find((image) => image.type === 'square')!.downloadLink)}
-                        layout="fill"
+                        alt={`Image of ${speaker.name}`}
+                        fill
                       />
                     )}
                   </div>
@@ -435,7 +436,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     backgroundSize: 'cover',
                   }}
                 >
-                  {squareImage && <Image src={sanitize(squareImage.downloadLink)} layout="fill" />}
+                  {squareImage && (
+                    <Image src={sanitize(squareImage.downloadLink)} alt={`Image of ${option.name}`} fill />
+                  )}
                 </div>
                 {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
                   <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>

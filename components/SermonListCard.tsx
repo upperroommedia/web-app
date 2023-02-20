@@ -148,7 +148,7 @@ Props) => {
       title: sermon.title,
       subtitle: sermon.subtitle,
       speakers: sermon.speakers,
-      autoPublish: autoPublish,
+      autoPublish,
       audioTitle: sermon.title,
       audioUrl: url,
       topics: sermon.topics,
@@ -211,7 +211,7 @@ Props) => {
         ) : (
           <Tooltip title="Upload to Soundcloud">
             <IconButton onClick={() => uploadToSoundCloud()}>
-              <Image src={SoundCloudLogo} width={24} height={24} />
+              <Image src={SoundCloudLogo} alt="Soundcloud Logo" width={24} height={24} />
             </IconButton>
           </Tooltip>
         )}
@@ -271,7 +271,8 @@ Props) => {
                 ? sanitize(sermon.images.find((image) => image.type === 'square')!.downloadLink)
                 : Logo
             }
-            layout="fill"
+            alt={`Image for ${sermon.title}`}
+            fill
           />
         </div>
         <div className={styles.divText}>

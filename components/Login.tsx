@@ -146,9 +146,7 @@ const Login = () => {
           <p style={{ textAlign: 'center' }}>or</p>
           <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
             <div className={styles.google_icon_wrapper}>
-              <div className={styles.google_icon}>
-                <Image src="/google-logo.svg" width="30px" height="30px" />
-              </div>
+              <Image src="/google-logo.svg" alt="Google Logo" width={30} height={30} />
             </div>
             <p className={styles.btn_text}>
               <b>Sign in with google</b>

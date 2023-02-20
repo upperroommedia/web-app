@@ -173,6 +173,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
                 {stableSort(props.users, order, orderBy)
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((user) => {
+                    const displayName = user.displayName || user.email;
                     return (
                       <TableRow hover tabIndex={-1} key={user.uid}>
                         <TableCell>{user.email}</TableCell>
@@ -205,7 +206,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
                               backgroundSize: 'cover',
                             }}
                           >
-                            {user.photoURL && <Image src={user.photoURL} layout="fill" />}
+                            {user.photoURL && <Image src={user.photoURL} alt={`Image of ${displayName}`} fill />}
                           </div>
                         </TableCell>
                       </TableRow>

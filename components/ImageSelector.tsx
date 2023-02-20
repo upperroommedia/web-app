@@ -115,14 +115,14 @@ const ImageSelector = (props: {
           >
             <Image
               src={sanitize(image.downloadLink)}
-              height="164px"
+              height={164}
               alt={image.name}
               style={{
                 borderRadius: '5px',
                 cursor: 'pointer',
+                objectFit: 'contain',
               }}
-              layout="fill"
-              objectFit="contain"
+              fill
               onClick={() => {
                 props.setNewSelectedImage(image);
               }}

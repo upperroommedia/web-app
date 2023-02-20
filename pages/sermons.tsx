@@ -6,7 +6,7 @@ import type { GetServerSideProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
 import { sermonConverter } from '../types/Sermon';
-import { Sermon, sermonStatusType } from '../types/SermonTypes';
+import { Sermon, uploadStatus } from '../types/SermonTypes';
 import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import SermonsList from '../components/SermonsList';
 import Head from 'next/head';
@@ -38,13 +38,13 @@ export const getServerSideProps: GetServerSideProps = async (_context) => {
     // Firestore data converter to convert the queried data to the expected type
     const sermonsQuery = query(
       collection(firestore, 'sermons'),
-      where('status.type', '==', sermonStatusType.UPLOADED)
+      where('status.subsplash', '==', uploadStatus.UPLOADED)
     ).withConverter(sermonConverter);
     const sermonsQuerySnapshot = await getDocs(sermonsQuery);
     const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
 
     return {
-      props: { sermons: sermons },
+      props: { sermons },
     };
   } catch (error) {
     return {

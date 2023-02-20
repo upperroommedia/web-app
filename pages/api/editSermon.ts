@@ -39,10 +39,8 @@ const editSermon = async (props: IEditSermon) => {
   );
   const results = await Promise.allSettled(promises);
   for (const result of results) {
-    if (result.status === 'fulfilled') {
-      console.log(result.status);
-    } else {
-      console.error(result.reason);
+    if (result.status !== 'fulfilled') {
+      alert(result.reason);
     }
   }
 };

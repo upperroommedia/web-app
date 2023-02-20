@@ -15,7 +15,7 @@ import nookies from 'nookies';
 import { setDoc, doc, getDoc } from 'firebase/firestore';
 import firestore from '../../firebase/firestore';
 
-interface User extends adminFirebase.User {
+export interface User extends adminFirebase.User {
   role?: string;
   firstName: string;
   lastName: string;
