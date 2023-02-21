@@ -1,109 +1,207 @@
 /**
  * Navbar: located at the top of all pages
  */
-import { FunctionComponent } from 'react';
-import Link from 'next/link';
+import AppBar from '@mui/material/AppBar';
+import Box from '@mui/material/Box';
+import Toolbar from '@mui/material/Toolbar';
+import IconButton from '@mui/material/IconButton';
+import Typography from '@mui/material/Typography';
+import Menu from '@mui/material/Menu';
+import MenuIcon from '@mui/icons-material/Menu';
+import Container from '@mui/material/Container';
+import Avatar from '@mui/material/Avatar';
+import Tooltip from '@mui/material/Tooltip';
+import MenuItem from '@mui/material/MenuItem';
 import Image from 'next/image';
-import styles from '../styles/Navbar.module.css';
+import { useRouter } from 'next/navigation';
+import styles from 'styles/Navbar.module.css';
+import NavMenuItem from './NavMenuItem';
+import UserAvatar from './UserAvatar';
+import { FunctionComponent, useState } from 'react';
 import useAuth from '../context/user/UserContext';
-import { useRouter } from 'next/router';
 
 const Navbar: FunctionComponent = () => {
-  const { user } = useAuth();
-  const displayName = user?.displayName || user?.email;
-  const photoSrc = user?.photoURL || '/user.png';
-  const path = useRouter().asPath;
+  const { user, logoutUser } = useAuth();
+  const router = useRouter();
+  const adminPages = user?.role === 'admin' ? ['Uploader', 'Admin'] : [];
+  const pages = ['Home', 'Sermons', 'About', ...adminPages];
+  const settings = user ? ['Profile', 'Logout'] : ['Login'];
+  const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
+  const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
+
+  const handleOpenNavMenu = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorElNav(event.currentTarget);
+  };
+  const handleOpenUserMenu = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorElUser(event.currentTarget);
+  };
+
+  const handleCloseNavMenu = () => {
+    setAnchorElNav(null);
+  };
+
+  const handleCloseUserMenu = () => {
+    setAnchorElUser(null);
+  };
+
+  const handleSettingsClicked = (setting: string) => {
+    handleCloseUserMenu();
+    switch (setting) {
+      case 'Profile':
+        router.push('/profile');
+        break;
+      case 'Logout':
+        logoutUser();
+        break;
+      case 'Login':
+        router.push('/login');
+    }
+  };
+
+  function handlePageClicked(page: string) {
+    router.push(`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`);
+  }
+
   return (
-    <nav>
-      <div className={styles.navbar}>
-        <div className={styles.navbar_header_container}>
-          <h1 className={styles.title}>Upper Room Media</h1>
-          <div className={styles.logo}>
-            <Image src="/upper_room_media_icon.png" alt="Upper Room Media Logo" width="100%" height="100%" />
-          </div>
-        </div>
-        {user && (
-          <Link href="/profile">
-            <div className={styles.user_info} style={{ cursor: 'pointer' }}>
-              <div className={styles.profile_pic}>
-                <Image src={photoSrc} layout="fill" alt="User profile picture"></Image>
-              </div>
-              <p>{displayName}</p>
-            </div>
-          </Link>
-        )}
-      </div>
-      <div className={styles.navbar_links}>
-        <Link href="/">
-          <a
-            className={styles.nav_link}
-            style={{
-              color: path === '/' ? 'blue' : 'black',
-              textDecoration: path === '/' ? 'underline' : 'none',
+    <AppBar
+      position="static"
+      elevation={3}
+      style={{
+        backgroundColor: 'rgb(31 41 55)',
+      }}
+    >
+      <Container maxWidth="xl">
+        <Toolbar disableGutters>
+          <Typography
+            variant="h6"
+            noWrap
+            component="a"
+            href="/"
+            sx={{
+              mr: 2,
+              display: { xs: 'none', md: 'flex' },
+              // fontFamily: 'monospace',
+              fontWeight: 700,
+              letterSpacing: '.3rem',
+              color: 'inherit',
+              textDecoration: 'none',
             }}
           >
-            Home
-          </a>
-        </Link>
-        <Link href="/sermons">
-          <a
-            className={styles.nav_link}
-            style={{
-              color: path === '/sermons' ? 'blue' : 'black',
-              textDecoration: path === '/sermons' ? 'underline' : 'none',
-            }}
-          >
-            Sermons
-          </a>
-        </Link>
-        <Link href="/about">
-          <a
-            className={styles.nav_link}
-            style={{
-              color: path === '/about' ? 'blue' : 'black',
-              textDecoration: path === '/about' ? 'underline' : 'none',
-            }}
-          >
-            About
-          </a>
-        </Link>
-        <>
-          {user?.role === 'admin' ? (
-            <>
-              <Link href="/uploader">
-                <a
-                  className={styles.nav_link}
-                  style={{
-                    color: path === '/uploader' ? 'blue' : 'black',
-                    textDecoration: path === '/uploader' ? 'underline' : 'none',
+            Upper Room Media
+          </Typography>
+          <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
+            <IconButton
+              size="large"
+              aria-label="account of current user"
+              aria-controls="menu-appbar"
+              aria-haspopup="true"
+              onClick={handleOpenNavMenu}
+              color="inherit"
+            >
+              <MenuIcon />
+            </IconButton>
+            <Menu
+              id="menu-appbar"
+              anchorEl={anchorElNav}
+              anchorOrigin={{
+                vertical: 'bottom',
+                horizontal: 'left',
+              }}
+              keepMounted
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'left',
+              }}
+              open={Boolean(anchorElNav)}
+              onClose={handleCloseNavMenu}
+              sx={{
+                display: { xs: 'block', md: 'none' },
+              }}
+            >
+              {pages.map((page) => (
+                <MenuItem
+                  key={page}
+                  onClick={() => {
+                    handleCloseNavMenu();
+                    handlePageClicked(page);
                   }}
                 >
-                  Uploader
-                </a>
-              </Link>
-              <Link href="/admin">
-                <a
-                  className={styles.nav_link}
-                  style={{
-                    color: path === '/admin' ? 'blue' : 'black',
-                    textDecoration: path === '/admin' ? 'underline' : 'none',
+                  <Typography textAlign="center">{page}</Typography>
+                </MenuItem>
+              ))}
+            </Menu>
+          </Box>
+          <Avatar variant="square" sx={{ bgcolor: 'transparent' }}>
+            <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill />
+          </Avatar>{' '}
+          <Typography
+            variant="h5"
+            noWrap
+            component="a"
+            href="/"
+            sx={{
+              mr: 2,
+              display: { xs: 'flex', md: 'none' },
+              flexGrow: 1,
+              fontWeight: 700,
+              letterSpacing: '.3rem',
+              color: 'inherit',
+              textDecoration: 'none',
+            }}
+          >
+            URM
+          </Typography>
+          <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' } }}>
+            {pages.map((page) => (
+              <NavMenuItem
+                path={page}
+                key={page}
+                onClick={() => {
+                  handlePageClicked(page);
+                }}
+              >
+                <Typography textAlign="center">{page}</Typography>
+              </NavMenuItem>
+            ))}
+          </Box>
+          <Box sx={{ flexGrow: 0 }}>
+            <Tooltip title="Open settings">
+              <IconButton onClick={handleOpenUserMenu} sx={{ p: 0 }}>
+                <UserAvatar user={user} />
+              </IconButton>
+            </Tooltip>
+            <Menu
+              sx={{ mt: '45px' }}
+              id="menu-appbar"
+              anchorEl={anchorElUser}
+              anchorOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              keepMounted
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              open={Boolean(anchorElUser)}
+              onClose={handleCloseUserMenu}
+            >
+              {settings.map((setting) => (
+                <MenuItem
+                  key={setting}
+                  onClick={() => {
+                    handleSettingsClicked(setting);
                   }}
+                  className={styles.menu_item}
                 >
-                  Admin
-                </a>
-              </Link>
-            </>
-          ) : (
-            <></>
-          )}
-          {user && (
-            <Link href="/logout">
-              <a className={styles.nav_link}>Log out</a>
-            </Link>
-          )}
-        </>
-      </div>
-    </nav>
+                  <Typography textAlign="center">{setting}</Typography>
+                </MenuItem>
+              ))}
+            </Menu>
+          </Box>
+        </Toolbar>
+      </Container>
+    </AppBar>
   );
 };
 

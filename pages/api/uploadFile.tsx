@@ -11,7 +11,6 @@ interface uploadFileProps {
   file: UploadableFile;
   setFile: Dispatch<SetStateAction<UploadableFile | undefined>>;
   setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string }>>;
-  date: Date;
   trimStart: number;
   sermon: Sermon;
 }

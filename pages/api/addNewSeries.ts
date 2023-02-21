@@ -1,9 +1,10 @@
 import firestore, { doc, setDoc } from '../../firebase/firestore';
 import { v4 } from 'uuid';
+import { seriesConverter } from '../../types/Series';
 
 const addNewSeries = async (value: string) => {
   const id = v4();
-  await setDoc(doc(firestore, 'series', id), {
+  await setDoc(doc(firestore, 'series', id).withConverter(seriesConverter), {
     id,
     name: value,
     sermonIds: [],

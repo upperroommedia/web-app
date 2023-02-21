@@ -2,9 +2,9 @@ import * as firebaseAdmin from 'firebase-admin';
 import { isDevelopment } from './firebase';
 
 /* eslint-disable no-console */
-const privateKey = process.env.PRIVATE_KEY;
-const clientEmail = process.env.CLIENT_EMAIL;
-const projectId = process.env.PROJECT_ID;
+const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+const projectId = process.env.FIREBASE_PROJECT_ID;
 
 if (!privateKey || !clientEmail || !projectId) {
   console.log(
@@ -17,11 +17,12 @@ if (!firebaseAdmin.apps.length) {
     console.log('Setting Admin SDK to use emulator');
     process.env.FIREBASE_AUTH_EMULATOR_HOST = 'localhost:9099';
   }
+
   firebaseAdmin.initializeApp({
     credential: firebaseAdmin.credential.cert({
-      projectId: projectId,
-      privateKey: privateKey,
-      clientEmail: clientEmail,
+      projectId,
+      privateKey,
+      clientEmail,
     }),
     databaseURL: `https://${projectId}.firebaseio.com`,
   });

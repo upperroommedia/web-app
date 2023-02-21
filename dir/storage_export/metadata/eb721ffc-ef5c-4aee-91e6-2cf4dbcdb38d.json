@@ -1,0 +1,17 @@
+{
+  "name": "processed-sermons/2df424a2-ac98-4940-a356-f782e9ba4e88",
+  "bucket": "urm-app.appspot.com",
+  "metageneration": 3,
+  "generation": 1669159901199,
+  "contentType": "audio/mpeg",
+  "storageClass": "STANDARD",
+  "downloadTokens": [
+    "00456a05-44b7-4ba6-80c7-dbea1772090b"
+  ],
+  "etag": "qys9CrUSHZQONfHQxNF+CM/fPpc",
+  "timeCreated": "2022-11-22T23:31:41.199Z",
+  "updated": "2022-11-22T23:32:07.832Z",
+  "size": 176555,
+  "md5Hash": "9qQbXUmEycEUOih/MisBVg==",
+  "crc32c": "2221545526"
+}

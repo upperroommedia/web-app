@@ -1,3 +1,4 @@
+/* eslint-disable  @typescript-eslint/no-explicit-any */
 import * as os from 'os';
 import sharp from 'sharp';
 import * as path from 'path';
