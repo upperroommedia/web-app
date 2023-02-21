@@ -195,7 +195,7 @@ Props) => {
   };
 
   const AdminControls: FunctionComponent = () => {
-    if (window.location.pathname !== '/admin' || user?.role !== 'admin') {
+    if (window.location.pathname !== '/admin/sermons' || user?.role !== 'admin') {
       return null;
     }
     return (
