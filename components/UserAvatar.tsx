@@ -1,6 +1,7 @@
 import Avatar, { AvatarProps } from '@mui/material/Avatar';
 import Image from 'next/image';
-import { User } from '../context/user/UserContext';
+import { User } from '../types/User';
+
 interface IUserAvatar extends AvatarProps {
   user: User | undefined;
 }

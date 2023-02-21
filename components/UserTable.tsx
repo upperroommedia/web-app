@@ -13,18 +13,25 @@ import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
 import { visuallyHidden } from '@mui/utils';
-import { User } from '../pages/admin';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
-import { ROLES } from '../context/types';
-
-type Order = 'asc' | 'desc';
+import { Order, ROLES } from '../context/types';
+import { User } from '../types/User';
 
 const stableSort = (array: User[], order: Order, orderBy: keyof User) => {
+  function compareEmail(a: User, b: User) {
+    if (a.email && b.email) {
+      return a.email.localeCompare(b.email);
+    } else if (a.email) {
+      return 1;
+    } else if (b.email) {
+      return -1;
+    }
+    return 0;
+  }
+
   if (orderBy === 'email') {
-    return order === 'asc'
-      ? array.sort((a, b) => a.email.localeCompare(b.email))
-      : array.sort((a, b) => b.email.localeCompare(a.email));
+    return order === 'asc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
   } else if (orderBy === 'role') {
     array.sort((a, b) => {
       if (

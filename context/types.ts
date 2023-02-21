@@ -11,14 +11,5 @@ export interface SignupForm {
 }
 export type CustomClaims = { [key: string]: any };
 
-export interface User {
-  id: string;
-  name: string | null;
-  email: string | null;
-  photoUrl: string | null;
-  emailVerified: boolean;
-  isAnonymous: boolean;
-  customClaims: CustomClaims;
-}
-
 export const ROLES = ['user', 'admin', 'uploader'];
+export type Order = 'asc' | 'desc';

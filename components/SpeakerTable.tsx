@@ -20,11 +20,12 @@ import { visuallyHidden } from '@mui/utils';
 // import Checkbox from '@mui/material/Checkbox';
 // import Button from '@mui/material/Button';
 // import Menu from '@mui/material/Menu';
-import { Order } from '../pages/admin';
+
 import { sanitize } from 'dompurify';
 import ImageViewer from './ImageViewer';
 import firestore, { doc, updateDoc } from '../firebase/firestore';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
+import { Order } from '../context/types';
 
 interface HeadCell {
   disablePadding: boolean;

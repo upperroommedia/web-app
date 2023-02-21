@@ -2,6 +2,7 @@ import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import { ChangeEvent, useEffect, useState } from 'react';
 import SpeakerTable from '../../components/SpeakerTable';
+import { Order } from '../../context/types';
 import firestore, {
   collection,
   DocumentData,
@@ -30,9 +31,9 @@ const AdminSpeakers = () => {
 
   const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortOrder, setSortOrder] = useState<Order>('desc');
 
-  const handleSort = async (property: keyof ISpeaker, order: 'asc' | 'desc') => {
+  const handleSort = async (property: keyof ISpeaker, order: Order) => {
     if (sortProperty !== property || sortOrder !== order) {
       setVisitedPages([]);
     }

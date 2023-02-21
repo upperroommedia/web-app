@@ -6,14 +6,8 @@ import { createFunction } from '../../utils/createFunction';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Slide from '@mui/material/Slide';
+import { User } from '../../types/User';
 
-export interface User {
-  uid: string;
-  displayName: string;
-  email: string;
-  photoURL: string;
-  role: string;
-}
 const AdminUsers = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [snackBarOpen, setSnackBarOpen] = useState<boolean>(false);

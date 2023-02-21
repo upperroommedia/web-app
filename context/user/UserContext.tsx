@@ -1,5 +1,5 @@
 import { useContext, createContext, useEffect, useState } from 'react';
-import adminFirebase, {
+import {
   createUserWithEmailAndPassword,
   getAdditionalUserInfo,
   GoogleAuthProvider,
@@ -14,12 +14,8 @@ import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
 import { setDoc, doc, getDoc } from 'firebase/firestore';
 import firestore from '../../firebase/firestore';
+import { User } from '../../types/User';
 
-export interface User extends adminFirebase.User {
-  role?: string;
-  firstName: string;
-  lastName: string;
-}
 interface Context {
   user: User | undefined;
   login: (loginForm: userCredentials) => Promise<any>;

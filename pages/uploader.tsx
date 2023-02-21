@@ -664,10 +664,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 export default Uploader;
 
 export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  console.log('getServerSideProps', ctx);
   const userCredentials = await ProtectedRoute(ctx);
   if (!userCredentials.props.uid || !['admin', 'uploader'].includes(userCredentials.props.customClaims?.role)) {
-    console.log('redirecting', JSON.stringify(userCredentials));
     return {
       redirect: {
         permanent: false,
