@@ -108,6 +108,7 @@ const ImageSelector = (props: {
             key={image.id}
             className={styles.imageContainer}
             style={{
+              height: '164px',
               aspectRatio: AspectRatio[image.type],
               backgroundColor: image.averageColorHex || '#f3f1f1',
               boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
@@ -115,14 +116,13 @@ const ImageSelector = (props: {
           >
             <Image
               src={sanitize(image.downloadLink)}
-              height="164px"
+              fill
               alt={image.name}
               style={{
                 borderRadius: '5px',
                 cursor: 'pointer',
+                objectFit: 'contain',
               }}
-              layout="fill"
-              objectFit="contain"
               onClick={() => {
                 props.setNewSelectedImage(image);
               }}

@@ -21,5 +21,8 @@ const nextConfig = withBundleAnalyzer({
     locales: ['en'],
     defaultLocale: 'en',
   },
+  async redirects() {
+    return [{ source: '/admin', destination: '/admin/sermons', permanent: true }];
+  },
 });
 module.exports = nextConfig;

@@ -14,11 +14,14 @@ import setUserRoleOnCreate from './setUserRoleOnCreate';
 import populatespeakerimages from './populateSpeakerImages';
 import createnewsubsplashlist from './createNewSubsplashList';
 import addToSeries from './addToSeries';
-import uploadToSoundCloud from './uploadToSoundCloud';
+import uploadtosoundcloud from './uploadToSoundCloud';
+import deletefromsoundcloud from './deleteFromSoundCloud';
+import editSermon from './editSermon';
 
 admin.initializeApp();
 
 exports.uploadToSubsplash = uploadToSubsplash;
+exports.editSermon = editSermon;
 exports.deleteFromSubsplash = deleteFromSubsplash;
 exports.setUserRole = setUserRole;
 exports.addintrooutro = addintrooutro;
@@ -30,4 +33,5 @@ exports.populatespeakerimages = populatespeakerimages;
 exports.createnewsubsplashlist = createnewsubsplashlist;
 exports.addtoseries = addToSeries;
 exports.saveimage = saveimage;
-exports.uploadtosoundcloud = uploadToSoundCloud;
+exports.uploadtosoundcloud = uploadtosoundcloud;
+exports.deletefromsoundcloud = deletefromsoundcloud;

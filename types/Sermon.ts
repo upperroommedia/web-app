@@ -1,7 +1,7 @@
 import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from '../firebase/firestore';
 import { ISpeaker } from './Speaker';
 import { v4 as uuidv4 } from 'uuid';
-import { Sermon, sermonStatusType } from './SermonTypes';
+import { Sermon, sermonStatusType, uploadStatus } from './SermonTypes';
 import { ImageType } from './Image';
 import { Series } from './Series';
 
@@ -16,7 +16,11 @@ export const createSermon = ({
   speakers = <ISpeaker[]>[],
   topics = <string[]>[],
   dateString = new Date().toLocaleDateString(),
-  status = { type: sermonStatusType.PENDING },
+  status = {
+    soundCloud: uploadStatus.NOT_UPLOADED,
+    subsplash: uploadStatus.NOT_UPLOADED,
+    audioStatus: sermonStatusType.PENDING,
+  },
   images = <ImageType[]>[],
 }): Sermon => {
   return {
@@ -62,18 +66,22 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
     };
   },
 };
-
+const currentDate = new Date();
 export const emptySermon: Sermon = {
   key: uuidv4(),
   title: '',
   subtitle: '',
   series: {} as Series,
   description: '',
-  dateMillis: 0,
+  dateMillis: currentDate.getTime(),
   durationSeconds: 0,
   speakers: [],
   topics: [],
-  dateString: new Date().toLocaleDateString(),
-  status: { type: sermonStatusType.PENDING },
+  dateString: currentDate.toLocaleDateString(),
+  status: {
+    soundCloud: uploadStatus.NOT_UPLOADED,
+    subsplash: uploadStatus.NOT_UPLOADED,
+    audioStatus: sermonStatusType.PENDING,
+  },
   images: [],
 };

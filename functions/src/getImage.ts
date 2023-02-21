@@ -1,6 +1,6 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { isAxiosError, AxiosRequestConfig } from 'axios';
 export interface GetImageInputType {
   url: string;
 }
@@ -39,7 +39,7 @@ const getimage = onCall(async (request: CallableRequest<GetImageInputType>): Pro
       logger.error('HttpsError', error);
       throw error;
     }
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       logger.error('AxiosError', error);
       throw new HttpsError('internal', error.message, error.name);
     }

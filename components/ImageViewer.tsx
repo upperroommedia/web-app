@@ -54,9 +54,11 @@ const ImageViewer = (props: propsType) => {
                   <Image
                     src={`${sanitize(image.downloadLink)}`}
                     alt={image.name}
-                    style={{ borderRadius: '5px' }}
-                    layout="fill"
-                    objectFit="contain"
+                    style={{
+                      objectFit: 'contain',
+                      borderRadius: '5px',
+                    }}
+                    fill
                   />
                 </div>
                 <h3 className={styles.imageCover}>Change Image</h3>

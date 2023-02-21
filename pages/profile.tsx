@@ -1,23 +1,52 @@
 /**
- * About page for information about Upper Room Media
+ * User profile page
  */
-import type { NextPage } from 'next';
-import useAuth from '../context/user/UserContext';
-import styles from '../styles/Home.module.css';
+('use client');
 
-const Profile: NextPage = () => {
-  const { user } = useAuth();
+import useAuth from '../context/user/UserContext';
+import Button, { ButtonProps } from '@mui/material/Button';
+import Box from '@mui/system/Box';
+import Typography from '@mui/material/Typography';
+import UserAvatar from '../components/UserAvatar';
+import LoginPage from './login';
+
+function MediumButton({ children, ...props }: ButtonProps) {
+  return (
+    <Button sx={{ width: 'min-content' }} size="medium" variant="contained" disableRipple color="primary" {...props}>
+      {children}
+    </Button>
+  );
+}
+
+export default function Profile() {
+  const { user, logoutUser } = useAuth();
   if (user) {
     return (
-      <div className={styles.container}>
-        <h1>Profile</h1>
-        <p>First Name: {user?.firstName}</p>
-        <p>Last Name: {user?.lastName}</p>
-      </div>
+      <Box display="flex" flexDirection="column" alignItems="center" gap="20px">
+        <Typography align="center" variant="h2">
+          Profile
+        </Typography>
+        <UserAvatar sx={{ width: 100, height: 100 }} user={user} />
+        <Typography align="center" variant="body1">
+          Display Name: {user.displayName}
+        </Typography>
+        <Typography align="center" variant="body1">
+          Email: {user.email}
+        </Typography>
+        <Typography align="center" variant="body1">
+          Role: {user.role ? user.role : 'No role assigned'}
+        </Typography>
+        <MediumButton onClick={() => logoutUser()}>Logout</MediumButton>
+      </Box>
     );
   } else {
-    return null;
+    return (
+      <Box display="flex" flexDirection="column" alignItems="center">
+        <Typography align="center" variant="h2">
+          You are not logged in
+        </Typography>
+        <LoginPage></LoginPage>
+      </Box>
+    );
   }
-};
-
-export default Profile;
+}

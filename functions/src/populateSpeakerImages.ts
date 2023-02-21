@@ -17,6 +17,7 @@ export interface populateSpeakerImagesInputType {
 }
 import sizeOf from 'image-size';
 import handleError from './handleError';
+import { firestoreAdminImagesConverter, firestoreAdminSpeakerConverter } from './firestoreDataConverter';
 
 export interface populateSpeakerImagesOutputType {
   buffer: {
@@ -63,8 +64,8 @@ const populateSpeakerImages = onCall(
       const bucket = storage().bucket('urm-app-images');
       const db = firestore();
       db.settings({ ignoreUndefinedProperties: true });
-      const firestoreSpeakers = db.collection('speakers');
-      const firestoreImages = db.collection('images');
+      const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
+      const firestoreImages = db.collection('images').withConverter(firestoreAdminImagesConverter);
       const firestoreLists = db.collection('lists');
 
       logger.log('Getting Lists');

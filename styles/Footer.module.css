@@ -17,6 +17,7 @@
 .logo {
   height: 36px;
   width: 36px;
+  position: relative;
   border-radius: 10px;
   overflow: hidden;
   margin-left: 0.5rem;

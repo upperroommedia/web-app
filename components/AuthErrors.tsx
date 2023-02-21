@@ -1,9 +1,9 @@
 const createErrorObject = (title: string, errorMessage: string, authFailure: boolean, dest: string) => {
   return {
-    title: title,
-    errorMessage: errorMessage,
-    authFailure: authFailure,
-    dest: dest,
+    title,
+    errorMessage,
+    authFailure,
+    dest,
   };
 };
 

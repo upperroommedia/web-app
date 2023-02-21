@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { isAxiosError } from 'axios';
 import { logger, https } from 'firebase-functions';
 import { HttpsError, FunctionsErrorCode } from 'firebase-functions/v2/https';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
@@ -20,7 +20,7 @@ const deleteFromSubsplash = https.onCall(async (data: string, context): Promise<
   } catch (error) {
     //TODO[1]: Handle errors better
     let httpsError = new HttpsError('unknown', 'Unknown error');
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       const response = error.response?.data.errors[0];
       let code: FunctionsErrorCode = 'unknown';
       if (response.code === 'resource_not_found') {

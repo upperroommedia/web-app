@@ -13,18 +13,19 @@ import TableSortLabel from '@mui/material/TableSortLabel';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
-import { ISpeaker } from '../types/Speaker';
+import { ISpeaker, speakerConverter } from '../types/Speaker';
 import { visuallyHidden } from '@mui/utils';
 // import FormGroup from '@mui/material/FormGroup';
 // import FormControlLabel from '@mui/material/FormControlLabel';
 // import Checkbox from '@mui/material/Checkbox';
 // import Button from '@mui/material/Button';
 // import Menu from '@mui/material/Menu';
-import { Order } from '../pages/admin';
+
 import { sanitize } from 'dompurify';
 import ImageViewer from './ImageViewer';
 import firestore, { doc, updateDoc } from '../firebase/firestore';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
+import { Order } from '../context/types';
 
 interface HeadCell {
   disablePadding: boolean;
@@ -233,7 +234,7 @@ const SpeakerTable = (props: {
       return;
     }
     try {
-      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id), {
+      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
         images: selectedSpeaker.images.filter((image) => image.type !== imageType),
       });
       props.setSpeakers((oldSpeakers) =>
@@ -266,7 +267,7 @@ const SpeakerTable = (props: {
       return;
     }
     try {
-      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id), {
+      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
         images: selectedSpeaker.images.find((image) => image.type === newImage.type)
           ? selectedSpeaker.images.map((image) => {
               if (image.type === newImage.type) {
@@ -394,7 +395,12 @@ const SpeakerTable = (props: {
                                 }}
                               >
                                 {image && (
-                                  <Image src={sanitize(image.downloadLink)} layout="fill" objectFit="contain" />
+                                  <Image
+                                    src={sanitize(image.downloadLink)}
+                                    alt={`Image of ${image.name}`}
+                                    fill
+                                    style={{ objectFit: 'contain' }}
+                                  />
                                 )}
                               </div>
                             );

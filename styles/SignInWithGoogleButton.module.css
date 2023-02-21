@@ -9,6 +9,9 @@
 }
 .google_icon_wrapper {
   position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-top: 1px;
   margin-left: 1px;
   width: 40px;

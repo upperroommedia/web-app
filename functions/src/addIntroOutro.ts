@@ -8,7 +8,9 @@ import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
-import { sermonStatus, sermonStatusType } from '../../types/SermonTypes';
+import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/SermonTypes';
+import { firestoreAdminSermonConverter } from './firestoreDataConverter';
+
 const tempFiles = new Set<string>();
 
 type filePaths = {
@@ -153,9 +155,20 @@ const addIntroOutro = onObjectFinalized(
     const bucket = storage().bucket();
     const db = firestore();
     const fileName = path.basename(filePath);
-    const docRef = db.collection('sermons').doc(fileName);
+    const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
+    const sermonStatus: sermonStatus = {
+      subsplash: uploadStatus.NOT_UPLOADED,
+      soundCloud: uploadStatus.NOT_UPLOADED,
+      audioStatus: sermonStatusType.PROCESSING,
+    };
     try {
-      await docRef.update({ status: <sermonStatus>{ type: sermonStatusType.PROCESSING, message: 'Getting Data' } });
+      await docRef.update({
+        status: {
+          ...sermonStatus,
+          audioStatus: sermonStatusType.PROCESSING,
+          message: 'Getting Data',
+        },
+      });
       logger.log(data.metadata);
       const audioFilesToMerge: filePaths = { CONTENT: filePath, INTRO: undefined, OUTRO: undefined };
       const customMetadata: { introUrl?: string; outroUrl?: string } = {};
@@ -170,7 +183,11 @@ const addIntroOutro = onObjectFinalized(
       logger.log('Audio File Download Paths', audioFilesToMerge);
       const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge);
       await docRef.update({
-        status: <sermonStatus>{ type: sermonStatusType.PROCESSING, message: 'Trimming and Transcoding' },
+        status: {
+          ...sermonStatus,
+          audioStatus: sermonStatusType.PROCESSING,
+          message: 'Trimming and Transcoding',
+        },
       });
       tempFilePaths.CONTENT = await trimAndTranscode(
         tempFilePaths.CONTENT,
@@ -181,7 +198,11 @@ const addIntroOutro = onObjectFinalized(
       await uploadSermon(tempFilePaths.CONTENT, `processed-sermons/${fileName}`, bucket, customMetadata);
       if (tempFilePaths.INTRO || tempFilePaths.OUTRO) {
         await docRef.update({
-          status: <sermonStatus>{ type: sermonStatusType.PROCESSING, message: 'Adding Intro and Outro' },
+          status: {
+            ...sermonStatus,
+            audioStatus: sermonStatusType.PROCESSING,
+            message: 'Adding Intro and Outro',
+          },
         });
         logger.log('Merging audio files', tempFilePaths);
         const outputFileName = 'intro_outro-' + fileName;
@@ -202,7 +223,10 @@ const addIntroOutro = onObjectFinalized(
       }
 
       await docRef.update({
-        status: <sermonStatus>{ type: sermonStatusType.PROCESSED },
+        status: {
+          ...sermonStatus,
+          audioStatus: sermonStatusType.PROCESSED,
+        },
         durationSeconds: durationSeconds,
       });
       return logger.log('Files have been merged succesfully');

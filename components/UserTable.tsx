@@ -1,4 +1,4 @@
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, memo, useState } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -13,31 +13,35 @@ import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
 import { visuallyHidden } from '@mui/utils';
-import { User } from '../pages/admin';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
-import { ROLES } from '../context/types';
-
-type Order = 'asc' | 'desc';
+import { Order, ROLES } from '../context/types';
+import { User } from '../types/User';
 
 const stableSort = (array: User[], order: Order, orderBy: keyof User) => {
+  function compareEmail(a: User, b: User) {
+    if (a.email && b.email) {
+      return a.email.localeCompare(b.email);
+    } else if (a.email) {
+      return 1;
+    } else if (b.email) {
+      return -1;
+    }
+    return 0;
+  }
+
   if (orderBy === 'email') {
-    return order === 'asc'
-      ? array.sort((a, b) => a.email.localeCompare(b.email))
-      : array.sort((a, b) => b.email.localeCompare(a.email));
+    return order === 'desc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
   } else if (orderBy === 'role') {
     array.sort((a, b) => {
-      if (
-        (a.role === 'admin' && (b.role === 'user' || b.role === 'uploader')) ||
-        (a.role === 'uploader' && b.role === 'user')
-      ) {
-        return order === 'asc' ? 1 : -1;
-      } else if (
-        (b.role === 'admin' && (a.role === 'user' || a.role === 'uploader')) ||
-        (b.role === 'uploader' && a.role === 'user')
-      ) {
-        return order === 'asc' ? 1 : -1;
-      } else return 0;
+      if (a.role && b.role) {
+        return order === 'desc' ? a.role.localeCompare(b.role) : b.role.localeCompare(a.role);
+      } else if (a.role) {
+        return order === 'desc' ? 1 : -1;
+      } else if (b.role) {
+        return order === 'desc' ? -1 : 1;
+      }
+      return 0;
     });
   }
   return array;
@@ -129,7 +133,7 @@ const UserTableToolbar = () => {
   );
 };
 
-const UserTable = (props: { users: User[]; handleRoleChange: (email: string, role: string) => void }) => {
+const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role: string) => void }) => {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof User>('email');
 
@@ -153,7 +157,6 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
 
   // Avoid a layout jump when reaching the last page with empty rows.
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
-
   return (
     <>
       <Box sx={{ width: '100%' }}>
@@ -173,6 +176,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
                 {stableSort(props.users, order, orderBy)
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((user) => {
+                    const displayName = user.displayName || user.email;
                     return (
                       <TableRow hover tabIndex={-1} key={user.uid}>
                         <TableCell>{user.email}</TableCell>
@@ -182,7 +186,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
                               labelId="demo-simple-select-label"
                               id="demo-simple-select"
                               value={user.role}
-                              onChange={(e) => props.handleRoleChange(user.email, e.target.value)}
+                              onChange={(e) => props.handleRoleChange(user.uid, e.target.value)}
                             >
                               {ROLES.map((role) => (
                                 <MenuItem key={role} value={role}>
@@ -205,7 +209,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
                               backgroundSize: 'cover',
                             }}
                           >
-                            {user.photoURL && <Image src={user.photoURL} layout="fill" />}
+                            {user.photoURL && <Image src={user.photoURL} alt={`Image of ${displayName}`} fill />}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -238,4 +242,8 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
   );
 };
 
-export default UserTable;
+function userTablesAreEqual(prevProps: { users: User[] }, nextProps: { users: User[] }) {
+  return JSON.stringify(prevProps.users) === JSON.stringify(nextProps.users);
+}
+
+export default memo(UserTable, userTablesAreEqual);

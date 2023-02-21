@@ -7,11 +7,18 @@ export enum sermonStatusType {
   PENDING = 'PENDING',
   PROCESSING = 'PROCESSING',
   PROCESSED = 'PROCESSED',
+}
+
+export enum uploadStatus {
+  ERROR = 'ERROR',
+  NOT_UPLOADED = 'NOT_UPLOADED',
   UPLOADED = 'UPLOADED',
 }
 
 export interface sermonStatus {
-  type: sermonStatusType;
+  subsplash: uploadStatus;
+  soundCloud: uploadStatus;
+  audioStatus: sermonStatusType;
   message?: string;
 }
 
@@ -28,4 +35,6 @@ export interface Sermon {
   dateString?: string;
   status: sermonStatus;
   images: ImageType[];
+  subsplashId?: string;
+  soundCloudTrackId?: string;
 }

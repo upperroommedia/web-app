@@ -14,6 +14,7 @@ export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   topics?: string[];
   description?: string;
   images: ImageType[];
+  date: Date;
 }
 
 const createAudioRef = async (title: string, bearerToken: string): Promise<string> => {

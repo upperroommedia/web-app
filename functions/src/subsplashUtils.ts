@@ -36,6 +36,7 @@ export const createAxiosConfig = (
   bearerToken: string,
   method: HTTPMethod,
   data?: unknown,
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
   additionalHeaders?: any
 ): AxiosRequestConfig => {
   const headers: Headers = {

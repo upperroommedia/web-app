@@ -5,13 +5,13 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 
+const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss'] as const;
+type MediaType = (typeof mediaTypes)[number];
 export interface AddToSeriesInputType {
   listId: string;
   mediaItemIds: { id: string; type: MediaType }[];
   overflowBehavior: 'ERROR' | 'CREATENEWLIST' | 'REMOVEOLDEST';
 }
-const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss'] as const;
-type MediaType = typeof mediaTypes[number];
 interface SubsplashListRow {
   id: string;
   _embedded: {
