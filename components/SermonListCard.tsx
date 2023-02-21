@@ -12,6 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
 import CircularProgress from '@mui/material/CircularProgress';
+import ListItem from '@mui/material/ListItem';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
@@ -33,7 +34,11 @@ import SoundCloudLogo from '../public/soundcloud.png';
 import { sanitize } from 'dompurify';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { seriesConverter } from '../types/Series';
-import { Tooltip } from '@mui/material';
+import Tooltip from '@mui/material/Tooltip';
+import Card from '@mui/material/Card';
+import Box from '@mui/system/Box';
+import Typography from '@mui/material/Typography';
+import Divider from '@mui/material/Divider';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -199,7 +204,7 @@ Props) => {
       return null;
     }
     return (
-      <div>
+      <Box display="flex">
         {isUploadingToSoundCloud ? (
           <CircularProgress size={24} />
         ) : sermon.status.soundCloud === uploadStatus.UPLOADED ? (
@@ -250,21 +255,20 @@ Props) => {
             <DeleteIcon />
           </IconButton>
         </Tooltip>
-      </div>
+      </Box>
     );
   };
 
   return (
-    <div
-      onClick={(e) => {
-        e.preventDefault();
-        // handleSermonClick(sermon);
-      }}
-      className={styles.cardContainer}
-    >
-      <hr className={styles['horizontal-line']}></hr>
-      <div className={styles.cardContent}>
-        <div className={styles.divImage}>
+    <>
+      <Divider />
+      <ListItem
+      // onClick={(e) => {
+      //   e.preventDefault();
+      //   // handleSermonClick(sermon);
+      // }}
+      >
+        <Card sx={{ width: 1, display: 'flex', gap: 3, padding: 2 }} elevation={0}>
           <Image
             src={
               sermon.images?.find((image) => image.type === 'square')
@@ -272,98 +276,108 @@ Props) => {
                 : Logo
             }
             alt={`Image for ${sermon.title}`}
-            fill
+            width={150}
+            height={150}
+            style={{ borderRadius: '5px' }}
           />
-        </div>
-        <div className={styles.divText}>
-          <h1 className={styles.title}>{`${sermon.title}: ${sermon.subtitle}`}</h1>
-          <p className={styles.description}>{sermon.description}</p>
-          <div className={styles.bottomDiv}>
-            {!minimal && (
-              <>
-                <IconButton
-                  aria-label="toggle play/pause"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setCurrentSermon(sermon);
-                    togglePlaying(!playing);
-                    // TODO(1): Handle CLICK EVENT
-                  }}
-                >
-                  {playing ? <PauseCircleIcon /> : <PlayCircleIcon />}
-                </IconButton>
-                <div className={styles.bottomDivText}>
-                  <span className={styles.date}>{sermon.dateString}</span>
-                  <span>·</span>
-                  {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
-                    <>
-                      <span className={styles.timeLeft}>
-                        {formatRemainingTime(Math.floor(sermon.durationSeconds) - sermon.currentSecond) +
-                          (playing || sermon.currentSecond > 0 ? ' left' : '')}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Played</span>
-                      <span style={{ color: 'lightgreen' }}> &#10003;</span>
-                    </>
-                  )}
+          <Box display={'flex'} flexDirection="column" justifyContent="space-between" width={1}>
+            <Typography variant="h5">
+              <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
+            </Typography>
+            <Typography variant="subtitle1" className={styles.description}>
+              {sermon.description}
+            </Typography>
+            <Box display={'flex'} marginLeft={3} alignItems={'center'}>
+              {!minimal && (
+                <>
+                  <IconButton
+                    aria-label="toggle play/pause"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setCurrentSermon(sermon);
+                      togglePlaying(!playing);
+                      // TODO(1): Handle CLICK EVENT
+                    }}
+                  >
+                    {playing ? <PauseCircleIcon fontSize="large" /> : <PlayCircleIcon fontSize="large" />}
+                  </IconButton>
+                  <Box display="flex" gap={1} marginRight={3}>
+                    <Typography style={{ whiteSpace: 'nowrap' }}>{sermon.dateString}</Typography>
+                    <Typography>·</Typography>
+                    {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
+                      <>
+                        <Typography style={{ whiteSpace: 'nowrap' }}>
+                          {formatRemainingTime(Math.floor(sermon.durationSeconds) - sermon.currentSecond) +
+                            (playing || sermon.currentSecond > 0 ? ' left' : '')}
+                        </Typography>
+                      </>
+                    ) : (
+                      <>
+                        <Typography>Played</Typography>
+                        <Typography style={{ color: 'lightgreen' }}> &#10003;</Typography>
+                      </>
+                    )}
+                  </Box>
+                </>
+              )}
+              {sermon.currentSecond < Math.floor(sermon.durationSeconds) && (playing || sermon.currentSecond > 0) && (
+                <progress
+                  className={styles.songProgress}
+                  value={sermon.currentSecond}
+                  max={Math.floor(sermon.durationSeconds)}
+                />
+              )}
+              <span style={{ width: '60%' }}></span>
+              {sermon.status.audioStatus === sermonStatusType.PROCESSED ? (
+                <AdminControls />
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    <h3 style={{ margin: 0 }}>{sermon.status.audioStatus}</h3>
+                    {sermon.status.audioStatus === sermonStatusType.PROCESSING && <CircularProgress size={15} />}
+                  </div>
+                  {sermon.status.message && <p style={{ margin: 0 }}>{sermon.status.message}</p>}
                 </div>
-              </>
-            )}
-            {sermon.currentSecond < Math.floor(sermon.durationSeconds) && (playing || sermon.currentSecond > 0) && (
-              <progress
-                className={styles.songProgress}
-                value={sermon.currentSecond}
-                max={Math.floor(sermon.durationSeconds)}
+              )}
+              <PopUp
+                title={'Upload Sermon to Supsplash?'}
+                open={uploadToSupsplashPopup}
+                setOpen={() => setUploadToSupsplashPopup(false)}
+                button={
+                  <Button aria-label="Confirm Upload to Subsplash" onClick={uploadToSubsplash}>
+                    {isUploading ? <CircularProgress /> : 'Upload'}
+                  </Button>
+                }
+              >
+                <Box>
+                  <Typography variant="h6">Title: {sermon.title}</Typography>
+                  <Box
+                    display="flex"
+                    alignItems={'center'}
+                    onClick={() => setAutoPublish((previousValue) => !previousValue)}
+                  >
+                    <Checkbox checked={autoPublish} />
+                    <Typography>Auto publish when upload is complete</Typography>
+                  </Box>
+                </Box>
+              </PopUp>
+              <DeleteEntityPopup
+                entityBeingDeleten="sermon"
+                handleDelete={handleDelete}
+                deleteConfirmationPopup={deleteConfirmationPopup}
+                setDeleteConfirmationPopup={setDeleteConfirmationPopup}
               />
-            )}
-            <span style={{ width: '60%' }}></span>
-            {sermon.status.audioStatus === sermonStatusType.PROCESSED ? (
-              <AdminControls />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                  <h3 style={{ margin: 0 }}>{sermon.status.audioStatus}</h3>
-                  {sermon.status.audioStatus === sermonStatusType.PROCESSING && <CircularProgress size={15} />}
-                </div>
-                {sermon.status.message && <p style={{ margin: 0 }}>{sermon.status.message}</p>}
-              </div>
-            )}
-            <PopUp
-              title={'Upload Sermon to Supsplash?'}
-              open={uploadToSupsplashPopup}
-              setOpen={() => setUploadToSupsplashPopup(false)}
-              button={
-                <Button aria-label="Confirm Upload to Subsplash" onClick={uploadToSubsplash}>
-                  {isUploading ? <CircularProgress /> : 'Upload'}
-                </Button>
-              }
-            >
-              <div>
-                <span>Title: {sermon.title}</span>
-                <div style={{ display: 'flex' }} onClick={() => setAutoPublish((previousValue) => !previousValue)}>
-                  <Checkbox checked={autoPublish} />
-                  <p>Auto publish when upload is complete</p>
-                </div>
-              </div>
-            </PopUp>
-            <DeleteEntityPopup
-              entityBeingDeleten="sermon"
-              handleDelete={handleDelete}
-              deleteConfirmationPopup={deleteConfirmationPopup}
-              setDeleteConfirmationPopup={setDeleteConfirmationPopup}
-            />
-            <EditSermonForm
-              open={editFormPopup}
-              setOpen={() => setEditFormPopup(false)}
-              sermon={sermon}
-              setUpdatedSermon={setUpdatedSermon}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+              <EditSermonForm
+                open={editFormPopup}
+                setOpen={() => setEditFormPopup(false)}
+                sermon={sermon}
+                setUpdatedSermon={setUpdatedSermon}
+              />
+            </Box>
+          </Box>
+        </Card>
+      </ListItem>
+    </>
   );
 };
 export default SermonListCard;

@@ -6,9 +6,9 @@ import BottomAudioBar from '../../components/BottomAudioBar';
 import SermonsList from '../../components/SermonsList';
 import AdminLayout from '../../layout/adminLayout';
 import { sermonConverter } from '../../types/Sermon';
-import CircularProgress from '@mui/material/CircularProgress';
 import { adminProtected } from '../../utils/protectedRoutes';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
+import SermonListSkeloten from '../../components/skeletons/SermonListSkeloten';
 
 const AdminSermons = () => {
   const sermonsRef = collection(firestore, 'sermons');
@@ -26,12 +26,7 @@ const AdminSermons = () => {
           </Box>
         </Typography>
       )}
-      {loading && (
-        <Box display="flex" gap={2}>
-          <Typography variant="h4">Loading</Typography>
-          <CircularProgress />
-        </Box>
-      )}
+      {loading && <SermonListSkeloten />}
       {sermons && <SermonsList sermons={sermons.docs.map((doc) => doc.data())} />}
       <BottomAudioBar />
     </Box>
