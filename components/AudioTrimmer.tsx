@@ -52,7 +52,7 @@ const calculateTime = (sec: number) => {
 };
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, setTrimStart, setTrimDuration }) => {
-  const [currentTime, setCurrentTime, currentTimeRef] = useStateRef<number>(0);
+  const [currentTime, setCurrentTime] = useStateRef<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
 
   const trimStartRef = useRef<number>(trimStart);
@@ -109,7 +109,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
       audioPlayer.current.play();
     }
     isScrubbingRef.current = false;
-    audioPlayer.current.currentTime = currentTimeRef.current;
   };
 
   const handleMove = (e: MouseEvent | TouchEvent) => {
