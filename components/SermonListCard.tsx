@@ -28,7 +28,7 @@ import { createFunction, createFunctionV2 } from '../utils/createFunction';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
 import Image from 'next/image';
-import Logo from '../public/upper_room_media_icon.png';
+import Logo from '../public/URM_icon.png';
 import SoundCloudLogo from '../public/soundcloud.png';
 import { sanitize } from 'dompurify';
 import DeleteEntityPopup from './DeleteEntityPopup';
@@ -148,7 +148,7 @@ Props) => {
       title: sermon.title,
       subtitle: sermon.subtitle,
       speakers: sermon.speakers,
-      autoPublish: autoPublish,
+      autoPublish,
       audioTitle: sermon.title,
       audioUrl: url,
       topics: sermon.topics,
@@ -195,7 +195,7 @@ Props) => {
   };
 
   const AdminControls: FunctionComponent = () => {
-    if (window.location.pathname !== '/admin' || user?.role !== 'admin') {
+    if (window.location.pathname !== '/admin/sermons' || user?.role !== 'admin') {
       return null;
     }
     return (
@@ -211,7 +211,7 @@ Props) => {
         ) : (
           <Tooltip title="Upload to Soundcloud">
             <IconButton onClick={() => uploadToSoundCloud()}>
-              <Image src={SoundCloudLogo} width={24} height={24} />
+              <Image src={SoundCloudLogo} alt="Soundcloud Logo" width={24} height={24} />
             </IconButton>
           </Tooltip>
         )}
@@ -271,7 +271,8 @@ Props) => {
                 ? sanitize(sermon.images.find((image) => image.type === 'square')!.downloadLink)
                 : Logo
             }
-            layout="fill"
+            alt={`Image for ${sermon.title}`}
+            fill
           />
         </div>
         <div className={styles.divText}>

@@ -15,7 +15,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 // import { modifyImage, ResizedImageResult } from './resize-image';
 import fs from 'fs';
 import os from 'os';
-import mkdirp from 'mkdirp';
+import { mkdirp } from 'mkdirp';
 import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
