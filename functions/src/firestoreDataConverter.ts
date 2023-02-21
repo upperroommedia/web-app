@@ -1,9 +1,9 @@
 import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase-admin/lib/firestore';
 import { FirebaseSermon, getDateString } from '../../types/Sermon';
-import { Timestamp } from 'firebase/firestore';
 import { Sermon } from '../../types/SermonTypes';
 import { ISpeaker } from '../../types/Speaker';
 import { ImageType } from '../../types/Image';
+import { Timestamp } from 'firebase/firestore';
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
