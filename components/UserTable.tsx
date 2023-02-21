@@ -1,4 +1,4 @@
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, memo, useState } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -129,7 +129,7 @@ const UserTableToolbar = () => {
   );
 };
 
-const UserTable = (props: { users: User[]; handleRoleChange: (email: string, role: string) => void }) => {
+const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role: string) => void }) => {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof User>('email');
 
@@ -153,7 +153,6 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
 
   // Avoid a layout jump when reaching the last page with empty rows.
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
-
   return (
     <>
       <Box sx={{ width: '100%' }}>
@@ -183,7 +182,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
                               labelId="demo-simple-select-label"
                               id="demo-simple-select"
                               value={user.role}
-                              onChange={(e) => props.handleRoleChange(user.email, e.target.value)}
+                              onChange={(e) => props.handleRoleChange(user.uid, e.target.value)}
                             >
                               {ROLES.map((role) => (
                                 <MenuItem key={role} value={role}>
@@ -239,4 +238,8 @@ const UserTable = (props: { users: User[]; handleRoleChange: (email: string, rol
   );
 };
 
-export default UserTable;
+function userTablesAreEqual(prevProps: { users: User[] }, nextProps: { users: User[] }) {
+  return JSON.stringify(prevProps.users) === JSON.stringify(nextProps.users);
+}
+
+export default memo(UserTable, userTablesAreEqual);

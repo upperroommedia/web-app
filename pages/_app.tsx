@@ -6,13 +6,25 @@ import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import { UserProvider } from '../context/user/UserContext';
 import NextNProgress from 'nextjs-progressbar';
 
-function MyApp({ Component, pageProps: { ...pageProps } }: AppProps) {
+type ComponentWithPageLayout = AppProps & {
+  Component: AppProps['Component'] & {
+    PageLayout?: React.ComponentType<{ children: React.ReactNode }>;
+  };
+};
+
+function MyApp({ Component, pageProps }: ComponentWithPageLayout) {
   return (
     <UserProvider>
       <Navbar />
       <AudioPlayerProvider>
         <NextNProgress options={{ showSpinner: false }} />
-        <Component {...pageProps} />
+        {Component.PageLayout ? (
+          <Component.PageLayout>
+            <Component {...pageProps} />
+          </Component.PageLayout>
+        ) : (
+          <Component {...pageProps} />
+        )}
       </AudioPlayerProvider>
       <Footer />
     </UserProvider>

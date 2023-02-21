@@ -59,7 +59,7 @@ const Navbar: FunctionComponent = () => {
   };
 
   function handlePageClicked(page: string) {
-    router.push(`/${page === 'Home' ? '' : page.toLowerCase()}`);
+    router.push(`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`);
   }
 
   return (
