@@ -31,15 +31,15 @@ const stableSort = (array: User[], order: Order, orderBy: keyof User) => {
   }
 
   if (orderBy === 'email') {
-    return order === 'asc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
+    return order === 'desc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
   } else if (orderBy === 'role') {
     array.sort((a, b) => {
       if (a.role && b.role) {
-        return order === 'asc' ? a.role.localeCompare(b.role) : b.role.localeCompare(a.role);
+        return order === 'desc' ? a.role.localeCompare(b.role) : b.role.localeCompare(a.role);
       } else if (a.role) {
-        return order === 'asc' ? 1 : -1;
+        return order === 'desc' ? 1 : -1;
       } else if (b.role) {
-        return order === 'asc' ? -1 : 1;
+        return order === 'desc' ? -1 : 1;
       }
       return 0;
     });
