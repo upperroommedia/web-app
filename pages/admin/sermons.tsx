@@ -7,6 +7,8 @@ import SermonsList from '../../components/SermonsList';
 import AdminLayout from '../../layout/adminLayout';
 import { sermonConverter } from '../../types/Sermon';
 import CircularProgress from '@mui/material/CircularProgress';
+import { adminProtected } from '../../utils/protectedRoutes';
+import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 
 const AdminSermons = () => {
   const sermonsRef = collection(firestore, 'sermons');
@@ -37,5 +39,10 @@ const AdminSermons = () => {
 };
 
 AdminSermons.PageLayout = AdminLayout;
+
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+  return adminProtected(ctx);
+  // TODO: see if you can get sermons server side then attach a listener on the client
+};
 
 export default AdminSermons;

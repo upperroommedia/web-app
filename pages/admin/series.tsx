@@ -14,6 +14,8 @@ import EditSeriesComponent from '../../components/EditSeriesPopupComponent';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
 import { Series, seriesConverter } from '../../types/Series';
+import { GetServerSideProps, GetServerSidePropsContext } from 'next';
+import { adminProtected } from '../../utils/protectedRoutes';
 
 const AdminSeries = () => {
   const [series, setSeries] = useState<Series[]>([]);
@@ -122,5 +124,9 @@ const AdminSeries = () => {
 };
 
 AdminSeries.PageLayout = AdminLayout;
+
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+  return adminProtected(ctx);
+};
 
 export default AdminSeries;

@@ -7,6 +7,8 @@ import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Slide from '@mui/material/Slide';
 import { User } from '../../types/User';
+import { GetServerSideProps, GetServerSidePropsContext } from 'next';
+import { adminProtected } from '../../utils/protectedRoutes';
 
 const AdminUsers = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -61,5 +63,9 @@ const AdminUsers = () => {
 };
 
 AdminUsers.PageLayout = AdminLayout;
+
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+  return adminProtected(ctx);
+};
 
 export default AdminUsers;

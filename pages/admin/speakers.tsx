@@ -1,5 +1,6 @@
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
+import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { ChangeEvent, useEffect, useState } from 'react';
 import SpeakerTable from '../../components/SpeakerTable';
 import { Order } from '../../context/types';
@@ -16,6 +17,7 @@ import firestore, {
 } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
+import { adminProtected } from '../../utils/protectedRoutes';
 import { fetchSpeakerResults } from '../uploader';
 
 const AdminSpeakers = () => {
@@ -195,5 +197,9 @@ const AdminSpeakers = () => {
 };
 
 AdminSpeakers.PageLayout = AdminLayout;
+
+export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+  return adminProtected(ctx);
+};
 
 export default AdminSpeakers;
