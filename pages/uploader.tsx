@@ -28,7 +28,7 @@ import firestore, {
   query,
   updateDoc,
 } from '../firebase/firestore';
-import { emptySermon, getDateString, createSermon } from '../types/Sermon';
+import { emptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
@@ -53,7 +53,6 @@ const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), 
 
 interface UploaderProps {
   existingSermon?: Sermon;
-  setUpdatedSermon?: Dispatch<SetStateAction<Sermon>>;
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
@@ -528,20 +527,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   subsplashId: sermon.subsplashId,
                   dateMillis: sermon.dateMillis,
                 });
-                props.setUpdatedSermon?.(
-                  createSermon({
-                    key: sermon.key,
-                    title: sermon.title,
-                    subtitle: sermon.subtitle,
-                    dateMillis: date.getTime(),
-                    durationSeconds: sermon.durationSeconds,
-                    description: sermon.description,
-                    speakers: sermon.speakers,
-                    topics: sermon.topics,
-                    series: sermon.series,
-                    dateString: getDateString(date),
-                  })
-                );
+
                 props.setEditFormOpen?.(false);
               }}
               disabled={
