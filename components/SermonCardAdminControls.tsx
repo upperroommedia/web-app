@@ -34,9 +34,27 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
 
   const handleDelete = async () => {
     try {
+      const promises: Promise<any>[] = [];
       if (sermon.subsplashId) {
-        await Promise.allSettled([deleteFromSubsplash(), deleteFromSoundCloud()]);
+        promises.push(deleteFromSubsplash());
       }
+      if (sermon.soundCloudTrackId) {
+        promises.push(deleteFromSoundCloudErrorThrowable());
+      }
+      const results = await Promise.allSettled(promises);
+
+      let successful = true;
+      results.forEach((result) => {
+        if (result.status === 'rejected') {
+          alert(result.reason);
+          successful = false;
+        }
+      });
+
+      if (!successful) {
+        return;
+      }
+
       const firebasePromises = [
         deleteObject(ref(storage, `sermons/${sermon.key}`)),
         deleteDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter)),
@@ -60,8 +78,8 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     );
     const data: UploadToSoundCloudInputType = {
       title: sermon.title,
-      description: sermon.subtitle,
-      tags: sermon.topics,
+      description: sermon.description,
+      tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
       audioUrl: await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`)),
       imageUrl: sermon.images.find((image) => image.type === 'square')?.downloadLink,
@@ -81,22 +99,45 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   };
 
   const deleteFromSoundCloud = async () => {
+    try {
+      await deleteFromSoundCloudErrorThrowable();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(error);
+      // TODO: handle error
+      alert(error);
+    }
+  };
+
+  const deleteFromSoundCloudErrorThrowable = async () => {
     if (sermon.soundCloudTrackId === undefined) {
       return;
     }
     setIsUploadingToSoundCloud(true);
     const deleteFromSoundCloud = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
+    const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
     try {
       await deleteFromSoundCloud({ soundCloudTrackId: sermon.soundCloudTrackId });
-      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
     } catch (error) {
-      alert(error);
+      type httpError = {
+        code: string;
+        name: string;
+        details?: string;
+      };
+      const { details }: httpError = JSON.parse(JSON.stringify(error));
+      if (details?.includes('Invalid track id')) {
+        await updateDoc(sermonRef, {
+          soundCloudTrackId: deleteField(),
+          status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+        });
+      }
+    } finally {
+      setIsUploadingToSoundCloud(false);
     }
-    setIsUploadingToSoundCloud(false);
   };
 
   const uploadToSubsplash = async () => {
@@ -129,6 +170,15 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   };
 
   const deleteFromSubsplash = async () => {
+    try {
+      await deleteFromSubsplashErrorThrowable();
+    } catch (error) {
+      // TODO: handle error
+      alert(error);
+    }
+  };
+
+  const deleteFromSubsplashErrorThrowable = async () => {
     const deleteFromSubsplashCall = createFunction<string, void>('deleteFromSubsplash');
     try {
       setIsUploadingToSubsplash(true);
@@ -144,11 +194,11 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
           subsplashId: deleteField(),
           status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
         });
-        setIsUploadingToSubsplash(false);
       } else {
-        setIsUploadingToSubsplash(false);
-        alert(error);
+        throw error;
       }
+    } finally {
+      setIsUploadingToSubsplash(false);
     }
   };
   if (window.location.pathname !== '/admin/sermons' || user?.role !== 'admin') {

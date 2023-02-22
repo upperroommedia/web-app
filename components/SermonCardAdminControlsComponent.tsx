@@ -16,7 +16,7 @@ import SoundCloudLogo from '../public/soundcloud.png';
 import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
-import { Dispatch, FunctionComponent, SetStateAction, useState } from 'react';
+import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 
 interface SermonCardAdminControlsComponentProps {
@@ -50,7 +50,11 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
 }: SermonCardAdminControlsComponentProps) => {
   const [deleteConfirmationPopup, setDeleteConfirmationPopup] = useState<boolean>(false);
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
+  const [disableButtons, setDisableButtons] = useState<boolean>(false);
 
+  useEffect(() => {
+    setDisableButtons(isUploadingToSoundCloud || isUploadingToSubsplash);
+  }, [isUploadingToSoundCloud, isUploadingToSubsplash]);
   return (
     <>
       <Box display="flex">
@@ -58,51 +62,70 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           <CircularProgress size={24} />
         ) : sermon.status.soundCloud === uploadStatus.UPLOADED ? (
           <Tooltip title="Remove From Soundcloud">
-            <IconButton aria-label="Upload to Subsplash" onClick={deleteFromSoundCloud}>
-              <UnpublishedIcon style={{ color: 'orangered' }} />
-            </IconButton>
+            <span>
+              <IconButton aria-label="Upload to Subsplash" disabled={disableButtons} onClick={deleteFromSoundCloud}>
+                <UnpublishedIcon style={{ color: 'orangered' }} />
+              </IconButton>
+            </span>
           </Tooltip>
         ) : (
           <Tooltip title="Upload to Soundcloud">
-            <IconButton onClick={() => uploadToSoundCloud()}>
-              <Image src={SoundCloudLogo} alt="Soundcloud Logo" width={24} height={24} />
-            </IconButton>
+            <span>
+              <IconButton disabled={disableButtons} onClick={() => uploadToSoundCloud()}>
+                <Image src={SoundCloudLogo} alt="Soundcloud Logo" width={24} height={24} />
+              </IconButton>
+            </span>
           </Tooltip>
         )}
         {isUploadingToSubsplash ? (
           <CircularProgress size={24} />
         ) : sermon.status.subsplash === uploadStatus.UPLOADED ? (
           <Tooltip title="Remove From Subsplash">
-            <IconButton aria-label="Upload to Subsplash" onClick={deleteFromSubsplash}>
-              <UnpublishedIcon style={{ color: 'orangered' }} />
-            </IconButton>
+            <span>
+              <IconButton disabled={disableButtons} aria-label="Upload to Subsplash" onClick={deleteFromSubsplash}>
+                <UnpublishedIcon style={{ color: 'orangered' }} />
+              </IconButton>
+            </span>
           </Tooltip>
         ) : (
           <Tooltip title="Upload to Subsplash">
-            <IconButton
-              aria-label="Upload to Subsplash"
-              style={{ color: 'lightgreen' }}
-              onClick={() => {
-                setUploadToSubsplashPopup(true);
-              }}
-            >
-              <PublishIcon />
-            </IconButton>
+            <span>
+              <IconButton
+                disabled={disableButtons}
+                aria-label="Upload to Subsplash"
+                style={{ color: 'lightgreen' }}
+                onClick={() => {
+                  setUploadToSubsplashPopup(true);
+                }}
+              >
+                <PublishIcon />
+              </IconButton>
+            </span>
           </Tooltip>
         )}
         <Tooltip title="Edit Sermon">
-          <IconButton aria-label="edit sermon" style={{ color: 'lightblue' }} onClick={() => setEditFormPopup(true)}>
-            <EditIcon />
-          </IconButton>
+          <span>
+            <IconButton
+              disabled={disableButtons}
+              aria-label="edit sermon"
+              style={{ color: 'lightblue' }}
+              onClick={() => setEditFormPopup(true)}
+            >
+              <EditIcon />
+            </IconButton>
+          </span>
         </Tooltip>
         <Tooltip title="Delete Sermon From All Systems">
-          <IconButton
-            aria-label="delete sermon"
-            style={{ color: 'red' }}
-            onClick={() => setDeleteConfirmationPopup(true)}
-          >
-            <DeleteIcon />
-          </IconButton>
+          <span>
+            <IconButton
+              disabled={disableButtons}
+              aria-label="delete sermon"
+              style={{ color: 'red' }}
+              onClick={() => setDeleteConfirmationPopup(true)}
+            >
+              <DeleteIcon />
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
       <PopUp

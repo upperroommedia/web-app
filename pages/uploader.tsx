@@ -525,6 +525,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   series: sermon.series,
                   images: sermon.images,
                   subsplashId: sermon.subsplashId,
+                  soundCloudTrackId: sermon.soundCloudTrackId,
                   dateMillis: sermon.dateMillis,
                 });
 
