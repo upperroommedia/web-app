@@ -166,12 +166,10 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   // Avoid a layout jump when reaching the last page with empty rows.
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
   return (
-    <Box width="100%" display="flex" padding="30px" justifyContent="center">
+    <Box width={1} maxWidth={800} display="flex" padding="30px" justifyContent="center">
       <Paper
         sx={{
-          overflowX: 'auto',
           width: 1,
-          maxWidth: 600,
         }}
       >
         <UserTableToolbar />
