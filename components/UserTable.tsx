@@ -96,7 +96,8 @@ const UserTableHead = (props: UserTableProps) => {
           headCell.id !== 'photoURL' ? (
             <TableCell
               align="center"
-              width={`${100 / 3}%`}
+              // width={`${100 / 3}%`}
+              // sx={{ minWidth: '200px' }}
               key={headCell.id}
               sortDirection={orderBy === headCell.id ? order : false}
             >
@@ -165,90 +166,94 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   // Avoid a layout jump when reaching the last page with empty rows.
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
   return (
-    <>
-      <Box sx={{ width: 'max-content' }}>
-        <Paper sx={{ width: 'max-content', mb: 2 }}>
-          <UserTableToolbar />
-          <TableContainer sx={{ width: 'max-content' }}>
-            <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
-              <UserTableHead
-                order={order}
-                orderBy={orderBy}
-                onRequestSort={handleRequestSort}
-                rowCount={props.users.length}
-              />
-              <TableBody>
-                {/* if you don't need to support IE11, you can replace the `stableSort` call with:
-              rows.sort(getComparator(order, orderBy)).slice() */}
-                {stableSort(props.users, order, orderBy)
-                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                  .map((user) => {
-                    const displayName = user.displayName || user.email;
-                    return (
-                      <TableRow hover tabIndex={-1} key={user.uid}>
-                        <TableCell align="center">{user.email}</TableCell>
-                        <TableCell align="center">
-                          {currentUser?.uid === user.uid ? (
-                            <Typography>{user.role}</Typography>
-                          ) : (
-                            <Select
-                              labelId="demo-simple-select-label"
-                              id="demo-simple-select"
-                              value={user.role}
-                              onChange={(e) => props.handleRoleChange(user.uid, e.target.value)}
-                            >
-                              {ROLES.map((role) => (
-                                <MenuItem key={role} value={role}>
-                                  {role}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          )}
-                        </TableCell>
-                        <TableCell align="center">
-                          <div
-                            style={{
-                              margin: 'auto',
-                              borderRadius: '2px',
-                              overflow: 'hidden',
-                              position: 'relative',
-                              width: 50,
-                              height: 50,
-                              backgroundImage: `url(${'/user.png'})`,
-                              backgroundPosition: 'center center',
-                              backgroundSize: 'cover',
-                            }}
+    <Box width="100%" display="flex" padding="30px" justifyContent="center">
+      <Paper
+        sx={{
+          overflowX: 'auto',
+          width: 1,
+          maxWidth: 600,
+        }}
+      >
+        <UserTableToolbar />
+        <TableContainer>
+          <Table aria-labelledby="tableTitle" size={'medium'}>
+            <UserTableHead
+              order={order}
+              orderBy={orderBy}
+              onRequestSort={handleRequestSort}
+              rowCount={props.users.length}
+            />
+            <TableBody>
+              {/* if you don't need to support IE11, you can replace the `stableSort` call with:
+                rows.sort(getComparator(order, orderBy)).slice() */}
+              {stableSort(props.users, order, orderBy)
+                .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                .map((user) => {
+                  const displayName = user.displayName || user.email;
+                  return (
+                    <TableRow hover tabIndex={-1} key={user.uid}>
+                      <TableCell align="center">{user.email}</TableCell>
+                      <TableCell align="center">
+                        {currentUser?.uid === user.uid ? (
+                          <Typography>{user.role}</Typography>
+                        ) : (
+                          <Select
+                            labelId="demo-simple-select-label"
+                            id="demo-simple-select"
+                            value={user.role}
+                            onChange={(e) => props.handleRoleChange(user.uid, e.target.value)}
                           >
-                            {user.photoURL && <Image src={user.photoURL} alt={`Image of ${displayName}`} fill />}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                {emptyRows > 0 && (
-                  <TableRow
-                    style={{
-                      height: 53 * emptyRows,
-                    }}
-                  >
-                    <TableCell colSpan={6} />
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          <TablePagination
-            rowsPerPageOptions={[5, 10, 25]}
-            component="div"
-            count={props.users.length}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-          />
-        </Paper>
-      </Box>
-    </>
+                            {ROLES.map((role) => (
+                              <MenuItem key={role} value={role}>
+                                {role}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        )}
+                      </TableCell>
+                      <TableCell align="center">
+                        <div
+                          style={{
+                            margin: 'auto',
+                            borderRadius: '2px',
+                            overflow: 'hidden',
+                            position: 'relative',
+                            width: 50,
+                            height: 50,
+                            backgroundImage: `url(${'/user.png'})`,
+                            backgroundPosition: 'center center',
+                            backgroundSize: 'cover',
+                          }}
+                        >
+                          {user.photoURL && <Image src={user.photoURL} alt={`Image of ${displayName}`} fill />}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              {emptyRows > 0 && (
+                <TableRow
+                  style={{
+                    height: 53 * emptyRows,
+                  }}
+                >
+                  <TableCell colSpan={6} />
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          rowsPerPageOptions={[5, 10, 25]}
+          component="div"
+          count={props.users.length}
+          rowsPerPage={rowsPerPage}
+          page={page}
+          onPageChange={handleChangePage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+        />
+      </Paper>
+    </Box>
   );
 };
 
