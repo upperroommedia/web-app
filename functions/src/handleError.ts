@@ -1,11 +1,11 @@
-import axios, { AxiosError } from 'axios';
+import { AxiosError, isAxiosError } from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 const handleError = (error: unknown): never => {
   if (error instanceof HttpsError) {
     throw error;
   }
-  if (axios.isAxiosError(error)) {
+  if (isAxiosError(error)) {
     const axiosError = error as AxiosError;
     throw new HttpsError('internal', axiosError.message, axiosError.toJSON());
   }

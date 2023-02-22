@@ -312,7 +312,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
     );
   };
 
-  const RenderTrimmer = ({ children }: React.ComponentProps<React.FC>) => {
+  const RenderTrimmer = ({ children }: { children: React.ReactNode }) => {
     return (
       <div className={styles.scrubber_container}>
         <div

@@ -46,7 +46,7 @@ import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import ImageViewer from '../components/ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
-import { Series } from '../types/Series';
+import { Series, seriesConverter } from '../types/Series';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
@@ -97,7 +97,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [timer, setTimer] = useState<NodeJS.Timeout>();
 
   // TODO: REFACTOR THESE INTO SERMON DATA
-  const [date, setDate] = useState<Date>(new Date(props.existingSermon ? props.existingSermon.dateMillis : new Date()));
+  const [date, setDate] = useState<Date>(props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date());
 
   const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
@@ -185,6 +185,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const handleDateChange = (newValue: Date) => {
     setDate(newValue);
+    updateSermon('dateMillis', newValue.getTime());
   };
 
   const setTrimDuration = (durationSeconds: number) => {
@@ -297,11 +298,11 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             value={sermon.series || null}
             onChange={async (_, newValue) => {
               if (newValue !== null) {
-                const newSeriesRef = doc(firestore, 'series', newValue.id);
+                const newSeriesRef = doc(firestore, 'series', newValue.id).withConverter(seriesConverter);
                 await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
               }
               if (sermon.series.name !== undefined && newValue === null) {
-                const seriesRef = doc(firestore, 'series', sermon.series.id);
+                const seriesRef = doc(firestore, 'series', sermon.series.id).withConverter(seriesConverter);
                 await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
               }
               newValue === null ? updateSermon('series', {} as Series) : updateSermon('series', newValue);
@@ -408,7 +409,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     {speaker.images?.find((image) => image.type === 'square') && (
                       <Image
                         src={sanitize(speaker.images.find((image) => image.type === 'square')!.downloadLink)}
-                        layout="fill"
+                        alt={`Image of ${speaker.name}`}
+                        fill
                       />
                     )}
                   </div>
@@ -434,7 +436,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     backgroundSize: 'cover',
                   }}
                 >
-                  {squareImage && <Image src={sanitize(squareImage.downloadLink)} layout="fill" />}
+                  {squareImage && (
+                    <Image src={sanitize(squareImage.downloadLink)} alt={`Image of ${option.name}`} fill />
+                  )}
                 </div>
                 {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
                   <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
@@ -521,6 +525,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   topics: sermon.topics,
                   series: sermon.series,
                   images: sermon.images,
+                  subsplashId: sermon.subsplashId,
+                  dateMillis: sermon.dateMillis,
                 });
                 props.setUpdatedSermon?.(
                   createSermon({
@@ -586,7 +592,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                         file,
                         setFile,
                         setUploadProgress,
-                        date,
                         trimStart,
                         sermon,
                       });
@@ -660,7 +665,7 @@ export default Uploader;
 
 export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.uid || userCredentials.props.customClaims?.role !== 'admin') {
+  if (!userCredentials.props.uid || !['admin', 'uploader'].includes(userCredentials.props.customClaims?.role)) {
     return {
       redirect: {
         permanent: false,

@@ -4,7 +4,7 @@ import Typography from '@mui/material/Typography';
 import { useState, useCallback } from 'react';
 import getCroppedImg, { CroppedImageData } from '../utils/cropImage';
 
-import Cropper from 'react-easy-crop';
+import Cropper, { Area } from 'react-easy-crop';
 import styles from '../styles/Cropper.module.css';
 import { ImageSizeType } from '../types/Image';
 import OutlinedInput from '@mui/material/OutlinedInput';
@@ -32,9 +32,9 @@ const ImageUploader = (props: Props) => {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area>();
 
-  const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
+  const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
 
@@ -110,7 +110,7 @@ const ImageUploader = (props: Props) => {
             onRotationChange={setRotation}
             onCropComplete={onCropComplete}
             onZoomChange={setZoom}
-            objectFit='auto-cover'
+            objectFit="auto-cover"
           />
           )
         </div>

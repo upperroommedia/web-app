@@ -1,5 +1,5 @@
 export const ImageSizes = ['square', 'wide', 'banner'] as const;
-export type ImageSizeType = typeof ImageSizes[number];
+export type ImageSizeType = (typeof ImageSizes)[number];
 export type ImageType = {
   id: string;
   size: 'thumbnail' | 'small' | 'medium' | 'large' | 'original' | 'cropped';
