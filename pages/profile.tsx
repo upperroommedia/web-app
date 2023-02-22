@@ -1,7 +1,7 @@
 /**
  * User profile page
  */
-('use client');
+// ('use client');
 
 import useAuth from '../context/user/UserContext';
 import Button, { ButtonProps } from '@mui/material/Button';

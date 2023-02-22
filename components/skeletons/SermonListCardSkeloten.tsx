@@ -9,6 +9,7 @@ import ListItem from '@mui/material/ListItem';
 export default function SermonListCardSkeloten() {
   return (
     <ListItem>
+      <Divider variant="middle" />
       <Card sx={{ width: '100%', display: 'flex', gap: 3, padding: 2 }} elevation={0}>
         <Skeleton variant="rectangular" width={150} height={150} sx={{ flex: 'none', borderRadius: '5px' }} />
         <Box display={'flex'} flexDirection="column" justifyContent="space-between" width={1}>

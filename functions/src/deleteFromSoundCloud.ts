@@ -14,7 +14,6 @@ const deleteFromSoundCloudHelper = async (soundCloudTrackId: string) => {
   const formData = new FormData();
   console.log('soundCloudTrackId', soundCloudTrackId);
   formData.append('trackId', soundCloudTrackId);
-  logger.log('formData Headers', formData.getHeaders());
   const config: AxiosRequestConfig = {
     method: 'POST',
     url: 'https://hook.eu1.make.com/c7mnio0orvi8teayuo11nlrdocvwmsoj',
@@ -24,9 +23,15 @@ const deleteFromSoundCloudHelper = async (soundCloudTrackId: string) => {
     data: formData,
   };
   try {
-    await axios(config);
+    console.log('Config', config);
+    const response = await axios(config);
+    logger.log('response status', response.status);
+    logger.log('response data', response.data);
+    if (response.status !== 200) {
+      throw new HttpsError('internal', response.data);
+    }
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -38,10 +43,11 @@ const deleteFromSoundCloud = onCall(
     }
     try {
       logger.log('Attempting to delete from SoundCloud', request.data);
-      const response = await deleteFromSoundCloudHelper(request.data.soundCloudTrackId);
-      logger.log('SoundCloud response', response);
+      await deleteFromSoundCloudHelper(request.data.soundCloudTrackId);
+      logger.log('Track deleted from SoundCloud');
     } catch (error) {
-      handleError(error);
+      logger.error(error);
+      throw handleError(error);
     }
   }
 );

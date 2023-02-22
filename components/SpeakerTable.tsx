@@ -79,7 +79,7 @@ const SpeakerTableHead = (props: SpeakerTableProps) => {
       <TableRow>
         {headCells.map((headCell) =>
           headCell.id === 'name' || headCell.id === 'sermonCount' ? (
-            <TableCell key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
+            <TableCell align="center" key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
               <TableSortLabel
                 onClick={createSortHandler(headCell.id)}
                 active={orderBy === headCell.id}
@@ -94,7 +94,9 @@ const SpeakerTableHead = (props: SpeakerTableProps) => {
               </TableSortLabel>
             </TableCell>
           ) : (
-            <TableCell key={headCell.id}>{headCell.label}</TableCell>
+            <TableCell align="center" key={headCell.id}>
+              {headCell.label}
+            </TableCell>
           )
         )}
       </TableRow>
@@ -357,8 +359,8 @@ const SpeakerTable = (props: {
 
   return (
     <>
-      <Box sx={{ width: '100%' }}>
-        <Paper sx={{ width: '100%', mb: 2 }}>
+      <Box width={1} display="flex" padding="30px" justifyContent="center">
+        <Paper sx={{ width: 1, mb: 2 }}>
           <SpeakerTableToolbar />
           <TableContainer>
             <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
@@ -374,37 +376,44 @@ const SpeakerTable = (props: {
                   .map((speaker) => {
                     return (
                       <TableRow hover onClick={() => handleClick(speaker)} tabIndex={-1} key={speaker.id}>
-                        <TableCell component="th" id={speaker.name} scope="row" padding="none">
+                        <TableCell align="center" component="th" id={speaker.name} scope="row" padding="none">
                           {speaker.name}
                         </TableCell>
-                        <TableCell>{speaker.sermonCount || 0}</TableCell>
-                        <TableCell>{speaker.listId || 'No list'}</TableCell>
-                        <TableCell align="right" style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
-                          {['banner', 'wide', 'square'].map((type, i) => {
-                            const image = speaker.images?.find((image) => image.type === type);
-                            return (
-                              <div
-                                key={image?.id || i}
-                                style={{
-                                  borderRadius: '2px',
-                                  overflow: 'hidden',
-                                  position: 'relative',
-                                  width: 50,
-                                  height: 50,
-                                  backgroundColor: image?.averageColorHex || '#f3f1f1',
-                                }}
-                              >
-                                {image && (
-                                  <Image
-                                    src={sanitize(image.downloadLink)}
-                                    alt={`Image of ${image.name}`}
-                                    fill
-                                    style={{ objectFit: 'contain' }}
-                                  />
-                                )}
-                              </div>
-                            );
-                          })}
+                        <TableCell align="center">{speaker.sermonCount || 0}</TableCell>
+                        <TableCell align="center">{speaker.listId || 'No list'}</TableCell>
+                        <TableCell style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
+                          <Box
+                            display="flex"
+                            justifyContent="center"
+                            gap={1}
+                            sx={{ marginLeft: 'auto', marginRight: 'auto' }}
+                          >
+                            {['square', 'wide', 'banner'].map((type, i) => {
+                              const image = speaker.images?.find((image) => image.type === type);
+                              return (
+                                <div
+                                  key={image?.id || i}
+                                  style={{
+                                    borderRadius: '2px',
+                                    overflow: 'hidden',
+                                    position: 'relative',
+                                    width: 50,
+                                    height: 50,
+                                    backgroundColor: image?.averageColorHex || '#f3f1f1',
+                                  }}
+                                >
+                                  {image && (
+                                    <Image
+                                      src={sanitize(image.downloadLink)}
+                                      alt={`Image of ${image.name}`}
+                                      fill
+                                      style={{ objectFit: 'contain' }}
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </Box>
                         </TableCell>
                       </TableRow>
                     );
