@@ -17,6 +17,7 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import { Order, ROLES } from '../context/types';
 import { User } from '../types/User';
+import useAuth from '../context/user/UserContext';
 
 const stableSort = (array: User[], order: Order, orderBy: keyof User) => {
   function compareEmail(a: User, b: User) {
@@ -93,7 +94,12 @@ const UserTableHead = (props: UserTableProps) => {
       <TableRow>
         {headCells.map((headCell) =>
           headCell.id !== 'photoURL' ? (
-            <TableCell key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
+            <TableCell
+              align="center"
+              width={`${100 / 3}%`}
+              key={headCell.id}
+              sortDirection={orderBy === headCell.id ? order : false}
+            >
               <TableSortLabel
                 onClick={createSortHandler(headCell.id)}
                 active={orderBy === headCell.id}
@@ -108,7 +114,7 @@ const UserTableHead = (props: UserTableProps) => {
               </TableSortLabel>
             </TableCell>
           ) : (
-            <TableCell key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
+            <TableCell align="center" key={headCell.id} sortDirection={orderBy === headCell.id ? order : false}>
               {headCell.label}
             </TableCell>
           )
@@ -136,6 +142,7 @@ const UserTableToolbar = () => {
 const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role: string) => void }) => {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof User>('email');
+  const { user: currentUser } = useAuth();
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(5);
@@ -159,10 +166,10 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
   return (
     <>
-      <Box sx={{ width: '100%' }}>
-        <Paper sx={{ width: '100%', mb: 2 }}>
+      <Box sx={{ width: 'max-content' }}>
+        <Paper sx={{ width: 'max-content', mb: 2 }}>
           <UserTableToolbar />
-          <TableContainer>
+          <TableContainer sx={{ width: 'max-content' }}>
             <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
               <UserTableHead
                 order={order}
@@ -179,9 +186,11 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
                     const displayName = user.displayName || user.email;
                     return (
                       <TableRow hover tabIndex={-1} key={user.uid}>
-                        <TableCell>{user.email}</TableCell>
-                        <TableCell>
-                          <div style={{ display: 'flex', padding: '20px', gap: '10px' }}>
+                        <TableCell align="center">{user.email}</TableCell>
+                        <TableCell align="center">
+                          {currentUser?.uid === user.uid ? (
+                            <Typography>{user.role}</Typography>
+                          ) : (
                             <Select
                               labelId="demo-simple-select-label"
                               id="demo-simple-select"
@@ -194,11 +203,12 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
                                 </MenuItem>
                               ))}
                             </Select>
-                          </div>
+                          )}
                         </TableCell>
-                        <TableCell align="right">
+                        <TableCell align="center">
                           <div
                             style={{
+                              margin: 'auto',
                               borderRadius: '2px',
                               overflow: 'hidden',
                               position: 'relative',
