@@ -1,4 +1,4 @@
-import axios, { AxiosRequestConfig, isAxiosError } from 'axios';
+import axios, { AxiosRequestConfig } from 'axios';
 import FormData from 'form-data';
 import handleError from './handleError';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
