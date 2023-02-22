@@ -511,6 +511,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           alignItems: 'center',
           justifyContent: 'center',
         }}
+        width={file ? 1 : .75}
       >
         {props.existingSermon ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
