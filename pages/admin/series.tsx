@@ -46,9 +46,7 @@ const AdminSeries = () => {
   const fetchSeries = async () => {
     const seriesQuery = query(collection(firestore, 'series').withConverter(seriesConverter));
     const seriesQuerySnapshot = await getDocs(seriesQuery);
-    seriesQuerySnapshot.docs.forEach((doc) => {
-      setSeries((oldSeries) => [...oldSeries, doc.data()]);
-    });
+    setSeries(seriesQuerySnapshot.docs.map((doc) => doc.data()));
   };
   useEffect(() => {
     const g = async () => {
@@ -59,7 +57,7 @@ const AdminSeries = () => {
 
   return (
     <>
-      <Box>
+      <Box padding={3}>
         <Typography variant="h2">Manage Series</Typography>
         {series.map((s) => {
           return (

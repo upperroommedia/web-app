@@ -1,7 +1,6 @@
 // 'use client';
 
 import Box from '@mui/material/Box';
-import Divider from '@mui/material/Divider';
 import List from '@mui/material/List';
 import SermonListCardSkeloten from './SermonListCardSkeloten';
 
@@ -16,14 +15,9 @@ export default function SermonListSkeloten() {
 
         // bgcolor={'blue'}
       >
-        {Array(3)
-          .fill(0)
-          .map(() => (
-            <>
-              <Divider variant="middle" />
-              <SermonListCardSkeloten />
-            </>
-          ))}
+        {[1, 2, 3].map((i) => (
+          <SermonListCardSkeloten key={`sermonListCardSkeloten: ${i}`} />
+        ))}
       </List>
     </Box>
   );

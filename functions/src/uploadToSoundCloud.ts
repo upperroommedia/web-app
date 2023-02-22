@@ -56,7 +56,7 @@ const uploadToSoundCloud = async ({
   try {
     return (await axios(config)).data;
   } catch (error) {
-    return handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -72,7 +72,7 @@ const uploadToSoundCloudCall = onCall(
       logger.log('SoundCloud response', response);
       return { soundCloudTrackId: response };
     } catch (error) {
-      return handleError(error);
+      throw handleError(error);
     }
   }
 );

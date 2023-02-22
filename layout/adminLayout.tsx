@@ -8,7 +8,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <Box>
-      <Box display="flex" bgcolor="aliceblue" justifyContent="center">
+      <Box display="flex" flexWrap={'wrap'} bgcolor="aliceblue" justifyContent="center">
         {pages.map((page) => (
           <NavMenuItem
             key={page}

@@ -15,6 +15,7 @@ import nookies from 'nookies';
 import { setDoc, doc, getDoc } from 'firebase/firestore';
 import firestore from '../../firebase/firestore';
 import { User } from '../../types/User';
+import { useRouter } from 'next/router';
 
 interface Context {
   user: User | undefined;
@@ -38,6 +39,7 @@ const getUserInfoFromFirestore = async (uid: string) => {
 export const UserProvider = ({ children }: any) => {
   const [user, setUser] = useState<User>();
   const [loading, setLoading] = useState<boolean>(true);
+  const router = useRouter();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -113,7 +115,7 @@ export const UserProvider = ({ children }: any) => {
 
   const logoutUser = async () => {
     await signOut(auth);
-    setUser(undefined);
+    router.reload();
   };
 
   const resetPassword = async (email: string) => {

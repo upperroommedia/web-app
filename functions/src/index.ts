@@ -16,12 +16,14 @@ import createnewsubsplashlist from './createNewSubsplashList';
 import addToSeries from './addToSeries';
 import uploadtosoundcloud from './uploadToSoundCloud';
 import deletefromsoundcloud from './deleteFromSoundCloud';
-import editSermon from './editSermon';
+import editSubsplashSermon from './editSubsplashSermon';
+import editSoundCloudSermon from './editSoundCloudSermon';
 
 admin.initializeApp();
 
 exports.uploadToSubsplash = uploadToSubsplash;
-exports.editSermon = editSermon;
+exports.editSubsplashSermon = editSubsplashSermon;
+exports.editSoundCloudSermon = editSoundCloudSermon;
 exports.deleteFromSubsplash = deleteFromSubsplash;
 exports.setUserRole = setUserRole;
 exports.addintrooutro = addintrooutro;
