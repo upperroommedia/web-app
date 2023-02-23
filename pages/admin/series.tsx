@@ -126,7 +126,7 @@ const AdminSeries = () => {
                               alt={image.name}
                               style={{
                                 objectFit: 'contain',
-                                borderRadius: '5px',
+                                // borderRadius: '5px',
                               }}
                               fill
                             />

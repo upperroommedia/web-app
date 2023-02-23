@@ -580,6 +580,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         setNewSeriesPopup={setNewSeriesPopup}
         seriesArray={seriesArray}
         setSeriesArray={setSeriesArray}
+        sermon={sermon}
+        setSermon={setSermon}
       />
     </form>
   );

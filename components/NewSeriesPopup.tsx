@@ -8,6 +8,7 @@ import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import { emptySeries, Series } from '../types/Series';
 import ImageViewer from './ImageViewer';
 import isEqual from 'lodash/isEqual';
+import { Sermon } from '../types/SermonTypes';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 
@@ -16,6 +17,8 @@ interface NewSeriesPopupProps {
   setNewSeriesPopup: Dispatch<SetStateAction<boolean>>;
   seriesArray: Series[];
   setSeriesArray: Dispatch<SetStateAction<Series[]>>;
+  sermon?: Sermon;
+  setSermon?: Dispatch<SetStateAction<Sermon>>;
   existingSeries?: Series | undefined;
 }
 
@@ -120,7 +123,11 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 const seriesToAdd = { id: newSeriesId, name: newSeries.name, sermonIds: [], images: newSeries.images };
                 props.setNewSeriesPopup(false);
                 props.seriesArray.push(seriesToAdd);
+                props.sermon &&
+                  props.setSermon &&
+                  props.setSermon({ ...props.sermon, series: [...props.sermon.series, seriesToAdd] });
                 setNewSeries(emptySeries);
+                setUserHasTypedInSeries(false);
               }
             } catch (error) {
               setNewSeriesError({ error: true, message: JSON.stringify(error) });
