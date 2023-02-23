@@ -1,11 +1,11 @@
 import { Button, TextField } from '@mui/material';
 import firestore from '../firebase/firestore';
-import { doc, updateDoc } from 'firebase/firestore';
+import { arrayUnion, doc, updateDoc } from 'firebase/firestore';
 import dynamic from 'next/dynamic';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import addNewSeries from '../pages/api/addNewSeries';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
-import { emptySeries, Series } from '../types/Series';
+import { emptySeries, Series, seriesConverter } from '../types/Series';
 import ImageViewer from './ImageViewer';
 import isEqual from 'lodash/isEqual';
 import { Sermon } from '../types/SermonTypes';
@@ -123,9 +123,11 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 const seriesToAdd = { id: newSeriesId, name: newSeries.name, sermonIds: [], images: newSeries.images };
                 props.setNewSeriesPopup(false);
                 props.seriesArray.push(seriesToAdd);
-                props.sermon &&
-                  props.setSermon &&
+                if (props.sermon && props.setSermon) {
                   props.setSermon({ ...props.sermon, series: [...props.sermon.series, seriesToAdd] });
+                  const newSeriesRef = doc(firestore, 'series', newSeriesId).withConverter(seriesConverter);
+                  await updateDoc(newSeriesRef, { sermonIds: arrayUnion(props.sermon.key) });
+                }
                 setNewSeries(emptySeries);
                 setUserHasTypedInSeries(false);
               }
