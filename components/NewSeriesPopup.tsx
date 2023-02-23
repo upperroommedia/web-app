@@ -138,7 +138,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         </Button>
       }
     >
-      <div style={{ display: 'flex', padding: '10px' }}>
+      <div style={{ display: 'flex', padding: '10px', justifyContent: 'center', flexDirection: 'column' }}>
         <TextField
           value={newSeries.name}
           onChange={(e) => {
@@ -149,8 +149,9 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
           }}
           error={newSeriesError.error}
           label={newSeriesError.error ? newSeriesError.message : 'Series'}
+          sx={{ paddingBottom: '5px' }}
         />
-        <ImageViewer images={newSeries.images} newImageCallback={handleNewImage} vertical={true} />
+        <ImageViewer images={newSeries.images} newImageCallback={handleNewImage} vertical={false} />
       </div>
     </DynamicPopUp>
   );

@@ -105,7 +105,7 @@ const AdminSeries = () => {
                     </Button>
                   </Box>
                   <div style={{ display: 'flex', justifyContent: 'center' }}>
-                    {['banner', 'wide', 'square'].map((type, i) => {
+                    {['square', 'wide', 'banner'].map((type, i) => {
                       const image = s.images?.find((image) => image.type === type);
                       return (
                         <div
@@ -126,7 +126,6 @@ const AdminSeries = () => {
                               alt={image.name}
                               style={{
                                 objectFit: 'contain',
-                                // borderRadius: '5px',
                               }}
                               fill
                             />
