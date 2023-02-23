@@ -60,9 +60,11 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
         deleteDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter)),
       ];
 
-      if (sermon.series?.name !== undefined) {
-        const seriesRef = doc(firestore, 'series', sermon.series.id).withConverter(seriesConverter);
-        firebasePromises.push(updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) }));
+      if (sermon.series.length !== 0) {
+        sermon.series.forEach(async (series) => {
+          const seriesRef = doc(firestore, 'series', series.id).withConverter(seriesConverter);
+          await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+        });
       }
       await Promise.allSettled(firebasePromises);
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));

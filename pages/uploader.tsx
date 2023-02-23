@@ -4,10 +4,10 @@
 import dynamic from 'next/dynamic';
 import uploadFile from './api/uploadFile';
 import editSermon from './api/editSermon';
-import addNewSeries from './api/addNewSeries';
 import styles from '../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
-
+import NewSeriesPopup from '../components/NewSeriesPopup';
+import Image from 'next/image';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
@@ -33,7 +33,6 @@ import { Sermon } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
-import Image from 'next/image';
 import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
@@ -48,7 +47,6 @@ import ImageViewer from '../components/ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import { Series, seriesConverter } from '../types/Series';
 
-const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
 interface UploaderProps {
@@ -98,36 +96,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date());
 
-  const [newSeries, setNewSeries] = useState<string>('');
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
   const [speakerError, setSpeakerError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
   const [topicError, setTopicError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
-
-  const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
-    error: false,
-    message: '',
-  });
-
-  const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
-
-  // const [editImagePopup, setEditImagePopup] = useState<boolean>(false);
-  // const [imageToEdit, setImageToEdit] = useState({ url: '', imageIndex: 0 });
-
-  useEffect(() => {
-    if (!userHasTypedInSeries) {
-      setNewSeriesError({ error: false, message: '' });
-      return;
-    }
-
-    if (newSeries === '') {
-      setNewSeriesError({ error: true, message: 'Series cannot be empty' });
-    } else if (seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())) {
-      setNewSeriesError({ error: true, message: 'Series already exists' });
-    } else {
-      setNewSeriesError({ error: false, message: '' });
-    }
-  }, [newSeries, userHasTypedInSeries, seriesArray]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -153,8 +125,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getDate() === date?.getDate() &&
       sermon1Date.getMonth() === date?.getMonth() &&
       sermon1Date.getFullYear() === date?.getFullYear() &&
-      sermon1.series.name === sermon.series.name &&
-      sermon1.series.id === sermon.series.id &&
+      JSON.stringify(sermon1.series) === JSON.stringify(sermon.series) &&
       JSON.stringify(sermon1.images) === JSON.stringify(sermon.images) &&
       JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
@@ -293,18 +264,22 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
         />
         <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
           <Autocomplete
+            multiple
             fullWidth
             value={sermon.series || null}
-            onChange={async (_, newValue) => {
-              if (newValue !== null) {
-                const newSeriesRef = doc(firestore, 'series', newValue.id).withConverter(seriesConverter);
+            onChange={async (_, newValue, reason, details) => {
+              if (reason === 'selectOption' && details) {
+                const newSeriesRef = doc(firestore, 'series', details.option.id).withConverter(seriesConverter);
                 await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
-              }
-              if (sermon.series.name !== undefined && newValue === null) {
-                const seriesRef = doc(firestore, 'series', sermon.series.id).withConverter(seriesConverter);
+                updateSermon('series', [...sermon.series, details.option]);
+              } else if (reason === 'removeOption' && details) {
+                const seriesRef = doc(firestore, 'series', details.option.id).withConverter(seriesConverter);
                 await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+                updateSermon(
+                  'series',
+                  sermon.series.filter((series) => series.id !== details.option.id)
+                );
               }
-              newValue === null ? updateSermon('series', {} as Series) : updateSermon('series', newValue);
             }}
             id="series-input"
             options={seriesArray}
@@ -493,7 +468,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           )}
         />
       </Box>
-      <div style={{}}>
+      <div>
         <ImageViewer
           images={sermon.images}
           speaker={sermon.speakers[0]}
@@ -528,7 +503,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   soundCloudTrackId: sermon.soundCloudTrackId,
                   dateMillis: sermon.dateMillis,
                 });
-
                 props.setEditFormOpen?.(false);
               }}
               disabled={
@@ -601,49 +575,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </>
         )}
       </Box>
-      <DynamicPopUp
-        title={'Add new series'}
-        open={newSeriesPopup}
-        setOpen={setNewSeriesPopup}
-        onClose={() => {
-          setUserHasTypedInSeries(false);
-          setNewSeries('');
-        }}
-        button={
-          <Button
-            variant="contained"
-            disabled={
-              newSeries === '' ||
-              seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.toLowerCase())
-            }
-            onClick={async () => {
-              try {
-                const newSeriesId = await addNewSeries(newSeries);
-                const seriesToAdd = { id: newSeriesId, name: newSeries, sermonIds: [] };
-                setNewSeriesPopup(false);
-                seriesArray.push(seriesToAdd);
-                setNewSeries('');
-              } catch (error) {
-                setNewSeriesError({ error: true, message: JSON.stringify(error) });
-              }
-            }}
-          >
-            Submit
-          </Button>
-        }
-      >
-        <div style={{ display: 'flex', padding: '10px' }}>
-          <TextField
-            value={newSeries}
-            onChange={(e) => {
-              setNewSeries(e.target.value);
-              !userHasTypedInSeries && setUserHasTypedInSeries(true);
-            }}
-            error={newSeriesError.error}
-            label={newSeriesError.error ? newSeriesError.message : 'Series'}
-          />
-        </div>
-      </DynamicPopUp>
+      <NewSeriesPopup
+        newSeriesPopup={newSeriesPopup}
+        setNewSeriesPopup={setNewSeriesPopup}
+        seriesArray={seriesArray}
+        setSeriesArray={setSeriesArray}
+      />
     </form>
   );
 };
