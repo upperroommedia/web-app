@@ -8,6 +8,7 @@ import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 
 export interface CreateNewSubsplashListInputType {
   title: string;
+  subtitle?: string;
   images?: ImageType[];
 }
 export interface CreateNewSubsplashListOutputType {
@@ -28,6 +29,7 @@ const createNewSubsplashList = onCall(
       header_type: 'none',
       layout_type: 'list',
       title: request.data.title,
+      ...(request.data.subtitle && { subtitle: request.data.subtitle }),
       type: 'standard',
       _embedded: request.data.images
         ? {
@@ -47,8 +49,7 @@ const createNewSubsplashList = onCall(
       // since this will not be changable through our ui, the display options are not returned
       return { listId: response.id };
     } catch (error) {
-      handleError(error);
-      return { listId: '' };
+      throw handleError(error);
     }
   }
 );
