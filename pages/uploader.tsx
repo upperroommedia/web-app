@@ -269,6 +269,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             value={sermon.series || null}
             onChange={async (_, newValue, reason, details) => {
               if (reason === 'selectOption' && details) {
+                console.log('details', details);
                 const newSeriesRef = doc(firestore, 'series', details.option.id).withConverter(seriesConverter);
                 await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
                 updateSermon('series', [...sermon.series, details.option]);

@@ -6,6 +6,7 @@ export interface Series {
   name: string;
   sermonIds: string[];
   images: ImageType[];
+  subsplashId?: string;
 }
 
 export const emptySeries: Series = {

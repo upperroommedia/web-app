@@ -132,6 +132,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 setUserHasTypedInSeries(false);
               }
             } catch (error) {
+              console.error(error);
               setNewSeriesError({ error: true, message: JSON.stringify(error) });
             }
           }}

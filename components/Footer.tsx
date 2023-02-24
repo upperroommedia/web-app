@@ -10,7 +10,7 @@ const Footer: FunctionComponent = () => (
     <p>
       Powered by{' '}
       <span className={styles.logo}>
-        <Image src="/coptic-devs-logo.webp" alt="Coptic Devs Logo" fill />
+        <Image src="/coptic-devs-logo.webp" alt="Coptic Devs Logo" fill style={{ objectFit: 'cover' }} />
       </span>
     </p>
   </footer>
