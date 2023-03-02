@@ -3,6 +3,7 @@ import axios from 'axios';
 import { firestore } from 'firebase-admin';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
+import { Series } from '../../types/Series';
 import { createNewSubsplashList } from './createNewSubsplashList';
 import { firestoreAdminSeriesConverter } from './firestoreDataConverter';
 import handleError from './handleError';
@@ -78,7 +79,7 @@ async function addItemsToList(
       'list-rows': listRows,
     },
   };
-  logger.log('Payload', payload);
+  logger.log(`Adding items: ${JSON.stringify(mediaItems)} to subsplash list: ${listId}`);
   const patchListConfig = createAxiosConfig(
     `https://core.subsplash.com/builder/v1/lists/${listId}`,
     token,
@@ -86,6 +87,21 @@ async function addItemsToList(
     payload
   );
   await axios(patchListConfig);
+  const seriesArray = await firestore()
+    .collection('series')
+    .where('subsplashId', '==', listId)
+    .limit(1)
+    .withConverter(firestoreAdminSeriesConverter)
+    .get();
+
+  if (!seriesArray.docs.length) {
+    logger.log('Throwing error');
+    throw new HttpsError('internal', 'Series id was not found in firestore');
+  }
+  logger.log(`Adding items: ${mediaItems} for firestore series: ${seriesArray.docs[0].data().name}`);
+  const field: keyof Series = 'sermonIds';
+  const value: Series[typeof field] = mediaItems.map((item) => item.id);
+  await seriesArray.docs[0].ref.update(field, value);
 }
 
 async function removeListRows(listRows: SubsplashListRow[], token: string): Promise<void> {
@@ -103,23 +119,125 @@ async function removeListRows(listRows: SubsplashListRow[], token: string): Prom
   );
 }
 
-const removeNOldestItems = async (numberToRemove: number, listId: string, token: string): Promise<void> => {
-  // get oldest item
-  const url = `https://core.subsplash.com/builder/v1/list-rows?filter%5Bapp_key%5D=9XTSHD&filter%5Bsource_list%5D=${listId}&sort=created_at&page%5Bnumber%5D=1&page%5Bsize%5D=${numberToRemove}`;
+async function getLastNOldestItems(n: number, listId: string, token: string): Promise<SubsplashListRow[]> {
+  const url = `https://core.subsplash.com/builder/v1/list-rows?filter%5Bapp_key%5D=9XTSHD&filter%5Bsource_list%5D=${listId}&sort=created_at&page%5Bnumber%5D=1&page%5Bsize%5D=${n}`;
   const config = createAxiosConfig(url, token, 'GET');
   const response = await axios(config);
-  const listRows: Array<SubsplashListRow> = response.data['_embedded']['list-rows'];
+  const listRows: SubsplashListRow[] = response.data['_embedded']['list-rows'];
+  return listRows;
+}
+
+const removeNOldestItems = async (numberToRemove: number, listId: string, token: string): Promise<void> => {
+  const listRows = await getLastNOldestItems(numberToRemove, listId, token);
   await removeListRows(listRows, token);
 };
 
-async function getListRows(listId: string, token: string): Promise<SubsplashListRow[]> {
-  const getListRowsConfig = createAxiosConfig(
-    `https://core.subsplash.com/builder/v1/list-rows?filter%5Bsource_list%5D=${listId}`,
-    token,
-    'GET'
+async function createMoreList(listId: string): Promise<string> {
+  //Creating a new list
+  logger.log(`createMoreList{listId: ${listId}}`);
+  const seriesArray = await firestore()
+    .collection('series')
+    .where('subsplashId', '==', listId)
+    .limit(1)
+    .withConverter(firestoreAdminSeriesConverter)
+    .get();
+
+  if (!seriesArray.docs.length) {
+    logger.log('Throwing error');
+    throw new HttpsError('internal', 'Series id was not found in firestore');
+  }
+  const series = seriesArray.docs[0].data();
+  //TODO: prevent title from being "More More ... Sermons Sermons"
+  const title = `More ${series.name} Sermons`;
+  logger.log('Firebase Series', series);
+  const { listId: moreListId } = await createNewSubsplashList({
+    title: title,
+    images: series.images,
+  });
+  // create new series in firestore
+  const moreSermonsSeries: Series = {
+    id: moreListId,
+    name: title,
+    sermonIds: [],
+    images: series.images,
+    subsplashId: moreListId,
+  };
+  await firestore().collection('series').withConverter(firestoreAdminSeriesConverter).add(moreSermonsSeries);
+  await seriesArray.docs[0].ref.update({ moreSermonsRef: moreListId });
+  return moreListId;
+}
+
+async function getListCount(listId: string, token: string): Promise<number> {
+  const currentListConfig = createAxiosConfig(`https://core.subsplash.com/builder/v1/lists/${listId}`, token, 'GET');
+  const response = (await axios(currentListConfig)).data;
+  const currentListCount: number = response.list_rows_count;
+  return currentListCount;
+}
+
+async function getMoreListId(listId: string): Promise<string | undefined> {
+  logger.log(`getMoreListId(listId: ${listId})`);
+  const seriesArray = await firestore()
+    .collection('series')
+    .where('subsplashId', '==', listId)
+    .limit(1)
+    .withConverter(firestoreAdminSeriesConverter)
+    .get();
+
+  if (!seriesArray.docs.length) {
+    logger.log('Throwing error');
+    throw new HttpsError('internal', 'Series id was not found in firestore');
+  }
+  const series = seriesArray.docs[0].data();
+  logger.log(`moreSermonsRef: ${series.moreSermonsRef}`);
+  return series.moreSermonsRef;
+}
+
+async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCount: number, token: string) {
+  // if items to add + current list items <= maxListCount add items to list
+  logger.log(
+    `handleOverflow(listId: ${listId}, itemsToAdd: ${JSON.stringify(itemsToAdd)}, maxListCount: ${maxListCount})`
   );
-  const listRowsResponse = (await axios(getListRowsConfig)).data;
-  return listRowsResponse['_embedded']['list-rows'];
+  const currentListCount = await getListCount(listId, token);
+  const newListCount = currentListCount + itemsToAdd.length;
+  if (newListCount <= maxListCount) {
+    logger.log('In basecase of handleOverflow');
+    await addItemsToList(itemsToAdd, listId, newListCount, token);
+    return;
+  }
+  // we have overflow
+  // get nextMoreListId
+  let moreListId = await getMoreListId(listId);
+
+  // move last n items (not including moreList) to moreList
+  let itemsToRemove: SubsplashListRow[] = await getLastNOldestItems(itemsToAdd.length + 1, listId, token);
+  let newMoreListCreated = false;
+  if (moreListId) {
+    itemsToRemove = itemsToRemove.filter((item) => item.id !== moreListId);
+  } else {
+    // create more list and add it to items to add
+    moreListId = await createMoreList(listId);
+    newMoreListCreated = true;
+  }
+
+  // fill current list as much as possible
+  const remainingSpace = maxListCount - currentListCount;
+  if (remainingSpace > 0) {
+    const items = itemsToAdd.splice(-remainingSpace);
+    itemsToRemove.splice(-remainingSpace);
+    logger.log(`Filling remaing space for ${listId} with ${items.length} items: ${JSON.stringify(items)}`);
+    await addItemsToList(items, listId, maxListCount, token);
+  }
+
+  // recursively call handleOverflow to add items to moreList before removing them from the current list
+  await handleOverflow(moreListId, convertSubsplashListRowToMediaItem(itemsToRemove), maxListCount, token);
+  // remove items from current list
+  await removeListRows(itemsToRemove, token);
+  // add items to list after room is available
+  if (newMoreListCreated) {
+    itemsToAdd.push({ id: moreListId, type: 'list' });
+  }
+  // TODO: add the new moreList to the bottom of the current list (issue is you need contiguous index counts so you need to get all current sermons and patch from 0 ... n)
+  await addItemsToList(itemsToAdd, listId, maxListCount, token);
 }
 
 const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>): Promise<void> => {
@@ -129,76 +247,41 @@ const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>
   }
   const data = request.data;
   logger.log('series', data.listId);
-
+  const maxListCount = 5;
+  const tooManyItemsError = new HttpsError(
+    'invalid-argument',
+    `Too many items to add. The list size has a max of ${maxListCount}`
+  );
+  if (data.overflowBehavior === 'REMOVEOLDEST' && data.mediaItemIds.length > maxListCount) {
+    throw tooManyItemsError;
+  } else if (data.mediaItemIds.length >= maxListCount) {
+    throw tooManyItemsError;
+  }
   //get current list info
   try {
     const token = await authenticateSubsplash();
-    const currentListConfig = createAxiosConfig(
-      `https://core.subsplash.com/builder/v1/lists/${data.listId}`,
-      token,
-      'GET'
-    );
-    const response = (await axios(currentListConfig)).data;
-    const currentListCount = response.list_rows_count;
-    logger.log('currentListCount', currentListCount);
-    const maxListCount = 5;
-    if (data.mediaItemIds.length > maxListCount) {
-      throw new HttpsError('invalid-argument', `Too many items to add. The list size has a max of ${maxListCount}`);
-    }
     logger.log('Number of series to be added', data.mediaItemIds.length);
+    const currentListCount = await getListCount(data.listId, token);
     let newListCount = currentListCount + data.mediaItemIds.length;
 
-    // handle list overflow
-    if (newListCount > maxListCount) {
-      if (data.overflowBehavior === 'CREATENEWLIST') {
-        //TODO: check if there is already a more list and use that before creating a new one
-
-        //Creating a new list
-        const seriesArray = await firestore()
-          .collection('series')
-          .where('subsplashId', '==', data.listId)
-          .limit(1)
-          .withConverter(firestoreAdminSeriesConverter)
-          .get();
-
-        if (!seriesArray.docs.length) {
-          logger.log('Throwing error');
-          throw new HttpsError('internal', 'Series id was not found in firestore');
-        }
-        const series = seriesArray.docs[0].data();
-        logger.log('Firebase Series', series);
-        const { listId: moreListId } = await createNewSubsplashList({
-          title: `More ${series.name} Sermons`,
-          images: series.images,
-        });
-
-        // TODO: We want to only move any overflowed items to the next list
-        // TODO: this should be done recursivly until there is no overflowing list
-
-        // copy the contents of the current list to the new list
-        const currentListRows = await getListRows(data.listId, token);
-        const currentMediaItems = convertSubsplashListRowToMediaItem(currentListRows);
-        await addItemsToList(currentMediaItems, moreListId, currentMediaItems.length, token);
-
-        // clear out contents of current list
-        await removeListRows(currentListRows, token);
-
-        // add more list to the data to add
-        data.mediaItemIds.push({ id: moreListId, type: 'list' });
-      } else if (data.overflowBehavior === 'REMOVEOLDEST') {
-        const numberToRemove = newListCount - maxListCount;
-        logger.log('Removing', numberToRemove, 'items from list', data.listId);
-        await removeNOldestItems(numberToRemove, data.listId, token);
-        newListCount -= numberToRemove;
-      } else {
-        throw new HttpsError('failed-precondition', 'List is full');
-      }
+    if (newListCount <= maxListCount) {
+      await addItemsToList(data.mediaItemIds, data.listId, newListCount, token);
+      return;
     }
-    // Add sermons to list
 
-    await addItemsToList(data.mediaItemIds, data.listId, newListCount, token);
-
-    // Handle adding another list
+    // handle list overflow
+    if (data.overflowBehavior === 'CREATENEWLIST') {
+      await handleOverflow(data.listId, data.mediaItemIds, maxListCount, token);
+    } else if (data.overflowBehavior === 'REMOVEOLDEST') {
+      const numberToRemove = newListCount - maxListCount;
+      logger.log('Removing', numberToRemove, 'items from list', data.listId);
+      await removeNOldestItems(numberToRemove, data.listId, token);
+      newListCount -= numberToRemove;
+      // Add sermons to list
+      await addItemsToList(data.mediaItemIds, data.listId, newListCount, token);
+    } else {
+      throw new HttpsError('failed-precondition', 'List is full');
+    }
   } catch (error) {
     throw handleError(error);
   }
