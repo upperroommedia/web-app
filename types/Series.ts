@@ -8,6 +8,7 @@ export interface Series {
   images: ImageType[];
   subsplashId?: string;
   moreSermonsRef?: string;
+  isMoreSermonsList?: boolean;
 }
 
 export const emptySeries: Series = {

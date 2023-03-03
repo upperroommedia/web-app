@@ -1,6 +1,7 @@
 // add sermon to series and handle condition when list is full
 import axios from 'axios';
 import { firestore } from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { Series } from '../../types/Series';
@@ -19,9 +20,20 @@ export interface AddToSeriesInputType {
 }
 interface SubsplashListRow {
   id: string;
+  position: number;
   _embedded: {
-    [key in MediaType]?: { id: string; title: string };
+    [key in MediaType]: {
+      id: string;
+    };
   };
+}
+
+type existingSubsplashListRow = Omit<SubsplashListRow, '_embedded'>;
+interface newSubsplashListRow extends Omit<SubsplashListRow, 'id' | '_embedded'> {
+  app_key: '9XTSHD';
+  method: 'static';
+  type: MediaType;
+  _embedded: { [key in MediaType & 'source-list']: { id: string } };
 }
 
 function convertSubsplashListRowToMediaItem(listRows: SubsplashListRow[]): MediaItem[] {
@@ -52,11 +64,12 @@ async function addItemsToList(
   mediaItems: MediaItem[],
   listId: string,
   newListCount: number,
-  token: string
+  token: string,
+  lastItemAtBottom?: true
 ): Promise<void> {
-  const listRows = mediaItems.map((mediaItem, index) => {
+  let listRows: Array<newSubsplashListRow | existingSubsplashListRow> = mediaItems.map((mediaItem, index) => {
     logger.log('Adding Item', mediaItem.id);
-    return {
+    const subSplashListRow: newSubsplashListRow = {
       app_key: '9XTSHD',
       method: 'static',
       position: index + 1,
@@ -70,7 +83,25 @@ async function addItemsToList(
         },
       },
     };
+    return subSplashListRow;
   });
+  if (lastItemAtBottom) {
+    const lastItem = listRows.pop();
+    if (!lastItem) {
+      throw new HttpsError('internal', 'something went wrong when adding more sermons list');
+    }
+    lastItem.position = newListCount;
+    const startingCount = listRows.length;
+    const existingListItems: existingSubsplashListRow[] = (await getFullList(listId, token, newListCount)).map(
+      (row) => ({
+        id: row.id,
+        position: startingCount + row.position,
+      })
+    );
+
+    listRows = [...listRows, ...existingListItems, lastItem];
+    logger.log('Reordered List Rows:', listRows);
+  }
 
   const payload = {
     id: listId,
@@ -101,7 +132,7 @@ async function addItemsToList(
   logger.log(`Adding items: ${mediaItems} for firestore series: ${seriesArray.docs[0].data().name}`);
   const field: keyof Series = 'sermonIds';
   const value: Series[typeof field] = mediaItems.map((item) => item.id);
-  await seriesArray.docs[0].ref.update(field, value);
+  await seriesArray.docs[0].ref.update(field, FieldValue.arrayUnion(...value));
 }
 
 async function removeListRows(listRows: SubsplashListRow[], token: string): Promise<void> {
@@ -117,6 +148,7 @@ async function removeListRows(listRows: SubsplashListRow[], token: string): Prom
       await axios(deleteConfig);
     })
   );
+  //TODO: Remove Items from firebase
 }
 
 async function getLastNOldestItems(n: number, listId: string, token: string): Promise<SubsplashListRow[]> {
@@ -147,9 +179,7 @@ async function createMoreList(listId: string): Promise<string> {
     throw new HttpsError('internal', 'Series id was not found in firestore');
   }
   const series = seriesArray.docs[0].data();
-  //TODO: prevent title from being "More More ... Sermons Sermons"
-  const title = `More ${series.name} Sermons`;
-  logger.log('Firebase Series', series);
+  const title = series.isMoreSermonsList ? series.name : `More ${series.name} Sermons`;
   const { listId: moreListId } = await createNewSubsplashList({
     title: title,
     images: series.images,
@@ -161,6 +191,7 @@ async function createMoreList(listId: string): Promise<string> {
     sermonIds: [],
     images: series.images,
     subsplashId: moreListId,
+    isMoreSermonsList: true,
   };
   await firestore().collection('series').withConverter(firestoreAdminSeriesConverter).add(moreSermonsSeries);
   await seriesArray.docs[0].ref.update({ moreSermonsRef: moreListId });
@@ -172,6 +203,16 @@ async function getListCount(listId: string, token: string): Promise<number> {
   const response = (await axios(currentListConfig)).data;
   const currentListCount: number = response.list_rows_count;
   return currentListCount;
+}
+
+async function getFullList(listId: string, token: string, maxListCount: number): Promise<SubsplashListRow[]> {
+  const listConfig = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${listId}&page[size]=${maxListCount}&sort=position`,
+    token,
+    'GET'
+  );
+  const response = (await axios(listConfig)).data;
+  return response['_embedded']['list-rows'];
 }
 
 async function getMoreListId(listId: string): Promise<string | undefined> {
@@ -218,26 +259,35 @@ async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCo
     moreListId = await createMoreList(listId);
     newMoreListCreated = true;
   }
+  logger.log('Items to remove', itemsToRemove);
 
   // fill current list as much as possible
-  const remainingSpace = maxListCount - currentListCount;
+  const remainingSpace = maxListCount - currentListCount - (newMoreListCreated ? 1 : 0);
   if (remainingSpace > 0) {
-    const items = itemsToAdd.splice(-remainingSpace);
-    itemsToRemove.splice(-remainingSpace);
+    const items = itemsToAdd.splice(0, remainingSpace);
+    // TODO: Make sure we are pushing any existing items behind the new items
+    itemsToRemove.splice(0, remainingSpace);
     logger.log(`Filling remaing space for ${listId} with ${items.length} items: ${JSON.stringify(items)}`);
     await addItemsToList(items, listId, maxListCount, token);
   }
 
+  let overflowItems = convertSubsplashListRowToMediaItem(itemsToRemove);
+  if (itemsToAdd.length > itemsToRemove.length) {
+    const countToOverflow = itemsToAdd.length - itemsToRemove.length;
+    overflowItems = [...itemsToAdd.splice(-countToOverflow), ...overflowItems];
+  }
+
   // recursively call handleOverflow to add items to moreList before removing them from the current list
-  await handleOverflow(moreListId, convertSubsplashListRowToMediaItem(itemsToRemove), maxListCount, token);
+  await handleOverflow(moreListId, overflowItems, maxListCount, token);
   // remove items from current list
   await removeListRows(itemsToRemove, token);
   // add items to list after room is available
   if (newMoreListCreated) {
     itemsToAdd.push({ id: moreListId, type: 'list' });
+    await addItemsToList(itemsToAdd, listId, maxListCount, token, true);
+  } else {
+    await addItemsToList(itemsToAdd, listId, maxListCount, token);
   }
-  // TODO: add the new moreList to the bottom of the current list (issue is you need contiguous index counts so you need to get all current sermons and patch from 0 ... n)
-  await addItemsToList(itemsToAdd, listId, maxListCount, token);
 }
 
 const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>): Promise<void> => {
@@ -252,9 +302,7 @@ const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>
     'invalid-argument',
     `Too many items to add. The list size has a max of ${maxListCount}`
   );
-  if (data.overflowBehavior === 'REMOVEOLDEST' && data.mediaItemIds.length > maxListCount) {
-    throw tooManyItemsError;
-  } else if (data.mediaItemIds.length >= maxListCount) {
+  if (data.overflowBehavior !== 'CREATENEWLIST' && data.mediaItemIds.length > maxListCount) {
     throw tooManyItemsError;
   }
   //get current list info
