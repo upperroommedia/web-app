@@ -54,17 +54,27 @@ Props) => {
       // }}
       >
         <Card sx={{ width: 1, display: 'flex', gap: 3, padding: 2 }} elevation={0}>
-          <Image
-            src={
-              sermon.images?.find((image) => image.type === 'square')
-                ? sanitize(sermon.images.find((image) => image.type === 'square')!.downloadLink)
-                : Logo
-            }
-            alt={`Image for ${sermon.title}`}
-            width={150}
-            height={150}
-            style={{ borderRadius: '5px' }}
-          />
+          <Box
+            style={{ position: 'relative' }}
+            sx={{
+              width: { xs: 50, md: 150 },
+              height: { xs: 50, md: 150 },
+              borderRadius: '5px',
+              flex: 'none',
+              overflow: 'hidden',
+            }}
+          >
+            <Image
+              src={
+                sermon.images?.find((image) => image.type === 'square')
+                  ? sanitize(sermon.images.find((image) => image.type === 'square')!.downloadLink)
+                  : Logo
+              }
+              alt={`Image for ${sermon.title}`}
+              fill
+              style={{ objectFit: 'cover' }}
+            />
+          </Box>
           <Box display={'flex'} flexDirection="column" justifyContent="space-between" width={1}>
             <Typography variant="h5">
               <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
@@ -72,7 +82,7 @@ Props) => {
             <Typography variant="subtitle1" className={styles.description}>
               {sermon.description}
             </Typography>
-            <Box display={'flex'} marginLeft={3} alignItems={'center'}>
+            <Box display={'flex'} marginLeft={3} alignItems={'center'} justifyContent="space-between">
               {!minimal && (
                 <>
                   <IconButton
