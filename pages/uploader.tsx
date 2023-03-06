@@ -46,7 +46,8 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-interface SpeakerWithHighLight extends ISpeaker {
+interface AlgoliaSpeaker extends ISpeaker {
+  nbHits?: number;
   _highlightResult?: {
     name: {
       value: string;
@@ -68,7 +69,7 @@ interface SeriesWithHighlight extends Series {
   };
 }
 
-const getSpeakersUnion = (array1: SpeakerWithHighLight[], array2: SpeakerWithHighLight[]) => {
+const getSpeakersUnion = (array1: AlgoliaSpeaker[], array2: AlgoliaSpeaker[]) => {
   const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
   return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
 };
@@ -84,9 +85,9 @@ const speakersIndex = client?.initIndex('speakers');
 const topicsIndex = client?.initIndex('topics');
 
 export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
-  const speakers: SpeakerWithHighLight[] = [];
+  const speakers: AlgoliaSpeaker[] = [];
   if (speakersIndex) {
-    const response = await speakersIndex.search<SpeakerWithHighLight>(query, {
+    const response = await speakersIndex.search<AlgoliaSpeaker>(query, {
       hitsPerPage,
       page,
     });
@@ -105,7 +106,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
   const [seriesArray, setSeriesArray] = useState<SeriesWithHighlight[]>([]);
-  const [speakersArray, setSpeakersArray] = useState<SpeakerWithHighLight[]>([]);
+  const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
   const [trimStart, setTrimStart] = useState<number>(0);
 
@@ -450,7 +451,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               />
             ));
           }}
-          renderOption={(props, option: SpeakerWithHighLight) => (
+          renderOption={(props, option: AlgoliaSpeaker) => (
             <ListItem key={option.id} {...props}>
               <AvatarWithDefaultImage
                 defaultImageURL="/user.png"
@@ -468,7 +469,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               )}
             </ListItem>
           )}
-          getOptionLabel={(option: SpeakerWithHighLight) => option.name}
+          getOptionLabel={(option: AlgoliaSpeaker) => option.name}
           multiple
           renderInput={(params) => {
             return (
