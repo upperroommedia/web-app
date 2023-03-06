@@ -19,7 +19,7 @@ const addNewSeries = async (series: Series) => {
   await setDoc(newSeriesRef, {
     id: newSeriesRef.id,
     name: series.name,
-    sermonIds: [],
+    sermons: [],
     subsplashId: listId,
     images: series.images,
   });

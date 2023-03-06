@@ -63,7 +63,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       if (sermon.series.length !== 0) {
         sermon.series.forEach(async (series) => {
           const seriesRef = doc(firestore, 'series', series.id).withConverter(seriesConverter);
-          await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
+          await updateDoc(seriesRef, { sermons: arrayRemove(sermon) });
         });
       }
       await Promise.allSettled(firebasePromises);

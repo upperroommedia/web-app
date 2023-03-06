@@ -6,15 +6,7 @@ import SermonsList from '../../components/SermonsList';
 import AdminLayout from '../../layout/adminLayout';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Button from '@mui/material/Button';
-import firestore, {
-  arrayRemove,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  query,
-  updateDoc,
-} from '../../firebase/firestore';
+import firestore, { arrayRemove, collection, doc, getDocs, query, runTransaction } from '../../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
@@ -40,15 +32,20 @@ const AdminSeries = () => {
   });
 
   const handleSeriesDelete = async () => {
-    if (selectedSeries) {
-      await deleteDoc(doc(firestore, 'series', selectedSeries.id));
-      selectedSeries.sermonIds.forEach(async (id) => {
-        const sermonRef = doc(firestore, 'sermons', id).withConverter(sermonConverter);
-        await updateDoc(sermonRef, {
-          series: arrayRemove(selectedSeries.id),
+    if (!selectedSeries) return;
+    try {
+      await runTransaction(firestore, async (transaction) => {
+        transaction.delete(doc(firestore, 'series', selectedSeries.id));
+        selectedSeries.sermons.forEach(async (sermon) => {
+          const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+          transaction.update(sermonRef, {
+            series: arrayRemove(selectedSeries.id),
+          });
         });
+        setSeries((oldSeries) => oldSeries.filter((series) => series.id !== selectedSeries.id));
       });
-      setSeries((oldSeries) => oldSeries.filter((series) => series.id !== selectedSeries.id));
+    } catch (e) {
+      alert('Error deleting series');
     }
   };
 
@@ -135,11 +132,13 @@ const AdminSeries = () => {
                     })}
                   </div>
                   {sermons &&
-                    s.sermonIds.map((sermonId) => {
+                    s.sermons.map((sermon) => {
                       return (
-                        <div key={sermonId}>
+                        <div key={sermon.key}>
                           <SermonsList
-                            sermons={sermons.docs.filter((doc) => doc.data().key === sermonId).map((doc) => doc.data())}
+                            sermons={sermons.docs
+                              .filter((doc) => doc.data().key === sermon.key)
+                              .map((doc) => doc.data())}
                             minimal={true}
                           />
                         </div>

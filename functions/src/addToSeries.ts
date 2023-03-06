@@ -5,8 +5,9 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { Series } from '../../types/Series';
+import { Sermon } from '../../types/SermonTypes';
 import { createNewSubsplashList } from './createNewSubsplashList';
-import { firestoreAdminSeriesConverter } from './firestoreDataConverter';
+import { firestoreAdminSeriesConverter, firestoreAdminSermonConverter } from './firestoreDataConverter';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 
@@ -59,6 +60,24 @@ function convertSubsplashListRowToMediaItem(listRows: SubsplashListRow[]): Media
     };
     return mediaItem;
   });
+}
+
+async function getFirestoreSermonFromMediaItem(mediaItems: MediaItem[]) {
+  //get sermons from firebase
+  const sermons: Sermon[] = await Promise.all(
+    mediaItems.map(async (item) => {
+      const sermonDoc = await firestore()
+        .collection('sermons')
+        .where('subsplashId', '==', item.id)
+        .withConverter(firestoreAdminSermonConverter)
+        .get();
+      if (!sermonDoc.docs.length) {
+        throw new HttpsError('internal', 'Sermon id was not found in firestore');
+      }
+      return sermonDoc.docs[0].data();
+    })
+  );
+  return sermons;
 }
 
 async function addItemsToList(
@@ -131,10 +150,11 @@ async function addItemsToList(
     logger.log('Throwing error');
     throw new HttpsError('internal', 'Series id was not found in firestore');
   }
-  logger.log(`Adding items: ${mediaItems} for firestore series: ${seriesArray.docs[0].data().name}`);
-  const field: keyof Series = 'sermonIds';
-  const value: Series[typeof field] = mediaItems.map((item) => item.id);
-  await seriesArray.docs[0].ref.update(field, FieldValue.arrayUnion(...value));
+  const sermons = await getFirestoreSermonFromMediaItem(mediaItems);
+  logger.log(`Adding items: ${sermons} for firestore series: ${seriesArray.docs[0].data().name}`);
+  await seriesArray.docs[0].ref
+    .withConverter(firestoreAdminSermonConverter)
+    .update('sermons', FieldValue.arrayUnion(...sermons));
 }
 
 async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
@@ -164,11 +184,11 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
     logger.log('Throwing error');
     throw new HttpsError('internal', 'Series id was not found in firestore');
   }
-
-  const field: keyof Series = 'sermonIds';
-  const value: Series[typeof field] = convertSubsplashListRowToMediaItem(listRows).map((item) => item.id);
-  logger.log(`Removing items: ${value} for firestore series: ${seriesArray.docs[0].data().name}`);
-  await seriesArray.docs[0].ref.update(field, FieldValue.arrayRemove(...value));
+  const sermons = await getFirestoreSermonFromMediaItem(convertSubsplashListRowToMediaItem(listRows));
+  logger.log(`Removing items: ${sermons} for firestore series: ${seriesArray.docs[0].data().name}`);
+  await seriesArray.docs[0].ref
+    .withConverter(firestoreAdminSeriesConverter)
+    .update('sermons', FieldValue.arrayRemove(...sermons));
 }
 
 async function getLastNOldestItems(
@@ -219,7 +239,7 @@ async function createMoreList(listId: string): Promise<string> {
   const moreSermonsSeries: Series = {
     id: moreListId,
     name: title,
-    sermonIds: [],
+    sermons: [],
     images: series.images,
     subsplashId: moreListId,
     isMoreSermonsList: true,

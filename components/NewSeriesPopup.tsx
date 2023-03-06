@@ -110,8 +110,8 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                     return s;
                   })
                 );
-                newSeries?.sermonIds.forEach((id) => {
-                  const sermonRef = doc(firestore, 'sermons', id);
+                newSeries?.sermons.forEach((sermon) => {
+                  const sermonRef = doc(firestore, 'sermons', sermon.key);
                   updateDoc(sermonRef, {
                     series: { ...newSeries },
                   });
@@ -120,13 +120,13 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 setUserHasTypedInSeries(false);
               } else {
                 const newSeriesId = await addNewSeries(newSeries);
-                const seriesToAdd = { id: newSeriesId, name: newSeries.name, sermonIds: [], images: newSeries.images };
+                const seriesToAdd = { id: newSeriesId, name: newSeries.name, sermons: [], images: newSeries.images };
                 props.setNewSeriesPopup(false);
                 props.seriesArray.push(seriesToAdd);
                 if (props.sermon && props.setSermon) {
                   props.setSermon({ ...props.sermon, series: [...props.sermon.series, seriesToAdd] });
                   const newSeriesRef = doc(firestore, 'series', newSeriesId).withConverter(seriesConverter);
-                  await updateDoc(newSeriesRef, { sermonIds: arrayUnion(props.sermon.key) });
+                  await updateDoc(newSeriesRef, { sermons: arrayUnion(props.sermon.key) });
                 }
                 setNewSeries(emptySeries);
                 setUserHasTypedInSeries(false);
