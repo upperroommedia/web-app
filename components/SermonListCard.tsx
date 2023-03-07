@@ -34,14 +34,7 @@ interface Props {
   // handleSermonClick: (sermon: Sermon) => void;
 }
 
-const SermonListCard: FunctionComponent<Props> = ({
-  sermon,
-  playing,
-  playlist,
-  setPlaylist,
-  minimal,
-}: // handleSermonClick,
-Props) => {
+const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, setPlaylist, minimal }: Props) => {
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
 
   return (
@@ -66,7 +59,6 @@ Props) => {
                    "image description description description"
                    "image playPause playStatus actionItems "`,
             },
-            // gap: 3,
             gridTemplateColumns: { xs: 'min-content auto min-content', sm: 'min-content min-content auto min-content' },
             gridColumnGap: '10px',
             padding: 0,
@@ -124,7 +116,6 @@ Props) => {
                 e.preventDefault();
                 setCurrentSermon(sermon);
                 togglePlaying(!playing);
-                // TODO(1): Handle CLICK EVENT
               }}
             >
               {playing ? <PauseCircleIcon fontSize="large" /> : <PlayCircleIcon fontSize="large" />}
