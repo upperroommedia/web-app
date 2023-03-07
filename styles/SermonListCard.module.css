@@ -28,7 +28,6 @@
 }
 
 .description {
-  font-size: 1em;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -70,7 +69,7 @@
 .songProgress {
   -webkit-appearance: none;
   appearance: none;
-  width: 250px;
+  /* max-width: 250px; */
   --progress-height: 5px;
   height: var(--progress-height);
   border-radius: calc(var(--progress-height) / 2);
