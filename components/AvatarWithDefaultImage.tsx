@@ -5,21 +5,21 @@ import Box from '@mui/material/Box';
 import { BoxProps } from '@mui/system';
 
 interface AvatarWithDefaultImageProps extends BoxProps {
-  defaultImageURL: string;
   altName: string;
   width: number;
   height: number;
   image?: ImageType;
   borderRadius?: number;
+  defaultImageURL?: string;
 }
 
 export default function AvatarWithDefaultImage({
   image,
   altName,
-  defaultImageURL,
   width,
   height,
   borderRadius = 0,
+  defaultImageURL,
   ...props
 }: AvatarWithDefaultImageProps) {
   const { sx, ...rest } = props;
@@ -32,7 +32,7 @@ export default function AvatarWithDefaultImage({
         width,
         height,
         backgroundColor: image?.averageColorHex ? image.averageColorHex : undefined,
-        backgroundImage: image?.averageColorHex ? undefined : `url(${defaultImageURL})`,
+        backgroundImage: image?.averageColorHex ? undefined : defaultImageURL ? `url(${defaultImageURL})` : undefined,
         backgroundPosition: 'center center',
         backgroundSize: 'cover',
         ...sx,

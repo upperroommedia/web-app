@@ -2,8 +2,6 @@
  * SermonListCard: A component to display sermons in a list
  */
 import { FunctionComponent } from 'react';
-import { sanitize } from 'dompurify';
-import Image from 'next/image';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
@@ -20,10 +18,12 @@ import { formatRemainingTime } from '../utils/audioUtils';
 
 import { Sermon, sermonStatusType } from '../types/SermonTypes';
 
-import Logo from '../public/URM_icon.png';
 import AdminControls from './SermonCardAdminControls';
 import LinearProgress from '@mui/material/LinearProgress';
 import CardActions from '@mui/material/CardActions';
+import AvatarWithDefaultImage from './AvatarWithDefaultImage';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import useTheme from '@mui/system/useTheme';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -36,7 +36,9 @@ interface Props {
 
 const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, setPlaylist, minimal }: Props) => {
   const { setCurrentSermon, togglePlaying } = useAudioPlayer();
-
+  const theme = useTheme();
+  const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
+  const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   return (
     <>
       <Divider />
@@ -65,28 +67,14 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
           }}
           elevation={0}
         >
-          <Box
-            style={{ position: 'relative' }}
-            sx={{
-              gridArea: 'image',
-              width: { xs: 50, sm: 100, md: 150 },
-              height: { xs: 50, sm: 100, md: 150 },
-              borderRadius: '5px',
-              flex: 'none',
-              overflow: 'hidden',
-            }}
-          >
-            <Image
-              src={
-                sermon.images?.find((image) => image.type === 'square')
-                  ? sanitize(sermon.images.find((image) => image.type === 'square')!.downloadLink)
-                  : Logo
-              }
-              alt={`Image for ${sermon.title}`}
-              fill
-              style={{ objectFit: 'cover' }}
-            />
-          </Box>
+          <AvatarWithDefaultImage
+            sx={{ gridArea: 'image' }}
+            width={mdMatches ? 150 : smMatches ? 100 : 50}
+            height={mdMatches ? 150 : smMatches ? 100 : 50}
+            altName={sermon.title}
+            borderRadius={5}
+            image={sermon.images?.find((image) => image.type === 'square')}
+          />
           <Box display="flex" alignItems="center" sx={{ gridArea: 'title' }}>
             <Typography variant="h5">
               <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
