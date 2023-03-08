@@ -5,6 +5,11 @@ import Footer from '../components/Footer';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import { UserProvider } from '../context/user/UserContext';
 import NextNProgress from 'nextjs-progressbar';
+import { createTheme, responsiveFontSizes } from '@mui/material/styles';
+import ThemeProvider from '@mui/system/ThemeProvider';
+
+let theme = createTheme();
+theme = responsiveFontSizes(theme, { factor: 4 });
 
 type ComponentWithPageLayout = AppProps & {
   Component: AppProps['Component'] & {
@@ -15,18 +20,20 @@ type ComponentWithPageLayout = AppProps & {
 function MyApp({ Component, pageProps }: ComponentWithPageLayout) {
   return (
     <UserProvider>
-      <Navbar />
-      <AudioPlayerProvider>
-        <NextNProgress options={{ showSpinner: false }} />
-        {Component.PageLayout ? (
-          <Component.PageLayout>
+      <ThemeProvider theme={theme}>
+        <Navbar />
+        <AudioPlayerProvider>
+          <NextNProgress options={{ showSpinner: false }} />
+          {Component.PageLayout ? (
+            <Component.PageLayout>
+              <Component {...pageProps} />
+            </Component.PageLayout>
+          ) : (
             <Component {...pageProps} />
-          </Component.PageLayout>
-        ) : (
-          <Component {...pageProps} />
-        )}
-      </AudioPlayerProvider>
-      <Footer />
+          )}
+        </AudioPlayerProvider>
+        <Footer />
+      </ThemeProvider>
     </UserProvider>
   );
 }

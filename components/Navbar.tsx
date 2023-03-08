@@ -73,7 +73,6 @@ const Navbar: FunctionComponent = () => {
       <Container maxWidth="xl">
         <Toolbar disableGutters>
           <Typography
-            variant="h6"
             noWrap
             component="a"
             href="/"
@@ -81,6 +80,7 @@ const Navbar: FunctionComponent = () => {
               mr: 2,
               display: { xs: 'none', md: 'flex' },
               // fontFamily: 'monospace',
+              fontSize: '1.25rem',
               fontWeight: 700,
               letterSpacing: '.3rem',
               color: 'inherit',
@@ -135,7 +135,7 @@ const Navbar: FunctionComponent = () => {
             <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill />
           </Avatar>{' '}
           <Typography
-            variant="h5"
+            // variant="h5"
             noWrap
             component="a"
             href="/"
@@ -143,6 +143,7 @@ const Navbar: FunctionComponent = () => {
               mr: 2,
               display: { xs: 'flex', md: 'none' },
               flexGrow: 1,
+              fontSize: '1.25rem',
               fontWeight: 700,
               letterSpacing: '.3rem',
               color: 'inherit',
