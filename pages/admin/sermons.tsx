@@ -18,7 +18,7 @@ const AdminSermons = () => {
   });
   return (
     <Box width="100%" display="flex" flexDirection="column" alignItems="center" gap="10px">
-      <Typography variant="h3">Manage Sermons</Typography>
+      {/* <Typography variant="h3">Manage Sermons</Typography> */}
       {error && (
         <Typography component="div">
           <Box fontWeight="bold" display="inline">
