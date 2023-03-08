@@ -15,10 +15,12 @@ const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list']
 type MediaType = (typeof mediaTypes)[number];
 type MediaItem = { id: string; type: MediaType };
 type sortType = 'position' | 'created_at';
+type overflowType = 'ERROR' | 'CREATENEWLIST' | 'REMOVEOLDEST';
+
 export interface AddToSeriesInputType {
-  listId: string;
+  listIds: string[];
   mediaItemIds: MediaItem[];
-  overflowBehavior: 'ERROR' | 'CREATENEWLIST' | 'REMOVEOLDEST';
+  overflowBehavior: overflowType;
 }
 interface SubsplashListRow {
   id: string;
@@ -355,13 +357,42 @@ async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCo
   }
 }
 
+const addToSingleSeries = async (
+  listId: string,
+  mediaItemIds: MediaItem[],
+  overflowBehavior: overflowType,
+  maxListCount: number,
+  token: string
+) => {
+  const currentListCount = await getListCount(listId, token);
+  let newListCount = currentListCount + mediaItemIds.length;
+
+  if (newListCount <= maxListCount) {
+    await addItemsToList(mediaItemIds, listId, newListCount, token);
+    return;
+  }
+
+  // handle list overflow
+  if (overflowBehavior === 'CREATENEWLIST') {
+    await handleOverflow(listId, mediaItemIds, maxListCount, token);
+  } else if (overflowBehavior === 'REMOVEOLDEST') {
+    const numberToRemove = newListCount - maxListCount;
+    logger.log('Removing', numberToRemove, 'items from list', listId);
+    await removeNOldestItems(numberToRemove, listId, token, 'created_at');
+    newListCount -= numberToRemove;
+    // Add sermons to list
+    await addItemsToList(mediaItemIds, listId, newListCount, token);
+  } else {
+    throw new HttpsError('failed-precondition', 'List is full');
+  }
+};
+
 const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>): Promise<void> => {
   logger.log('addToSeries', request);
   if (request.auth?.token.role !== 'admin') {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
   const data = request.data;
-  logger.log('series', data.listId);
   const maxListCount = 200;
   const tooManyItemsError = new HttpsError(
     'invalid-argument',
@@ -370,33 +401,16 @@ const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>
   if (data.overflowBehavior !== 'CREATENEWLIST' && data.mediaItemIds.length > maxListCount) {
     throw tooManyItemsError;
   }
-  //get current list info
+  const token = await authenticateSubsplash();
   try {
-    const token = await authenticateSubsplash();
-    logger.log('Number of series to be added', data.mediaItemIds.length);
-    const currentListCount = await getListCount(data.listId, token);
-    let newListCount = currentListCount + data.mediaItemIds.length;
-
-    if (newListCount <= maxListCount) {
-      await addItemsToList(data.mediaItemIds, data.listId, newListCount, token);
-      return;
-    }
-
-    // handle list overflow
-    if (data.overflowBehavior === 'CREATENEWLIST') {
-      await handleOverflow(data.listId, data.mediaItemIds, maxListCount, token);
-    } else if (data.overflowBehavior === 'REMOVEOLDEST') {
-      const numberToRemove = newListCount - maxListCount;
-      logger.log('Removing', numberToRemove, 'items from list', data.listId);
-      await removeNOldestItems(numberToRemove, data.listId, token, 'created_at');
-      newListCount -= numberToRemove;
-      // Add sermons to list
-      await addItemsToList(data.mediaItemIds, data.listId, newListCount, token);
-    } else {
-      throw new HttpsError('failed-precondition', 'List is full');
-    }
-  } catch (error) {
-    throw handleError(error);
+    await Promise.all(
+      data.listIds.map(async (listId) => {
+        logger.log('series', listId);
+        await addToSingleSeries(listId, data.mediaItemIds, data.overflowBehavior, maxListCount, token);
+      })
+    );
+  } catch (err) {
+    throw handleError(err);
   }
 });
 

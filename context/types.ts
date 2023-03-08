@@ -13,3 +13,5 @@ export type CustomClaims = { [key: string]: any };
 
 export const ROLES = ['user', 'admin', 'uploader'];
 export type Order = 'asc' | 'desc';
+
+export type UploaderFieldError = { error: boolean; message: string };

@@ -6,18 +6,15 @@ import uploadFile from './api/uploadFile';
 import editSermon from './api/editSermon';
 import styles from '../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
-import NewSeriesPopup from '../components/NewSeriesPopup';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DesktopDatePicker } from '@mui/x-date-pickers/DesktopDatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import IconButton from '@mui/material/IconButton';
-import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
-import firestore, { collection, doc, getDoc, getDocs, query } from '../firebase/firestore';
+import firestore, { doc, getDoc } from '../firebase/firestore';
 import { emptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -35,9 +32,10 @@ import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import ImageViewer from '../components/ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
-import { Series, seriesConverter, SeriesSummary } from '../types/Series';
 import AvatarWithDefaultImage from '../components/AvatarWithDefaultImage';
-import { ListItem } from '@mui/material';
+import ListItem from '@mui/material/ListItem';
+import { UploaderFieldError } from '../context/types';
+import SeriesSelector from '../components/SeriesSelector';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -48,17 +46,6 @@ interface UploaderProps {
 
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
-  _highlightResult?: {
-    name: {
-      value: string;
-      matchLevel: 'none' | 'partial' | 'full';
-      fullyHighlighted: boolean;
-      matchedWords: string[];
-    };
-  };
-}
-
-interface SeriesWithHighlight extends Series {
   _highlightResult?: {
     name: {
       value: string;
@@ -105,7 +92,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
-  const [seriesArray, setSeriesArray] = useState<SeriesWithHighlight[]>([]);
+
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
   const [trimStart, setTrimStart] = useState<number>(0);
@@ -115,10 +102,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date());
 
-  const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
-
-  const [speakerError, setSpeakerError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
-  const [topicError, setTopicError] = useState<{ error: boolean; message: string }>({ error: false, message: '' });
+  const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
+  const [topicError, setTopicError] = useState<UploaderFieldError>({ error: false, message: '' });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -126,15 +111,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       const subtitlesSnap = await getDoc(subtitlesRef);
       const subtitlesData = subtitlesSnap.data();
       setSubtitlesArray(subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []);
-
-      const seriesQuery = query(collection(firestore, 'series')).withConverter(seriesConverter);
-      const seriesQuerySnapshot = await getDocs(seriesQuery);
-      setSeriesArray(
-        seriesQuerySnapshot.docs.map((doc) => {
-          const series = doc.data();
-          return series;
-        })
-      );
 
       // fetch speakers
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
@@ -179,6 +155,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
 
   const updateSermon = <T extends keyof Sermon>(key: T, value: Sermon[T]) => {
+    console.log('updateSermon', key, value);
     setSermon((oldSermon) => ({ ...oldSermon, [key]: value }));
   };
 
@@ -296,80 +273,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onChange={handleChange}
         />
         <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-          <Autocomplete
-            multiple
-            fullWidth
-            value={sermon.series.map((series) => ({ sermons: [], ...series }))}
-            onChange={async (_, newValue) => {
-              updateSermon(
-                'series',
-                newValue.map((series) => {
-                  const { _highlightResult, sermons: _, ...seriesSummary } = series;
-                  return seriesSummary as SeriesSummary;
-                })
-              );
-            }}
-            id="series-input"
-            options={seriesArray}
-            renderTags={(series, _) => {
-              return series.map((series) => (
-                <Chip
-                  key={series.id}
-                  label={series.name}
-                  onDelete={() => {
-                    setSpeakerError({ error: false, message: '' });
-                    updateSermon(
-                      'series',
-                      sermon.series.filter((s) => s.id !== series.id)
-                    );
-                  }}
-                  avatar={
-                    <AvatarWithDefaultImage
-                      defaultImageURL="/user.png"
-                      altName={series.name}
-                      width={24}
-                      height={24}
-                      borderRadius={12}
-                      image={series.images?.find((image) => image.type === 'square')}
-                    />
-                  }
-                />
-              ));
-            }}
-            renderOption={(props, option: SeriesWithHighlight) => (
-              <ListItem key={option.id} {...props}>
-                <AvatarWithDefaultImage
-                  defaultImageURL="/user.png"
-                  altName={option.name}
-                  width={30}
-                  height={30}
-                  image={option.images?.find((image) => image.type === 'square')}
-                  borderRadius={5}
-                  sx={{ marginRight: '15px' }}
-                />
-                {option._highlightResult && sermon.series?.find((s) => s.id === option?.id) === undefined ? (
-                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
-                ) : (
-                  <div>{option.name}</div>
-                )}
-              </ListItem>
-            )}
-            getOptionLabel={(option: SeriesWithHighlight) => option.name}
-            isOptionEqualToValue={(option, value) =>
-              value.name === undefined ||
-              option.name === undefined ||
-              (option.name === value.name && option.id === value.id)
-            }
-            renderInput={(params) => <TextField {...params} label="Series" />}
-          />
-          <p style={{ paddingLeft: '10px' }}>or</p>
-          <IconButton
-            onClick={() => {
-              setNewSeriesPopup(true);
-            }}
-          >
-            <AddIcon />
-          </IconButton>
+          <SeriesSelector sermon={sermon} setSermon={setSermon} updateSermon={updateSermon} />
         </div>
         <Autocomplete
           fullWidth
@@ -618,14 +522,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </>
         )}
       </Box>
-      <NewSeriesPopup
-        newSeriesPopup={newSeriesPopup}
-        setNewSeriesPopup={setNewSeriesPopup}
-        seriesArray={seriesArray}
-        setSeriesArray={setSeriesArray}
-        sermon={sermon}
-        setSermon={setSermon}
-      />
     </form>
   );
 };

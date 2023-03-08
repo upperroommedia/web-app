@@ -18,6 +18,8 @@ import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
+import SeriesSelector from './SeriesSelector';
+import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
@@ -138,8 +140,19 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           </Button>
         }
       >
-        <Box>
-          <Typography variant="h6">Title: {sermon.title}</Typography>
+        <Box display="flex" flexDirection="column" gap={1}>
+          <Box display="flex" alignItems="center" gap={1} marginBottom={1}>
+            <AvatarWithDefaultImage
+              altName={sermon.title}
+              image={sermon.images.find((image) => image.type === 'square')}
+              width={50}
+              height={50}
+              borderRadius={5}
+            />
+            <Typography variant="h6">{sermon.title}</Typography>
+          </Box>
+          <Typography variant="body1">The sermon will be added to the following lists:</Typography>
+          <SeriesSelector sermon={sermon} />
           <Box display="flex" alignItems={'center'} onClick={() => setAutoPublish((previousValue) => !previousValue)}>
             <Checkbox checked={autoPublish} />
             <Typography>Auto publish when upload is complete</Typography>

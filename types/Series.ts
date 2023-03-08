@@ -12,6 +12,17 @@ export interface Series {
   isMoreSermonsList?: boolean;
 }
 
+export interface SeriesWithHighlight extends Series {
+  _highlightResult?: {
+    name: {
+      value: string;
+      matchLevel: 'none' | 'partial' | 'full';
+      fullyHighlighted: boolean;
+      matchedWords: string[];
+    };
+  };
+}
+
 export type SeriesSummary = Omit<Series, 'sermons'>;
 
 export const emptySeriesSummary: SeriesSummary = {

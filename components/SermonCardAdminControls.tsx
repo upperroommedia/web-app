@@ -4,6 +4,7 @@ import storage, { deleteObject, getDownloadURL, ref } from '../firebase/storage'
 import firestore, { arrayRemove, deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
 
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
+import { AddToSeriesInputType } from '../functions/src/addToSeries';
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { createFunction, createFunctionV2 } from '../utils/createFunction';
 
@@ -144,6 +145,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
 
   const uploadToSubsplash = async () => {
     const uploadToSubsplash = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
+    const addToSeries = createFunctionV2<AddToSeriesInputType, void>('addtoseries');
     const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`));
     const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
       title: sermon.title,
@@ -162,6 +164,22 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       // TODO [1]: Fix return Type
       const response = (await uploadToSubsplash(data)) as unknown as { id: string };
       const id = response.id;
+      const subSplashListIds = await Promise.all(
+        sermon.series.map((s) => {
+          if (s.subsplashId) {
+            return s.subsplashId;
+          }
+          // TODO: upload series to subsplash
+          return '';
+        })
+      );
+
+      // TODO: handle overflow behavior properly
+      await addToSeries({
+        listIds: subSplashListIds,
+        mediaItemIds: [{ id, type: 'media-item' }],
+        overflowBehavior: 'CREATENEWLIST',
+      });
       const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
       await updateDoc(sermonRef, { subsplashId: id, status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });
     } catch (error) {
