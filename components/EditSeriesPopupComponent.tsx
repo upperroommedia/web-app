@@ -1,4 +1,4 @@
-import { TextField } from '@mui/material';
+import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import { FunctionComponent, useEffect, useState } from 'react';
 import firestore, { doc, updateDoc } from '../firebase/firestore';
