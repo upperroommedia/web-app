@@ -1,4 +1,5 @@
-import { Button, Checkbox } from '@mui/material';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
 import { Dispatch, SetStateAction, useState } from 'react';
 import PopUp from './PopUp';
 
