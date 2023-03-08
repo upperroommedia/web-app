@@ -3,13 +3,13 @@ import { ISpeaker } from './Speaker';
 import { v4 as uuidv4 } from 'uuid';
 import { Sermon, sermonStatusType, uploadStatus } from './SermonTypes';
 import { ImageType } from './Image';
-import { Series } from './Series';
+import { SeriesSummary } from './Series';
 
 export const createSermon = ({
   key = uuidv4(),
   title = '',
   subtitle = '',
-  series = <Series[]>[],
+  series = <SeriesSummary[]>[],
   description = '',
   dateMillis = 0,
   durationSeconds = 0,

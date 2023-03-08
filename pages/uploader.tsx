@@ -7,7 +7,6 @@ import editSermon from './api/editSermon';
 import styles from '../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import NewSeriesPopup from '../components/NewSeriesPopup';
-import Image from 'next/image';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
@@ -18,16 +17,7 @@ import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
 import Cancel from '@mui/icons-material/Cancel';
 
-import firestore, {
-  arrayRemove,
-  arrayUnion,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  updateDoc,
-} from '../firebase/firestore';
+import firestore, { collection, doc, getDoc, getDocs, query } from '../firebase/firestore';
 import { emptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -45,7 +35,9 @@ import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import ImageViewer from '../components/ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
-import { Series, seriesConverter } from '../types/Series';
+import { Series, seriesConverter, SeriesSummary } from '../types/Series';
+import AvatarWithDefaultImage from '../components/AvatarWithDefaultImage';
+import { ListItem } from '@mui/material';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -54,7 +46,30 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-const getSpeakersUnion = (array1: ISpeaker[], array2: ISpeaker[]) => {
+interface AlgoliaSpeaker extends ISpeaker {
+  nbHits?: number;
+  _highlightResult?: {
+    name: {
+      value: string;
+      matchLevel: 'none' | 'partial' | 'full';
+      fullyHighlighted: boolean;
+      matchedWords: string[];
+    };
+  };
+}
+
+interface SeriesWithHighlight extends Series {
+  _highlightResult?: {
+    name: {
+      value: string;
+      matchLevel: 'none' | 'partial' | 'full';
+      fullyHighlighted: boolean;
+      matchedWords: string[];
+    };
+  };
+}
+
+const getSpeakersUnion = (array1: AlgoliaSpeaker[], array2: AlgoliaSpeaker[]) => {
   const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
   return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
 };
@@ -70,13 +85,17 @@ const speakersIndex = client?.initIndex('speakers');
 const topicsIndex = client?.initIndex('topics');
 
 export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
+  const speakers: AlgoliaSpeaker[] = [];
   if (speakersIndex) {
-    const response = await speakersIndex.search<ISpeaker>(query, {
+    const response = await speakersIndex.search<AlgoliaSpeaker>(query, {
       hitsPerPage,
       page,
     });
-    return response;
+    response.hits.forEach((hit) => {
+      speakers.push(hit);
+    });
   }
+  return speakers;
 };
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
@@ -86,8 +105,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
-  const [seriesArray, setSeriesArray] = useState<Series[]>([]);
-  const [speakersArray, setSpeakersArray] = useState<ISpeaker[]>([]);
+  const [seriesArray, setSeriesArray] = useState<SeriesWithHighlight[]>([]);
+  const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
   const [topicsArray, setTopicsArray] = useState<string[]>([]);
   const [trimStart, setTrimStart] = useState<number>(0);
 
@@ -108,9 +127,19 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       const subtitlesData = subtitlesSnap.data();
       setSubtitlesArray(subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []);
 
-      const seriesQuery = query(collection(firestore, 'series'));
+      const seriesQuery = query(collection(firestore, 'series')).withConverter(seriesConverter);
       const seriesQuerySnapshot = await getDocs(seriesQuery);
-      setSeriesArray(seriesQuerySnapshot.docs.map((doc) => doc.data() as Series));
+      setSeriesArray(
+        seriesQuerySnapshot.docs.map((doc) => {
+          const series = doc.data();
+          return series;
+        })
+      );
+
+      // fetch speakers
+      setSpeakersArray(await fetchSpeakerResults('', 20, 0));
+      // fetch topics
+      setTopicsArray(await fetchTopicsResults(''));
     };
     fetchData();
   }, []);
@@ -149,7 +178,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     });
   };
 
-  const updateSermon = (key: keyof Sermon, value: any) => {
+  const updateSermon = <T extends keyof Sermon>(key: T, value: Sermon[T]) => {
     setSermon((oldSermon) => ({ ...oldSermon, [key]: value }));
   };
 
@@ -163,12 +192,16 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
 
   const fetchTopicsResults = async (query: string) => {
+    const res: string[] = [];
     if (topicsIndex) {
       const response = await topicsIndex.search(query, {
         hitsPerPage: 5,
       });
-      return response;
+      response?.hits.forEach((element: any) => {
+        res.push(element.name);
+      });
     }
+    return res;
   };
 
   const handleNewImage = (image: ImageType | ImageSizeType) => {
@@ -266,25 +299,62 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <Autocomplete
             multiple
             fullWidth
-            value={sermon.series || null}
-            onChange={async (_, newValue, reason, details) => {
-              if (reason === 'selectOption' && details) {
-                const newSeriesRef = doc(firestore, 'series', details.option.id).withConverter(seriesConverter);
-                await updateDoc(newSeriesRef, { sermonIds: arrayUnion(sermon.key) });
-                updateSermon('series', [...sermon.series, details.option]);
-              } else if (reason === 'removeOption' && details) {
-                const seriesRef = doc(firestore, 'series', details.option.id).withConverter(seriesConverter);
-                await updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) });
-                updateSermon(
-                  'series',
-                  sermon.series.filter((series) => series.id !== details.option.id)
-                );
-              }
+            value={sermon.series.map((series) => ({ sermons: [], ...series }))}
+            onChange={async (_, newValue) => {
+              updateSermon(
+                'series',
+                newValue.map((series) => {
+                  const { _highlightResult, sermons: _, ...seriesSummary } = series;
+                  return seriesSummary as SeriesSummary;
+                })
+              );
             }}
             id="series-input"
             options={seriesArray}
-            renderOption={(props, option) => <li {...props}>{option.name}</li>}
-            getOptionLabel={(option) => option?.name || ''}
+            renderTags={(series, _) => {
+              return series.map((series) => (
+                <Chip
+                  key={series.id}
+                  label={series.name}
+                  onDelete={() => {
+                    setSpeakerError({ error: false, message: '' });
+                    updateSermon(
+                      'series',
+                      sermon.series.filter((s) => s.id !== series.id)
+                    );
+                  }}
+                  avatar={
+                    <AvatarWithDefaultImage
+                      defaultImageURL="/user.png"
+                      altName={series.name}
+                      width={24}
+                      height={24}
+                      borderRadius={12}
+                      image={series.images?.find((image) => image.type === 'square')}
+                    />
+                  }
+                />
+              ));
+            }}
+            renderOption={(props, option: SeriesWithHighlight) => (
+              <ListItem key={option.id} {...props}>
+                <AvatarWithDefaultImage
+                  defaultImageURL="/user.png"
+                  altName={option.name}
+                  width={30}
+                  height={30}
+                  image={option.images?.find((image) => image.type === 'square')}
+                  borderRadius={5}
+                  sx={{ marginRight: '15px' }}
+                />
+                {option._highlightResult && sermon.series?.find((s) => s.id === option?.id) === undefined ? (
+                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+                ) : (
+                  <div>{option.name}</div>
+                )}
+              </ListItem>
+            )}
+            getOptionLabel={(option: SeriesWithHighlight) => option.name}
             isOptionEqualToValue={(option, value) =>
               value.name === undefined ||
               option.name === undefined ||
@@ -317,7 +387,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               updateSermon('images', newImages);
             }
             if (newValue !== null && newValue.length <= 3) {
-              updateSermon('speakers', newValue);
+              updateSermon(
+                'speakers',
+                newValue.map((speaker) => {
+                  const { _highlightResult, ...speakerWithoutHighlight } = speaker;
+                  return speakerWithoutHighlight;
+                })
+              );
             }
 
             if (newValue.length >= 4) {
@@ -332,12 +408,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onInputChange={async (_, value) => {
             clearTimeout(timer);
             const newTimer = setTimeout(async () => {
-              const data = await fetchSpeakerResults(value, 25, 0);
-              const res: ISpeaker[] = [];
-              data?.hits.forEach((element: ISpeaker) => {
-                res.push(element);
-              });
-              setSpeakersArray(res);
+              setSpeakersArray(await fetchSpeakerResults(value, 25, 0));
             }, 300);
             setTimer(newTimer);
           }}
@@ -368,61 +439,37 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 key={speaker.id}
                 label={speaker.name}
                 avatar={
-                  <div
-                    style={{
-                      borderRadius: '12px',
-                      overflow: 'hidden',
-                      position: 'relative',
-                      width: 24,
-                      height: 24,
-                      backgroundImage: `url(${'/user.png'})`,
-                      backgroundPosition: 'center center',
-                      backgroundSize: 'cover',
-                    }}
-                  >
-                    {speaker.images?.find((image) => image.type === 'square') && (
-                      <Image
-                        src={sanitize(speaker.images.find((image) => image.type === 'square')!.downloadLink)}
-                        alt={`Image of ${speaker.name}`}
-                        fill
-                      />
-                    )}
-                  </div>
+                  <AvatarWithDefaultImage
+                    defaultImageURL="/user.png"
+                    altName={speaker.name}
+                    width={24}
+                    height={24}
+                    image={speaker.images?.find((image) => image.type === 'square')}
+                    borderRadius={12}
+                  />
                 }
               />
             ));
           }}
-          renderOption={(props, option: ISpeaker) => {
-            const squareImage = option.images?.find((image) => image.type === 'square');
-            return (
-              <li key={option.id} {...props}>
-                <div
-                  style={{
-                    borderRadius: '5px',
-                    overflow: 'hidden',
-                    position: 'relative',
-                    width: 30,
-                    height: 30,
-                    marginRight: 15,
-                    backgroundColor: squareImage?.averageColorHex ? squareImage.averageColorHex : undefined,
-                    backgroundImage: squareImage?.averageColorHex ? undefined : `url(${'/user.png'})`,
-                    backgroundPosition: 'center center',
-                    backgroundSize: 'cover',
-                  }}
-                >
-                  {squareImage && (
-                    <Image src={sanitize(squareImage.downloadLink)} alt={`Image of ${option.name}`} fill />
-                  )}
-                </div>
-                {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
-                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
-                ) : (
-                  <div>{option.name}</div>
-                )}
-              </li>
-            );
-          }}
-          getOptionLabel={(option: ISpeaker) => option.name}
+          renderOption={(props, option: AlgoliaSpeaker) => (
+            <ListItem key={option.id} {...props}>
+              <AvatarWithDefaultImage
+                defaultImageURL="/user.png"
+                altName={option.name}
+                width={30}
+                height={30}
+                image={option.images?.find((image) => image.type === 'square')}
+                borderRadius={5}
+                sx={{ marginRight: '15px' }}
+              />
+              {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
+                <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+              ) : (
+                <div>{option.name}</div>
+              )}
+            </ListItem>
+          )}
+          getOptionLabel={(option: AlgoliaSpeaker) => option.name}
           multiple
           renderInput={(params) => {
             return (
@@ -453,12 +500,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             }
           }}
           onInputChange={async (_, value) => {
-            const data = await fetchTopicsResults(value);
-            const res: string[] = [];
-            data?.hits.forEach((element: any) => {
-              res.push(element.name);
-            });
-            setTopicsArray(res);
+            const topics = await fetchTopicsResults(value);
+            setTopicsArray(topics);
           }}
           id="topic-input"
           options={topicsArray}
