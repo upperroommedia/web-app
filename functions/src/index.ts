@@ -19,6 +19,7 @@ import uploadtosoundcloud from './uploadToSoundCloud';
 import deletefromsoundcloud from './deleteFromSoundCloud';
 import editSubsplashSermon from './editSubsplashSermon';
 import editSoundCloudSermon from './editSoundCloudSermon';
+import seriesWriteTrigger from './seriesWriteTrigger';
 
 admin.initializeApp();
 
@@ -39,3 +40,4 @@ exports.addtoseries = addToSeries;
 exports.saveimage = saveimage;
 exports.uploadtosoundcloud = uploadtosoundcloud;
 exports.deletefromsoundcloud = deletefromsoundcloud;
+exports.seriesWriteTrigger = seriesWriteTrigger;

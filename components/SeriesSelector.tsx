@@ -30,8 +30,13 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
 
   const updateSermonSeries = (series: SeriesWithHighlight[] | SeriesSummary[]) => {
     const seriesSummaries: SeriesSummary[] = series.map((series) => {
-      if ('_highlightResult' in series || 'sermons' in series) {
-        const { _highlightResult, sermons: _, ...seriesSummary } = series;
+      if ('_highlightResult' in series || 'sermonsInSubsplash' in series) {
+        const {
+          _highlightResult,
+          sermonsInSubsplash: _sermonsInSubsplash,
+          allSermons: _allSermons,
+          ...seriesSummary
+        } = series;
         return seriesSummary as SeriesSummary;
       }
       console.log('series', series);
@@ -73,7 +78,7 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
         <Autocomplete
           multiple
           fullWidth
-          value={seriesSermon.series.map((series) => ({ sermons: [], ...series }))}
+          value={seriesSermon.series.map((series) => ({ allSermons: [], sermonsInSubsplash: [], ...series }))}
           onChange={async (_, newValue) => {
             updateSermonSeries(newValue);
           }}

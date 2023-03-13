@@ -35,9 +35,11 @@ const AdminSeries = () => {
     if (!selectedSeries) return;
     try {
       await runTransaction(firestore, async (transaction) => {
+        // TODO: Delete from Subsplash
         transaction.delete(doc(firestore, 'series', selectedSeries.id));
-        selectedSeries.sermons.forEach(async (sermon) => {
+        selectedSeries.allSermons.forEach(async (sermon) => {
           const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+          // TODO: fix arrayRemove
           transaction.update(sermonRef, {
             series: arrayRemove(selectedSeries.id),
           });
@@ -132,7 +134,7 @@ const AdminSeries = () => {
                     })}
                   </div>
                   {sermons &&
-                    s.sermons.map((sermon) => {
+                    s.allSermons.map((sermon) => {
                       return (
                         <div key={sermon.key}>
                           <SermonsList

@@ -121,7 +121,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                     return s;
                   })
                 );
-                newSeries?.sermons.forEach((sermon) => {
+                newSeries?.allSermons.forEach((sermon) => {
                   const sermonRef = doc(firestore, 'sermons', sermon.key);
                   updateDoc(sermonRef, {
                     series: { ...newSeries },
@@ -134,7 +134,8 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 const seriesToAdd: Series = {
                   id: newSeriesId,
                   name: newSeries.name,
-                  sermons: [],
+                  sermonsInSubsplash: [],
+                  allSermons: [],
                   overflowBehavior: newSeries.overflowBehavior,
                   images: newSeries.images,
                 };
@@ -142,7 +143,11 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 props.setNewSeriesPopup(false);
                 props.seriesArray.push(seriesToAdd);
                 if (props.sermon && props.setSermon) {
-                  const { sermons: _, ...seriesToAddSummary } = seriesToAdd;
+                  const {
+                    sermonsInSubsplash: _sermonsInSubsplash,
+                    allSermons: _allSermons,
+                    ...seriesToAddSummary
+                  } = seriesToAdd;
                   props.setSermon({ ...props.sermon, series: [...props.sermon.series, seriesToAddSummary] });
                 }
                 setNewSeries(emptySeries);

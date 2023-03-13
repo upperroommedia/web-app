@@ -1,14 +1,22 @@
 import { FunctionComponent, useState } from 'react';
 
 import storage, { deleteObject, getDownloadURL, ref } from '../firebase/storage';
-import firestore, { arrayRemove, deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
+import firestore, {
+  arrayRemove,
+  deleteDoc,
+  deleteField,
+  doc,
+  DocumentReference,
+  runTransaction,
+  updateDoc,
+} from '../firebase/firestore';
 
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
 import { AddToSeriesInputType } from '../functions/src/addToSeries';
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { createFunction, createFunctionV2 } from '../utils/createFunction';
 
-import { seriesConverter } from '../types/Series';
+import { Series, seriesConverter } from '../types/Series';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
 
@@ -41,7 +49,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     try {
       const promises: Promise<any>[] = [];
       if (sermon.subsplashId) {
-        promises.push(deleteFromSubsplash());
+        promises.push(deleteFromSubsplash(true));
       }
       if (sermon.soundCloudTrackId) {
         promises.push(deleteFromSoundCloudErrorThrowable());
@@ -68,7 +76,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       if (sermon.series.length !== 0) {
         sermon.series.forEach(async (series) => {
           const seriesRef = doc(firestore, 'series', series.id).withConverter(seriesConverter);
-          await updateDoc(seriesRef, { sermons: arrayRemove(sermon) });
+          await updateDoc(seriesRef, { allSermons: arrayRemove(sermon), sermonsInSubsplash: arrayRemove(sermon) });
         });
       }
       await Promise.allSettled(firebasePromises);
@@ -167,7 +175,9 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     try {
       // TODO [1]: Fix return Type
       const response = (await uploadToSubsplash(data)) as unknown as { id: string };
+      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
       const id = response.id;
+      await updateDoc(sermonRef, { subsplashId: id });
       const seriesMetadata = await Promise.all(
         sermon.series.map(async (s) => {
           if (s.subsplashId) {
@@ -179,6 +189,8 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
             CreateNewSubsplashListOutputType
           >('createnewsubsplashlist');
           const { listId } = await createNewSubsplashList({ title: s.name, subtitle: '', images: s.images });
+          const seriesRef = doc(firestore, 'series', s.id).withConverter(seriesConverter);
+          await updateDoc(seriesRef, { subsplashId: listId });
           return { listId, overflowBehavior: s.overflowBehavior };
         })
       );
@@ -188,8 +200,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
         seriesMetadata,
         mediaItemIds: [{ id, type: 'media-item' }],
       });
-      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
-      await updateDoc(sermonRef, { subsplashId: id, status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });
+      await updateDoc(sermonRef, { status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });
     } catch (error) {
       alert(error);
     }
@@ -197,31 +208,50 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     setUploadToSubsplashPopup(false);
   };
 
-  const deleteFromSubsplash = async () => {
+  const deleteFromSubsplash = async (deleteCompletely?: true) => {
     try {
-      await deleteFromSubsplashErrorThrowable();
+      await deleteFromSubsplashErrorThrowable(deleteCompletely);
     } catch (error) {
       // TODO: handle error
       alert(error);
     }
   };
 
-  const deleteFromSubsplashErrorThrowable = async () => {
+  const handleFirestoreDeleteFromSubsplash = async (deleteCompletely?: true) => {
+    await runTransaction(firestore, async (transaction) => {
+      const fireStoreSeries: { seriesRef: DocumentReference; series: Series }[] = await Promise.all(
+        sermon.series.map(async (s) => {
+          const seriesRef = doc(firestore, 'series', s.id).withConverter(seriesConverter);
+          const series = (await transaction.get(seriesRef)).data();
+          if (series) {
+            return { seriesRef, series };
+          }
+          throw new Error('Series not found');
+        })
+      );
+      transaction.update(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
+        subsplashId: deleteField(),
+        status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
+      });
+      fireStoreSeries.map(async ({ seriesRef, series }) => {
+        transaction.update(seriesRef, {
+          sermonsInSubsplash: series.sermonsInSubsplash.filter((s) => s.key !== sermon.key),
+          ...(deleteCompletely === true && { allSermons: series.allSermons.filter((s) => s.key !== sermon.key) }),
+        });
+      });
+    });
+  };
+
+  const deleteFromSubsplashErrorThrowable = async (deleteCompletely?: true) => {
     const deleteFromSubsplashCall = createFunction<string, void>('deleteFromSubsplash');
     try {
       setIsUploadingToSubsplash(true);
       await deleteFromSubsplashCall(sermon.subsplashId!);
-      await updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
-        subsplashId: deleteField(),
-        status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
-      });
+      await handleFirestoreDeleteFromSubsplash(deleteCompletely);
       setIsUploadingToSubsplash(false);
     } catch (error: any) {
       if (error.code === 'functions/not-found') {
-        await updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
-          subsplashId: deleteField(),
-          status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
-        });
+        await handleFirestoreDeleteFromSubsplash(deleteCompletely);
       } else {
         throw error;
       }

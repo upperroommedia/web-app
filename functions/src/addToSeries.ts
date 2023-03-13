@@ -68,6 +68,7 @@ async function getFirestoreSermonFromMediaItem(mediaItems: MediaItem[]) {
   //get sermons from firebase
   const sermons: Sermon[] = await Promise.all(
     mediaItems.map(async (item) => {
+      logger.log('Getting sermon from firestore', item.id);
       const sermonDoc = await firestore()
         .collection('sermons')
         .where('subsplashId', '==', item.id)
@@ -147,16 +148,24 @@ async function addItemsToList(
     .limit(1)
     .withConverter(firestoreAdminSeriesConverter)
     .get();
-
   if (!seriesArray.docs.length) {
     logger.log('Throwing error');
     throw new HttpsError('internal', 'Series id was not found in firestore');
   }
   const sermons = await getFirestoreSermonFromMediaItem(mediaItems);
   logger.log(`Adding items: ${sermons} for firestore series: ${seriesArray.docs[0].data().name}`);
-  await seriesArray.docs[0].ref
-    .withConverter(firestoreAdminSermonConverter)
-    .update('sermons', FieldValue.arrayUnion(...sermons));
+  // add sermon to series if it is not already there
+  const currentAllSermonsKeys = seriesArray.docs[0].data().allSermons.map((sermon) => sermon.key);
+  const addToAllSermons = sermons.filter((sermon) => !currentAllSermonsKeys.includes(sermon.key));
+  const currentSermonsInSubsplashKeys = seriesArray.docs[0].data().sermonsInSubsplash.map((sermon) => sermon.key);
+  const addToSermonsInSubsplash = sermons.filter((sermon) => !currentSermonsInSubsplashKeys.includes(sermon.key));
+  if (!addToSermonsInSubsplash.length && !addToAllSermons.length) {
+    return;
+  }
+  await seriesArray.docs[0].ref.update({
+    ...(addToSermonsInSubsplash.length > 0 && { sermonsInSubsplash: FieldValue.arrayUnion(...sermons) }),
+    ...(addToAllSermons.length > 0 && { allSermons: FieldValue.arrayUnion(...addToAllSermons) }),
+  });
 }
 
 async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
@@ -241,7 +250,8 @@ async function createMoreList(listId: string): Promise<string> {
   const moreSermonsSeries: Series = {
     id: moreListId,
     name: title,
-    sermons: [],
+    sermonsInSubsplash: [],
+    allSermons: [],
     images: series.images,
     overflowBehavior: series.overflowBehavior,
     subsplashId: moreListId,

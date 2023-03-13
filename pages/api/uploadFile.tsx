@@ -1,4 +1,4 @@
-import firestore, { deleteDoc, doc, setDoc } from '../../firebase/firestore';
+import firestore, { arrayUnion, deleteDoc, doc, runTransaction, setDoc } from '../../firebase/firestore';
 import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
@@ -6,6 +6,7 @@ import { UploadableFile } from '../../components/DropZone';
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
+import { seriesConverter } from '../../types/Series';
 
 interface uploadFileProps {
   file: UploadableFile;
@@ -57,6 +58,12 @@ const uploadFile = async (props: uploadFileProps) => {
     },
     async () => {
       props.setUploadProgress({ error: false, message: 'Uploaded!' });
+      runTransaction(firestore, async (transaction) => {
+        props.sermon.series.forEach((s) => {
+          const seriesRef = doc(firestore, 'series', s.id).withConverter(seriesConverter);
+          transaction.update(seriesRef, { allSermons: arrayUnion(props.sermon) });
+        });
+      });
     }
   );
 };
