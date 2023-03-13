@@ -1,7 +1,7 @@
 import { firestore, logger } from 'firebase-functions';
 import { firestore as firestoreAdmin } from 'firebase-admin';
 import { Sermon } from '../../types/SermonTypes';
-import { firestoreAdminSeriesConverter, firestoreAdminSermonConverter } from './firestoreDataConverter';
+import { firestoreAdminSeriesConverter } from './firestoreDataConverter';
 
 const sermonWriteTrigger = firestore.document('sermon/{sermonId}').onWrite(async (change, context) => {
   const { sermonId } = context.params;
