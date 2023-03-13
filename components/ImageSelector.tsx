@@ -8,6 +8,7 @@ import firestore, {
   DocumentData,
   orderBy,
   startAfter,
+  onSnapshot,
 } from '../firebase/firestore';
 import { useEffect, useState } from 'react';
 import { AspectRatio, ImageType } from '../types/Image';
@@ -22,6 +23,7 @@ import { CroppedImageData } from '../utils/cropImage';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { sanitize } from 'dompurify';
 import styles from '../styles/ImageSelector.module.css';
+import CircularProgress from '@mui/material/CircularProgress';
 
 const ImageSelector = (props: {
   selectedSpeaker?: ISpeaker;
@@ -32,10 +34,12 @@ const ImageSelector = (props: {
   const [images, setImages] = useState<ImageType[]>([]);
   const [title, setTitle] = useState(
     (props.selectedSpeaker &&
-      `${props.selectedSpeaker?.name.replaceAll(' ', '-')}-${props.selectedImageFromSpeakerDetails.type}.jpeg`) ||
+      `${props.selectedSpeaker?.name.replaceAll(' ', '-')}`) ||
       ''
   );
   const [lastImage, setLastImage] = useState<QueryDocumentSnapshot<DocumentData>>();
+  const [imageUploading, setImageUploading] = useState<boolean>(false);
+
   const fetchImages = async () => {
     const q = query(
       collection(firestore, 'images'),
@@ -72,12 +76,32 @@ const ImageSelector = (props: {
 
   const saveImage = async (croppedImageData: CroppedImageData, name: string) => {
     try {
-      // TODO make this work
-      const imageRef = ref(imageStorage, `speaker-images/${name}`);
-      await uploadBytes(imageRef, croppedImageData.blob, {
-        contentType: croppedImageData.contentType,
-        customMetadata: { name, size: 'original', type: croppedImageData.type },
-      });
+      setImageUploading(true);
+      const q = query(collection(firestore, 'images'), where('name', '==', name));
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) {
+        // TODO make this work
+        const imageRef = ref(imageStorage, `speaker-images/${name}`);
+        await uploadBytes(imageRef, croppedImageData.blob, {
+          contentType: croppedImageData.contentType,
+          customMetadata: { name, size: 'original', type: croppedImageData.type },
+        });
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const imageAddedToFirestore = change.doc.data() as ImageType;
+              setImages((oldImages) => [imageAddedToFirestore, ...oldImages]);
+              props.setNewSelectedImage(imageAddedToFirestore);
+              unsubscribe();
+            }
+          });
+        });
+        setImageUploading(false);
+      } else {
+        alert('An image with this name already exists, please use a different name');
+        setImageUploading(false);
+      }
     } catch (e) {
       alert(e);
     }
@@ -93,63 +117,69 @@ const ImageSelector = (props: {
 
   return (
     <div>
-      <InfiniteScroll
-        dataLength={images.length + 1}
-        next={async () => await fetchMoreImages()}
-        hasMore={lastImage !== undefined}
-        loader={<InfinitScrollMessage message="Loading..." />}
-        height="500px"
-        // scrollableTarget="scrollableDiv"
-        style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
-        endMessage={<InfinitScrollMessage message="No More Images" />}
-      >
-        {images.map((image) => (
-          <div
-            key={image.id}
-            className={styles.imageContainer}
-            style={{
-              height: '164px',
-              aspectRatio: AspectRatio[image.type],
-              backgroundColor: image.averageColorHex || '#f3f1f1',
-              boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
-            }}
+      {imageUploading ? (
+        <CircularProgress />
+      ) : (
+        <>
+          <InfiniteScroll
+            dataLength={images.length + 1}
+            next={async () => await fetchMoreImages()}
+            hasMore={lastImage !== undefined}
+            loader={<InfinitScrollMessage message="Loading..." />}
+            height="500px"
+            // scrollableTarget="scrollableDiv"
+            style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
+            endMessage={<InfinitScrollMessage message="No More Images" />}
           >
-            <Image
-              src={sanitize(image.downloadLink)}
-              fill
-              alt={image.name}
-              style={{
-                borderRadius: '5px',
-                cursor: 'pointer',
-                objectFit: 'contain',
-              }}
-              onClick={() => {
-                props.setNewSelectedImage(image);
-              }}
-            />
-            {props.newSelectedImage?.id === image.id && (
-              <CheckCircleIcon
-                color="primary"
+            {images.map((image) => (
+              <div
+                key={image.id}
+                className={styles.imageContainer}
                 style={{
-                  position: 'absolute',
-                  backgroundColor: 'white',
-                  borderRadius: '50%',
-                  zIndex: 2,
-                  top: '10px',
-                  right: '10px',
+                  height: '164px',
+                  aspectRatio: AspectRatio[image.type],
+                  backgroundColor: image.averageColorHex || '#f3f1f1',
+                  boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
                 }}
-              ></CheckCircleIcon>
-            )}
-          </div>
-        ))}
-        {/* </div> */}
-      </InfiniteScroll>
-      <ImageUploader
-        onFinish={async (imgSrc, name) => saveImage(imgSrc, name)}
-        type={props.selectedImageFromSpeakerDetails.type}
-        title={title}
-        setTitle={setTitle}
-      />
+              >
+                <Image
+                  src={sanitize(image.downloadLink)}
+                  fill
+                  alt={image.name}
+                  style={{
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    objectFit: 'contain',
+                  }}
+                  onClick={() => {
+                    props.setNewSelectedImage(image);
+                  }}
+                />
+                {props.newSelectedImage?.id === image.id && (
+                  <CheckCircleIcon
+                    color="primary"
+                    style={{
+                      position: 'absolute',
+                      backgroundColor: 'white',
+                      borderRadius: '50%',
+                      zIndex: 2,
+                      top: '10px',
+                      right: '10px',
+                    }}
+                  ></CheckCircleIcon>
+                )}
+              </div>
+            ))}
+            {/* </div> */}
+          </InfiniteScroll>
+          <ImageUploader
+            onFinish={async (imgSrc, name) => saveImage(imgSrc, name)}
+            type={props.selectedImageFromSpeakerDetails.type}
+            title={title}
+            setTitle={setTitle}
+          />
+        </>
+      )}
     </div>
   );
 };
