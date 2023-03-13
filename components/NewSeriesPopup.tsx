@@ -3,7 +3,6 @@ import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
-import dynamic from 'next/dynamic';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import addNewSeries from '../pages/api/addNewSeries';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
@@ -15,8 +14,7 @@ import MenuItem from '@mui/material/MenuItem';
 import Box from '@mui/material/Box';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
-
-const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
+import PopUp from '../components/PopUp';
 
 interface NewSeriesPopupProps {
   newSeriesPopup: boolean;
@@ -91,7 +89,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   }, [newSeries, userHasTypedInSeries, props.seriesArray]);
 
   return (
-    <DynamicPopUp
+    <PopUp
       title={props.existingSeries ? 'Edit Series' : 'Add new series'}
       open={props.newSeriesPopup}
       setOpen={props.setNewSeriesPopup}
@@ -197,7 +195,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         </FormControl>
         <ImageViewer images={newSeries.images} newImageCallback={handleNewImage} vertical={false} />
       </Box>
-    </DynamicPopUp>
+    </PopUp>
   );
 };
 
