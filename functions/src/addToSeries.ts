@@ -4,7 +4,7 @@ import { firestore } from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { Series } from '../../types/Series';
+import { OverflowBehaviorType, Series } from '../../types/Series';
 import { Sermon } from '../../types/SermonTypes';
 import { createNewSubsplashList } from './createNewSubsplashList';
 import { firestoreAdminSeriesConverter, firestoreAdminSermonConverter } from './firestoreDataConverter';
@@ -15,12 +15,12 @@ const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list']
 type MediaType = (typeof mediaTypes)[number];
 type MediaItem = { id: string; type: MediaType };
 type sortType = 'position' | 'created_at';
-type overflowType = 'ERROR' | 'CREATENEWLIST' | 'REMOVEOLDEST';
+
+type seriesMetaDataType = { overflowBehavior: OverflowBehaviorType; listId: string };
 
 export interface AddToSeriesInputType {
-  listIds: string[];
+  seriesMetadata: seriesMetaDataType[];
   mediaItemIds: MediaItem[];
-  overflowBehavior: overflowType;
 }
 interface SubsplashListRow {
   id: string;
@@ -243,6 +243,7 @@ async function createMoreList(listId: string): Promise<string> {
     name: title,
     sermons: [],
     images: series.images,
+    overflowBehavior: series.overflowBehavior,
     subsplashId: moreListId,
     isMoreSermonsList: true,
   };
@@ -360,7 +361,7 @@ async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCo
 const addToSingleSeries = async (
   listId: string,
   mediaItemIds: MediaItem[],
-  overflowBehavior: overflowType,
+  overflowBehavior: OverflowBehaviorType,
   maxListCount: number,
   token: string
 ) => {
@@ -398,15 +399,15 @@ const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>
     'invalid-argument',
     `Too many items to add. The list size has a max of ${maxListCount}`
   );
-  if (data.overflowBehavior !== 'CREATENEWLIST' && data.mediaItemIds.length > maxListCount) {
-    throw tooManyItemsError;
-  }
   const token = await authenticateSubsplash();
   try {
     await Promise.all(
-      data.listIds.map(async (listId) => {
-        logger.log('series', listId);
-        await addToSingleSeries(listId, data.mediaItemIds, data.overflowBehavior, maxListCount, token);
+      data.seriesMetadata.map(async (series) => {
+        if (series.overflowBehavior !== 'CREATENEWLIST' && data.mediaItemIds.length > maxListCount) {
+          throw tooManyItemsError;
+        }
+        logger.log('series', series.listId);
+        await addToSingleSeries(series.listId, data.mediaItemIds, series.overflowBehavior, maxListCount, token);
       })
     );
   } catch (err) {

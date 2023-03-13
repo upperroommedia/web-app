@@ -1,25 +1,15 @@
 import firestore, { setDoc, collection, doc } from '../../firebase/firestore';
 import { Series, seriesConverter } from '../../types/Series';
-// import { createFunctionV2 } from '../../utils/createFunction';
-// import {
-//   CreateNewSubsplashListInputType,
-//   CreateNewSubsplashListOutputType,
-// } from '../../functions/src/createNewSubsplashList';
 
 const addNewSeries = async (series: Series) => {
-  // TODO: REMOVE THIS TO OCCUR ONLY AFTER THE SERMON WITH THE LIST IS UPLOADED
-  // create list on subsplash
-  // const createNewSubsplashList = createFunctionV2<CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType>(
-  //   'createnewsubsplashlist'
-  // );
-  // const { listId } = await createNewSubsplashList({ title: series.name, subtitle: '', images: series.images });
-
+  console.log('addNewSeries', series.sermons);
   // create series on firestore
   const newSeriesRef = doc(collection(firestore, 'series')).withConverter(seriesConverter);
   await setDoc(newSeriesRef, {
     id: newSeriesRef.id,
     name: series.name,
-    sermons: [],
+    sermons: series.sermons,
+    overflowBehavior: series.overflowBehavior,
     images: series.images,
   });
   return newSeriesRef.id;

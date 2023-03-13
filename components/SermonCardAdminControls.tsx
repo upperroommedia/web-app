@@ -14,6 +14,10 @@ import { sermonConverter } from '../types/Sermon';
 
 import useAuth from '../context/user/UserContext';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
+import {
+  CreateNewSubsplashListInputType,
+  CreateNewSubsplashListOutputType,
+} from '../functions/src/createNewSubsplashList';
 
 export interface AdminControlsProps {
   sermon: Sermon;
@@ -164,21 +168,25 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       // TODO [1]: Fix return Type
       const response = (await uploadToSubsplash(data)) as unknown as { id: string };
       const id = response.id;
-      const subSplashListIds = await Promise.all(
-        sermon.series.map((s) => {
+      const seriesMetadata = await Promise.all(
+        sermon.series.map(async (s) => {
           if (s.subsplashId) {
-            return s.subsplashId;
+            return { listId: s.subsplashId, overflowBehavior: s.overflowBehavior };
           }
-          // TODO: upload series to subsplash
-          return '';
+          // upload series to subsplash
+          const createNewSubsplashList = createFunctionV2<
+            CreateNewSubsplashListInputType,
+            CreateNewSubsplashListOutputType
+          >('createnewsubsplashlist');
+          const { listId } = await createNewSubsplashList({ title: s.name, subtitle: '', images: s.images });
+          return { listId, overflowBehavior: s.overflowBehavior };
         })
       );
 
       // TODO: handle overflow behavior properly
       await addToSeries({
-        listIds: subSplashListIds,
+        seriesMetadata,
         mediaItemIds: [{ id, type: 'media-item' }],
-        overflowBehavior: 'CREATENEWLIST',
       });
       const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
       await updateDoc(sermonRef, { subsplashId: id, status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });

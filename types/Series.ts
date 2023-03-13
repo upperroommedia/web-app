@@ -2,11 +2,14 @@ import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase/firestor
 import { ImageType } from './Image';
 import { Sermon } from './SermonTypes';
 
+export const OverflowBehavior = ['ERROR', 'CREATENEWLIST', 'REMOVEOLDEST'] as const;
+export type OverflowBehaviorType = (typeof OverflowBehavior)[number];
 export interface Series {
   id: string;
   name: string;
   sermons: Sermon[];
   images: ImageType[];
+  overflowBehavior: OverflowBehaviorType;
   subsplashId?: string;
   moreSermonsRef?: string;
   isMoreSermonsList?: boolean;
@@ -28,6 +31,7 @@ export type SeriesSummary = Omit<Series, 'sermons'>;
 export const emptySeriesSummary: SeriesSummary = {
   id: '',
   name: '',
+  overflowBehavior: 'CREATENEWLIST',
   images: [],
 };
 
@@ -48,8 +52,8 @@ export const seriesSummaryConverter: FirestoreDataConverter<SeriesSummary> = {
 };
 
 export const seriesConverter: FirestoreDataConverter<Series> = {
-  toFirestore: (speaker: Series): Series => {
-    return speaker;
+  toFirestore: (series: Series): Series => {
+    return series;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
     return snapshot.data();

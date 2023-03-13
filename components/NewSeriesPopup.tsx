@@ -1,14 +1,20 @@
-import { Button, TextField } from '@mui/material';
+import Button from '@mui/material/Button';
+import TextField from '@mui/material/TextField';
+import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
-import { arrayUnion, doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import dynamic from 'next/dynamic';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import addNewSeries from '../pages/api/addNewSeries';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
-import { emptySeries, Series, seriesConverter } from '../types/Series';
+import { emptySeries, Series, OverflowBehavior, OverflowBehaviorType } from '../types/Series';
 import ImageViewer from './ImageViewer';
 import isEqual from 'lodash/isEqual';
 import { Sermon } from '../types/SermonTypes';
+import MenuItem from '@mui/material/MenuItem';
+import Box from '@mui/material/Box';
+import InputLabel from '@mui/material/InputLabel';
+import FormControl from '@mui/material/FormControl';
 
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 
@@ -28,6 +34,13 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     error: false,
     message: '',
   });
+  const overFlowBehaviorOptions: {
+    [key in OverflowBehaviorType]: string;
+  } = {
+    ERROR: 'Error',
+    CREATENEWLIST: 'Create New List',
+    REMOVEOLDEST: 'Remove Oldest',
+  };
   const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
   useEffect(() => {
     if (props.existingSeries && newSeries.id !== props.existingSeries.id) {
@@ -120,13 +133,19 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 setUserHasTypedInSeries(false);
               } else {
                 const newSeriesId = await addNewSeries(newSeries);
-                const seriesToAdd = { id: newSeriesId, name: newSeries.name, sermons: [], images: newSeries.images };
+                const seriesToAdd: Series = {
+                  id: newSeriesId,
+                  name: newSeries.name,
+                  sermons: [],
+                  overflowBehavior: newSeries.overflowBehavior,
+                  images: newSeries.images,
+                };
+
                 props.setNewSeriesPopup(false);
                 props.seriesArray.push(seriesToAdd);
                 if (props.sermon && props.setSermon) {
-                  props.setSermon({ ...props.sermon, series: [...props.sermon.series, seriesToAdd] });
-                  const newSeriesRef = doc(firestore, 'series', newSeriesId).withConverter(seriesConverter);
-                  await updateDoc(newSeriesRef, { sermons: arrayUnion(props.sermon.key) });
+                  const { sermons: _, ...seriesToAddSummary } = seriesToAdd;
+                  props.setSermon({ ...props.sermon, series: [...props.sermon.series, seriesToAddSummary] });
                 }
                 setNewSeries(emptySeries);
                 setUserHasTypedInSeries(false);
@@ -141,7 +160,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         </Button>
       }
     >
-      <div style={{ display: 'flex', padding: '10px', justifyContent: 'center', flexDirection: 'column' }}>
+      <Box display="flex" padding="10px" justifyContent="center" flexDirection="column" gap={1}>
         <TextField
           value={newSeries.name}
           onChange={(e) => {
@@ -154,8 +173,30 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
           label={newSeriesError.error ? newSeriesError.message : 'Series'}
           sx={{ paddingBottom: '5px' }}
         />
+        <FormControl fullWidth>
+          <InputLabel id="overflow-behavior-select-label">Overflow Behavior</InputLabel>
+          <Select
+            value={newSeries.overflowBehavior}
+            label="Overflow Behavior"
+            labelId="overflow-behavior-select-label"
+            id="overflow-behavior-select"
+            onChange={(e) => {
+              setNewSeries((oldSeries) => {
+                return { ...oldSeries, overflowBehavior: e.target.value as OverflowBehaviorType };
+              });
+            }}
+          >
+            {OverflowBehavior.map((overflowBehavior) => {
+              return (
+                <MenuItem key={overflowBehavior} value={overflowBehavior}>
+                  {overFlowBehaviorOptions[overflowBehavior]}
+                </MenuItem>
+              );
+            })}
+          </Select>
+        </FormControl>
         <ImageViewer images={newSeries.images} newImageCallback={handleNewImage} vertical={false} />
-      </div>
+      </Box>
     </DynamicPopUp>
   );
 };

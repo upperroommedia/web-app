@@ -69,7 +69,7 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
   }, []);
   return (
     <>
-      <Box display="flex" gap={1} width={1}>
+      <Box display="flex" gap={1} width={1} alignItems="center">
         <Autocomplete
           multiple
           fullWidth
@@ -128,6 +128,7 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
         />
         <IconButton
           size="small"
+          sx={{ height: 'min-content' }}
           onClick={() => {
             setNewSeriesPopup(true);
           }}
