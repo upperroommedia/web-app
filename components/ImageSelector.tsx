@@ -33,9 +33,7 @@ const ImageSelector = (props: {
 }) => {
   const [images, setImages] = useState<ImageType[]>([]);
   const [title, setTitle] = useState(
-    (props.selectedSpeaker &&
-      `${props.selectedSpeaker?.name.replaceAll(' ', '-')}`) ||
-      ''
+    (props.selectedSpeaker && `${props.selectedSpeaker?.name.replaceAll(' ', '-')}`) || ''
   );
   const [lastImage, setLastImage] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [imageUploading, setImageUploading] = useState<boolean>(false);
@@ -93,11 +91,11 @@ const ImageSelector = (props: {
               const imageAddedToFirestore = change.doc.data() as ImageType;
               setImages((oldImages) => [imageAddedToFirestore, ...oldImages]);
               props.setNewSelectedImage(imageAddedToFirestore);
+              setImageUploading(false);
               unsubscribe();
             }
           });
         });
-        setImageUploading(false);
       } else {
         alert('An image with this name already exists, please use a different name');
         setImageUploading(false);
