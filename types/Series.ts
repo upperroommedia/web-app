@@ -1,14 +1,11 @@
 import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase/firestore';
 import { ImageType } from './Image';
-import { Sermon } from './SermonTypes';
 
 export const OverflowBehavior = ['ERROR', 'CREATENEWLIST', 'REMOVEOLDEST'] as const;
 export type OverflowBehaviorType = (typeof OverflowBehavior)[number];
 export interface Series {
   id: string;
   name: string;
-  sermonsInSubsplash: Sermon[];
-  allSermons: Sermon[];
   images: ImageType[];
   overflowBehavior: OverflowBehaviorType;
   subsplashId?: string;
@@ -27,35 +24,11 @@ export interface SeriesWithHighlight extends Series {
   };
 }
 
-export type SeriesSummary = Omit<Series, 'allSermons' | 'sermonsInSubsplash'>;
-
-export const emptySeriesSummary: SeriesSummary = {
+export const emptySeries: Series = {
   id: '',
   name: '',
   overflowBehavior: 'CREATENEWLIST',
   images: [],
-};
-
-export const emptySeries: Series = {
-  ...emptySeriesSummary,
-  sermonsInSubsplash: [],
-  allSermons: [],
-};
-
-export const seriesSummaryConverter: FirestoreDataConverter<SeriesSummary> = {
-  toFirestore: (series: Series): SeriesSummary => {
-    const { sermonsInSubsplash: _, allSermons: _allSermons, ...summary } = series;
-    return summary;
-  },
-  fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): SeriesSummary => {
-    const { sermonsInSubsplash: _, allSermons: _allSermons, ...summary } = snapshot.data();
-    return summary;
-  },
-};
-
-export const convertSeriesToSeriesSummary = (series: Series): SeriesSummary => {
-  const { sermonsInSubsplash: _, allSermons: _allSermons, ...summary } = series;
-  return summary;
 };
 
 export const seriesConverter: FirestoreDataConverter<Series> = {

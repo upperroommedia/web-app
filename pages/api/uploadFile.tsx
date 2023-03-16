@@ -1,4 +1,4 @@
-import firestore, { arrayUnion, deleteDoc, doc, runTransaction, setDoc } from '../../firebase/firestore';
+import firestore, { deleteDoc, doc, setDoc, writeBatch } from '../../firebase/firestore';
 import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
@@ -6,7 +6,7 @@ import { UploadableFile } from '../../components/DropZone';
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
-import { seriesConverter } from '../../types/Series';
+import { Series } from '../../types/Series';
 
 interface uploadFileProps {
   file: UploadableFile;
@@ -14,6 +14,7 @@ interface uploadFileProps {
   setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string }>>;
   trimStart: number;
   sermon: Sermon;
+  sermonSeries: Series[];
 }
 
 const uploadFile = async (props: uploadFileProps) => {
@@ -57,13 +58,15 @@ const uploadFile = async (props: uploadFileProps) => {
       throw error;
     },
     async () => {
-      props.setUploadProgress({ error: false, message: 'Uploaded!' });
-      runTransaction(firestore, async (transaction) => {
-        props.sermon.series.forEach((s) => {
-          const seriesRef = doc(firestore, 'series', s.id).withConverter(seriesConverter);
-          transaction.update(seriesRef, { allSermons: arrayUnion(props.sermon) });
-        });
+      // add sermon to series
+      // note a firestore function document listener will take care of updating the series subcollection for the sermon
+      const batch = writeBatch(firestore);
+      props.sermonSeries.forEach((series) => {
+        const seriesSermonRef = doc(firestore, 'series', series.id, 'seriesSermons', props.sermon.key);
+        batch.set(seriesSermonRef, props.sermon);
       });
+      batch.commit();
+      props.setUploadProgress({ error: false, message: 'Uploaded!' });
     }
   );
 };

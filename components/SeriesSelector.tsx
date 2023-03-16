@@ -4,9 +4,8 @@ import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
 import { sanitize } from 'dompurify';
 import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect } from 'react';
-import { seriesConverter, SeriesSummary, SeriesWithHighlight } from '../types/Series';
+import { Series, seriesConverter, SeriesWithHighlight } from '../types/Series';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
-import { Sermon } from '../types/SermonTypes';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewSeriesPopup from './NewSeriesPopup';
@@ -14,56 +13,43 @@ import firestore, { query, collection, getDocs } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 
 interface SeriesSelectorProps {
-  sermon: Sermon;
-  setSermon?: Dispatch<SetStateAction<Sermon>>;
-  updateSermon?: <T extends keyof Sermon>(key: T, value: Sermon[T]) => void;
+  sermonSeries: Series[];
+  setSermonSeries?: Dispatch<SetStateAction<Series[]>>;
 }
 
 const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
-  sermon,
-  setSermon,
-  updateSermon,
+  sermonSeries,
+  setSermonSeries,
 }: SeriesSelectorProps) => {
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
-  const [seriesArray, setSeriesArray] = useState<SeriesWithHighlight[]>([]);
-  const [seriesSermon, setSeriesSermon] = useState<Sermon>(sermon);
+  const [allSeriesArray, setAllSeriesArray] = useState<SeriesWithHighlight[]>([]);
 
-  const updateSermonSeries = (series: SeriesWithHighlight[] | SeriesSummary[]) => {
-    const seriesSummaries: SeriesSummary[] = series.map((series) => {
-      if ('_highlightResult' in series || 'sermonsInSubsplash' in series) {
-        const {
-          _highlightResult,
-          sermonsInSubsplash: _sermonsInSubsplash,
-          allSermons: _allSermons,
-          ...seriesSummary
-        } = series;
-        return seriesSummary as SeriesSummary;
+  const updateSermonSeries = (seriesWithHighlight: SeriesWithHighlight[]) => {
+    const seriesArray: Series[] = seriesWithHighlight.map((s) => {
+      if ('_highlightResult' in s) {
+        const { _highlightResult, ...series } = s;
+        return series as Series;
       }
-      console.log('series', series);
-      return series;
+      return s as Series;
     });
 
-    setSeriesSermon((previousSermon) => {
-      return {
-        ...previousSermon,
-        series: seriesSummaries,
-      };
-    });
+    // setSeriesSermon((previousSermon) => {
+    //   return {
+    //     ...previousSermon,
+    //     series,
+    //   };
+    // });
 
-    if (updateSermon) {
-      updateSermon('series', seriesSummaries);
+    if (setSermonSeries) {
+      setSermonSeries(seriesArray);
     }
   };
-
-  useEffect(() => {
-    setSeriesSermon(sermon);
-  }, [sermon]);
 
   useEffect(() => {
     const fetchSeries = async () => {
       const seriesQuery = query(collection(firestore, 'series')).withConverter(seriesConverter);
       const seriesQuerySnapshot = await getDocs(seriesQuery);
-      setSeriesArray(
+      setAllSeriesArray(
         seriesQuerySnapshot.docs.map((doc) => {
           const series = doc.data();
           return series;
@@ -78,19 +64,19 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
         <Autocomplete
           multiple
           fullWidth
-          value={seriesSermon.series.map((series) => ({ allSermons: [], sermonsInSubsplash: [], ...series }))}
+          value={sermonSeries}
           onChange={async (_, newValue) => {
             updateSermonSeries(newValue);
           }}
           id="series-input"
-          options={seriesArray}
+          options={allSeriesArray}
           renderTags={(series, _) => {
             return series.map((series) => (
               <Chip
                 key={series.id}
                 label={series.name}
                 onDelete={() => {
-                  updateSermonSeries(seriesSermon.series.filter((s) => s.id !== series.id));
+                  updateSermonSeries(sermonSeries.filter((s) => s.id !== series.id));
                 }}
                 avatar={
                   <AvatarWithDefaultImage
@@ -116,7 +102,7 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
                 borderRadius={5}
                 sx={{ marginRight: '15px' }}
               />
-              {option._highlightResult && seriesArray.find((s) => s.id === option?.id) === undefined ? (
+              {option._highlightResult && allSeriesArray.find((s) => s.id === option?.id) === undefined ? (
                 <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
               ) : (
                 <div>{option.name}</div>
@@ -144,10 +130,9 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
       <NewSeriesPopup
         newSeriesPopup={newSeriesPopup}
         setNewSeriesPopup={setNewSeriesPopup}
-        seriesArray={seriesArray}
-        setSeriesArray={setSeriesArray}
-        sermon={sermon}
-        setSermon={setSermon || setSeriesSermon}
+        seriesArray={allSeriesArray}
+        setSeriesArray={setAllSeriesArray}
+        setSermonSeries={setSermonSeries}
       />
     </>
   );

@@ -19,8 +19,10 @@ import uploadtosoundcloud from './uploadToSoundCloud';
 import deletefromsoundcloud from './deleteFromSoundCloud';
 import editSubsplashSermon from './editSubsplashSermon';
 import editSoundCloudSermon from './editSoundCloudSermon';
-import seriesWriteTrigger from './seriesWriteTrigger';
-
+import seriesSermonOnDelete from './DocumentListeners/Series/seriesSermonOnDelete';
+import seriesSermonOnCreate from './DocumentListeners/Series/seriesSermonOnCreate';
+import seriesOnDelete from './DocumentListeners/Series/seriesOnDelete';
+import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
 admin.initializeApp();
 
 exports.uploadToSubsplash = uploadToSubsplash;
@@ -40,4 +42,7 @@ exports.addtoseries = addToSeries;
 exports.saveimage = saveimage;
 exports.uploadtosoundcloud = uploadtosoundcloud;
 exports.deletefromsoundcloud = deletefromsoundcloud;
-exports.seriesWriteTrigger = seriesWriteTrigger;
+exports.sermonWriteTrigger = sermonWriteTrigger;
+exports.seriesOnDelete = seriesOnDelete;
+exports.seriesSermonOnDelete = seriesSermonOnDelete;
+exports.seriesSermonOnCreate = seriesSermonOnCreate;

@@ -1,5 +1,4 @@
 import { ImageType } from './Image';
-import { SeriesSummary } from './Series';
 import { ISpeaker } from './Speaker';
 
 export enum sermonStatusType {
@@ -26,7 +25,6 @@ export interface Sermon {
   key: string;
   title: string;
   description: string;
-  series: SeriesSummary[];
   speakers: ISpeaker[];
   subtitle: string;
   dateMillis: number;

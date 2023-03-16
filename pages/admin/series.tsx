@@ -2,21 +2,18 @@ import Accordion from '@mui/material/Accordion';
 import AccordionDetails from '@mui/material/AccordionDetails';
 import AccordionSummary from '@mui/material/AccordionSummary';
 import Box from '@mui/material/Box';
-import SermonsList from '../../components/SermonsList';
 import AdminLayout from '../../layout/adminLayout';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Button from '@mui/material/Button';
-import firestore, { arrayRemove, collection, doc, getDocs, query, runTransaction } from '../../firebase/firestore';
-import { useCollection } from 'react-firebase-hooks/firestore';
-import { sermonConverter } from '../../types/Sermon';
+import firestore, { collection, deleteDoc, doc, getDocs, query } from '../../firebase/firestore';
+// import { useCollection } from 'react-firebase-hooks/firestore';
+// import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
 import { Series, seriesConverter } from '../../types/Series';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { adminProtected } from '../../utils/protectedRoutes';
 import NewSeriesPopup from '../../components/NewSeriesPopup';
-import { sanitize } from 'dompurify';
-import Image from 'next/image';
 
 const AdminSeries = () => {
   const [series, setSeries] = useState<Series[]>([]);
@@ -25,27 +22,17 @@ const AdminSeries = () => {
   const [deleteSeriesPopup, setDeleteSeriesPopup] = useState<boolean>(false);
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
 
-  const sermonsRef = collection(firestore, 'sermons');
-  const q = query(sermonsRef.withConverter(sermonConverter));
-  const [sermons] = useCollection(q, {
-    snapshotListenOptions: { includeMetadataChanges: true },
-  });
+  // const sermonsRef = collection(firestore, 'sermons');
+  // const q = query(sermonsRef.withConverter(sermonConverter));
+  // const [sermons] = useCollection(q, {
+  //   snapshotListenOptions: { includeMetadataChanges: true },
+  // });
 
   const handleSeriesDelete = async () => {
     if (!selectedSeries) return;
     try {
-      await runTransaction(firestore, async (transaction) => {
-        // TODO: Delete from Subsplash
-        transaction.delete(doc(firestore, 'series', selectedSeries.id));
-        selectedSeries.allSermons.forEach(async (sermon) => {
-          const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
-          // TODO: fix arrayRemove
-          transaction.update(sermonRef, {
-            series: arrayRemove(selectedSeries.id),
-          });
-        });
-        setSeries((oldSeries) => oldSeries.filter((series) => series.id !== selectedSeries.id));
-      });
+      await deleteDoc(doc(firestore, 'series', selectedSeries.id));
+      setSeries((oldSeries) => oldSeries.filter((series) => series.id !== selectedSeries.id));
     } catch (e) {
       alert('Error deleting series');
     }
@@ -103,7 +90,8 @@ const AdminSeries = () => {
                       <p>Delete Series</p>
                     </Button>
                   </Box>
-                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  {/* TODO: Display Sermons on a new page */}
+                  {/* <div style={{ display: 'flex', justifyContent: 'center' }}>
                     {['square', 'wide', 'banner'].map((type, i) => {
                       const image = s.images?.find((image) => image.type === type);
                       return (
@@ -145,7 +133,7 @@ const AdminSeries = () => {
                           />
                         </div>
                       );
-                    })}
+                    })} */}
                 </Box>
               </AccordionDetails>
             </Accordion>

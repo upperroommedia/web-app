@@ -155,17 +155,17 @@ async function addItemsToList(
   const sermons = await getFirestoreSermonFromMediaItem(mediaItems);
   logger.log(`Adding items: ${sermons} for firestore series: ${seriesArray.docs[0].data().name}`);
   // add sermon to series if it is not already there
-  const currentAllSermonsKeys = seriesArray.docs[0].data().allSermons.map((sermon) => sermon.key);
-  const addToAllSermons = sermons.filter((sermon) => !currentAllSermonsKeys.includes(sermon.key));
-  const currentSermonsInSubsplashKeys = seriesArray.docs[0].data().sermonsInSubsplash.map((sermon) => sermon.key);
-  const addToSermonsInSubsplash = sermons.filter((sermon) => !currentSermonsInSubsplashKeys.includes(sermon.key));
-  if (!addToSermonsInSubsplash.length && !addToAllSermons.length) {
-    return;
-  }
-  await seriesArray.docs[0].ref.update({
-    ...(addToSermonsInSubsplash.length > 0 && { sermonsInSubsplash: FieldValue.arrayUnion(...sermons) }),
-    ...(addToAllSermons.length > 0 && { allSermons: FieldValue.arrayUnion(...addToAllSermons) }),
+
+  const bulkWriter = firestore().bulkWriter();
+  const series = seriesArray.docs[0];
+  sermons.forEach((sermon) => {
+    logger.log(`Adding "${sermon.title}" to series - ${series.id}`);
+    const sermonRef = firestore().doc(`series/${series.id}/seriesSermons/${sermon.key}`);
+    // this single call will fail if the sermon already exists which is ok
+    bulkWriter.create(sermonRef, sermon);
   });
+
+  await bulkWriter.close();
 }
 
 async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
@@ -197,9 +197,16 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
   }
   const sermons = await getFirestoreSermonFromMediaItem(convertSubsplashListRowToMediaItem(listRows));
   logger.log(`Removing items: ${sermons} for firestore series: ${seriesArray.docs[0].data().name}`);
-  await seriesArray.docs[0].ref
-    .withConverter(firestoreAdminSeriesConverter)
-    .update('sermons', FieldValue.arrayRemove(...sermons));
+
+  // delete sermons from firebase series
+  const bulkWriter = firestore().bulkWriter();
+  const series = seriesArray.docs[0];
+  sermons.forEach((sermon) => {
+    logger.log(`Adding "${sermon.title}" to series - ${series.id}`);
+    const sermonRef = firestore().doc(`series/${series.id}/seriesSermons/${sermon.key}`);
+    bulkWriter.delete(sermonRef);
+  });
+  await bulkWriter.close();
 }
 
 async function getLastNOldestItems(
@@ -250,8 +257,6 @@ async function createMoreList(listId: string): Promise<string> {
   const moreSermonsSeries: Series = {
     id: moreListId,
     name: title,
-    sermonsInSubsplash: [],
-    allSermons: [],
     images: series.images,
     overflowBehavior: series.overflowBehavior,
     subsplashId: moreListId,

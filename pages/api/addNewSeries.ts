@@ -7,8 +7,6 @@ const addNewSeries = async (series: Series) => {
   await setDoc(newSeriesRef, {
     id: newSeriesRef.id,
     name: series.name,
-    sermonsInSubsplash: series.sermonsInSubsplash,
-    allSermons: series.allSermons,
     overflowBehavior: series.overflowBehavior,
     images: series.images,
   });

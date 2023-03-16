@@ -36,11 +36,13 @@ import AvatarWithDefaultImage from '../components/AvatarWithDefaultImage';
 import ListItem from '@mui/material/ListItem';
 import { UploaderFieldError } from '../context/types';
 import SeriesSelector from '../components/SeriesSelector';
+import { Series } from '../types/Series';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
 interface UploaderProps {
   existingSermon?: Sermon;
+  existingSeries?: Series[];
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
@@ -87,7 +89,8 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
-  const [sermon, setSermon] = useState<Sermon>(props.existingSermon ? props.existingSermon : emptySermon);
+  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || emptySermon);
+  const [sermonSeries, setSermonSeries] = useState<Series[]>(props.existingSeries || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
 
@@ -119,10 +122,11 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     };
     fetchData();
   }, []);
-
+  const seriesEqual = (series1: Series[], series2: Series[]): boolean => {
+    return JSON.stringify(series1) === JSON.stringify(series2);
+  };
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
-
     return (
       sermon1.title === sermon2.title &&
       sermon1.subtitle === sermon2.subtitle &&
@@ -130,7 +134,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       sermon1Date.getDate() === date?.getDate() &&
       sermon1Date.getMonth() === date?.getMonth() &&
       sermon1Date.getFullYear() === date?.getFullYear() &&
-      JSON.stringify(sermon1.series) === JSON.stringify(sermon.series) &&
       JSON.stringify(sermon1.images) === JSON.stringify(sermon.images) &&
       JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
@@ -141,6 +144,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
     setSermon(emptySermon);
+    setSermonSeries([]);
     setDate(new Date());
     setFile(undefined);
   };
@@ -155,7 +159,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
 
   const updateSermon = <T extends keyof Sermon>(key: T, value: Sermon[T]) => {
-    console.log('updateSermon', key, value);
     setSermon((oldSermon) => ({ ...oldSermon, [key]: value }));
   };
 
@@ -273,7 +276,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           onChange={handleChange}
         />
         <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-          <SeriesSelector sermon={sermon} setSermon={setSermon} updateSermon={updateSermon} />
+          <SeriesSelector sermonSeries={sermonSeries} setSermonSeries={setSermonSeries} />
         </div>
         <Autocomplete
           fullWidth
@@ -433,27 +436,15 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           justifyContent: 'center',
         }}
       >
-        {props.existingSermon ? (
+        {props.existingSermon && props.existingSeries ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
               onClick={async () => {
-                await editSermon({
-                  key: sermon.key,
-                  title: sermon.title,
-                  subtitle: sermon.subtitle,
-                  description: sermon.description,
-                  speakers: sermon.speakers,
-                  topics: sermon.topics,
-                  series: sermon.series,
-                  images: sermon.images,
-                  subsplashId: sermon.subsplashId,
-                  soundCloudTrackId: sermon.soundCloudTrackId,
-                  dateMillis: sermon.dateMillis,
-                });
+                await editSermon(sermon, sermonSeries);
                 props.setEditFormOpen?.(false);
               }}
               disabled={
-                sermonsEqual(props.existingSermon, sermon) ||
+                (sermonsEqual(props.existingSermon, sermon) && seriesEqual(props.existingSeries, sermonSeries)) ||
                 sermon.title === '' ||
                 date === null ||
                 sermon.speakers.length === 0 ||
@@ -502,6 +493,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                         setUploadProgress,
                         trimStart,
                         sermon,
+                        sermonSeries,
                       });
                       clearForm();
                     } catch (error) {

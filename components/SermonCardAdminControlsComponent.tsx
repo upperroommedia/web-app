@@ -2,36 +2,28 @@ import Image from 'next/image';
 
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import Button from '@mui/material/Button';
-import Checkbox from '@mui/material/Checkbox';
 import IconButton from '@mui/material/IconButton';
 import CircularProgress from '@mui/material/CircularProgress';
-import Typography from '@mui/material/Typography';
 import Box from '@mui/system/Box';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
 import Tooltip from '@mui/material/Tooltip';
 import SoundCloudLogo from '../public/soundcloud.png';
-
-import PopUp from './PopUp';
 import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
-import SeriesSelector from './SeriesSelector';
-import AvatarWithDefaultImage from './AvatarWithDefaultImage';
+import UploadToSubsplashPopup from './uploadToSubsplashPopup';
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
   isUploadingToSubsplash: boolean;
   isUploadingToSoundCloud: boolean;
   uploadToSubsplashPopup: boolean;
-  autoPublish: boolean;
   setUploadToSubsplashPopup: (boolean: boolean) => void;
-  setAutoPublish: Dispatch<SetStateAction<boolean>>;
+  setIsUploadingToSubsplash: Dispatch<SetStateAction<boolean>>;
   handleDelete: () => Promise<void>;
   uploadToSoundCloud: () => Promise<void>;
-  uploadToSubsplash: () => Promise<void>;
   deleteFromSoundCloud: () => Promise<void>;
   deleteFromSubsplash: () => Promise<void>;
 }
@@ -41,12 +33,10 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   isUploadingToSoundCloud,
   isUploadingToSubsplash,
   uploadToSubsplashPopup,
-  autoPublish,
   setUploadToSubsplashPopup,
-  setAutoPublish,
+  setIsUploadingToSubsplash,
   handleDelete,
   uploadToSoundCloud,
-  uploadToSubsplash,
   deleteFromSoundCloud,
   deleteFromSubsplash,
 }: SermonCardAdminControlsComponentProps) => {
@@ -130,35 +120,13 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           </span>
         </Tooltip>
       </Box>
-      <PopUp
-        title={'Upload Sermon to Supsplash?'}
-        open={uploadToSubsplashPopup}
-        setOpen={() => setUploadToSubsplashPopup(false)}
-        button={
-          <Button aria-label="Confirm Upload to Subsplash" onClick={uploadToSubsplash}>
-            {isUploadingToSoundCloud ? <CircularProgress /> : 'Upload'}
-          </Button>
-        }
-      >
-        <Box display="flex" flexDirection="column" gap={1}>
-          <Box display="flex" alignItems="center" gap={1} marginBottom={1}>
-            <AvatarWithDefaultImage
-              altName={sermon.title}
-              image={sermon.images.find((image) => image.type === 'square')}
-              width={50}
-              height={50}
-              borderRadius={5}
-            />
-            <Typography variant="h6">{sermon.title}</Typography>
-          </Box>
-          <Typography variant="body1">The sermon will be added to the following lists:</Typography>
-          <SeriesSelector sermon={sermon} />
-          <Box display="flex" alignItems={'center'} onClick={() => setAutoPublish((previousValue) => !previousValue)}>
-            <Checkbox checked={autoPublish} />
-            <Typography>Auto publish when upload is complete</Typography>
-          </Box>
-        </Box>
-      </PopUp>
+      <UploadToSubsplashPopup
+        sermon={sermon}
+        uploadToSubsplashPopupBoolean={uploadToSubsplashPopup}
+        setUploadToSubsplashPopupBoolean={setUploadToSubsplashPopup}
+        setIsUploadingToSubsplash={setIsUploadingToSubsplash}
+        isUploadingToSubsplash={isUploadingToSubsplash}
+      />
       <DeleteEntityPopup
         entityBeingDeleten="sermon"
         handleDelete={handleDelete}

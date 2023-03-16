@@ -9,7 +9,6 @@ import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import { emptySeries, Series, OverflowBehavior, OverflowBehaviorType } from '../types/Series';
 import ImageViewer from './ImageViewer';
 import isEqual from 'lodash/isEqual';
-import { Sermon } from '../types/SermonTypes';
 import MenuItem from '@mui/material/MenuItem';
 import Box from '@mui/material/Box';
 import InputLabel from '@mui/material/InputLabel';
@@ -21,8 +20,7 @@ interface NewSeriesPopupProps {
   setNewSeriesPopup: Dispatch<SetStateAction<boolean>>;
   seriesArray: Series[];
   setSeriesArray: Dispatch<SetStateAction<Series[]>>;
-  sermon?: Sermon;
-  setSermon?: Dispatch<SetStateAction<Sermon>>;
+  setSermonSeries?: Dispatch<SetStateAction<Series[]>>;
   existingSeries?: Series | undefined;
 }
 
@@ -121,12 +119,6 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                     return s;
                   })
                 );
-                newSeries?.allSermons.forEach((sermon) => {
-                  const sermonRef = doc(firestore, 'sermons', sermon.key);
-                  updateDoc(sermonRef, {
-                    series: { ...newSeries },
-                  });
-                });
                 props.setNewSeriesPopup(false);
                 setUserHasTypedInSeries(false);
               } else {
@@ -134,26 +126,20 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 const seriesToAdd: Series = {
                   id: newSeriesId,
                   name: newSeries.name,
-                  sermonsInSubsplash: [],
-                  allSermons: [],
                   overflowBehavior: newSeries.overflowBehavior,
                   images: newSeries.images,
                 };
 
                 props.setNewSeriesPopup(false);
-                props.seriesArray.push(seriesToAdd);
-                if (props.sermon && props.setSermon) {
-                  const {
-                    sermonsInSubsplash: _sermonsInSubsplash,
-                    allSermons: _allSermons,
-                    ...seriesToAddSummary
-                  } = seriesToAdd;
-                  props.setSermon({ ...props.sermon, series: [...props.sermon.series, seriesToAddSummary] });
+                props.setSeriesArray((previousseriesArray) => [seriesToAdd, ...previousseriesArray]);
+                if (props.setSermonSeries) {
+                  props.setSermonSeries((previousSeries) => [seriesToAdd, ...previousSeries]);
                 }
                 setNewSeries(emptySeries);
                 setUserHasTypedInSeries(false);
               }
             } catch (error) {
+              // eslint-disable-next-line no-console
               console.error(error);
               setNewSeriesError({ error: true, message: JSON.stringify(error) });
             }
