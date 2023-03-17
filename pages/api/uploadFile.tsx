@@ -21,12 +21,32 @@ const uploadFile = async (props: uploadFileProps) => {
   const sermonRef = ref(storage, `sermons/${props.sermon.key}`);
 
   // const sermonRef = ref(storage, `sermons/${file.name}`);
+  let introRef = '';
+  let outroRef = '';
+  try {
+    introRef = await getDownloadURL(ref(storage, `intros/${props.sermon.subtitle}_intro.mp3`));
+  } catch (error) {
+    try {
+      introRef = await getDownloadURL(ref(storage, `intros/default_intro.mp3`));
+    } catch (error) {
+      throw new Error('Could not find intro audio for sermon');
+    }
+  }
+  try {
+    outroRef = await getDownloadURL(ref(storage, `outros/${props.sermon.subtitle}_outro.mp3`));
+  } catch (error) {
+    try {
+      outroRef = await getDownloadURL(ref(storage, `outros/default_outro.mp3`));
+    } catch (error) {
+      throw new Error('Could not find outro audio for sermon');
+    }
+  }
   const metadata: UploadMetadata = {
     customMetadata: {
       startTime: props.trimStart.toString(),
       duration: props.sermon.durationSeconds.toString(),
-      introUrl: await getDownloadURL(ref(storage, `intros/${props.sermon.subtitle}_intro.m4a`)),
-      outroUrl: await getDownloadURL(ref(storage, `outros/${props.sermon.subtitle}_outro.m4a`)),
+      introUrl: introRef,
+      outroUrl: outroRef,
     },
   };
   props.sermon.images = await Promise.all(

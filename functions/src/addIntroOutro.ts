@@ -204,7 +204,7 @@ const addIntroOutro = onObjectFinalized(
             message: 'Adding Intro and Outro',
           },
         });
-        logger.log('Merging audio files', tempFilePaths);
+        logger.log('Merging audio files', JSON.stringify(tempFilePaths));
         const outputFileName = 'intro_outro-' + fileName;
 
         //create merge array in order INTRO, CONTENT, OUTRO
@@ -214,14 +214,16 @@ const addIntroOutro = onObjectFinalized(
         if (tempFilePaths.OUTRO) filePathsArray.push(tempFilePaths.OUTRO);
 
         //merge files
+        logger.log('Merging files', filePathsArray, 'to', outputFileName, '...');
         const tmpFilePath = await mergeFiles(filePathsArray, outputFileName);
 
         //upload merged file
+        logger.log('Uploading merged file', tmpFilePath, 'to intro-outro-sermons/', fileName);
         const destination = `intro-outro-sermons/${fileName}`;
         durationSeconds = await getDurationSeconds(tmpFilePath);
         await uploadSermon(tmpFilePath, destination, bucket);
       }
-
+      logger.log('Updating status to PROCESSED');
       await docRef.update({
         status: {
           ...sermonStatus,
