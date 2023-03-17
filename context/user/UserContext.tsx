@@ -70,7 +70,7 @@ export const UserProvider = ({ children }: any) => {
       console.log(`refreshing token...`);
       const user = auth.currentUser;
       if (user) await user.getIdToken(true);
-    }, 10 * 60 * 1000);
+    }, 24 * 60 * 60 * 1000);
     return () => {
       unsubscribe();
       clearInterval(handle);
