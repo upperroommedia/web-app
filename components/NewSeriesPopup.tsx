@@ -15,6 +15,8 @@ import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 import PopUp from '../components/PopUp';
 import { CircularProgress } from '@mui/material';
+import { EditSubsplashListInputType, EditSubsplashListOutputType } from '../functions/src/editSubsplashList';
+import { createFunctionV2 } from '../utils/createFunction';
 
 interface NewSeriesPopupProps {
   newSeriesPopup: boolean;
@@ -114,6 +116,18 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
             setSubmitting(true);
             try {
               if (props.existingSeries) {
+                if (newSeries.subsplashId) {
+                  // edit subsplash list
+                  const editSubsplashList = createFunctionV2<EditSubsplashListInputType, EditSubsplashListOutputType>(
+                    'editsubsplashlist'
+                  );
+
+                  await editSubsplashList({
+                    listId: newSeries.subsplashId,
+                    title: newSeries.name,
+                    images: newSeries.images,
+                  });
+                }
                 const seriesRef = doc(firestore, 'series', newSeries.id);
                 await updateDoc(seriesRef, {
                   ...newSeries,
