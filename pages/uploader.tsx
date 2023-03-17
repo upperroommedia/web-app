@@ -37,6 +37,7 @@ import ListItem from '@mui/material/ListItem';
 import { UploaderFieldError } from '../context/types';
 import SeriesSelector from '../components/SeriesSelector';
 import { Series } from '../types/Series';
+import FormControl from '@mui/material/FormControl';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -216,8 +217,18 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
 
   return (
-    <form className={styles.container}>
-      <h1 style={{ justifySelf: 'center', gridColumn: '1/3' }}>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
+    <FormControl
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: { xs: 'auto', md: '4fr 1fr' },
+        maxWidth: '80%',
+        gap: '1ch 100px',
+        margin: 'auto',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <h1 style={{ justifySelf: 'center', gridColumn: '1/-1' }}>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
       <Box
         sx={{
           display: 'flex',
@@ -424,14 +435,14 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           )}
         />
       </Box>
-      <div>
+      <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
         <ImageViewer
           images={sermon.images}
           speaker={sermon.speakers[0]}
           newImageCallback={handleNewImage}
           vertical={true}
         />
-      </div>
+      </Box>
       <Box
         sx={{
           display: 'flex',
@@ -520,7 +531,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           </>
         )}
       </Box>
-    </form>
+    </FormControl>
   );
 };
 
