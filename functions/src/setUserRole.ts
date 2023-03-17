@@ -15,6 +15,7 @@ const setUserRole = https.onCall(async (data: { uid: string; role: string }, con
       return { status: `User is already role: ${data.role}` };
     } else {
       await auth().setCustomUserClaims(user.uid, { role: data.role });
+      await auth().revokeRefreshTokens(user.uid);
       return { status: 'Success!' };
     }
   } catch (e) {
