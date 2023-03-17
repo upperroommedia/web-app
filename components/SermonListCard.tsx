@@ -96,7 +96,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
           >
             {sermon.description}
           </Typography>
-          {!minimal && (
+          {!minimal && sermon.status.audioStatus === sermonStatusType.PROCESSED && (
             <IconButton
               sx={{ gridArea: 'playPause' }}
               aria-label="toggle play/pause"
