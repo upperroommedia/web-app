@@ -3,13 +3,11 @@ import { ISpeaker } from './Speaker';
 import { v4 as uuidv4 } from 'uuid';
 import { Sermon, sermonStatusType, uploadStatus } from './SermonTypes';
 import { ImageType } from './Image';
-import { Series } from './Series';
 
 export const createSermon = ({
   key = uuidv4(),
   title = '',
   subtitle = '',
-  series = {} as Series,
   description = '',
   dateMillis = 0,
   durationSeconds = 0,
@@ -27,7 +25,6 @@ export const createSermon = ({
     key,
     title,
     subtitle,
-    series,
     description,
     dateMillis,
     durationSeconds,
@@ -66,12 +63,12 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
     };
   },
 };
+
 const currentDate = new Date();
 export const emptySermon: Sermon = {
   key: uuidv4(),
   title: '',
   subtitle: '',
-  series: {} as Series,
   description: '',
   dateMillis: currentDate.getTime(),
   durationSeconds: 0,

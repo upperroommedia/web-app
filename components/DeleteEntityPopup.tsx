@@ -1,4 +1,6 @@
-import { Button, Checkbox } from '@mui/material';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import CircularProgress from '@mui/material/CircularProgress';
 import { Dispatch, SetStateAction, useState } from 'react';
 import PopUp from './PopUp';
 
@@ -7,6 +9,7 @@ interface DeleteEntityPopupProps {
   deleteConfirmationPopup: boolean;
   setDeleteConfirmationPopup: Dispatch<SetStateAction<boolean>>;
   handleDelete: () => Promise<void>;
+  isDeleting: boolean;
 }
 
 const DeleteEntityPopup = (props: DeleteEntityPopupProps) => {
@@ -19,16 +22,15 @@ const DeleteEntityPopup = (props: DeleteEntityPopupProps) => {
       button={
         <Button
           aria-label={`confirm delete ${props.entityBeingDeleten}`}
-          variant="contained"
           onClick={async () => {
             await props.handleDelete();
             props.setDeleteConfirmationPopup(false);
             setDeleteChecked(false);
           }}
-          color="primary"
-          disabled={!deleteChecked}
+          color="error"
+          disabled={!deleteChecked || props.isDeleting}
         >
-          Delete Forever
+          {props.isDeleting ? <CircularProgress /> : 'Delete Forever'}
         </Button>
       }
     >

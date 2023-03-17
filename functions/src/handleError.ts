@@ -7,7 +7,6 @@ const handleError = (error: unknown): HttpsError => {
   }
   if (isAxiosError(error)) {
     const axiosError = error as AxiosError;
-    console.log('HERE', error.response?.data);
     return new HttpsError('internal', axiosError.message, error.response?.data || axiosError.toJSON());
   }
   if (error instanceof Error) {

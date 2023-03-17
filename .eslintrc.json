@@ -30,7 +30,14 @@
     "no-console": "warn", // no console statements allowed
     "prettier/prettier": "off", // don't show prettier errors as it will be fixed when saved anyway
     "no-unused-vars": "off",
-    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ]
   },
 
   "settings": {

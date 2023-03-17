@@ -77,13 +77,10 @@ const AdminSpeakers = () => {
 
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
     const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
-    result?.nbHits && setTotalSpeakers(result.nbHits);
+    // TODO: fix this
+    setTotalSpeakers(result[0].nbHits || 0);
     setSpeakersLoading(false);
-    const arr: ISpeaker[] = [];
-    result?.hits.forEach((element: ISpeaker) => {
-      arr.push(element);
-    });
-    return arr;
+    return result;
   };
 
   const getSpeakersFirebase = async () => {
@@ -101,7 +98,7 @@ const AdminSpeakers = () => {
     setSpeakers(res);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     const result = await fetchSpeakerResults('', 1, 0);
-    result?.nbHits && setTotalSpeakers(result.nbHits);
+    setTotalSpeakers(result[0].nbHits || 0);
   };
 
   const getMoreSpeakersFirebase = async () => {
@@ -117,7 +114,7 @@ const AdminSpeakers = () => {
       setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data()]);
     });
     const result = await fetchSpeakerResults('', 1, 0);
-    result?.nbHits && setTotalSpeakers(result.nbHits);
+    setTotalSpeakers(result[0].nbHits || 0);
   };
 
   const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {

@@ -4,6 +4,12 @@ import Dialog from '@mui/material/Dialog';
 import Button from '@mui/material/Button';
 import Uploader from '../pages/uploader';
 import { Sermon } from '../types/SermonTypes';
+import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
+import { collection } from 'firebase/firestore';
+import firestore from '../firebase/firestore';
+// import Box from '@mui/material/Box';
+// import CircularProgress from '@mui/material/CircularProgress';
+import { seriesConverter } from '../types/Series';
 
 interface EditSermonFormInfo {
   open: boolean;
@@ -11,13 +17,21 @@ interface EditSermonFormInfo {
   sermon: Sermon;
 }
 
-const EditSermonForm = (props: EditSermonFormInfo) => {
-  const { sermon, open, setOpen } = props;
+const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
+  const [sermonSeries, _loading, _error, _snapshot] = useCollectionDataOnce(
+    collection(firestore, `sermons/${sermon.key}/sermonSeries`).withConverter(seriesConverter)
+  );
 
   return (
     <Dialog open={open} onClose={() => setOpen(false)} aria-labelledby="confirm-dialog" maxWidth="lg">
       <DialogContent>
-        <Uploader existingSermon={sermon} setEditFormOpen={setOpen} />
+        {/* {error ? (
+          <Box>{error.message}</Box>
+        ) : loading ? (
+          <CircularProgress />
+        ) : ( */}
+        <Uploader existingSermon={sermon} existingSeries={sermonSeries || []} setEditFormOpen={setOpen} />
+        {/* )} */}
       </DialogContent>
       <DialogActions>
         <Button
