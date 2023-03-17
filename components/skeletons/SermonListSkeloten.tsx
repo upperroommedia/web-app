@@ -2,12 +2,15 @@
 
 import Box from '@mui/material/Box';
 import List from '@mui/material/List';
+import { memo } from 'react';
 import SermonListCardSkeloten from './SermonListCardSkeloten';
 
 interface SermonsListSkelotenProps {
   minimal?: boolean;
+  count?: number;
 }
-export default function SermonListSkeloten({ minimal = false }: SermonsListSkelotenProps) {
+export default memo(function SermonListSkeloten({ minimal, count }: SermonsListSkelotenProps) {
+  console.log('SermonsListSkeloten');
   return (
     <Box display="flex" justifyContent={'start'} width={1}>
       <List
@@ -18,10 +21,10 @@ export default function SermonListSkeloten({ minimal = false }: SermonsListSkelo
 
         // bgcolor={'blue'}
       >
-        {[1, 2, 3].map((i) => (
+        {Array.from(Array(count || 3).keys()).map((i) => (
           <SermonListCardSkeloten minimal={minimal} key={`sermonListCardSkeloten: ${i}`} />
         ))}
       </List>
     </Box>
   );
-}
+});

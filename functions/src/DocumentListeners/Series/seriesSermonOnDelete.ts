@@ -1,13 +1,20 @@
 import { firestore } from 'firebase-functions';
 import { firestore as firestoreAdmin } from 'firebase-admin';
 import handleError from '../../handleError';
+import { firestoreAdminSeriesConverter } from '../../firestoreDataConverter';
+import { FieldValue } from 'firebase-admin/firestore';
 
 const seriesSermonOnDelete = firestore
   .document('series/{seriesId}/seriesSermons/{sermonId}')
-  .onDelete(async (_snapshot, context) => {
+  .onDelete(async (snapshot, context) => {
     const { seriesId, sermonId } = context.params;
     try {
-      return firestoreAdmin().collection('sermons').doc(sermonId).collection('sermonSeries').doc(seriesId).delete();
+      const batch = firestoreAdmin().batch();
+      batch.delete(firestoreAdmin().collection('sermons').doc(sermonId).collection('sermonSeries').doc(seriesId));
+      console.log('decrementing count');
+      batch.update(snapshot.ref.withConverter(firestoreAdminSeriesConverter), {
+        count: FieldValue.increment(-1),
+      });
     } catch (error) {
       throw handleError(error);
     }

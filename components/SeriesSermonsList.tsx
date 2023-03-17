@@ -8,19 +8,19 @@ import SermonListSkeloten from './skeletons/SermonListSkeloten';
 
 interface SeriesSermonListProps {
   seriesId: string;
+  count: number;
 }
 
-const SeriesSermonList: FunctionComponent<SeriesSermonListProps> = ({ seriesId }: SeriesSermonListProps) => {
+const SeriesSermonList: FunctionComponent<SeriesSermonListProps> = ({ seriesId, count }: SeriesSermonListProps) => {
   const [sermons, loading, error] = useCollectionData(
     collection(firestore, `series/${seriesId}/seriesSermons`).withConverter(sermonConverter)
   );
-
   return (
     <>
       {error ? (
         <Box> {error?.message} </Box>
       ) : loading ? (
-        <SermonListSkeloten minimal />
+        <SermonListSkeloten minimal count={count} />
       ) : (
         <SermonsList sermons={sermons!} minimal />
       )}

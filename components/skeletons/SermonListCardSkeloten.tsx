@@ -5,12 +5,14 @@ import Card from '@mui/material/Card';
 import Skeleton from '@mui/material/Skeleton';
 import ListItem from '@mui/material/ListItem';
 import Box from '@mui/material/Box';
+import { memo } from 'react';
 
 interface SermonListCardSkelotenProps {
   minimal?: boolean;
 }
 
-export default function SermonListCardSkeloten({ minimal = false }: SermonListCardSkelotenProps) {
+export default memo(function SermonListCardSkeloten({ minimal = false }: SermonListCardSkelotenProps) {
+  console.log('SermonListCard Rendered');
   return (
     <>
       <Divider />
@@ -93,4 +95,4 @@ export default function SermonListCardSkeloten({ minimal = false }: SermonListCa
       </ListItem>
     </>
   );
-}
+});

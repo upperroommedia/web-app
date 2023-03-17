@@ -11,13 +11,12 @@ export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
     return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data();
-
+    console.log('HERHE', snapshot.data());
     return {
       ...data,
-      dateMillis: snapshot.data().date.toMillis(),
-      dateString: getDateString(snapshot.data().date.toDate()),
+      dateMillis: date.toMillis(),
+      dateString: getDateString(date.toDate()),
     };
   },
 };

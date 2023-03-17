@@ -14,18 +14,20 @@ import Box from '@mui/material/Box';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 import PopUp from '../components/PopUp';
+import { CircularProgress } from '@mui/material';
 
 interface NewSeriesPopupProps {
   newSeriesPopup: boolean;
   setNewSeriesPopup: Dispatch<SetStateAction<boolean>>;
   seriesArray: Series[];
-  setSeriesArray: Dispatch<SetStateAction<Series[]>>;
+  setSeriesArray?: Dispatch<SetStateAction<Series[]>>;
   setSermonSeries?: Dispatch<SetStateAction<Series[]>>;
   existingSeries?: Series | undefined;
 }
 
 const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   const [newSeries, setNewSeries] = useState<Series>(props.existingSeries ? props.existingSeries : emptySeries);
+  const [submitting, setSubmitting] = useState(false);
   const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
     error: false,
     message: '',
@@ -70,6 +72,9 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   };
 
   useEffect(() => {
+    if (submitting) {
+      return;
+    }
     if (!userHasTypedInSeries) {
       setNewSeriesError({ error: false, message: '' });
       return;
@@ -102,23 +107,27 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
             (props.seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.name.toLowerCase()) &&
               isEqual(props.existingSeries?.images, newSeries.images)) ||
             newSeries.name === '' ||
-            newSeries.images.length === 0
+            newSeries.images.length === 0 ||
+            submitting
           }
           onClick={async () => {
+            setSubmitting(true);
             try {
               if (props.existingSeries) {
                 const seriesRef = doc(firestore, 'series', newSeries.id);
                 await updateDoc(seriesRef, {
                   ...newSeries,
                 });
-                props.setSeriesArray((oldSeriesArray) =>
-                  oldSeriesArray.map((s) => {
-                    if (s.id === newSeries.id) {
-                      return { ...newSeries };
-                    }
-                    return s;
-                  })
-                );
+                if (props.setSeriesArray) {
+                  props.setSeriesArray((oldSeriesArray) =>
+                    oldSeriesArray.map((s) => {
+                      if (s.id === newSeries.id) {
+                        return { ...newSeries };
+                      }
+                      return s;
+                    })
+                  );
+                }
                 props.setNewSeriesPopup(false);
                 setUserHasTypedInSeries(false);
               } else {
@@ -126,12 +135,15 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
                 const seriesToAdd: Series = {
                   id: newSeriesId,
                   name: newSeries.name,
+                  count: newSeries.count,
                   overflowBehavior: newSeries.overflowBehavior,
                   images: newSeries.images,
                 };
 
                 props.setNewSeriesPopup(false);
-                props.setSeriesArray((previousseriesArray) => [seriesToAdd, ...previousseriesArray]);
+                if (props.setSeriesArray) {
+                  props.setSeriesArray((previousseriesArray) => [seriesToAdd, ...previousseriesArray]);
+                }
                 if (props.setSermonSeries) {
                   props.setSermonSeries((previousSeries) => [seriesToAdd, ...previousSeries]);
                 }
@@ -143,9 +155,10 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
               console.error(error);
               setNewSeriesError({ error: true, message: JSON.stringify(error) });
             }
+            setSubmitting(false);
           }}
         >
-          Submit
+          {submitting ? <CircularProgress size={24} /> : 'Submit'}
         </Button>
       }
     >

@@ -1,9 +1,5 @@
-import Accordion from '@mui/material/Accordion';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import AccordionSummary from '@mui/material/AccordionSummary';
 import Box from '@mui/material/Box';
 import AdminLayout from '../../layout/adminLayout';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Button from '@mui/material/Button';
 import firestore, { collection, deleteDoc, doc } from '../../firebase/firestore';
 // import { useCollection } from 'react-firebase-hooks/firestore';
@@ -14,27 +10,37 @@ import { Series, seriesConverter } from '../../types/Series';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { adminProtected } from '../../utils/protectedRoutes';
 import NewSeriesPopup from '../../components/NewSeriesPopup';
-import SeriesSermonList from '../../components/SeriesSermonsList';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { CircularProgress } from '@mui/material';
+import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '../../functions/src/deleteSubsplashList';
+import Link from 'next/link';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
+import ListItemButton from '@mui/material/ListItemButton';
 
 const AdminSeries = () => {
   const [firebaseSeries, loading, error] = useCollectionData(
     collection(firestore, 'series').withConverter(seriesConverter)
   );
   const [series, setSeries] = useState<Series[]>([]);
-  const [selectedSeries, setSelectedSeries] = useState<Series>();
   const [editSeriesPopup, setEditSeriesPopup] = useState<boolean>(false);
   const [deleteSeriesPopup, setDeleteSeriesPopup] = useState<boolean>(false);
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
+  const [selectedSeries, setSelectedSeries] = useState<Series>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
-
+  const disableButtons = isDeleting;
   const handleSeriesDelete = async () => {
-    if (!selectedSeries) return;
+    if (!selectedSeries) {
+      return;
+    }
     try {
       setIsDeleting(true);
       const deleteSubsplashList = createFunctionV2<DeleteSubsplashListInputType, DeleteSubsplashListOutputType>(
@@ -80,12 +86,12 @@ const AdminSeries = () => {
                 Add Series
               </Button>
             </Box>
-            <Box>
+            <List>
               {series.map((s) => {
                 return (
-                  <Accordion TransitionProps={{ unmountOnExit: true }} key={s.id} onClick={() => setSelectedSeries(s)}>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Link href={`/admin/series/${s.id}?count=${s.count}`} key={s.id}>
+                    <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box display="flex" alignItems="center" gap={1}>
                         <AvatarWithDefaultImage
                           image={s.images.find((image) => image.type === 'square')}
                           altName={`Image of Series: ${s.name}`}
@@ -94,39 +100,48 @@ const AdminSeries = () => {
                           borderRadius={5}
                         />
                         <Typography>{s.name}</Typography>
+                        <Typography>{`Count: ${s.count}`}</Typography>
                       </Box>
-                    </AccordionSummary>
-                    <AccordionDetails>
                       <Box>
-                        <Box display="flex" justifyContent="center" gap={1}>
-                          <Button
-                            color="info"
-                            variant="contained"
-                            size="small"
-                            onClick={() => {
-                              setEditSeriesPopup(true);
-                            }}
-                          >
-                            Edit Series
-                          </Button>
-
-                          <Button
-                            color="error"
-                            variant="contained"
-                            size="small"
-                            disabled={isDeleting}
-                            onClick={() => setDeleteSeriesPopup(true)}
-                          >
-                            {isDeleting ? <CircularProgress /> : 'Delete Series'}
-                          </Button>
-                        </Box>
-                        <SeriesSermonList seriesId={s.id} />
+                        <Tooltip title="Edit Series">
+                          <span>
+                            <IconButton
+                              disabled={disableButtons}
+                              aria-label="edit series"
+                              style={{ color: 'lightblue' }}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setSelectedSeries(s);
+                                setEditSeriesPopup(true);
+                              }}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Delete Series From All Systems">
+                          <span>
+                            <IconButton
+                              disabled={disableButtons}
+                              aria-label="delete series"
+                              style={{ color: 'red' }}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setSelectedSeries(s);
+                                setDeleteSeriesPopup(true);
+                              }}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
                       </Box>
-                    </AccordionDetails>
-                  </Accordion>
+                    </ListItemButton>
+                    <Divider />
+                  </Link>
                 );
               })}
-            </Box>
+            </List>
           </Box>
         )}
       </Box>
@@ -141,13 +156,13 @@ const AdminSeries = () => {
         newSeriesPopup={newSeriesPopup}
         setNewSeriesPopup={setNewSeriesPopup}
         seriesArray={series}
-        setSeriesArray={setSeries}
+        // setSeriesArray={setSeries}
       />
       <NewSeriesPopup
         newSeriesPopup={editSeriesPopup}
         setNewSeriesPopup={setEditSeriesPopup}
         seriesArray={series}
-        setSeriesArray={setSeries}
+        // setSeriesArray={setSeries}
         existingSeries={selectedSeries}
       />
     </>

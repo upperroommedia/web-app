@@ -8,6 +8,7 @@ export interface Series {
   name: string;
   images: ImageType[];
   overflowBehavior: OverflowBehaviorType;
+  count: number;
   subsplashId?: string;
   moreSermonsRef?: string;
   isMoreSermonsList?: boolean;
@@ -27,6 +28,7 @@ export interface SeriesWithHighlight extends Series {
 export const emptySeries: Series = {
   id: '',
   name: '',
+  count: 0,
   overflowBehavior: 'CREATENEWLIST',
   images: [],
 };

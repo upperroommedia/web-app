@@ -134,7 +134,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
         setDeleteConfirmationPopup={setDeleteConfirmationPopup}
         isDeleting={isUploadingToSubsplash}
       />
-      <EditSermonForm open={editFormPopup} setOpen={() => setEditFormPopup(false)} sermon={sermon} />
+      {editFormPopup && <EditSermonForm open={editFormPopup} setOpen={() => setEditFormPopup(false)} sermon={sermon} />}
     </>
   );
 };

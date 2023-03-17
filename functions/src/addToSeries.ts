@@ -258,6 +258,7 @@ async function createMoreList(listId: string): Promise<string> {
     id: moreListId,
     name: title,
     images: series.images,
+    count: series.count,
     overflowBehavior: series.overflowBehavior,
     subsplashId: moreListId,
     isMoreSermonsList: true,

@@ -122,6 +122,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (props.existingSeries) {
+      setSermonSeries(props.existingSeries);
+    }
+  }, [props.existingSeries]);
   const seriesEqual = (series1: Series[], series2: Series[]): boolean => {
     return JSON.stringify(series1) === JSON.stringify(series2);
   };
@@ -440,6 +446,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
               onClick={async () => {
+                console.log('HERHERH', sermonSeries);
                 await editSermon(sermon, sermonSeries);
                 props.setEditFormOpen?.(false);
               }}

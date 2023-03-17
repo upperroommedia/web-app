@@ -7,6 +7,7 @@ const addNewSeries = async (series: Series) => {
   await setDoc(newSeriesRef, {
     id: newSeriesRef.id,
     name: series.name,
+    count: series.count,
     overflowBehavior: series.overflowBehavior,
     images: series.images,
   });
