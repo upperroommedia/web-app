@@ -126,7 +126,7 @@ const downloadFiles = async (bucket: Bucket, filePaths: filePaths): Promise<file
   // get key and value of filePaths
   for (const [key, filePath] of Object.entries(filePaths) as [keyof filePaths, string | undefined][]) {
     if (filePath) {
-      tempFilePaths[key] = createTempFile(path.basename(filePath));
+      tempFilePaths[key] = createTempFile(path.basename(filePath).split('?')[0]);
       if (key === 'CONTENT') {
         promises.push(bucket.file(filePath).download({ destination: tempFilePaths[key] }));
       } else {
