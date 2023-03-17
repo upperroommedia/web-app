@@ -14,6 +14,9 @@ import { Series, seriesConverter } from '../../types/Series';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { adminProtected } from '../../utils/protectedRoutes';
 import NewSeriesPopup from '../../components/NewSeriesPopup';
+import SeriesSermonList from '../../components/SeriesSermonsList';
+import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
+import Typography from '@mui/material/Typography';
 
 const AdminSeries = () => {
   const [series, setSeries] = useState<Series[]>([]);
@@ -68,9 +71,18 @@ const AdminSeries = () => {
         </div>
         {series.map((s) => {
           return (
-            <Accordion key={s.id} onClick={() => setSelectedSeries(s)}>
+            <Accordion TransitionProps={{ unmountOnExit: true }} key={s.id} onClick={() => setSelectedSeries(s)}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <p>{s.name}</p>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AvatarWithDefaultImage
+                    image={s.images.find((image) => image.type === 'square')}
+                    altName={`Image of Series: ${s.name}`}
+                    width={50}
+                    height={50}
+                    borderRadius={5}
+                  />
+                  <Typography>{s.name}</Typography>
+                </Box>
               </AccordionSummary>
               <AccordionDetails>
                 <Box>
@@ -90,50 +102,7 @@ const AdminSeries = () => {
                       <p>Delete Series</p>
                     </Button>
                   </Box>
-                  {/* TODO: Display Sermons on a new page */}
-                  {/* <div style={{ display: 'flex', justifyContent: 'center' }}>
-                    {['square', 'wide', 'banner'].map((type, i) => {
-                      const image = s.images?.find((image) => image.type === type);
-                      return (
-                        <div
-                          key={image?.id || i}
-                          style={{
-                            borderRadius: '2px',
-                            overflow: 'hidden',
-                            position: 'relative',
-                            width: 250,
-                            height: 250,
-                            backgroundColor: image?.averageColorHex || '#f3f1f1',
-                            padding: '20px',
-                          }}
-                        >
-                          {image && (
-                            <Image
-                              src={`${sanitize(image.downloadLink)}`}
-                              alt={image.name}
-                              style={{
-                                objectFit: 'contain',
-                              }}
-                              fill
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {sermons &&
-                    s.allSermons.map((sermon) => {
-                      return (
-                        <div key={sermon.key}>
-                          <SermonsList
-                            sermons={sermons.docs
-                              .filter((doc) => doc.data().key === sermon.key)
-                              .map((doc) => doc.data())}
-                            minimal={true}
-                          />
-                        </div>
-                      );
-                    })} */}
+                  <SeriesSermonList seriesId={s.id} />
                 </Box>
               </AccordionDetails>
             </Accordion>
