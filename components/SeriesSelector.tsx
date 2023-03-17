@@ -14,7 +14,7 @@ import AddIcon from '@mui/icons-material/Add';
 
 interface SeriesSelectorProps {
   sermonSeries: Series[];
-  setSermonSeries?: Dispatch<SetStateAction<Series[]>>;
+  setSermonSeries: Dispatch<SetStateAction<Series[]>>;
 }
 
 const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
@@ -32,17 +32,8 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
       }
       return s as Series;
     });
-
-    // setSeriesSermon((previousSermon) => {
-    //   return {
-    //     ...previousSermon,
-    //     series,
-    //   };
-    // });
-
-    if (setSermonSeries) {
-      setSermonSeries(seriesArray);
-    }
+    console.log('seriesArray', seriesArray);
+    setSermonSeries(seriesArray);
   };
 
   useEffect(() => {

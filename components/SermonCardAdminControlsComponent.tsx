@@ -13,7 +13,7 @@ import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
-import UploadToSubsplashPopup from './uploadToSubsplashPopup';
+import UploadToSubsplashPopup from './UploadToSubsplashPopupComponent';
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
