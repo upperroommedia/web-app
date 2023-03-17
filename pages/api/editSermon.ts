@@ -56,7 +56,6 @@ const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
     }
   }
 
-  console.log('sermon series', sermonSeries);
   // update sermonSeries
   const sermonSeriesSnapshot = await getDocs(
     collection(firestore, `sermons/${sermonRef.id}/sermonSeries`).withConverter(seriesConverter)
@@ -65,13 +64,10 @@ const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
   const seriesInFirebase = new Set<string>();
   const batch = writeBatch(firestore);
   sermonSeriesSnapshot.forEach((snapshot) => {
-    console.log(snapshot.data());
     if (sermonSeries.find((series) => series.id === snapshot.id)) {
       // series exists in both lists
-      console.log('series exists in both lists');
       seriesInFirebase.add(snapshot.id);
     } else {
-      console.log(`deleting sermon: series/${snapshot.id}/seriesSermons/${sermon.key}`);
       // series exists in firebase but not updated list
       batch.delete(doc(firestore, `series/${snapshot.id}/seriesSermons/${sermon.key}`));
     }

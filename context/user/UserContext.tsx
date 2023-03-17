@@ -66,8 +66,8 @@ export const UserProvider = ({ children }: any) => {
       setLoading(false);
     });
     const handle = setInterval(async () => {
-      // eslint-disable-next-line no-console
       // TODO: figure out why refresh token is reloading the page
+      // eslint-disable-next-line no-console
       console.log(`refreshing token...`);
       const user = auth.currentUser;
       if (user) await user.getIdToken(true);

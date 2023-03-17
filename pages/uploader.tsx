@@ -446,7 +446,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
               onClick={async () => {
-                console.log('HERHERH', sermonSeries);
                 await editSermon(sermon, sermonSeries);
                 props.setEditFormOpen?.(false);
               }}

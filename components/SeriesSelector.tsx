@@ -32,7 +32,6 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
       }
       return s as Series;
     });
-    console.log('seriesArray', seriesArray);
     setSermonSeries(seriesArray);
   };
 

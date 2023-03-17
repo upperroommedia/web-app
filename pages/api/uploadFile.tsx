@@ -63,7 +63,6 @@ const uploadFile = async (props: uploadFileProps) => {
       const batch = writeBatch(firestore);
       props.sermonSeries.forEach((series) => {
         const seriesSermonRef = doc(firestore, 'series', series.id, 'seriesSermons', props.sermon.key);
-        console.log('Setting Sermon in series', seriesSermonRef);
         batch.set(seriesSermonRef, props.sermon);
       });
       batch.commit();

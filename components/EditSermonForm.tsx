@@ -10,7 +10,6 @@ import firestore from '../firebase/firestore';
 // import Box from '@mui/material/Box';
 // import CircularProgress from '@mui/material/CircularProgress';
 import { seriesConverter } from '../types/Series';
-import { useEffect } from 'react';
 
 interface EditSermonFormInfo {
   open: boolean;
@@ -23,9 +22,6 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
     collection(firestore, `sermons/${sermon.key}/sermonSeries`).withConverter(seriesConverter)
   );
 
-  useEffect(() => {
-    console.log('SermonSeries', sermonSeries);
-  }, [sermonSeries]);
   return (
     <Dialog open={open} onClose={() => setOpen(false)} aria-labelledby="confirm-dialog" maxWidth="lg">
       <DialogContent>
