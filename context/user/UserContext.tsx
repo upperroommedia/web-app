@@ -65,15 +65,8 @@ export const UserProvider = ({ children }: any) => {
       }
       setLoading(false);
     });
-    const handle = setInterval(async () => {
-      // eslint-disable-next-line no-console
-      console.log(`refreshing token...`);
-      const user = auth.currentUser;
-      if (user) await user.getIdToken(true);
-    }, 24 * 60 * 60 * 1000);
     return () => {
       unsubscribe();
-      clearInterval(handle);
     };
   }, []);
 
