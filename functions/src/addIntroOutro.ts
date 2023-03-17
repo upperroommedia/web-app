@@ -7,9 +7,10 @@ import os from 'os';
 import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
-import axios from 'axios';
+import axios, { AxiosError, isAxiosError } from 'axios';
 import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/SermonTypes';
 import { firestoreAdminSermonConverter } from './firestoreDataConverter';
+import { HttpsError } from 'firebase-functions/v2/https';
 
 const tempFiles = new Set<string>();
 
@@ -73,7 +74,7 @@ const uploadSermon = async (
   bucket: Bucket,
   customMetadata?: { [key: string]: string }
 ) => {
-  logger.log('custom metadata', customMetadata);
+  logger.log('custom metadata', JSON.stringify(customMetadata));
   await bucket.upload(inputFilePath, { destination: destinationFilePath });
   await bucket.file(destinationFilePath).setMetadata({ contentType: 'audio/mpeg', metadata: customMetadata });
 };
@@ -139,7 +140,7 @@ const downloadFiles = async (bucket: Bucket, filePaths: filePaths): Promise<file
 };
 
 const addIntroOutro = onObjectFinalized(
-  { timeoutSeconds: 300, memory: '256MiB' },
+  { timeoutSeconds: 300, memory: '256MiB', cpu: 1 },
   async (storageEvent): Promise<void> => {
     const data = storageEvent.data;
     const filePath = data.name ? data.name : '';
@@ -180,7 +181,7 @@ const addIntroOutro = onObjectFinalized(
         audioFilesToMerge.OUTRO = data.metadata.outroUrl;
         customMetadata.outroUrl = data.metadata.outroUrl;
       }
-      logger.log('Audio File Download Paths', audioFilesToMerge);
+      logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
       const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge);
       await docRef.update({
         status: {
@@ -231,7 +232,23 @@ const addIntroOutro = onObjectFinalized(
       });
       return logger.log('Files have been merged succesfully');
     } catch (e) {
-      return logger.error(e);
+      let message = 'Something Went Wrong';
+      if (e instanceof HttpsError) {
+        message = e.message;
+      } else if (isAxiosError(e)) {
+        const axiosError = e as AxiosError;
+        message = axiosError.message;
+      } else if (e instanceof Error) {
+        message = e.message;
+      }
+      await docRef.update({
+        status: {
+          ...sermonStatus,
+          audioStatus: sermonStatusType.ERROR,
+          message: message,
+        },
+      });
+      return logger.error('Error', e);
     } finally {
       const promises: Promise<void>[] = [];
       tempFiles.forEach((file) => {
