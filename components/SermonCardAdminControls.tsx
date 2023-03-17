@@ -1,13 +1,11 @@
 import { FunctionComponent, useState } from 'react';
 
 import storage, { deleteObject, getDownloadURL, ref } from '../firebase/storage';
-import firestore, { arrayRemove, deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
+import firestore, { deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
 
-import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { createFunction, createFunctionV2 } from '../utils/createFunction';
 
-import { seriesConverter } from '../types/Series';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
 
@@ -29,7 +27,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   const { user } = useAuth();
 
   const [uploadToSubsplashPopup, setUploadToSubsplashPopup] = useState<boolean>(false);
-  const [autoPublish, setAutoPublish] = useState<boolean>(false);
+
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState<boolean>(false);
 
   const handleDelete = async () => {
@@ -54,16 +52,11 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       if (!successful) {
         return;
       }
-
       const firebasePromises = [
         deleteObject(ref(storage, `sermons/${sermon.key}`)),
         deleteDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter)),
       ];
 
-      if (sermon.series?.name !== undefined) {
-        const seriesRef = doc(firestore, 'series', sermon.series.id).withConverter(seriesConverter);
-        firebasePromises.push(updateDoc(seriesRef, { sermonIds: arrayRemove(sermon.key) }));
-      }
       await Promise.allSettled(firebasePromises);
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
@@ -140,35 +133,6 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     }
   };
 
-  const uploadToSubsplash = async () => {
-    const uploadToSubsplash = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
-    const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`));
-    const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
-      title: sermon.title,
-      subtitle: sermon.subtitle,
-      speakers: sermon.speakers,
-      autoPublish,
-      audioTitle: sermon.title,
-      audioUrl: url,
-      topics: sermon.topics,
-      description: sermon.description,
-      images: sermon.images,
-      date: new Date(sermon.dateMillis),
-    };
-    setIsUploadingToSubsplash(true);
-    try {
-      // TODO [1]: Fix return Type
-      const response = (await uploadToSubsplash(data)) as unknown as { id: string };
-      const id = response.id;
-      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
-      await updateDoc(sermonRef, { subsplashId: id, status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });
-    } catch (error) {
-      alert(error);
-    }
-    setIsUploadingToSubsplash(false);
-    setUploadToSubsplashPopup(false);
-  };
-
   const deleteFromSubsplash = async () => {
     try {
       await deleteFromSubsplashErrorThrowable();
@@ -178,22 +142,23 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     }
   };
 
+  const handleFirestoreDeleteFromSubsplash = async () => {
+    updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
+      subsplashId: deleteField(),
+      status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
+    });
+  };
+
   const deleteFromSubsplashErrorThrowable = async () => {
     const deleteFromSubsplashCall = createFunction<string, void>('deleteFromSubsplash');
     try {
       setIsUploadingToSubsplash(true);
       await deleteFromSubsplashCall(sermon.subsplashId!);
-      await updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
-        subsplashId: deleteField(),
-        status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
-      });
+      await handleFirestoreDeleteFromSubsplash();
       setIsUploadingToSubsplash(false);
     } catch (error: any) {
       if (error.code === 'functions/not-found') {
-        await updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
-          subsplashId: deleteField(),
-          status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
-        });
+        await handleFirestoreDeleteFromSubsplash();
       } else {
         throw error;
       }
@@ -210,12 +175,10 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       isUploadingToSoundCloud={isUploadingToSoundCloud}
       isUploadingToSubsplash={isUploadingToSubsplash}
       uploadToSubsplashPopup={uploadToSubsplashPopup}
-      autoPublish={autoPublish}
       setUploadToSubsplashPopup={setUploadToSubsplashPopup}
-      setAutoPublish={setAutoPublish}
+      setIsUploadingToSubsplash={setIsUploadingToSubsplash}
       handleDelete={handleDelete}
       uploadToSoundCloud={uploadToSoundCloud}
-      uploadToSubsplash={uploadToSubsplash}
       deleteFromSoundCloud={deleteFromSoundCloud}
       deleteFromSubsplash={deleteFromSubsplash}
     />

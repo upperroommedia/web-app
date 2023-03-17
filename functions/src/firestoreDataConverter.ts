@@ -4,19 +4,19 @@ import { Sermon } from '../../types/SermonTypes';
 import { ISpeaker } from '../../types/Speaker';
 import { ImageType } from '../../types/Image';
 import { Timestamp } from 'firebase/firestore';
+import { Series } from '../../types/Series';
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
     return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data();
-
+    console.log('HERHE', snapshot.data());
     return {
       ...data,
-      dateMillis: snapshot.data().date.toMillis(),
-      dateString: getDateString(snapshot.data().date.toDate()),
+      dateMillis: date.toMillis(),
+      dateString: getDateString(date.toDate()),
     };
   },
 };
@@ -39,11 +39,11 @@ export const firestoreAdminImagesConverter: FirestoreDataConverter<ImageType> = 
   },
 };
 
-// export const firestoreAdminImagesConverter: FirestoreDataConverter<> = {
-//   toFirestore: (image: IImage): IImage => {
-//     return image;
-//   },
-//   fromFirestore: (snapshot: QueryDocumentSnapshot<IImage>): IImage => {
-//     return snapshot.data();
-//   },
-// };
+export const firestoreAdminSeriesConverter: FirestoreDataConverter<Series> = {
+  toFirestore: (series: Series): Series => {
+    return series;
+  },
+  fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
+    return snapshot.data();
+  },
+};

@@ -1,15 +1,17 @@
-import firestore, { doc, setDoc } from '../../firebase/firestore';
-import { v4 } from 'uuid';
-import { seriesConverter } from '../../types/Series';
+import firestore, { setDoc, collection, doc } from '../../firebase/firestore';
+import { Series, seriesConverter } from '../../types/Series';
 
-const addNewSeries = async (value: string) => {
-  const id = v4();
-  await setDoc(doc(firestore, 'series', id).withConverter(seriesConverter), {
-    id,
-    name: value,
-    sermonIds: [],
+const addNewSeries = async (series: Series) => {
+  // create series on firestore
+  const newSeriesRef = doc(collection(firestore, 'series')).withConverter(seriesConverter);
+  await setDoc(newSeriesRef, {
+    id: newSeriesRef.id,
+    name: series.name,
+    count: series.count,
+    overflowBehavior: series.overflowBehavior,
+    images: series.images,
   });
-  return id;
+  return newSeriesRef.id;
 };
 
 export default addNewSeries;

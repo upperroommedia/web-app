@@ -1,53 +1,52 @@
-import firestore, { doc, updateDoc } from '../../firebase/firestore';
+import firestore, { collection, doc, getDocs, updateDoc, writeBatch } from '../../firebase/firestore';
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { createFunction } from '../../utils/createFunction';
 import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
 import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
-interface IEditSermon extends Omit<Sermon, 'status' | 'durationSeconds'> {}
+import { Series, seriesConverter } from '../../types/Series';
 
-const editSermon = async (props: IEditSermon) => {
+const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
   const promises: Promise<any>[] = [];
-  if (props.subsplashId) {
+  if (sermon.subsplashId) {
     const editSubsplashSermon = createFunction<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
     const input: EDIT_SUBSPLASH_SERMON_INCOMING_DATA = {
-      subsplashId: props.subsplashId,
-      title: props.title,
-      subtitle: props.subtitle,
-      description: props.description,
-      speakers: props.speakers,
-      topics: props.topics,
-      images: props.images,
-      date: new Date(props.dateMillis),
+      subsplashId: sermon.subsplashId,
+      title: sermon.title,
+      subtitle: sermon.subtitle,
+      description: sermon.description,
+      speakers: sermon.speakers,
+      topics: sermon.topics,
+      images: sermon.images,
+      date: new Date(sermon.dateMillis),
     };
     promises.push(editSubsplashSermon(input));
   }
 
-  if (props.soundCloudTrackId) {
+  if (sermon.soundCloudTrackId) {
     const editSoundCloudSermon = createFunction<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>('editSoundCloudSermon');
     const data: EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA = {
-      trackId: props.soundCloudTrackId,
-      title: props.title,
-      description: props.description,
-      tags: [props.subtitle, ...props.topics],
-      speakers: props.speakers.map((speaker) => speaker.name),
-      imageUrl: props.images.find((image) => image.type === 'square')?.downloadLink,
+      trackId: sermon.soundCloudTrackId,
+      title: sermon.title,
+      description: sermon.description,
+      tags: [sermon.subtitle, ...sermon.topics],
+      speakers: sermon.speakers.map((speaker) => speaker.name),
+      imageUrl: sermon.images.find((image) => image.type === 'square')?.downloadLink,
     };
     promises.push(editSoundCloudSermon(data));
   }
 
-  const sermonRef = doc(firestore, 'sermons', props.key).withConverter(sermonConverter);
+  const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
   promises.push(
     updateDoc(sermonRef.withConverter(sermonConverter), {
-      title: props.title,
-      subtitle: props.subtitle,
-      description: props.description,
-      series: props.series,
-      speakers: props.speakers,
-      topics: props.topics,
-      images: props.images,
-      dateMillis: props.dateMillis,
+      title: sermon.title,
+      subtitle: sermon.subtitle,
+      description: sermon.description,
+      speakers: sermon.speakers,
+      topics: sermon.topics,
+      images: sermon.images,
+      dateMillis: sermon.dateMillis,
     })
   );
   const results = await Promise.allSettled(promises);
@@ -56,5 +55,33 @@ const editSermon = async (props: IEditSermon) => {
       alert(result.reason);
     }
   }
+
+  // update sermonSeries
+  const sermonSeriesSnapshot = await getDocs(
+    collection(firestore, `sermons/${sermonRef.id}/sermonSeries`).withConverter(seriesConverter)
+  );
+
+  const seriesInFirebase = new Set<string>();
+  const batch = writeBatch(firestore);
+  sermonSeriesSnapshot.forEach((snapshot) => {
+    if (sermonSeries.find((series) => series.id === snapshot.id)) {
+      // series exists in both lists
+      seriesInFirebase.add(snapshot.id);
+    } else {
+      // series exists in firebase but not updated list
+      batch.delete(doc(firestore, `series/${snapshot.id}/seriesSermons/${sermon.key}`));
+    }
+  });
+
+  // add any new series to firebase
+  sermonSeries.forEach((series) => {
+    if (!seriesInFirebase.has(series.id)) {
+      batch.set(
+        doc(firestore, `series/${series.id}/seriesSermons/${sermon.key}`).withConverter(sermonConverter),
+        sermon
+      );
+    }
+  });
+  await batch.commit();
 };
 export default editSermon;

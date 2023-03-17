@@ -8,14 +8,6 @@ export interface ISpeaker {
   name: string;
   images: ImageType[];
   sermonCount: number;
-  _highlightResult?: {
-    name: {
-      value: string;
-      matchLevel: 'none' | 'partial' | 'full';
-      fullyHighlighted: boolean;
-      matchedWords: string[];
-    };
-  };
 }
 
 export const speakerConverter: FirestoreDataConverter<ISpeaker> = {

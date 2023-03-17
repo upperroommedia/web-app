@@ -58,10 +58,17 @@ export const AudioPlayerProvider = ({ children }: any) => {
   };
 
   const previousSermon = () => {
-    dispatch({
-      type: 'SET_CURRENT_SERMON_INDEX',
-      payload: (state.currentSermonIndex - 1) % state.playlist.length,
-    });
+    if (state.currentSermonIndex === 0) {
+      dispatch({
+        type: 'SET_CURRENT_SERMON_INDEX',
+        payload: state.playlist.length - 1,
+      });
+    } else {
+      dispatch({
+        type: 'SET_CURRENT_SERMON_INDEX',
+        payload: (state.currentSermonIndex - 1) % state.playlist.length,
+      });
+    }
   };
 
   const setCurrentSermonUrl = (url: string) => {
