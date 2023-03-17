@@ -6,7 +6,11 @@ import Skeleton from '@mui/material/Skeleton';
 import ListItem from '@mui/material/ListItem';
 import Box from '@mui/material/Box';
 
-export default function SermonListCardSkeloten() {
+interface SermonListCardSkelotenProps {
+  minimal?: boolean;
+}
+
+export default function SermonListCardSkeloten({ minimal = false }: SermonListCardSkelotenProps) {
   return (
     <>
       <Divider />
@@ -64,7 +68,11 @@ export default function SermonListCardSkeloten() {
               }}
             />
           </Box>
-          <Box display="flex" alignItems="center" sx={{ gridArea: 'playStatus', paddingTop: { xs: 1, sm: 0 } }}>
+          <Box
+            display={minimal ? 'none' : 'flex'}
+            alignItems="center"
+            sx={{ gridArea: 'playStatus', paddingTop: { xs: 1, sm: 0 } }}
+          >
             <Skeleton
               variant="text"
               sx={{
@@ -73,8 +81,14 @@ export default function SermonListCardSkeloten() {
               }}
             />
           </Box>
-          <Skeleton variant="rectangular" sx={{ gridArea: 'actionItems', width: 150, height: 30, margin: 1 }} />
-          <Skeleton variant="circular" sx={{ gridArea: 'playPause', width: 35, height: 35, margin: 1 }} />
+          <Skeleton
+            variant="rectangular"
+            sx={{ gridArea: 'actionItems', width: 150, height: 30, margin: 1, display: minimal ? 'none' : 'unset' }}
+          />
+          <Skeleton
+            variant="circular"
+            sx={{ gridArea: 'playPause', width: 35, height: 35, margin: 1, display: minimal ? 'none' : 'unset' }}
+          />
         </Card>
       </ListItem>
     </>

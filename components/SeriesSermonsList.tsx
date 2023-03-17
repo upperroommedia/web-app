@@ -20,7 +20,7 @@ const SeriesSermonList: FunctionComponent<SeriesSermonListProps> = ({ seriesId }
       {error ? (
         <Box> {error?.message} </Box>
       ) : loading ? (
-        <SermonListSkeloten />
+        <SermonListSkeloten minimal />
       ) : (
         <SermonsList sermons={sermons!} minimal />
       )}
