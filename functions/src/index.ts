@@ -22,6 +22,7 @@ import editSoundCloudSermon from './editSoundCloudSermon';
 import seriesSermonOnDelete from './DocumentListeners/Series/seriesSermonOnDelete';
 import seriesSermonOnCreate from './DocumentListeners/Series/seriesSermonOnCreate';
 import seriesOnDelete from './DocumentListeners/Series/seriesOnDelete';
+import seriesOnUpdate from './DocumentListeners/Series/seriesOnUpdate';
 import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
 admin.initializeApp();
 
@@ -44,5 +45,6 @@ exports.uploadtosoundcloud = uploadtosoundcloud;
 exports.deletefromsoundcloud = deletefromsoundcloud;
 exports.sermonWriteTrigger = sermonWriteTrigger;
 exports.seriesOnDelete = seriesOnDelete;
+exports.seriesOnUpdate = seriesOnUpdate;
 exports.seriesSermonOnDelete = seriesSermonOnDelete;
 exports.seriesSermonOnCreate = seriesSermonOnCreate;

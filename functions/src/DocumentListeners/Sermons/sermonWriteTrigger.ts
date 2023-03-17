@@ -31,11 +31,11 @@ const sermonWriteTrigger = firestore.document('sermons/{sermonId}').onWrite(asyn
       .collectionGroup('seriesSermons')
       .where('key', '==', sermonId)
       .get();
-    const batch = firestoreAdmin().batch();
     if (sermonBefore && sermonAfter) {
       // Update
       logger.info(`Sermon ${sermonId} updated`);
       // get all sermons in Sermon
+      const batch = firestoreAdmin().batch();
       seriesSermonSnapshot.docs.forEach((doc) => {
         batch.update(doc.ref, { ...sermonAfter });
       });
