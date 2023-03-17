@@ -102,6 +102,7 @@ const ImageSelector = (props: {
       }
     } catch (e) {
       alert(e);
+      setImageUploading(false);
     }
   };
 
