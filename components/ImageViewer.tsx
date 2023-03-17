@@ -130,7 +130,7 @@ const ImageViewer = (props: propsType) => {
                 setImageSelectorPopup(false);
               }}
             >
-              Set {props.speaker ? 'Speaker' : 'Sermon'} Image
+              Confirm
             </Button>
           }
         >
