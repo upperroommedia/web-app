@@ -49,9 +49,9 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   }, [isUploadingToSoundCloud, isUploadingToSubsplash]);
   return (
     <>
-      <Box display="flex">
+      <Box display="flex" alignItems="center">
         {isUploadingToSoundCloud ? (
-          <CircularProgress size={24} />
+          <CircularProgress size={24} sx={{ margin: 1 }} />
         ) : sermon.status.soundCloud === uploadStatus.UPLOADED ? (
           <Tooltip title="Remove From Soundcloud">
             <span>
@@ -70,7 +70,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           </Tooltip>
         )}
         {isUploadingToSubsplash ? (
-          <CircularProgress size={24} />
+          <CircularProgress size={24} sx={{ margin: 1 }} />
         ) : sermon.status.subsplash === uploadStatus.UPLOADED ? (
           <Tooltip title="Remove From Subsplash">
             <span>
