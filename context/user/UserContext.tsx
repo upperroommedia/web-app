@@ -32,7 +32,7 @@ const getUserInfoFromFirestore = async (uid: string) => {
   const userRef = doc(firestore, 'users', uid);
   const userSnap = await getDoc(userRef);
   if (userSnap.exists()) {
-    return { firstName: userSnap.data().firstName as string, lastName: userSnap.data().lastName as string };
+    return { firstName: userSnap.data().firstName as string, lastName: userSnap.data().lastName as string } as const;
   }
 };
 
@@ -66,6 +66,7 @@ export const UserProvider = ({ children }: any) => {
       setLoading(false);
     });
     const handle = setInterval(async () => {
+      // TODO: figure out why refresh token is reloading the page
       // eslint-disable-next-line no-console
       console.log(`refreshing token...`);
       const user = auth.currentUser;

@@ -11,10 +11,8 @@ export default function NavMenuItem({ path, children, sx, ...props }: INavMenuIt
   const active = (path === 'Home' && segment === '/') || `/${path.toLowerCase()}` === segment.toLocaleLowerCase();
   return (
     <MenuItem
-      {...props}
       disableRipple
       sx={{
-        ...sx,
         '&:hover': {
           bgcolor: 'rgb(55,65,81)',
         },
@@ -25,7 +23,9 @@ export default function NavMenuItem({ path, children, sx, ...props }: INavMenuIt
         borderRadius: '0.375rem',
         fontWeight: '500',
         fontFamily: 'ui-sans-serif',
+        ...sx,
       }}
+      {...props}
     >
       {children}
     </MenuItem>
