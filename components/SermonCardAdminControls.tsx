@@ -1,6 +1,5 @@
 import { FunctionComponent, useState } from 'react';
 
-import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
 
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
@@ -64,13 +63,17 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     const uploadToSoundCloud = createFunctionV2<UploadToSoundCloudInputType, UploadToSoundCloudReturnType>(
       'uploadtosoundcloud'
     );
+    const defaultImagePath = 'app-images/upper_room_media_logo.png';
+    const imageId = sermon.images.find((image) => image.type === 'square')?.id;
+    const imageStoragePath = imageId ? `speaker-images/${imageId}` : defaultImagePath;
+
     const data: UploadToSoundCloudInputType = {
       title: sermon.title,
       description: sermon.description,
       tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
-      audioUrl: await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`)),
-      imageUrl: sermon.images.find((image) => image.type === 'square')?.downloadLink,
+      audioStoragePath: `intro-outro-sermons/${sermon.key}`,
+      imageStoragePath,
     };
     try {
       const result = await uploadToSoundCloud(data);
