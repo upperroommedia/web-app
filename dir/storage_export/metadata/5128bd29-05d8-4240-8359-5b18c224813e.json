@@ -6,15 +6,13 @@
   "contentType": "audio/mpeg",
   "storageClass": "STANDARD",
   "contentDisposition": "inline",
-  "downloadTokens": [
-    "8abc7b31-e614-4aa7-aaaf-f6d5472b21ad"
-  ],
+  "downloadTokens": ["8abc7b31-e614-4aa7-aaaf-f6d5472b21ad"],
   "etag": "FzmB8eRu2Yl7E9E8kyY/kVvJUG0",
   "customMetadata": {
     "startTime": "0",
     "duration": "452.362458",
-    "introUrl": "http://localhost:9199/v0/b/urm-app.appspot.com/o/intros%2FThe%20Well_intro.mp3?alt=media&token=ed372987-2a46-424a-b6cd-97bcc445e245",
-    "outroUrl": "http://localhost:9199/v0/b/urm-app.appspot.com/o/outros%2Fdefault_outro.mp3?alt=media&token=17b3faa8-24f6-479a-924a-0d341af057f8"
+    "introUrl": "http://127.0.0.1:9199/v0/b/urm-app.appspot.com/o/intros%2FThe%20Well_intro.mp3?alt=media&token=ed372987-2a46-424a-b6cd-97bcc445e245",
+    "outroUrl": "http://127.0.0.1:9199/v0/b/urm-app.appspot.com/o/outros%2Fdefault_outro.mp3?alt=media&token=17b3faa8-24f6-479a-924a-0d341af057f8"
   },
   "timeCreated": "2023-03-19T20:15:12.178Z",
   "updated": "2023-03-19T20:15:12.178Z",

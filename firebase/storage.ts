@@ -8,8 +8,8 @@ export const imageStorage = getStorage(firebase, 'urm-app-images');
 
 if (isDevelopment) {
   console.log('Connecting to Storage emulator');
-  connectStorageEmulator(storage, 'localhost', 9199);
-  connectStorageEmulator(imageStorage, 'localhost', 9199);
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  connectStorageEmulator(imageStorage, '127.0.0.1', 9199);
 }
 export default storage;
 export * from 'firebase/storage';
