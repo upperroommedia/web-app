@@ -48,7 +48,6 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   useEffect(() => {
     setDisableButtons(isUploadingToSoundCloud || isUploadingToSubsplash);
   }, [isUploadingToSoundCloud, isUploadingToSubsplash]);
-  console.log('Is Develpoment', isDevelopment);
   return (
     <>
       <Box display="flex" alignItems="center">
