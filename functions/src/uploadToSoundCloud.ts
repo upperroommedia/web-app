@@ -5,11 +5,11 @@ import { logger } from 'firebase-functions/v2';
 
 export interface UploadToSoundCloudInputType {
   audioStoragePath: string;
-  imageStoragePath: string;
   title: string;
   speakers: string[];
   tags: string[];
   description: string;
+  imageStoragePath?: string;
 }
 
 export type UploadToSoundCloudReturnType = {
@@ -30,7 +30,7 @@ const uploadToSoundCloudCall = onCall(
       data: {
         title: data.title,
         audioStoragePath: data.audioStoragePath,
-        imageStoragePath: data.imageStoragePath,
+        ...(data.imageStoragePath && { imageStoragePath: data.imageStoragePath }),
         tags: reformatedTags,
         description: data.description,
       },
