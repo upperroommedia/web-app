@@ -65,20 +65,22 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
 };
 
 const currentDate = new Date();
-export const emptySermon: Sermon = {
-  key: uuidv4(),
-  title: '',
-  subtitle: '',
-  description: '',
-  dateMillis: currentDate.getTime(),
-  durationSeconds: 0,
-  speakers: [],
-  topics: [],
-  dateString: currentDate.toLocaleDateString(),
-  status: {
-    soundCloud: uploadStatus.NOT_UPLOADED,
-    subsplash: uploadStatus.NOT_UPLOADED,
-    audioStatus: sermonStatusType.PENDING,
-  },
-  images: [],
+export const createEmptySermon = (): Sermon => {
+  return {
+    key: uuidv4(),
+    title: '',
+    subtitle: '',
+    description: '',
+    dateMillis: currentDate.getTime(),
+    durationSeconds: 0,
+    speakers: [],
+    topics: [],
+    dateString: currentDate.toLocaleDateString(),
+    status: {
+      soundCloud: uploadStatus.NOT_UPLOADED,
+      subsplash: uploadStatus.NOT_UPLOADED,
+      audioStatus: sermonStatusType.PENDING,
+    },
+    images: [],
+  };
 };

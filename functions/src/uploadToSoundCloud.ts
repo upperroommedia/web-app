@@ -44,7 +44,7 @@ const uploadToSoundCloud = async ({
   audioImageFiles[1] && formData.append('image', audioImageFiles[1], { filename: 'image.jpg' });
   formData.append('tags', reformatedTags);
   formData.append('description', description);
-  logger.log('formData Headers', formData.getHeaders());
+  logger.log('formData Headers', JSON.stringify(formData.getHeaders()));
   const config: AxiosRequestConfig = {
     method: 'POST',
     url: 'https://hook.eu1.make.com/q1tpo6rfktqe3a8cexb79n70j6sq0y65',

@@ -15,6 +15,7 @@ const seriesSermonOnDelete = firestore
       batch.update(snapshot.ref.withConverter(firestoreAdminSeriesConverter), {
         count: FieldValue.increment(-1),
       });
+      return batch.commit();
     } catch (error) {
       throw handleError(error);
     }

@@ -18,6 +18,7 @@ interface uploadFileProps {
 }
 
 const uploadFile = async (props: uploadFileProps) => {
+  console.info(`uploading sermon ${props.sermon.title} with key ${props.sermon.key}`);
   const sermonRef = ref(storage, `sermons/${props.sermon.key}`);
 
   // const sermonRef = ref(storage, `sermons/${file.name}`);
@@ -29,7 +30,9 @@ const uploadFile = async (props: uploadFileProps) => {
     try {
       introRef = await getDownloadURL(ref(storage, `intros/default_intro.mp3`));
     } catch (error) {
-      throw new Error('Could not find intro audio for sermon');
+      throw new Error(
+        'Could not find intro audio for sermon: you must have a file called "default_intro.mp3" in your storage bucket'
+      );
     }
   }
   try {
@@ -38,7 +41,9 @@ const uploadFile = async (props: uploadFileProps) => {
     try {
       outroRef = await getDownloadURL(ref(storage, `outros/default_outro.mp3`));
     } catch (error) {
-      throw new Error('Could not find outro audio for sermon');
+      throw new Error(
+        'Could not find outro audio for sermon: you must have a file called "default_outro.mp3" in your storage bucket'
+      );
     }
   }
   const metadata: UploadMetadata = {
