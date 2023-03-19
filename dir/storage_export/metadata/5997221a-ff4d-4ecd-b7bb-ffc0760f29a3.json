@@ -1,0 +1,19 @@
+{
+  "name": "intros/default_intro.mp3",
+  "bucket": "urm-app.appspot.com",
+  "metageneration": 1,
+  "generation": 1679254908234,
+  "contentType": "audio/mpeg",
+  "storageClass": "STANDARD",
+  "contentDisposition": "inline",
+  "downloadTokens": [
+    "7c2b4d4e-c121-4413-94d5-a2c84892cfd3"
+  ],
+  "etag": "C3QMGxnORUu79Kek3TYFkYtwi7o",
+  "customMetadata": {},
+  "timeCreated": "2023-03-19T19:41:48.235Z",
+  "updated": "2023-03-19T19:41:48.235Z",
+  "size": 402725,
+  "md5Hash": "K3mVM6MsAZl5vlvh5G+ePA==",
+  "crc32c": "2153294091"
+}
