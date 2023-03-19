@@ -14,6 +14,7 @@ import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import UploadToSubsplashPopup from './UploadToSubsplashPopup';
+import { isDevelopment } from '../firebase/firebase';
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
@@ -47,6 +48,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   useEffect(() => {
     setDisableButtons(isUploadingToSoundCloud || isUploadingToSubsplash);
   }, [isUploadingToSoundCloud, isUploadingToSubsplash]);
+  console.log('Is Develpoment', isDevelopment);
   return (
     <>
       <Box display="flex" alignItems="center">
@@ -55,15 +57,15 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
         ) : sermon.status.soundCloud === uploadStatus.UPLOADED ? (
           <Tooltip title="Remove From Soundcloud">
             <span>
-              <IconButton aria-label="Upload to Subsplash" disabled={disableButtons} onClick={deleteFromSoundCloud}>
+              <IconButton aria-label="Remove from Soundcloud" disabled={disableButtons} onClick={deleteFromSoundCloud}>
                 <UnpublishedIcon style={{ color: 'orangered' }} />
               </IconButton>
             </span>
           </Tooltip>
         ) : (
-          <Tooltip title="Upload to Soundcloud">
+          <Tooltip title={isDevelopment ? 'Cannot upload to Soundcloud from dev environment' : 'Upload to Soundcloud'}>
             <span>
-              <IconButton disabled={disableButtons} onClick={() => uploadToSoundCloud()}>
+              <IconButton disabled={disableButtons || isDevelopment} onClick={() => uploadToSoundCloud()}>
                 <Image src={SoundCloudLogo} alt="Soundcloud Logo" width={24} height={24} />
               </IconButton>
             </span>
