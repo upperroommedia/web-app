@@ -10,6 +10,7 @@ import { sermonConverter } from '../types/Sermon';
 
 import useAuth from '../context/user/UserContext';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
+import { getSquareImageStoragePath } from '../utils/utils';
 
 export interface AdminControlsProps {
   sermon: Sermon;
@@ -63,9 +64,6 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     const uploadToSoundCloud = createFunctionV2<UploadToSoundCloudInputType, UploadToSoundCloudReturnType>(
       'uploadtosoundcloud'
     );
-    const defaultImagePath = 'app-images/upper_room_media_logo.png';
-    const imageId = sermon.images.find((image) => image.type === 'square')?.id;
-    const imageStoragePath = imageId ? `speaker-images/${imageId}` : defaultImagePath;
 
     const data: UploadToSoundCloudInputType = {
       title: sermon.title,
@@ -73,7 +71,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
       audioStoragePath: `intro-outro-sermons/${sermon.key}`,
-      imageStoragePath,
+      imageStoragePath: getSquareImageStoragePath(sermon),
     };
     try {
       const result = await uploadToSoundCloud(data);

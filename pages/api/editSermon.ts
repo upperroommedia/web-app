@@ -6,6 +6,7 @@ import { createFunction } from '../../utils/createFunction';
 import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
 import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
 import { Series, seriesConverter } from '../../types/Series';
+import { getSquareImageStoragePath } from '../../utils/utils';
 
 const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
   const promises: Promise<any>[] = [];
@@ -32,7 +33,7 @@ const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
       description: sermon.description,
       tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
-      imageUrl: sermon.images.find((image) => image.type === 'square')?.downloadLink,
+      imageStoragePath: getSquareImageStoragePath(sermon),
     };
     promises.push(editSoundCloudSermon(data));
   }
