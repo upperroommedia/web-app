@@ -15,7 +15,7 @@ if (!privateKey || !clientEmail || !projectId) {
 if (!firebaseAdmin.apps.length) {
   if (isDevelopment) {
     console.log('Setting Admin SDK to use emulator');
-    process.env.FIREBASE_AUTH_EMULATOR_HOST = 'localhost:9099';
+    process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
   }
 
   firebaseAdmin.initializeApp({
