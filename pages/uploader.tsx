@@ -15,7 +15,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import Cancel from '@mui/icons-material/Cancel';
 
 import firestore, { doc, getDoc } from '../firebase/firestore';
-import { emptySermon } from '../types/Sermon';
+import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
@@ -90,7 +90,7 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
-  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || emptySermon);
+  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon());
   const [sermonSeries, setSermonSeries] = useState<Series[]>(props.existingSeries || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
@@ -150,7 +150,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
-    setSermon(emptySermon);
+    setSermon(createEmptySermon());
     setSermonSeries([]);
     setDate(new Date());
     setFile(undefined);

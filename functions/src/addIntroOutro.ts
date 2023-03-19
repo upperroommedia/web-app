@@ -64,7 +64,7 @@ const mergeFiles = (inputs: string[], outputFileName: string): Promise<string> =
       .on('error', function (err) {
         return reject(err);
       })
-      .mergeToFile(tmpFilePath);
+      .mergeToFile(tmpFilePath, os.tmpdir());
   });
 };
 
@@ -257,8 +257,12 @@ const addIntroOutro = onObjectFinalized(
         logger.log('Deleting temp file', file);
         promises.push(unlink(file));
       });
-      await Promise.all(promises);
-      logger.log('Temp files deleted');
+      try {
+        await Promise.all(promises);
+        logger.log('All temp files deleted');
+      } catch (err) {
+        logger.warn('Error when deleting temporary files', err);
+      }
     }
   }
 );
