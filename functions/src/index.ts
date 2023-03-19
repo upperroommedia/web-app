@@ -24,6 +24,7 @@ import seriesSermonOnDelete from './DocumentListeners/Series/seriesSermonOnDelet
 import seriesSermonOnCreate from './DocumentListeners/Series/seriesSermonOnCreate';
 import seriesOnDelete from './DocumentListeners/Series/seriesOnDelete';
 import seriesOnUpdate from './DocumentListeners/Series/seriesOnUpdate';
+import sermonOnDelete from './DocumentListeners/Sermons/sermonOnDelete';
 import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
 admin.initializeApp();
 
@@ -46,6 +47,7 @@ exports.saveimage = saveimage;
 exports.uploadtosoundcloud = uploadtosoundcloud;
 exports.deletefromsoundcloud = deletefromsoundcloud;
 exports.sermonWriteTrigger = sermonWriteTrigger;
+exports.sermonOnDelete = sermonOnDelete;
 exports.seriesOnDelete = seriesOnDelete;
 exports.seriesOnUpdate = seriesOnUpdate;
 exports.seriesSermonOnDelete = seriesSermonOnDelete;

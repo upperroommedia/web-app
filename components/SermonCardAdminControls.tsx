@@ -1,6 +1,6 @@
 import { FunctionComponent, useState } from 'react';
 
-import storage, { deleteObject, getDownloadURL, ref } from '../firebase/storage';
+import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
 
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
@@ -52,12 +52,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       if (!successful) {
         return;
       }
-      const firebasePromises = [
-        deleteObject(ref(storage, `sermons/${sermon.key}`)),
-        deleteDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter)),
-      ];
-
-      await Promise.allSettled(firebasePromises);
+      await deleteDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter));
       setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
     } catch (error) {
       alert(error);

@@ -12,15 +12,13 @@ import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/Sermon
 import { firestoreAdminSermonConverter } from './firestoreDataConverter';
 import { HttpsError } from 'firebase-functions/v2/https';
 
-const tempFiles = new Set<string>();
-
 type filePaths = {
   INTRO: string | undefined;
   CONTENT: string;
   OUTRO: string | undefined;
 };
 
-const createTempFile = (fileName: string) => {
+const createTempFile = (fileName: string, tempFiles: Set<string>) => {
   try {
     if (!existsSync(os.tmpdir())) {
       mkdirSync(os.tmpdir());
@@ -33,8 +31,13 @@ const createTempFile = (fileName: string) => {
   }
 };
 
-const trimAndTranscode = (filePath: string, startTime?: number, duration?: number): Promise<string> => {
-  const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'));
+const trimAndTranscode = (
+  filePath: string,
+  tempFiles: Set<string>,
+  startTime?: number,
+  duration?: number
+): Promise<string> => {
+  const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'), tempFiles);
   const proc = ffmpeg().format('mp3').input(filePath);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
@@ -50,8 +53,8 @@ const trimAndTranscode = (filePath: string, startTime?: number, duration?: numbe
   });
 };
 
-const mergeFiles = (inputs: string[], outputFileName: string): Promise<string> => {
-  const tmpFilePath = createTempFile(outputFileName);
+const mergeFiles = (inputs: string[], outputFileName: string, tempFiles: Set<string>): Promise<string> => {
+  const tmpFilePath = createTempFile(outputFileName, tempFiles);
   const proc = ffmpeg().format('mp3');
   inputs.forEach((input) => {
     proc.input(input);
@@ -120,13 +123,13 @@ async function downloadFile(fileUrl: string, outputLocationPath: string): Promis
   });
 }
 
-const downloadFiles = async (bucket: Bucket, filePaths: filePaths): Promise<filePaths> => {
+const downloadFiles = async (bucket: Bucket, filePaths: filePaths, tempFiles: Set<string>): Promise<filePaths> => {
   const tempFilePaths: filePaths = { CONTENT: '', INTRO: undefined, OUTRO: undefined };
   const promises: Promise<unknown>[] = [];
   // get key and value of filePaths
   for (const [key, filePath] of Object.entries(filePaths) as [keyof filePaths, string | undefined][]) {
     if (filePath) {
-      tempFilePaths[key] = createTempFile(path.basename(filePath).split('?')[0]);
+      tempFilePaths[key] = createTempFile(path.basename(filePath).split('?')[0], tempFiles);
       if (key === 'CONTENT') {
         promises.push(bucket.file(filePath).download({ destination: tempFilePaths[key] }));
       } else {
@@ -162,6 +165,7 @@ const addIntroOutro = onObjectFinalized(
       soundCloud: uploadStatus.NOT_UPLOADED,
       audioStatus: sermonStatusType.PROCESSING,
     };
+    const tempFiles = new Set<string>();
     try {
       await docRef.update({
         status: {
@@ -182,7 +186,7 @@ const addIntroOutro = onObjectFinalized(
         customMetadata.outroUrl = data.metadata.outroUrl;
       }
       logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
-      const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge);
+      const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge, tempFiles);
       await docRef.update({
         status: {
           ...sermonStatus,
@@ -192,6 +196,7 @@ const addIntroOutro = onObjectFinalized(
       });
       tempFilePaths.CONTENT = await trimAndTranscode(
         tempFilePaths.CONTENT,
+        tempFiles,
         parseFloat(data.metadata?.startTime || ''),
         parseFloat(data.metadata?.duration || '')
       );
@@ -216,7 +221,7 @@ const addIntroOutro = onObjectFinalized(
 
         //merge files
         logger.log('Merging files', filePathsArray, 'to', outputFileName, '...');
-        const tmpFilePath = await mergeFiles(filePathsArray, outputFileName);
+        const tmpFilePath = await mergeFiles(filePathsArray, outputFileName, tempFiles);
 
         //upload merged file
         logger.log('Uploading merged file', tmpFilePath, 'to intro-outro-sermons/', fileName);
