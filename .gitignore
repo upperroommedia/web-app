@@ -31,3 +31,6 @@
 
 # vercel
 .vercel
+
+# service account
+sa.json
