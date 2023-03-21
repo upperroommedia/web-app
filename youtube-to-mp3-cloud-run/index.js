@@ -15,7 +15,11 @@ const firebaseApp = initializeApp({
   }),
 });
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: '*',
+  })
+);
 
 app.get('/', async (req, res) => {
   if (!req.headers.authorization) {
