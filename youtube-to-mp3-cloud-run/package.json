@@ -1,0 +1,32 @@
+{
+  "name": "youtube-to-mp3-cloud-run",
+  "version": "0.0.1",
+  "description": "Takes in a youtube url and returns back a stream mp3",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "lint": "eslint **.js",
+    "fix": "eslint --fix *.js",
+    "test": "mocha test/*.test.js --check-leaks --timeout 5000"
+  },
+  "author": "Google LLC",
+  "license": "0BSD",
+  "engines": {
+    "node": ">=11.14"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "handlebars": "^4.7.4",
+    "ytdl-core": "^4.11.2"
+  },
+  "devDependencies": {
+    "eslint": "8.29.0",
+    "eslint-config-prettier": "8.5.0",
+    "eslint-plugin-node": "11.1.0",
+    "eslint-plugin-prettier": "4.2.1",
+    "eslint-plugin-promise": "6.1.1",
+    "gaxios": "5.0.2",
+    "mocha": "10.1.0"
+  }
+}
