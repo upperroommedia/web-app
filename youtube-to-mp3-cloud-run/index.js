@@ -3,7 +3,9 @@ const ytdl = require('ytdl-core');
 const cors = require('cors');
 const {initializeApp, cert} = require('firebase-admin/app');
 const {getAuth} = require('firebase-admin/auth');
-const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY
+  ? process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/gm, '\n')
+  : undefined;
 const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
 const projectId = process.env.FIREBASE_PROJECT_ID;
 
