@@ -5,19 +5,23 @@ import Button from '@mui/material/Button';
 import { UploadableFile } from './DropZone';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
+import { isDevelopment } from '../firebase/firebase';
 
 interface YoutubeUrlToMp3Props {
   setFile: Dispatch<SetStateAction<UploadableFile | undefined>>;
 }
 
 async function convertToMp3(url: string, setError: Dispatch<SetStateAction<string>>) {
-  console.log(url);
   try {
-    const response = await fetch(`https://youtube-to-mp-3-cloud-run-yshbijirxq-uc.a.run.app/?url=${url}`, {
+    const domain = isDevelopment
+      ? 'http://127.0.0.1:8081/'
+      : 'https://youtube-to-mp-3-cloud-run-yshbijirxq-uc.a.run.app/';
+    console.log(`${domain}?url=${url}`);
+    const response = await fetch(`${domain}?url=${url}`, {
       method: 'GET',
       headers: {
         responseType: 'blob',
-        // Accept: 'application/force-download',
+        Accept: 'application/force-download',
       },
     });
     if (!response.ok) {
@@ -33,7 +37,10 @@ async function convertToMp3(url: string, setError: Dispatch<SetStateAction<strin
     return uploadableFile;
   } catch (err) {
     if (err instanceof Error) {
-      setError(err.message);
+      const additionalInfo = isDevelopment
+        ? ' - Make sure to run the index.js (in youtube-to-mp3-cloud-run) file following these instructions: https://cloud.google.com/code/docs/vscode/develop-service'
+        : '';
+      setError(err.message + additionalInfo);
     }
   }
 }
@@ -67,7 +74,7 @@ const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = ({ setFile }: Y
         />
         <Button
           variant="contained"
-          disabled={isLoading}
+          disabled={isLoading || !inputText}
           onClick={async () => {
             setIsLoading(true);
             const uploadableFile = await convertToMp3(inputText, setError);

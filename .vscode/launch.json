@@ -12,7 +12,7 @@
       "image": "web-app",
       "service": {
         "name": "web-app",
-        "containerPort": 8080,
+        "containerPort": 8081,
         "resources": {
           "limits": {
             "memory": "256Mi"
@@ -22,7 +22,12 @@
       "target": {
         "minikube": {}
       },
-      "watch": true
+      "watch": true,
+      "debug": {
+        "sourceFileMap": {
+          "${workspaceFolder}": "/usr/src/app"
+        }
+      }
     }
   ]
 }
