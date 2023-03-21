@@ -5,6 +5,7 @@ import Button from '@mui/material/Button';
 import { UploadableFile } from './DropZone';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
+import auth from '../firebase/auth';
 import { isDevelopment } from '../firebase/firebase';
 
 interface YoutubeUrlToMp3Props {
@@ -16,11 +17,15 @@ async function convertToMp3(url: string, setError: Dispatch<SetStateAction<strin
     const domain = isDevelopment
       ? 'http://127.0.0.1:8081/'
       : 'https://youtube-to-mp-3-cloud-run-yshbijirxq-uc.a.run.app/';
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      throw new Error('User is not authenticated');
+    }
     const response = await fetch(`${domain}?url=${url}`, {
       method: 'GET',
       headers: {
         responseType: 'blob',
-        Accept: 'application/force-download',
+        Authorization: `Bearer ${token}`,
       },
     });
     if (!response.ok) {
