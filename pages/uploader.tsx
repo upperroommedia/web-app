@@ -14,6 +14,8 @@ import { DesktopDatePicker } from '@mui/x-date-pickers/DesktopDatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import Cancel from '@mui/icons-material/Cancel';
 
+import { isBrowser } from 'react-device-detect';
+
 import firestore, { doc, getDoc } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
@@ -38,6 +40,10 @@ import { UploaderFieldError } from '../context/types';
 import SeriesSelector from '../components/SeriesSelector';
 import { Series } from '../types/Series';
 import FormControl from '@mui/material/FormControl';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
+import Typography from '@mui/material/Typography';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -94,6 +100,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [sermonSeries, setSermonSeries] = useState<Series[]>(props.existingSeries || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
+  const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
 
@@ -146,14 +153,17 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
   };
-
+  const clearAudioTrimmer = () => {
+    setFile(undefined);
+    setTrimStart(0);
+  };
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
     setSermon(createEmptySermon());
     setSermonSeries([]);
     setDate(new Date());
-    setFile(undefined);
+    clearAudioTrimmer();
   };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -451,6 +461,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           margin: 'auto',
           alignItems: 'center',
           justifyContent: 'center',
+          width: 1,
         }}
       >
         {props.existingSermon && props.existingSeries ? (
@@ -477,17 +488,41 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             {file ? (
               <div style={{ width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'right' }}>
-                  <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)} />
+                  <Cancel sx={{ color: 'red' }} onClick={clearAudioTrimmer} />
                 </div>
-                <DynamicAudioTrimmer
-                  url={file.preview}
-                  trimStart={trimStart}
-                  setTrimStart={setTrimStart}
-                  setTrimDuration={setTrimDuration}
-                />
+                {isBrowser ? (
+                  <DynamicAudioTrimmer
+                    url={file.preview}
+                    trimStart={trimStart}
+                    setTrimStart={setTrimStart}
+                    setTrimDuration={setTrimDuration}
+                  />
+                ) : (
+                  <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center">
+                    <audio style={{ width: '100%' }} controls src={file.preview} />
+                    <Typography variant="caption">
+                      Trimming is not currently supported on mobile: please trim your audio on a seperate application
+                      first
+                    </Typography>
+                  </Box>
+                )}
               </div>
             ) : (
-              <DropZone setFile={setFile} />
+              <Box display="flex" flexDirection="column" width={1} justifyContent="center" alignItems="center" gap={1}>
+                {isBrowser && (
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={useYoutubeUrl}
+                        onChange={() => setUseYoutubeUrl((prevValue) => !prevValue)}
+                        inputProps={{ 'aria-label': 'controlled' }}
+                      />
+                    }
+                    label="Upload from Youtube Url"
+                  />
+                )}
+                {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
+              </Box>
             )}
             <div style={{ display: 'flex' }}>
               <input
@@ -506,7 +541,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     try {
                       await uploadFile({
                         file,
-                        setFile,
                         setUploadProgress,
                         trimStart,
                         sermon,
