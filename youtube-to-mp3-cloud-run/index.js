@@ -37,6 +37,7 @@ app.get('/', async (req, res) => {
     res.status(401).set('User is not authenticated');
   }
   try {
+    res.contentType('audio/mpeg');
     ytdl(req.query.url, {
       filter: 'audioonly',
       quality: 'highestaudio',
