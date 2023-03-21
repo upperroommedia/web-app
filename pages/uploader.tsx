@@ -38,6 +38,9 @@ import { UploaderFieldError } from '../context/types';
 import SeriesSelector from '../components/SeriesSelector';
 import { Series } from '../types/Series';
 import FormControl from '@mui/material/FormControl';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -94,6 +97,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [sermonSeries, setSermonSeries] = useState<Series[]>(props.existingSeries || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
+  const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
 
@@ -453,6 +457,16 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           justifyContent: 'center',
         }}
       >
+        <FormControlLabel
+          control={
+            <Switch
+              checked={useYoutubeUrl}
+              onChange={() => setUseYoutubeUrl((prevValue) => !prevValue)}
+              inputProps={{ 'aria-label': 'controlled' }}
+            />
+          }
+          label="Upload from Youtube Url"
+        />
         {props.existingSermon && props.existingSeries ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
@@ -486,6 +500,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   setTrimDuration={setTrimDuration}
                 />
               </div>
+            ) : useYoutubeUrl ? (
+              <YoutubeUrlToMp3 setFile={setFile} />
             ) : (
               <DropZone setFile={setFile} />
             )}
@@ -506,7 +522,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     try {
                       await uploadFile({
                         file,
-                        setFile,
                         setUploadProgress,
                         trimStart,
                         sermon,
