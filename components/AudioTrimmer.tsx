@@ -187,8 +187,11 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
     } else {
       event = e;
     }
-    if (target === CLICK_TARGET.START_TRIM || target === CLICK_TARGET.END_TRIM) {
+    if (target === CLICK_TARGET.START_TRIM) {
+      clickOffsetRef.current = event.clientX - e.currentTarget.getBoundingClientRect().right;
+    } else if (target === CLICK_TARGET.END_TRIM) {
       clickOffsetRef.current = event.clientX - e.currentTarget.getBoundingClientRect().left;
+      console.log('here', clickOffsetRef.current);
     } else {
       clickOffsetRef.current = 0;
     }
@@ -216,8 +219,9 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
   };
 
   const calculateTimeFromPosition = (mousePageX: number, container: HTMLDivElement) => {
+    const rect = container.getBoundingClientRect();
     const duration = audioPlayer.current.duration;
-    let time = ((mousePageX - container.offsetLeft + 1) / container.offsetWidth) * duration;
+    let time = ((mousePageX - rect.left) / container.offsetWidth) * duration;
     if (time < 0) time = 0;
     else if (time > duration) time = duration;
     return time;

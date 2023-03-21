@@ -10,7 +10,6 @@ import { Series } from '../../types/Series';
 
 interface uploadFileProps {
   file: UploadableFile;
-  setFile: Dispatch<SetStateAction<UploadableFile | undefined>>;
   setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string }>>;
   trimStart: number;
   sermon: Sermon;
