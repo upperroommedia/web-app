@@ -150,14 +150,17 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
   };
-
+  const clearAudioTrimmer = () => {
+    setFile(undefined);
+    setTrimStart(0);
+  };
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
     setSermon(createEmptySermon());
     setSermonSeries([]);
     setDate(new Date());
-    setFile(undefined);
+    clearAudioTrimmer();
   };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -455,18 +458,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           margin: 'auto',
           alignItems: 'center',
           justifyContent: 'center',
+          width: 1,
         }}
       >
-        <FormControlLabel
-          control={
-            <Switch
-              checked={useYoutubeUrl}
-              onChange={() => setUseYoutubeUrl((prevValue) => !prevValue)}
-              inputProps={{ 'aria-label': 'controlled' }}
-            />
-          }
-          label="Upload from Youtube Url"
-        />
         {props.existingSermon && props.existingSeries ? (
           <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
             <Button
@@ -491,7 +485,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             {file ? (
               <div style={{ width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'right' }}>
-                  <Cancel sx={{ color: 'red' }} onClick={() => setFile(undefined)} />
+                  <Cancel sx={{ color: 'red' }} onClick={clearAudioTrimmer} />
                 </div>
                 <DynamicAudioTrimmer
                   url={file.preview}
@@ -500,10 +494,20 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   setTrimDuration={setTrimDuration}
                 />
               </div>
-            ) : useYoutubeUrl ? (
-              <YoutubeUrlToMp3 setFile={setFile} />
             ) : (
-              <DropZone setFile={setFile} />
+              <Box display="flex" flexDirection="column" width={1} justifyContent="center" alignItems="center" gap={1}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={useYoutubeUrl}
+                      onChange={() => setUseYoutubeUrl((prevValue) => !prevValue)}
+                      inputProps={{ 'aria-label': 'controlled' }}
+                    />
+                  }
+                  label="Upload from Youtube Url"
+                />
+                {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
+              </Box>
             )}
             <div style={{ display: 'flex' }}>
               <input
