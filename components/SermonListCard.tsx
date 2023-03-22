@@ -24,6 +24,7 @@ import CardActions from '@mui/material/CardActions';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import useTheme from '@mui/system/useTheme';
+import { ErrorBoundary } from 'react-error-boundary';
 
 interface Props {
   sermon: SermonWithMetadata;
@@ -40,7 +41,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   return (
-    <>
+    <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
       <Divider />
       <ListItem
       // onClick={(e) => {
@@ -165,7 +166,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
           </CardActions>
         </Card>
       </ListItem>
-    </>
+    </ErrorBoundary>
   );
 };
 export default SermonListCard;
