@@ -171,45 +171,49 @@ const ImageSelector = (props: {
               height="500px"
               style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
             >
-              {imageSearchResults.map((image) => (
-                <div
-                  key={image.id}
-                  className={styles.imageContainer}
-                  style={{
-                    height: '164px',
-                    aspectRatio: AspectRatio[image.type],
-                    backgroundColor: image.averageColorHex || '#f3f1f1',
-                    boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
-                  }}
-                >
-                  <Image
-                    src={sanitize(image.downloadLink)}
-                    fill
-                    alt={image.name}
+              {imageSearchResults.map((image) => {
+                delete image._highlightResult;
+                delete image?.nbHits;
+                return (
+                  <div
+                    key={image.id}
+                    className={styles.imageContainer}
                     style={{
-                      borderRadius: '5px',
-                      cursor: 'pointer',
-                      objectFit: 'contain',
+                      height: '164px',
+                      aspectRatio: AspectRatio[image.type],
+                      backgroundColor: image.averageColorHex || '#f3f1f1',
+                      boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
                     }}
-                    onClick={() => {
-                      props.setNewSelectedImage(image);
-                    }}
-                  />
-                  {props.newSelectedImage?.id === image.id && (
-                    <CheckCircleIcon
-                      color="primary"
+                  >
+                    <Image
+                      src={sanitize(image.downloadLink)}
+                      fill
+                      alt={image.name}
                       style={{
-                        position: 'absolute',
-                        backgroundColor: 'white',
-                        borderRadius: '50%',
-                        zIndex: 2,
-                        top: '10px',
-                        right: '10px',
+                        borderRadius: '5px',
+                        cursor: 'pointer',
+                        objectFit: 'contain',
                       }}
-                    ></CheckCircleIcon>
-                  )}
-                </div>
-              ))}
+                      onClick={() => {
+                        props.setNewSelectedImage(image);
+                      }}
+                    />
+                    {props.newSelectedImage?.id === image.id && (
+                      <CheckCircleIcon
+                        color="primary"
+                        style={{
+                          position: 'absolute',
+                          backgroundColor: 'white',
+                          borderRadius: '50%',
+                          zIndex: 2,
+                          top: '10px',
+                          right: '10px',
+                        }}
+                      ></CheckCircleIcon>
+                    )}
+                  </div>
+                );
+              })}
             </InfiniteScroll>
           ) : (
             <InfiniteScroll
