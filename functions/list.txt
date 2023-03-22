@@ -1,0 +1,3 @@
+file '/var/folders/g_/vxv41kb13tq7sj6p2_g0cdy80000gn/T/intros%2FSunday%20Homilies_intro.mp3'
+file '/var/folders/g_/vxv41kb13tq7sj6p2_g0cdy80000gn/T/temp-transcoded-file.mp3'
+file '/var/folders/g_/vxv41kb13tq7sj6p2_g0cdy80000gn/T/outros%2Fdefault_outro.mp3'
