@@ -143,7 +143,7 @@ const downloadFiles = async (bucket: Bucket, filePaths: filePaths, tempFiles: Se
 };
 
 const addIntroOutro = onObjectFinalized(
-  { timeoutSeconds: 300, memory: '256MiB', cpu: 1 },
+  { timeoutSeconds: 300, memory: '1GiB', cpu: 1 },
   async (storageEvent): Promise<void> => {
     const data = storageEvent.data;
     const filePath = data.name ? data.name : '';
