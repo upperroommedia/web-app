@@ -6,7 +6,7 @@
     "build-functions-watch": "cd functions && pnpm build-watch",
     "next-dev": " next dev & pnpm run start-emulators",
     "start-emulators": "pnpm run build-functions-watch & firebase emulators:start --import=./dir --export-on-exit=./dir",
-    "dev": "pnpm kill-port 8080 9909 4000 3000 5001 && pnpm run next-dev",
+    "dev": "pnpm kill-port 8080 9099 4000 3000 5001 9000 && pnpm run next-dev",
     "analyze": "ANALYZE=true next build",
     "build": "next build",
     "start": "next start",

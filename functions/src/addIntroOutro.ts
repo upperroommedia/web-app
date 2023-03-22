@@ -1,16 +1,17 @@
 import { logger } from 'firebase-functions/v2';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
-import { storage, firestore } from 'firebase-admin';
+import { storage, firestore, database } from 'firebase-admin';
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import os from 'os';
-import { createWriteStream, existsSync, mkdirSync } from 'fs';
+import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
 import axios, { AxiosError, isAxiosError } from 'axios';
 import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/SermonTypes';
 import { firestoreAdminSermonConverter } from './firestoreDataConverter';
 import { HttpsError } from 'firebase-functions/v2/https';
+import { Reference } from 'firebase-admin/database';
 
 type filePaths = {
   INTRO: string | undefined;
@@ -30,10 +31,18 @@ const createTempFile = (fileName: string, tempFiles: Set<string>) => {
     throw new Error(`Error creating temp file: ${err}`);
   }
 };
+const convertStringToMilliseconds = (timeStr: string): number => {
+  // '10:20:30:500'  Example time string
+  const [hours, minutes, secondsAndMilliseconds] = timeStr.split(':');
+  const [seconds, milliseconds] = secondsAndMilliseconds.split('.');
+
+  return (parseInt(hours) * 60 * 60 + parseInt(minutes) * 60 + parseInt(seconds)) * 1000 + parseInt(milliseconds);
+};
 
 const trimAndTranscode = (
   filePath: string,
   tempFiles: Set<string>,
+  realtimeDBRef: Reference,
   startTime?: number,
   duration?: number
 ): Promise<string> => {
@@ -41,33 +50,80 @@ const trimAndTranscode = (
   const proc = ffmpeg().format('mp3').input(filePath);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
+  let totalTimeMillis: number;
   return new Promise((resolve, reject) => {
     proc
-      .on('end', () => {
+      .on('start', function (commandLine) {
+        logger.log('Trim And Transcode Spawned Ffmpeg with command: ' + commandLine);
+      })
+      .on('end', async () => {
         resolve(tmpFilePath);
       })
       .on('error', (err) => {
+        logger.error('Trim and Transcode Error:', err);
         reject(err);
+      })
+      .on('codecData', (data) => {
+        // HERE YOU GET THE TOTAL TIME
+        console.log('Total duration: ' + data.duration);
+        totalTimeMillis = convertStringToMilliseconds(data.duration);
+      })
+      .on('progress', (progress) => {
+        console.log('CurrentTimemark', progress.timemark);
+        const timeMillis = convertStringToMilliseconds(progress.timemark);
+        logger.log('Trimming and Transcoding: ' + timeMillis + 'ms done', totalTimeMillis);
+        // AND HERE IS THE CALCULATION
+        const calculatedDuration = duration
+          ? duration * 1000
+          : startTime
+          ? totalTimeMillis - startTime * 1000
+          : totalTimeMillis;
+        const percent = ((timeMillis * 0.97) / calculatedDuration) * 100; // go to 97% to leave room for the time it takes to Merge the files
+        realtimeDBRef.set(percent || 0);
+        logger.log('Trimming and Transcoding: ' + percent + '% done');
       })
       .saveToFile(tmpFilePath);
   });
 };
 
-const mergeFiles = (inputs: string[], outputFileName: string, tempFiles: Set<string>): Promise<string> => {
+const mergeFiles = (
+  filePaths: string[],
+  outputFileName: string,
+  tempFiles: Set<string>,
+  realtimeDBref: Reference
+): Promise<string> => {
   const tmpFilePath = createTempFile(outputFileName, tempFiles);
-  const proc = ffmpeg().format('mp3');
-  inputs.forEach((input) => {
-    proc.input(input);
-  });
+  const listFileName = createTempFile('list.txt', tempFiles);
+
+  // ffmpeg -f concat -i mylist.txt -c copy output
+  const filePathsForTxt = filePaths.map((filePath) => `file '${filePath}'`);
+  const fileNames = filePathsForTxt.join('\n');
+
+  logger.log('fileNames', fileNames);
+
+  writeFileSync(listFileName, fileNames);
+
+  const merge = ffmpeg();
+
   return new Promise((resolve, reject) => {
-    proc
+    merge
+      .input(listFileName)
+      .inputOptions(['-f concat', '-safe 0'])
+      .outputOptions('-c copy')
+      .outputFormat('mp3')
+      .on('start', function (commandLine) {
+        realtimeDBref.set(98);
+        logger.log('MergeFiles Spawned Ffmpeg with command: ' + commandLine);
+      })
       .on('end', async function () {
+        realtimeDBref.set(98);
         resolve(tmpFilePath);
       })
       .on('error', function (err) {
+        logger.log('MergeFiles Error:', err);
         return reject(err);
       })
-      .mergeToFile(tmpFilePath, os.tmpdir());
+      .save(tmpFilePath);
   });
 };
 
@@ -157,6 +213,7 @@ const addIntroOutro = onObjectFinalized(
       return logger.log('Not a media file');
     }
     const bucket = storage().bucket();
+    const realtimeDB = database();
     const db = firestore();
     const fileName = path.basename(filePath);
     const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
@@ -197,6 +254,7 @@ const addIntroOutro = onObjectFinalized(
       tempFilePaths.CONTENT = await trimAndTranscode(
         tempFilePaths.CONTENT,
         tempFiles,
+        realtimeDB.ref(`addIntroOutro/${fileName}`),
         parseFloat(data.metadata?.startTime || ''),
         parseFloat(data.metadata?.duration || '')
       );
@@ -211,7 +269,7 @@ const addIntroOutro = onObjectFinalized(
           },
         });
         logger.log('Merging audio files', JSON.stringify(tempFilePaths));
-        const outputFileName = 'intro_outro-' + fileName;
+        const outputFileName = `intro_outro-${fileName}`;
 
         //create merge array in order INTRO, CONTENT, OUTRO
         const filePathsArray: string[] = [];
@@ -221,7 +279,12 @@ const addIntroOutro = onObjectFinalized(
 
         //merge files
         logger.log('Merging files', filePathsArray, 'to', outputFileName, '...');
-        const tmpFilePath = await mergeFiles(filePathsArray, outputFileName, tempFiles);
+        const tmpFilePath = await mergeFiles(
+          filePathsArray,
+          outputFileName,
+          tempFiles,
+          realtimeDB.ref(`addIntroOutro/${fileName}`)
+        );
 
         //upload merged file
         logger.log('Uploading merged file', tmpFilePath, 'to intro-outro-sermons/', fileName);
@@ -237,6 +300,8 @@ const addIntroOutro = onObjectFinalized(
         },
         durationSeconds: durationSeconds,
       });
+      realtimeDB.ref(`addIntroOutro/${fileName}`).set(100);
+      await realtimeDB.ref(`addIntroOutro/${fileName}`).remove();
       return logger.log('Files have been merged succesfully');
     } catch (e) {
       let message = 'Something Went Wrong';
