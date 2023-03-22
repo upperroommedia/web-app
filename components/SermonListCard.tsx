@@ -5,7 +5,6 @@ import { FunctionComponent } from 'react';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
-import CircularProgress from '@mui/material/CircularProgress';
 import ListItem from '@mui/material/ListItem';
 import Divider from '@mui/material/Divider';
 import Card from '@mui/material/Card';
@@ -26,6 +25,10 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import useTheme from '@mui/system/useTheme';
 import { ErrorBoundary } from 'react-error-boundary';
 
+import { useObject } from 'react-firebase-hooks/database';
+import database, { ref } from '../firebase/database';
+import CircularProgressWithLabel from './CircularProgressWithLabel';
+
 interface Props {
   sermon: SermonWithMetadata;
   playing: boolean;
@@ -40,6 +43,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
   const theme = useTheme();
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
+  const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.key}`));
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
       <Divider />
@@ -158,9 +162,10 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
                   <Typography variant="subtitle1" sx={{ margin: 0 }}>
                     {sermon.status.audioStatus}
                   </Typography>
-                  {sermon.status.audioStatus === sermonStatusType.PROCESSING && <CircularProgress size={15} />}
+                  {sermon.status.audioStatus === sermonStatusType.PROCESSING && snapshot !== undefined && (
+                    <CircularProgressWithLabel value={Number(snapshot.val())} />
+                  )}
                 </Box>
-                {sermon.status.message && <p style={{ margin: 0 }}>{sermon.status.message}</p>}
               </Box>
             )}
           </CardActions>
