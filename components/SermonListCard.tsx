@@ -1,7 +1,7 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent, useEffect } from 'react';
+import { FunctionComponent } from 'react';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
@@ -26,7 +26,7 @@ import useTheme from '@mui/system/useTheme';
 import { ErrorBoundary } from 'react-error-boundary';
 
 import { useObject } from 'react-firebase-hooks/database';
-import database, { ref, set } from '../firebase/database';
+import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
 
 interface Props {
@@ -44,11 +44,6 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.key}`));
-
-  useEffect(() => {
-    console.log('DATABASE', database);
-    set(ref(database, `addIntroOutro/${sermon.key}`), 68);
-  }, []);
 
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
