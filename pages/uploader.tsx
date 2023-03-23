@@ -511,18 +511,16 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               </div>
             ) : (
               <Box display="flex" flexDirection="column" width={1} justifyContent="center" alignItems="center" gap={1}>
-                {isBrowser && (
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={useYoutubeUrl}
-                        onChange={() => setUseYoutubeUrl((prevValue) => !prevValue)}
-                        inputProps={{ 'aria-label': 'controlled' }}
-                      />
-                    }
-                    label="Upload from Youtube Url"
-                  />
-                )}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={useYoutubeUrl}
+                      onChange={() => setUseYoutubeUrl((prevValue) => !prevValue)}
+                      inputProps={{ 'aria-label': 'controlled' }}
+                    />
+                  }
+                  label="Upload from Youtube Url"
+                />
                 {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
               </Box>
             )}
