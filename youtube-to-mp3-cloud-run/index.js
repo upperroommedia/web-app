@@ -18,6 +18,9 @@ app.get('/', async (req, res) => {
     ytdl(req.query.url, {
       filter: 'audioonly',
       quality: 'highestaudio',
+      format: {
+        audioCodec: 'libmp3lame',
+      },
     }).pipe(res);
   } catch (e) {
     res.status(500).send('Internal Server Error');
