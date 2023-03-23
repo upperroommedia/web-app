@@ -1,0 +1,6 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": "auth != null && (auth.token.role == 'uploader' || auth.token.role == 'admin')"
+  }
+}
