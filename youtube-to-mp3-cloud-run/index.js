@@ -31,6 +31,6 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(
-    `Hello from Cloud Run! The container started successfully and is listening for HTTP requests on ${PORT}`
+    `Hello from Cloud Run! The youtube-to-mp3 started successfully and is listening for HTTP requests on ${PORT}`
   );
 });
