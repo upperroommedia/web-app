@@ -104,7 +104,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
           </Typography>
           {!minimal && sermon.status.audioStatus === sermonStatusType.PROCESSED && (
             <IconButton
-              sx={{ gridArea: 'playPause' }}
+              sx={{ gridArea: 'playPause', flexShrink: 0, alignSelf: 'center' }}
               aria-label="toggle play/pause"
               onClick={(e) => {
                 e.preventDefault();
