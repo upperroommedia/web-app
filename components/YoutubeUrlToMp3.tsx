@@ -34,7 +34,7 @@ async function convertToMp3(url: string, setError: Dispatch<SetStateAction<strin
     const blob = await response.blob();
     const downloadUrl = URL.createObjectURL(blob);
     const uploadableFile: UploadableFile = {
-      file: new File([blob], 'youtubeMp3.mp3'),
+      file: new File([blob], 'youtubeMp3.mp3', { type: 'audio/mp3' }),
       name: 'youtubeMp3.mp3',
       preview: downloadUrl,
     };
