@@ -19,6 +19,9 @@ import NavMenuItem from './NavMenuItem';
 import UserAvatar from './UserAvatar';
 import { FunctionComponent, useState } from 'react';
 import useAuth from '../context/user/UserContext';
+import Link from 'next/link';
+import useTheme from '@mui/system/useTheme';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 const Navbar: FunctionComponent = () => {
   const { user, logoutUser } = useAuth();
@@ -28,6 +31,8 @@ const Navbar: FunctionComponent = () => {
   const settings = user ? ['Profile', 'Logout'] : ['Login'];
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
+  const theme = useTheme();
+  const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
 
   const handleOpenNavMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorElNav(event.currentTarget);
@@ -72,14 +77,11 @@ const Navbar: FunctionComponent = () => {
     >
       <Container maxWidth="xl">
         <Toolbar disableGutters>
-          <Typography
-            noWrap
-            component="a"
+          <Link
             href="/"
-            sx={{
-              mr: 2,
-              display: { xs: 'none', md: 'flex' },
-              // fontFamily: 'monospace',
+            style={{
+              marginRight: '16px',
+              display: mdMatches ? 'flex' : 'none',
               fontSize: '1.25rem',
               fontWeight: 700,
               letterSpacing: '.3rem',
@@ -88,7 +90,7 @@ const Navbar: FunctionComponent = () => {
             }}
           >
             Upper Room Media
-          </Typography>
+          </Link>
           <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
             <IconButton
               size="large"
@@ -134,14 +136,11 @@ const Navbar: FunctionComponent = () => {
           <Avatar variant="square" sx={{ bgcolor: 'transparent' }}>
             <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill />
           </Avatar>{' '}
-          <Typography
-            // variant="h5"
-            noWrap
-            component="a"
+          <Link
             href="/"
-            sx={{
-              mr: 2,
-              display: { xs: 'flex', md: 'none' },
+            style={{
+              marginRight: '16px',
+              display: mdMatches ? 'none' : 'flex',
               flexGrow: 1,
               fontSize: '1.25rem',
               fontWeight: 700,
@@ -151,7 +150,7 @@ const Navbar: FunctionComponent = () => {
             }}
           >
             URM
-          </Typography>
+          </Link>
           <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' } }}>
             {pages.map((page) => (
               <NavMenuItem
