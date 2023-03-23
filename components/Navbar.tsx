@@ -55,7 +55,9 @@ const Navbar: FunctionComponent = () => {
   };
 
   const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
-    <Link href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`}>{children} </Link>
+    <Link href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`} passHref>
+      {children}{' '}
+    </Link>
   );
 
   return (
