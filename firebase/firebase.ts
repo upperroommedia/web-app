@@ -16,7 +16,9 @@ if (!apps.length) {
     messagingSenderId: '747878690617',
     appId: '1:747878690617:web:d29679a2961a60f31b82e8',
     measurementId: 'G-3PE6CE9N0H',
-    databaseURL: isDevelopment ? 'http://127.0.0.1:9000/?ns=urm-app-default-rtdb' : 'https://urm-app.firebaseio.com/',
+    databaseURL: isDevelopment
+      ? 'http://127.0.0.1:9000/?ns=urm-app-default-rtdb'
+      : 'https://urm-app-default-rtdb.firebaseio.com/',
   });
 } else {
   firebase = apps[0];
