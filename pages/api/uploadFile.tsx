@@ -10,7 +10,7 @@ import { Series } from '../../types/Series';
 
 interface uploadFileProps {
   file: UploadableFile;
-  setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string }>>;
+  setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string; percent: number }>>;
   trimStart: number;
   sermon: Sermon;
   sermonSeries: Series[];
@@ -68,7 +68,7 @@ const uploadFile = async (props: uploadFileProps) => {
       'state_changed',
       (snapshot) => {
         const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        props.setUploadProgress({ error: false, message: `${Math.round(progress)}%` });
+        props.setUploadProgress({ error: false, percent: Math.round(progress), message: 'Uploading...' });
         switch (snapshot.state) {
           case 'paused':
             break;
@@ -90,7 +90,7 @@ const uploadFile = async (props: uploadFileProps) => {
           batch.set(seriesSermonRef, props.sermon);
         });
         batch.commit();
-        props.setUploadProgress({ error: false, message: 'Uploaded!' });
+        props.setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
       }
     );
   });
