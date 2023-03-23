@@ -29,6 +29,18 @@ app.use(
   })
 );
 
+const convertStringToMilliseconds = (timeStr) => {
+  // '10:20:30:500'  Example time string
+  const [hours, minutes, secondsAndMilliseconds] = timeStr.split(':');
+  const [seconds, milliseconds] = secondsAndMilliseconds.split('.');
+
+  return (
+    (parseInt(hours) * 60 * 60 + parseInt(minutes) * 60 + parseInt(seconds)) *
+      1000 +
+    parseInt(milliseconds)
+  );
+};
+
 app.get('/', async (req, res) => {
   if (!req.query.url) {
     res.status(500).send('No url query parameter provided');
@@ -36,6 +48,12 @@ app.get('/', async (req, res) => {
   try {
     console.log('URL', req.query.url);
     res.contentType('audio/mpeg');
+
+    const videoDetails = (await ytdl.getBasicInfo(req.query.url)).videoDetails;
+    const lengthSeconds = parseInt(videoDetails.lengthSeconds);
+
+    console.log(videoDetails);
+
     const audio = ytdl(req.query.url, {
       filter: 'audioonly',
       quality: 'highestaudio',
@@ -50,7 +68,14 @@ app.get('/', async (req, res) => {
         );
       })
       .on('progress', function (progress) {
-        console.info('Processing: ', progress);
+        console.info(
+          'Processing: ',
+          (convertStringToMilliseconds(progress.timemark) /
+            1000 /
+            lengthSeconds) *
+            100,
+          '% done'
+        );
       })
       .on('error', (err) => {
         console.error('FFMPG ERROR', err);
