@@ -36,7 +36,6 @@ app.get('/', async (req, res) => {
   try {
     console.log('URL', req.query.url);
     res.contentType('audio/mpeg');
-    ytdl();
     const audio = ytdl(req.query.url, {
       filter: 'audioonly',
       quality: 'highestaudio',
