@@ -46,6 +46,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.key}`));
 
   useEffect(() => {
+    console.log('DATABASE', database);
     set(ref(database, `addIntroOutro/${sermon.key}`), 68);
   }, []);
 
