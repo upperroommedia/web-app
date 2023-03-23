@@ -44,6 +44,7 @@ import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
+import LinearProgress from '@mui/material/LinearProgress';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -99,7 +100,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon());
   const [sermonSeries, setSermonSeries] = useState<Series[]>(props.existingSeries || []);
   const [file, setFile] = useState<UploadableFile>();
-  const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
+  const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
+  const [isUploading, setIsUploading] = useState(false);
   const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
@@ -524,44 +526,60 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                 {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
               </Box>
             )}
-            <div style={{ display: 'flex' }}>
-              <input
-                className={styles.button}
-                type="button"
-                value="Upload"
-                disabled={
-                  file === undefined ||
-                  sermon.title === '' ||
-                  date === null ||
-                  sermon.speakers.length === 0 ||
-                  sermon.subtitle === ''
-                }
-                onClick={async () => {
-                  if (file !== undefined && date != null && user?.role === 'admin') {
-                    try {
-                      await uploadFile({
-                        file,
-                        setUploadProgress,
-                        trimStart,
-                        sermon,
-                        sermonSeries,
-                      });
-                      clearForm();
-                    } catch (error) {
-                      setUploadProgress({ error: true, message: `Error uploading file: ${error}` });
-                    }
-                  } else if (user?.role !== 'admin') {
-                    setUploadProgress({ error: true, message: 'You do not have permission to upload' });
+            <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
+              <Box display="flex">
+                <input
+                  className={styles.button}
+                  type="button"
+                  value="Upload"
+                  disabled={
+                    file === undefined ||
+                    sermon.title === '' ||
+                    date === null ||
+                    sermon.speakers.length === 0 ||
+                    sermon.subtitle === '' ||
+                    isUploading
                   }
-                }}
-              />
-              <button type="button" className={styles.button} onClick={() => clearForm()}>
-                Clear Form
-              </button>
-            </div>
-            <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
-              {uploadProgress.message}
-            </p>
+                  onClick={async () => {
+                    if (file !== undefined && date != null && user?.role === 'admin') {
+                      try {
+                        setIsUploading(true);
+                        await uploadFile({
+                          file,
+                          setUploadProgress,
+                          trimStart,
+                          sermon,
+                          sermonSeries,
+                        });
+                        setIsUploading(false);
+                        clearForm();
+                      } catch (error) {
+                        setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
+                      }
+                    } else if (user?.role !== 'admin') {
+                      setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
+                    }
+                  }}
+                />
+                <button type="button" className={styles.button} onClick={() => clearForm()}>
+                  Clear Form
+                </button>
+              </Box>
+              <Box display="flex" width={1} gap={1} justifyContent="center" alignItems="center">
+                {isUploading && (
+                  <Box width={1}>
+                    <LinearProgress variant="determinate" value={uploadProgress.percent} />
+                  </Box>
+                )}
+                {uploadProgress.message && (
+                  <Typography sx={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
+                    {!uploadProgress.error && uploadProgress.percent < 100
+                      ? `${uploadProgress.percent}%`
+                      : uploadProgress.message}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
           </>
         )}
       </Box>
