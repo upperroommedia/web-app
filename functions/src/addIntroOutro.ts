@@ -50,6 +50,7 @@ const trimAndTranscode = (
   const proc = ffmpeg().format('mp3').input(filePath);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
+  proc.audioCodec('libmp3lame').audioBitrate(128).audioChannels(2).audioFrequency(44100);
   let totalTimeMillis: number;
   return new Promise((resolve, reject) => {
     proc
