@@ -22,7 +22,11 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
       <Head>
         <title>Sermons</title>
         <meta property="og:title" content="Sermons" key="title" />
-        <meta name="description" content="Upper Room Media Sermons are English Coptic Orthodox Christian Sermons" />
+        <meta
+          name="description"
+          content="Upper Room Media Sermons are English Coptic Orthodox Christian Sermons"
+          key="description"
+        />
       </Head>
       <div style={{ padding: '0 2rem' }}>
         <h1>Sermons</h1>
