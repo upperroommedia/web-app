@@ -36,7 +36,8 @@ const Signup = () => {
 
   const handleSignup = async () => {
     const res = await signup(data);
-    const authResult = AuthErrors(res);
+    const { callbackurl } = router.query;
+    const authResult = AuthErrors(res, (callbackurl as string) || '/');
     if (authResult.authFailure) {
       setTitle(authResult.title);
       setErrorMessage(authResult.errorMessage);

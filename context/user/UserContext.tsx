@@ -19,6 +19,7 @@ import { useRouter } from 'next/router';
 
 interface Context {
   user: User | undefined;
+  loading: boolean;
   login: (loginForm: userCredentials) => Promise<any>;
   loginWithGoogle: () => Promise<any>;
   signup: (loginForm: SignupForm) => Promise<any>;
@@ -45,8 +46,9 @@ export const UserProvider = ({ children }: any) => {
     if (typeof window !== 'undefined') {
       (window as any).nookies = nookies;
     }
-    const unsubscribe = auth.onIdTokenChanged(async (user) => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setLoading(true);
+      console.log('here');
       if (!user) {
         setUser(undefined);
         nookies.destroy(null, 'token');
@@ -59,6 +61,7 @@ export const UserProvider = ({ children }: any) => {
           setUser({ ...user, ...names!, role });
           nookies.destroy(null, 'token');
           nookies.set(null, 'token', token, { path: '/' });
+          // router.reload();
         } catch (e) {
           return e;
         }
@@ -123,6 +126,7 @@ export const UserProvider = ({ children }: any) => {
     <UserContext.Provider
       value={{
         user,
+        loading,
         login,
         loginWithGoogle,
         signup,
