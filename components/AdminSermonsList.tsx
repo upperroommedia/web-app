@@ -1,6 +1,6 @@
 import Typography from '@mui/material/Typography';
 import { Box } from '@mui/system';
-import firestore, { collection, query } from '../firebase/firestore';
+import firestore, { collection, orderBy, query } from '../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import BottomAudioBar from './BottomAudioBar';
 import SermonsList from './SermonsList';
@@ -18,7 +18,7 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
   count,
 }: AdminSermonsListProps) => {
   const sermonsRef = collection(firestore, collectionPath);
-  const q = query(sermonsRef.withConverter(sermonConverter));
+  const q = query(sermonsRef.withConverter(sermonConverter), orderBy('date', 'desc'));
   const [sermons, loading, error] = useCollection(q, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
