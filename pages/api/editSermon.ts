@@ -1,4 +1,4 @@
-import firestore, { collection, doc, getDocs, updateDoc, writeBatch } from '../../firebase/firestore';
+import firestore, { collection, doc, getDocs, setDoc, writeBatch } from '../../firebase/firestore';
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
@@ -40,14 +40,8 @@ const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
 
   const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
   promises.push(
-    updateDoc(sermonRef.withConverter(sermonConverter), {
-      title: sermon.title,
-      subtitle: sermon.subtitle,
-      description: sermon.description,
-      speakers: sermon.speakers,
-      topics: sermon.topics,
-      images: sermon.images,
-      dateMillis: sermon.dateMillis,
+    setDoc(sermonRef.withConverter(sermonConverter), {
+      ...sermon,
     })
   );
   const results = await Promise.allSettled(promises);
