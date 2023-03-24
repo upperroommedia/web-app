@@ -17,14 +17,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     <>
       <Head>
         <title>Admin</title>
-        <meta property="og:title" content="Login" key="title" />
-        <meta
-          name="description"
-          content="Bringing the Word of God from a timeless faith into your hearts and minds anytime, anywhere.
-Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you rich & fresh spiritual resources including Sermons, Music, Videos, Blogs and much more!"
-          key="description"
-        />
-        <link rel="icon" href="/URM_icon.png" />
+        <meta property="og:title" content="Admin" key="title" />
       </Head>
       <Box>
         <Box display="flex" flexWrap={'wrap'} justifyContent="center">
