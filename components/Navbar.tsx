@@ -47,13 +47,6 @@ const Navbar: FunctionComponent = () => {
     setAnchorElUser(null);
   };
 
-  const handleSettingsClicked = (setting: string) => {
-    handleCloseUserMenu();
-    if (setting === 'Logout') {
-      logoutUser();
-    }
-  };
-
   const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
     <Link href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`} passHref>
       {children}{' '}
@@ -176,18 +169,35 @@ const Navbar: FunctionComponent = () => {
               open={Boolean(anchorElUser)}
               onClose={handleCloseUserMenu}
             >
-              {settings.map((setting) => (
-                <MenuItemLink key={setting} page={setting}>
-                  <MenuItem
-                    onClick={() => {
-                      handleSettingsClicked(setting);
-                    }}
-                    className={styles.menu_item}
-                  >
-                    <Typography textAlign="center">{setting}</Typography>
-                  </MenuItem>
-                </MenuItemLink>
-              ))}
+              {settings.map((setting) => {
+                if (setting === 'Logout') {
+                  return (
+                    <MenuItem
+                      key={setting}
+                      onClick={() => {
+                        handleCloseUserMenu();
+                        logoutUser();
+                      }}
+                      className={styles.menu_item}
+                    >
+                      <Typography textAlign="center">{setting}</Typography>
+                    </MenuItem>
+                  );
+                } else {
+                  return (
+                    <MenuItemLink key={setting} page={setting}>
+                      <MenuItem
+                        onClick={() => {
+                          handleCloseUserMenu();
+                        }}
+                        className={styles.menu_item}
+                      >
+                        <Typography textAlign="center">{setting}</Typography>
+                      </MenuItem>
+                    </MenuItemLink>
+                  );
+                }
+              })}
             </Menu>
           </Box>
         </Toolbar>
