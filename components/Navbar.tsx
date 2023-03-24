@@ -21,9 +21,11 @@ import useAuth from '../context/user/UserContext';
 import Link from 'next/link';
 import useTheme from '@mui/system/useTheme';
 import useMediaQuery from '@mui/material/useMediaQuery';
+import { useRouter } from 'next/router';
 
 const Navbar: FunctionComponent = () => {
   const { user, logoutUser } = useAuth();
+  const router = useRouter();
   const adminPages = user?.role === 'admin' ? ['Uploader', 'Admin'] : [];
   const pages = ['Home', 'Sermons', 'About', ...adminPages];
   const settings = user ? ['Profile', 'Logout'] : ['Login'];
@@ -49,7 +51,7 @@ const Navbar: FunctionComponent = () => {
 
   const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
     <Link href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`} passHref>
-      {children}{' '}
+      {children}
     </Link>
   );
 
@@ -185,7 +187,10 @@ const Navbar: FunctionComponent = () => {
                   );
                 } else {
                   return (
-                    <MenuItemLink key={setting} page={setting}>
+                    <MenuItemLink
+                      key={setting}
+                      page={setting === 'Login' ? `login?callbackUrl=${router.pathname}` : setting}
+                    >
                       <MenuItem
                         onClick={() => {
                           handleCloseUserMenu();

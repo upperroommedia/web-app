@@ -30,8 +30,9 @@ const Login = () => {
   const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     try {
+      const { callbackurl } = router.query;
       const res = await resetPassword(forgotPasswordEmail);
-      const authResult = AuthErrors(res);
+      const authResult = AuthErrors(res, (callbackurl as string) || '/');
       if (authResult.authFailure) {
         setTitle(authResult.title);
         setErrorMessage(authResult.errorMessage);
@@ -48,8 +49,8 @@ const Login = () => {
 
   const handleLogin = async () => {
     const res = await login(data);
-
-    const authResult = AuthErrors(res);
+    const { callbackurl } = router.query;
+    const authResult = AuthErrors(res, (callbackurl as string) || '/');
     if (authResult.authFailure) {
       setTitle(authResult.title);
       setErrorMessage(authResult.errorMessage);
@@ -126,14 +127,7 @@ const Login = () => {
               size="small"
             />
           </div>
-          <Button
-            fullWidth
-            variant="contained"
-            type="submit"
-            style={{ marginTop: '30px' }}
-            size="medium"
-            onClick={handleLogin}
-          >
+          <Button fullWidth variant="contained" type="submit" style={{ marginTop: '30px' }} size="medium">
             Login
           </Button>
           <Button
