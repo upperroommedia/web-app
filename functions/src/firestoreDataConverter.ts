@@ -1,10 +1,11 @@
 import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase-admin/lib/firestore';
 import { createEmptySermon, FirebaseSermon, getDateString } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
-import { ISpeaker } from '../../types/Speaker';
-import { ImageType } from '../../types/Image';
+import { emptySpeaker, ISpeaker } from '../../types/Speaker';
+import { emptyImage, ImageType } from '../../types/Image';
 import { Timestamp } from 'firebase/firestore';
-import { Series } from '../../types/Series';
+import { emptySeries, Series } from '../../types/Series';
+import { emptyList, List } from '../../types/List';
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
@@ -27,7 +28,7 @@ export const firestoreAdminSpeakerConverter: FirestoreDataConverter<ISpeaker> = 
     return speaker;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<ISpeaker>): ISpeaker => {
-    return { ...snapshot.data(), id: snapshot.id };
+    return { ...emptySpeaker, ...snapshot.data(), id: snapshot.id };
   },
 };
 
@@ -36,7 +37,7 @@ export const firestoreAdminImagesConverter: FirestoreDataConverter<ImageType> = 
     return image;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<ImageType>): ImageType => {
-    return { ...snapshot.data(), id: snapshot.id };
+    return { ...emptyImage, ...snapshot.data(), id: snapshot.id };
   },
 };
 
@@ -45,6 +46,15 @@ export const firestoreAdminSeriesConverter: FirestoreDataConverter<Series> = {
     return series;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
-    return { ...snapshot.data(), id: snapshot.id };
+    return { ...emptySeries, ...snapshot.data(), id: snapshot.id };
+  },
+};
+
+export const firestoreAdminListConverter: FirestoreDataConverter<List> = {
+  toFirestore: (list: List): List => {
+    return list;
+  },
+  fromFirestore: (snapshot: QueryDocumentSnapshot<List>): List => {
+    return { ...emptyList, ...snapshot.data(), id: snapshot.id };
   },
 };
