@@ -5,29 +5,35 @@ import { Series, seriesConverter } from './Series';
 import { createEmptySermon, sermonConverter } from './Sermon';
 import { Sermon } from './SermonTypes';
 
-interface mediaItems {
-  sermon: Sermon;
-  series: Series;
-  list: List;
-  // song: any;
-  // link: any;
-  // rss: any;
-}
+export type ListItemType = Sermon | Series | List;
 
-export interface ListItem<T extends keyof mediaItems> {
+interface CommonFields {
   id: string;
+  position: number;
   name: string;
   images: ImageType[];
   updatedAtMillis: number;
   createdAtMillis: number;
   subsplashId?: string;
-  type: T;
-  mediaItem: mediaItems[T];
 }
 
-export const emptyListItem: ListItem<keyof mediaItems> = {
+export type ListItem<T extends ListItemType> = CommonFields &
+  (T extends Sermon
+    ? { type: 'sermon'; mediaItem: Sermon }
+    : T extends List
+    ? { type: 'list'; mediaItem: List }
+    : T extends Series
+    ? { type: 'series'; mediaItem: Series }
+    : never);
+
+// let listItem: ListItem<ListItemType>;
+
+// const t = listItem.type;
+
+export const emptyListItem: ListItem<ListItemType> = {
   id: '',
   name: '',
+  position: 0,
   createdAtMillis: new Date().getTime(),
   updatedAtMillis: new Date().getTime(),
   images: [],
@@ -35,22 +41,18 @@ export const emptyListItem: ListItem<keyof mediaItems> = {
   mediaItem: createEmptySermon(),
 };
 
-export const ListItemConverter: FirestoreDataConverter<ListItem<keyof mediaItems>> = {
-  toFirestore: (listItem: ListItem<keyof mediaItems>): ListItem<keyof mediaItems> => {
+export const ListItemConverter: FirestoreDataConverter<ListItem<ListItemType>> = {
+  toFirestore: (listItem: ListItem<ListItemType>): ListItem<ListItemType> => {
     // handle converting the media item to the correct firestore type
     switch (listItem.type) {
       case 'sermon':
-        listItem.mediaItem = sermonConverter.toFirestore(
-          listItem.mediaItem as mediaItems['sermon']
-        ) as mediaItems['sermon'];
+        listItem.mediaItem = sermonConverter.toFirestore(listItem.mediaItem as Sermon) as any;
         break;
       case 'series':
-        listItem.mediaItem = seriesConverter.toFirestore(
-          listItem.mediaItem as mediaItems['series']
-        ) as mediaItems['series'];
+        listItem.mediaItem = seriesConverter.toFirestore(listItem.mediaItem as Series) as any;
         break;
       case 'list':
-        listItem.mediaItem = listConverter.toFirestore(listItem.mediaItem as mediaItems['list']) as mediaItems['list'];
+        listItem.mediaItem = listConverter.toFirestore(listItem.mediaItem as List) as any;
         break;
       default:
         break;
@@ -58,7 +60,7 @@ export const ListItemConverter: FirestoreDataConverter<ListItem<keyof mediaItems
     return listItem;
   },
 
-  fromFirestore: (snapshot: QueryDocumentSnapshot<ListItem<keyof mediaItems>>): ListItem<keyof mediaItems> => {
+  fromFirestore: (snapshot: QueryDocumentSnapshot<ListItem<ListItemType>>): ListItem<ListItemType> => {
     const listItem = { ...emptyListItem, ...snapshot.data(), id: snapshot.id };
 
     // handle converting the media item to the correct firestore type
@@ -66,17 +68,17 @@ export const ListItemConverter: FirestoreDataConverter<ListItem<keyof mediaItems
       case 'sermon':
         listItem.mediaItem = sermonConverter.fromFirestore(
           listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
-        ) as mediaItems['sermon'];
+        ) as Sermon;
         break;
       case 'series':
         listItem.mediaItem = seriesConverter.fromFirestore(
           listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
-        ) as mediaItems['series'];
+        ) as Series;
         break;
       case 'list':
         listItem.mediaItem = listConverter.fromFirestore(
           listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
-        ) as mediaItems['list'];
+        ) as List;
         break;
       default:
         break;

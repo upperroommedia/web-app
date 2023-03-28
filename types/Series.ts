@@ -1,13 +1,10 @@
 import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase/firestore';
 import { ImageType } from './Image';
 
-export const OverflowBehavior = ['ERROR', 'CREATENEWLIST', 'REMOVEOLDEST'] as const;
-export type OverflowBehaviorType = (typeof OverflowBehavior)[number];
 export interface Series {
   id: string;
   name: string;
   images: ImageType[];
-  overflowBehavior: OverflowBehaviorType;
   count: number;
   subsplashId?: string;
   moreSermonsRef?: string;
@@ -29,7 +26,6 @@ export const emptySeries: Series = {
   id: '',
   name: '',
   count: 0,
-  overflowBehavior: 'CREATENEWLIST',
   images: [],
 };
 

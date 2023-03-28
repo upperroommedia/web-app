@@ -1,4 +1,4 @@
-import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase-admin/lib/firestore';
+import { DocumentData, FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase-admin/lib/firestore';
 import { createEmptySermon, FirebaseSermon, getDateString } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { emptySpeaker, ISpeaker } from '../../types/Speaker';
@@ -6,6 +6,7 @@ import { emptyImage, ImageType } from '../../types/Image';
 import { Timestamp } from 'firebase/firestore';
 import { emptySeries, Series } from '../../types/Series';
 import { emptyList, List } from '../../types/List';
+import { emptyListItem, ListItem, ListItemType } from '../../types/ListItem';
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
@@ -56,5 +57,51 @@ export const firestoreAdminListConverter: FirestoreDataConverter<List> = {
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<List>): List => {
     return { ...emptyList, ...snapshot.data(), id: snapshot.id };
+  },
+};
+
+export const firestoreAdminListItemConverter: FirestoreDataConverter<ListItem<ListItemType>> = {
+  toFirestore: (listItem: ListItem<ListItemType>): ListItem<ListItemType> => {
+    // handle converting the media item to the correct firestore type
+    switch (listItem.type) {
+      case 'sermon':
+        listItem.mediaItem = firestoreAdminSermonConverter.toFirestore(listItem.mediaItem as Sermon) as any;
+        break;
+      case 'series':
+        listItem.mediaItem = firestoreAdminSeriesConverter.toFirestore(listItem.mediaItem as Series) as any;
+        break;
+      case 'list':
+        listItem.mediaItem = firestoreAdminListConverter.toFirestore(listItem.mediaItem as List) as any;
+        break;
+      default:
+        break;
+    }
+    return listItem;
+  },
+
+  fromFirestore: (snapshot: QueryDocumentSnapshot<ListItem<ListItemType>>): ListItem<ListItemType> => {
+    const listItem = { ...emptyListItem, ...snapshot.data(), id: snapshot.id };
+
+    // handle converting the media item to the correct firestore type
+    switch (listItem.type) {
+      case 'sermon':
+        listItem.mediaItem = firestoreAdminSermonConverter.fromFirestore(
+          listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
+        ) as Sermon;
+        break;
+      case 'series':
+        listItem.mediaItem = firestoreAdminSeriesConverter.fromFirestore(
+          listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
+        ) as Series;
+        break;
+      case 'list':
+        listItem.mediaItem = firestoreAdminListConverter.fromFirestore(
+          listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
+        ) as List;
+        break;
+      default:
+        break;
+    }
+    return listItem;
   },
 };

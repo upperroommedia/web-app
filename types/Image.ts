@@ -1,3 +1,5 @@
+import { FirestoreDataConverter, QueryDocumentSnapshot } from '../firebase/firestore';
+
 export const ImageSizes = ['square', 'wide', 'banner'] as const;
 export type ImageSizeType = (typeof ImageSizes)[number];
 export type ImageType = {
@@ -23,5 +25,25 @@ export const AspectRatio: { [key in ImageSizeType]: number } = {
   banner: 1920 / 692,
 };
 
+export const emptyImage = {
+  id: '',
+  size: 'thumbnail',
+  type: 'square',
+  height: 0,
+  width: 0,
+  downloadLink: '',
+  name: '',
+  dateAddedMillis: new Date().getTime(),
+};
+
 export type resizeType = { width: number; height: number; sizeType: ImageType['size'] };
 export type supportedContentTypes = 'image/jpeg' | 'image/png' | 'image/tiff' | 'image/webp' | 'image/gif';
+
+export const speakerConverter: FirestoreDataConverter<ImageType> = {
+  toFirestore: (image: ImageType): ImageType => {
+    return image;
+  },
+  fromFirestore: (snapshot: QueryDocumentSnapshot<ImageType>): ImageType => {
+    return { ...emptyImage, ...snapshot.data(), id: snapshot.id };
+  },
+};
