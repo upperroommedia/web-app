@@ -1,5 +1,5 @@
 import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase-admin/lib/firestore';
-import { FirebaseSermon, getDateString } from '../../types/Sermon';
+import { createEmptySermon, FirebaseSermon, getDateString } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { ISpeaker } from '../../types/Speaker';
 import { ImageType } from '../../types/Image';
@@ -12,11 +12,12 @@ export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
     const { date, ...data } = snapshot.data();
-    console.log('HERHE', snapshot.data());
     return {
+      ...createEmptySermon(),
       ...data,
       dateMillis: date.toMillis(),
       dateString: getDateString(date.toDate()),
+      key: snapshot.id,
     };
   },
 };
@@ -26,7 +27,7 @@ export const firestoreAdminSpeakerConverter: FirestoreDataConverter<ISpeaker> = 
     return speaker;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<ISpeaker>): ISpeaker => {
-    return snapshot.data();
+    return { ...snapshot.data(), id: snapshot.id };
   },
 };
 
@@ -35,7 +36,7 @@ export const firestoreAdminImagesConverter: FirestoreDataConverter<ImageType> = 
     return image;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<ImageType>): ImageType => {
-    return snapshot.data();
+    return { ...snapshot.data(), id: snapshot.id };
   },
 };
 
@@ -44,6 +45,6 @@ export const firestoreAdminSeriesConverter: FirestoreDataConverter<Series> = {
     return series;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
-    return snapshot.data();
+    return { ...snapshot.data(), id: snapshot.id };
   },
 };

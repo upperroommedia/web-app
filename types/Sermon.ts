@@ -55,11 +55,14 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data();
-
     return {
+      ...createEmptySermon(),
       ...data,
-      dateMillis: snapshot.data().date.toMillis(),
-      dateString: getDateString(snapshot.data().date.toDate()),
+      ...(snapshot.data().date && {
+        dateMillis: snapshot.data()?.date?.toMillis(),
+        dateString: getDateString(snapshot.data()?.date?.toDate()),
+      }),
+      key: snapshot.id,
     };
   },
 };

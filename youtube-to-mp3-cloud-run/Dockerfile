@@ -13,6 +13,7 @@ COPY package*.json ./
 # Install dependencies.
 # If you add a package-lock.json speed your build by switching to 'npm ci'.
 # RUN npm ci --only=production
+RUN apk update && apk add ffmpeg
 RUN npm install --production
 
 # Copy local code to the container image.

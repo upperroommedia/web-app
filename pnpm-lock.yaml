@@ -54,6 +54,7 @@ specifiers:
   react-dom: ^18.2.0
   react-dropzone: ^14.2.3
   react-easy-crop: ^4.7.1
+  react-error-boundary: ^4.0.0
   react-firebase-hooks: ^5.1.1
   react-image-crop: ^10.0.9
   react-infinite-scroll-component: ^6.1.0
@@ -88,6 +89,7 @@ dependencies:
   react-dom: 18.2.0_react@18.2.0
   react-dropzone: 14.2.3_react@18.2.0
   react-easy-crop: 4.7.1_biqbaboplfbrettd7655fr4n2y
+  react-error-boundary: 4.0.0_react@18.2.0
   react-firebase-hooks: 5.1.1_aqcelxavj7bzvzjrob2hajgybq
   react-image-crop: 10.0.9_react@18.2.0
   react-infinite-scroll-component: 6.1.0_react@18.2.0
@@ -6945,6 +6947,15 @@ packages:
       react: 18.2.0
       react-dom: 18.2.0_react@18.2.0
       tslib: 2.0.1
+    dev: false
+
+  /react-error-boundary/4.0.0_react@18.2.0:
+    resolution: {integrity: sha512-vNbTyivmwBxCpJA68Ry55rJhZMzJSB+egkEm8hkEzbEBJLsJp5054zEVpoK/8ndxt6B+dvEA2LDw33xUfvE8og==}
+    peerDependencies:
+      react: '>=16.13.1'
+    dependencies:
+      '@babel/runtime': 7.20.13
+      react: 18.2.0
     dev: false
 
   /react-firebase-hooks/5.1.1_aqcelxavj7bzvzjrob2hajgybq:

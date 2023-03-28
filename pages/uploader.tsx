@@ -44,6 +44,8 @@ import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
+import LinearProgress from '@mui/material/LinearProgress';
+import Head from 'next/head';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -99,7 +101,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon());
   const [sermonSeries, setSermonSeries] = useState<Series[]>(props.existingSeries || []);
   const [file, setFile] = useState<UploadableFile>();
-  const [uploadProgress, setUploadProgress] = useState({ error: false, message: '' });
+  const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
+  const [isUploading, setIsUploading] = useState(false);
   const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
 
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
@@ -227,289 +230,303 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
 
   return (
-    <FormControl
-      sx={{
-        display: 'grid',
-        gridTemplateColumns: { xs: 'auto', md: '4fr 1fr' },
-        maxWidth: '80%',
-        gap: '1ch 100px',
-        margin: 'auto',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <h1 style={{ justifySelf: 'center', gridColumn: '1/-1' }}>{props.existingSermon ? 'Edit Sermon' : 'Uploader'}</h1>
-      <Box
+    <>
+      <Head>
+        <title>Uploader</title>
+        <meta property="og:title" content="Uploader" key="title" />
+        <meta name="description" content="Upload christian sermons to Upper Room Meida" key="description" />
+      </Head>
+      <FormControl
         sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '1ch',
+          display: 'grid',
+          gridTemplateColumns: { xs: 'auto', md: '4fr 1fr' },
+          maxWidth: '80%',
+          gap: '1ch 100px',
           margin: 'auto',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <TextField
+        <h1 style={{ justifySelf: 'center', gridColumn: '1/-1' }}>
+          {props.existingSermon ? 'Edit Sermon' : 'Uploader'}
+        </h1>
+        <Box
           sx={{
-            display: 'block',
-            width: 1,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '1ch',
+            margin: 'auto',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
-          fullWidth
-          id="title-input"
-          label="Title"
-          name="title"
-          variant="outlined"
-          value={sermon.title}
-          onChange={handleChange}
-          required
-        />
-        <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
+        >
+          <TextField
+            sx={{
+              display: 'block',
+              width: 1,
+            }}
+            fullWidth
+            id="title-input"
+            label="Title"
+            name="title"
+            variant="outlined"
+            value={sermon.title}
+            onChange={handleChange}
+            required
+          />
+          <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
+            <Autocomplete
+              fullWidth
+              id="subtitle-input"
+              value={sermon.subtitle || null}
+              onChange={(_, newValue) => {
+                newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
+              }}
+              renderInput={(params) => <TextField required {...params} label="Subtitle" />}
+              options={subtitlesArray}
+            />
+            <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
+              <DesktopDatePicker
+                label="Date"
+                inputFormat="MM/dd/yyyy"
+                value={date}
+                onChange={(newValue) => {
+                  if (newValue !== null) {
+                    handleDateChange(new Date(newValue));
+                  }
+                }}
+                renderInput={(params) => <TextField {...params} />}
+              />
+            </LocalizationProvider>
+          </Box>
+          <TextField
+            sx={{
+              display: 'block',
+            }}
+            fullWidth
+            rows={4}
+            id="description-text"
+            label="Description"
+            name="description"
+            placeholder="Description"
+            multiline
+            value={sermon.description}
+            onChange={handleChange}
+          />
+          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+            <SeriesSelector sermonSeries={sermonSeries} setSermonSeries={setSermonSeries} />
+          </div>
           <Autocomplete
             fullWidth
-            id="subtitle-input"
-            value={sermon.subtitle || null}
-            onChange={(_, newValue) => {
-              newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
-            }}
-            renderInput={(params) => <TextField required {...params} label="Subtitle" />}
-            options={subtitlesArray}
-          />
-          <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
-            <DesktopDatePicker
-              label="Date"
-              inputFormat="MM/dd/yyyy"
-              value={date}
-              onChange={(newValue) => {
-                if (newValue !== null) {
-                  handleDateChange(new Date(newValue));
-                }
-              }}
-              renderInput={(params) => <TextField {...params} />}
-            />
-          </LocalizationProvider>
-        </Box>
-        <TextField
-          sx={{
-            display: 'block',
-          }}
-          fullWidth
-          rows={4}
-          id="description-text"
-          label="Description"
-          name="description"
-          placeholder="Description"
-          multiline
-          value={sermon.description}
-          onChange={handleChange}
-        />
-        <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-          <SeriesSelector sermonSeries={sermonSeries} setSermonSeries={setSermonSeries} />
-        </div>
-        <Autocomplete
-          fullWidth
-          value={sermon.speakers}
-          onBlur={() => {
-            setSpeakerError({ error: false, message: '' });
-          }}
-          onChange={async (_, newValue) => {
-            if (newValue.length === 1) {
-              const currentTypes = sermon.images.map((img) => img.type);
-              const newImages = [
-                ...sermon.images,
-                ...newValue[0].images.filter((img) => !currentTypes.includes(img.type)),
-              ];
-              updateSermon('images', newImages);
-            }
-            if (newValue !== null && newValue.length <= 3) {
-              updateSermon(
-                'speakers',
-                newValue.map((speaker) => {
-                  const { _highlightResult, ...speakerWithoutHighlight } = speaker;
-                  return speakerWithoutHighlight;
-                })
-              );
-            }
-
-            if (newValue.length >= 4) {
-              setSpeakerError({
-                error: true,
-                message: 'Can only add up to 3 speakers',
-              });
-            } else if (speakerError.error) {
+            value={sermon.speakers}
+            onBlur={() => {
               setSpeakerError({ error: false, message: '' });
-            }
-          }}
-          onInputChange={async (_, value) => {
-            clearTimeout(timer);
-            const newTimer = setTimeout(async () => {
-              setSpeakersArray(await fetchSpeakerResults(value, 25, 0));
-            }, 300);
-            setTimer(newTimer);
-          }}
-          id="speaker-input"
-          options={getSpeakersUnion(sermon.speakers, speakersArray)}
-          isOptionEqualToValue={(option, value) =>
-            value === undefined || option === undefined || option.id === value.id
-          }
-          renderTags={(speakers, _) => {
-            return speakers.map((speaker) => (
-              <Chip
-                style={{ margin: '3px' }}
-                onDelete={() => {
-                  setSpeakerError({ error: false, message: '' });
-                  setSermon((previousSermon) => {
-                    const newImages = previousSermon.images.filter((img) => {
-                      return !speaker.images?.find((image) => image.id === img.id);
-                    });
-                    updateSermon('images', newImages);
-                    const previousSpeakers = previousSermon.speakers;
-                    const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
-                    return {
-                      ...previousSermon,
-                      speakers: newSpeakers,
-                    };
-                  });
-                }}
-                key={speaker.id}
-                label={speaker.name}
-                avatar={
-                  <AvatarWithDefaultImage
-                    defaultImageURL="/user.png"
-                    altName={speaker.name}
-                    width={24}
-                    height={24}
-                    image={speaker.images?.find((image) => image.type === 'square')}
-                    borderRadius={12}
-                  />
-                }
-              />
-            ));
-          }}
-          renderOption={(props, option: AlgoliaSpeaker) => (
-            <ListItem key={option.id} {...props}>
-              <AvatarWithDefaultImage
-                defaultImageURL="/user.png"
-                altName={option.name}
-                width={30}
-                height={30}
-                image={option.images?.find((image) => image.type === 'square')}
-                borderRadius={5}
-                sx={{ marginRight: '15px' }}
-              />
-              {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
-                <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
-              ) : (
-                <div>{option.name}</div>
-              )}
-            </ListItem>
-          )}
-          getOptionLabel={(option: AlgoliaSpeaker) => option.name}
-          multiple
-          renderInput={(params) => {
-            return (
-              <TextField
-                {...params}
-                required
-                label="Speaker(s)"
-                error={speakerError.error}
-                helperText={speakerError.message}
-              />
-            );
-          }}
-        />
-        <Autocomplete
-          fullWidth
-          value={sermon.topics}
-          onBlur={() => {
-            setTopicError({ error: false, message: '' });
-          }}
-          onChange={(_, newValue) => {
-            if (newValue !== null && newValue.length <= 10) {
-              updateSermon('topics', newValue);
-            } else if (newValue.length >= 11) {
-              setTopicError({
-                error: true,
-                message: 'Can only add up to 10 topics',
-              });
-            }
-          }}
-          onInputChange={async (_, value) => {
-            const topics = await fetchTopicsResults(value);
-            setTopicsArray(topics);
-          }}
-          id="topic-input"
-          options={topicsArray}
-          multiple
-          renderInput={(params) => (
-            <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
-          )}
-        />
-      </Box>
-      <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
-        <ImageViewer
-          images={sermon.images}
-          speaker={sermon.speakers[0]}
-          newImageCallback={handleNewImage}
-          vertical={true}
-        />
-      </Box>
-      <Box
-        sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '1ch',
-          margin: 'auto',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 1,
-        }}
-      >
-        {props.existingSermon && props.existingSeries ? (
-          <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
-            <Button
-              onClick={async () => {
-                await editSermon(sermon, sermonSeries);
-                props.setEditFormOpen?.(false);
-              }}
-              disabled={
-                (sermonsEqual(props.existingSermon, sermon) && seriesEqual(props.existingSeries, sermonSeries)) ||
-                sermon.title === '' ||
-                date === null ||
-                sermon.speakers.length === 0 ||
-                sermon.subtitle === ''
+            }}
+            onChange={async (_, newValue) => {
+              if (newValue.length === 1) {
+                const currentTypes = sermon.images.map((img) => img.type);
+                const newImages = [
+                  ...sermon.images,
+                  ...newValue[0].images.filter((img) => !currentTypes.includes(img.type)),
+                ];
+                updateSermon('images', newImages);
               }
-              variant="contained"
-            >
-              update sermon
-            </Button>
-          </div>
-        ) : (
-          <>
-            {file ? (
-              <div style={{ width: '100%' }}>
-                <div style={{ display: 'flex', justifyContent: 'right' }}>
-                  <Cancel sx={{ color: 'red' }} onClick={clearAudioTrimmer} />
-                </div>
-                {isBrowser ? (
-                  <DynamicAudioTrimmer
-                    url={file.preview}
-                    trimStart={trimStart}
-                    setTrimStart={setTrimStart}
-                    setTrimDuration={setTrimDuration}
-                  />
+              if (newValue !== null && newValue.length <= 3) {
+                updateSermon(
+                  'speakers',
+                  newValue.map((speaker) => {
+                    const { _highlightResult, ...speakerWithoutHighlight } = speaker;
+                    return speakerWithoutHighlight;
+                  })
+                );
+              }
+
+              if (newValue.length >= 4) {
+                setSpeakerError({
+                  error: true,
+                  message: 'Can only add up to 3 speakers',
+                });
+              } else if (speakerError.error) {
+                setSpeakerError({ error: false, message: '' });
+              }
+            }}
+            onInputChange={async (_, value) => {
+              clearTimeout(timer);
+              const newTimer = setTimeout(async () => {
+                setSpeakersArray(await fetchSpeakerResults(value, 25, 0));
+              }, 300);
+              setTimer(newTimer);
+            }}
+            id="speaker-input"
+            options={getSpeakersUnion(sermon.speakers, speakersArray)}
+            isOptionEqualToValue={(option, value) =>
+              value === undefined || option === undefined || option.id === value.id
+            }
+            renderTags={(speakers, _) => {
+              return speakers.map((speaker) => (
+                <Chip
+                  style={{ margin: '3px' }}
+                  onDelete={() => {
+                    setSpeakerError({ error: false, message: '' });
+                    setSermon((previousSermon) => {
+                      const newImages = previousSermon.images.filter((img) => {
+                        return !speaker.images?.find((image) => image.id === img.id);
+                      });
+                      updateSermon('images', newImages);
+                      const previousSpeakers = previousSermon.speakers;
+                      const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
+                      return {
+                        ...previousSermon,
+                        speakers: newSpeakers,
+                      };
+                    });
+                  }}
+                  key={speaker.id}
+                  label={speaker.name}
+                  avatar={
+                    <AvatarWithDefaultImage
+                      defaultImageURL="/user.png"
+                      altName={speaker.name}
+                      width={24}
+                      height={24}
+                      image={speaker.images?.find((image) => image.type === 'square')}
+                      borderRadius={12}
+                    />
+                  }
+                />
+              ));
+            }}
+            renderOption={(props, option: AlgoliaSpeaker) => (
+              <ListItem key={option.id} {...props}>
+                <AvatarWithDefaultImage
+                  defaultImageURL="/user.png"
+                  altName={option.name}
+                  width={30}
+                  height={30}
+                  image={option.images?.find((image) => image.type === 'square')}
+                  borderRadius={5}
+                  sx={{ marginRight: '15px' }}
+                />
+                {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
+                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
                 ) : (
-                  <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center">
-                    <audio style={{ width: '100%' }} controls src={file.preview} />
-                    <Typography variant="caption">
-                      Trimming is not currently supported on mobile: please trim your audio on a seperate application
-                      first
-                    </Typography>
-                  </Box>
+                  <div>{option.name}</div>
                 )}
-              </div>
-            ) : (
-              <Box display="flex" flexDirection="column" width={1} justifyContent="center" alignItems="center" gap={1}>
-                {isBrowser && (
+              </ListItem>
+            )}
+            getOptionLabel={(option: AlgoliaSpeaker) => option.name}
+            multiple
+            renderInput={(params) => {
+              return (
+                <TextField
+                  {...params}
+                  required
+                  label="Speaker(s)"
+                  error={speakerError.error}
+                  helperText={speakerError.message}
+                />
+              );
+            }}
+          />
+          <Autocomplete
+            fullWidth
+            value={sermon.topics}
+            onBlur={() => {
+              setTopicError({ error: false, message: '' });
+            }}
+            onChange={(_, newValue) => {
+              if (newValue !== null && newValue.length <= 10) {
+                updateSermon('topics', newValue);
+              } else if (newValue.length >= 11) {
+                setTopicError({
+                  error: true,
+                  message: 'Can only add up to 10 topics',
+                });
+              }
+            }}
+            onInputChange={async (_, value) => {
+              const topics = await fetchTopicsResults(value);
+              setTopicsArray(topics);
+            }}
+            id="topic-input"
+            options={topicsArray}
+            multiple
+            renderInput={(params) => (
+              <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
+            )}
+          />
+        </Box>
+        <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
+          <ImageViewer
+            images={sermon.images}
+            speaker={sermon.speakers[0]}
+            newImageCallback={handleNewImage}
+            vertical={true}
+          />
+        </Box>
+        <Box
+          sx={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '1ch',
+            margin: 'auto',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 1,
+          }}
+        >
+          {props.existingSermon && props.existingSeries ? (
+            <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
+              <Button
+                onClick={async () => {
+                  await editSermon(sermon, sermonSeries);
+                  props.setEditFormOpen?.(false);
+                }}
+                disabled={
+                  (sermonsEqual(props.existingSermon, sermon) && seriesEqual(props.existingSeries, sermonSeries)) ||
+                  sermon.title === '' ||
+                  date === null ||
+                  sermon.speakers.length === 0 ||
+                  sermon.subtitle === ''
+                }
+                variant="contained"
+              >
+                update sermon
+              </Button>
+            </div>
+          ) : (
+            <>
+              {file ? (
+                <div style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', justifyContent: 'right' }}>
+                    <Cancel sx={{ color: 'red' }} onClick={clearAudioTrimmer} />
+                  </div>
+                  {isBrowser ? (
+                    <DynamicAudioTrimmer
+                      url={file.preview}
+                      trimStart={trimStart}
+                      setTrimStart={setTrimStart}
+                      setTrimDuration={setTrimDuration}
+                    />
+                  ) : (
+                    <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center">
+                      <audio style={{ width: '100%' }} controls src={file.preview} />
+                      <Typography variant="caption">
+                        Trimming is not currently supported on mobile: please trim your audio on a seperate application
+                        first
+                      </Typography>
+                    </Box>
+                  )}
+                </div>
+              ) : (
+                <Box
+                  display="flex"
+                  flexDirection="column"
+                  width={1}
+                  justifyContent="center"
+                  alignItems="center"
+                  gap={1}
+                >
                   <FormControlLabel
                     control={
                       <Switch
@@ -520,52 +537,68 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     }
                     label="Upload from Youtube Url"
                   />
-                )}
-                {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
-              </Box>
-            )}
-            <div style={{ display: 'flex' }}>
-              <input
-                className={styles.button}
-                type="button"
-                value="Upload"
-                disabled={
-                  file === undefined ||
-                  sermon.title === '' ||
-                  date === null ||
-                  sermon.speakers.length === 0 ||
-                  sermon.subtitle === ''
-                }
-                onClick={async () => {
-                  if (file !== undefined && date != null && user?.role === 'admin') {
-                    try {
-                      await uploadFile({
-                        file,
-                        setUploadProgress,
-                        trimStart,
-                        sermon,
-                        sermonSeries,
-                      });
-                      clearForm();
-                    } catch (error) {
-                      setUploadProgress({ error: true, message: `Error uploading file: ${error}` });
+                  {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
+                </Box>
+              )}
+              <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
+                <Box display="flex">
+                  <input
+                    className={styles.button}
+                    type="button"
+                    value="Upload"
+                    disabled={
+                      file === undefined ||
+                      sermon.title === '' ||
+                      date === null ||
+                      sermon.speakers.length === 0 ||
+                      sermon.subtitle === '' ||
+                      isUploading
                     }
-                  } else if (user?.role !== 'admin') {
-                    setUploadProgress({ error: true, message: 'You do not have permission to upload' });
-                  }
-                }}
-              />
-              <button type="button" className={styles.button} onClick={() => clearForm()}>
-                Clear Form
-              </button>
-            </div>
-            <p style={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
-              {uploadProgress.message}
-            </p>
-          </>
-        )}
-      </Box>
-    </FormControl>
+                    onClick={async () => {
+                      if (file !== undefined && date != null && user?.role === 'admin') {
+                        try {
+                          setIsUploading(true);
+                          await uploadFile({
+                            file,
+                            setUploadProgress,
+                            trimStart,
+                            sermon,
+                            sermonSeries,
+                          });
+                          setIsUploading(false);
+                          clearForm();
+                        } catch (error) {
+                          setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
+                        }
+                      } else if (user?.role !== 'admin') {
+                        setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
+                      }
+                    }}
+                  />
+                  <button type="button" className={styles.button} onClick={() => clearForm()}>
+                    Clear Form
+                  </button>
+                </Box>
+                <Box display="flex" width={1} gap={1} justifyContent="center" alignItems="center">
+                  {isUploading && (
+                    <Box width={1}>
+                      <LinearProgress variant="determinate" value={uploadProgress.percent} />
+                    </Box>
+                  )}
+                  {uploadProgress.message && (
+                    <Typography sx={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
+                      {!uploadProgress.error && uploadProgress.percent < 100
+                        ? `${uploadProgress.percent}%`
+                        : uploadProgress.message}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            </>
+          )}
+        </Box>
+      </FormControl>
+    </>
   );
 };
 
@@ -574,13 +607,7 @@ export default Uploader;
 export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   const userCredentials = await ProtectedRoute(ctx);
   if (!userCredentials.props.uid || !['admin', 'uploader'].includes(userCredentials.props.customClaims?.role)) {
-    return {
-      redirect: {
-        permanent: false,
-        destination: '/',
-      },
-      props: {},
-    };
+    return userCredentials;
   }
   return { props: {} };
 };

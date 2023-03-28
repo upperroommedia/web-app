@@ -7,7 +7,8 @@ const createErrorObject = (title: string, errorMessage: string, authFailure: boo
   };
 };
 
-const AuthErrors = (error: string) => {
+const AuthErrors = (error: string, callbackRoute: string) => {
+  console.log('callbackRoute', callbackRoute);
   switch (error) {
     case 'auth/email-already-exists':
       return createErrorObject('Email Already in Use', 'This email is already in use', true, '');
@@ -21,7 +22,7 @@ const AuthErrors = (error: string) => {
       return createErrorObject('Account already exists', 'The email provided is already in use', true, '');
     case undefined:
       // Login or SignUp Succeeded
-      return createErrorObject('', '', false, '/');
+      return createErrorObject('', '', false, callbackRoute);
     default:
       return createErrorObject('Wrong Credentials', 'Double check your username and password', true, '');
   }

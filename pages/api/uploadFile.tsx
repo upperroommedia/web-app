@@ -10,7 +10,7 @@ import { Series } from '../../types/Series';
 
 interface uploadFileProps {
   file: UploadableFile;
-  setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string }>>;
+  setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string; percent: number }>>;
   trimStart: number;
   sermon: Sermon;
   sermonSeries: Series[];
@@ -63,35 +63,36 @@ const uploadFile = async (props: uploadFileProps) => {
     })
   );
   await setDoc(doc(firestore, 'sermons', props.sermon.key).withConverter(sermonConverter), props.sermon);
-  const uploadTask = uploadBytesResumable(sermonRef, props.file.file, metadata);
-
-  uploadTask.on(
-    'state_changed',
-    (snapshot) => {
-      const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-      props.setUploadProgress({ error: false, message: `${Math.round(progress)}%` });
-      switch (snapshot.state) {
-        case 'paused':
-          break;
-        case 'running':
-          break;
+  await new Promise<void>((resolve, reject) => {
+    uploadBytesResumable(sermonRef, props.file.file, metadata).on(
+      'state_changed',
+      (snapshot) => {
+        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        props.setUploadProgress({ error: false, percent: Math.round(progress), message: 'Uploading...' });
+        switch (snapshot.state) {
+          case 'paused':
+            break;
+          case 'running':
+            break;
+        }
+      },
+      async (error) => {
+        await deleteDoc(doc(firestore, 'sermons', props.sermon.key));
+        reject(error);
+      },
+      async () => {
+        resolve();
+        // add sermon to series
+        // note a firestore function document listener will take care of updating the series subcollection for the sermon
+        const batch = writeBatch(firestore);
+        props.sermonSeries.forEach((series) => {
+          const seriesSermonRef = doc(firestore, 'series', series.id, 'seriesSermons', props.sermon.key);
+          batch.set(seriesSermonRef, props.sermon);
+        });
+        batch.commit();
+        props.setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
       }
-    },
-    async (error) => {
-      await deleteDoc(doc(firestore, 'sermons', props.sermon.key));
-      throw error;
-    },
-    async () => {
-      // add sermon to series
-      // note a firestore function document listener will take care of updating the series subcollection for the sermon
-      const batch = writeBatch(firestore);
-      props.sermonSeries.forEach((series) => {
-        const seriesSermonRef = doc(firestore, 'series', series.id, 'seriesSermons', props.sermon.key);
-        batch.set(seriesSermonRef, props.sermon);
-      });
-      batch.commit();
-      props.setUploadProgress({ error: false, message: 'Uploaded!' });
-    }
-  );
+    );
+  });
 };
 export default uploadFile;

@@ -78,7 +78,7 @@ const AdminSpeakers = () => {
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
     const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
     // TODO: fix this
-    setTotalSpeakers(result[0].nbHits || 0);
+    setTotalSpeakers(result[0]?.nbHits || 0);
     setSpeakersLoading(false);
     return result;
   };
@@ -98,7 +98,7 @@ const AdminSpeakers = () => {
     setSpeakers(res);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     const result = await fetchSpeakerResults('', 1, 0);
-    setTotalSpeakers(result[0].nbHits || 0);
+    setTotalSpeakers(result[0]?.nbHits || 0);
   };
 
   const getMoreSpeakersFirebase = async () => {
@@ -114,7 +114,7 @@ const AdminSpeakers = () => {
       setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data()]);
     });
     const result = await fetchSpeakerResults('', 1, 0);
-    setTotalSpeakers(result[0].nbHits || 0);
+    setTotalSpeakers(result[0]?.nbHits || 0);
   };
 
   const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -171,6 +171,8 @@ const AdminSpeakers = () => {
       />
       {speakersLoading ? (
         <h2>loading...</h2>
+      ) : speakers.length === 0 ? (
+        <h2>No results</h2>
       ) : (
         <SpeakerTable
           speakers={speakers}
