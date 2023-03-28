@@ -109,7 +109,7 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
         />
         <IconButton
           size="small"
-          sx={{ height: 'min-content' }}
+          sx={{ flexShrink: 0 }}
           onClick={() => {
             setNewSeriesPopup(true);
           }}

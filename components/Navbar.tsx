@@ -13,12 +13,15 @@ import Avatar from '@mui/material/Avatar';
 import Tooltip from '@mui/material/Tooltip';
 import MenuItem from '@mui/material/MenuItem';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import styles from 'styles/Navbar.module.css';
 import NavMenuItem from './NavMenuItem';
 import UserAvatar from './UserAvatar';
 import { FunctionComponent, useState } from 'react';
 import useAuth from '../context/user/UserContext';
+import Link from 'next/link';
+import useTheme from '@mui/system/useTheme';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useRouter } from 'next/router';
 
 const Navbar: FunctionComponent = () => {
   const { user, logoutUser } = useAuth();
@@ -28,6 +31,8 @@ const Navbar: FunctionComponent = () => {
   const settings = user ? ['Profile', 'Logout'] : ['Login'];
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
+  const theme = useTheme();
+  const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
 
   const handleOpenNavMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorElNav(event.currentTarget);
@@ -44,23 +49,11 @@ const Navbar: FunctionComponent = () => {
     setAnchorElUser(null);
   };
 
-  const handleSettingsClicked = (setting: string) => {
-    handleCloseUserMenu();
-    switch (setting) {
-      case 'Profile':
-        router.push('/profile');
-        break;
-      case 'Logout':
-        logoutUser();
-        break;
-      case 'Login':
-        router.push('/login');
-    }
-  };
-
-  function handlePageClicked(page: string) {
-    router.push(`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`);
-  }
+  const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
+    <Link href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`} passHref>
+      {children}
+    </Link>
+  );
 
   return (
     <AppBar
@@ -72,14 +65,11 @@ const Navbar: FunctionComponent = () => {
     >
       <Container maxWidth="xl">
         <Toolbar disableGutters>
-          <Typography
-            noWrap
-            component="a"
+          <Link
             href="/"
-            sx={{
-              mr: 2,
-              display: { xs: 'none', md: 'flex' },
-              // fontFamily: 'monospace',
+            style={{
+              marginRight: '16px',
+              display: mdMatches ? 'flex' : 'none',
               fontSize: '1.25rem',
               fontWeight: 700,
               letterSpacing: '.3rem',
@@ -88,7 +78,7 @@ const Navbar: FunctionComponent = () => {
             }}
           >
             Upper Room Media
-          </Typography>
+          </Link>
           <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
             <IconButton
               size="large"
@@ -119,29 +109,27 @@ const Navbar: FunctionComponent = () => {
               }}
             >
               {pages.map((page) => (
-                <MenuItem
-                  key={page}
-                  onClick={() => {
-                    handleCloseNavMenu();
-                    handlePageClicked(page);
-                  }}
-                >
-                  <Typography textAlign="center">{page}</Typography>
-                </MenuItem>
+                <MenuItemLink key={page} page={page}>
+                  <MenuItem
+                    onClick={() => {
+                      handleCloseNavMenu();
+                      // handlePageClicked(page);
+                    }}
+                  >
+                    {page}
+                  </MenuItem>
+                </MenuItemLink>
               ))}
             </Menu>
           </Box>
           <Avatar variant="square" sx={{ bgcolor: 'transparent' }}>
             <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill />
           </Avatar>{' '}
-          <Typography
-            // variant="h5"
-            noWrap
-            component="a"
+          <Link
             href="/"
-            sx={{
-              mr: 2,
-              display: { xs: 'flex', md: 'none' },
+            style={{
+              marginRight: '16px',
+              display: mdMatches ? 'none' : 'flex',
               flexGrow: 1,
               fontSize: '1.25rem',
               fontWeight: 700,
@@ -151,18 +139,14 @@ const Navbar: FunctionComponent = () => {
             }}
           >
             URM
-          </Typography>
+          </Link>
           <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' } }}>
             {pages.map((page) => (
-              <NavMenuItem
-                path={page}
-                key={page}
-                onClick={() => {
-                  handlePageClicked(page);
-                }}
-              >
-                <Typography textAlign="center">{page}</Typography>
-              </NavMenuItem>
+              <MenuItemLink key={page} page={page}>
+                <NavMenuItem path={page}>
+                  <Typography textAlign="center">{page}</Typography>
+                </NavMenuItem>
+              </MenuItemLink>
             ))}
           </Box>
           <Box sx={{ flexGrow: 0 }}>
@@ -187,17 +171,38 @@ const Navbar: FunctionComponent = () => {
               open={Boolean(anchorElUser)}
               onClose={handleCloseUserMenu}
             >
-              {settings.map((setting) => (
-                <MenuItem
-                  key={setting}
-                  onClick={() => {
-                    handleSettingsClicked(setting);
-                  }}
-                  className={styles.menu_item}
-                >
-                  <Typography textAlign="center">{setting}</Typography>
-                </MenuItem>
-              ))}
+              {settings.map((setting) => {
+                if (setting === 'Logout') {
+                  return (
+                    <MenuItem
+                      key={setting}
+                      onClick={() => {
+                        handleCloseUserMenu();
+                        logoutUser();
+                      }}
+                      className={styles.menu_item}
+                    >
+                      <Typography textAlign="center">{setting}</Typography>
+                    </MenuItem>
+                  );
+                } else {
+                  return (
+                    <MenuItemLink
+                      key={setting}
+                      page={setting === 'Login' ? `login?callbackUrl=${router.pathname}` : setting}
+                    >
+                      <MenuItem
+                        onClick={() => {
+                          handleCloseUserMenu();
+                        }}
+                        className={styles.menu_item}
+                      >
+                        <Typography textAlign="center">{setting}</Typography>
+                      </MenuItem>
+                    </MenuItemLink>
+                  );
+                }
+              })}
             </Menu>
           </Box>
         </Toolbar>

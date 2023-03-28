@@ -15,7 +15,7 @@ export default async function ProtectedRoute(context: GetServerSidePropsContext)
     return {
       redirect: {
         permanent: false,
-        destination: '/login',
+        destination: `/login?callbackurl=${context.resolvedUrl}`,
       },
       props: {} as never,
     };

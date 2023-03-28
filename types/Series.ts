@@ -38,6 +38,6 @@ export const seriesConverter: FirestoreDataConverter<Series> = {
     return series;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
-    return snapshot.data();
+    return { ...emptySeries, ...snapshot.data(), id: snapshot.id };
   },
 };
