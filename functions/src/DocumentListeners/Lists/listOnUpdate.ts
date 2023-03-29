@@ -2,7 +2,7 @@ import { firestore } from 'firebase-functions';
 import { firestore as firestoreAdmin } from 'firebase-admin';
 import handleError from '../../handleError';
 
-const seriesOnUpdate = firestore.document('series/{seriesId}').onUpdate(async (change, context) => {
+const listOnUpdate = firestore.document('series/{seriesId}').onUpdate(async (change, context) => {
   const { seriesId } = context.params;
   const updatedSermon = change.after.data();
   try {
@@ -21,4 +21,4 @@ const seriesOnUpdate = firestore.document('series/{seriesId}').onUpdate(async (c
   }
 });
 
-export default seriesOnUpdate;
+export default listOnUpdate;
