@@ -1,11 +1,10 @@
 import { DocumentData, FirestoreDataConverter, QueryDocumentSnapshot } from '../firebase/firestore';
 import { ImageType } from './Image';
 import { List, listConverter } from './List';
-import { Series, seriesConverter } from './Series';
 import { createEmptySermon, sermonConverter } from './Sermon';
 import { Sermon } from './SermonTypes';
 
-export type ListItemType = Sermon | Series | List;
+export type ListItemType = Sermon | List;
 
 interface CommonFields {
   id: string;
@@ -22,13 +21,7 @@ export type ListItem<T extends ListItemType> = CommonFields &
     ? { type: 'sermon'; mediaItem: Sermon }
     : T extends List
     ? { type: 'list'; mediaItem: List }
-    : T extends Series
-    ? { type: 'series'; mediaItem: Series }
     : never);
-
-// let listItem: ListItem<ListItemType>;
-
-// const t = listItem.type;
 
 export const emptyListItem: ListItem<ListItemType> = {
   id: '',
@@ -48,9 +41,6 @@ export const ListItemConverter: FirestoreDataConverter<ListItem<ListItemType>> =
       case 'sermon':
         listItem.mediaItem = sermonConverter.toFirestore(listItem.mediaItem as Sermon) as any;
         break;
-      case 'series':
-        listItem.mediaItem = seriesConverter.toFirestore(listItem.mediaItem as Series) as any;
-        break;
       case 'list':
         listItem.mediaItem = listConverter.toFirestore(listItem.mediaItem as List) as any;
         break;
@@ -69,11 +59,6 @@ export const ListItemConverter: FirestoreDataConverter<ListItem<ListItemType>> =
         listItem.mediaItem = sermonConverter.fromFirestore(
           listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
         ) as Sermon;
-        break;
-      case 'series':
-        listItem.mediaItem = seriesConverter.fromFirestore(
-          listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
-        ) as Series;
         break;
       case 'list':
         listItem.mediaItem = listConverter.fromFirestore(

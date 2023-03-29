@@ -5,16 +5,14 @@ import { useDocumentData } from 'react-firebase-hooks/firestore';
 import AdminSermonsList from '../../../components/AdminSermonsList';
 import firestore, { doc } from '../../../firebase/firestore';
 import AdminLayout from '../../../layout/adminLayout';
-import { seriesConverter } from '../../../types/Series';
+import { listConverter } from '../../../types/List';
 import { adminProtected } from '../../../utils/protectedRoutes';
 
 const SeriesSermon = () => {
   const router = useRouter();
-  const seriesId = router.query.seriesId as string;
-  const [series, _loading, _error] = useDocumentData(
-    doc(firestore, `series/${seriesId}`).withConverter(seriesConverter)
-  );
-  const title = series?.name || seriesId;
+  const listId = router.query.listId as string;
+  const [series, _loading, _error] = useDocumentData(doc(firestore, `lists/${listId}`).withConverter(listConverter));
+  const title = series?.name || listId;
   const count = Number(router.query.count as string);
 
   return (
@@ -28,7 +26,7 @@ const SeriesSermon = () => {
           key="description"
         />
       </Head>
-      <AdminSermonsList collectionPath={`series/${seriesId}/seriesSermons`} count={count} />
+      <AdminSermonsList collectionPath={`lists/${listId}/listItems`} count={count} />
     </>
   );
 };

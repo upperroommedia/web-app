@@ -1,14 +1,26 @@
 import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase/firestore';
 import { ImageType } from './Image';
 
-export const OverflowBehavior = ['ERROR', 'CREATENEWLIST', 'REMOVEOLDEST'] as const;
-export type OverflowBehaviorType = (typeof OverflowBehavior)[number];
+export enum OverflowBehavior {
+  ERROR = 'ERROR',
+  CREATENEWLIST = 'CREATENEWLIST',
+  REMOVEOLDEST = 'REMOVEOLDEST',
+}
+export enum ListType {
+  SERIES = 'series',
+  SPEAKER_LIST = 'speaker-list',
+  TOPIC_LIST = 'topic-list',
+  CATEGORY_LIST = 'category-list',
+  LATEST = 'latest',
+}
+
 export interface List {
   id: string;
   name: string;
   images: ImageType[];
-  overflowBehavior: OverflowBehaviorType;
+  overflowBehavior: OverflowBehavior;
   count: number;
+  type: ListType;
   updatedAtMillis: number;
   createdAtMillis: number;
   subsplashId?: string;
@@ -31,9 +43,10 @@ export const emptyList: List = {
   id: '',
   name: '',
   count: 0,
+  type: ListType.SERIES,
   createdAtMillis: new Date().getTime(),
   updatedAtMillis: new Date().getTime(),
-  overflowBehavior: 'CREATENEWLIST',
+  overflowBehavior: OverflowBehavior.CREATENEWLIST,
   images: [],
 };
 

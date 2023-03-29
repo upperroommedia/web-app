@@ -22,7 +22,7 @@ export interface sermonStatus {
 }
 
 export interface Sermon {
-  key: string;
+  id: string;
   title: string;
   description: string;
   speakers: ISpeaker[];

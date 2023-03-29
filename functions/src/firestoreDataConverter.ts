@@ -4,7 +4,6 @@ import { Sermon } from '../../types/SermonTypes';
 import { emptySpeaker, ISpeaker } from '../../types/Speaker';
 import { emptyImage, ImageType } from '../../types/Image';
 import { Timestamp } from 'firebase/firestore';
-import { emptySeries, Series } from '../../types/Series';
 import { emptyList, List } from '../../types/List';
 import { emptyListItem, ListItem, ListItemType } from '../../types/ListItem';
 
@@ -19,7 +18,7 @@ export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
       ...data,
       dateMillis: date.toMillis(),
       dateString: getDateString(date.toDate()),
-      key: snapshot.id,
+      id: snapshot.id,
     };
   },
 };
@@ -42,15 +41,6 @@ export const firestoreAdminImagesConverter: FirestoreDataConverter<ImageType> = 
   },
 };
 
-export const firestoreAdminSeriesConverter: FirestoreDataConverter<Series> = {
-  toFirestore: (series: Series): Series => {
-    return series;
-  },
-  fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
-    return { ...emptySeries, ...snapshot.data(), id: snapshot.id };
-  },
-};
-
 export const firestoreAdminListConverter: FirestoreDataConverter<List> = {
   toFirestore: (list: List): List => {
     return list;
@@ -66,9 +56,6 @@ export const firestoreAdminListItemConverter: FirestoreDataConverter<ListItem<Li
     switch (listItem.type) {
       case 'sermon':
         listItem.mediaItem = firestoreAdminSermonConverter.toFirestore(listItem.mediaItem as Sermon) as any;
-        break;
-      case 'series':
-        listItem.mediaItem = firestoreAdminSeriesConverter.toFirestore(listItem.mediaItem as Series) as any;
         break;
       case 'list':
         listItem.mediaItem = firestoreAdminListConverter.toFirestore(listItem.mediaItem as List) as any;
@@ -88,11 +75,6 @@ export const firestoreAdminListItemConverter: FirestoreDataConverter<ListItem<Li
         listItem.mediaItem = firestoreAdminSermonConverter.fromFirestore(
           listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
         ) as Sermon;
-        break;
-      case 'series':
-        listItem.mediaItem = firestoreAdminSeriesConverter.fromFirestore(
-          listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
-        ) as Series;
         break;
       case 'list':
         listItem.mediaItem = firestoreAdminListConverter.fromFirestore(

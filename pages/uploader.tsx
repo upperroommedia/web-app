@@ -38,7 +38,6 @@ import AvatarWithDefaultImage from '../components/AvatarWithDefaultImage';
 import ListItem from '@mui/material/ListItem';
 import { UploaderFieldError } from '../context/types';
 import SeriesSelector from '../components/SeriesSelector';
-import { Series } from '../types/Series';
 import FormControl from '@mui/material/FormControl';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -46,12 +45,13 @@ import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
+import { List } from '../types/List';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
 interface UploaderProps {
   existingSermon?: Sermon;
-  existingSeries?: Series[];
+  existingList?: List[];
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
@@ -99,7 +99,7 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
   const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon());
-  const [sermonSeries, setSermonSeries] = useState<Series[]>(props.existingSeries || []);
+  const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
   const [isUploading, setIsUploading] = useState(false);
@@ -135,12 +135,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   }, []);
 
   useEffect(() => {
-    if (props.existingSeries) {
-      setSermonSeries(props.existingSeries);
+    if (props.existingList) {
+      setSermonList(props.existingList);
     }
-  }, [props.existingSeries]);
-  const seriesEqual = (series1: Series[], series2: Series[]): boolean => {
-    return JSON.stringify(series1) === JSON.stringify(series2);
+  }, [props.existingList]);
+  const listEqual = (list1: List[], list2: List[]): boolean => {
+    return JSON.stringify(list1) === JSON.stringify(list2);
   };
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
@@ -164,7 +164,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     setSpeakerError({ error: false, message: '' });
     setTopicError({ error: false, message: '' });
     setSermon(createEmptySermon());
-    setSermonSeries([]);
+    setSermonList([]);
     setDate(new Date());
     clearAudioTrimmer();
   };
@@ -314,7 +314,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onChange={handleChange}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <SeriesSelector sermonSeries={sermonSeries} setSermonSeries={setSermonSeries} />
+            <SeriesSelector sermonList={sermonList} setSermonList={setSermonList} />
           </div>
           <Autocomplete
             fullWidth
@@ -475,15 +475,15 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             width: 1,
           }}
         >
-          {props.existingSermon && props.existingSeries ? (
+          {props.existingSermon && props.existingList ? (
             <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
               <Button
                 onClick={async () => {
-                  await editSermon(sermon, sermonSeries);
+                  await editSermon(sermon, sermonList);
                   props.setEditFormOpen?.(false);
                 }}
                 disabled={
-                  (sermonsEqual(props.existingSermon, sermon) && seriesEqual(props.existingSeries, sermonSeries)) ||
+                  (sermonsEqual(props.existingSermon, sermon) && listEqual(props.existingList, sermonList)) ||
                   sermon.title === '' ||
                   date === null ||
                   sermon.speakers.length === 0 ||
@@ -563,7 +563,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                             setUploadProgress,
                             trimStart,
                             sermon,
-                            sermonSeries,
+                            sermonList,
                           });
                           setIsUploading(false);
                           clearForm();

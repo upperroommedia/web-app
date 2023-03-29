@@ -7,9 +7,9 @@ import { Sermon } from '../types/SermonTypes';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { collection } from 'firebase/firestore';
 import firestore from '../firebase/firestore';
+import { listConverter } from '../types/List';
 // import Box from '@mui/material/Box';
 // import CircularProgress from '@mui/material/CircularProgress';
-import { seriesConverter } from '../types/Series';
 
 interface EditSermonFormInfo {
   open: boolean;
@@ -18,8 +18,8 @@ interface EditSermonFormInfo {
 }
 
 const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
-  const [sermonSeries, _loading, _error, _snapshot] = useCollectionDataOnce(
-    collection(firestore, `sermons/${sermon.key}/sermonSeries`).withConverter(seriesConverter)
+  const [sermonLists, _loading, _error, _snapshot] = useCollectionDataOnce(
+    collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(listConverter)
   );
 
   return (
@@ -30,7 +30,7 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
         ) : loading ? (
           <CircularProgress />
         ) : ( */}
-        <Uploader existingSermon={sermon} existingSeries={sermonSeries || []} setEditFormOpen={setOpen} />
+        <Uploader existingSermon={sermon} existingSeries={sermonLists || []} setEditFormOpen={setOpen} />
         {/* )} */}
       </DialogContent>
       <DialogActions>

@@ -52,8 +52,8 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       if (!successful) {
         return;
       }
-      await deleteDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter));
-      setPlaylist(playlist.filter((obj) => obj.key !== sermon.key));
+      await deleteDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter));
+      setPlaylist(playlist.filter((obj) => obj.id !== sermon.id));
     } catch (error) {
       alert(error);
     }
@@ -70,12 +70,12 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       description: sermon.description,
       tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
-      audioStoragePath: `intro-outro-sermons/${sermon.key}`,
+      audioStoragePath: `intro-outro-sermons/${sermon.id}`,
       imageStoragePath: getSquareImageStoragePath(sermon),
     };
     try {
       const result = await uploadToSoundCloud(data);
-      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+      const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       await updateDoc(sermonRef, {
         soundCloudTrackId: result.soundCloudTrackId,
         status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
@@ -104,7 +104,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
     }
     setIsUploadingToSoundCloud(true);
     const deleteFromSoundCloud = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
-    const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+    const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
     try {
       await deleteFromSoundCloud({ soundCloudTrackId: sermon.soundCloudTrackId });
       await updateDoc(sermonRef, {
@@ -139,7 +139,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   };
 
   const handleFirestoreDeleteFromSubsplash = async () => {
-    updateDoc(doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter), {
+    updateDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
       subsplashId: deleteField(),
       status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
     });
