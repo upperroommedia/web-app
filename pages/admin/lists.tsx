@@ -84,20 +84,21 @@ const AdminList = () => {
               </Button>
             </Box>
             <MaterialList>
-              {list.map((s) => {
+              {list.map((l) => {
                 return (
-                  <Link href={`/admin/lists/${s.id}?count=${s.count}`} key={s.id}>
+                  <Link href={`/admin/lists/${l.id}?count=${l.count}`} key={l.id}>
                     <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box display="flex" alignItems="center" gap={1}>
                         <AvatarWithDefaultImage
-                          image={s.images.find((image) => image.type === 'square')}
-                          altName={`Image of List: ${s.name}`}
+                          image={l.images.find((image) => image.type === 'square')}
+                          altName={`Image of List: ${l.name}`}
                           width={50}
                           height={50}
                           borderRadius={5}
                         />
-                        <Typography>{s.name}</Typography>
-                        <Typography>{`Count: ${s.count}`}</Typography>
+                        <Typography>{l.name}</Typography>
+                        <Typography>{`Count: ${l.count}`}</Typography>
+                        <Typography>{`Type: ${l.type}`}</Typography>
                       </Box>
                       <Box>
                         <Tooltip title="Edit List">
@@ -108,7 +109,7 @@ const AdminList = () => {
                               style={{ color: 'lightblue' }}
                               onClick={(e) => {
                                 e.preventDefault();
-                                setSelectedList(s);
+                                setSelectedList(l);
                                 setEditListPopup(true);
                               }}
                             >
@@ -124,7 +125,7 @@ const AdminList = () => {
                               style={{ color: 'red' }}
                               onClick={(e) => {
                                 e.preventDefault();
-                                setSelectedList(s);
+                                setSelectedList(l);
                                 setDeleteListPopup(true);
                               }}
                             >
