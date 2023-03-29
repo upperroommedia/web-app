@@ -10,19 +10,19 @@ const listItemOnCreate = firestore
   .onCreate(async (snapshot, context) => {
     const { listId, sermonId } = context.params;
     try {
-      const series = (await firestoreAdmin().collection('lists').doc(listId).get()).data();
-      if (!series) {
+      const list = (await firestoreAdmin().collection('lists').doc(listId).get()).data();
+      if (!list) {
         throw new HttpsError('internal', 'Something went wrong, please try again later');
       }
       const batch = firestoreAdmin().batch();
       batch.create(
         firestoreAdmin()
-          .collection('lists')
+          .collection('sermons')
           .doc(sermonId)
-          .collection('listItems')
+          .collection('sermonLists')
           .doc(listId)
           .withConverter(firestoreAdminListConverter),
-        series
+        list
       );
       batch.update(firestoreAdmin().doc(`lists/${listId}`).withConverter(firestoreAdminListConverter), {
         count: FieldValue.increment(1),

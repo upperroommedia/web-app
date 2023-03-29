@@ -10,7 +10,7 @@ const listItemOnDelete = firestore
     // removing list from sermon if sermon still exists
     try {
       logger.info(`Removing list ${listId} from sermon ${sermonId}`);
-      await firestoreAdmin().collection('sermons').doc(sermonId).collection('sermonSeries').doc(listId).delete();
+      await firestoreAdmin().collection('sermons').doc(sermonId).collection('sermonLists').doc(listId).delete();
     } catch (err) {
       logger.info(`Sermon ${sermonId} does not exist - skipping delete`);
     }
