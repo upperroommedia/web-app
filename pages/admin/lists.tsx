@@ -46,7 +46,7 @@ const AdminList = () => {
       if (selectedList.subsplashId) {
         await deleteSubsplashList({ listId: selectedList.subsplashId });
       }
-      await deleteDoc(doc(firestore, 'list', selectedList.id));
+      await deleteDoc(doc(firestore, 'lists', selectedList.id));
       setList((oldList) => oldList.filter((list) => list.id !== selectedList.id));
     } catch (e) {
       alert('Error deleting list');
