@@ -55,6 +55,8 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       await deleteDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter));
       setPlaylist(playlist.filter((obj) => obj.id !== sermon.id));
     } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(error);
       alert(error);
     }
   };
