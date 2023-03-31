@@ -7,7 +7,7 @@ import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect } from
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
-import NewSeriesPopup from './NewSeriesPopup';
+import NewListPopup from './NewListPopup';
 import firestore, { query, collection, getDocs, where } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
@@ -15,10 +15,15 @@ import { List, listConverter, ListType, ListWithHighlight } from '../types/List'
 interface ListSelectorProps {
   sermonList: List[];
   setSermonList: Dispatch<SetStateAction<List[]>>;
+  listType: ListType;
 }
 
-const ListSelector: FunctionComponent<ListSelectorProps> = ({ sermonList, setSermonList }: ListSelectorProps) => {
-  const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
+const ListSelector: FunctionComponent<ListSelectorProps> = ({
+  sermonList,
+  setSermonList,
+  listType,
+}: ListSelectorProps) => {
+  const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
 
   const updateSermonList = (listWithHighlight: ListWithHighlight[]) => {
@@ -29,12 +34,15 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({ sermonList, setSer
       }
       return s as List;
     });
-    setSermonList(listArray);
+    setSermonList((oldSermonList) => [
+      ...oldSermonList.filter((list) => list.type !== listType),
+      ...listArray.filter((list) => list.type === listType),
+    ]);
   };
 
   useEffect(() => {
     const fetchList = async () => {
-      const listQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.SERIES)).withConverter(
+      const listQuery = query(collection(firestore, 'lists'), where('type', '==', listType)).withConverter(
         listConverter
       );
       const listQuerySnapshot = await getDocs(listQuery);
@@ -53,7 +61,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({ sermonList, setSer
         <Autocomplete
           multiple
           fullWidth
-          value={sermonList}
+          value={sermonList.filter((list) => list.type === listType)}
           onChange={async (_, newValue) => {
             updateSermonList(newValue);
           }}
@@ -104,24 +112,27 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({ sermonList, setSer
             option.name === undefined ||
             (option.name === value.name && option.id === value.id)
           }
-          renderInput={(params) => <TextField {...params} label="List" />}
+          renderInput={(params) => (
+            <TextField {...params} label={listType.charAt(0).toUpperCase() + listType.slice(1)} />
+          )}
         />
         <IconButton
           size="small"
           sx={{ flexShrink: 0 }}
           onClick={() => {
-            setNewSeriesPopup(true);
+            setNewListPopup(true);
           }}
         >
           <AddIcon />
         </IconButton>
       </Box>
-      <NewSeriesPopup
-        newSeriesPopup={newSeriesPopup}
-        setNewSeriesPopup={setNewSeriesPopup}
+      <NewListPopup
+        newListPopup={newListPopup}
+        setNewListPopup={setNewListPopup}
         listArray={allListArray}
         setListArray={setAllListArray}
         setSermonList={setSermonList}
+        listType={listType}
       />
     </>
   );

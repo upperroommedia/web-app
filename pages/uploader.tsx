@@ -37,7 +37,7 @@ import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import AvatarWithDefaultImage from '../components/AvatarWithDefaultImage';
 import ListItem from '@mui/material/ListItem';
 import { UploaderFieldError } from '../context/types';
-import SeriesSelector from '../components/SeriesSelector';
+import ListSelector from '../components/ListSelector';
 import FormControl from '@mui/material/FormControl';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -45,7 +45,7 @@ import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
-import { List } from '../types/List';
+import { List, ListType } from '../types/List';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -80,7 +80,6 @@ const client =
       })
     : undefined;
 const speakersIndex = client?.initIndex('speakers');
-const topicsIndex = client?.initIndex('topics');
 
 export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
   const speakers: AlgoliaSpeaker[] = [];
@@ -108,7 +107,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
 
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
-  const [topicsArray, setTopicsArray] = useState<string[]>([]);
+
   const [trimStart, setTrimStart] = useState<number>(0);
 
   const [timer, setTimer] = useState<NodeJS.Timeout>();
@@ -117,7 +116,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [date, setDate] = useState<Date>(props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date());
 
   const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
-  const [topicError, setTopicError] = useState<UploaderFieldError>({ error: false, message: '' });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -128,8 +126,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
       // fetch speakers
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
-      // fetch topics
-      setTopicsArray(await fetchTopicsResults(''));
     };
     fetchData();
   }, []);
@@ -162,7 +158,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
-    setTopicError({ error: false, message: '' });
     setSermon(createEmptySermon());
     setSermonList([]);
     setDate(new Date());
@@ -189,19 +184,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const setTrimDuration = (durationSeconds: number) => {
     updateSermon('durationSeconds', durationSeconds);
-  };
-
-  const fetchTopicsResults = async (query: string) => {
-    const res: string[] = [];
-    if (topicsIndex) {
-      const response = await topicsIndex.search(query, {
-        hitsPerPage: 5,
-      });
-      response?.hits.forEach((element: any) => {
-        res.push(element.name);
-      });
-    }
-    return res;
   };
 
   const handleNewImage = (image: ImageType | ImageSizeType) => {
@@ -314,7 +296,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onChange={handleChange}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <SeriesSelector sermonList={sermonList} setSermonList={setSermonList} />
+            <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.SERIES} />
           </div>
           <Autocomplete
             fullWidth
@@ -428,33 +410,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               );
             }}
           />
-          <Autocomplete
-            fullWidth
-            value={sermon.topics}
-            onBlur={() => {
-              setTopicError({ error: false, message: '' });
-            }}
-            onChange={(_, newValue) => {
-              if (newValue !== null && newValue.length <= 10) {
-                updateSermon('topics', newValue);
-              } else if (newValue.length >= 11) {
-                setTopicError({
-                  error: true,
-                  message: 'Can only add up to 10 topics',
-                });
-              }
-            }}
-            onInputChange={async (_, value) => {
-              const topics = await fetchTopicsResults(value);
-              setTopicsArray(topics);
-            }}
-            id="topic-input"
-            options={topicsArray}
-            multiple
-            renderInput={(params) => (
-              <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
-            )}
-          />
+          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+            <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.TOPIC_LIST} />
+          </div>
         </Box>
         <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
           <ImageViewer

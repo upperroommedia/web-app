@@ -12,23 +12,27 @@ import MenuItem from '@mui/material/MenuItem';
 import Box from '@mui/material/Box';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
-import PopUp from '../components/PopUp';
+import PopUp from './PopUp';
 import { CircularProgress } from '@mui/material';
 import { EditSubsplashListInputType, EditSubsplashListOutputType } from '../functions/src/editSubsplashList';
 import { createFunctionV2 } from '../utils/createFunction';
-import { emptyList, List, OverflowBehavior } from '../types/List';
+import { createEmptyList, emptyList, List, ListType, OverflowBehavior } from '../types/List';
 
 interface NewListPopupProps {
-  newSeriesPopup: boolean;
-  setNewSeriesPopup: Dispatch<SetStateAction<boolean>>;
+  newListPopup: boolean;
+  setNewListPopup: Dispatch<SetStateAction<boolean>>;
   listArray: List[];
   setListArray?: Dispatch<SetStateAction<List[]>>;
   setSermonList?: Dispatch<SetStateAction<List[]>>;
   existingList?: List | undefined;
+  listType?: ListType;
 }
 
 const NewListPopup = (props: NewListPopupProps) => {
-  const [newList, setNewList] = useState<List>(props.existingList ? props.existingList : emptyList);
+  // TODO[0]: Make empty list without any specified list type if listtype is not passed in
+  const [newList, setNewList] = useState<List>(
+    props.existingList ? props.existingList : createEmptyList(props.listType || ListType.SERIES)
+  );
   const [selectedOverflowBehavior, setSelectedOverflowBehavior] = useState<OverflowBehavior>(
     OverflowBehavior.CREATENEWLIST
   );
@@ -98,9 +102,9 @@ const NewListPopup = (props: NewListPopupProps) => {
 
   return (
     <PopUp
-      title={props.existingList ? 'Edit List' : 'Add new list'}
-      open={props.newSeriesPopup}
-      setOpen={props.setNewSeriesPopup}
+      title={props.existingList ? `Edit ${props.existingList.name}` : `Add new ${props.listType}`}
+      open={props.newListPopup}
+      setOpen={props.setNewListPopup}
       onClose={() => {
         setUserHasTypedInList(false);
         setNewList(emptyList);
@@ -145,7 +149,7 @@ const NewListPopup = (props: NewListPopupProps) => {
                     })
                   );
                 }
-                props.setNewSeriesPopup(false);
+                props.setNewListPopup(false);
                 setUserHasTypedInList(false);
               } else {
                 const newListId = await addNewList(newList);
@@ -154,7 +158,7 @@ const NewListPopup = (props: NewListPopupProps) => {
                   id: newListId,
                 };
 
-                props.setNewSeriesPopup(false);
+                props.setNewListPopup(false);
                 if (props.setListArray) {
                   props.setListArray((previouslistArray) => [listToAdd, ...previouslistArray]);
                 }
@@ -186,7 +190,7 @@ const NewListPopup = (props: NewListPopupProps) => {
             !userHasTypedInList && setUserHasTypedInList(true);
           }}
           error={newListError.error}
-          label={newListError.error ? newListError.message : 'List'}
+          label={newListError.error ? newListError.message : 'Name'}
           sx={{ paddingBottom: '5px' }}
         />
         <FormControl fullWidth>
