@@ -406,7 +406,8 @@ const SpeakerTable = (props: {
                                     <Image
                                       src={sanitize(image.downloadLink)}
                                       alt={`Image of ${image.name}`}
-                                      fill
+                                      width={50}
+                                      height={50}
                                       style={{ objectFit: 'contain' }}
                                     />
                                   )}
