@@ -18,6 +18,7 @@ export interface populateDatabaseFromSubsplashInputType {
 import sizeOf from 'image-size';
 import handleError from '../handleError';
 import { firestoreAdminImagesConverter, firestoreAdminSpeakerConverter } from '../firestoreDataConverter';
+import populateListsFromSubsplash from './populateListsFromSubsplash';
 
 export interface populateDatabaseFromSubsplashOutputType {
   buffer: {
@@ -55,7 +56,7 @@ const populateDatabaseFromSubsplash = onCall(
       let page_number = 1;
       // TODO[0]: UNCOMMENT
       // const page_size = 100;
-      const page_size = 2;
+      const page_size = 1000;
       let loop = true;
       let current = 0;
       let uploadedImages = 0;
@@ -66,43 +67,9 @@ const populateDatabaseFromSubsplash = onCall(
       db.settings({ ignoreUndefinedProperties: true });
       const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
       const firestoreImages = db.collection('images').withConverter(firestoreAdminImagesConverter);
-      const firestoreLists = db.collection('lists');
-
-      logger.log('Getting Lists');
-      const listResponse = (
-        await axios(
-          createAxiosConfig(
-            'https://core.subsplash.com/builder/v1/lists?filter%5Bapp_key%5D=9XTSHD&filter%5Bgenerated%5D=false&filter%5Btype%5D=standard&page%5Bsize%5D=2000&sort=title',
-            bearerToken,
-            'GET',
-            undefined
-          )
-        )
-      ).data;
-      logger.log(`Found ${listResponse._embedded.lists.length} lists`);
-      const speakerNameToListId: { [key: string]: string } = {};
-      const duplicates = new Set<string>();
-      await Promise.all(
-        listResponse._embedded.lists.map(async (list: any) => {
-          if (list.status === 'published' && list.list_rows_count > 0) {
-            await firestoreLists
-              .doc(list.id)
-              .set({ name: list.title, itemCount: list.list_rows_count, id: list.id }, { merge: true });
-            if (speakerNameToListId[list.id] !== undefined) {
-              console.log(list.id);
-              duplicates.add(list.id);
-            } else {
-              logger.log(`Adding list: ${list.title} to lists collection`);
-              speakerNameToListId[list.title] = list.id;
-            }
-          }
-        })
-      );
-      logger.log(`Duplicate list names: ${duplicates.size}`);
-      logger.log(
-        `There are ${listResponse._embedded.lists.length - Object.keys(speakerNameToListId).length} unique lists`
-      );
       // console.log(speakerNameToListId);
+      const speakerNameToListId: { [key: string]: string } = {};
+      await populateListsFromSubsplash(db, bearerToken, speakerNameToListId, page_size);
       logger.log('loop starting');
       const promises = [];
       while (loop) {
