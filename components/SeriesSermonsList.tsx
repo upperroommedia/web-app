@@ -13,7 +13,7 @@ interface SeriesSermonListProps {
 
 const SeriesSermonList: FunctionComponent<SeriesSermonListProps> = ({ seriesId, count }: SeriesSermonListProps) => {
   const [sermons, loading, error] = useCollectionData(
-    collection(firestore, `series/${seriesId}/seriesSermons`).withConverter(sermonConverter)
+    collection(firestore, `lists/${seriesId}/listItems`).withConverter(sermonConverter)
   );
   return (
     <>

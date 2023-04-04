@@ -41,19 +41,19 @@ const SermonsList = ({ sermons, minimal }: Props) => {
               <SermonListCard
                 sermon={{ ...sermon, currentSecond }}
                 playing={false}
-                key={sermon.key}
+                key={sermon.id}
                 playlist={playlist}
                 setPlaylist={setPlaylist}
                 minimal={true}
               />
             ))
           : playlist.map((sermon) => {
-              if (currentSermon?.key === sermon.key) {
+              if (currentSermon?.id === sermon.id) {
                 return (
                   <SermonListCard
                     sermon={{ ...sermon, currentSecond }}
                     playing={playing}
-                    key={sermon.key}
+                    key={sermon.id}
                     playlist={playlist}
                     setPlaylist={setPlaylist}
                   />
@@ -63,7 +63,7 @@ const SermonsList = ({ sermons, minimal }: Props) => {
                   <SermonListCard
                     sermon={sermon}
                     playing={false}
-                    key={sermon.key}
+                    key={sermon.id}
                     playlist={playlist}
                     setPlaylist={setPlaylist}
                   />

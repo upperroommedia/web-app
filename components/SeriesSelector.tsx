@@ -4,49 +4,48 @@ import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
 import { sanitize } from 'dompurify';
 import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect } from 'react';
-import { Series, seriesConverter, SeriesWithHighlight } from '../types/Series';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewSeriesPopup from './NewSeriesPopup';
-import firestore, { query, collection, getDocs } from '../firebase/firestore';
+import firestore, { query, collection, getDocs, where } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
+import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
 
-interface SeriesSelectorProps {
-  sermonSeries: Series[];
-  setSermonSeries: Dispatch<SetStateAction<Series[]>>;
+interface ListSelectorProps {
+  sermonList: List[];
+  setSermonList: Dispatch<SetStateAction<List[]>>;
 }
 
-const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
-  sermonSeries,
-  setSermonSeries,
-}: SeriesSelectorProps) => {
+const ListSelector: FunctionComponent<ListSelectorProps> = ({ sermonList, setSermonList }: ListSelectorProps) => {
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
-  const [allSeriesArray, setAllSeriesArray] = useState<SeriesWithHighlight[]>([]);
+  const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
 
-  const updateSermonSeries = (seriesWithHighlight: SeriesWithHighlight[]) => {
-    const seriesArray: Series[] = seriesWithHighlight.map((s) => {
+  const updateSermonList = (listWithHighlight: ListWithHighlight[]) => {
+    const listArray: List[] = listWithHighlight.map((s) => {
       if ('_highlightResult' in s) {
-        const { _highlightResult, ...series } = s;
-        return series as Series;
+        const { _highlightResult, ...list } = s;
+        return list as List;
       }
-      return s as Series;
+      return s as List;
     });
-    setSermonSeries(seriesArray);
+    setSermonList(listArray);
   };
 
   useEffect(() => {
-    const fetchSeries = async () => {
-      const seriesQuery = query(collection(firestore, 'series')).withConverter(seriesConverter);
-      const seriesQuerySnapshot = await getDocs(seriesQuery);
-      setAllSeriesArray(
-        seriesQuerySnapshot.docs.map((doc) => {
-          const series = doc.data();
-          return series;
+    const fetchList = async () => {
+      const listQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.SERIES)).withConverter(
+        listConverter
+      );
+      const listQuerySnapshot = await getDocs(listQuery);
+      setAllListArray(
+        listQuerySnapshot.docs.map((doc) => {
+          const list = doc.data();
+          return list;
         })
       );
     };
-    fetchSeries();
+    fetchList();
   }, []);
   return (
     <>
@@ -54,34 +53,34 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
         <Autocomplete
           multiple
           fullWidth
-          value={sermonSeries}
+          value={sermonList}
           onChange={async (_, newValue) => {
-            updateSermonSeries(newValue);
+            updateSermonList(newValue);
           }}
-          id="series-input"
-          options={allSeriesArray}
-          renderTags={(series, _) => {
-            return series.map((series) => (
+          id="list-input"
+          options={allListArray}
+          renderTags={(list, _) => {
+            return list.map((list) => (
               <Chip
-                key={series.id}
-                label={series.name}
+                key={list.id}
+                label={list.name}
                 onDelete={() => {
-                  updateSermonSeries(sermonSeries.filter((s) => s.id !== series.id));
+                  updateSermonList(sermonList.filter((s) => s.id !== list.id));
                 }}
                 avatar={
                   <AvatarWithDefaultImage
                     defaultImageURL="/user.png"
-                    altName={series.name}
+                    altName={list.name}
                     width={24}
                     height={24}
                     borderRadius={12}
-                    image={series.images?.find((image) => image.type === 'square')}
+                    image={list.images?.find((image) => image.type === 'square')}
                   />
                 }
               />
             ));
           }}
-          renderOption={(props, option: SeriesWithHighlight) => (
+          renderOption={(props, option: ListWithHighlight) => (
             <ListItem key={option.id} {...props}>
               <AvatarWithDefaultImage
                 defaultImageURL="/user.png"
@@ -92,20 +91,20 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
                 borderRadius={5}
                 sx={{ marginRight: '15px' }}
               />
-              {option._highlightResult && allSeriesArray.find((s) => s.id === option?.id) === undefined ? (
+              {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
                 <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
               ) : (
                 <div>{option.name}</div>
               )}
             </ListItem>
           )}
-          getOptionLabel={(option: SeriesWithHighlight) => option.name}
+          getOptionLabel={(option: ListWithHighlight) => option.name}
           isOptionEqualToValue={(option, value) =>
             value.name === undefined ||
             option.name === undefined ||
             (option.name === value.name && option.id === value.id)
           }
-          renderInput={(params) => <TextField {...params} label="Series" />}
+          renderInput={(params) => <TextField {...params} label="List" />}
         />
         <IconButton
           size="small"
@@ -120,12 +119,12 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = ({
       <NewSeriesPopup
         newSeriesPopup={newSeriesPopup}
         setNewSeriesPopup={setNewSeriesPopup}
-        seriesArray={allSeriesArray}
-        setSeriesArray={setAllSeriesArray}
-        setSermonSeries={setSermonSeries}
+        listArray={allListArray}
+        setListArray={setAllListArray}
+        setSermonList={setSermonList}
       />
     </>
   );
 };
 
-export default SeriesSelector;
+export default ListSelector;

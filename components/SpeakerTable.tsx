@@ -162,7 +162,7 @@ const SpeakerTableToolbar = () =>
         }}
       >
         <FormGroup sx={{ pl: '1em' }}>
-          {Object.keys(props.filters).map((filter) => {
+          {Object.ids(props.filters).map((filter) => {
             return (
               <FormControlLabel
                 key={filter}

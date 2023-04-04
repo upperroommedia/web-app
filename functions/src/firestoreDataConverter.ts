@@ -1,10 +1,11 @@
-import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase-admin/lib/firestore';
+import { DocumentData, FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase-admin/lib/firestore';
 import { createEmptySermon, FirebaseSermon, getDateString } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
-import { ISpeaker } from '../../types/Speaker';
-import { ImageType } from '../../types/Image';
+import { emptySpeaker, ISpeaker } from '../../types/Speaker';
+import { emptyImage, ImageType } from '../../types/Image';
 import { Timestamp } from 'firebase/firestore';
-import { Series } from '../../types/Series';
+import { emptyList, List } from '../../types/List';
+import { emptyListItem, ListItem, ListItemType } from '../../types/ListItem';
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
@@ -17,7 +18,7 @@ export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
       ...data,
       dateMillis: date.toMillis(),
       dateString: getDateString(date.toDate()),
-      key: snapshot.id,
+      id: snapshot.id,
     };
   },
 };
@@ -27,7 +28,7 @@ export const firestoreAdminSpeakerConverter: FirestoreDataConverter<ISpeaker> = 
     return speaker;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<ISpeaker>): ISpeaker => {
-    return { ...snapshot.data(), id: snapshot.id };
+    return { ...emptySpeaker, ...snapshot.data(), id: snapshot.id };
   },
 };
 
@@ -36,15 +37,53 @@ export const firestoreAdminImagesConverter: FirestoreDataConverter<ImageType> = 
     return image;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<ImageType>): ImageType => {
-    return { ...snapshot.data(), id: snapshot.id };
+    return { ...emptyImage, ...snapshot.data(), id: snapshot.id };
   },
 };
 
-export const firestoreAdminSeriesConverter: FirestoreDataConverter<Series> = {
-  toFirestore: (series: Series): Series => {
-    return series;
+export const firestoreAdminListConverter: FirestoreDataConverter<List> = {
+  toFirestore: (list: List): List => {
+    return list;
   },
-  fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
-    return { ...snapshot.data(), id: snapshot.id };
+  fromFirestore: (snapshot: QueryDocumentSnapshot<List>): List => {
+    return { ...emptyList, ...snapshot.data(), id: snapshot.id };
+  },
+};
+
+export const firestoreAdminListItemConverter: FirestoreDataConverter<ListItem<ListItemType>> = {
+  toFirestore: (listItem: ListItem<ListItemType>): ListItem<ListItemType> => {
+    // handle converting the media item to the correct firestore type
+    switch (listItem.type) {
+      case 'sermon':
+        listItem.mediaItem = firestoreAdminSermonConverter.toFirestore(listItem.mediaItem as Sermon) as any;
+        break;
+      case 'list':
+        listItem.mediaItem = firestoreAdminListConverter.toFirestore(listItem.mediaItem as List) as any;
+        break;
+      default:
+        break;
+    }
+    return listItem;
+  },
+
+  fromFirestore: (snapshot: QueryDocumentSnapshot<ListItem<ListItemType>>): ListItem<ListItemType> => {
+    const listItem = { ...emptyListItem, ...snapshot.data(), id: snapshot.id };
+
+    // handle converting the media item to the correct firestore type
+    switch (listItem.type) {
+      case 'sermon':
+        listItem.mediaItem = firestoreAdminSermonConverter.fromFirestore(
+          listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
+        ) as Sermon;
+        break;
+      case 'list':
+        listItem.mediaItem = firestoreAdminListConverter.fromFirestore(
+          listItem.mediaItem as unknown as QueryDocumentSnapshot<DocumentData>
+        ) as List;
+        break;
+      default:
+        break;
+    }
+    return listItem;
   },
 };

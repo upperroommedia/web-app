@@ -43,7 +43,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
   const theme = useTheme();
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
-  const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.key}`));
+  const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
 
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
