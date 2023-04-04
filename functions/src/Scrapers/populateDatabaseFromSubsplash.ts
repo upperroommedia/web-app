@@ -3,23 +3,23 @@ import { logger } from 'firebase-functions/v2';
 import { storage, firestore } from 'firebase-admin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { File } from '@google-cloud/storage';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import axios from 'axios';
-import { ImageType } from '../../types/Image';
-import { ISpeaker } from '../../types/Speaker';
+import { ImageType } from '../../../types/Image';
+import { ISpeaker } from '../../../types/Speaker';
 import { Stream } from 'stream';
 import { existsSync, mkdirSync, unlinkSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { v4 } from 'uuid';
-export interface populateSpeakerImagesInputType {
+export interface populateDatabaseFromSubsplashInputType {
   speakerTagIds?: string[];
 }
 import sizeOf from 'image-size';
-import handleError from './handleError';
-import { firestoreAdminImagesConverter, firestoreAdminSpeakerConverter } from './firestoreDataConverter';
+import handleError from '../handleError';
+import { firestoreAdminImagesConverter, firestoreAdminSpeakerConverter } from '../firestoreDataConverter';
 
-export interface populateSpeakerImagesOutputType {
+export interface populateDatabaseFromSubsplashOutputType {
   buffer: {
     type: 'Buffer';
     data: number[];
@@ -44,14 +44,14 @@ const streamDataToStorage = async (stream: Stream, destinationFile: File): Promi
     stream.pipe(destinationFile.createWriteStream()).on('close', resolve);
   });
 };
-const populateSpeakerImages = onCall(
+const populateDatabaseFromSubsplash = onCall(
   { timeoutSeconds: 540, memory: '1GiB' },
-  async (request: CallableRequest<populateSpeakerImagesInputType>): Promise<string> => {
+  async (request: CallableRequest<populateDatabaseFromSubsplashInputType>): Promise<string> => {
     if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');
     }
     try {
-      logger.log('Populating Speaker Images');
+      logger.log('Populating Database from Subsplash');
       let page_number = 1;
       // TODO[0]: UNCOMMENT
       // const page_size = 100;
@@ -88,8 +88,9 @@ const populateSpeakerImages = onCall(
             await firestoreLists
               .doc(list.id)
               .set({ name: list.title, itemCount: list.list_rows_count, id: list.id }, { merge: true });
-            if (speakerNameToListId[list.title] !== undefined) {
-              duplicates.add(list.title);
+            if (speakerNameToListId[list.id] !== undefined) {
+              console.log(list.id);
+              duplicates.add(list.id);
             } else {
               logger.log(`Adding list: ${list.title} to lists collection`);
               speakerNameToListId[list.title] = list.id;
@@ -250,4 +251,4 @@ const populateSpeakerImages = onCall(
   }
 );
 
-export default populateSpeakerImages;
+export default populateDatabaseFromSubsplash;
