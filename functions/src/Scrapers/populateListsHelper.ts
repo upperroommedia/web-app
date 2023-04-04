@@ -8,7 +8,7 @@ import populateImages from './populateImagesHelper';
 import { Bucket } from '@google-cloud/storage';
 import { HttpsError } from 'firebase-functions/v2/https';
 
-async function populateListsFromSubsplash(
+async function populateLists(
   db: firestore.Firestore,
   bucket: Bucket,
   bearerToken: string,
@@ -47,24 +47,25 @@ async function populateListsFromSubsplash(
     }
     logger.log(`Found ${listResponse._embedded.lists.length} lists`);
 
-    const allSubsplashListImages: { [key: string]: { imageName: string; image: any } } = {};
+    const allSubsplashListImages = new Map<string, { imageName: string; image: any }>();
 
     listResponse._embedded.lists.forEach((list: any) => {
       if (list._embedded) {
         const subsplashImages = list._embedded.images;
         subsplashImages.forEach((image: any) => {
-          allSubsplashListImages[image.id] = { imageName: list.title, image };
+          if (image.id) {
+            allSubsplashListImages.set(image.id, { imageName: list.title, image });
+          }
         });
       }
     });
 
-    await populateImages(
-      bucket,
-      imageIds,
-      db,
-      Object.values(allSubsplashListImages).map((item) => item),
-      firestoreImagesMap
-    );
+    const subsplashImagesInput: { imageName: string; image: any }[] = [];
+    allSubsplashListImages.forEach((value) => subsplashImagesInput.push(value));
+
+    await populateImages(bucket, imageIds, db, subsplashImagesInput, firestoreImagesMap);
+
+    logger.log(`${firestoreImagesMap.size} images metadata in memory`);
 
     const batch = db.batch();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -110,4 +111,4 @@ async function populateListsFromSubsplash(
   return current;
 }
 
-export default populateListsFromSubsplash;
+export default populateLists;
