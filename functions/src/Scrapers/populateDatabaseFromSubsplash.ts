@@ -23,12 +23,6 @@ export interface populateDatabaseFromSubsplashOutputType {
     data: number[];
   };
 }
-const bucket = storage().bucket('urm-app-images');
-const db = firestore();
-db.settings({ ignoreUndefinedProperties: true });
-const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
-const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
-const firestoreTopics = db.collection('topics').withConverter(firestoreAdminTopicConverter);
 
 const populateDatabaseFromSubsplash = onCall(
   { timeoutSeconds: 540, memory: '1GiB' },
@@ -43,6 +37,12 @@ const populateDatabaseFromSubsplash = onCall(
       const listIdToImageIdMap = new Map<string, string[]>();
       const listNameToId = new Map<string, string>();
       const bearerToken = await authenticateSubsplash();
+      const bucket = storage().bucket('urm-app-images');
+      const db = firestore();
+      db.settings({ ignoreUndefinedProperties: true });
+      const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
+      const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
+      const firestoreTopics = db.collection('topics').withConverter(firestoreAdminTopicConverter);
       const listCount = await populateLists(
         db,
         bucket,
