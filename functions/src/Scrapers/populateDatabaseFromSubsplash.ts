@@ -39,7 +39,6 @@ const populateDatabaseFromSubsplash = onCall(
       const bearerToken = await authenticateSubsplash();
       const bucket = storage().bucket('urm-app-images');
       const db = firestore();
-      db.settings({ ignoreUndefinedProperties: true });
       const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
       const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
       const firestoreTopics = db.collection('topics').withConverter(firestoreAdminTopicConverter);
