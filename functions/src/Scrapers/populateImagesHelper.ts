@@ -49,7 +49,8 @@ async function populateImages(
         const storagePath = decodeURIComponent(image?.downloadLink.split('/').pop() || '');
         logger.log('storagePath', storagePath);
         const file = bucket.file(storagePath);
-        if (await file.exists()) {
+        if ((await file.exists())[0]) {
+          imageIds.add(storagePath);
           logger.log(`${imageId} already exists, skipping download...`);
           if (image) {
             firestoreImagesMap.set(imageId, image);
@@ -99,8 +100,8 @@ async function populateImages(
           metadata: {
             width: width,
             height: height,
-            average_color_hex: averageColorHex,
-            vibrant_color_hex: vibrantColorHex,
+            ...(averageColorHex && { average_color_hex: averageColorHex }),
+            ...(vibrantColorHex && { vibrant_color_hex: vibrantColorHex }),
           },
         });
       }
@@ -118,8 +119,8 @@ async function populateImages(
         dateAddedMillis: new Date().getTime(),
         name: `${imageName}-${type}.${contentType.split('/')[1]}`,
         subsplashId: imageId,
-        averageColorHex: averageColorHex,
-        vibrantColorHex: vibrantColorHex,
+        ...(averageColorHex && { average_color_hex: averageColorHex }),
+        ...(vibrantColorHex && { vibrant_color_hex: vibrantColorHex }),
       };
       if (shouldUploadImage) {
         await firestoreImages.doc(finalImage.id).set(finalImage, { merge: true });
