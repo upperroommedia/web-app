@@ -1,5 +1,5 @@
 import { firestore } from 'firebase-functions';
-import { firestore as firestoreAdmin } from 'firebase-admin';
+import { db } from '../../../../firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -10,13 +10,13 @@ const listItemOnCreate = firestore
   .onCreate(async (snapshot, context) => {
     const { listId, sermonId } = context.params;
     try {
-      const list = (await firestoreAdmin().collection('lists').doc(listId).get()).data();
+      const list = (await db.collection('lists').doc(listId).get()).data();
       if (!list) {
         throw new HttpsError('internal', 'Something went wrong, please try again later');
       }
-      const batch = firestoreAdmin().batch();
+      const batch = db.batch();
       batch.create(
-        firestoreAdmin()
+        db
           .collection('sermons')
           .doc(sermonId)
           .collection('sermonLists')
@@ -24,7 +24,7 @@ const listItemOnCreate = firestore
           .withConverter(firestoreAdminListConverter),
         list
       );
-      batch.update(firestoreAdmin().doc(`lists/${listId}`).withConverter(firestoreAdminListConverter), {
+      batch.update(db.doc(`lists/${listId}`).withConverter(firestoreAdminListConverter), {
         count: FieldValue.increment(1),
       });
       return batch.commit();

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { firestore } from 'firebase-admin';
+import { Firestore, CollectionReference } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { ImageType } from '../../../types/Image';
 import { List, ListType } from '../../../types/List';
@@ -7,13 +7,13 @@ import { Topic } from '../../../types/Topic';
 import { createAxiosConfig } from '../subsplashUtils';
 
 async function populateTopics(
-  db: firestore.Firestore,
+  db: Firestore,
   bearerToken: string,
   firestoreImagesMap: Map<string, ImageType>,
   listIdToImageIdMap: Map<string, string[]>,
   listNameToId: Map<string, string>,
-  firestoreLists: firestore.CollectionReference<List>,
-  firestoreTopics: firestore.CollectionReference<Topic>
+  firestoreLists: CollectionReference<List>,
+  firestoreTopics: CollectionReference<Topic>
 ): Promise<number> {
   let loop = true;
   let current = 0;
