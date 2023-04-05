@@ -4,9 +4,8 @@ import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
-import addNewSeries from '../pages/api/addNewSeries';
+import addNewList from '../pages/api/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
-import { emptySeries, Series, OverflowBehavior, OverflowBehaviorType } from '../types/Series';
 import ImageViewer from './ImageViewer';
 import isEqual from 'lodash/isEqual';
 import MenuItem from '@mui/material/MenuItem';
@@ -17,57 +16,61 @@ import PopUp from '../components/PopUp';
 import { CircularProgress } from '@mui/material';
 import { EditSubsplashListInputType, EditSubsplashListOutputType } from '../functions/src/editSubsplashList';
 import { createFunctionV2 } from '../utils/createFunction';
+import { emptyList, List, OverflowBehavior } from '../types/List';
 
-interface NewSeriesPopupProps {
+interface NewListPopupProps {
   newSeriesPopup: boolean;
   setNewSeriesPopup: Dispatch<SetStateAction<boolean>>;
-  seriesArray: Series[];
-  setSeriesArray?: Dispatch<SetStateAction<Series[]>>;
-  setSermonSeries?: Dispatch<SetStateAction<Series[]>>;
-  existingSeries?: Series | undefined;
+  listArray: List[];
+  setListArray?: Dispatch<SetStateAction<List[]>>;
+  setSermonList?: Dispatch<SetStateAction<List[]>>;
+  existingList?: List | undefined;
 }
 
-const NewSeriesPopup = (props: NewSeriesPopupProps) => {
-  const [newSeries, setNewSeries] = useState<Series>(props.existingSeries ? props.existingSeries : emptySeries);
+const NewListPopup = (props: NewListPopupProps) => {
+  const [newList, setNewList] = useState<List>(props.existingList ? props.existingList : emptyList);
+  const [selectedOverflowBehavior, setSelectedOverflowBehavior] = useState<OverflowBehavior>(
+    OverflowBehavior.CREATENEWLIST
+  );
   const [submitting, setSubmitting] = useState(false);
-  const [newSeriesError, setNewSeriesError] = useState<{ error: boolean; message: string }>({
+  const [newListError, setNewListError] = useState<{ error: boolean; message: string }>({
     error: false,
     message: '',
   });
   const overFlowBehaviorOptions: {
-    [key in OverflowBehaviorType]: string;
+    [key in OverflowBehavior]: string;
   } = {
-    ERROR: 'Error',
-    CREATENEWLIST: 'Create New List',
-    REMOVEOLDEST: 'Remove Oldest',
+    [OverflowBehavior.ERROR]: 'Error',
+    [OverflowBehavior.CREATENEWLIST]: 'Create New List',
+    [OverflowBehavior.REMOVEOLDEST]: 'Remove Oldest',
   };
-  const [userHasTypedInSeries, setUserHasTypedInSeries] = useState<boolean>(false);
+  const [userHasTypedInList, setUserHasTypedInList] = useState<boolean>(false);
   useEffect(() => {
-    if (props.existingSeries && newSeries.id !== props.existingSeries.id) {
-      setNewSeries(props.existingSeries);
+    if (props.existingList && newList.id !== props.existingList.id) {
+      setNewList(props.existingList);
     }
-  }, [props.existingSeries, newSeries]);
+  }, [props.existingList, newList]);
 
   const handleNewImage = (image: ImageType | ImageSizeType) => {
-    setNewSeries((oldSeries) => {
+    setNewList((oldList) => {
       // check if image is ImageType or ImageSizeType
       if (isImageType(image)) {
         const castedImage = image as ImageType;
         let newImages: ImageType[] = [];
-        if (oldSeries.images.find((img) => img.type === castedImage.type)) {
-          newImages = oldSeries.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+        if (oldList.images.find((img) => img.type === castedImage.type)) {
+          newImages = oldList.images.map((img) => (img.type === castedImage.type ? castedImage : img));
         } else {
-          newImages = [...oldSeries.images, castedImage];
+          newImages = [...oldList.images, castedImage];
         }
         return {
-          ...oldSeries,
+          ...oldList,
           images: newImages,
         };
       } else {
         const imageSizeType = image as ImageSizeType;
         return {
-          ...oldSeries,
-          images: oldSeries.images.filter((img) => img.type !== imageSizeType),
+          ...oldList,
+          images: oldList.images.filter((img) => img.type !== imageSizeType),
         };
       }
     });
@@ -77,97 +80,94 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     if (submitting) {
       return;
     }
-    if (!userHasTypedInSeries) {
-      setNewSeriesError({ error: false, message: '' });
+    if (!userHasTypedInList) {
+      setNewListError({ error: false, message: '' });
       return;
     }
-    if (newSeries?.name === '') {
-      setNewSeriesError({ error: true, message: 'Series cannot be empty' });
+    if (newList?.name === '') {
+      setNewListError({ error: true, message: 'List cannot be empty' });
     } else if (
-      newSeries?.name &&
-      props.seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.name.toLowerCase())
+      newList?.name &&
+      props.listArray.map((list) => list.name.toLowerCase()).includes(newList.name.toLowerCase())
     ) {
-      setNewSeriesError({ error: true, message: 'Series already exists' });
+      setNewListError({ error: true, message: 'List already exists' });
     } else {
-      setNewSeriesError({ error: false, message: '' });
+      setNewListError({ error: false, message: '' });
     }
-  }, [newSeries, userHasTypedInSeries, props.seriesArray]);
+  }, [newList, userHasTypedInList, props.listArray]);
 
   return (
     <PopUp
-      title={props.existingSeries ? 'Edit Series' : 'Add new series'}
+      title={props.existingList ? 'Edit List' : 'Add new list'}
       open={props.newSeriesPopup}
       setOpen={props.setNewSeriesPopup}
       onClose={() => {
-        setUserHasTypedInSeries(false);
-        setNewSeries(emptySeries);
+        setUserHasTypedInList(false);
+        setNewList(emptyList);
       }}
       button={
         <Button
           variant="contained"
           disabled={
-            (props.seriesArray.map((series) => series.name.toLowerCase()).includes(newSeries.name.toLowerCase()) &&
-              isEqual(props.existingSeries?.images, newSeries.images)) ||
-            newSeries.name === '' ||
-            newSeries.images.length === 0 ||
+            (props.listArray.map((list) => list.name.toLowerCase()).includes(newList.name.toLowerCase()) &&
+              isEqual(props.existingList?.images, newList.images)) ||
+            newList.name === '' ||
+            newList.images.length === 0 ||
             submitting
           }
           onClick={async () => {
             setSubmitting(true);
             try {
-              if (props.existingSeries) {
-                if (newSeries.subsplashId) {
+              if (props.existingList) {
+                if (newList.subsplashId) {
                   // edit subsplash list
                   const editSubsplashList = createFunctionV2<EditSubsplashListInputType, EditSubsplashListOutputType>(
                     'editsubsplashlist'
                   );
 
                   await editSubsplashList({
-                    listId: newSeries.subsplashId,
-                    title: newSeries.name,
-                    images: newSeries.images,
+                    listId: newList.subsplashId,
+                    title: newList.name,
+                    images: newList.images,
                   });
                 }
-                const seriesRef = doc(firestore, 'series', newSeries.id);
-                await updateDoc(seriesRef, {
-                  ...newSeries,
+                const listRef = doc(firestore, 'lists', newList.id);
+                await updateDoc(listRef, {
+                  ...newList,
                 });
-                if (props.setSeriesArray) {
-                  props.setSeriesArray((oldSeriesArray) =>
-                    oldSeriesArray.map((s) => {
-                      if (s.id === newSeries.id) {
-                        return { ...newSeries };
+                if (props.setListArray) {
+                  props.setListArray((oldListArray) =>
+                    oldListArray.map((s) => {
+                      if (s.id === newList.id) {
+                        return { ...newList };
                       }
                       return s;
                     })
                   );
                 }
                 props.setNewSeriesPopup(false);
-                setUserHasTypedInSeries(false);
+                setUserHasTypedInList(false);
               } else {
-                const newSeriesId = await addNewSeries(newSeries);
-                const seriesToAdd: Series = {
-                  id: newSeriesId,
-                  name: newSeries.name,
-                  count: newSeries.count,
-                  overflowBehavior: newSeries.overflowBehavior,
-                  images: newSeries.images,
+                const newListId = await addNewList(newList);
+                const listToAdd: List = {
+                  ...newList,
+                  id: newListId,
                 };
 
                 props.setNewSeriesPopup(false);
-                if (props.setSeriesArray) {
-                  props.setSeriesArray((previousseriesArray) => [seriesToAdd, ...previousseriesArray]);
+                if (props.setListArray) {
+                  props.setListArray((previouslistArray) => [listToAdd, ...previouslistArray]);
                 }
-                if (props.setSermonSeries) {
-                  props.setSermonSeries((previousSeries) => [seriesToAdd, ...previousSeries]);
+                if (props.setSermonList) {
+                  props.setSermonList((previousList) => [listToAdd, ...previousList]);
                 }
-                setNewSeries(emptySeries);
-                setUserHasTypedInSeries(false);
+                setNewList(emptyList);
+                setUserHasTypedInList(false);
               }
             } catch (error) {
               // eslint-disable-next-line no-console
               console.error(error);
-              setNewSeriesError({ error: true, message: JSON.stringify(error) });
+              setNewListError({ error: true, message: JSON.stringify(error) });
             }
             setSubmitting(false);
           }}
@@ -178,31 +178,29 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     >
       <Box display="flex" padding="10px" justifyContent="center" flexDirection="column" gap={1}>
         <TextField
-          value={newSeries.name}
+          value={newList.name}
           onChange={(e) => {
-            setNewSeries((oldSeries) => {
-              return { ...oldSeries, name: e.target.value };
+            setNewList((oldList) => {
+              return { ...oldList, name: e.target.value };
             });
-            !userHasTypedInSeries && setUserHasTypedInSeries(true);
+            !userHasTypedInList && setUserHasTypedInList(true);
           }}
-          error={newSeriesError.error}
-          label={newSeriesError.error ? newSeriesError.message : 'Series'}
+          error={newListError.error}
+          label={newListError.error ? newListError.message : 'List'}
           sx={{ paddingBottom: '5px' }}
         />
         <FormControl fullWidth>
           <InputLabel id="overflow-behavior-select-label">Overflow Behavior</InputLabel>
           <Select
-            value={newSeries.overflowBehavior}
+            value={selectedOverflowBehavior}
             label="Overflow Behavior"
             labelId="overflow-behavior-select-label"
             id="overflow-behavior-select"
             onChange={(e) => {
-              setNewSeries((oldSeries) => {
-                return { ...oldSeries, overflowBehavior: e.target.value as OverflowBehaviorType };
-              });
+              setSelectedOverflowBehavior(e.target.value as OverflowBehavior);
             }}
           >
-            {OverflowBehavior.map((overflowBehavior) => {
+            {(Object.keys(OverflowBehavior) as Array<keyof typeof OverflowBehavior>).map((overflowBehavior) => {
               return (
                 <MenuItem key={overflowBehavior} value={overflowBehavior}>
                   {overFlowBehaviorOptions[overflowBehavior]}
@@ -211,10 +209,10 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
             })}
           </Select>
         </FormControl>
-        <ImageViewer images={newSeries.images} newImageCallback={handleNewImage} vertical={false} />
+        <ImageViewer images={newList.images} newImageCallback={handleNewImage} vertical={false} />
       </Box>
     </PopUp>
   );
 };
 
-export default NewSeriesPopup;
+export default NewListPopup;

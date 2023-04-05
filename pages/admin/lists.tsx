@@ -1,12 +1,11 @@
 import Box from '@mui/material/Box';
 import AdminLayout from '../../layout/adminLayout';
 import Button from '@mui/material/Button';
-import firestore, { collection, deleteDoc, doc } from '../../firebase/firestore';
+import firestore, { collection, deleteDoc, doc, orderBy, query } from '../../firebase/firestore';
 // import { useCollection } from 'react-firebase-hooks/firestore';
 // import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
-import { Series, seriesConverter } from '../../types/Series';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { adminProtected } from '../../utils/protectedRoutes';
 import NewSeriesPopup from '../../components/NewSeriesPopup';
@@ -17,27 +16,27 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '../../functions/src/deleteSubsplashList';
 import Link from 'next/link';
-import List from '@mui/material/List';
+import MaterialList from '@mui/material/List';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ListItemButton from '@mui/material/ListItemButton';
+import { listConverter, List } from '../../types/List';
 
-const AdminSeries = () => {
-  const [firebaseSeries, loading, error] = useCollectionData(
-    collection(firestore, 'series').withConverter(seriesConverter)
-  );
-  const [series, setSeries] = useState<Series[]>([]);
-  const [editSeriesPopup, setEditSeriesPopup] = useState<boolean>(false);
-  const [deleteSeriesPopup, setDeleteSeriesPopup] = useState<boolean>(false);
+const AdminList = () => {
+  const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'));
+  const [firebaseList, loading, error] = useCollectionData(q);
+  const [list, setList] = useState<List[]>([]);
+  const [editListPopup, setEditListPopup] = useState<boolean>(false);
+  const [deleteListPopup, setDeleteListPopup] = useState<boolean>(false);
   const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
-  const [selectedSeries, setSelectedSeries] = useState<Series>();
+  const [selectedList, setSelectedList] = useState<List>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const disableButtons = isDeleting;
-  const handleSeriesDelete = async () => {
-    if (!selectedSeries) {
+  const handleListDelete = async () => {
+    if (!selectedList) {
       return;
     }
     try {
@@ -45,23 +44,23 @@ const AdminSeries = () => {
       const deleteSubsplashList = createFunctionV2<DeleteSubsplashListInputType, DeleteSubsplashListOutputType>(
         'deletesubsplashlist'
       );
-      if (selectedSeries.subsplashId) {
-        await deleteSubsplashList({ listId: selectedSeries.subsplashId });
+      if (selectedList.subsplashId) {
+        await deleteSubsplashList({ listId: selectedList.subsplashId });
       }
-      await deleteDoc(doc(firestore, 'series', selectedSeries.id));
-      setSeries((oldSeries) => oldSeries.filter((series) => series.id !== selectedSeries.id));
+      await deleteDoc(doc(firestore, 'lists', selectedList.id));
+      setList((oldList) => oldList.filter((list) => list.id !== selectedList.id));
     } catch (e) {
-      alert('Error deleting series');
+      alert('Error deleting list');
     } finally {
       setIsDeleting(false);
     }
   };
 
   useEffect(() => {
-    if (firebaseSeries) {
-      setSeries(firebaseSeries);
+    if (firebaseList) {
+      setList(firebaseList);
     }
-  }, [firebaseSeries]);
+  }, [firebaseList]);
 
   return (
     <>
@@ -73,7 +72,7 @@ const AdminSeries = () => {
         ) : (
           <Box display="flex" flexDirection="column" gap={1} width={1}>
             <Box display="flex" justifyContent="center" gap={1}>
-              <Typography variant="h4">Manage Series</Typography>
+              <Typography variant="h4">Manage List</Typography>
               <Button
                 color="info"
                 variant="contained"
@@ -82,52 +81,53 @@ const AdminSeries = () => {
                   setNewSeriesPopup(true);
                 }}
               >
-                Add Series
+                Add List
               </Button>
             </Box>
-            <List>
-              {series.map((s) => {
+            <MaterialList>
+              {list.map((l) => {
                 return (
-                  <Link href={`/admin/series/${s.id}?count=${s.count}`} key={s.id}>
+                  <Link href={`/admin/lists/${l.id}?count=${l.count}`} key={l.id}>
                     <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box display="flex" alignItems="center" gap={1}>
                         <AvatarWithDefaultImage
-                          image={s.images.find((image) => image.type === 'square')}
-                          altName={`Image of Series: ${s.name}`}
+                          image={l.images.find((image) => image.type === 'square')}
+                          altName={`Image of List: ${l.name}`}
                           width={50}
                           height={50}
                           borderRadius={5}
                         />
-                        <Typography>{s.name}</Typography>
-                        <Typography>{`Count: ${s.count}`}</Typography>
+                        <Typography>{l.name}</Typography>
+                        <Typography>{`Count: ${l.count}`}</Typography>
+                        <Typography>{`Type: ${l.type}`}</Typography>
                       </Box>
                       <Box>
-                        <Tooltip title="Edit Series">
+                        <Tooltip title="Edit List">
                           <span>
                             <IconButton
                               disabled={disableButtons}
-                              aria-label="edit series"
+                              aria-label="edit list"
                               style={{ color: 'lightblue' }}
                               onClick={(e) => {
                                 e.preventDefault();
-                                setSelectedSeries(s);
-                                setEditSeriesPopup(true);
+                                setSelectedList(l);
+                                setEditListPopup(true);
                               }}
                             >
                               <EditIcon />
                             </IconButton>
                           </span>
                         </Tooltip>
-                        <Tooltip title="Delete Series From All Systems">
+                        <Tooltip title="Delete List From All Systems">
                           <span>
                             <IconButton
                               disabled={disableButtons}
-                              aria-label="delete series"
+                              aria-label="delete list"
                               style={{ color: 'red' }}
                               onClick={(e) => {
                                 e.preventDefault();
-                                setSelectedSeries(s);
-                                setDeleteSeriesPopup(true);
+                                setSelectedList(l);
+                                setDeleteListPopup(true);
                               }}
                             >
                               <DeleteIcon />
@@ -140,38 +140,38 @@ const AdminSeries = () => {
                   </Link>
                 );
               })}
-            </List>
+            </MaterialList>
           </Box>
         )}
       </Box>
       <DeleteEntityPopup
-        entityBeingDeleten="series"
-        handleDelete={handleSeriesDelete}
-        deleteConfirmationPopup={deleteSeriesPopup}
-        setDeleteConfirmationPopup={setDeleteSeriesPopup}
+        entityBeingDeleten="list"
+        handleDelete={handleListDelete}
+        deleteConfirmationPopup={deleteListPopup}
+        setDeleteConfirmationPopup={setDeleteListPopup}
         isDeleting={isDeleting}
       />
       <NewSeriesPopup
         newSeriesPopup={newSeriesPopup}
         setNewSeriesPopup={setNewSeriesPopup}
-        seriesArray={series}
-        // setSeriesArray={setSeries}
+        listArray={list}
+        // setListArray={setList}
       />
       <NewSeriesPopup
-        newSeriesPopup={editSeriesPopup}
-        setNewSeriesPopup={setEditSeriesPopup}
-        seriesArray={series}
-        // setSeriesArray={setSeries}
-        existingSeries={selectedSeries}
+        newSeriesPopup={editListPopup}
+        setNewSeriesPopup={setEditListPopup}
+        listArray={list}
+        // setListArray={setList}
+        existingList={selectedList}
       />
     </>
   );
 };
 
-AdminSeries.PageLayout = AdminLayout;
+AdminList.PageLayout = AdminLayout;
 
 export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
   return adminProtected(ctx);
 };
 
-export default AdminSeries;
+export default AdminList;

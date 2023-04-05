@@ -162,7 +162,7 @@ const SpeakerTableToolbar = () =>
         }}
       >
         <FormGroup sx={{ pl: '1em' }}>
-          {Object.keys(props.filters).map((filter) => {
+          {Object.ids(props.filters).map((filter) => {
             return (
               <FormControlLabel
                 key={filter}
@@ -406,7 +406,8 @@ const SpeakerTable = (props: {
                                     <Image
                                       src={sanitize(image.downloadLink)}
                                       alt={`Image of ${image.name}`}
-                                      fill
+                                      width={50}
+                                      height={50}
                                       style={{ objectFit: 'contain' }}
                                     />
                                   )}
@@ -422,7 +423,7 @@ const SpeakerTable = (props: {
             </Table>
           </TableContainer>
           <TablePagination
-            rowsPerPageOptions={[5, 10, 25]}
+            rowsPerPageOptions={[25, 50, 100]}
             component="div"
             count={props.totalSpeakers}
             rowsPerPage={props.rowsPerPage}

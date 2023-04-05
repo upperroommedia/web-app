@@ -26,7 +26,8 @@ import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import algoliasearch from 'algoliasearch';
-import { TextField } from '@mui/material';
+import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
 
 const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
@@ -175,6 +176,85 @@ const ImageSelector = (props: {
                 delete image._highlightResult;
                 delete image?.nbHits;
                 return (
+                  <Tooltip
+                    key={image.id}
+                    title={image.name.split('-').slice(0, -1).join(' ')}
+                    placement="bottom"
+                    PopperProps={{
+                      sx: {
+                        '& .MuiTooltip-tooltip': {
+                          marginTop: '-10px !important',
+                          bgcolor: 'grey !important',
+                          opacity: '1.0 !important',
+                        },
+                      },
+                    }}
+                  >
+                    <div
+                      className={styles.imageContainer}
+                      style={{
+                        height: '164px',
+                        aspectRatio: AspectRatio[image.type],
+                        backgroundColor: image.averageColorHex || '#f3f1f1',
+                        boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
+                      }}
+                    >
+                      <Image
+                        src={sanitize(image.downloadLink)}
+                        fill
+                        alt={image.name}
+                        style={{
+                          borderRadius: '5px',
+                          cursor: 'pointer',
+                          objectFit: 'contain',
+                        }}
+                        onClick={() => {
+                          props.setNewSelectedImage(image);
+                        }}
+                      />
+                      {props.newSelectedImage?.id === image.id && (
+                        <CheckCircleIcon
+                          color="primary"
+                          style={{
+                            position: 'absolute',
+                            backgroundColor: 'white',
+                            borderRadius: '50%',
+                            zIndex: 2,
+                            top: '10px',
+                            right: '10px',
+                          }}
+                        ></CheckCircleIcon>
+                      )}
+                    </div>
+                  </Tooltip>
+                );
+              })}
+            </InfiniteScroll>
+          ) : (
+            <InfiniteScroll
+              dataLength={images.length}
+              next={async () => await fetchMoreImages()}
+              hasMore={lastImage !== undefined}
+              loader={<InfinitScrollMessage message="Loading..." />}
+              height="500px"
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
+              endMessage={<InfinitScrollMessage message="No More Images" />}
+            >
+              {images.map((image) => (
+                <Tooltip
+                  key={image.id}
+                  title={image.name.split('-').slice(0, -1).join(' ')}
+                  placement="bottom"
+                  PopperProps={{
+                    sx: {
+                      '& .MuiTooltip-tooltip': {
+                        marginTop: '-10px !important',
+                        bgcolor: 'grey !important',
+                        opacity: '1.0 !important',
+                      },
+                    },
+                  }}
+                >
                   <div
                     key={image.id}
                     className={styles.imageContainer}
@@ -212,57 +292,7 @@ const ImageSelector = (props: {
                       ></CheckCircleIcon>
                     )}
                   </div>
-                );
-              })}
-            </InfiniteScroll>
-          ) : (
-            <InfiniteScroll
-              dataLength={images.length}
-              next={async () => await fetchMoreImages()}
-              hasMore={lastImage !== undefined}
-              loader={<InfinitScrollMessage message="Loading..." />}
-              height="500px"
-              style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
-              endMessage={<InfinitScrollMessage message="No More Images" />}
-            >
-              {images.map((image) => (
-                <div
-                  key={image.id}
-                  className={styles.imageContainer}
-                  style={{
-                    height: '164px',
-                    aspectRatio: AspectRatio[image.type],
-                    backgroundColor: image.averageColorHex || '#f3f1f1',
-                    boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
-                  }}
-                >
-                  <Image
-                    src={sanitize(image.downloadLink)}
-                    fill
-                    alt={image.name}
-                    style={{
-                      borderRadius: '5px',
-                      cursor: 'pointer',
-                      objectFit: 'contain',
-                    }}
-                    onClick={() => {
-                      props.setNewSelectedImage(image);
-                    }}
-                  />
-                  {props.newSelectedImage?.id === image.id && (
-                    <CheckCircleIcon
-                      color="primary"
-                      style={{
-                        position: 'absolute',
-                        backgroundColor: 'white',
-                        borderRadius: '50%',
-                        zIndex: 2,
-                        top: '10px',
-                        right: '10px',
-                      }}
-                    ></CheckCircleIcon>
-                  )}
-                </div>
+                </Tooltip>
               ))}
             </InfiniteScroll>
           )}

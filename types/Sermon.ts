@@ -5,7 +5,7 @@ import { Sermon, sermonStatusType, uploadStatus } from './SermonTypes';
 import { ImageType } from './Image';
 
 export const createSermon = ({
-  key = uuidv4(),
+  id = uuidv4(),
   title = '',
   subtitle = '',
   description = '',
@@ -22,7 +22,7 @@ export const createSermon = ({
   images = <ImageType[]>[],
 }): Sermon => {
   return {
-    key,
+    id,
     title,
     subtitle,
     description,
@@ -62,7 +62,7 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
         dateMillis: snapshot.data()?.date?.toMillis(),
         dateString: getDateString(snapshot.data()?.date?.toDate()),
       }),
-      key: snapshot.id,
+      id: snapshot.id,
     };
   },
 };
@@ -70,7 +70,7 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
 const currentDate = new Date();
 export const createEmptySermon = (): Sermon => {
   return {
-    key: uuidv4(),
+    id: uuidv4(),
     title: '',
     subtitle: '',
     description: '',

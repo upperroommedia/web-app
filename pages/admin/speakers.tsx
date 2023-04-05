@@ -7,6 +7,7 @@ import { Order } from '../../context/types';
 import firestore, {
   collection,
   DocumentData,
+  getCountFromServer,
   getDocs,
   limit,
   orderBy,
@@ -24,7 +25,7 @@ const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [speakers, setSpeakers] = useState<ISpeaker[]>([]);
   const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
@@ -78,17 +79,21 @@ const AdminSpeakers = () => {
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
     const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
     // TODO: fix this
-    setTotalSpeakers(result[0]?.nbHits || 0);
+    console.log(result[0]);
+    if (result[0] && result[0].nbHits) {
+      setTotalSpeakers(result[0].nbHits);
+    }
     setSpeakersLoading(false);
     return result;
   };
 
   const getSpeakersFirebase = async () => {
-    const q = query(
-      collection(firestore, 'speakers').withConverter(speakerConverter),
-      limit(rowsPerPage),
-      orderBy('sermonCount', 'desc')
-    );
+    const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
+    const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
+    console.log('Speakers Count', speakersCount);
+    setTotalSpeakers(speakersCount);
+
+    const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));
     setQueryState(q);
     const querySnapshot = await getDocs(q);
     const res: ISpeaker[] = [];
@@ -98,7 +103,9 @@ const AdminSpeakers = () => {
     setSpeakers(res);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     const result = await fetchSpeakerResults('', 1, 0);
-    setTotalSpeakers(result[0]?.nbHits || 0);
+    if (result[0] && result[0].nbHits) {
+      setTotalSpeakers(result[0].nbHits);
+    }
   };
 
   const getMoreSpeakersFirebase = async () => {
@@ -114,7 +121,9 @@ const AdminSpeakers = () => {
       setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data()]);
     });
     const result = await fetchSpeakerResults('', 1, 0);
-    setTotalSpeakers(result[0]?.nbHits || 0);
+    if (result[0] && result[0].nbHits) {
+      setTotalSpeakers(result[0].nbHits);
+    }
   };
 
   const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
