@@ -4,10 +4,15 @@ import { firestore } from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { OverflowBehaviorType, Series } from '../../types/Series';
+import { List, ListType, OverflowBehavior } from '../../types/List';
+import { ListItem } from '../../types/ListItem';
 import { Sermon } from '../../types/SermonTypes';
 import { createNewSubsplashList } from './createNewSubsplashList';
-import { firestoreAdminSeriesConverter, firestoreAdminSermonConverter } from './firestoreDataConverter';
+import {
+  firestoreAdminListConverter,
+  firestoreAdminListItemConverter,
+  firestoreAdminSermonConverter,
+} from './firestoreDataConverter';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 
@@ -16,10 +21,10 @@ type MediaType = (typeof mediaTypes)[number];
 type MediaItem = { id: string; type: MediaType };
 type sortType = 'position' | 'created_at';
 
-type seriesMetaDataType = { overflowBehavior: OverflowBehaviorType; listId: string };
+type listMetaDataType = { overflowBehavior: OverflowBehavior; listId: string; type: ListType };
 
-export interface AddToSeriesInputType {
-  seriesMetadata: seriesMetaDataType[];
+export interface AddtoListInputType {
+  listMetadata: listMetaDataType[];
   mediaItemIds: MediaItem[];
 }
 interface SubsplashListRow {
@@ -142,27 +147,41 @@ async function addItemsToList(
     payload
   );
   await axios(patchListConfig);
-  const seriesArray = await firestore()
-    .collection('series')
+  const listArray = await firestore()
+    .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
-    .withConverter(firestoreAdminSeriesConverter)
+    .withConverter(firestoreAdminListConverter)
     .get();
-  if (!seriesArray.docs.length) {
+  if (!listArray.docs.length) {
     logger.log('Throwing error');
-    throw new HttpsError('internal', 'Series id was not found in firestore');
+    throw new HttpsError('internal', 'List id was not found in firestore');
   }
   const sermons = await getFirestoreSermonFromMediaItem(mediaItems);
-  logger.log(`Adding items: ${sermons} for firestore series: ${seriesArray.docs[0].data().name}`);
-  // add sermon to series if it is not already there
+  logger.log(`Adding items: ${sermons} for firestore list: ${listArray.docs[0].data().name}`);
+  // add sermon to list if it is not already there
 
   const bulkWriter = firestore().bulkWriter();
-  const series = seriesArray.docs[0];
-  sermons.forEach((sermon) => {
-    logger.log(`Adding "${sermon.title}" to series - ${series.id}`);
-    const sermonRef = firestore().doc(`series/${series.id}/seriesSermons/${sermon.key}`);
+  const list = listArray.docs[0];
+  sermons.forEach((sermon, index) => {
+    logger.log(`Adding "${sermon.title}" to series - ${list.id}`);
+    const listItem: ListItem<Sermon> = {
+      id: sermon.id,
+      position: index,
+      name: sermon.title,
+      images: sermon.images,
+      updatedAtMillis: sermon.dateMillis, // TODO: add updatedAtMillis to sermon
+      createdAtMillis: sermon.dateMillis,
+      subsplashId: sermon.subsplashId,
+      type: 'sermon',
+      mediaItem: sermon,
+    };
+
+    const listItemRef = firestore()
+      .doc(`list/${list.id}/listItems/${sermon.id}`)
+      .withConverter(firestoreAdminListItemConverter);
     // this single call will fail if the sermon already exists which is ok
-    bulkWriter.create(sermonRef, sermon);
+    bulkWriter.create(listItemRef, listItem);
   });
 
   await bulkWriter.close();
@@ -186,10 +205,10 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
   );
 
   const seriesArray = await firestore()
-    .collection('series')
+    .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
-    .withConverter(firestoreAdminSeriesConverter)
+    .withConverter(firestoreAdminListConverter)
     .get();
   if (!seriesArray.docs.length) {
     logger.log('Throwing error');
@@ -203,7 +222,7 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
   const series = seriesArray.docs[0];
   sermons.forEach((sermon) => {
     logger.log(`Adding "${sermon.title}" to series - ${series.id}`);
-    const sermonRef = firestore().doc(`series/${series.id}/seriesSermons/${sermon.key}`);
+    const sermonRef = firestore().doc(`lists/${series.id}/listItems/${sermon.id}`);
     bulkWriter.delete(sermonRef);
   });
   await bulkWriter.close();
@@ -233,14 +252,14 @@ const removeNOldestItems = async (
   await removeListRows(listId, listRows, token);
 };
 
-async function createMoreList(listId: string): Promise<string> {
+async function createMoreList(listId: string, type: ListType): Promise<string> {
   //Creating a new list
   logger.log(`createMoreList{listId: ${listId}}`);
   const seriesArray = await firestore()
-    .collection('series')
+    .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
-    .withConverter(firestoreAdminSeriesConverter)
+    .withConverter(firestoreAdminListConverter)
     .get();
 
   if (!seriesArray.docs.length) {
@@ -254,16 +273,19 @@ async function createMoreList(listId: string): Promise<string> {
     images: series.images,
   });
   // create new series in firestore
-  const moreSermonsSeries: Series = {
+  const moreSermonsList: List = {
     id: moreListId,
     name: title,
     images: series.images,
     count: series.count,
+    type,
+    updatedAtMillis: new Date().getTime(),
+    createdAtMillis: new Date().getTime(),
     overflowBehavior: series.overflowBehavior,
     subsplashId: moreListId,
     isMoreSermonsList: true,
   };
-  await firestore().collection('series').withConverter(firestoreAdminSeriesConverter).add(moreSermonsSeries);
+  await firestore().collection('lists').withConverter(firestoreAdminListConverter).add(moreSermonsList);
   await seriesArray.docs[0].ref.update({ moreSermonsRef: moreListId });
   return moreListId;
 }
@@ -288,10 +310,10 @@ async function getFullList(listId: string, token: string, maxListCount: number):
 async function getMoreListId(listId: string, token: string): Promise<string | undefined> {
   logger.log(`getMoreListId(listId: ${listId})`);
   const seriesArray = await firestore()
-    .collection('series')
+    .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
-    .withConverter(firestoreAdminSeriesConverter)
+    .withConverter(firestoreAdminListConverter)
     .get();
 
   if (!seriesArray.docs.length) {
@@ -316,7 +338,13 @@ async function getMoreListId(listId: string, token: string): Promise<string | un
   return moreSermonsRef;
 }
 
-async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCount: number, token: string) {
+async function handleOverflow(
+  listId: string,
+  itemsToAdd: MediaItem[],
+  maxListCount: number,
+  token: string,
+  type: ListType
+) {
   // if items to add + current list items <= maxListCount add items to list
   logger.log(
     `handleOverflow(listId: ${listId}, itemsToAdd: ${JSON.stringify(itemsToAdd)}, maxListCount: ${maxListCount})`
@@ -342,7 +370,7 @@ async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCo
     itemsToRemove = itemsToRemove.filter((item) => item.id !== moreListId);
   } else {
     // create more list and add it to items to add
-    moreListId = await createMoreList(listId);
+    moreListId = await createMoreList(listId, type);
     newMoreListCreated = true;
   }
   logger.log('Items to remove', itemsToRemove);
@@ -362,7 +390,7 @@ async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCo
   }
 
   // recursively call handleOverflow to add items to moreList before removing them from the current list
-  await handleOverflow(moreListId, overflowItems, maxListCount, token);
+  await handleOverflow(moreListId, overflowItems, maxListCount, token, type);
   // remove items from current list
   await removeListRows(listId, itemsToRemove, token);
   // add items to list after room is available
@@ -374,12 +402,13 @@ async function handleOverflow(listId: string, itemsToAdd: MediaItem[], maxListCo
   }
 }
 
-const addToSingleSeries = async (
+const addToSingleList = async (
   listId: string,
   mediaItemIds: MediaItem[],
-  overflowBehavior: OverflowBehaviorType,
+  overflowBehavior: OverflowBehavior,
   maxListCount: number,
-  token: string
+  token: string,
+  type: ListType
 ) => {
   const currentListCount = await getListCount(listId, token);
   let newListCount = currentListCount + mediaItemIds.length;
@@ -391,7 +420,7 @@ const addToSingleSeries = async (
 
   // handle list overflow
   if (overflowBehavior === 'CREATENEWLIST') {
-    await handleOverflow(listId, mediaItemIds, maxListCount, token);
+    await handleOverflow(listId, mediaItemIds, maxListCount, token, type);
   } else if (overflowBehavior === 'REMOVEOLDEST') {
     const numberToRemove = newListCount - maxListCount;
     logger.log('Removing', numberToRemove, 'items from list', listId);
@@ -404,8 +433,8 @@ const addToSingleSeries = async (
   }
 };
 
-const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>): Promise<void> => {
-  logger.log('addToSeries', request);
+const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<void> => {
+  logger.log('addToList', request);
   if (request.auth?.token.role !== 'admin') {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
@@ -418,12 +447,12 @@ const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>
   const token = await authenticateSubsplash();
   try {
     await Promise.all(
-      data.seriesMetadata.map(async (series) => {
-        if (series.overflowBehavior !== 'CREATENEWLIST' && data.mediaItemIds.length > maxListCount) {
+      data.listMetadata.map(async (list) => {
+        if (list.overflowBehavior !== 'CREATENEWLIST' && data.mediaItemIds.length > maxListCount) {
           throw tooManyItemsError;
         }
-        logger.log('series', series.listId);
-        await addToSingleSeries(series.listId, data.mediaItemIds, series.overflowBehavior, maxListCount, token);
+        logger.log('list', list.listId);
+        await addToSingleList(list.listId, data.mediaItemIds, list.overflowBehavior, maxListCount, token, list.type);
       })
     );
   } catch (err) {
@@ -431,4 +460,4 @@ const addToSeries = onCall(async (request: CallableRequest<AddToSeriesInputType>
   }
 });
 
-export default addToSeries;
+export default addToList;

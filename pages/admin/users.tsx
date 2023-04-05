@@ -13,7 +13,7 @@ import { adminProtected } from '../../utils/protectedRoutes';
 const AdminUsers = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [snackBarOpen, setSnackBarOpen] = useState<boolean>(false);
-  const [message, setMessage] = useState<{ message: string; key: number }>({ message: '', key: new Date().getTime() });
+  const [message, setMessage] = useState<{ message: string; id: number }>({ message: '', id: new Date().getTime() });
   const fetchUsers = async () => {
     const getImage = createFunction<any, any>('listusers');
     const res = await getImage({});
@@ -27,7 +27,7 @@ const AdminUsers = () => {
       if (result.data.status === 'Success!') {
         fetchUsers();
       }
-      setMessage({ message: result.data.status, key: new Date().getTime() });
+      setMessage({ message: result.data.status, id: new Date().getTime() });
       setSnackBarOpen(true);
     });
   };
@@ -42,11 +42,11 @@ const AdminUsers = () => {
     <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
       <UserTable users={users} handleRoleChange={handleRoleChange} />
       <Snackbar
-        key={message.key}
+        key={message.id}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
         open={snackBarOpen}
         autoHideDuration={6000}
-        TransitionProps={{ onExited: () => setMessage({ message: '', key: new Date().getTime() }) }}
+        TransitionProps={{ onExited: () => setMessage({ message: '', id: new Date().getTime() }) }}
         // TODO: fade out on close
         TransitionComponent={(props) => <Slide {...props} direction="right" />}
         onClose={(_, reason) => {

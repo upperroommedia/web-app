@@ -32,7 +32,11 @@ export default function AvatarWithDefaultImage({
         width,
         height,
         backgroundColor: image?.averageColorHex ? image.averageColorHex : undefined,
-        backgroundImage: image?.averageColorHex ? undefined : defaultImageURL ? `url(${defaultImageURL})` : undefined,
+        backgroundImage: image?.averageColorHex
+          ? undefined
+          : defaultImageURL
+          ? `url(${defaultImageURL})`
+          : 'url(/URM_Icon.png)',
         backgroundPosition: 'center center',
         backgroundSize: 'cover',
         ...sx,

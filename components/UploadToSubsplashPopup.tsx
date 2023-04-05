@@ -6,20 +6,20 @@ import Typography from '@mui/material/Typography';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { doc, updateDoc, collection } from '../firebase/firestore';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
-import { AddToSeriesInputType } from '../functions/src/addToSeries';
+import { AddtoListInputType } from '../functions/src/addToList';
 import {
   CreateNewSubsplashListInputType,
   CreateNewSubsplashListOutputType,
 } from '../functions/src/createNewSubsplashList';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
-import { Series, seriesConverter } from '../types/Series';
 import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { createFunction, createFunctionV2 } from '../utils/createFunction';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import PopUp from './PopUp';
-import SeriesSelector from './SeriesSelector';
+// import SeriesSelector from './SeriesSelector';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
+import { List, listConverter } from '../types/List';
 
 interface UploadToSubsplashPopupProps {
   sermon: Sermon;
@@ -37,22 +37,22 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
   isUploadingToSubsplash,
 }: UploadToSubsplashPopupProps) => {
   const [autoPublish, setAutoPublish] = useState<boolean>(false);
-  const [seriesArray, setSeriesArray] = useState<Series[]>([]);
-  const [seriesArrayFirestore, loading, error] = useCollectionDataOnce(
-    collection(firestore, `sermons/${sermon.key}/sermonSeries`).withConverter(seriesConverter)
+  const [listArray, setListArray] = useState<List[]>([]);
+  const [listArrayFirestore, loading, error] = useCollectionDataOnce(
+    collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(listConverter)
   );
 
   useEffect(() => {
-    if (seriesArrayFirestore) {
-      setSeriesArray(seriesArrayFirestore);
+    if (listArrayFirestore) {
+      setListArray(listArrayFirestore);
     }
-  }, [seriesArrayFirestore]);
+  }, [listArrayFirestore]);
 
   const uploadToSubsplash = async () => {
     try {
       const uploadToSubsplashCallable = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
-      const addToSeries = createFunctionV2<AddToSeriesInputType, void>('addtoseries');
-      const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.key}`));
+      const addToList = createFunctionV2<AddtoListInputType, void>('addtolist');
+      const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
       const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
         title: sermon.title,
         subtitle: sermon.subtitle,
@@ -68,15 +68,15 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
       setIsUploadingToSubsplash(true);
       // TODO [1]: Fix return Type
       const response = (await uploadToSubsplashCallable(data)) as unknown as { id: string };
-      const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+      const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       const id = response.id;
       await updateDoc(sermonRef, { subsplashId: id });
       // get series
       // get/create subsplashListId and overflow behavior
-      const seriesMetadata = await Promise.all(
-        seriesArray.map(async (series) => {
-          if (series.subsplashId) {
-            return { listId: series.subsplashId, overflowBehavior: series.overflowBehavior };
+      const listMetadata = await Promise.all(
+        listArray.map(async (list) => {
+          if (list.subsplashId) {
+            return { listId: list.subsplashId, overflowBehavior: list.overflowBehavior, type: list.type };
           }
           // upload series to subsplash
           const createNewSubsplashList = createFunctionV2<
@@ -84,17 +84,17 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
             CreateNewSubsplashListOutputType
           >('createnewsubsplashlist');
           const { listId } = await createNewSubsplashList({
-            title: series.name,
+            title: list.name,
             subtitle: '',
-            images: series.images,
+            images: list.images,
           });
-          await updateDoc(doc(firestore, `series/${series.id}`), { subsplashId: listId });
-          return { listId, overflowBehavior: series.overflowBehavior };
+          await updateDoc(doc(firestore, `lists/${list.id}`), { subsplashId: listId });
+          return { listId, overflowBehavior: list.overflowBehavior, type: list.type };
         })
       );
 
-      await addToSeries({
-        seriesMetadata,
+      await addToList({
+        listMetadata,
         mediaItemIds: [{ id, type: 'media-item' }],
       });
       await updateDoc(sermonRef, { status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });
@@ -133,7 +133,8 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
         ) : loading ? (
           <CircularProgress />
         ) : (
-          <SeriesSelector sermonSeries={seriesArray} setSermonSeries={setSeriesArray} />
+          <Typography>TODO</Typography>
+          // <SeriesSelector sermonSeries={listArray} setSermonSeries={setListArray} />
         )}
         <Box display="flex" alignItems={'center'} onClick={() => setAutoPublish((previousValue) => !previousValue)}>
           <Checkbox checked={autoPublish} />

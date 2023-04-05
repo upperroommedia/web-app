@@ -6,19 +6,19 @@ import { UploadableFile } from '../../components/DropZone';
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
-import { Series } from '../../types/Series';
+import { List } from '../../types/List';
 
 interface uploadFileProps {
   file: UploadableFile;
   setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string; percent: number }>>;
   trimStart: number;
   sermon: Sermon;
-  sermonSeries: Series[];
+  sermonList: List[];
 }
 
 const uploadFile = async (props: uploadFileProps) => {
-  console.info(`uploading sermon ${props.sermon.title} with key ${props.sermon.key}`);
-  const sermonRef = ref(storage, `sermons/${props.sermon.key}`);
+  console.info(`uploading sermon ${props.sermon.title} with key ${props.sermon.id}`);
+  const sermonRef = ref(storage, `sermons/${props.sermon.id}`);
 
   // const sermonRef = ref(storage, `sermons/${file.name}`);
   let introRef = '';
@@ -62,7 +62,7 @@ const uploadFile = async (props: uploadFileProps) => {
       return image;
     })
   );
-  await setDoc(doc(firestore, 'sermons', props.sermon.key).withConverter(sermonConverter), props.sermon);
+  await setDoc(doc(firestore, 'sermons', props.sermon.id).withConverter(sermonConverter), props.sermon);
   await new Promise<void>((resolve, reject) => {
     uploadBytesResumable(sermonRef, props.file.file, metadata).on(
       'state_changed',
@@ -77,7 +77,7 @@ const uploadFile = async (props: uploadFileProps) => {
         }
       },
       async (error) => {
-        await deleteDoc(doc(firestore, 'sermons', props.sermon.key));
+        await deleteDoc(doc(firestore, 'sermons', props.sermon.id));
         reject(error);
       },
       async () => {
@@ -85,8 +85,8 @@ const uploadFile = async (props: uploadFileProps) => {
         // add sermon to series
         // note a firestore function document listener will take care of updating the series subcollection for the sermon
         const batch = writeBatch(firestore);
-        props.sermonSeries.forEach((series) => {
-          const seriesSermonRef = doc(firestore, 'series', series.id, 'seriesSermons', props.sermon.key);
+        props.sermonList.forEach((list) => {
+          const seriesSermonRef = doc(firestore, 'lists', list.id, 'listItems', props.sermon.id);
           batch.set(seriesSermonRef, props.sermon);
         });
         batch.commit();

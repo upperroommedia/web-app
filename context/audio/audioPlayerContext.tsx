@@ -46,8 +46,8 @@ export const AudioPlayerProvider = ({ children }: any) => {
   };
 
   const setCurrentSermon = (sermon: Sermon) => {
-    if (state.playlist[state.currentSermonIndex].key === sermon.key) return;
-    const currentSermonIndex = state.playlist.findIndex((s: SermonWithMetadata) => s.key === sermon.key);
+    if (state.playlist[state.currentSermonIndex].id === sermon.id) return;
+    const currentSermonIndex = state.playlist.findIndex((s: SermonWithMetadata) => s.id === sermon.id);
     dispatch({ type: 'SET_CURRENT_SERMON_INDEX', payload: currentSermonIndex });
   };
   const nextSermon = () => {

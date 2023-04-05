@@ -5,10 +5,10 @@ import { Sermon } from '../../types/SermonTypes';
 import { createFunction } from '../../utils/createFunction';
 import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
 import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
-import { Series, seriesConverter } from '../../types/Series';
 import { getSquareImageStoragePath } from '../../utils/utils';
+import { List, listConverter } from '../../types/List';
 
-const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
+const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
   const promises: Promise<any>[] = [];
   if (sermon.subsplashId) {
     const editSubsplashSermon = createFunction<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
@@ -38,7 +38,7 @@ const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
     promises.push(editSoundCloudSermon(data));
   }
 
-  const sermonRef = doc(firestore, 'sermons', sermon.key).withConverter(sermonConverter);
+  const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
   promises.push(
     setDoc(sermonRef.withConverter(sermonConverter), {
       ...sermon,
@@ -53,7 +53,7 @@ const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
 
   // update sermonSeries
   const sermonSeriesSnapshot = await getDocs(
-    collection(firestore, `sermons/${sermonRef.id}/sermonSeries`).withConverter(seriesConverter)
+    collection(firestore, `lists/${sermonRef.id}/listItems`).withConverter(listConverter)
   );
 
   const seriesInFirebase = new Set<string>();
@@ -64,17 +64,14 @@ const editSermon = async (sermon: Sermon, sermonSeries: Series[]) => {
       seriesInFirebase.add(snapshot.id);
     } else {
       // series exists in firebase but not updated list
-      batch.delete(doc(firestore, `series/${snapshot.id}/seriesSermons/${sermon.key}`));
+      batch.delete(doc(firestore, `lists/${snapshot.id}/listItems/${sermon.id}`));
     }
   });
 
   // add any new series to firebase
   sermonSeries.forEach((series) => {
     if (!seriesInFirebase.has(series.id)) {
-      batch.set(
-        doc(firestore, `series/${series.id}/seriesSermons/${sermon.key}`).withConverter(sermonConverter),
-        sermon
-      );
+      batch.set(doc(firestore, `lists/${series.id}/listItems/${sermon.id}`).withConverter(sermonConverter), sermon);
     }
   });
   await batch.commit();

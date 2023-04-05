@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Head from 'next/head';
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
-  const pages = ['Sermons', 'Users', 'Speakers', 'Series', 'Topics'];
+  const pages = ['Sermons', 'Users', 'Speakers', 'Lists', 'Topics'];
   const router = useRouter();
   const isActive = (page: string) => {
     const path = `admin/${page.toLowerCase()}`;

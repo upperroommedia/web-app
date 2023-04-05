@@ -27,10 +27,7 @@ const sermonWriteTrigger = firestore.document('sermons/{sermonId}').onWrite(asyn
   const sermonBefore = change.before.data() as Sermon | undefined;
   const sermonAfter = change.after.data() as Sermon | undefined;
   try {
-    const seriesSermonSnapshot = await firestoreAdmin()
-      .collectionGroup('seriesSermons')
-      .where('key', '==', sermonId)
-      .get();
+    const seriesSermonSnapshot = await firestoreAdmin().collectionGroup('listItems').where('id', '==', sermonId).get();
     if (sermonBefore && sermonAfter) {
       // Update
       logger.info(`Sermon ${sermonId} updated`);

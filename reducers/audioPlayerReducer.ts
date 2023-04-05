@@ -12,7 +12,10 @@ export type AudioPlayerState = {
   playing: boolean;
 };
 
-export default function audioPlayerReducer(state: AudioPlayerState, action: { type: string; payload: any }) {
+export default function audioPlayerReducer(
+  state: AudioPlayerState,
+  action: { type: string; payload: any }
+): AudioPlayerState {
   const { type, payload } = action;
   // console.log(type, payload);
   switch (type) {
