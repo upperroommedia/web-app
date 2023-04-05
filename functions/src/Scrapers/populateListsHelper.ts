@@ -90,8 +90,10 @@ async function populateLists(
             count: list.list_rows_count,
             overflowBehavior: OverflowBehavior.CREATENEWLIST,
             type: ListType.SERIES,
-            createdAtMillis: new Date(list.created_at).getTime(),
-            updatedAtMillis: new Date(list.updated_at).getTime(),
+            createdAtMillis:
+              new Date(list.created_at).getTime() || new Date(list.updated_at).getTime() || new Date().getTime(),
+            updatedAtMillis:
+              new Date(list.updated_at).getTime() || new Date(list.created_at).getTime() || new Date().getTime(),
             ...(images && { images: images }),
           },
           { merge: true }

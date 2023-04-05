@@ -40,8 +40,10 @@ async function populateTopics(
         id: topic.id,
         title: topic.title,
         itemsCount: topic.tagging_count,
-        createdAtMillis: new Date(topic.created_at).getTime(),
-        updatedAtMillis: new Date(topic.updated_at).getTime(),
+        createdAtMillis:
+          new Date(topic.created_at).getTime() || new Date(topic.updated_at).getTime() || new Date().getTime(),
+        updatedAtMillis:
+          new Date(topic.updated_at).getTime() || new Date(topic.created_at).getTime() || new Date().getTime(),
       };
       batch.set(firestoreTopics.doc(topicData.id), topicData, { merge: true });
       logger.log(`Updated firestore document topics/${topicData.id} for ${topicData.title}`);
