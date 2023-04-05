@@ -43,13 +43,19 @@ async function populateImages(
     subsplashImages.map(async ({ image, imageName }): Promise<void> => {
       const imageId = image.id;
       const firebaseImage = await firestoreImages.doc(imageId).withConverter(firestoreAdminImagesConverter).get();
+
       if (firebaseImage.exists) {
-        logger.log(`${imageId} already exists, skipping download...`);
         const image = firebaseImage.data();
-        if (image) {
-          firestoreImagesMap.set(imageId, image);
+        const storagePath = decodeURIComponent(image?.downloadLink.split('/').pop() || '');
+        logger.log('storagePath', storagePath);
+        const file = bucket.file(storagePath);
+        if (await file.exists()) {
+          logger.log(`${imageId} already exists, skipping download...`);
+          if (image) {
+            firestoreImagesMap.set(imageId, image);
+          }
+          return;
         }
-        return;
       }
       let width = image.width;
       let height = image.height;
