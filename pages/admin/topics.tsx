@@ -14,6 +14,8 @@ import firestore, { collection, orderBy, query } from '../../firebase/firestore'
 import AdminLayout from '../../layout/adminLayout';
 import { topicConverter } from '../../types/Topic';
 import { adminProtected } from '../../utils/protectedRoutes';
+import Image from 'next/image';
+import { sanitize } from 'dompurify';
 
 const AdminTopics = () => {
   const q = query(collection(firestore, 'topics').withConverter(topicConverter), orderBy('title'));
@@ -41,6 +43,8 @@ const AdminTopics = () => {
                 <TableCell align="center">Items&nbsp;Count</TableCell>
                 <TableCell align="center">Updated&nbsp;At</TableCell>
                 <TableCell align="center">Created&nbsp;At</TableCell>
+                <TableCell align="center">List</TableCell>
+                <TableCell align="center">Images</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -52,6 +56,42 @@ const AdminTopics = () => {
                   <TableCell align="center">{topic.itemsCount}</TableCell>
                   <TableCell align="center">{formatDateTime(topic.updatedAtMillis)}</TableCell>
                   <TableCell align="center">{formatDateTime(topic.createdAtMillis)}</TableCell>
+                  <TableCell align="center">{topic.listId || 'No list'}</TableCell>
+                  <TableCell style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
+                    <Box
+                      display="flex"
+                      justifyContent="center"
+                      gap={1}
+                      sx={{ marginLeft: 'auto', marginRight: 'auto' }}
+                    >
+                      {['square', 'wide', 'banner'].map((type, i) => {
+                        const image = topic.images?.find((image) => image.type === type);
+                        return (
+                          <div
+                            key={image?.id || i}
+                            style={{
+                              borderRadius: '2px',
+                              overflow: 'hidden',
+                              position: 'relative',
+                              width: 50,
+                              height: 50,
+                              backgroundColor: image?.averageColorHex || '#f3f1f1',
+                            }}
+                          >
+                            {image && (
+                              <Image
+                                src={sanitize(image.downloadLink)}
+                                alt={`Image of ${image.name}`}
+                                width={50}
+                                height={50}
+                                style={{ objectFit: 'contain' }}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </Box>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

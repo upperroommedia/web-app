@@ -43,7 +43,6 @@ const populateDatabaseFromSubsplash = onCall(
       const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
       const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
       const firestoreTopics = db.collection('topics').withConverter(firestoreAdminTopicConverter);
-      const topicsPromise = populateTopics(db, bearerToken, firestoreTopics);
       const listCount = await populateLists(
         db,
         bucket,
@@ -54,7 +53,6 @@ const populateDatabaseFromSubsplash = onCall(
         listNameToId,
         firestoreLists
       );
-      logger.log('loop starting');
       const speakerCount = await populateSpeakers(
         db,
         bucket,
@@ -66,7 +64,15 @@ const populateDatabaseFromSubsplash = onCall(
         firestoreLists,
         firestoreSpeakers
       );
-      const topicCount = await topicsPromise;
+      const topicCount = await populateTopics(
+        db,
+        bearerToken,
+        firestoreImagesMap,
+        listIdToImageIdMap,
+        listNameToId,
+        firestoreLists,
+        firestoreTopics
+      );
       const completedMessage = `Finished updating ${listCount} lists, ${speakerCount} speakers, ${topicCount} topics, and ${firestoreImagesMap.size} images`;
       logger.log(completedMessage);
       return completedMessage;

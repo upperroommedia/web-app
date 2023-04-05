@@ -8,7 +8,7 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewSeriesPopup from './NewSeriesPopup';
-import firestore, { query, collection, getDocs, where } from '../firebase/firestore';
+import firestore, { query, collection, getDocs, where, orderBy, limit } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
 
@@ -34,8 +34,11 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({ sermonList, setSer
 
   useEffect(() => {
     const fetchList = async () => {
-      const listQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.SERIES)).withConverter(
-        listConverter
+      const listQuery = query(
+        collection(firestore, 'lists').withConverter(listConverter),
+        where('type', '==', ListType.SERIES),
+        orderBy('name'),
+        limit(25)
       );
       const listQuerySnapshot = await getDocs(listQuery);
       setAllListArray(
