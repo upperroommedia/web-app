@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import AdminLayout from '../../layout/adminLayout';
 import Button from '@mui/material/Button';
-import firestore, { collection, deleteDoc, doc } from '../../firebase/firestore';
+import firestore, { collection, deleteDoc, doc, orderBy, query } from '../../firebase/firestore';
 // import { useCollection } from 'react-firebase-hooks/firestore';
 // import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
@@ -26,7 +26,8 @@ import ListItemButton from '@mui/material/ListItemButton';
 import { listConverter, List } from '../../types/List';
 
 const AdminList = () => {
-  const [firebaseList, loading, error] = useCollectionData(collection(firestore, 'lists').withConverter(listConverter));
+  const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'));
+  const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
   const [editListPopup, setEditListPopup] = useState<boolean>(false);
   const [deleteListPopup, setDeleteListPopup] = useState<boolean>(false);

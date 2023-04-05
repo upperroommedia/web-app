@@ -10,13 +10,14 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import firestore, { collection } from '../../firebase/firestore';
+import firestore, { collection, orderBy, query } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';
 import { topicConverter } from '../../types/Topic';
 import { adminProtected } from '../../utils/protectedRoutes';
 
 const AdminTopics = () => {
-  const [topics, loading, error] = useCollectionData(collection(firestore, 'topics').withConverter(topicConverter));
+  const q = query(collection(firestore, 'topics').withConverter(topicConverter), orderBy('title'));
+  const [topics, loading, error] = useCollectionData(q);
 
   const formatDateTime = (millis: number) => {
     const date = new Date(millis);
