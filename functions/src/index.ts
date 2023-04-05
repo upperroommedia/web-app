@@ -1,6 +1,7 @@
 // To deploy functions: npm run-script deploy
 // To test functions: npm run-script serve
 
+import * as admin from 'firebase-admin';
 import uploadToSubsplash from './uploadToSubsplash';
 import setUserRole from './setUserRole';
 import addintrooutro from './addIntroOutro';
@@ -25,6 +26,7 @@ import listOnDelete from './DocumentListeners/Lists/listOnDelete';
 import listOnUpdate from './DocumentListeners/Lists/listOnUpdate';
 import sermonOnDelete from './DocumentListeners/Sermons/sermonOnDelete';
 import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
+admin.initializeApp();
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;

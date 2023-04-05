@@ -1,6 +1,6 @@
 import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
-import { Firestore, CollectionReference } from 'firebase-admin/firestore';
+import { firestore } from 'firebase-admin';
 import { logger } from 'firebase-functions/v2';
 import { ImageType } from '../../../types/Image';
 import { List, ListType } from '../../../types/List';
@@ -9,15 +9,15 @@ import { createAxiosConfig } from '../subsplashUtils';
 import populateImages from './populateImagesHelper';
 
 async function populateSpeakers(
-  db: Firestore,
+  db: firestore.Firestore,
   bucket: Bucket,
   bearerToken: string,
   imageIds: Set<string>,
   firestoreImagesMap: Map<string, ImageType>,
   listIdToImageIdMap: Map<string, string[]>,
   listNameToId: Map<string, string>,
-  firestoreLists: CollectionReference<List>,
-  firestoreSpeakers: CollectionReference<ISpeaker>
+  firestoreLists: firestore.CollectionReference<List>,
+  firestoreSpeakers: firestore.CollectionReference<ISpeaker>
 ): Promise<number> {
   const speakersWithNoListImages: ISpeaker[] = [];
   let loop = true;

@@ -18,12 +18,13 @@ if (!firebaseAdmin.apps.length) {
     process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
   }
 
-  firebaseAdmin.initializeApp();
+  firebaseAdmin.initializeApp({
+    credential: firebaseAdmin.credential.cert({
+      projectId,
+      privateKey,
+      clientEmail,
+    }),
+    databaseURL: `https://${projectId}.firebaseio.com`,
+  });
 }
-
-export const db = firebaseAdmin.firestore();
-db.settings({ ignoreUndefinedProperties: true });
-export const realtimeDB = firebaseAdmin.database();
-export const storage = firebaseAdmin.storage();
-export const auth = firebaseAdmin.auth();
 export default firebaseAdmin;

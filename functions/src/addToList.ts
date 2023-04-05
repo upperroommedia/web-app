@@ -1,6 +1,6 @@
 // add sermon to series and handle condition when list is full
 import axios from 'axios';
-import { db } from '../../firebase/firebaseAdmin';
+import { firestore } from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
@@ -74,7 +74,7 @@ async function getFirestoreSermonFromMediaItem(mediaItems: MediaItem[]) {
   const sermons: Sermon[] = await Promise.all(
     mediaItems.map(async (item) => {
       logger.log('Getting sermon from firestore', item.id);
-      const sermonDoc = await db
+      const sermonDoc = await firestore()
         .collection('sermons')
         .where('subsplashId', '==', item.id)
         .withConverter(firestoreAdminSermonConverter)
@@ -147,7 +147,7 @@ async function addItemsToList(
     payload
   );
   await axios(patchListConfig);
-  const listArray = await db
+  const listArray = await firestore()
     .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
@@ -161,7 +161,7 @@ async function addItemsToList(
   logger.log(`Adding items: ${sermons} for firestore list: ${listArray.docs[0].data().name}`);
   // add sermon to list if it is not already there
 
-  const bulkWriter = db.bulkWriter();
+  const bulkWriter = firestore().bulkWriter();
   const list = listArray.docs[0];
   sermons.forEach((sermon, index) => {
     logger.log(`Adding "${sermon.title}" to series - ${list.id}`);
@@ -177,7 +177,9 @@ async function addItemsToList(
       mediaItem: sermon,
     };
 
-    const listItemRef = db.doc(`list/${list.id}/listItems/${sermon.id}`).withConverter(firestoreAdminListItemConverter);
+    const listItemRef = firestore()
+      .doc(`list/${list.id}/listItems/${sermon.id}`)
+      .withConverter(firestoreAdminListItemConverter);
     // this single call will fail if the sermon already exists which is ok
     bulkWriter.create(listItemRef, listItem);
   });
@@ -202,7 +204,7 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
     })
   );
 
-  const seriesArray = await db
+  const seriesArray = await firestore()
     .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
@@ -216,11 +218,11 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
   logger.log(`Removing items: ${sermons} for firestore series: ${seriesArray.docs[0].data().name}`);
 
   // delete sermons from firebase series
-  const bulkWriter = db.bulkWriter();
+  const bulkWriter = firestore().bulkWriter();
   const series = seriesArray.docs[0];
   sermons.forEach((sermon) => {
     logger.log(`Adding "${sermon.title}" to series - ${series.id}`);
-    const sermonRef = db.doc(`lists/${series.id}/listItems/${sermon.id}`);
+    const sermonRef = firestore().doc(`lists/${series.id}/listItems/${sermon.id}`);
     bulkWriter.delete(sermonRef);
   });
   await bulkWriter.close();
@@ -253,7 +255,7 @@ const removeNOldestItems = async (
 async function createMoreList(listId: string, type: ListType): Promise<string> {
   //Creating a new list
   logger.log(`createMoreList{listId: ${listId}}`);
-  const seriesArray = await db
+  const seriesArray = await firestore()
     .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
@@ -283,7 +285,7 @@ async function createMoreList(listId: string, type: ListType): Promise<string> {
     subsplashId: moreListId,
     isMoreSermonsList: true,
   };
-  await db.collection('lists').withConverter(firestoreAdminListConverter).add(moreSermonsList);
+  await firestore().collection('lists').withConverter(firestoreAdminListConverter).add(moreSermonsList);
   await seriesArray.docs[0].ref.update({ moreSermonsRef: moreListId });
   return moreListId;
 }
@@ -307,7 +309,7 @@ async function getFullList(listId: string, token: string, maxListCount: number):
 
 async function getMoreListId(listId: string, token: string): Promise<string | undefined> {
   logger.log(`getMoreListId(listId: ${listId})`);
-  const seriesArray = await db
+  const seriesArray = await firestore()
     .collection('lists')
     .where('subsplashId', '==', listId)
     .limit(1)
