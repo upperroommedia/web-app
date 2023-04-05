@@ -4,9 +4,14 @@ import { storage, firestore } from 'firebase-admin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { ImageType } from '../../../types/Image';
-import { firestoreAdminListConverter, firestoreAdminSpeakerConverter } from '../firestoreDataConverter';
+import {
+  firestoreAdminListConverter,
+  firestoreAdminSpeakerConverter,
+  firestoreAdminTopicConverter,
+} from '../firestoreDataConverter';
 import populateLists from './populateListsHelper';
 import populateSpeakers from './populateSpeakersHelper';
+import populateTopics from './populateTopicsHelper';
 import handleError from '../handleError';
 
 export interface populateDatabaseFromSubsplashInputType {
@@ -37,6 +42,8 @@ const populateDatabaseFromSubsplash = onCall(
       db.settings({ ignoreUndefinedProperties: true });
       const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
       const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
+      const firestoreTopics = db.collection('topics').withConverter(firestoreAdminTopicConverter);
+      const topicsPromise = populateTopics(db, bearerToken, firestoreTopics);
       const listCount = await populateLists(
         db,
         bucket,
@@ -59,7 +66,8 @@ const populateDatabaseFromSubsplash = onCall(
         firestoreLists,
         firestoreSpeakers
       );
-      const completedMessage = `Finished updating ${listCount} lists, ${speakerCount} speakers, and ${firestoreImagesMap.size} images`;
+      const topicCount = await topicsPromise;
+      const completedMessage = `Finished updating ${listCount} lists, ${speakerCount} speakers, ${topicCount} topics, and ${firestoreImagesMap.size} images`;
       logger.log(completedMessage);
       return completedMessage;
     } catch (error) {

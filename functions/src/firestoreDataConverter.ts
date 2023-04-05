@@ -5,6 +5,7 @@ import { emptySpeaker, ISpeaker } from '../../types/Speaker';
 import { emptyImage, ImageType } from '../../types/Image';
 import { Timestamp } from 'firebase/firestore';
 import { emptyList, List } from '../../types/List';
+import { emptyTopic, Topic } from '../../types/Topic';
 import { emptyListItem, ListItem, ListItemType } from '../../types/ListItem';
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
@@ -38,6 +39,15 @@ export const firestoreAdminImagesConverter: FirestoreDataConverter<ImageType> = 
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<ImageType>): ImageType => {
     return { ...emptyImage, ...snapshot.data(), id: snapshot.id };
+  },
+};
+
+export const firestoreAdminTopicConverter: FirestoreDataConverter<Topic> = {
+  toFirestore: (topic: Topic): Topic => {
+    return topic;
+  },
+  fromFirestore: (snapshot: QueryDocumentSnapshot<Topic>): Topic => {
+    return { ...emptyTopic, ...snapshot.data(), id: snapshot.id };
   },
 };
 

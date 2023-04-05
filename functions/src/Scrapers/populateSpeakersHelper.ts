@@ -33,6 +33,7 @@ async function populateSpeakers(
       undefined,
       { 'collection-total': 'include' }
     );
+
     const response = (await axios(axiosConfig)).data;
     current += response.count;
     logger.log(`Retrieved ${current} of ${response.total} speaker tags`);
@@ -113,6 +114,7 @@ async function populateSpeakers(
       );
     })
   );
+
   const subsplashImagesInput: { imageName: string; image: any }[] = [];
   remainingSpeakerImages.forEach((value) => subsplashImagesInput.push(value));
   await populateImages(bucket, imageIds, db, subsplashImagesInput, firestoreImagesMap);
