@@ -13,7 +13,7 @@ async function updateCategories(
   bearerToken: string,
   firestoreLists: firestore.CollectionReference<List>
 ) {
-  // update categories lists
+  // update categories lists from subsplash categories list
   const categoriesResponse = (
     await axios(
       createAxiosConfig(
