@@ -33,11 +33,19 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
     if (!props.listType) {
       props.setSermonList(listArray);
     } else {
-      // Only updates of items of input listtype
-      props.setSermonList((oldSermonList) => [
-        ...oldSermonList.filter((list) => list.type !== props.listType),
-        ...listArray.filter((list) => list.type === props.listType),
-      ]);
+      if (props.listType === ListType.SERIES) {
+        // also removes category lists
+        props.setSermonList((oldSermonList) => [
+          ...oldSermonList.filter((list) => list.type !== props.listType && list.type !== ListType.CATEGORY_LIST),
+          ...listArray.filter((list) => list.type === props.listType),
+        ]);
+      } else {
+        // Only updates of items of input listtype
+        props.setSermonList((oldSermonList) => [
+          ...oldSermonList.filter((list) => list.type !== props.listType),
+          ...listArray.filter((list) => list.type === props.listType),
+        ]);
+      }
     }
   };
 

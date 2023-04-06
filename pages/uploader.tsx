@@ -16,7 +16,7 @@ import Cancel from '@mui/icons-material/Cancel';
 
 import { isBrowser } from 'react-device-detect';
 
-import firestore, { collection, doc, getDoc, getDocs, query, where } from '../firebase/firestore';
+import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -104,7 +104,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [isUploading, setIsUploading] = useState(false);
   const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
 
-  const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
+  const [subtitlesArray, setSubtitlesArray] = useState<List[]>([]);
 
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
 
@@ -119,10 +119,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   useEffect(() => {
     const fetchData = async () => {
-      const subtitlesRef = doc(firestore, 'subtitles', 'subtitlesDoc');
-      const subtitlesSnap = await getDoc(subtitlesRef);
-      const subtitlesData = subtitlesSnap.data();
-      setSubtitlesArray(subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []);
+      const q = query(collection(firestore, 'lists'), where('type', '==', ListType.CATEGORY_LIST)).withConverter(
+        listConverter
+      );
+      const subtitlesSnap = await getDocs(q);
+      subtitlesSnap.forEach((doc) => {
+        setSubtitlesArray((oldSubtitlesArray) => [...oldSubtitlesArray, doc.data()]);
+      });
 
       // fetch speakers
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
@@ -263,9 +266,17 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               value={sermon.subtitle || null}
               onChange={(_, newValue) => {
                 newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
+                if (newValue !== null) {
+                  const subtitleList = subtitlesArray.find((subtitle) => subtitle.name === newValue);
+                  subtitleList && setSermonList((oldSermonList) => [...oldSermonList, subtitleList]);
+                } else {
+                  setSermonList((oldSermonList) =>
+                    oldSermonList.filter((subtitle) => subtitle.type !== ListType.CATEGORY_LIST)
+                  );
+                }
               }}
               renderInput={(params) => <TextField required {...params} label="Subtitle" />}
-              options={subtitlesArray}
+              options={subtitlesArray.map((subtitle) => subtitle.name)}
             />
             <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
               <DesktopDatePicker
