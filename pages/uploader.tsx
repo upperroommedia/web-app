@@ -129,6 +129,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
       // fetch speakers
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
+
+      // fetch latest list
+      const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
+        listConverter
+      );
+      const latestSnap = await getDocs(latestQuery);
+      setSermonList((oldSermonList) => [...oldSermonList, latestSnap.docs[0].data()]);
     };
     fetchData();
   }, []);
