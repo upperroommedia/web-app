@@ -16,7 +16,7 @@ import Cancel from '@mui/icons-material/Cancel';
 
 import { isBrowser } from 'react-device-detect';
 
-import firestore, { doc, getDoc } from '../firebase/firestore';
+import firestore, { collection, doc, getDoc, getDocs, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -45,7 +45,7 @@ import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
-import { List, ListType } from '../types/List';
+import { List, listConverter, ListType } from '../types/List';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -304,7 +304,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onBlur={() => {
               setSpeakerError({ error: false, message: '' });
             }}
-            onChange={async (_, newValue) => {
+            onChange={async (_, newValue, reason, details) => {
               if (newValue.length === 1) {
                 const currentTypes = sermon.images.map((img) => img.type);
                 const newImages = [
@@ -321,8 +321,16 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     return speakerWithoutHighlight;
                   })
                 );
+                if (details?.option.listId) {
+                  const q = query(
+                    collection(firestore, 'lists'),
+                    where('id', '==', details.option.listId)
+                  ).withConverter(listConverter);
+                  const querySnapshot = await getDocs(q);
+                  const list = querySnapshot.docs[0].data();
+                  setSermonList((oldSermonList) => [...oldSermonList, list]);
+                }
               }
-
               if (newValue.length >= 4) {
                 setSpeakerError({
                   error: true,
@@ -362,6 +370,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                         speakers: newSpeakers,
                       };
                     });
+                    setSermonList((oldSermonList) => oldSermonList.filter((list) => list.id !== speaker.listId));
                   }}
                   key={speaker.id}
                   label={speaker.name}
@@ -412,6 +421,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.TOPIC_LIST} />
+          </div>
+          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+            <ListSelector sermonList={sermonList} setSermonList={setSermonList} />
           </div>
         </Box>
         <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>

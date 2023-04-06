@@ -8,21 +8,17 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewListPopup from './NewListPopup';
-import firestore, { query, collection, getDocs, where } from '../firebase/firestore';
+import firestore, { query, collection, getDocs, where, limit } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
 
 interface ListSelectorProps {
   sermonList: List[];
   setSermonList: Dispatch<SetStateAction<List[]>>;
-  listType: ListType;
+  listType?: ListType;
 }
 
-const ListSelector: FunctionComponent<ListSelectorProps> = ({
-  sermonList,
-  setSermonList,
-  listType,
-}: ListSelectorProps) => {
+const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorProps) => {
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
 
@@ -34,17 +30,23 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({
       }
       return s as List;
     });
-    setSermonList((oldSermonList) => [
-      ...oldSermonList.filter((list) => list.type !== listType),
-      ...listArray.filter((list) => list.type === listType),
-    ]);
+    if (!props.listType) {
+      props.setSermonList(listArray);
+    } else {
+      // Only updates of items of input listtype
+      props.setSermonList((oldSermonList) => [
+        ...oldSermonList.filter((list) => list.type !== props.listType),
+        ...listArray.filter((list) => list.type === props.listType),
+      ]);
+    }
   };
 
   useEffect(() => {
     const fetchList = async () => {
-      const listQuery = query(collection(firestore, 'lists'), where('type', '==', listType)).withConverter(
-        listConverter
-      );
+      // TODO[1]: Query from algolia!!!!
+      const listQuery = props.listType
+        ? query(collection(firestore, 'lists'), where('type', '==', props.listType)).withConverter(listConverter)
+        : query(collection(firestore, 'lists'), limit(5)).withConverter(listConverter);
       const listQuerySnapshot = await getDocs(listQuery);
       setAllListArray(
         listQuerySnapshot.docs.map((doc) => {
@@ -61,7 +63,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({
         <Autocomplete
           multiple
           fullWidth
-          value={sermonList.filter((list) => list.type === listType)}
+          value={props.listType ? props.sermonList.filter((list) => list.type === props.listType) : props.sermonList}
           onChange={async (_, newValue) => {
             updateSermonList(newValue);
           }}
@@ -73,7 +75,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({
                 key={list.id}
                 label={list.name}
                 onDelete={() => {
-                  updateSermonList(sermonList.filter((s) => s.id !== list.id));
+                  updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
                 }}
                 avatar={
                   <AvatarWithDefaultImage
@@ -113,7 +115,10 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({
             (option.name === value.name && option.id === value.id)
           }
           renderInput={(params) => (
-            <TextField {...params} label={listType.charAt(0).toUpperCase() + listType.slice(1)} />
+            <TextField
+              {...params}
+              label={props.listType ? props.listType.charAt(0).toUpperCase() + props.listType.slice(1) : 'Lists'}
+            />
           )}
         />
         <IconButton
@@ -131,8 +136,8 @@ const ListSelector: FunctionComponent<ListSelectorProps> = ({
         setNewListPopup={setNewListPopup}
         listArray={allListArray}
         setListArray={setAllListArray}
-        setSermonList={setSermonList}
-        listType={listType}
+        setSermonList={props.setSermonList}
+        listType={props.listType}
       />
     </>
   );
