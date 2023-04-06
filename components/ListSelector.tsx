@@ -125,7 +125,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           renderInput={(params) => (
             <TextField
               {...params}
-              label={props.listType ? props.listType.charAt(0).toUpperCase() + props.listType.slice(1) : 'Lists'}
+              label={props.listType ? props.listType.charAt(0).toUpperCase() + props.listType.split('-')[0].slice(1) : 'Lists'}
             />
           )}
         />
