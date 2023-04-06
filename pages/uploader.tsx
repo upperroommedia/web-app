@@ -94,6 +94,7 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
   }
   return speakers;
 };
+const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
@@ -107,6 +108,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [subtitlesArray, setSubtitlesArray] = useState<List[]>([]);
 
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
+  const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
 
   const [trimStart, setTrimStart] = useState<number>(0);
 
@@ -322,7 +324,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onBlur={() => {
               setSpeakerError({ error: false, message: '' });
             }}
-            onChange={async (_, newValue, reason, details) => {
+            onChange={async (_, newValue, _reason, details) => {
+              if (!details?.option.listId) {
+                setSpeakerHasNoListPopup(true);
+              }
               if (newValue.length === 1) {
                 const currentTypes = sermon.images.map((img) => img.type);
                 const newImages = [
@@ -585,6 +590,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             </>
           )}
         </Box>
+        <DynamicPopUp title={'Warning'} open={speakerHasNoListPopup} setOpen={setSpeakerHasNoListPopup}>
+          Speaker has no associated list that this sermon will be added to
+        </DynamicPopUp>
       </FormControl>
     </>
   );
