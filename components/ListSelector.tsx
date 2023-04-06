@@ -16,6 +16,7 @@ interface ListSelectorProps {
   sermonList: List[];
   setSermonList: Dispatch<SetStateAction<List[]>>;
   listType?: ListType;
+  disabled?: boolean;
 }
 
 const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorProps) => {
@@ -61,6 +62,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
     <>
       <Box display="flex" gap={1} width={1} alignItems="center">
         <Autocomplete
+          disabled={props.disabled}
           multiple
           fullWidth
           value={props.listType ? props.sermonList.filter((list) => list.type === props.listType) : props.sermonList}

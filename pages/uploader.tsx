@@ -264,8 +264,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               onChange={(_, newValue) => {
                 newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
               }}
-              renderInput={(params) => <TextField required {...params} label="Subtitle" />}
+              renderInput={(params) => <TextField {...params} label="Subtitle" />}
               options={subtitlesArray}
+              disabled={sermonList.find((list) => list.type === ListType.SERIES) !== undefined}
             />
             <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
               <DesktopDatePicker
@@ -296,7 +297,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onChange={handleChange}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.SERIES} />
+            <ListSelector
+              disabled={sermon.subtitle !== ''}
+              sermonList={sermonList}
+              setSermonList={setSermonList}
+              listType={ListType.SERIES}
+            />
           </div>
           <Autocomplete
             fullWidth
@@ -521,7 +527,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                       sermon.title === '' ||
                       date === null ||
                       sermon.speakers.length === 0 ||
-                      sermon.subtitle === '' ||
+                      (sermon.subtitle === '' &&
+                        sermonList.filter((list) => list.type === ListType.SERIES).length === 0) ||
                       isUploading
                     }
                     onClick={async () => {
