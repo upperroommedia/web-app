@@ -16,7 +16,7 @@ import Cancel from '@mui/icons-material/Cancel';
 
 import { isBrowser } from 'react-device-detect';
 
-import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
+import firestore, { collection, getDocs, orderBy, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -121,9 +121,11 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   useEffect(() => {
     const fetchData = async () => {
-      const q = query(collection(firestore, 'lists'), where('type', '==', ListType.CATEGORY_LIST)).withConverter(
-        listConverter
-      );
+      const q = query(
+        collection(firestore, 'lists'),
+        where('type', '==', ListType.CATEGORY_LIST),
+        orderBy('name', 'asc')
+      ).withConverter(listConverter);
       const subtitlesSnap = await getDocs(q);
       subtitlesSnap.forEach((doc) => {
         setSubtitlesArray((oldSubtitlesArray) => [...oldSubtitlesArray, doc.data()]);
