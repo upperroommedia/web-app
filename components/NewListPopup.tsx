@@ -36,6 +36,7 @@ const NewListPopup = (props: NewListPopupProps) => {
   const [selectedOverflowBehavior, setSelectedOverflowBehavior] = useState<OverflowBehavior>(
     OverflowBehavior.CREATENEWLIST
   );
+
   const [submitting, setSubmitting] = useState(false);
   const [newListError, setNewListError] = useState<{ error: boolean; message: string }>({
     error: false,
@@ -47,6 +48,15 @@ const NewListPopup = (props: NewListPopupProps) => {
     [OverflowBehavior.ERROR]: 'Error',
     [OverflowBehavior.CREATENEWLIST]: 'Create New List',
     [OverflowBehavior.REMOVEOLDEST]: 'Remove Oldest',
+  };
+  const listTypeOptions: {
+    [key in ListType]: string;
+  } = {
+    [ListType.SERIES]: 'Series',
+    [ListType.SPEAKER_LIST]: 'Speaker List',
+    [ListType.TOPIC_LIST]: 'Topic',
+    [ListType.CATEGORY_LIST]: 'Category',
+    [ListType.LATEST]: 'Latest',
   };
   const [userHasTypedInList, setUserHasTypedInList] = useState<boolean>(false);
   useEffect(() => {
@@ -102,7 +112,7 @@ const NewListPopup = (props: NewListPopupProps) => {
 
   return (
     <PopUp
-      title={props.existingList ? `Edit ${props.existingList.name}` : `Add new ${props.listType}`}
+      title={props.existingList ? `Edit ${props.existingList.name}` : `Add new ${props.listType || 'list'}`}
       open={props.newListPopup}
       setOpen={props.setNewListPopup}
       onClose={() => {
@@ -213,6 +223,33 @@ const NewListPopup = (props: NewListPopupProps) => {
             })}
           </Select>
         </FormControl>
+        {!props.listType && (
+          <FormControl fullWidth>
+            <InputLabel id="list-type-select-label" required>
+              List Type
+            </InputLabel>
+            <Select
+              value={newList.type}
+              label="List Type"
+              labelId="list-type-select-label"
+              id="list-type-select"
+              onChange={(e) => {
+                setNewList((oldList) => ({ ...oldList, type: e.target.value as ListType }));
+              }}
+            >
+              {/* eslint-disable-next-line array-callback-return */}
+              {(Object.values(ListType) as Array<ListType>).map((listType) => {
+                if (listType !== ListType.LATEST) {
+                  return (
+                    <MenuItem key={listType} value={listType}>
+                      {listTypeOptions[listType]}
+                    </MenuItem>
+                  );
+                }
+              })}
+            </Select>
+          </FormControl>
+        )}
         <ImageViewer images={newList.images} newImageCallback={handleNewImage} vertical={false} />
       </Box>
     </PopUp>
