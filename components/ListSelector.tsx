@@ -106,6 +106,9 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           fullWidth
           value={value}
           onChange={async (_, newValue) => {
+            if (props.listType === ListType.CATEGORY_LIST && newValue.length > 1) {
+              newValue = newValue.slice(1);
+            }
             updateSermonList(newValue);
           }}
           id="list-input"
@@ -159,6 +162,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           renderInput={(params) => (
             <TextField
               {...params}
+              required={props.listType === ListType.CATEGORY_LIST}
               label={
                 props.listType
                   ? props.listType.charAt(0).toUpperCase() + props.listType.split('-')[0].slice(1)
@@ -167,15 +171,17 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
             />
           )}
         />
-        <IconButton
-          size="small"
-          sx={{ flexShrink: 0 }}
-          onClick={() => {
-            setNewListPopup(true);
-          }}
-        >
-          <AddIcon />
-        </IconButton>
+        {props.listType !== ListType.CATEGORY_LIST && (
+          <IconButton
+            size="small"
+            sx={{ flexShrink: 0 }}
+            onClick={() => {
+              setNewListPopup(true);
+            }}
+          >
+            <AddIcon />
+          </IconButton>
+        )}
       </Box>
       <NewListPopup
         newListPopup={newListPopup}

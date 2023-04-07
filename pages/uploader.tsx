@@ -16,7 +16,7 @@ import Cancel from '@mui/icons-material/Cancel';
 
 import { isBrowser } from 'react-device-detect';
 
-import firestore, { collection, getDocs, orderBy, query, where } from '../firebase/firestore';
+import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -105,8 +105,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [isUploading, setIsUploading] = useState(false);
   const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
 
-  const [subtitlesArray, setSubtitlesArray] = useState<List[]>([]);
-
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
   const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
 
@@ -121,16 +119,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   useEffect(() => {
     const fetchData = async () => {
-      const q = query(
-        collection(firestore, 'lists'),
-        where('type', '==', ListType.CATEGORY_LIST),
-        orderBy('name', 'asc')
-      ).withConverter(listConverter);
-      const subtitlesSnap = await getDocs(q);
-      subtitlesSnap.forEach((doc) => {
-        setSubtitlesArray((oldSubtitlesArray) => [...oldSubtitlesArray, doc.data()]);
-      });
-
       // fetch speakers
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
 
@@ -149,9 +137,15 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       setSermonList(props.existingList);
     }
   }, [props.existingList]);
+
+  useEffect(() => {
+    updateSermon('subtitle', sermonList.find((list) => list.type === ListType.CATEGORY_LIST)?.name || '');
+  }, [sermonList]);
+
   const listEqual = (list1: List[], list2: List[]): boolean => {
     return JSON.stringify(list1) === JSON.stringify(list2);
   };
+
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
     return (
@@ -271,24 +265,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             required
           />
           <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
-            <Autocomplete
-              fullWidth
-              id="subtitle-input"
-              value={sermon.subtitle || null}
-              onChange={(_, newValue) => {
-                newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
-                if (newValue !== null) {
-                  const subtitleList = subtitlesArray.find((subtitle) => subtitle.name === newValue);
-                  subtitleList && setSermonList((oldSermonList) => [...oldSermonList, subtitleList]);
-                } else {
-                  setSermonList((oldSermonList) =>
-                    oldSermonList.filter((subtitle) => subtitle.type !== ListType.CATEGORY_LIST)
-                  );
-                }
-              }}
-              renderInput={(params) => <TextField required {...params} label="Subtitle" />}
-              options={subtitlesArray.map((subtitle) => subtitle.name)}
-            />
+            <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.CATEGORY_LIST} />
             <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
               <DesktopDatePicker
                 label="Date"
