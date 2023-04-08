@@ -153,7 +153,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       setSermonList(props.existingList);
     }
   }, [props.existingList]);
-
+  
   const listEqual = (list1: List[], list2: List[]): boolean => {
     return JSON.stringify(list1) === JSON.stringify(list2);
   };

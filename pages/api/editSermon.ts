@@ -53,7 +53,7 @@ const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
 
   // update sermonSeries
   const sermonSeriesSnapshot = await getDocs(
-    collection(firestore, `sermons/${sermonRef.id}/sermonLists`).withConverter(listConverter)
+    collection(firestore, `lists/${sermonRef.id}/listItems`).withConverter(listConverter)
   );
 
   const seriesInFirebase = new Set<string>();

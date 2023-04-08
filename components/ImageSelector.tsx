@@ -11,7 +11,7 @@ import firestore, {
   onSnapshot,
 } from '../firebase/firestore';
 import { useEffect, useState } from 'react';
-import { AspectRatio, ImageType } from '../types/Image';
+import { AlgoliaImage, AspectRatio, ImageType } from '../types/Image';
 import Image from 'next/image';
 // import ImageList from '@mui/material/ImageList';
 // import ImageListItem from '@mui/material/ImageListItem';
@@ -24,6 +24,19 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { sanitize } from 'dompurify';
 import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
+import { createInMemoryCache } from '@algolia/cache-in-memory';
+import algoliasearch from 'algoliasearch';
+import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
+
+const client =
+  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
+        responsesCache: createInMemoryCache(),
+        requestsCache: createInMemoryCache({ serializable: false }),
+      })
+    : undefined;
+const imagesIndex = client?.initIndex('images');
 
 const ImageSelector = (props: {
   selectedSpeaker?: ISpeaker;
@@ -32,6 +45,9 @@ const ImageSelector = (props: {
   setNewSelectedImage: (image: ImageType) => void;
 }) => {
   const [images, setImages] = useState<ImageType[]>([]);
+  const [imageSearchResults, setImageSearchResults] = useState<AlgoliaImage[]>();
+  const [imageSearchQuery, setImageQuery] = useState<string>('');
+
   const [title, setTitle] = useState(
     (props.selectedSpeaker && `${props.selectedSpeaker?.name.replaceAll(' ', '-')}`) || ''
   );
@@ -63,6 +79,21 @@ const ImageSelector = (props: {
     querySnapshot.forEach((doc) => {
       setImages((oldImages) => [...oldImages, doc.data() as ImageType]);
     });
+  };
+
+  const searchImages = async (query: string, hitsPerPage: number, page: number) => {
+    const images: AlgoliaImage[] = [];
+    if (imagesIndex) {
+      const response = await imagesIndex.search<AlgoliaImage>(query, {
+        hitsPerPage,
+        page,
+        filters: `type:${props.selectedImageFromSpeakerDetails.type}`,
+      });
+      response.hits.forEach((hit) => {
+        images.push(hit);
+      });
+    }
+    return images;
   };
 
   useEffect(() => {
@@ -120,57 +151,151 @@ const ImageSelector = (props: {
         <CircularProgress />
       ) : (
         <>
-          <InfiniteScroll
-            dataLength={images.length + 1}
-            next={async () => await fetchMoreImages()}
-            hasMore={lastImage !== undefined}
-            loader={<InfinitScrollMessage message="Loading..." />}
-            height="500px"
-            // scrollableTarget="scrollableDiv"
-            style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
-            endMessage={<InfinitScrollMessage message="No More Images" />}
-          >
-            {images.map((image) => (
-              <div
-                key={image.id}
-                className={styles.imageContainer}
-                style={{
-                  height: '164px',
-                  aspectRatio: AspectRatio[image.type],
-                  backgroundColor: image.averageColorHex || '#f3f1f1',
-                  boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
-                }}
-              >
-                <Image
-                  src={sanitize(image.downloadLink)}
-                  fill
-                  alt={image.name}
-                  style={{
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    objectFit: 'contain',
-                  }}
-                  onClick={() => {
-                    props.setNewSelectedImage(image);
-                  }}
-                />
-                {props.newSelectedImage?.id === image.id && (
-                  <CheckCircleIcon
-                    color="primary"
-                    style={{
-                      position: 'absolute',
-                      backgroundColor: 'white',
-                      borderRadius: '50%',
-                      zIndex: 2,
-                      top: '10px',
-                      right: '10px',
+          <TextField
+            value={imageSearchQuery}
+            onChange={async (e) => {
+              setImageQuery(e.target.value);
+              if (e.target.value !== null || e.target.value !== '') {
+                setImageSearchResults(await searchImages(e.target.value, 100, 0));
+              }
+            }}
+            fullWidth
+            placeholder="Search for an image"
+            sx={{ paddingBottom: '5px' }}
+          />
+          {imageSearchQuery !== '' && imageSearchResults ? (
+            <InfiniteScroll
+              next={() => {}}
+              hasMore={false}
+              loader={undefined}
+              dataLength={imageSearchResults.length}
+              height="500px"
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
+            >
+              {imageSearchResults.map((image) => {
+                delete image._highlightResult;
+                delete image?.nbHits;
+                return (
+                  <Tooltip
+                    key={image.id}
+                    title={image.name.split('-').slice(0, -1).join(' ')}
+                    placement="bottom"
+                    PopperProps={{
+                      sx: {
+                        '& .MuiTooltip-tooltip': {
+                          marginTop: '-10px !important',
+                          bgcolor: 'grey !important',
+                          opacity: '1.0 !important',
+                        },
+                      },
                     }}
-                  ></CheckCircleIcon>
-                )}
-              </div>
-            ))}
-            {/* </div> */}
-          </InfiniteScroll>
+                  >
+                    <div
+                      className={styles.imageContainer}
+                      style={{
+                        height: '164px',
+                        aspectRatio: AspectRatio[image.type],
+                        backgroundColor: image.averageColorHex || '#f3f1f1',
+                        boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
+                      }}
+                    >
+                      <Image
+                        src={sanitize(image.downloadLink)}
+                        fill
+                        alt={image.name}
+                        style={{
+                          borderRadius: '5px',
+                          cursor: 'pointer',
+                          objectFit: 'contain',
+                        }}
+                        onClick={() => {
+                          props.setNewSelectedImage(image);
+                        }}
+                      />
+                      {props.newSelectedImage?.id === image.id && (
+                        <CheckCircleIcon
+                          color="primary"
+                          style={{
+                            position: 'absolute',
+                            backgroundColor: 'white',
+                            borderRadius: '50%',
+                            zIndex: 2,
+                            top: '10px',
+                            right: '10px',
+                          }}
+                        ></CheckCircleIcon>
+                      )}
+                    </div>
+                  </Tooltip>
+                );
+              })}
+            </InfiniteScroll>
+          ) : (
+            <InfiniteScroll
+              dataLength={images.length}
+              next={async () => await fetchMoreImages()}
+              hasMore={lastImage !== undefined}
+              loader={<InfinitScrollMessage message="Loading..." />}
+              height="500px"
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
+              endMessage={<InfinitScrollMessage message="No More Images" />}
+            >
+              {images.map((image) => (
+                <Tooltip
+                  key={image.id}
+                  title={image.name.split('-').slice(0, -1).join(' ')}
+                  placement="bottom"
+                  PopperProps={{
+                    sx: {
+                      '& .MuiTooltip-tooltip': {
+                        marginTop: '-10px !important',
+                        bgcolor: 'grey !important',
+                        opacity: '1.0 !important',
+                      },
+                    },
+                  }}
+                >
+                  <div
+                    key={image.id}
+                    className={styles.imageContainer}
+                    style={{
+                      height: '164px',
+                      aspectRatio: AspectRatio[image.type],
+                      backgroundColor: image.averageColorHex || '#f3f1f1',
+                      boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
+                    }}
+                  >
+                    <Image
+                      src={sanitize(image.downloadLink)}
+                      fill
+                      alt={image.name}
+                      style={{
+                        borderRadius: '5px',
+                        cursor: 'pointer',
+                        objectFit: 'contain',
+                      }}
+                      onClick={() => {
+                        props.setNewSelectedImage(image);
+                      }}
+                    />
+                    {props.newSelectedImage?.id === image.id && (
+                      <CheckCircleIcon
+                        color="primary"
+                        style={{
+                          position: 'absolute',
+                          backgroundColor: 'white',
+                          borderRadius: '50%',
+                          zIndex: 2,
+                          top: '10px',
+                          right: '10px',
+                        }}
+                      ></CheckCircleIcon>
+                    )}
+                  </div>
+                </Tooltip>
+              ))}
+            </InfiniteScroll>
+          )}
           <ImageUploader
             onFinish={async (imgSrc, name) => saveImage(imgSrc, name)}
             type={props.selectedImageFromSpeakerDetails.type}

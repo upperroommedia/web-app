@@ -15,9 +15,22 @@ export type ImageType = {
   averageColorHex?: string;
   vibrantColorHex?: string;
 };
+
 export const isImageType = (obj: any): obj is ImageType => {
   return obj.id !== undefined && obj.type !== undefined && obj.size !== undefined;
 };
+
+export interface AlgoliaImage extends ImageType {
+  nbHits?: number;
+  _highlightResult?: {
+    name: {
+      value: string;
+      matchLevel: 'none' | 'partial' | 'full';
+      fullyHighlighted: boolean;
+      matchedWords: string[];
+    };
+  };
+}
 
 export const AspectRatio: { [key in ImageSizeType]: number } = {
   square: 1,
