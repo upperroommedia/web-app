@@ -46,6 +46,7 @@ import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
 import { List, listConverter, ListType } from '../types/List';
+import SubtitleSelector from '../components/SubtitleSelector';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -108,6 +109,8 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
   const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
 
+  const [subtitles, setSubtitles] = useState<List[]>([]);
+
   const [trimStart, setTrimStart] = useState<number>(0);
 
   const [timer, setTimer] = useState<NodeJS.Timeout>();
@@ -121,6 +124,19 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
     const fetchData = async () => {
       // fetch speakers
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
+
+      // fetch subtitles
+      const listQuery = query(
+        collection(firestore, 'lists'),
+        where('type', '==', ListType.CATEGORY_LIST)
+      ).withConverter(listConverter);
+      const listQuerySnapshot = await getDocs(listQuery);
+      setSubtitles(
+        listQuerySnapshot.docs.map((doc) => {
+          const list = doc.data();
+          return list;
+        })
+      );
 
       // fetch latest list
       const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
@@ -137,10 +153,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       setSermonList(props.existingList);
     }
   }, [props.existingList]);
-
-  useEffect(() => {
-    updateSermon('subtitle', sermonList.find((list) => list.type === ListType.CATEGORY_LIST)?.name || '');
-  }, [sermonList]);
 
   const listEqual = (list1: List[], list2: List[]): boolean => {
     return JSON.stringify(list1) === JSON.stringify(list2);
@@ -265,7 +277,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             required
           />
           <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
-            <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.CATEGORY_LIST} />
+            <SubtitleSelector
+              sermonList={sermonList}
+              setSermonList={setSermonList}
+              sermon={sermon}
+              setSermon={setSermon}
+              subtitles={subtitles}
+            />
             <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
               <DesktopDatePicker
                 label="Date"
@@ -295,7 +313,14 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onChange={handleChange}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.SERIES} />
+            <ListSelector
+              sermonList={sermonList}
+              setSermonList={setSermonList}
+              listType={ListType.SERIES}
+              subtitle={
+                sermon.subtitle !== '' ? subtitles.find((subtitle) => subtitle.name === sermon.subtitle) : undefined
+              }
+            />
           </div>
           <Autocomplete
             fullWidth

@@ -18,6 +18,7 @@ interface ListSelectorProps {
   sermonList: List[];
   setSermonList: Dispatch<SetStateAction<List[]>>;
   listType?: ListType;
+  subtitle?: List;
 }
 
 const client =
@@ -120,6 +121,13 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
                 label={list.name}
                 onDelete={() => {
                   updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
+                  if (
+                    props.sermonList.filter((list) => list.type === ListType.SERIES).length === 1 &&
+                    props.listType === ListType.SERIES &&
+                    props.subtitle !== undefined
+                  ) {
+                    props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+                  }
                 }}
                 avatar={
                   <AvatarWithDefaultImage
