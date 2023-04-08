@@ -106,11 +106,14 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           multiple
           fullWidth
           value={value}
-          onChange={async (_, newValue) => {
+          onChange={async (_, newValue, reason) => {
             if (props.listType === ListType.CATEGORY_LIST && newValue.length > 1) {
               newValue = newValue.slice(1);
             }
             updateSermonList(newValue);
+            if (reason === 'clear' && props.listType === ListType.SERIES && props.subtitle !== undefined) {
+              props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+            }
           }}
           id="list-input"
           options={getListUnion(value, allListArray)}
