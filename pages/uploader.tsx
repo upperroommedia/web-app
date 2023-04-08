@@ -139,11 +139,13 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       );
 
       // fetch latest list
-      const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
-        listConverter
-      );
-      const latestSnap = await getDocs(latestQuery);
-      setSermonList((oldSermonList) => [...oldSermonList, latestSnap.docs[0].data()]);
+      if (sermonList.find((list) => list.type === ListType.LATEST) !== undefined) {
+        const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
+          listConverter
+        );
+        const latestSnap = await getDocs(latestQuery);
+        setSermonList((oldSermonList) => [...oldSermonList, latestSnap.docs[0].data()]);
+      }
     };
     fetchData();
   }, []);
@@ -153,7 +155,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       setSermonList(props.existingList);
     }
   }, [props.existingList]);
-  
+
   const listEqual = (list1: List[], list2: List[]): boolean => {
     return JSON.stringify(list1) === JSON.stringify(list2);
   };
