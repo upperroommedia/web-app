@@ -26,6 +26,7 @@ import listOnDelete from './DocumentListeners/Lists/listOnDelete';
 import listOnUpdate from './DocumentListeners/Lists/listOnUpdate';
 import sermonOnDelete from './DocumentListeners/Sermons/sermonOnDelete';
 import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
+import repopulatelistfromspeakeritems from './Scrapers/repopulateListFromSpeakerItems';
 admin.initializeApp();
 
 exports.uploadToSubsplash = uploadToSubsplash;
@@ -52,3 +53,4 @@ exports.listOnDelete = listOnDelete;
 exports.listOnUpdate = listOnUpdate;
 exports.listItemOnDelete = listItemOnDelete;
 exports.listItemOnCreate = listItemOnCreate;
+exports.repopulatelistfromspeakeritems = repopulatelistfromspeakeritems;
