@@ -86,10 +86,10 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
             </span>
           </Tooltip>
         ) : (
-          <Tooltip title="Upload to Subsplash">
+          <Tooltip title="Upload to Subsplash (Temporarily Disabled)">
             <span>
               <IconButton
-                disabled={disableButtons}
+                disabled={true || disableButtons}
                 aria-label="Upload to Subsplash"
                 style={{ color: 'lightgreen' }}
                 onClick={() => {
