@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import AdminLayout from '../../layout/adminLayout';
 import Button from '@mui/material/Button';
-import firestore, { collection, deleteDoc, doc, orderBy, query } from '../../firebase/firestore';
+import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../firebase/firestore';
 // import { useCollection } from 'react-firebase-hooks/firestore';
 // import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
@@ -24,17 +24,36 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ListItemButton from '@mui/material/ListItemButton';
 import { listConverter, List } from '../../types/List';
+import { createInMemoryCache } from '@algolia/cache-in-memory';
+import algoliasearch from 'algoliasearch';
+import TextField from '@mui/material/TextField';
+
+const HITSPERPAGE = 20;
+
+const client =
+  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
+        responsesCache: createInMemoryCache(),
+        requestsCache: createInMemoryCache({ serializable: false }),
+      })
+    : undefined;
+const listsIndex = client?.initIndex('lists');
 
 const AdminList = () => {
-  const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'));
+  const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
   const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchResults, setSearchResults] = useState<List[]>();
+  const [currentPage, setCurrentPage] = useState<number>(0);
+  const [noMoreResults, setNoMoreResults] = useState<boolean>(false);
   const [editListPopup, setEditListPopup] = useState<boolean>(false);
   const [deleteListPopup, setDeleteListPopup] = useState<boolean>(false);
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [selectedList, setSelectedList] = useState<List>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const disableButtons = isDeleting;
+
   const handleListDelete = async () => {
     if (!selectedList) {
       return;
@@ -56,11 +75,29 @@ const AdminList = () => {
     }
   };
 
+  const searchLists = async (query?: string) => {
+    const res = await listsIndex?.search<List>(query || searchQuery, { hitsPerPage: HITSPERPAGE, page: currentPage });
+    if (res && res.hits.length > 0) {
+      setNoMoreResults(false);
+      setSearchResults(res.hits);
+    } else {
+      setSearchResults([]);
+      setNoMoreResults(true);
+    }
+  };
+
   useEffect(() => {
     if (firebaseList) {
       setList(firebaseList);
     }
   }, [firebaseList]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      await searchLists();
+    };
+    fetchData();
+  }, [currentPage]);
 
   return (
     <>
@@ -84,8 +121,21 @@ const AdminList = () => {
                 Add List
               </Button>
             </Box>
+            <TextField
+              fullWidth
+              placeholder="Search a for a list"
+              onChange={async (e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(0);
+                if (e.target.value === '') {
+                  setSearchResults(undefined);
+                } else {
+                  await searchLists(e.target.value);
+                }
+              }}
+            />
             <MaterialList>
-              {list.map((l) => {
+              {(searchResults || list).map((l) => {
                 return (
                   <Link href={`/admin/lists/${l.id}?count=${l.count}`} key={l.id}>
                     <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -141,6 +191,18 @@ const AdminList = () => {
                 );
               })}
             </MaterialList>
+            <Box display="flex" flexDirection="column" justifyContent="center" width={'100%'}>
+              {!noMoreResults && !(searchResults && searchResults.length < HITSPERPAGE) && (
+                <Button onClick={() => setCurrentPage((oldPage) => oldPage + 1)}>Next Page</Button>
+              )}
+              {!noMoreResults && searchResults && searchResults.length < HITSPERPAGE && (
+                <Typography alignSelf="center">{"You've reached the bottom"}</Typography>
+              )}
+              {currentPage > 0 && (
+                <Button onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>Previous Page</Button>
+              )}
+              {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
+            </Box>
           </Box>
         )}
       </Box>
