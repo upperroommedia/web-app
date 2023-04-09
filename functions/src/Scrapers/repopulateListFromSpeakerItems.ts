@@ -1,17 +1,7 @@
 // add sermon to series and handle condition when list is full
 import axios from 'axios';
-import { firestore } from 'firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { List, ListType, OverflowBehavior } from '../../../types/List';
-import { Sermon } from '../../../types/SermonTypes';
-import { createNewSubsplashList } from '../createNewSubsplashList';
-import {
-  firestoreAdminListConverter,
-  firestoreAdminListItemConverter,
-  firestoreAdminSermonConverter,
-} from '../firestoreDataConverter';
 import handleError from '../handleError';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 
@@ -19,10 +9,6 @@ const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list']
 type MediaType = (typeof mediaTypes)[number];
 type MediaItem = { id: string; type: MediaType };
 type MediaItemWithUpdatedAt = MediaItem & { updatedAt: Date };
-
-type sortType = 'position' | 'created_at';
-
-type listMetaDataType = { overflowBehavior: OverflowBehavior; listId: string; type: ListType };
 
 export interface repopulateListFromSpeakerItemsInputType {
   listId: string;
@@ -172,10 +158,6 @@ const repopulateListFromSpeakerItems = onCall(
     }
     const data = request.data;
     const maxListCount = 200;
-    const tooManyItemsError = new HttpsError(
-      'invalid-argument',
-      `Too many items to add. The list size has a max of ${maxListCount}`
-    );
     const token = await authenticateSubsplash();
     try {
       const mediaItemIds: MediaItem[] = await getSpeakerItems(data.speakerId, token);

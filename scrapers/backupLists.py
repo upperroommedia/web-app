@@ -71,7 +71,7 @@ async def download_and_write_all(backup_folder_path):
     url = f'https://core.subsplash.com/builder/v1/lists?filter%5Bapp_key%5D=9XTSHD&filter%5Bgenerated%5D=false&filter%5Btype%5D=standard&page%5Bnumber%5D={page_number}&page%5Bsize%5D={page_size}&sort=title'
     response = requests.request("GET", url, headers=headers).json()
     count += response['count']
-    print(f"Retrieved count of {response['total']} lists")
+    print(f"Retrieved {count} of {response['total']} lists")
     if (count >= response['total'] or count == 0 or page_number * page_size >= response['total']):
       if (count == 0):
         print("No lists found")
