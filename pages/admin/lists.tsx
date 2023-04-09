@@ -8,7 +8,7 @@ import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { adminProtected } from '../../utils/protectedRoutes';
-import NewListPopup from '../../components/NewListPopup';
+import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
@@ -23,10 +23,14 @@ import Tooltip from '@mui/material/Tooltip';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ListItemButton from '@mui/material/ListItemButton';
-import { listConverter, List } from '../../types/List';
+import { listConverter, List, ListType } from '../../types/List';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import algoliasearch from 'algoliasearch';
 import TextField from '@mui/material/TextField';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import InputLabel from '@mui/material/InputLabel';
+import FormControl from '@mui/material/FormControl';
 
 const HITSPERPAGE = 20;
 
@@ -47,6 +51,7 @@ const AdminList = () => {
   const [searchResults, setSearchResults] = useState<List[]>();
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [noMoreResults, setNoMoreResults] = useState<boolean>(false);
+  const [filter, setFilter] = useState<ListType>();
   const [editListPopup, setEditListPopup] = useState<boolean>(false);
   const [deleteListPopup, setDeleteListPopup] = useState<boolean>(false);
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
@@ -121,19 +126,47 @@ const AdminList = () => {
                 Add List
               </Button>
             </Box>
-            <TextField
-              fullWidth
-              placeholder="Search a for a list"
-              onChange={async (e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(0);
-                if (e.target.value === '') {
-                  setSearchResults(undefined);
-                } else {
-                  await searchLists(e.target.value);
-                }
-              }}
-            />
+            <Box display="flex" width="100%" justifyContent="space-between">
+              <TextField
+                placeholder="Search a for a list"
+                onChange={async (e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(0);
+                  if (e.target.value === '') {
+                    setSearchResults(undefined);
+                  } else {
+                    await searchLists(e.target.value);
+                  }
+                }}
+                sx={{ width: '65%' }}
+              />
+              <Box sx={{ width: '34%' }}>
+                <FormControl fullWidth>
+                  <InputLabel shrink={true} id="filter-select">
+                    Filter
+                  </InputLabel>
+                  <Select
+                    label="Filter"
+                    labelId="filter-select"
+                    id="filter-select"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value as ListType)}
+                  >
+                    <MenuItem value="">None</MenuItem>
+                    {/* eslint-disable-next-line array-callback-return */}
+                    {(Object.values(ListType) as Array<ListType>).map((listType) => {
+                      if (listType !== ListType.LATEST) {
+                        return (
+                          <MenuItem key={listType} value={listType}>
+                            {listTypeOptions[listType]}
+                          </MenuItem>
+                        );
+                      }
+                    })}
+                  </Select>
+                </FormControl>
+              </Box>
+            </Box>
             <MaterialList>
               {(searchResults || list).map((l) => {
                 return (
