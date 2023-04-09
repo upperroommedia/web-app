@@ -50,6 +50,19 @@ export const emptyList: List = {
   images: [],
 };
 
+export const createEmptyList = (type: ListType): List => {
+  return {
+    id: '',
+    name: '',
+    count: 0,
+    type,
+    createdAtMillis: new Date().getTime(),
+    updatedAtMillis: new Date().getTime(),
+    overflowBehavior: OverflowBehavior.CREATENEWLIST,
+    images: [],
+  };
+};
+
 export const listConverter: FirestoreDataConverter<List> = {
   toFirestore: (list: List): List => {
     return list;

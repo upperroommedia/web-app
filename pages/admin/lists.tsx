@@ -8,7 +8,7 @@ import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { adminProtected } from '../../utils/protectedRoutes';
-import NewSeriesPopup from '../../components/NewSeriesPopup';
+import NewListPopup from '../../components/NewListPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
@@ -31,7 +31,7 @@ const AdminList = () => {
   const [list, setList] = useState<List[]>([]);
   const [editListPopup, setEditListPopup] = useState<boolean>(false);
   const [deleteListPopup, setDeleteListPopup] = useState<boolean>(false);
-  const [newSeriesPopup, setNewSeriesPopup] = useState<boolean>(false);
+  const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [selectedList, setSelectedList] = useState<List>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const disableButtons = isDeleting;
@@ -78,7 +78,7 @@ const AdminList = () => {
                 variant="contained"
                 size="small"
                 onClick={() => {
-                  setNewSeriesPopup(true);
+                  setNewListPopup(true);
                 }}
               >
                 Add List
@@ -151,15 +151,15 @@ const AdminList = () => {
         setDeleteConfirmationPopup={setDeleteListPopup}
         isDeleting={isDeleting}
       />
-      <NewSeriesPopup
-        newSeriesPopup={newSeriesPopup}
-        setNewSeriesPopup={setNewSeriesPopup}
+      <NewListPopup
+        newListPopup={newListPopup}
+        setNewListPopup={setNewListPopup}
         listArray={list}
         // setListArray={setList}
       />
-      <NewSeriesPopup
-        newSeriesPopup={editListPopup}
-        setNewSeriesPopup={setEditListPopup}
+      <NewListPopup
+        newListPopup={editListPopup}
+        setNewListPopup={setEditListPopup}
         listArray={list}
         // setListArray={setList}
         existingList={selectedList}
