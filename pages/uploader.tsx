@@ -16,7 +16,7 @@ import Cancel from '@mui/icons-material/Cancel';
 
 import { isBrowser } from 'react-device-detect';
 
-import firestore, { doc, getDoc } from '../firebase/firestore';
+import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -37,7 +37,7 @@ import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import AvatarWithDefaultImage from '../components/AvatarWithDefaultImage';
 import ListItem from '@mui/material/ListItem';
 import { UploaderFieldError } from '../context/types';
-import SeriesSelector from '../components/SeriesSelector';
+import ListSelector from '../components/ListSelector';
 import FormControl from '@mui/material/FormControl';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -45,7 +45,8 @@ import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
-import { List } from '../types/List';
+import { List, listConverter, ListType } from '../types/List';
+import SubtitleSelector from '../components/SubtitleSelector';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -80,7 +81,6 @@ const client =
       })
     : undefined;
 const speakersIndex = client?.initIndex('speakers');
-const topicsIndex = client?.initIndex('topics');
 
 export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
   const speakers: AlgoliaSpeaker[] = [];
@@ -95,6 +95,7 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
   }
   return speakers;
 };
+const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
@@ -105,10 +106,11 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [isUploading, setIsUploading] = useState(false);
   const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
 
-  const [subtitlesArray, setSubtitlesArray] = useState<string[]>([]);
-
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
-  const [topicsArray, setTopicsArray] = useState<string[]>([]);
+  const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
+
+  const [subtitles, setSubtitles] = useState<List[]>([]);
+
   const [trimStart, setTrimStart] = useState<number>(0);
 
   const [timer, setTimer] = useState<NodeJS.Timeout>();
@@ -117,19 +119,33 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [date, setDate] = useState<Date>(props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date());
 
   const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
-  const [topicError, setTopicError] = useState<UploaderFieldError>({ error: false, message: '' });
 
   useEffect(() => {
     const fetchData = async () => {
-      const subtitlesRef = doc(firestore, 'subtitles', 'subtitlesDoc');
-      const subtitlesSnap = await getDoc(subtitlesRef);
-      const subtitlesData = subtitlesSnap.data();
-      setSubtitlesArray(subtitlesData ? subtitlesSnap.data()?.subtitlesArray : []);
-
       // fetch speakers
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
-      // fetch topics
-      setTopicsArray(await fetchTopicsResults(''));
+
+      // fetch subtitles
+      const listQuery = query(
+        collection(firestore, 'lists'),
+        where('type', '==', ListType.CATEGORY_LIST)
+      ).withConverter(listConverter);
+      const listQuerySnapshot = await getDocs(listQuery);
+      setSubtitles(
+        listQuerySnapshot.docs.map((doc) => {
+          const list = doc.data();
+          return list;
+        })
+      );
+
+      // fetch latest list
+      if (sermonList.find((list) => list.type === ListType.LATEST) !== undefined) {
+        const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
+          listConverter
+        );
+        const latestSnap = await getDocs(latestQuery);
+        setSermonList((oldSermonList) => [...oldSermonList, latestSnap.docs[0].data()]);
+      }
     };
     fetchData();
   }, []);
@@ -139,9 +155,11 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       setSermonList(props.existingList);
     }
   }, [props.existingList]);
+
   const listEqual = (list1: List[], list2: List[]): boolean => {
     return JSON.stringify(list1) === JSON.stringify(list2);
   };
+
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
     return (
@@ -162,7 +180,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   };
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
-    setTopicError({ error: false, message: '' });
     setSermon(createEmptySermon());
     setSermonList([]);
     setDate(new Date());
@@ -189,19 +206,6 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
   const setTrimDuration = (durationSeconds: number) => {
     updateSermon('durationSeconds', durationSeconds);
-  };
-
-  const fetchTopicsResults = async (query: string) => {
-    const res: string[] = [];
-    if (topicsIndex) {
-      const response = await topicsIndex.search(query, {
-        hitsPerPage: 5,
-      });
-      response?.hits.forEach((element: any) => {
-        res.push(element.name);
-      });
-    }
-    return res;
   };
 
   const handleNewImage = (image: ImageType | ImageSizeType) => {
@@ -275,15 +279,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             required
           />
           <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
-            <Autocomplete
-              fullWidth
-              id="subtitle-input"
-              value={sermon.subtitle || null}
-              onChange={(_, newValue) => {
-                newValue === null ? updateSermon('subtitle', '') : updateSermon('subtitle', newValue);
-              }}
-              renderInput={(params) => <TextField required {...params} label="Subtitle" />}
-              options={subtitlesArray}
+            <SubtitleSelector
+              sermonList={sermonList}
+              setSermonList={setSermonList}
+              sermon={sermon}
+              setSermon={setSermon}
+              subtitles={subtitles}
             />
             <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
               <DesktopDatePicker
@@ -314,7 +315,14 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onChange={handleChange}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <SeriesSelector sermonList={sermonList} setSermonList={setSermonList} />
+            <ListSelector
+              sermonList={sermonList}
+              setSermonList={setSermonList}
+              listType={ListType.SERIES}
+              subtitle={
+                sermon.subtitle !== '' ? subtitles.find((subtitle) => subtitle.name === sermon.subtitle) : undefined
+              }
+            />
           </div>
           <Autocomplete
             fullWidth
@@ -322,7 +330,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onBlur={() => {
               setSpeakerError({ error: false, message: '' });
             }}
-            onChange={async (_, newValue) => {
+            onChange={async (_, newValue, _reason, details) => {
+              if (!details?.option.listId) {
+                setSpeakerHasNoListPopup(true);
+              }
               if (newValue.length === 1) {
                 const currentTypes = sermon.images.map((img) => img.type);
                 const newImages = [
@@ -339,8 +350,16 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                     return speakerWithoutHighlight;
                   })
                 );
+                if (details?.option.listId) {
+                  const q = query(
+                    collection(firestore, 'lists'),
+                    where('id', '==', details.option.listId)
+                  ).withConverter(listConverter);
+                  const querySnapshot = await getDocs(q);
+                  const list = querySnapshot.docs[0].data();
+                  setSermonList((oldSermonList) => [...oldSermonList, list]);
+                }
               }
-
               if (newValue.length >= 4) {
                 setSpeakerError({
                   error: true,
@@ -380,6 +399,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                         speakers: newSpeakers,
                       };
                     });
+                    setSermonList((oldSermonList) => oldSermonList.filter((list) => list.id !== speaker.listId));
                   }}
                   key={speaker.id}
                   label={speaker.name}
@@ -428,33 +448,12 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
               );
             }}
           />
-          <Autocomplete
-            fullWidth
-            value={sermon.topics}
-            onBlur={() => {
-              setTopicError({ error: false, message: '' });
-            }}
-            onChange={(_, newValue) => {
-              if (newValue !== null && newValue.length <= 10) {
-                updateSermon('topics', newValue);
-              } else if (newValue.length >= 11) {
-                setTopicError({
-                  error: true,
-                  message: 'Can only add up to 10 topics',
-                });
-              }
-            }}
-            onInputChange={async (_, value) => {
-              const topics = await fetchTopicsResults(value);
-              setTopicsArray(topics);
-            }}
-            id="topic-input"
-            options={topicsArray}
-            multiple
-            renderInput={(params) => (
-              <TextField {...params} label="Topic(s)" error={topicError.error} helperText={topicError.message} />
-            )}
-          />
+          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+            <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.TOPIC_LIST} />
+          </div>
+          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+            <ListSelector sermonList={sermonList} setSermonList={setSermonList} />
+          </div>
         </Box>
         <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
           <ImageViewer
@@ -597,6 +596,9 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             </>
           )}
         </Box>
+        <DynamicPopUp title={'Warning'} open={speakerHasNoListPopup} setOpen={setSpeakerHasNoListPopup}>
+          Speaker has no associated list that this sermon will be added to
+        </DynamicPopUp>
       </FormControl>
     </>
   );

@@ -20,6 +20,7 @@ import PopUp from './PopUp';
 // import SeriesSelector from './SeriesSelector';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { List, listConverter } from '../types/List';
+import ListSelector from './ListSelector';
 
 interface UploadToSubsplashPopupProps {
   sermon: Sermon;
@@ -133,8 +134,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
         ) : loading ? (
           <CircularProgress />
         ) : (
-          <Typography>TODO</Typography>
-          // <SeriesSelector sermonSeries={listArray} setSermonSeries={setListArray} />
+          <ListSelector sermonList={listArray} setSermonList={setListArray} />
         )}
         <Box display="flex" alignItems={'center'} onClick={() => setAutoPublish((previousValue) => !previousValue)}>
           <Checkbox checked={autoPublish} />
