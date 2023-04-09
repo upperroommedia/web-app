@@ -41,7 +41,7 @@ const convertStringToMilliseconds = (timeStr) => {
   );
 };
 
-app.get('/', async (req, res) => {
+app.get('/', async (req, res, next) => {
   if (!req.query.url) {
     res.status(500).send('No url query parameter provided');
   }
@@ -58,6 +58,7 @@ app.get('/', async (req, res) => {
       filter: 'audioonly',
       quality: 'highestaudio',
     });
+
     ffmpeg(audio)
       .audioCodec('libmp3lame')
       .audioBitrate(128)
@@ -79,7 +80,7 @@ app.get('/', async (req, res) => {
       })
       .on('error', (err) => {
         console.error('FFMPG ERROR', err);
-        res.status(500).send('Internal Server Error', err);
+        next(err);
       })
       .on('end', () => console.log('Finished!'))
       .pipe(res, {
@@ -87,7 +88,7 @@ app.get('/', async (req, res) => {
       });
   } catch (e) {
     console.error(e);
-    res.status(500).send('Internal Server Error');
+    next(e);
   }
 });
 
