@@ -99,7 +99,7 @@ const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false }
 
 const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { user } = useAuth();
-  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon());
+  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon(user?.uid));
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
