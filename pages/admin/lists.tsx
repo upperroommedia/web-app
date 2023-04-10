@@ -229,15 +229,15 @@ const AdminList = () => {
                 );
               })}
             </MaterialList>
-            <Box display="flex" flexDirection="column" justifyContent="center" width={'100%'}>
+            <Box display="flex" gap={2} justifyContent="center" width={'100%'}>
+              {currentPage > 0 && (
+                <Button onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>Previous Page</Button>
+              )}
               {!noMoreResults && !(searchResults && searchResults.length < HITSPERPAGE) && (
                 <Button onClick={() => setCurrentPage((oldPage) => oldPage + 1)}>Next Page</Button>
               )}
               {!noMoreResults && searchResults && searchResults.length < HITSPERPAGE && (
-                <Typography alignSelf="center">{"You've reached the bottom"}</Typography>
-              )}
-              {currentPage > 0 && (
-                <Button onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>Previous Page</Button>
+                <Typography alignSelf="center">{'No more results'}</Typography>
               )}
               {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
             </Box>
