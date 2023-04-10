@@ -51,7 +51,7 @@ const AdminList = () => {
   const [searchResults, setSearchResults] = useState<List[]>();
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [noMoreResults, setNoMoreResults] = useState<boolean>(false);
-  const [filter, setFilter] = useState<ListType>();
+  const [filter, setFilter] = useState<ListType | ''>('');
   const [editListPopup, setEditListPopup] = useState<boolean>(false);
   const [deleteListPopup, setDeleteListPopup] = useState<boolean>(false);
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
@@ -81,7 +81,11 @@ const AdminList = () => {
   };
 
   const searchLists = async (query?: string) => {
-    const res = await listsIndex?.search<List>(query || searchQuery, { hitsPerPage: HITSPERPAGE, page: currentPage });
+    const res = await listsIndex?.search<List>(query || searchQuery, {
+      hitsPerPage: HITSPERPAGE,
+      page: currentPage,
+      ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
+    });
     if (res && res.hits.length > 0) {
       setNoMoreResults(false);
       setSearchResults(res.hits);
@@ -102,7 +106,7 @@ const AdminList = () => {
       await searchLists();
     };
     fetchData();
-  }, [currentPage]);
+  }, [currentPage, filter]);
 
   return (
     <>
@@ -142,17 +146,18 @@ const AdminList = () => {
               />
               <Box sx={{ width: '34%' }}>
                 <FormControl fullWidth>
-                  <InputLabel shrink={true} id="filter-select">
-                    Filter
-                  </InputLabel>
+                  <InputLabel id="list-type-select-label">Filter by list type</InputLabel>
                   <Select
-                    label="Filter"
-                    labelId="filter-select"
-                    id="filter-select"
                     value={filter}
-                    onChange={(e) => setFilter(e.target.value as ListType)}
+                    label="Filter by list type"
+                    labelId="list-type-select-label"
+                    id="list-type-select"
+                    onChange={(e) => {
+                      setCurrentPage(0);
+                      setFilter(e.target.value as ListType);
+                    }}
                   >
-                    <MenuItem value="">None</MenuItem>
+                    <MenuItem value={''}>None</MenuItem>
                     {/* eslint-disable-next-line array-callback-return */}
                     {(Object.values(ListType) as Array<ListType>).map((listType) => {
                       if (listType !== ListType.LATEST) {
