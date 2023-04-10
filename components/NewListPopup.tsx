@@ -59,7 +59,6 @@ const NewListPopup = (props: NewListPopupProps) => {
     [OverflowBehavior.CREATENEWLIST]: 'Create New List',
     [OverflowBehavior.REMOVEOLDEST]: 'Remove Oldest',
   };
-
   const [userHasTypedInList, setUserHasTypedInList] = useState<boolean>(false);
   useEffect(() => {
     if (props.existingList && newList.id !== props.existingList.id) {
