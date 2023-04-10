@@ -43,7 +43,15 @@ export default function AvatarWithDefaultImage({
       }}
       {...rest}
     >
-      {image && <Image src={sanitize(image.downloadLink)} alt={`Image of ${altName}`} width={width} height={height} />}
+      {image && (
+        <Image
+          src={sanitize(image.downloadLink)}
+          alt={`Image of ${altName}`}
+          width={width}
+          height={height}
+          style={{ objectFit: 'cover' }}
+        />
+      )}
     </Box>
   );
 }
