@@ -35,4 +35,6 @@ export interface Sermon {
   images: ImageType[];
   subsplashId?: string;
   soundCloudTrackId?: string;
+  uploaderId?: string;
+  approverId?: string;
 }

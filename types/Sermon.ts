@@ -68,7 +68,7 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
 };
 
 const currentDate = new Date();
-export const createEmptySermon = (): Sermon => {
+export const createEmptySermon = (uploaderId?: string): Sermon => {
   return {
     id: uuidv4(),
     title: '',
@@ -85,5 +85,6 @@ export const createEmptySermon = (): Sermon => {
       audioStatus: sermonStatusType.PENDING,
     },
     images: [],
+    ...(uploaderId && { uploaderId }),
   };
 };

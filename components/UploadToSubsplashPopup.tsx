@@ -21,6 +21,7 @@ import PopUp from './PopUp';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { List, listConverter } from '../types/List';
 import ListSelector from './ListSelector';
+import useAuth from '../context/user/UserContext';
 
 interface UploadToSubsplashPopupProps {
   sermon: Sermon;
@@ -37,6 +38,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
   setIsUploadingToSubsplash,
   isUploadingToSubsplash,
 }: UploadToSubsplashPopupProps) => {
+  const { user } = useAuth();
   const [autoPublish, setAutoPublish] = useState<boolean>(false);
   const [listArray, setListArray] = useState<List[]>([]);
   const [listArrayFirestore, loading, error] = useCollectionDataOnce(
@@ -98,7 +100,10 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
         listMetadata,
         mediaItemIds: [{ id, type: 'media-item' }],
       });
-      await updateDoc(sermonRef, { status: { ...sermon.status, subsplash: uploadStatus.UPLOADED } });
+      await updateDoc(sermonRef, {
+        status: { ...sermon.status, subsplash: uploadStatus.UPLOADED },
+        approverId: user?.uid,
+      });
     } catch (error) {
       alert(error);
     }
