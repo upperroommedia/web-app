@@ -28,6 +28,16 @@ interface NewListPopupProps {
   listType?: ListType;
 }
 
+export const listTypeOptions: {
+  [key in ListType]: string;
+} = {
+  [ListType.SERIES]: 'Series',
+  [ListType.SPEAKER_LIST]: 'Speaker List',
+  [ListType.TOPIC_LIST]: 'Topic',
+  [ListType.CATEGORY_LIST]: 'Category',
+  [ListType.LATEST]: 'Latest',
+};
+
 const NewListPopup = (props: NewListPopupProps) => {
   // TODO[0]: Make empty list without any specified list type if listtype is not passed in
   const [newList, setNewList] = useState<List>(
@@ -48,15 +58,6 @@ const NewListPopup = (props: NewListPopupProps) => {
     [OverflowBehavior.ERROR]: 'Error',
     [OverflowBehavior.CREATENEWLIST]: 'Create New List',
     [OverflowBehavior.REMOVEOLDEST]: 'Remove Oldest',
-  };
-  const listTypeOptions: {
-    [key in ListType]: string;
-  } = {
-    [ListType.SERIES]: 'Series',
-    [ListType.SPEAKER_LIST]: 'Speaker List',
-    [ListType.TOPIC_LIST]: 'Topic',
-    [ListType.CATEGORY_LIST]: 'Category',
-    [ListType.LATEST]: 'Latest',
   };
   const [userHasTypedInList, setUserHasTypedInList] = useState<boolean>(false);
   useEffect(() => {
