@@ -27,6 +27,7 @@ export default function AvatarWithDefaultImage({
     <Box
       sx={{
         borderRadius: `${borderRadius}px`,
+        flexShrink: 0,
         overflow: 'hidden',
         position: 'relative',
         width,
