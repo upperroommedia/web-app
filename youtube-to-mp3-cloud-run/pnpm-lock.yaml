@@ -11,10 +11,10 @@ specifiers:
   express-winston: ^4.2.0
   fluent-ffmpeg: ^2.1.2
   gaxios: 5.0.2
-  handlebars: ^4.7.7
+  handlebars: ^4.7.4
   mocha: 10.1.0
   winston: ^3.8.2
-  ytdl-core: ^4.11.3
+  ytdl-core: 4.10.0
 
 dependencies:
   cors: 2.8.5
@@ -23,7 +23,7 @@ dependencies:
   fluent-ffmpeg: 2.1.2
   handlebars: 4.7.7
   winston: 3.8.2
-  ytdl-core: 4.11.3
+  ytdl-core: 4.10.0
 
 devDependencies:
   eslint: 8.29.0
@@ -1714,6 +1714,7 @@ packages:
     resolution: {integrity: sha512-T9q82TJI9e/C1TAxYvfb16xO120tMVFZrGA3f9/P4424DNu6ypK103y0GPFVa17yotwSyZW5iYXgjYHkGrJW/g==}
     engines: {node: '>=0.8.0'}
     hasBin: true
+    requiresBuild: true
     dev: false
     optional: true
 
@@ -1858,9 +1859,9 @@ packages:
     engines: {node: '>=10'}
     dev: true
 
-  /ytdl-core/4.11.3:
-    resolution: {integrity: sha512-0KerQw+R7Nnhcebxq6WPopO92VLNnsoRVjJuhGhRzgfK1YdrnG1aqaq4zycolMBY+K8TZHXPV7ZNIjcawD/BPA==}
-    engines: {node: '>=12'}
+  /ytdl-core/4.10.0:
+    resolution: {integrity: sha512-RCCoSVTmMeBPH5NFR1fh3nkDU9okvWM0ZdN6plw6I5+vBBZVUEpOt8vjbSgprLRMmGUsmrQZJhvG1CHOat4mLA==}
+    engines: {node: '>=10'}
     dependencies:
       m3u8stream: 0.8.6
       miniget: 4.2.2
