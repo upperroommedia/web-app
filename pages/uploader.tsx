@@ -39,8 +39,8 @@ import ListItem from '@mui/material/ListItem';
 import { UploaderFieldError } from '../context/types';
 import ListSelector from '../components/ListSelector';
 import FormControl from '@mui/material/FormControl';
-import Switch from '@mui/material/Switch';
-import FormControlLabel from '@mui/material/FormControlLabel';
+// import Switch from '@mui/material/Switch';
+// import FormControlLabel from '@mui/material/FormControlLabel';
 import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
@@ -104,7 +104,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
   const [isUploading, setIsUploading] = useState(false);
-  const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
+  const [useYoutubeUrl, _setUseYoutubeUrl] = useState(false);
 
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
   const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
@@ -526,7 +526,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                   alignItems="center"
                   gap={1}
                 >
-                  <FormControlLabel
+                  {/* <FormControlLabel
                     control={
                       <Switch
                         checked={useYoutubeUrl}
@@ -535,7 +535,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                       />
                     }
                     label="Upload from Youtube Url"
-                  />
+                  /> */}
                   {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
                 </Box>
               )}
