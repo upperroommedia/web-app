@@ -24,8 +24,10 @@ import { fetchSpeakerResults } from '../uploader';
 const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
+  const [AlgoliaSearch, setAlgoliaSearch] = useState<string>('');
+  const [AlgoliaSearchPrev, setAlgoliaSearchPrev] = useState<string>('');
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
   const [speakers, setSpeakers] = useState<ISpeaker[]>([]);
   const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
@@ -56,14 +58,18 @@ const AdminSpeakers = () => {
     });
     setQueryState(
       query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order), startAfter(lastSpeaker))
+      
     );
+    console.log('here');
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     setSpeakers(res);
   };
 
+
   const handlePageChange = async (newPage: number) => {
     if (visitedPages.includes(newPage)) {
       setPage(newPage);
+      console.log("visited");
       return;
     }
     setVisitedPages([...visitedPages, newPage]);
@@ -77,13 +83,23 @@ const AdminSpeakers = () => {
   };
 
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
-    const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
+    if(AlgoliaSearch != query){
+      setVisitedPages([0]);
+      setPage(0);
+    }
+    
+    const [result,resp] = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
     // TODO: fix this
-    console.log(result[0]);
-    if (result[0] && result[0].nbHits) {
-      setTotalSpeakers(result[0].nbHits);
+    // console.log(query, rowsPerPage, newPage, page,result.length);
+    // console.log('Agolia count______',resp.nbHits);
+    // console.log("%j",result[0]);
+    
+    if (resp != null && resp.nbHits != null ) {
+      setTotalSpeakers(resp.nbHits);
     }
     setSpeakersLoading(false);
+    
+    setAlgoliaSearch(query);
     return result;
   };
 

@@ -92,8 +92,9 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
     response.hits.forEach((hit) => {
       speakers.push(hit);
     });
+    return [speakers,response];
   }
-  return speakers;
+  return [speakers,null];
 };
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 

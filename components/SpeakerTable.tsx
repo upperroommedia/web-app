@@ -356,7 +356,6 @@ const SpeakerTable = (props: {
   // useEffect(() => {
   //   handleRequestFilter();
   // }, [filters]);
-
   return (
     <>
       <Box width={1} display="flex" padding="30px" justifyContent="center">
@@ -372,7 +371,7 @@ const SpeakerTable = (props: {
               />
               <TableBody>
                 {props.speakers
-                  .slice(props.page * props.rowsPerPage, props.page * props.rowsPerPage + props.rowsPerPage)
+                  .slice(props.page *50, props.page * 50 + 50)
                   .map((speaker) => {
                     return (
                       <TableRow hover onClick={() => handleClick(speaker)} tabIndex={-1} key={speaker.id}>
@@ -423,7 +422,7 @@ const SpeakerTable = (props: {
             </Table>
           </TableContainer>
           <TablePagination
-            rowsPerPageOptions={[25, 50, 100]}
+            rowsPerPageOptions={[  50]}
             component="div"
             count={props.totalSpeakers}
             rowsPerPage={props.rowsPerPage}
