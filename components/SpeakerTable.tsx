@@ -423,7 +423,7 @@ const SpeakerTable = (props: {
             </Table>
           </TableContainer>
           <TablePagination
-            rowsPerPageOptions={[25, 50, 100]}
+            rowsPerPageOptions={[50]}
             component="div"
             count={props.totalSpeakers}
             rowsPerPage={props.rowsPerPage}

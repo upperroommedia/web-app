@@ -25,12 +25,13 @@ const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
   const [speakers, setSpeakers] = useState<ISpeaker[]>([]);
   const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
   const [queryState, setQueryState] = useState<Query<DocumentData>>();
   const [totalSpeakers, setTotalSpeakers] = useState<number>(0);
+  const [algoliaSearch, setAlgoliaSearch] = useState<string>('');
 
   const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
@@ -64,27 +65,31 @@ const AdminSpeakers = () => {
   const handlePageChange = async (newPage: number) => {
     if (visitedPages.includes(newPage)) {
       setPage(newPage);
+      console.log("visited")
       return;
     }
+    console.log("New page",   page,newPage);
     setVisitedPages([...visitedPages, newPage]);
     setPage(newPage);
-    if (speakerInput === '' && queryState) {
-      await getMoreSpeakersFirebase();
-    } else {
-      const result = await getSpeakersAlgolia(speakerInput, newPage);
-      setSpeakers([...speakers, ...result]);
-    }
+    const result = await getSpeakersAlgolia(speakerInput, newPage);
+    setSpeakers([...speakers, ...result]);
   };
 
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
-    const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
-    // TODO: fix this
-    console.log(result[0]);
-    if (result[0] && result[0].nbHits) {
-      setTotalSpeakers(result[0].nbHits);
-    }
+    
+    if(algoliaSearch != query){
+      setVisitedPages([0]);
+      setPage(0);
+    } 
+    console.log("pages",  newPage,page, page);
+    const resp = await fetchSpeakerResults(query, rowsPerPage, algoliaSearch != query ? 0:newPage || page);
+    setTotalSpeakers(resp.nbHits);
+    
     setSpeakersLoading(false);
-    return result;
+    
+    setAlgoliaSearch(query);
+    console.log("Algolia Search Stats",resp.nbHits,resp.speakers.length,page)
+    return resp.speakers;
   };
 
   const getSpeakersFirebase = async () => {
@@ -102,29 +107,28 @@ const AdminSpeakers = () => {
     });
     setSpeakers(res);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    const result = await fetchSpeakerResults('', 1, 0);
-    if (result[0] && result[0].nbHits) {
-      setTotalSpeakers(result[0].nbHits);
-    }
+    const out = await fetchSpeakerResults('', 1, 0);
+    const result = out.speakers;
+    setTotalSpeakers(out.nbHits);
+    
   };
 
-  const getMoreSpeakersFirebase = async () => {
-    const q = query(
-      collection(firestore, 'speakers'),
-      limit(rowsPerPage),
-      orderBy('sermonCount', 'desc'),
-      startAfter(lastSpeaker)
-    ).withConverter(speakerConverter);
-    const querySnapshot = await getDocs(q);
-    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    querySnapshot.forEach((doc) => {
-      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data()]);
-    });
-    const result = await fetchSpeakerResults('', 1, 0);
-    if (result[0] && result[0].nbHits) {
-      setTotalSpeakers(result[0].nbHits);
-    }
-  };
+  // const getMoreSpeakersFirebase = async () => {
+  //   const q = query(
+  //     collection(firestore, 'speakers'),
+  //     limit(rowsPerPage),
+  //     orderBy('sermonCount', 'desc'),
+  //     startAfter(lastSpeaker)
+  //   ).withConverter(speakerConverter);
+  //   const querySnapshot = await getDocs(q);
+  //   setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+  //   querySnapshot.forEach((doc) => {
+  //     setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data()]);
+  //   });
+  //   const out = await fetchSpeakerResults('', 1, 0);
+  //   const result = out.speakers;
+  //   setTotalSpeakers(out.nbHits);
+  // };
 
   const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
