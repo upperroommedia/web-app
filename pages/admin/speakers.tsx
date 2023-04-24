@@ -65,10 +65,8 @@ const AdminSpeakers = () => {
   const handlePageChange = async (newPage: number) => {
     if (visitedPages.includes(newPage)) {
       setPage(newPage);
-      console.log("visited")
       return;
     }
-    console.log("New page",   page,newPage);
     setVisitedPages([...visitedPages, newPage]);
     setPage(newPage);
     const result = await getSpeakersAlgolia(speakerInput, newPage);
@@ -76,19 +74,18 @@ const AdminSpeakers = () => {
   };
 
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
-    
-    if(algoliaSearch != query){
+    if (algoliaSearch !== query) {
       setVisitedPages([0]);
       setPage(0);
-    } 
-    console.log("pages",  newPage,page, page);
-    const resp = await fetchSpeakerResults(query, rowsPerPage, algoliaSearch != query ? 0:newPage || page);
+    }
+    console.log('pages', newPage, page, page);
+    const resp = await fetchSpeakerResults(query, rowsPerPage, algoliaSearch !== query ? 0 : newPage || page);
     setTotalSpeakers(resp.nbHits);
-    
+
     setSpeakersLoading(false);
-    
+
     setAlgoliaSearch(query);
-    console.log("Algolia Search Stats",resp.nbHits,resp.speakers.length,page)
+    console.log('Algolia Search Stats', resp.nbHits, resp.speakers.length, page);
     return resp.speakers;
   };
 
@@ -110,7 +107,6 @@ const AdminSpeakers = () => {
     const out = await fetchSpeakerResults('', 1, 0);
     const result = out.speakers;
     setTotalSpeakers(out.nbHits);
-    
   };
 
   // const getMoreSpeakersFirebase = async () => {

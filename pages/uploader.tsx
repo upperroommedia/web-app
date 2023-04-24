@@ -90,7 +90,7 @@ const client =
 const speakersIndex = client?.initIndex('speakers');
 
 export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
-  const speakers_intr: AlgoliaSpeaker[] = [];
+  const speakersIntr: AlgoliaSpeaker[] = [];
   const out: response = {speakers:[], nbHits: 0};
   if (speakersIndex) {
     const response = await speakersIndex.search<AlgoliaSpeaker>(query, {
@@ -98,9 +98,9 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
       page,
     });
     response.hits.forEach((hit) => {
-      speakers_intr.push(hit);
+      speakersIntr.push(hit);
     });
-    out.speakers = speakers_intr;
+    out.speakers = speakersIntr;
     out.nbHits = response.nbHits;
     return out;
   }
