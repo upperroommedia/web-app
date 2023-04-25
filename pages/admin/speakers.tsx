@@ -12,9 +12,7 @@ import firestore, {
   limit,
   orderBy,
   query,
-  Query,
   QueryDocumentSnapshot,
-  startAfter,
 } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
@@ -29,11 +27,10 @@ const AdminSpeakers = () => {
   const [speakers, setSpeakers] = useState<ISpeaker[]>([]);
   const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
-  const [queryState, setQueryState] = useState<Query<DocumentData>>();
+  // const [ setQueryState] = useState<Query<DocumentData>>();
   const [totalSpeakers, setTotalSpeakers] = useState<number>(0);
   const [algoliaSearch, setAlgoliaSearch] = useState<string>('');
-
-  const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
+  const [_lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
   const [sortOrder, setSortOrder] = useState<Order>('desc');
 
@@ -55,9 +52,9 @@ const AdminSpeakers = () => {
     querySnapshot.forEach((doc) => {
       res.push(doc.data());
     });
-    setQueryState(
-      query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order), startAfter(lastSpeaker))
-    );
+    // setQueryState(
+    //   query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order), startAfter(lastSpeaker))
+    // );
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     setSpeakers(res);
   };
@@ -78,25 +75,25 @@ const AdminSpeakers = () => {
       setVisitedPages([0]);
       setPage(0);
     }
-    console.log('pages', newPage, page, page);
+    // console.log('pages', newPage, page, page);
     const resp = await fetchSpeakerResults(query, rowsPerPage, algoliaSearch !== query ? 0 : newPage || page);
     setTotalSpeakers(resp.nbHits);
 
     setSpeakersLoading(false);
 
     setAlgoliaSearch(query);
-    console.log('Algolia Search Stats', resp.nbHits, resp.speakers.length, page);
+    // console.log('Algolia Search Stats', resp.nbHits, resp.speakers.length, page);
     return resp.speakers;
   };
 
   const getSpeakersFirebase = async () => {
     const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
     const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
-    console.log('Speakers Count', speakersCount);
+    // console.log('Speakers Count', speakersCount);
     setTotalSpeakers(speakersCount);
 
     const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));
-    setQueryState(q);
+    // setQueryState(q);
     const querySnapshot = await getDocs(q);
     const res: ISpeaker[] = [];
     querySnapshot.forEach((doc) => {
@@ -105,7 +102,7 @@ const AdminSpeakers = () => {
     setSpeakers(res);
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     const out = await fetchSpeakerResults('', 1, 0);
-    const result = out.speakers;
+    // const result = out.speakers;
     setTotalSpeakers(out.nbHits);
   };
 
@@ -142,14 +139,14 @@ const AdminSpeakers = () => {
     querySnapshot.forEach((doc) => {
       res.push(doc.data());
     });
-    setQueryState(
-      query(
-        collection(firestore, 'speakers'),
-        limit(rowsPerPage),
-        orderBy('sermonCount', 'desc'),
-        startAfter(lastSpeaker)
-      )
-    );
+    // setQueryState(
+    //   query(
+    //     collection(firestore, 'speakers'),
+    //     limit(rowsPerPage),
+    //     orderBy('sermonCount', 'desc'),
+    //     startAfter(lastSpeaker)
+    //   )
+    // );
     setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
     setSpeakers(res);
   };
