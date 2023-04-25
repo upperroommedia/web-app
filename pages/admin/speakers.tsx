@@ -189,7 +189,7 @@ const AdminSpeakers = () => {
           totalSpeakers={totalSpeakers}
           setTotalSpeakers={setTotalSpeakers}
           handlePageChange={handlePageChange}
-          handleChangeRowsPerPage={handleChangeRowsPerPage}
+          // handleChangeRowsPerPage={handleChangeRowsPerPage}
           handleSort={handleSort}
           sortOrder={sortOrder}
           setSortOrder={setSortOrder}

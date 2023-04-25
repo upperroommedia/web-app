@@ -201,7 +201,7 @@ const SpeakerTable = (props: {
   totalSpeakers: number;
   setTotalSpeakers: Dispatch<SetStateAction<number>>;
   handlePageChange: (newPage: number) => void;
-  handleChangeRowsPerPage: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
+  // handleChangeRowsPerPage: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
   handleSort: (property: keyof ISpeaker, order: Order) => Promise<void>;
   sortOrder: Order;
   setSortOrder: Dispatch<SetStateAction<Order>>;
@@ -429,7 +429,7 @@ const SpeakerTable = (props: {
             rowsPerPage={props.rowsPerPage}
             page={props.page}
             onPageChange={(_, newPage) => props.handlePageChange(newPage)}
-            onRowsPerPageChange={props.handleChangeRowsPerPage}
+            // onRowsPerPageChange={props.handleChangeRowsPerPage}
           />
         </Paper>
       </Box>
