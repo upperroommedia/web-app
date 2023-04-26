@@ -56,6 +56,7 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
+
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
   _highlightResult?: {
@@ -67,6 +68,12 @@ interface AlgoliaSpeaker extends ISpeaker {
     };
   };
 }
+
+interface response {
+  speakers: AlgoliaSpeaker[];
+  nbHits: number;
+}
+
 
 const getSpeakersUnion = (array1: AlgoliaSpeaker[], array2: AlgoliaSpeaker[]) => {
   const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
@@ -83,17 +90,21 @@ const client =
 const speakersIndex = client?.initIndex('speakers');
 
 export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
-  const speakers: AlgoliaSpeaker[] = [];
+  const speakersIntr: AlgoliaSpeaker[] = [];
+  const out: response = {speakers:[], nbHits: 0};
   if (speakersIndex) {
     const response = await speakersIndex.search<AlgoliaSpeaker>(query, {
       hitsPerPage,
       page,
     });
     response.hits.forEach((hit) => {
-      speakers.push(hit);
+      speakersIntr.push(hit);
     });
+    out.speakers = speakersIntr;
+    out.nbHits = response.nbHits;
+    return out;
   }
-  return speakers;
+  return out;
 };
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 
@@ -123,7 +134,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
   useEffect(() => {
     const fetchData = async () => {
       // fetch speakers
-      setSpeakersArray(await fetchSpeakerResults('', 20, 0));
+      setSpeakersArray((await fetchSpeakerResults('', 20, 0)).speakers);
 
       // fetch subtitles
       const listQuery = query(
@@ -372,7 +383,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
             onInputChange={async (_, value) => {
               clearTimeout(timer);
               const newTimer = setTimeout(async () => {
-                setSpeakersArray(await fetchSpeakerResults(value, 25, 0));
+                setSpeakersArray((await fetchSpeakerResults(value, 25, 0)).speakers);
               }, 300);
               setTimer(newTimer);
             }}

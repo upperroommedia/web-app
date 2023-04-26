@@ -1,4 +1,4 @@
-import { ChangeEvent, memo, useState } from 'react';
+import {  memo, useState } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -146,7 +146,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   const { user: currentUser } = useAuth();
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [rowsPerPage, _setRowsPerPage] = useState(5);
 
   const handleRequestSort = (_: any, property: keyof User) => {
     const isAsc = order === 'asc';
@@ -158,10 +158,10 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
     setPage(newPage);
   };
 
-  const handleChangeRowsPerPage = (event: ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
+  // const handleChangeRowsPerPage = (event: ChangeEvent<HTMLInputElement>) => {
+  //   setRowsPerPage(parseInt(event.target.value, 10));
+  //   setPage(0);
+  // };
 
   // Avoid a layout jump when reaching the last page with empty rows.
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
@@ -248,7 +248,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
+          // onRowsPerPageChange={handleChangeRowsPerPage}
         />
       </Paper>
     </Box>

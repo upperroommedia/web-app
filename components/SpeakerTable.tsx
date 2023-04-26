@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { ChangeEvent, useEffect, useState, Dispatch, SetStateAction } from 'react';
+import { useEffect, useState, Dispatch, SetStateAction } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -201,7 +201,7 @@ const SpeakerTable = (props: {
   totalSpeakers: number;
   setTotalSpeakers: Dispatch<SetStateAction<number>>;
   handlePageChange: (newPage: number) => void;
-  handleChangeRowsPerPage: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
+  // handleChangeRowsPerPage: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
   handleSort: (property: keyof ISpeaker, order: Order) => Promise<void>;
   sortOrder: Order;
   setSortOrder: Dispatch<SetStateAction<Order>>;
@@ -423,13 +423,13 @@ const SpeakerTable = (props: {
             </Table>
           </TableContainer>
           <TablePagination
-            rowsPerPageOptions={[25, 50, 100]}
+            rowsPerPageOptions={[50]}
             component="div"
             count={props.totalSpeakers}
             rowsPerPage={props.rowsPerPage}
             page={props.page}
             onPageChange={(_, newPage) => props.handlePageChange(newPage)}
-            onRowsPerPageChange={props.handleChangeRowsPerPage}
+            // onRowsPerPageChange={props.handleChangeRowsPerPage}
           />
         </Paper>
       </Box>
