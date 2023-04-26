@@ -1,4 +1,4 @@
-import { ChangeEvent, memo, useState } from 'react';
+import {  memo, useState } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -146,7 +146,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   const { user: currentUser } = useAuth();
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [rowsPerPage, _setRowsPerPage] = useState(5);
 
   const handleRequestSort = (_: any, property: keyof User) => {
     const isAsc = order === 'asc';
