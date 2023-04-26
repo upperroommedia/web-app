@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-import { ChangeEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import SpeakerTable from '../../components/SpeakerTable';
 import { Order } from '../../context/types';
 import firestore, {
@@ -23,7 +23,7 @@ const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
-  const [rowsPerPage, setRowsPerPage] = useState(50);
+  const [rowsPerPage, _setRowsPerPage] = useState(50);
   const [speakers, setSpeakers] = useState<ISpeaker[]>([]);
   const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
@@ -123,33 +123,33 @@ const AdminSpeakers = () => {
   //   setTotalSpeakers(out.nbHits);
   // };
 
-  const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setLastSpeaker(undefined);
-    setPage(0);
-    setSortProperty('sermonCount');
-    setSortOrder('desc');
-    const q = query(
-      collection(firestore, 'speakers'),
-      limit(parseInt(event.target.value, 10)),
-      orderBy('sermonCount', 'desc')
-    ).withConverter(speakerConverter);
-    const querySnapshot = await getDocs(q);
-    const res: ISpeaker[] = [];
-    querySnapshot.forEach((doc) => {
-      res.push(doc.data());
-    });
-    // setQueryState(
-    //   query(
-    //     collection(firestore, 'speakers'),
-    //     limit(rowsPerPage),
-    //     orderBy('sermonCount', 'desc'),
-    //     startAfter(lastSpeaker)
-    //   )
-    // );
-    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    setSpeakers(res);
-  };
+  // const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
+  //   setRowsPerPage(parseInt(event.target.value, 10));
+  //   setLastSpeaker(undefined);
+  //   setPage(0);
+  //   setSortProperty('sermonCount');
+  //   setSortOrder('desc');
+  //   const q = query(
+  //     collection(firestore, 'speakers'),
+  //     limit(parseInt(event.target.value, 10)),
+  //     orderBy('sermonCount', 'desc')
+  //   ).withConverter(speakerConverter);
+  //   const querySnapshot = await getDocs(q);
+  //   const res: ISpeaker[] = [];
+  //   querySnapshot.forEach((doc) => {
+  //     res.push(doc.data());
+  //   });
+  //   // setQueryState(
+  //   //   query(
+  //   //     collection(firestore, 'speakers'),
+  //   //     limit(rowsPerPage),
+  //   //     orderBy('sermonCount', 'desc'),
+  //   //     startAfter(lastSpeaker)
+  //   //   )
+  //   // );
+  //   setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+  //   setSpeakers(res);
+  // };
 
   useEffect(() => {
     const g = async () => {
