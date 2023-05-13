@@ -12,7 +12,7 @@ import {
 } from '../../types/Image';
 import { HttpsError } from 'firebase-functions/v2/https';
 // import { FirestoreDataConverter } from '@google-cloud/firestore';
-// import { modifyImage, ResizedImageResult } from './resize-image';
+// import { modifyImage, ResizedImageResult } from './resizeimage';
 import fs from 'fs';
 import os from 'os';
 import { mkdirp } from 'mkdirp';

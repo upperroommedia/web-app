@@ -10,7 +10,7 @@
 // } from '../../types/Image';
 
 // // import { FirestoreDataConverter } from '@google-cloud/firestore';
-// // import { modifyImage, ResizedImageResult } from './resize-image';
+// // import { modifyImage, ResizedImageResult } from './resizeimage';
 // import fs from 'fs';
 // import os from 'os';
 // import mkdirp from 'mkdirp';
