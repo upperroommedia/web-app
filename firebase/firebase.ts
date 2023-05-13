@@ -20,6 +20,10 @@ if (!apps.length) {
       ? 'http://127.0.0.1:9000/?ns=urm-app-default-rtdb'
       : 'https://urm-app-default-rtdb.firebaseio.com/',
   });
+
+  if (isDevelopment) {
+    process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
+  }
 } else {
   firebase = apps[0];
 }
