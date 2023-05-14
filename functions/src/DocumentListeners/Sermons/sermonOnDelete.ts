@@ -1,11 +1,12 @@
 import { firestore } from 'firebase-functions';
-import { firestore as firestoreAdmin, storage } from 'firebase-admin';
+import { adminFirestore, adminStorage } from '../../../../firebase/initFirebaseAdmin';
+import { logger } from 'firebase-functions/v2';
 import handleError from '../../handleError';
 
 const sermonOnDelete = firestore.document('sermons/{sermonId}').onDelete(async (_snapshot, context) => {
   const { sermonId } = context.params;
   try {
-    await firestoreAdmin().recursiveDelete(firestoreAdmin().doc(`sermons/${sermonId}`));
+    await adminFirestore.recursiveDelete(adminFirestore.doc(`sermons/${sermonId}`));
     // Define a list of folder names where the file may exist
     const folderNames = ['sermons', 'processed-sermons', 'intro-outro-sermons'];
 
@@ -13,7 +14,7 @@ const sermonOnDelete = firestore.document('sermons/{sermonId}').onDelete(async (
     Promise.all(
       folderNames.map(async (folderName) => {
         // Get a reference to the file in the current folder
-        const fileRef = storage().bucket().file(`${folderName}/${sermonId}`);
+        const fileRef = adminStorage.bucket().file(`${folderName}/${sermonId}`);
 
         // Check if the file exists
         const [exists] = await fileRef.exists();
@@ -21,7 +22,7 @@ const sermonOnDelete = firestore.document('sermons/{sermonId}').onDelete(async (
         // Delete the file if it exists
         if (exists) {
           await fileRef.delete();
-          console.log(`File ${sermonId} deleted from ${folderName}`);
+          logger.log(`File ${sermonId} deleted from ${folderName}`);
         }
       })
     );
