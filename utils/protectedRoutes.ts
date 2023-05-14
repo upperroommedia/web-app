@@ -3,6 +3,7 @@ import ProtectedRoute from '../components/ProtectedRoute';
 
 export async function adminProtected(ctx: GetServerSidePropsContext) {
   const userCredentials = await ProtectedRoute(ctx);
+  console.log('userCredentials', userCredentials);
   if (!userCredentials.props.uid || userCredentials.props.customClaims?.role !== 'admin') {
     return userCredentials;
   }

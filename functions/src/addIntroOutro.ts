@@ -1,6 +1,6 @@
 import { logger } from 'firebase-functions/v2';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
-import { storage, firestore, database } from 'firebase-admin';
+import { adminFirestore, adminDatabase, adminStorage } from '../../firebase/initFirebaseAdmin';
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import os from 'os';
@@ -213,11 +213,9 @@ const addIntroOutro = onObjectFinalized(
       // This is not a media file
       return logger.log('Not a media file');
     }
-    const bucket = storage().bucket();
-    const realtimeDB = database();
-    const db = firestore();
+    const bucket = adminStorage.bucket();
     const fileName = path.basename(filePath);
-    const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
+    const docRef = adminFirestore.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
     const sermonStatus: sermonStatus = {
       subsplash: uploadStatus.NOT_UPLOADED,
       soundCloud: uploadStatus.NOT_UPLOADED,
@@ -255,7 +253,7 @@ const addIntroOutro = onObjectFinalized(
       tempFilePaths.CONTENT = await trimAndTranscode(
         tempFilePaths.CONTENT,
         tempFiles,
-        realtimeDB.ref(`addIntroOutro/${fileName}`),
+        adminDatabase.ref(`addIntroOutro/${fileName}`),
         parseFloat(data.metadata?.startTime || ''),
         parseFloat(data.metadata?.duration || '')
       );
@@ -284,7 +282,7 @@ const addIntroOutro = onObjectFinalized(
           filePathsArray,
           outputFileName,
           tempFiles,
-          realtimeDB.ref(`addIntroOutro/${fileName}`)
+          adminDatabase.ref(`addIntroOutro/${fileName}`)
         );
 
         //upload merged file
@@ -301,8 +299,8 @@ const addIntroOutro = onObjectFinalized(
         },
         durationSeconds: durationSeconds,
       });
-      realtimeDB.ref(`addIntroOutro/${fileName}`).set(100);
-      await realtimeDB.ref(`addIntroOutro/${fileName}`).remove();
+      adminDatabase.ref(`addIntroOutro/${fileName}`).set(100);
+      await adminDatabase.ref(`addIntroOutro/${fileName}`).remove();
       return logger.log('Files have been merged succesfully');
     } catch (e) {
       let message = 'Something Went Wrong';

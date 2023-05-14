@@ -1,12 +1,12 @@
 import type { GetServerSidePropsContext } from 'next';
-import { auth } from 'firebase-admin';
+import { adminAuth } from '../firebase/initFirebaseAdmin';
 import nookies from 'nookies';
 
 export default async function ProtectedRoute(context: GetServerSidePropsContext) {
   try {
     const cookies = nookies.get(context);
-    const token = await auth().verifyIdToken(cookies.token);
-    const user = await auth().getUser(token.uid);
+    const token = await adminAuth.verifyIdToken(cookies.token);
+    const user = await adminAuth.getUser(token.uid);
     return {
       props: { ...user },
     };
