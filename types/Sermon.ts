@@ -1,4 +1,4 @@
-import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from 'firebase/firestore';
+import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from '../firebase/firestore';
 import { ISpeaker } from './Speaker';
 import { v4 as uuidv4 } from 'uuid';
 import { Sermon, sermonStatusType, uploadStatus } from './SermonTypes';

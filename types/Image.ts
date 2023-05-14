@@ -1,4 +1,4 @@
-import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase/firestore';
+import { FirestoreDataConverter, QueryDocumentSnapshot } from '../firebase/firestore';
 
 export const ImageSizes = ['square', 'wide', 'banner'] as const;
 export type ImageSizeType = (typeof ImageSizes)[number];

@@ -1,4 +1,4 @@
-import { DocumentData, FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase/firestore';
+import { DocumentData, FirestoreDataConverter, QueryDocumentSnapshot } from '../firebase/firestore';
 import { ImageType } from './Image';
 import { List, listConverter } from './List';
 import { createEmptySermon, sermonConverter } from './Sermon';

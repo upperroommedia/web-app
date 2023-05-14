@@ -1,7 +1,7 @@
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
-import { firestore } from '../firebase/firebase';
+import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import addNewList from '../pages/api/addNewList';

@@ -7,10 +7,9 @@ import type { GetServerSideProps, NextPage } from 'next';
 
 import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
+import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import SermonsList from '../components/SermonsList';
 import Head from 'next/head';
-import { firestore } from '../firebase/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 
 const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface Props {
