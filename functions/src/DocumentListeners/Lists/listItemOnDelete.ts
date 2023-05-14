@@ -1,5 +1,5 @@
 import { firestore, logger } from 'firebase-functions';
-import { firestore as firestoreAdmin } from 'firebase-admin';
+import { adminFirestore } from '../../../../firebase/initFirebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
 
@@ -10,13 +10,13 @@ const listItemOnDelete = firestore
     // removing list from sermon if sermon still exists
     try {
       logger.info(`Removing list ${listId} from sermon ${sermonId}`);
-      await firestoreAdmin().collection('sermons').doc(sermonId).collection('sermonLists').doc(listId).delete();
+      await adminFirestore.collection('sermons').doc(sermonId).collection('sermonLists').doc(listId).delete();
     } catch (err) {
       logger.info(`Sermon ${sermonId} does not exist - skipping delete`);
     }
     try {
       logger.log('Decrementing list count');
-      await firestoreAdmin()
+      await adminFirestore
         .collection('lists')
         .doc(listId)
         .withConverter(firestoreAdminListConverter)

@@ -12,7 +12,7 @@ export type DeleteFromSoundCloudReturnType = void;
 
 const deleteFromSoundCloudHelper = async (soundCloudTrackId: string) => {
   const formData = new FormData();
-  console.log('soundCloudTrackId', soundCloudTrackId);
+  logger.log('soundCloudTrackId', soundCloudTrackId);
   formData.append('trackId', soundCloudTrackId);
   const config: AxiosRequestConfig = {
     method: 'POST',
@@ -23,7 +23,7 @@ const deleteFromSoundCloudHelper = async (soundCloudTrackId: string) => {
     data: formData,
   };
   try {
-    console.log('Config', config);
+    logger.log('Config', config);
     const response = await axios(config);
     logger.log('response status', response.status);
     logger.log('response data', response.data);

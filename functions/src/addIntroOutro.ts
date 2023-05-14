@@ -66,11 +66,11 @@ const trimAndTranscode = (
       })
       .on('codecData', (data) => {
         // HERE YOU GET THE TOTAL TIME
-        console.log('Total duration: ' + data.duration);
+        logger.log('Total duration: ' + data.duration);
         totalTimeMillis = convertStringToMilliseconds(data.duration);
       })
       .on('progress', (progress) => {
-        console.log('CurrentTimemark', progress.timemark);
+        logger.log('CurrentTimemark', progress.timemark);
         const timeMillis = convertStringToMilliseconds(progress.timemark);
         logger.log('Trimming and Transcoding: ' + timeMillis + 'ms done', totalTimeMillis);
         // AND HERE IS THE CALCULATION

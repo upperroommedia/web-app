@@ -2,7 +2,7 @@
 // import { logger } from 'firebase-functions';
 // import { onObjectFinalized } from 'firebase-functions/v2/storage';
 // import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-// import { storage, firestore } from 'firebase-admin';
+// import { adminFirestore, adminStorage } from '../../firebase/initFirebaseAdmin';
 // import {
 //   ImageType,
 //   // resizeType,
@@ -56,7 +56,7 @@
 //       // const fileDir = path.dirname(filePath);
 //       const fileExtension = path.extname(filePath);
 //       const fileNameWithoutExtension = path.basename(filePath, fileExtension);
-//       const docRef = firestore().collection('images').doc(fileNameWithoutExtension).withConverter(adminImageConvertor);
+//       const docRef = adminFirestore.collection('images').doc(fileNameWithoutExtension).withConverter(adminImageConvertor);
 //       const imageData = (await docRef.get()).data();
 //       logger.log(imageData);
 //       if (!imageData) {
@@ -68,7 +68,7 @@
 //       // }
 //       originalFile = path.join(os.tmpdir(), filePath);
 //       const tempLocalDir = path.dirname(originalFile);
-//       const bucket = storage().bucket(object.bucket);
+//       const bucket = adminStorage.bucket(object.bucket);
 
 //       // Create the temp directory where the storage file will be downloaded.
 //       logger.log(`Creating temporary directory: '${tempLocalDir}'`);

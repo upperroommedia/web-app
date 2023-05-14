@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { firestore } from 'firebase-admin';
+import { Firestore, CollectionReference } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { createAxiosConfig } from '../subsplashUtils';
 import { List, ListType, OverflowBehavior } from '../../../types/List';
@@ -8,11 +8,7 @@ import populateImages from './populateImagesHelper';
 import { Bucket } from '@google-cloud/storage';
 import { HttpsError } from 'firebase-functions/v2/https';
 
-async function updateCategories(
-  db: firestore.Firestore,
-  bearerToken: string,
-  firestoreLists: firestore.CollectionReference<List>
-) {
+async function updateCategories(db: Firestore, bearerToken: string, firestoreLists: CollectionReference<List>) {
   // update categories lists from subsplash categories list
   const categoriesResponse = (
     await axios(
@@ -45,14 +41,14 @@ async function updateCategories(
 }
 
 async function populateLists(
-  db: firestore.Firestore,
+  db: Firestore,
   bucket: Bucket,
   bearerToken: string,
   imageIds: Set<string>,
   firestoreImagesMap: Map<string, ImageType>,
   listIdToImageIdMap: Map<string, string[]>,
   listNameToId: Map<string, string>,
-  firestoreLists: firestore.CollectionReference<List>
+  firestoreLists: CollectionReference<List>
 ): Promise<number> {
   const pageSize = 250; // must be <= 500
   let loop = true;

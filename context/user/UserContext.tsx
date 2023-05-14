@@ -48,7 +48,6 @@ export const UserProvider = ({ children }: any) => {
     }
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setLoading(true);
-      console.log('here');
       if (!user) {
         setUser(undefined);
         nookies.destroy(null, 'token');

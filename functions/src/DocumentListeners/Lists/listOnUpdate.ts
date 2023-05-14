@@ -1,5 +1,5 @@
 import { firestore } from 'firebase-functions';
-import { firestore as firestoreAdmin } from 'firebase-admin';
+import { adminFirestore } from '../../../../firebase/initFirebaseAdmin';
 import handleError from '../../handleError';
 
 const listOnUpdate = firestore.document('lists/{listId}').onUpdate(async (change, context) => {
@@ -7,8 +7,8 @@ const listOnUpdate = firestore.document('lists/{listId}').onUpdate(async (change
   const updatedSermon = change.after.data();
   try {
     // update all series instances of sermon
-    const sermonSeriesSnapshot = await firestoreAdmin().collectionGroup('sermonLists').where('id', '==', listId).get();
-    const batch = firestoreAdmin().batch();
+    const sermonSeriesSnapshot = await adminFirestore.collectionGroup('sermonLists').where('id', '==', listId).get();
+    const batch = adminFirestore.batch();
     sermonSeriesSnapshot.docs.forEach((doc) => {
       batch.update(doc.ref, { ...updatedSermon });
     });

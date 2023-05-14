@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from 'firebase-functions/v2';
-import { storage, firestore } from 'firebase-admin';
+import { adminFirestore, adminStorage } from '../../../firebase/initFirebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { ImageType } from '../../../types/Image';
@@ -37,13 +37,12 @@ const populateDatabaseFromSubsplash = onCall(
       const listIdToImageIdMap = new Map<string, string[]>();
       const listNameToId = new Map<string, string>();
       const bearerToken = await authenticateSubsplash();
-      const bucket = storage().bucket('urm-app-images');
-      const db = firestore();
-      const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
-      const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
-      const firestoreTopics = db.collection('topics').withConverter(firestoreAdminTopicConverter);
+      const bucket = adminStorage.bucket('urm-app-images');
+      const firestoreLists = adminFirestore.collection('lists').withConverter(firestoreAdminListConverter);
+      const firestoreSpeakers = adminFirestore.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
+      const firestoreTopics = adminFirestore.collection('topics').withConverter(firestoreAdminTopicConverter);
       const listCount = await populateLists(
-        db,
+        adminFirestore,
         bucket,
         bearerToken,
         imageIds,
@@ -53,7 +52,7 @@ const populateDatabaseFromSubsplash = onCall(
         firestoreLists
       );
       const speakerCount = await populateSpeakers(
-        db,
+        adminFirestore,
         bucket,
         bearerToken,
         imageIds,
@@ -64,7 +63,7 @@ const populateDatabaseFromSubsplash = onCall(
         firestoreSpeakers
       );
       const topicCount = await populateTopics(
-        db,
+        adminFirestore,
         bearerToken,
         firestoreImagesMap,
         listIdToImageIdMap,

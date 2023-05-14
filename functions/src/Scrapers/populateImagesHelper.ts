@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { firestore } from 'firebase-admin';
+import { Firestore } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { ImageType } from '../../../types/Image';
 import { File, Bucket } from '@google-cloud/storage';
@@ -34,7 +34,7 @@ const streamDataToStorage = async (stream: Stream, destinationFile: File): Promi
 async function populateImages(
   bucket: Bucket,
   imageIds: Set<string>,
-  db: firestore.Firestore,
+  db: Firestore,
   subsplashImages: { image: any; imageName: string }[],
   firestoreImagesMap: Map<string, ImageType>
 ): Promise<void> {
