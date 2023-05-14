@@ -1,4 +1,4 @@
-import { FirestoreDataConverter, QueryDocumentSnapshot } from '../firebase/firestore';
+import { FirestoreDataConverter, QueryDocumentSnapshot } from 'firebase/firestore';
 import { ImageType } from './Image';
 
 export interface Topic {
