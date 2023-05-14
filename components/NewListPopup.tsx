@@ -7,7 +7,7 @@ import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import addNewList from '../pages/api/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
-import isEqual from 'lodash/isEqual';
+import deepEqual from 'deep-equal';
 import MenuItem from '@mui/material/MenuItem';
 import Box from '@mui/material/Box';
 import InputLabel from '@mui/material/InputLabel';
@@ -125,7 +125,7 @@ const NewListPopup = (props: NewListPopupProps) => {
           variant="contained"
           disabled={
             (props.listArray.map((list) => list.name.toLowerCase()).includes(newList.name.toLowerCase()) &&
-              isEqual(props.existingList?.images, newList.images)) ||
+              deepEqual(props.existingList?.images, newList.images)) ||
             newList.name === '' ||
             newList.images.length === 0 ||
             submitting
