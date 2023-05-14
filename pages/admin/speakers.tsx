@@ -79,7 +79,6 @@ const AdminSpeakers = () => {
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
     const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
     // TODO: fix this
-    console.log(result[0]);
     if (result[0] && result[0].nbHits) {
       setTotalSpeakers(result[0].nbHits);
     }
@@ -90,7 +89,6 @@ const AdminSpeakers = () => {
   const getSpeakersFirebase = async () => {
     const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
     const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
-    console.log('Speakers Count', speakersCount);
     setTotalSpeakers(speakersCount);
 
     const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));
