@@ -8,7 +8,7 @@ import Button, { ButtonProps } from '@mui/material/Button';
 import Box from '@mui/system/Box';
 import Typography from '@mui/material/Typography';
 import UserAvatar from '../components/UserAvatar';
-import LoginPage from './login';
+import LoginPage from './old_login';
 import Head from 'next/head';
 
 function MediumButton({ children, ...props }: ButtonProps) {

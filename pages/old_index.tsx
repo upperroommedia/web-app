@@ -12,7 +12,7 @@ import Head from 'next/head';
 import useAuth from '../context/user/UserContext';
 
 // Components
-import LoginPage from './login';
+import LoginPage from './old_login';
 
 const Home: NextPage = () => {
   const { user, loading } = useAuth();

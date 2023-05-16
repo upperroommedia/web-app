@@ -1,3 +1,4 @@
+'use client';
 /**
  * Navbar: located at the top of all pages
  */
