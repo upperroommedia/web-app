@@ -1,9 +1,10 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { authentication } from 'next-firebase-auth-edge/lib/next/middleware';
-import { serverConfig } from './app/server-config';
+import { serverConfig } from './config/server-config';
 
 export async function middleware(request: NextRequest) {
+  console.log(serverConfig.serviceAccount);
   return authentication(request, {
     loginPath: '/api/login',
     logoutPath: '/api/logout',
@@ -19,6 +20,19 @@ export async function middleware(request: NextRequest) {
     },
     serviceAccount: serverConfig.serviceAccount,
     isTokenValid: (token) => Boolean(token),
+    handleInvalidToken: async () => {
+      console.log('User is not authenticated. Redirecting to login');
+      // Avoid redirect loop
+      if (request.nextUrl.pathname === '/login') {
+        return NextResponse.next();
+      }
+
+      // Redirect to /login?redirect=/prev-path when request is unauthenticated
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      url.search = `redirect=${request.nextUrl.pathname}${url.search}`;
+      return NextResponse.redirect(url);
+    },
     handleValidToken: async ({ token, decodedToken }) => {
       console.log('Successfully authenticated', { token, decodedToken });
       return NextResponse.next();

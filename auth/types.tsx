@@ -6,5 +6,7 @@ export interface Tenant {
   email: string | null;
   photoUrl: string | null;
   emailVerified: boolean;
+  isAnonymous: boolean;
   customClaims: CustomClaims;
+  idToken: string;
 }

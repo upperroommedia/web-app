@@ -1,5 +1,5 @@
-import firestore, { setDoc, collection, doc } from '../../firebase/firestore';
-import { listConverter, List } from '../../types/List';
+import firestore, { setDoc, collection, doc } from '../firebase/firestore';
+import { listConverter, List } from '../types/List';
 
 const addNewList = async (list: List) => {
   // create series on firestore

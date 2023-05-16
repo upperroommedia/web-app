@@ -1,10 +1,11 @@
+'use client';
 /**
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import dynamic from 'next/dynamic';
-import uploadFile from './api/uploadFile';
-import editSermon from './api/editSermon';
-import styles from '../styles/Uploader.module.css';
+import uploadFile from '../../api/uploadFile';
+import editSermon from '../../api/editSermon';
+import styles from '../../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
@@ -16,39 +17,36 @@ import Cancel from '@mui/icons-material/Cancel';
 
 import { isBrowser } from 'react-device-detect';
 
-import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
-import { createEmptySermon } from '../types/Sermon';
-import { Sermon } from '../types/SermonTypes';
+import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
+import { createEmptySermon } from '../../types/Sermon';
+import { Sermon } from '../../types/SermonTypes';
 
 import Button from '@mui/material/Button';
-import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
-import ProtectedRoute from '../components/ProtectedRoute';
-import useAuth from '../context/user/UserContext';
-import DropZone, { UploadableFile } from '../components/DropZone';
-import { ISpeaker } from '../types/Speaker';
+import { useAuth } from '../../auth/hooks';
+import DropZone, { UploadableFile } from '../../components/DropZone';
+import { AlgoliaSpeaker } from '../../types/Speaker';
 import Chip from '@mui/material/Chip';
 import { sanitize } from 'dompurify';
 // import ImageUploader from '../components/ImageUploader';
 
-import algoliasearch from 'algoliasearch';
-import { createInMemoryCache } from '@algolia/cache-in-memory';
-import ImageViewer from '../components/ImageViewer';
-import { ImageSizeType, ImageType, isImageType } from '../types/Image';
-import AvatarWithDefaultImage from '../components/AvatarWithDefaultImage';
+import ImageViewer from '../../components/ImageViewer';
+import { ImageSizeType, ImageType, isImageType } from '../../types/Image';
+import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import ListItem from '@mui/material/ListItem';
-import { UploaderFieldError } from '../context/types';
-import ListSelector from '../components/ListSelector';
+import { UploaderFieldError } from '../../context/types';
+import ListSelector from '../../components/ListSelector';
 import FormControl from '@mui/material/FormControl';
 // import Switch from '@mui/material/Switch';
 // import FormControlLabel from '@mui/material/FormControlLabel';
-import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
+import YoutubeUrlToMp3 from '../../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
-import { List, listConverter, ListType } from '../types/List';
-import SubtitleSelector from '../components/SubtitleSelector';
+import { List, listConverter, ListType } from '../../types/List';
+import SubtitleSelector from '../../components/SubtitleSelector';
+import { fetchSpeakerResults } from '../../utils/utils';
 
-const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
+const DynamicAudioTrimmer = dynamic(() => import('../../components/AudioTrimmer'), { ssr: false });
 
 interface UploaderProps {
   existingSermon?: Sermon;
@@ -56,50 +54,16 @@ interface UploaderProps {
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
-interface AlgoliaSpeaker extends ISpeaker {
-  nbHits?: number;
-  _highlightResult?: {
-    name: {
-      value: string;
-      matchLevel: 'none' | 'partial' | 'full';
-      fullyHighlighted: boolean;
-      matchedWords: string[];
-    };
-  };
-}
-
 const getSpeakersUnion = (array1: AlgoliaSpeaker[], array2: AlgoliaSpeaker[]) => {
   const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
   return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
 };
 
-const client =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
-        responsesCache: createInMemoryCache(),
-        requestsCache: createInMemoryCache({ serializable: false }),
-      })
-    : undefined;
-const speakersIndex = client?.initIndex('speakers');
+const DynamicPopUp = dynamic(() => import('../../components/PopUp'), { ssr: false });
 
-export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
-  const speakers: AlgoliaSpeaker[] = [];
-  if (speakersIndex) {
-    const response = await speakersIndex.search<AlgoliaSpeaker>(query, {
-      hitsPerPage,
-      page,
-    });
-    response.hits.forEach((hit) => {
-      speakers.push(hit);
-    });
-  }
-  return speakers;
-};
-const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
-
-const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
-  const { user } = useAuth();
-  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon(user?.uid));
+export default function UploaderComponent(props: UploaderProps) {
+  const { tenant } = useAuth();
+  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon(tenant?.id));
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
@@ -554,7 +518,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                       isUploading
                     }
                     onClick={async () => {
-                      if (file !== undefined && date != null && user?.role === 'admin') {
+                      if (file !== undefined && date != null && tenant?.customClaims?.role === 'admin') {
                         try {
                           setIsUploading(true);
                           await uploadFile({
@@ -569,7 +533,7 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
                         } catch (error) {
                           setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
                         }
-                      } else if (user?.role !== 'admin') {
+                      } else if (tenant?.customClaims?.role !== 'admin') {
                         setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
                       }
                     }}
@@ -602,14 +566,4 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
       </FormControl>
     </>
   );
-};
-
-export default Uploader;
-
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.uid || !['admin', 'uploader'].includes(userCredentials.props.customClaims?.role)) {
-    return userCredentials;
-  }
-  return { props: {} };
-};
+}

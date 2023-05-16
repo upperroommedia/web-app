@@ -5,8 +5,8 @@ import { startTransition } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { IdTokenResult } from 'firebase/auth';
 import auth from '../firebase/auth';
-import { Tenant } from '../auth/types';
-import { AuthContext } from '../auth/context';
+import { Tenant } from './types';
+import { AuthContext } from './context';
 
 const mapFirebaseResponseToTenant = (result: IdTokenResult, user: FirebaseUser): Tenant => {
   const providerData = user.providerData && user.providerData[0];
@@ -19,6 +19,8 @@ const mapFirebaseResponseToTenant = (result: IdTokenResult, user: FirebaseUser):
       emailVerified: user.emailVerified || false,
       photoUrl: providerData.photoURL || null,
       customClaims: {},
+      isAnonymous: user.isAnonymous,
+      idToken: result.token,
     };
   }
 
@@ -29,6 +31,8 @@ const mapFirebaseResponseToTenant = (result: IdTokenResult, user: FirebaseUser):
     emailVerified: user.emailVerified || false,
     photoUrl: user.photoURL || null,
     customClaims: {},
+    isAnonymous: user.isAnonymous,
+    idToken: result.token,
   };
 };
 
@@ -48,10 +52,15 @@ export const AuthProvider: React.FunctionComponent<AuthProviderProps> = ({ defau
     }
 
     if (!firebaseUser && firstLoadRef.current) {
-      console.log('Signing in anonymously');
       const { signInAnonymously } = await import('firebase/auth');
       firstLoadRef.current = false;
-      await signInAnonymously(auth);
+      const credential = await signInAnonymously(auth);
+      await fetch('/api/login', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${(await credential.user.getIdTokenResult()).token}`,
+        },
+      });
       return;
     }
 
@@ -65,12 +74,6 @@ export const AuthProvider: React.FunctionComponent<AuthProviderProps> = ({ defau
 
     firstLoadRef.current = false;
     const tokenResult = await firebaseUser.getIdTokenResult();
-    await fetch('/api/login', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${tokenResult.token}`,
-      },
-    });
     startTransition(() => {
       setTenant(mapFirebaseResponseToTenant(tokenResult, firebaseUser));
     });

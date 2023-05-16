@@ -19,7 +19,7 @@ import firestore, {
 import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
 import { adminProtected } from '../../utils/protectedRoutes';
-import { fetchSpeakerResults } from '../uploader';
+import { fetchSpeakerResults } from '../../utils/utils';
 
 const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');

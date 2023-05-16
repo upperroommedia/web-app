@@ -1,74 +1,86 @@
-import Button from '@mui/material/Button';
-import TextField from '@mui/material/TextField';
-import { useRouter } from 'next/router';
+// import Button from '@mui/material/Button';
+// import TextField from '@mui/material/TextField';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
-import useAuth from '../context/user/UserContext';
-import AuthErrors from './AuthErrors';
+// import AuthErrors from './AuthErrors';
 import PopUp from './PopUp';
 import styles from '../styles/SignInWithGoogleButton.module.css';
 import Image from 'next/image';
-import Alert from '@mui/material/Alert';
-import Collapse from '@mui/material/Collapse';
+// import Alert from '@mui/material/Alert';
+// import Collapse from '@mui/material/Collapse';
+import { useLoadingCallback } from 'react-loading-hook';
+// import { useAuth } from '../auth/hooks';
+import auth from '../firebase/auth';
+import { getGoogleProvider, loginWithProvider } from '../app/(auth)/login/firebase';
+import CircularProgress from '@mui/material/CircularProgress';
 
 const Login = () => {
   const router = useRouter();
-  const { user, login, loginWithGoogle, resetPassword } = useAuth();
+  // const searchParams = useSearchParams();
 
-  const [data, setData] = useState({
-    email: '',
-    password: '',
-  });
-  const [open, setOpen] = useState<boolean>(false);
-  const [title, setTitle] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
+  // const [data, setData] = useState({
+  //   email: '',
+  //   password: '',
+  // });
+  // const [open, setOpen] = useState<boolean>(false);
+  // const [title, setTitle] = useState('');
+  // const [errorMessage, setErrorMessage] = useState('');
 
   const [forgotPasswordPopup, setForgotPasswordPopup] = useState<boolean>(false);
-  const [forgotPasswordEmail, setForgotPasswordEmail] = useState<string>('');
-  const [sentForgotPasswordEmail, setSentForgotPasswordEmail] = useState<string>('');
-  const [forgotPasswordLinkSent, setForgotPasswordLinkSent] = useState<boolean>(false);
+  // const [forgotPasswordEmail, setForgotPasswordEmail] = useState<string>('');
+  // const [sentForgotPasswordEmail, setSentForgotPasswordEmail] = useState<string>('');
+  // const [forgotPasswordLinkSent, setForgotPasswordLinkSent] = useState<boolean>(false);
 
-  const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    try {
-      const { callbackurl } = router.query;
-      const res = await resetPassword(forgotPasswordEmail);
-      const authResult = AuthErrors(res, (callbackurl as string) || '/');
-      if (authResult.authFailure) {
-        setTitle(authResult.title);
-        setErrorMessage(authResult.errorMessage);
-        setOpen(true);
-      } else {
-        setSentForgotPasswordEmail(forgotPasswordEmail);
-        setForgotPasswordPopup(false);
-        setForgotPasswordLinkSent(true);
-      }
-    } catch (e) {
-      alert('There was an error, try again');
-    }
-  };
+  const params = useSearchParams();
+  const [hasLogged, setHasLogged] = useState(false);
+  // const { tenant } = useAuth();
 
-  const handleLogin = async () => {
-    const res = await login(data);
-    const { callbackurl } = router.query;
-    const authResult = AuthErrors(res, (callbackurl as string) || '/');
-    if (authResult.authFailure) {
-      setTitle(authResult.title);
-      setErrorMessage(authResult.errorMessage);
-      setOpen(true);
-    }
-    router.push(authResult.dest);
-  };
+  // const handleForgotPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+  //   e.preventDefault();
+  //   try {
+  //     const callbackurl = searchParams?.get('callbackurl');
+  //     const res = await resetPassword(forgotPasswordEmail);
+  //     const authResult = AuthErrors(res, (callbackurl as string) || '/');
+  //     if (authResult.authFailure) {
+  //       setTitle(authResult.title);
+  //       setErrorMessage(authResult.errorMessage);
+  //       setOpen(true);
+  //     } else {
+  //       setSentForgotPasswordEmail(forgotPasswordEmail);
+  //       setForgotPasswordPopup(false);
+  //       setForgotPasswordLinkSent(true);
+  //     }
+  //   } catch (e) {
+  //     alert('There was an error, try again');
+  //   }
+  // };
 
-  const handleLoginWithGoogle = async () => {
-    try {
-      await loginWithGoogle();
-      router.push('/');
-    } catch {
-      setTitle('Error');
-      setErrorMessage('Something went wrong. Please try again.');
-      setOpen(true);
-    }
-  };
+  // const handleLogin = async () => {
+  //   const res = await login(data);
+  //   const callbackurl = searchParams?.get('callbackurl');
+  //   const authResult = AuthErrors(res, (callbackurl as string) || '/');
+  //   if (authResult.authFailure) {
+  //     setTitle(authResult.title);
+  //     setErrorMessage(authResult.errorMessage);
+  //     setOpen(true);
+  //   }
+  //   router.push(authResult.dest);
+  // };
+
+  const [handleLoginWithGoogle, _isLoading] = useLoadingCallback(async () => {
+    setHasLogged(false);
+    const { GoogleAuthProvider } = await import('firebase/auth');
+    const tenant = await loginWithProvider(auth, await getGoogleProvider(auth), GoogleAuthProvider.credentialFromError);
+    await fetch('/api/login', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${tenant.idToken}`,
+      },
+    });
+    setHasLogged(true);
+    const redirect = params?.get('redirect');
+    router.push(redirect ?? '/');
+  });
 
   return (
     <div
@@ -79,17 +91,18 @@ const Login = () => {
         alignItems: 'center',
       }}
     >
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleLogin();
-        }}
-      >
-        <div style={{ height: '100%', width: '300px', margin: '20px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {user?.emailVerified === false && (
+      {!hasLogged ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            // handleLogin();
+          }}
+        >
+          <div style={{ height: '100%', width: '300px', margin: '20px' }}>
+            {/* <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {tenant?.emailVerified === false && (
               <Alert severity="info" style={{ marginBottom: '1em' }}>
-                An account verification email has been sent to {user.email}. Please click the link in the email and then
+                An account verification email has been sent to {tenant.email}. Please click the link in the email and then
                 login using your new account (may be in spam)
               </Alert>
             )}
@@ -136,22 +149,29 @@ const Login = () => {
             }}
           >
             Forgot Password?
-          </Button>
-          <p style={{ textAlign: 'center' }}>or</p>
-          <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
-            <div className={styles.google_icon_wrapper}>
-              <Image src="/google-logo.svg" alt="Google Logo" width={30} height={30} />
+          </Button> 
+             <p style={{ textAlign: 'center' }}>or</p> */}
+            <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
+              <div className={styles.google_icon_wrapper}>
+                <Image src="/google-logo.svg" alt="Google Logo" width={30} height={30} />
+              </div>
+              <p className={styles.btn_text}>
+                <b>Sign in with google</b>
+              </p>
             </div>
-            <p className={styles.btn_text}>
-              <b>Sign in with google</b>
-            </p>
           </div>
+        </form>
+      ) : (
+        <div className={styles.info}>
+          <p>
+            Redirecting to <strong>{params?.get('redirect') || '/'}</strong> <CircularProgress />
+          </p>
         </div>
-      </form>
+      )}
       <PopUp open={forgotPasswordPopup} title="Forgot Password" setOpen={setForgotPasswordPopup}>
         <div className="form">
           <h1 className="form-title">Forgot Password?</h1>
-          <form style={{ display: 'grid' }} onSubmit={async (e) => await handleForgotPassword(e)}>
+          {/* <form style={{ display: 'grid' }} onSubmit={async (e) => await handleForgotPassword(e)}>
             <TextField
               onChange={(e) => setForgotPasswordEmail(e.target.value)}
               value={forgotPasswordEmail}
@@ -161,12 +181,12 @@ const Login = () => {
             <Button className="submit-button" type="submit">
               Send Password Reset
             </Button>
-          </form>
+          </form> */}
         </div>
       </PopUp>
-      <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
+      {/* <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
         {errorMessage}
-      </PopUp>
+      </PopUp> */}
     </div>
   );
 };

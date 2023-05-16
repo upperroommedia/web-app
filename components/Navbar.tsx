@@ -17,19 +17,19 @@ import Image from 'next/image';
 import styles from 'styles/Navbar.module.css';
 import NavMenuItem from './NavMenuItem';
 import UserAvatar from './UserAvatar';
-import { FunctionComponent, useState } from 'react';
-import useAuth from '../context/user/UserContext';
+import { useState } from 'react';
+import { useAuth } from '../auth/hooks';
 import Link from 'next/link';
 import useTheme from '@mui/system/useTheme';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { useRouter } from 'next/router';
+import { usePathname } from 'next/navigation';
 
-const Navbar: FunctionComponent = () => {
-  const { user, logoutUser } = useAuth();
-  const router = useRouter();
-  const adminPages = user?.role === 'admin' ? ['Uploader', 'Admin'] : [];
+function Navbar() {
+  const { tenant } = useAuth();
+  const pathname = usePathname();
+  const adminPages = tenant?.customClaims?.role === 'admin' ? ['Uploader', 'Admin'] : [];
   const pages = ['Home', 'Sermons', 'About', ...adminPages];
-  const settings = user ? ['Profile', 'Logout'] : ['Login'];
+  const settings = tenant ? ['Profile', 'Logout'] : ['Login'];
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
   const theme = useTheme();
@@ -51,7 +51,11 @@ const Navbar: FunctionComponent = () => {
   };
 
   const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
-    <Link href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`} passHref>
+    <Link
+      style={{ textDecoration: 'none' }}
+      href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`}
+      passHref
+    >
       {children}
     </Link>
   );
@@ -124,7 +128,7 @@ const Navbar: FunctionComponent = () => {
             </Menu>
           </Box>
           <Avatar variant="square" sx={{ bgcolor: 'transparent' }}>
-            <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill />
+            <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={40} height={40} />
           </Avatar>{' '}
           <Link
             href="/"
@@ -153,7 +157,7 @@ const Navbar: FunctionComponent = () => {
           <Box sx={{ flexGrow: 0 }}>
             <Tooltip title="Open settings">
               <IconButton onClick={handleOpenUserMenu} sx={{ p: 0 }}>
-                <UserAvatar user={user} />
+                <UserAvatar tenant={tenant} />
               </IconButton>
             </Tooltip>
             <Menu
@@ -179,7 +183,7 @@ const Navbar: FunctionComponent = () => {
                       key={setting}
                       onClick={() => {
                         handleCloseUserMenu();
-                        logoutUser();
+                        // logoutUser();
                       }}
                       className={styles.menu_item}
                     >
@@ -188,10 +192,7 @@ const Navbar: FunctionComponent = () => {
                   );
                 } else {
                   return (
-                    <MenuItemLink
-                      key={setting}
-                      page={setting === 'Login' ? `login?callbackUrl=${router.pathname}` : setting}
-                    >
+                    <MenuItemLink key={setting} page={setting === 'Login' ? `login?callbackUrl=${pathname}` : setting}>
                       <MenuItem
                         onClick={() => {
                           handleCloseUserMenu();
@@ -210,6 +211,6 @@ const Navbar: FunctionComponent = () => {
       </Container>
     </AppBar>
   );
-};
+}
 
 export default Navbar;

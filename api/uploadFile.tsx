@@ -1,12 +1,12 @@
-import firestore, { deleteDoc, doc, setDoc, writeBatch } from '../../firebase/firestore';
-import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } from '../../firebase/storage';
+import firestore, { deleteDoc, doc, setDoc, writeBatch } from '../firebase/firestore';
+import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } from '../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
-import { UploadableFile } from '../../components/DropZone';
-import { sermonConverter } from '../../types/Sermon';
-import { Sermon } from '../../types/SermonTypes';
-import { ImageType } from '../../types/Image';
-import { List } from '../../types/List';
+import { UploadableFile } from '../components/DropZone';
+import { sermonConverter } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
+import { ImageType } from '../types/Image';
+import { List } from '../types/List';
 
 interface uploadFileProps {
   file: UploadableFile;

@@ -48,6 +48,7 @@
     "react-firebase-hooks": "^5.1.1",
     "react-image-crop": "^10.0.9",
     "react-infinite-scroll-component": "^6.1.0",
+    "react-loading-hook": "^1.0.0",
     "sharp": "^0.31.3",
     "tmp": "^0.2.1",
     "uuid": "^9.0.0"

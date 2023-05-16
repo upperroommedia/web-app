@@ -1,12 +1,12 @@
-import firestore, { collection, doc, getDocs, setDoc, writeBatch } from '../../firebase/firestore';
+import firestore, { collection, doc, getDocs, setDoc, writeBatch } from '../firebase/firestore';
 
-import { sermonConverter } from '../../types/Sermon';
-import { Sermon } from '../../types/SermonTypes';
-import { createFunction } from '../../utils/createFunction';
-import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
-import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
-import { getSquareImageStoragePath } from '../../utils/utils';
-import { List, listConverter } from '../../types/List';
+import { sermonConverter } from '../types/Sermon';
+import { Sermon } from '../types/SermonTypes';
+import { createFunction } from '../utils/createFunction';
+import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../functions/src/editSubsplashSermon';
+import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../functions/src/editSoundCloudSermon';
+import { getSquareImageStoragePath } from '../utils/utils';
+import { List, listConverter } from '../types/List';
 
 const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
   const promises: Promise<any>[] = [];

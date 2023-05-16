@@ -59,6 +59,7 @@ specifiers:
   react-firebase-hooks: ^5.1.1
   react-image-crop: ^10.0.9
   react-infinite-scroll-component: ^6.1.0
+  react-loading-hook: ^1.0.0
   sharp: ^0.31.3
   tmp: ^0.2.1
   typescript: ^4.9.5
@@ -95,6 +96,7 @@ dependencies:
   react-firebase-hooks: 5.1.1_ruahcciss5bve24kacsc6xs43e
   react-image-crop: 10.0.9_react@18.2.0
   react-infinite-scroll-component: 6.1.0_react@18.2.0
+  react-loading-hook: 1.0.0_biqbaboplfbrettd7655fr4n2y
   sharp: 0.31.3
   tmp: 0.2.1
   uuid: 9.0.0
@@ -7601,6 +7603,16 @@ packages:
 
   /react-is/18.2.0:
     resolution: {integrity: sha512-xWGDIW6x921xtzPkhiULtthJHoJvBbF3q26fzloPCK0hsvxtPVelvftw3zjbHWSkR2km9Z+4uxbDDK/6Zw9B8w==}
+    dev: false
+
+  /react-loading-hook/1.0.0_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-lyGm2Rk5Np2eZgiJl8EBOfoyJrStEDTuVq6xD5ebGsDsblhu9dECgJxGYg3d8gFgyl6Y2vbnVAUYLg6UmYPtEA==}
+    peerDependencies:
+      react: ^18.2.0
+      react-dom: ^18.2.0
+    dependencies:
+      react: 18.2.0
+      react-dom: 18.2.0_react@18.2.0
     dev: false
 
   /react-transition-group/4.4.5_biqbaboplfbrettd7655fr4n2y:

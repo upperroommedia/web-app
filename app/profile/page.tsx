@@ -1,27 +1,27 @@
 /**
  * User profile page
  */
-// ('use client');
+'use client';
 
-import useAuth from '../context/user/UserContext';
-import Button, { ButtonProps } from '@mui/material/Button';
+// import Button, { ButtonProps } from '@mui/material/Button';
 import Box from '@mui/system/Box';
 import Typography from '@mui/material/Typography';
-import UserAvatar from '../components/UserAvatar';
-import LoginPage from './old_login';
+import UserAvatar from '../../components/UserAvatar';
+import { useAuth } from '../../auth/hooks';
+// import LoginPage from './old_login';
 import Head from 'next/head';
 
-function MediumButton({ children, ...props }: ButtonProps) {
-  return (
-    <Button sx={{ width: 'min-content' }} size="medium" variant="contained" disableRipple color="primary" {...props}>
-      {children}
-    </Button>
-  );
-}
+// function MediumButton({ children, ...props }: ButtonProps) {
+//   return (
+//     <Button sx={{ width: 'min-content' }} size="medium" variant="contained" disableRipple color="primary" {...props}>
+//       {children}
+//     </Button>
+//   );
+// }
 
 export default function Profile() {
-  const { user, logoutUser } = useAuth();
-  if (user) {
+  const { tenant } = useAuth();
+  if (tenant) {
     return (
       <>
         <Head>
@@ -38,17 +38,17 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
           <Typography align="center" variant="h2">
             Profile
           </Typography>
-          <UserAvatar sx={{ width: 100, height: 100 }} user={user} />
+          <UserAvatar sx={{ width: 100, height: 100 }} tenant={tenant} />
           <Typography align="center" variant="body1">
-            Display Name: {user.displayName}
+            Display Name: {tenant.name}
           </Typography>
           <Typography align="center" variant="body1">
-            Email: {user.email}
+            Email: {tenant.email}
           </Typography>
           <Typography align="center" variant="body1">
-            Role: {user.role ? user.role : 'No role assigned'}
+            Role: {tenant.customClaims.role ? tenant.customClaims.role : 'No role assigned'}
           </Typography>
-          <MediumButton onClick={() => logoutUser()}>Logout</MediumButton>
+          {/* <MediumButton onClick={() => logoutUser()}>Logout</MediumButton> */}
         </Box>
       </>
     );
@@ -58,7 +58,7 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
         <Typography align="center" variant="h2">
           You are not logged in
         </Typography>
-        <LoginPage></LoginPage>
+        {/* <LoginPage></LoginPage> */}
       </Box>
     );
   }
