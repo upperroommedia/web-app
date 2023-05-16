@@ -31,5 +31,13 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/((?!_next/static|favicon.ico|logo.svg).*)'],
+  matcher: [
+    '/uploader:path*',
+    '/admin:path*',
+    '/api:path*',
+    '/login:path*',
+    '/logout:path*',
+    '/api/login',
+    '/api/logout',
+  ],
 };
