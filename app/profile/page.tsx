@@ -40,7 +40,7 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
           </Typography>
           <UserAvatar sx={{ width: 100, height: 100 }} tenant={tenant} />
           <Typography align="center" variant="body1">
-            Display Name: {tenant.name}
+            Display Name: {}
           </Typography>
           <Typography align="center" variant="body1">
             Email: {tenant.email}

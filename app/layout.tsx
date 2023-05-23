@@ -1,6 +1,8 @@
+import { ServerAuthProvider } from '../auth/server-auth-provider';
 import Navbar from '../components/Navbar';
 import ThemeProvider from '../components/ThemeProvider';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
+import '../styles/global.css';
 
 export default function RootLayout({
   // Layouts must accept a children prop.
@@ -11,18 +13,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body
-        style={{
-          margin: 0,
-          padding: 0,
-          fontFamily:
-            '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans,Helvetica Neue, sans-serif',
-        }}
-      >
-        <ThemeProvider>
-          <Navbar />
-          <AudioPlayerProvider>{children}</AudioPlayerProvider>
-        </ThemeProvider>
+      <body>
+        {/* @ts-expect-error https://github.com/vercel/next.js/issues/43537 */}
+        <ServerAuthProvider>
+          <ThemeProvider>
+            <Navbar />
+            <AudioPlayerProvider>{children}</AudioPlayerProvider>
+          </ThemeProvider>
+        </ServerAuthProvider>
       </body>
     </html>
   );

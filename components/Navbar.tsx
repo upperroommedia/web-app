@@ -23,6 +23,7 @@ import Link from 'next/link';
 import useTheme from '@mui/system/useTheme';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { usePathname } from 'next/navigation';
+import auth from '../firebase/auth';
 
 function Navbar() {
   const { tenant } = useAuth();
@@ -48,6 +49,10 @@ function Navbar() {
 
   const handleCloseUserMenu = () => {
     setAnchorElUser(null);
+  };
+
+  const logoutUser = () => {
+    auth.signOut();
   };
 
   const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
@@ -183,7 +188,7 @@ function Navbar() {
                       key={setting}
                       onClick={() => {
                         handleCloseUserMenu();
-                        // logoutUser();
+                        logoutUser();
                       }}
                       className={styles.menu_item}
                     >
