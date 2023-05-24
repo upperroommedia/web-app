@@ -5,7 +5,7 @@ const withBundleAnalyzer = require('@next/bundle-analyzer')({
 });
 
 const nextConfig = withBundleAnalyzer({
-  reactStrictMode: false,
+  reactStrictMode: true,
   images: {
     domains: [
       'lh3.googleusercontent.com',
