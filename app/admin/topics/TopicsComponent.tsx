@@ -1,3 +1,4 @@
+'use client';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
@@ -8,16 +9,13 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import firestore, { collection, orderBy, query } from '../../firebase/firestore';
-import AdminLayout from '../../layout/adminLayout';
-import { topicConverter } from '../../types/Topic';
-import { adminProtected } from '../../utils/protectedRoutes';
+import firestore, { collection, orderBy, query } from '../../../firebase/firestore';
+import { topicConverter } from '../../../types/Topic';
 import Image from 'next/image';
 import { sanitize } from 'dompurify';
 
-const AdminTopics = () => {
+const TopicsComponent = () => {
   const q = query(collection(firestore, 'topics').withConverter(topicConverter), orderBy('title'));
   const [topics, loading, error] = useCollectionData(q);
 
@@ -102,10 +100,4 @@ const AdminTopics = () => {
   );
 };
 
-AdminTopics.PageLayout = AdminLayout;
-
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
-
-export default AdminTopics;
+export default TopicsComponent;

@@ -1,21 +1,16 @@
 // import Button from '@mui/material/Button';
 // import TextField from '@mui/material/TextField';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 // import AuthErrors from './AuthErrors';
-import PopUp from './PopUp';
-import styles from '../styles/SignInWithGoogleButton.module.css';
-import Image from 'next/image';
+import PopUp from '../../../components/PopUp';
 // import Alert from '@mui/material/Alert';
 // import Collapse from '@mui/material/Collapse';
-import { useLoadingCallback } from 'react-loading-hook';
-// import { useAuth } from '../auth/hooks';
-import auth from '../firebase/auth';
-import { getGoogleProvider, loginWithProvider } from '../app/(auth)/login/firebase';
-import CircularProgress from '@mui/material/CircularProgress';
+
+import GoogleSignIn from '../GoogleSignIn';
+import RedirectingComponent from '../RedirectingComponent';
 
 const Login = () => {
-  const router = useRouter();
   // const searchParams = useSearchParams();
 
   // const [data, setData] = useState({
@@ -66,21 +61,6 @@ const Login = () => {
   //   }
   //   router.push(authResult.dest);
   // };
-
-  const [handleLoginWithGoogle, _isLoading] = useLoadingCallback(async () => {
-    setHasLogged(false);
-    const { GoogleAuthProvider } = await import('firebase/auth');
-    const tenant = await loginWithProvider(auth, await getGoogleProvider(auth), GoogleAuthProvider.credentialFromError);
-    await fetch('/api/login', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${tenant.idToken}`,
-      },
-    });
-    setHasLogged(true);
-    const redirect = params?.get('redirect');
-    router.push(redirect ?? '/');
-  });
 
   return (
     <div
@@ -151,22 +131,11 @@ const Login = () => {
             Forgot Password?
           </Button> 
              <p style={{ textAlign: 'center' }}>or</p> */}
-            <div className={styles.google_btn} onClick={handleLoginWithGoogle}>
-              <div className={styles.google_icon_wrapper}>
-                <Image src="/google-logo.svg" alt="Google Logo" width={30} height={30} />
-              </div>
-              <p className={styles.btn_text}>
-                <b>Sign in with google</b>
-              </p>
-            </div>
+            <GoogleSignIn setHasLogged={setHasLogged} redirect={params.get('redirect')} />
           </div>
         </form>
       ) : (
-        <div className={styles.info}>
-          <p>
-            Redirecting to <strong>{params?.get('redirect') || '/'}</strong> <CircularProgress />
-          </p>
-        </div>
+        <RedirectingComponent path={params?.get('redirect') || '/'} />
       )}
       <PopUp open={forgotPasswordPopup} title="Forgot Password" setOpen={setForgotPasswordPopup}>
         <div className="form">

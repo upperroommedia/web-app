@@ -1,11 +1,12 @@
+'use client';
 import Typography from '@mui/material/Typography';
 import { Box } from '@mui/system';
-import firestore, { collection, orderBy, query } from '../firebase/firestore';
+import firestore, { collection, orderBy, query } from '../../../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
-import BottomAudioBar from './BottomAudioBar';
-import SermonsList from './SermonsList';
-import { sermonConverter } from '../types/Sermon';
-import SermonListSkeloten from './skeletons/SermonListSkeloten';
+import BottomAudioBar from '../../../components/BottomAudioBar';
+import SermonsList from '../../../components/SermonsList';
+import { sermonConverter } from '../../../types/Sermon';
+import SermonListSkeloten from '../../../components/skeletons/SermonListSkeloten';
 import { FunctionComponent } from 'react';
 
 interface AdminSermonsListProps {

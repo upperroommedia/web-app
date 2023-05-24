@@ -1,9 +1,9 @@
+'use client';
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { ChangeEvent, useEffect, useState } from 'react';
-import SpeakerTable from '../../components/SpeakerTable';
-import { Order } from '../../context/types';
+import SpeakerTable from '../../../components/SpeakerTable';
+import { Order } from '../../../context/types';
 import firestore, {
   collection,
   DocumentData,
@@ -15,13 +15,11 @@ import firestore, {
   Query,
   QueryDocumentSnapshot,
   startAfter,
-} from '../../firebase/firestore';
-import AdminLayout from '../../layout/adminLayout';
-import { ISpeaker, speakerConverter } from '../../types/Speaker';
-import { adminProtected } from '../../utils/protectedRoutes';
-import { fetchSpeakerResults } from '../../utils/utils';
+} from '../../../firebase/firestore';
+import { ISpeaker, speakerConverter } from '../../../types/Speaker';
+import { fetchSpeakerResults } from '../../../utils/utils';
 
-const AdminSpeakers = () => {
+const SpeakersComponent = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
@@ -204,10 +202,4 @@ const AdminSpeakers = () => {
   );
 };
 
-AdminSpeakers.PageLayout = AdminLayout;
-
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
-
-export default AdminSpeakers;
+export default SpeakersComponent;

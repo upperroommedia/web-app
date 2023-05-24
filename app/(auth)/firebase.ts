@@ -1,8 +1,9 @@
 import type { Auth, AuthError, AuthProvider, OAuthCredential } from 'firebase/auth';
 import { IdTokenResult } from 'firebase/auth';
-import { User as FirebaseUser } from '../../../firebase/auth';
-import { Tenant } from '../../../auth/types';
+import { User as FirebaseUser } from '../../firebase/auth';
+import { Tenant } from '../../auth/types';
 import { filterStandardClaims } from 'next-firebase-auth-edge/lib/auth/tenant';
+import firestore, { doc, setDoc } from '../../firebase/firestore';
 
 const CREDENTIAL_ALREADY_IN_USE_ERROR = 'auth/credential-already-in-use';
 export const isCredentialAlreadyInUseError = (e: AuthError) => e?.code === CREDENTIAL_ALREADY_IN_USE_ERROR;
@@ -105,4 +106,8 @@ export const loginWithProvider = async (
   const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
   const idTokenResult = await result.user.getIdTokenResult();
   return mapFirebaseResponseToTenant(idTokenResult, result.user!);
+};
+
+export const addNewUserToDb = async (uid: string, email: string, firstName: string, lastName: string) => {
+  await setDoc(doc(firestore, 'users', uid), { firstName, lastName, email, uid });
 };

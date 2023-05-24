@@ -1,16 +1,14 @@
-import functions, { httpsCallable } from '../../firebase/functions';
+'use client';
+import functions, { httpsCallable } from '../../../firebase/functions';
 import { useEffect, useState } from 'react';
-import UserTable from '../../components/UserTable';
-import AdminLayout from '../../layout/adminLayout';
-import { createFunction } from '../../utils/createFunction';
+import UserTable from '../../../components/UserTable';
+import { createFunction } from '../../../utils/createFunction';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Slide from '@mui/material/Slide';
-import { User } from '../../types/User';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-import { adminProtected } from '../../utils/protectedRoutes';
+import { User } from '../../../types/User';
 
-const AdminUsers = () => {
+const UsersComponent = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [snackBarOpen, setSnackBarOpen] = useState<boolean>(false);
   const [message, setMessage] = useState<{ message: string; id: number }>({ message: '', id: new Date().getTime() });
@@ -62,10 +60,4 @@ const AdminUsers = () => {
   );
 };
 
-AdminUsers.PageLayout = AdminLayout;
-
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
-
-export default AdminUsers;
+export default UsersComponent;

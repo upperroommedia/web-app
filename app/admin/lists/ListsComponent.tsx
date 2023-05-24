@@ -1,20 +1,21 @@
+'use client';
 import Box from '@mui/material/Box';
-import AdminLayout from '../../layout/adminLayout';
 import Button from '@mui/material/Button';
-import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../firebase/firestore';
+import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../../firebase/firestore';
 // import { useCollection } from 'react-firebase-hooks/firestore';
-// import { sermonConverter } from '../../types/Sermon';
-import DeleteEntityPopup from '../../components/DeleteEntityPopup';
+// import { sermonConverter } from '../../../types/Sermon';
+import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-import { adminProtected } from '../../utils/protectedRoutes';
-import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
-import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
+import NewListPopup, { listTypeOptions } from '../../../components/NewListPopup';
+import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import CircularProgress from '@mui/material/CircularProgress';
-import { createFunctionV2 } from '../../utils/createFunction';
-import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '../../functions/src/deleteSubsplashList';
+import { createFunctionV2 } from '../../../utils/createFunction';
+import {
+  DeleteSubsplashListInputType,
+  DeleteSubsplashListOutputType,
+} from '../../../functions/src/deleteSubsplashList';
 import Link from 'next/link';
 import MaterialList from '@mui/material/List';
 import Divider from '@mui/material/Divider';
@@ -23,7 +24,7 @@ import Tooltip from '@mui/material/Tooltip';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ListItemButton from '@mui/material/ListItemButton';
-import { listConverter, List, ListType } from '../../types/List';
+import { listConverter, List, ListType } from '../../../types/List';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import algoliasearch from 'algoliasearch';
 import TextField from '@mui/material/TextField';
@@ -43,7 +44,7 @@ const client =
     : undefined;
 const listsIndex = client?.initIndex('lists');
 
-const AdminList = () => {
+const ListsComponent = () => {
   const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
   const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
@@ -268,10 +269,4 @@ const AdminList = () => {
   );
 };
 
-AdminList.PageLayout = AdminLayout;
-
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
-
-export default AdminList;
+export default ListsComponent;

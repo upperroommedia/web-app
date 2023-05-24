@@ -1,17 +1,16 @@
+'use client';
 import Box from '@mui/material/Box';
-import { useRouter } from 'next/router';
+import { usePathname } from 'next/navigation';
 import Button from '@mui/material/Button';
 import Link from 'next/link';
 import Head from 'next/head';
 
-const AdminLayout = ({ children }: { children: React.ReactNode }) => {
+const AdminLayoutComponent = ({ children }: { children: React.ReactNode }) => {
+  const pathname = usePathname();
   const pages = ['Sermons', 'Users', 'Speakers', 'Lists', 'Topics'];
-  const router = useRouter();
   const isActive = (page: string) => {
     const path = `admin/${page.toLowerCase()}`;
-    return (
-      (path === 'Home' && router.pathname === '/') || `/${path.toLowerCase()}` === router.pathname.toLocaleLowerCase()
-    );
+    return (path === 'Home' && pathname === '/') || `/${path.toLowerCase()}` === pathname.toLocaleLowerCase();
   };
   return (
     <>
@@ -48,4 +47,4 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-export default AdminLayout;
+export default AdminLayoutComponent;
