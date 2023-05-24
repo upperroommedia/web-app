@@ -32,7 +32,7 @@
     "classnames": "^2.3.2",
     "date-fns": "^2.29.3",
     "dompurify": "^3.0.0",
-    "firebase": "^9.17.1",
+    "firebase": "^9.22.0",
     "firebase-admin": "^11.5.0",
     "firebase-tools": "^11.23.1",
     "next": "13.4.3",
