@@ -51,8 +51,12 @@ function Navbar() {
     setAnchorElUser(null);
   };
 
-  const logoutUser = () => {
+  const logoutUser = async () => {
     auth.signOut();
+    await fetch('/api/logout', {
+      method: 'GET',
+    });
+    window.location.reload();
   };
 
   const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
