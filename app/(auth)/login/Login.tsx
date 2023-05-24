@@ -131,7 +131,7 @@ const Login = () => {
             Forgot Password?
           </Button> 
              <p style={{ textAlign: 'center' }}>or</p> */}
-            <GoogleSignIn setHasLogged={setHasLogged} redirect={params.get('redirect')} />
+            <GoogleSignIn setHasLogged={setHasLogged} redirect={params?.get('redirect')} />
           </div>
         </form>
       ) : (

@@ -43,7 +43,7 @@ const Signup = () => {
 
   const handleSignup = async () => {
     const res = await signupWithEmailAndPassword(data);
-    const authResult = AuthErrors(res, params.get('callbackurl') || '/');
+    const authResult = AuthErrors(res, params?.get('callbackurl') || '/');
     if (authResult.authFailure) {
       setTitle(authResult.title);
       setErrorMessage(authResult.errorMessage);

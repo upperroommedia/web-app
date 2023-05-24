@@ -8,7 +8,7 @@ import { Dispatch, SetStateAction } from 'react';
 
 type GoogleSignInParams = {
   setHasLogged: Dispatch<SetStateAction<boolean>>;
-  redirect: string | null;
+  redirect?: string | null;
 };
 
 export default function GoogleSignIn({ setHasLogged, redirect }: GoogleSignInParams) {

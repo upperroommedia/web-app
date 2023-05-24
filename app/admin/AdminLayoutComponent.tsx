@@ -10,7 +10,7 @@ const AdminLayoutComponent = ({ children }: { children: React.ReactNode }) => {
   const pages = ['Sermons', 'Users', 'Speakers', 'Lists', 'Topics'];
   const isActive = (page: string) => {
     const path = `admin/${page.toLowerCase()}`;
-    return (path === 'Home' && pathname === '/') || `/${path.toLowerCase()}` === pathname.toLocaleLowerCase();
+    return (path === 'Home' && pathname === '/') || `/${path.toLowerCase()}` === pathname?.toLocaleLowerCase();
   };
   return (
     <>

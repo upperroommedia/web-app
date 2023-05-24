@@ -6,7 +6,7 @@ export const isDevelopment = process.env.NODE_ENV === 'development';
 // These keys are ok to leave public according to Firebase docs
 // Initialize Firebase
 const apps = getApps();
-let firebase = null;
+let firebase: FirebaseApp;
 if (!apps.length) {
   firebase = initializeApp({
     apiKey: 'AIzaSyCJKArKBX02ItsUD1zDJVC6JRA4sho7PTo',
