@@ -310,7 +310,7 @@ export default function UploaderComponent(props: UploaderProps) {
                 updateSermon(
                   'speakers',
                   newValue.map((speaker) => {
-                    const { _highlightResult, ...speakerWithoutHighlight } = speaker;
+                    const { _highlightResult, ...speakerWithoutHighlight } = speaker as AlgoliaSpeaker;
                     return speakerWithoutHighlight;
                   })
                 );
