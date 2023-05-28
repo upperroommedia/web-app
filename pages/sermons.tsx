@@ -10,6 +10,7 @@ import { Sermon, uploadStatus } from '../types/SermonTypes';
 import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import SermonsList from '../components/SermonsList';
 import Head from 'next/head';
+import Link from 'next/link';
 
 const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface Props {
@@ -28,6 +29,7 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
           key="description"
         />
       </Head>
+      <Link href={`/api/revalidate/sermons?secret=${process.env.REVALIDATE_SECRET}`} />
       <div style={{ padding: '0 2rem' }}>
         <h1>Sermons</h1>
         <SermonsList sermons={sermons} />
@@ -49,12 +51,10 @@ export const getStaticProps: GetStaticProps = async (_context) => {
 
     return {
       props: { sermons },
-      revalidate: 60,
     };
   } catch (error) {
     return {
       props: { sermons: [] },
-      revalidate: 60,
     };
   }
 };
