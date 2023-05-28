@@ -1,16 +1,13 @@
 /**
  * Sermons page for viewing all sermons test
  */
-import dynamic from 'next/dynamic';
-// import PropTypes from 'prop-types';
-
 import { sermonConverter } from '../../types/Sermon';
 import { uploadStatus } from '../../types/SermonTypes';
 import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
 import SermonsList from '../../components/SermonsList';
 import Head from 'next/head';
-
-const DynamicBottomAudioBar = dynamic(() => import('../../components/BottomAudioBar'), { ssr: false });
+import { cache } from 'react';
+import BottomAudioBar from '../../components/BottomAudioBar';
 
 export default async function Sermons() {
   return (
@@ -28,12 +25,12 @@ export default async function Sermons() {
         <h1>Sermons</h1>
         <SermonsList sermons={await getSermons()} />
       </div>
-      <DynamicBottomAudioBar />
+      <BottomAudioBar />
     </>
   );
 }
 
-async function getSermons() {
+const getSermons = cache(async () => {
   try {
     // Firestore data converter to convert the queried data to the expected type
     const sermonsQuery = query(
@@ -42,9 +39,8 @@ async function getSermons() {
     ).withConverter(sermonConverter);
     const sermonsQuerySnapshot = await getDocs(sermonsQuery);
     const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
-
     return sermons;
   } catch (error) {
     return [];
   }
-}
+});
