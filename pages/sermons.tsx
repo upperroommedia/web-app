@@ -29,7 +29,7 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
           key="description"
         />
       </Head>
-      <Link href={`/api/revalidate/sermons?secret=${process.env.REVALIDATE_SECRET}`}>Revalidate Page</Link>
+      <Link href={`/api/revalidate/sermons?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET}`}>Revalidate Page</Link>
       <div style={{ padding: '0 2rem' }}>
         <h1>Sermons</h1>
         <SermonsList sermons={sermons} />
