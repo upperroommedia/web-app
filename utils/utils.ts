@@ -35,3 +35,7 @@ export async function fetchSpeakerResults(query: string, hitsPerPage: number, pa
   }
   return speakers;
 }
+
+export function classNames(...classes) {
+  return classes.filter(Boolean).join(' ');
+}
