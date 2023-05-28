@@ -4,7 +4,7 @@ import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
-// import addNewList from '../api/addNewList';
+import addNewList from '../api/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import isEqual from 'lodash/isEqual';
@@ -163,22 +163,21 @@ const NewListPopup = (props: NewListPopupProps) => {
                 props.setNewListPopup(false);
                 setUserHasTypedInList(false);
               } else {
-                // const newListId = await addNewList(newList);
-                // const listToAdd: List = {
-                //   ...newList,
-                //   id: newListId,
-                // // };
+                const newListId = await addNewList(newList);
+                const listToAdd: List = {
+                  ...newList,
+                  id: newListId,
+                };
 
-                // props.setNewListPopup(false);
-                // if (props.setListArray) {
-                //   props.setListArray((previouslistArray) => [listToAdd, ...previouslistArray]);
-                // }
-                // if (props.setSermonList) {
-                //   props.setSermonList((previousList) => [listToAdd, ...previousList]);
-                // }
-                // setNewList(emptyList);
-                // setUserHasTypedInList(false);
-                alert('Not implemented');
+                props.setNewListPopup(false);
+                if (props.setListArray) {
+                  props.setListArray((previouslistArray) => [listToAdd, ...previouslistArray]);
+                }
+                if (props.setSermonList) {
+                  props.setSermonList((previousList) => [listToAdd, ...previousList]);
+                }
+                setNewList(emptyList);
+                setUserHasTypedInList(false);
               }
             } catch (error) {
               // eslint-disable-next-line no-console

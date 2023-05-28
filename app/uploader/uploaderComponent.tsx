@@ -3,8 +3,8 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import dynamic from 'next/dynamic';
-// import uploadFile from '../../api/uploadFile';
-// import editSermon from '../../api/editSermon';
+import uploadFile from '../../api/uploadFile';
+import editSermon from '../../api/editSermon';
 import styles from '../../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import TextField from '@mui/material/TextField';
@@ -442,9 +442,8 @@ export default function UploaderComponent(props: UploaderProps) {
             <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
               <Button
                 onClick={async () => {
-                  // await editSermon(sermon, sermonList);
-                  // props.setEditFormOpen?.(false);
-                  alert('This feature is not yet implemented');
+                  await editSermon(sermon, sermonList);
+                  props.setEditFormOpen?.(false);
                 }}
                 disabled={
                   (sermonsEqual(props.existingSermon, sermon) && listEqual(props.existingList, sermonList)) ||
@@ -522,14 +521,13 @@ export default function UploaderComponent(props: UploaderProps) {
                       if (file !== undefined && date != null && tenant?.customClaims?.role === 'admin') {
                         try {
                           setIsUploading(true);
-                          // await uploadFile({
-                          //   file,
-                          //   setUploadProgress,
-                          //   trimStart,
-                          //   sermon,
-                          //   sermonList,
-                          // });
-                          alert('This feature is not yet implemented');
+                          await uploadFile({
+                            file,
+                            setUploadProgress,
+                            trimStart,
+                            sermon,
+                            sermonList,
+                          });
                           setIsUploading(false);
                           clearForm();
                         } catch (error) {
