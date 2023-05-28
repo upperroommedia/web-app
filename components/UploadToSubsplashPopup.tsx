@@ -104,6 +104,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
         status: { ...sermon.status, subsplash: uploadStatus.UPLOADED },
         approverId: user?.uid,
       });
+      await fetch(`/api/revalidate/sermons?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET}`);
     } catch (error) {
       alert(error);
     }

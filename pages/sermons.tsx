@@ -10,7 +10,6 @@ import { Sermon, uploadStatus } from '../types/SermonTypes';
 import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import SermonsList from '../components/SermonsList';
 import Head from 'next/head';
-import Button from '@mui/material/Button';
 
 const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface Props {
@@ -29,9 +28,6 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
           key="description"
         />
       </Head>
-      <Button onClick={() => fetch(`/api/revalidate/sermons?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET}`)}>
-        Revalidate Page
-      </Button>
       <div style={{ padding: '0 2rem' }}>
         <h1>Sermons</h1>
         <SermonsList sermons={sermons} />
