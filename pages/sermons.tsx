@@ -2,7 +2,7 @@
  * Sermons page for viewing all sermons test
  */
 import dynamic from 'next/dynamic';
-import type { GetStaticProps, NextPage } from 'next';
+import type { GetServerSideProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
 import { sermonConverter } from '../types/Sermon';
@@ -37,7 +37,7 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
   );
 };
 
-export const getStaticProps: GetStaticProps = async (_context) => {
+export const getServerSideProps: GetServerSideProps = async (_context) => {
   try {
     // Firestore data converter to convert the queried data to the expected type
     const sermonsQuery = query(
@@ -49,12 +49,10 @@ export const getStaticProps: GetStaticProps = async (_context) => {
 
     return {
       props: { sermons },
-      revalidate: 60,
     };
   } catch (error) {
     return {
       props: { sermons: [] },
-      revalidate: 60,
     };
   }
 };
