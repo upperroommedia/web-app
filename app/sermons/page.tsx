@@ -19,7 +19,7 @@ export default async function Sermons() {
         />
       </Head>
       <div style={{ padding: '0 2rem' }}>
-        <h1>Sermons</h1>
+        <h1 className="text-4xl">Sermons</h1>
         <SermonsList sermons={await getSermons()} />
       </div>
       <BottomAudioBar />

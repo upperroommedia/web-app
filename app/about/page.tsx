@@ -11,8 +11,8 @@ export const metadata: Metadata = {
 
 const About: NextPage = () => {
   return (
-    <div style={{ display: 'flex', justifyContent: 'center' }}>
-      <h1>About</h1>
+    <div className="flex justify-center">
+      <h1 className="text-4xl">About</h1>
     </div>
   );
 };
