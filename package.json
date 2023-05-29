@@ -51,6 +51,7 @@
     "react-image-crop": "^10.0.11",
     "react-infinite-scroll-component": "^6.1.0",
     "react-loading-hook": "^1.0.0",
+    "server-only": "^0.0.1",
     "sharp": "^0.31.3",
     "tmp": "^0.2.1",
     "uuid": "^9.0.0"

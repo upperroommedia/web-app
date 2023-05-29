@@ -1,13 +1,10 @@
 /**
  * Sermons page for viewing all sermons test
  */
-import { sermonConverter } from '../../types/Sermon';
-import { uploadStatus } from '../../types/SermonTypes';
-import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
 import SermonsList from '../../components/SermonsList';
 import Head from 'next/head';
-import { cache } from 'react';
 import BottomAudioBar from '../../components/BottomAudioBar';
+import getSermons from './getSermons';
 
 export default async function Sermons() {
   return (
@@ -29,18 +26,3 @@ export default async function Sermons() {
     </>
   );
 }
-
-const getSermons = cache(async () => {
-  try {
-    // Firestore data converter to convert the queried data to the expected type
-    const sermonsQuery = query(
-      collection(firestore, 'sermons'),
-      where('status.subsplash', '==', uploadStatus.UPLOADED)
-    ).withConverter(sermonConverter);
-    const sermonsQuerySnapshot = await getDocs(sermonsQuery);
-    const sermons = sermonsQuerySnapshot.docs.map((doc) => doc.data());
-    return sermons;
-  } catch (error) {
-    return [];
-  }
-});
