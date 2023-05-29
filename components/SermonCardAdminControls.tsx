@@ -8,7 +8,7 @@ import { createFunction, createFunctionV2 } from '../utils/createFunction';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
 
-import useAuth from '../context/user/UserContext';
+import { useAuth } from '../auth/hooks';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
 
@@ -24,7 +24,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   setPlaylist,
 }: AdminControlsProps) => {
   const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState<boolean>(false);
-  const { user } = useAuth();
+  const { tenant } = useAuth();
 
   const [uploadToSubsplashPopup, setUploadToSubsplashPopup] = useState<boolean>(false);
 
@@ -164,7 +164,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       setIsUploadingToSubsplash(false);
     }
   };
-  if (window.location.pathname !== '/admin/sermons' || user?.role !== 'admin') {
+  if (window.location.pathname !== '/admin/sermons' || tenant?.customClaims?.role !== 'admin') {
     return null;
   }
   return (

@@ -1,5 +1,5 @@
-/* eslint-disable no-console */
 /* eslint-disable import/export */
+/* eslint-disable no-console */
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import firebase, { isDevelopment } from './firebase';
 const firestore = getFirestore(firebase);
