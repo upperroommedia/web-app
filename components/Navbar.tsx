@@ -1,6 +1,6 @@
 'use client';
 import { Disclosure } from '@headlessui/react';
-import { Bars3Icon, BellIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 import Image from 'next/image';
 import { useAuth } from '../auth/hooks';
 import Link from 'next/link';
@@ -8,12 +8,12 @@ import { classNames } from '../utils/utils';
 import NavBarMenu from './NavBarMenu';
 import { usePathname } from 'next/navigation';
 
-const isCurrent = (item: { name: string; href: string }) => {
-  const pathname = usePathname();
+const isCurrent = (item: { name: string; href: string }, pathname) => {
   return pathname === item.href;
 };
 
 export default function Navbar() {
+  const pathname = usePathname();
   const { tenant } = useAuth();
   const adminPages =
     tenant?.customClaims?.role === 'admin'
@@ -61,12 +61,12 @@ export default function Navbar() {
                         key={item.name}
                         href={item.href}
                         className={classNames(
-                          isCurrent(item)
+                          isCurrent(item, pathname)
                             ? 'bg-gray-900 text-white'
                             : 'text-gray-300 hover:bg-gray-700 hover:text-white',
                           'rounded-md px-3 py-2 text-sm font-medium'
                         )}
-                        aria-current={isCurrent(item) ? 'page' : undefined}
+                        aria-current={isCurrent(item, pathname) ? 'page' : undefined}
                       >
                         {item.name}
                       </Link>
@@ -75,16 +75,20 @@ export default function Navbar() {
                 </div>
               </div>
               <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:static sm:inset-auto sm:ml-6 sm:pr-0">
-                <button
-                  type="button"
-                  className="rounded-full bg-gray-800 p-1 text-gray-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-800"
-                >
-                  <span className="sr-only">View notifications</span>
-                  <BellIcon className="h-6 w-6" aria-hidden="true" />
-                </button>
-
-                {/* Profile dropdown */}
-                <NavBarMenu />
+                {tenant !== null ? (
+                  <NavBarMenu />
+                ) : (
+                  <Disclosure.Button
+                    as="a"
+                    href={`login?callbackUrl=${pathname}`}
+                    className={classNames(
+                      'text-gray-300 hover:bg-gray-700 hover:text-white',
+                      'block rounded-md px-3 py-2 text-base font-medium'
+                    )}
+                  >
+                    Login
+                  </Disclosure.Button>
+                )}
               </div>
             </div>
           </div>
@@ -97,10 +101,12 @@ export default function Navbar() {
                   as="a"
                   href={item.href}
                   className={classNames(
-                    isCurrent(item) ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                    isCurrent(item, pathname)
+                      ? 'bg-gray-900 text-white'
+                      : 'text-gray-300 hover:bg-gray-700 hover:text-white',
                     'block rounded-md px-3 py-2 text-base font-medium'
                   )}
-                  aria-current={isCurrent(item) ? 'page' : undefined}
+                  aria-current={isCurrent(item, pathname) ? 'page' : undefined}
                 >
                   {item.name}
                 </Disclosure.Button>
