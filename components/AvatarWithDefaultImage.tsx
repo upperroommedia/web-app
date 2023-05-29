@@ -37,7 +37,7 @@ export default function AvatarWithDefaultImage({
           ? undefined
           : defaultImageURL
           ? `url(${defaultImageURL})`
-          : 'url(/URM_Icon.png)',
+          : 'url(/URM_icon.png)',
         backgroundPosition: 'center center',
         backgroundSize: 'cover',
         ...sx,
