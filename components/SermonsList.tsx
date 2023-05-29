@@ -1,3 +1,4 @@
+'use client';
 /**
  * SermonsList Component for displaying a list of sermons
  */

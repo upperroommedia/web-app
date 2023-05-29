@@ -1,3 +1,4 @@
+'use client';
 /**
  * BottomAudioBar is a component that displays the audio player similar to Spotify's bottom play bar
  */

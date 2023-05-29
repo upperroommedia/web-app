@@ -35,7 +35,7 @@ interface newSubsplashListRow extends Omit<SubsplashListRow, 'id' | '_embedded'>
 
 function convertSubsplashListRowToMediaItemWithUpdateAt(listRows: SubsplashListRow[]): MediaItemWithUpdatedAt[] {
   return listRows.map((listRow) => {
-    let mediaKey = undefined;
+    let mediaKey: MediaType | undefined;
     for (const key in listRow._embedded) {
       mediaKey = mediaTypes.find((type) => type === key);
       if (mediaKey) {

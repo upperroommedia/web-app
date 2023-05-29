@@ -191,7 +191,6 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
       clickOffsetRef.current = event.clientX - e.currentTarget.getBoundingClientRect().right;
     } else if (target === CLICK_TARGET.END_TRIM) {
       clickOffsetRef.current = event.clientX - e.currentTarget.getBoundingClientRect().left;
-      console.log('here', clickOffsetRef.current);
     } else {
       clickOffsetRef.current = 0;
     }

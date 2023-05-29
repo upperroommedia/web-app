@@ -1,3 +1,4 @@
+'use client';
 import { createContext, useReducer, useContext } from 'react';
 import { Sermon } from '../../types/SermonTypes';
 import audioPlayerReducer, { AudioPlayerState, SermonWithMetadata } from '../../reducers/audioPlayerReducer';
@@ -26,7 +27,7 @@ type AudioPlayerContextType = {
 
 const AudioPlayerContext = createContext<AudioPlayerContextType | null>(null);
 
-export const AudioPlayerProvider = ({ children }: any) => {
+export const AudioPlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const [state, dispatch] = useReducer(audioPlayerReducer, initialState);
 
   const setPlaylist = (playlist: Sermon[]) => {
