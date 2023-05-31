@@ -8,6 +8,7 @@ const nextConfig = withBundleAnalyzer({
   reactStrictMode: false,
   images: {
     domains: [
+      'graph.facebook.com',
       'lh3.googleusercontent.com',
       'core.subsplash.com',
       'localhost',
