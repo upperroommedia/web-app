@@ -1,13 +1,13 @@
 /* eslint-disable import/export */
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
-import { getAnalytics } from 'firebase/analytics';
+import { getAnalytics, isSupported } from 'firebase/analytics';
 
 export const isDevelopment = process.env.NODE_ENV === 'development';
 // Your web app's Firebase configuration
 // These keys are ok to leave public according to Firebase docs
 // Initialize Firebase
 const apps = getApps();
-let firebase = null;
+let firebase: FirebaseApp;
 if (!apps.length) {
   firebase = initializeApp({
     apiKey: 'AIzaSyCJKArKBX02ItsUD1zDJVC6JRA4sho7PTo',
@@ -24,6 +24,6 @@ if (!apps.length) {
 } else {
   firebase = apps[0];
 }
-export const analytics = getAnalytics(firebase);
+export const analytics = isSupported().then((value) => (value ? getAnalytics(firebase) : null));
 export default firebase as FirebaseApp;
 export * from 'firebase/app';
