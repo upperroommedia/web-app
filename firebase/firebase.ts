@@ -1,5 +1,6 @@
 /* eslint-disable import/export */
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
+import { getAnalytics } from 'firebase/analytics';
 
 export const isDevelopment = process.env.NODE_ENV === 'development';
 // Your web app's Firebase configuration
@@ -23,5 +24,6 @@ if (!apps.length) {
 } else {
   firebase = apps[0];
 }
+export const analytics = getAnalytics(firebase);
 export default firebase as FirebaseApp;
 export * from 'firebase/app';
