@@ -8,7 +8,6 @@ const createErrorObject = (title: string, errorMessage: string, authFailure: boo
 };
 
 const AuthErrors = (error: string, callbackRoute: string) => {
-  console.log('callbackRoute', callbackRoute);
   switch (error) {
     case 'auth/email-already-exists':
       return createErrorObject('Email Already in Use', 'This email is already in use', true, '');

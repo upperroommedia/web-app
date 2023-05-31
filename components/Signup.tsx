@@ -30,14 +30,16 @@ const Signup = () => {
     firstName: '',
     lastName: '',
   });
+  const { callbackurl: possibleCallback } = router.query;
+  const callbackUrl = (possibleCallback as string) || '/';
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
   const handleSignup = async () => {
     const res = await signup(data);
-    const { callbackurl } = router.query;
-    const authResult = AuthErrors(res, (callbackurl as string) || '/');
+
+    const authResult = AuthErrors(res, callbackUrl);
     if (authResult.authFailure) {
       setTitle(authResult.title);
       setErrorMessage(authResult.errorMessage);
@@ -49,13 +51,23 @@ const Signup = () => {
   const handleLoginWithGoogle = async () => {
     try {
       await loginWithGoogle();
-      router.push('/');
+      router.push(callbackUrl);
     } catch {
       setTitle('Error');
       setErrorMessage('Something went wrong. Please try again.');
       setOpen(true);
     }
   };
+  // const handleLoginWithFacebook = async () => {
+  //   try {
+  //     await loginWithFacebook();
+  //     router.push(callbackUrl);
+  //   } catch {
+  //     setTitle('Error');
+  //     setErrorMessage('Something went wrong. Please try again.');
+  //     setOpen(true);
+  //   }
+  // };
 
   return (
     <div

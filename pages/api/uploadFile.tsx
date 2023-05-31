@@ -17,7 +17,6 @@ interface uploadFileProps {
 }
 
 const uploadFile = async (props: uploadFileProps) => {
-  console.info(`uploading sermon ${props.sermon.title} with key ${props.sermon.id}`);
   const sermonRef = ref(storage, `sermons/${props.sermon.id}`);
 
   // const sermonRef = ref(storage, `sermons/${file.name}`);

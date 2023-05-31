@@ -4,7 +4,6 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import { UserProvider } from '../context/user/UserContext';
-import NextNProgress from 'nextjs-progressbar';
 import { createTheme, responsiveFontSizes } from '@mui/material/styles';
 import ThemeProvider from '@mui/system/ThemeProvider';
 import Head from 'next/head';
@@ -36,7 +35,6 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
         <ThemeProvider theme={theme}>
           <Navbar />
           <AudioPlayerProvider>
-            <NextNProgress options={{ showSpinner: false }} />
             {Component.PageLayout ? (
               <Component.PageLayout>
                 <Component {...pageProps} />

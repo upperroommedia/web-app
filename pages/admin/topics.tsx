@@ -8,12 +8,11 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import firestore, { collection, orderBy, query } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';
 import { topicConverter } from '../../types/Topic';
-import { adminProtected } from '../../utils/protectedRoutes';
+// import { adminProtected } from '../../utils/protectedRoutes';
 import Image from 'next/image';
 import { sanitize } from 'dompurify';
 
@@ -104,8 +103,8 @@ const AdminTopics = () => {
 
 AdminTopics.PageLayout = AdminLayout;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   return adminProtected(ctx);
+// };
 
 export default AdminTopics;

@@ -3,16 +3,42 @@ import { useRouter } from 'next/router';
 import Button from '@mui/material/Button';
 import Link from 'next/link';
 import Head from 'next/head';
+import useAuth from '../context/user/UserContext';
+import Stack from '@mui/material/Stack';
+import CircularProgress from '@mui/material/CircularProgress';
+import Typography from '@mui/material/Typography';
+import RequestRoleChange from '../components/RequestUploadPrivalige';
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
-  const pages = ['Sermons', 'Users', 'Speakers', 'Lists', 'Topics'];
+  const { user } = useAuth();
   const router = useRouter();
+  if (!user) {
+    router.push('/login?callbackurl=/admin');
+    return (
+      <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
+        <CircularProgress />
+      </Stack>
+    );
+  } else if (!user.isAdmin()) {
+    return (
+      <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
+        <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
+          <Typography variant="h2">You are not an admin.</Typography>
+          <Typography>If you think you should have admin privilages, please request permission below.</Typography>
+        </Stack>
+        <RequestRoleChange />
+      </Stack>
+    );
+  }
+
+  const pages = ['Sermons', 'Users', 'Speakers', 'Lists', 'Topics'];
   const isActive = (page: string) => {
     const path = `admin/${page.toLowerCase()}`;
     return (
       (path === 'Home' && router.pathname === '/') || `/${path.toLowerCase()}` === router.pathname.toLocaleLowerCase()
     );
   };
+
   return (
     <>
       <Head>
