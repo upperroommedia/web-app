@@ -188,7 +188,9 @@ const Navbar: FunctionComponent = () => {
                   return (
                     <MenuItemLink
                       key={setting}
-                      page={setting === 'Login' ? `login?callbackUrl=${router.pathname}` : setting}
+                      page={
+                        setting === 'Login' ? `login?callbackUrl=${router.pathname.replace(/^\/|\/$/g, '')}` : setting
+                      }
                     >
                       <MenuItem
                         onClick={() => {

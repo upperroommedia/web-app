@@ -61,7 +61,13 @@ const Login = () => {
   const handleLogin = async (loginFunction: () => Promise<any>) => {
     try {
       await loginFunction();
-      router.push('/');
+      const { callbackurl: possibleCallback } = router.query;
+      const callbackUrl = (possibleCallback as string) || '';
+      if (callbackUrl === '/login') {
+        router.push('/');
+      } else {
+        router.push(`/${callbackUrl}`);
+      }
     } catch {
       setTitle('Error');
       setErrorMessage('Something went wrong. Please try again.');
