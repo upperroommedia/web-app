@@ -88,7 +88,6 @@ const AdminSpeakers = () => {
   const getSpeakersFirebase = async () => {
     const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
     const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
-    console.log('Speakers Count', speakersCount);
     setTotalSpeakers(speakersCount);
 
     const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));

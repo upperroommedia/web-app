@@ -4,13 +4,9 @@
 import type { NextPage } from 'next';
 import Head from 'next/head';
 
-// Auth
-import useAuth from '../context/user/UserContext';
-
 import Uploader from '../components/UploaderComponent';
 
 const Home: NextPage = () => {
-  const { user } = useAuth();
   return (
     <>
       <Head>

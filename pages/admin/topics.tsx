@@ -8,7 +8,6 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import firestore, { collection, orderBy, query } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';

@@ -1,4 +1,3 @@
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useDocumentData } from 'react-firebase-hooks/firestore';

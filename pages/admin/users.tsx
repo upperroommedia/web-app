@@ -7,8 +7,6 @@ import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Slide from '@mui/material/Slide';
 import { User } from '../../types/User';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-// import { adminProtected } from '../../utils/protectedRoutes';
 
 const AdminUsers = () => {
   const [users, setUsers] = useState<User[]>([]);
