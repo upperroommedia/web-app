@@ -1,8 +1,10 @@
 import { useContext, createContext, useEffect, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
+  FacebookAuthProvider,
   getAdditionalUserInfo,
   GoogleAuthProvider,
+  OAuthProvider,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -23,6 +25,8 @@ interface Context {
   loading: boolean;
   login: (loginForm: userCredentials) => Promise<any>;
   loginWithGoogle: () => Promise<any>;
+  loginWithFacebook: () => Promise<any>;
+  loginWithApple: () => Promise<any>;
   signup: (loginForm: SignupForm) => Promise<any>;
   logoutUser: () => Promise<void>;
   resetPassword: (email: string) => Promise<any>;
@@ -113,6 +117,34 @@ export const UserProvider = ({ children }: any) => {
     }
   };
 
+  const loginWithFacebook = async () => {
+    try {
+      const provider = new FacebookAuthProvider();
+      const res = await signInWithPopup(auth, provider);
+      const details = getAdditionalUserInfo(res);
+      const email = res.user.email;
+      if (details?.isNewUser && email) {
+        await addNewUserToDb(res.user.uid, email, res.user.displayName || '', '');
+      }
+    } catch (error: any) {
+      return error.code;
+    }
+  };
+
+  const loginWithApple = async () => {
+    try {
+      const provider = new OAuthProvider('apple.com');
+      const res = await signInWithPopup(auth, provider);
+      const details = getAdditionalUserInfo(res);
+      const email = res.user.email;
+      if (details?.isNewUser && email) {
+        await addNewUserToDb(res.user.uid, email, res.user.displayName || '', '');
+      }
+    } catch (error: any) {
+      return error.code;
+    }
+  };
+
   const signup = async (loginForm: SignupForm) => {
     try {
       const res = await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
@@ -158,6 +190,8 @@ export const UserProvider = ({ children }: any) => {
         loading,
         login,
         loginWithGoogle,
+        loginWithFacebook,
+        loginWithApple,
         signup,
         logoutUser,
         resetPassword,
