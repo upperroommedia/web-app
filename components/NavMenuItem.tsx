@@ -1,5 +1,5 @@
 // 'use client';
-import { usePathname } from 'next/navigation';
+import { useRouter } from 'next/router';
 import MenuItem, { MenuItemProps } from '@mui/material/MenuItem';
 
 interface INavMenuItem extends MenuItemProps {
@@ -7,7 +7,7 @@ interface INavMenuItem extends MenuItemProps {
 }
 
 export default function NavMenuItem({ path, children, sx, ...props }: INavMenuItem) {
-  const segment = usePathname() ?? '';
+  const segment = useRouter().pathname;
   const active = (path === 'Home' && segment === '/') || `/${path.toLowerCase()}` === segment.toLocaleLowerCase();
   return (
     <MenuItem

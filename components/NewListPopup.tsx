@@ -4,7 +4,7 @@ import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
-import addNewList from '../api/addNewList';
+import addNewList from '../pages/api/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import isEqual from 'lodash/isEqual';
