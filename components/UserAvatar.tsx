@@ -1,9 +1,9 @@
 import Avatar, { AvatarProps } from '@mui/material/Avatar';
 import Image from 'next/image';
-import { Tenant } from '../auth/types';
+import { User } from '../types/User';
 
 interface IUserAvatar extends AvatarProps {
-  tenant: Tenant | null;
+  user: User | undefined;
 }
 function stringToColor(string: string) {
   let hash = 0;
@@ -23,14 +23,14 @@ function stringToColor(string: string) {
   return color;
 }
 
-export default function UserAvatar({ tenant, children, sx, ...props }: IUserAvatar) {
-  const displayName = tenant?.name || tenant?.email;
+export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar) {
+  const displayName = user?.displayName || user?.email;
 
   if (displayName) {
     return (
       <Avatar sx={{ ...sx, bgcolor: stringToColor(displayName) }} {...props}>
-        {tenant?.photoUrl ? (
-          <Image src={tenant.photoUrl} alt={`Image for ${displayName}`} fill></Image>
+        {user?.photoURL ? (
+          <Image src={user.photoURL} alt={`Image for ${displayName}`} fill></Image>
         ) : (
           displayName
             .split(' ')

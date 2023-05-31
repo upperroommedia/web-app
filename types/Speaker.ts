@@ -17,18 +17,6 @@ export const emptySpeaker: ISpeaker = {
   images: [],
 };
 
-export interface AlgoliaSpeaker extends ISpeaker {
-  nbHits?: number;
-  _highlightResult?: {
-    name: {
-      value: string;
-      matchLevel: 'none' | 'partial' | 'full';
-      fullyHighlighted: boolean;
-      matchedWords: string[];
-    };
-  };
-}
-
 export const speakerConverter: FirestoreDataConverter<ISpeaker> = {
   toFirestore: (speaker: ISpeaker): ISpeaker => {
     return speaker;

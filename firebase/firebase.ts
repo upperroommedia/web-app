@@ -6,7 +6,7 @@ export const isDevelopment = process.env.NODE_ENV === 'development';
 // These keys are ok to leave public according to Firebase docs
 // Initialize Firebase
 const apps = getApps();
-let firebase: FirebaseApp;
+let firebase = null;
 if (!apps.length) {
   firebase = initializeApp({
     apiKey: 'AIzaSyCJKArKBX02ItsUD1zDJVC6JRA4sho7PTo',
@@ -20,11 +20,6 @@ if (!apps.length) {
       ? 'http://127.0.0.1:9000/?ns=urm-app-default-rtdb'
       : 'https://urm-app-default-rtdb.firebaseio.com/',
   });
-
-  if (isDevelopment) {
-    console.log('Setting Auth to use emulator');
-    process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
-  }
 } else {
   firebase = apps[0];
 }
