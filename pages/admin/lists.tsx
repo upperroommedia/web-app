@@ -6,8 +6,8 @@ import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '..
 // import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-import { adminProtected } from '../../utils/protectedRoutes';
+// import { GetServerSideProps, GetServerSidePropsContext } from 'next';
+// import { adminProtected } from '../../utils/protectedRoutes';
 import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
@@ -270,8 +270,8 @@ const AdminList = () => {
 
 AdminList.PageLayout = AdminLayout;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   return adminProtected(ctx);
+// };
 
 export default AdminList;

@@ -14,8 +14,9 @@ import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
 import { setDoc, doc, getDoc } from 'firebase/firestore';
 import firestore from '../../firebase/firestore';
-import { User } from '../../types/User';
-import { useRouter } from 'next/router';
+import { User, UserRole } from '../../types/User';
+import Stack from '@mui/material/Stack';
+import Image from 'next/image';
 
 interface Context {
   user: User | undefined;
@@ -39,8 +40,8 @@ const getUserInfoFromFirestore = async (uid: string) => {
 
 export const UserProvider = ({ children }: any) => {
   const [user, setUser] = useState<User>();
+  const [artificalLoading, setArtificalLoading] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
-  const router = useRouter();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -58,7 +59,13 @@ export const UserProvider = ({ children }: any) => {
           const token = await user.getIdToken();
           const role = (await user.getIdTokenResult()).claims.role as string;
           const names = await getUserInfoFromFirestore(user.uid);
-          setUser({ ...user, ...names!, role });
+          setUser({
+            ...user,
+            ...names!,
+            role,
+            isAdmin: () => role === UserRole.ADMIN,
+            isUploader: () => role === UserRole.UPLOADER || role === UserRole.ADMIN,
+          });
           nookies.destroy(null, 'token');
           nookies.set(null, 'token', token, { path: '/' });
           // router.reload();
@@ -68,8 +75,14 @@ export const UserProvider = ({ children }: any) => {
       }
       setLoading(false);
     });
+
+    const timer = setTimeout(() => {
+      setArtificalLoading(false);
+    }, 500);
+
     return () => {
       unsubscribe();
+      clearTimeout(timer);
     };
   }, []);
 
@@ -111,7 +124,6 @@ export const UserProvider = ({ children }: any) => {
 
   const logoutUser = async () => {
     await signOut(auth);
-    router.reload();
   };
 
   const resetPassword = async (email: string) => {
@@ -121,6 +133,23 @@ export const UserProvider = ({ children }: any) => {
       return error;
     }
   };
+
+  if (loading || artificalLoading) {
+    return (
+      <Stack
+        sx={{
+          width: '100vw',
+          height: '100vh',
+          // bgcolor: 'rgb(31 41 55)',
+
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} />
+      </Stack>
+    );
+  }
 
   return (
     <UserContext.Provider
@@ -134,7 +163,7 @@ export const UserProvider = ({ children }: any) => {
         resetPassword,
       }}
     >
-      {!loading && children}
+      {children}
     </UserContext.Provider>
   );
 };

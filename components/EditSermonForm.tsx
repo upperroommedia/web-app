@@ -2,7 +2,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Dialog from '@mui/material/Dialog';
 import Button from '@mui/material/Button';
-import Uploader from '../pages/uploader';
+import Uploader from './UploaderComponent';
 import { Sermon } from '../types/SermonTypes';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { collection } from 'firebase/firestore';

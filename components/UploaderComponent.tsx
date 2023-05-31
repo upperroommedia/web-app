@@ -2,8 +2,8 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import dynamic from 'next/dynamic';
-import uploadFile from './api/uploadFile';
-import editSermon from './api/editSermon';
+import uploadFile from '../pages/api/uploadFile';
+import editSermon from '../pages/api/editSermon';
 import styles from '../styles/Uploader.module.css';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import TextField from '@mui/material/TextField';
@@ -21,8 +21,6 @@ import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
-import { GetServerSideProps, GetServerSidePropsContext, InferGetServerSidePropsType } from 'next';
-import ProtectedRoute from '../components/ProtectedRoute';
 import useAuth from '../context/user/UserContext';
 import DropZone, { UploadableFile } from '../components/DropZone';
 import { ISpeaker } from '../types/Speaker';
@@ -47,6 +45,10 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
 import { List, listConverter, ListType } from '../types/List';
 import SubtitleSelector from '../components/SubtitleSelector';
+import { useRouter } from 'next/router';
+import Stack from '@mui/material/Stack';
+import CircularProgress from '@mui/material/CircularProgress';
+import RequestRoleChange from './RequestUploadPrivalige';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
@@ -97,8 +99,28 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
 };
 const DynamicPopUp = dynamic(() => import('../components/PopUp'), { ssr: false });
 
-const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getServerSideProps>) => {
+const Uploader = (props: UploaderProps) => {
   const { user } = useAuth();
+  const router = useRouter();
+  if (!user) {
+    router.push('/login');
+    return (
+      <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
+        <CircularProgress />
+      </Stack>
+    );
+  } else if (!user.isUploader()) {
+    return (
+      <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
+        <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
+          <Typography variant="h2">You are not an uploader.</Typography>
+          <Typography>In order to upload sermons, please contact the admin to be added as an uploader.</Typography>
+        </Stack>
+        <RequestRoleChange />
+      </Stack>
+    );
+  }
+
   const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon(user?.uid));
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [file, setFile] = useState<UploadableFile>();
@@ -606,10 +628,10 @@ const Uploader = (props: UploaderProps & InferGetServerSidePropsType<typeof getS
 
 export default Uploader;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  const userCredentials = await ProtectedRoute(ctx);
-  if (!userCredentials.props.uid || !['admin', 'uploader'].includes(userCredentials.props.customClaims?.role)) {
-    return userCredentials;
-  }
-  return { props: {} };
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   const userCredentials = await ProtectedRoute(ctx);
+//   if (!userCredentials.props.uid || !['admin', 'uploader'].includes(userCredentials.props.customClaims?.role)) {
+//     return userCredentials;
+//   }
+//   return { props: {} };
+// };

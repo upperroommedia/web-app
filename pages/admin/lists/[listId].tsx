@@ -6,7 +6,7 @@ import AdminSermonsList from '../../../components/AdminSermonsList';
 import firestore, { doc } from '../../../firebase/firestore';
 import AdminLayout from '../../../layout/adminLayout';
 import { listConverter } from '../../../types/List';
-import { adminProtected } from '../../../utils/protectedRoutes';
+// import { adminProtected } from '../../../utils/protectedRoutes';
 
 const SeriesSermon = () => {
   const router = useRouter();
@@ -33,9 +33,10 @@ const SeriesSermon = () => {
 
 SeriesSermon.PageLayout = AdminLayout;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   return adminProtected(ctx);
+// };
+
 export default SeriesSermon;
 //  <Box>
 //       <Box display="flex" justifyContent="center" gap={1}>
