@@ -31,7 +31,7 @@ const Signup = () => {
     lastName: '',
   });
   const { callbackurl: possibleCallback } = router.query;
-  const callbackUrl = (possibleCallback as string) || '/';
+  const callbackUrl = `/${possibleCallback as string}` || '/';
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
