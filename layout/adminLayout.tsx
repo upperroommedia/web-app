@@ -13,7 +13,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
   const router = useRouter();
   if (!user) {
-    router.push('/login');
+    router.push('/login?callbackurl=/admin');
     return (
       <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
         <CircularProgress />
