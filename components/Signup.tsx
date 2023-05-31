@@ -22,7 +22,7 @@ import { SignupForm } from '../context/types';
 
 const Signup = () => {
   const router = useRouter();
-  const { signup, loginWithGoogle, loginWithFacebook } = useAuth();
+  const { signup, loginWithGoogle } = useAuth();
 
   const [data, setData] = useState<SignupForm>({
     email: '',
@@ -58,16 +58,16 @@ const Signup = () => {
       setOpen(true);
     }
   };
-  const handleLoginWithFacebook = async () => {
-    try {
-      await loginWithFacebook();
-      router.push(callbackUrl);
-    } catch {
-      setTitle('Error');
-      setErrorMessage('Something went wrong. Please try again.');
-      setOpen(true);
-    }
-  };
+  // const handleLoginWithFacebook = async () => {
+  //   try {
+  //     await loginWithFacebook();
+  //     router.push(callbackUrl);
+  //   } catch {
+  //     setTitle('Error');
+  //     setErrorMessage('Something went wrong. Please try again.');
+  //     setOpen(true);
+  //   }
+  // };
 
   return (
     <div

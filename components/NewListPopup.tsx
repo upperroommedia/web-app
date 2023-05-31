@@ -13,7 +13,7 @@ import Box from '@mui/material/Box';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 import PopUp from './PopUp';
-import { CircularProgress } from '@mui/material';
+import CircularProgress from '@mui/material/CircularProgress';
 import { EditSubsplashListInputType, EditSubsplashListOutputType } from '../functions/src/editSubsplashList';
 import { createFunctionV2 } from '../utils/createFunction';
 import { createEmptyList, emptyList, List, ListType, OverflowBehavior } from '../types/List';
