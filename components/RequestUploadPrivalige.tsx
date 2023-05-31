@@ -5,6 +5,8 @@ import Select from '@mui/material/Select';
 import { useState } from 'react';
 import { UserRole } from '../types/User';
 import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import Tooltip from '@mui/material/Tooltip';
 
 const RequestRoleChange = () => {
   const defaultValue = UserRole.UPLOADER;
@@ -38,6 +40,17 @@ const RequestRoleChange = () => {
         value={reason}
         onChange={(event) => setReason(event.target.value)}
       />
+      <Tooltip title="This feature is not yet implemented. Please contact the admin directly.">
+        <Button
+          type="submit"
+          disabled={true}
+          onClick={() => {
+            alert('This feature is not yet implemented. Please contact the admin directly.');
+          }}
+        >
+          Submit
+        </Button>
+      </Tooltip>
     </FormControl>
     // TODO: Make form functional
   );
