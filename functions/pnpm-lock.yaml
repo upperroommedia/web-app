@@ -1,7 +1,7 @@
 lockfileVersion: 5.4
 
 specifiers:
-  '@google-cloud/storage': ^6.9.3
+  '@google-cloud/storage': 6.10.1
   '@types/fluent-ffmpeg': ^2.1.21
   '@types/imagemagick': ^0.0.31
   '@types/node': ^18.14.0
@@ -31,7 +31,7 @@ specifiers:
   uuidv4: ^6.2.13
 
 dependencies:
-  '@google-cloud/storage': 6.9.5
+  '@google-cloud/storage': 6.10.1
   axios: 1.4.0
   dotenv: 16.0.3
   firebase: 9.22.1
@@ -939,8 +939,8 @@ packages:
     resolution: {integrity: sha512-z1CjRjtQyBOYL+5Qr9DdYIfrdLBe746jRTYfaYU6MeXkqp7UfYs/jX16lFFVzZ7PGEJvqZNqYUEtb1mvDww4pA==}
     engines: {node: '>=12'}
 
-  /@google-cloud/storage/6.9.5:
-    resolution: {integrity: sha512-fcLsDA8YKcGuqvhk0XTjJGVpG9dzs5Em8IcUjSjspYvERuHYqMy9CMChWapSjv3Lyw//exa3mv4nUxPlV93BnA==}
+  /@google-cloud/storage/6.10.1:
+    resolution: {integrity: sha512-EtLlT0YbXtrbUxaNbEfTyTytrjELtl4i42flf8COg+Hu5+apdNjsFO9XEY39wshxAuVjLf4fCSm7GTSW+BD3gQ==}
     engines: {node: '>=12'}
     dependencies:
       '@google-cloud/paginator': 3.0.7
@@ -2872,7 +2872,7 @@ packages:
       uuid: 9.0.0
     optionalDependencies:
       '@google-cloud/firestore': 6.6.1
-      '@google-cloud/storage': 6.9.5
+      '@google-cloud/storage': 6.10.1
     transitivePeerDependencies:
       - encoding
       - supports-color
@@ -3056,7 +3056,7 @@ packages:
       extend: 3.0.2
       https-proxy-agent: 5.0.1
       is-stream: 2.0.1
-      node-fetch: 2.6.7
+      node-fetch: 2.6.9
     transitivePeerDependencies:
       - encoding
       - supports-color
@@ -4443,6 +4443,7 @@ packages:
         optional: true
     dependencies:
       whatwg-url: 5.0.0
+    dev: false
 
   /node-fetch/2.6.9:
     resolution: {integrity: sha512-DJm/CJkZkRjKKj4Zi4BsKVZh3ValV5IR5s7LVZnW+6YMh0W1BfNA8XSs6DLMGYlId5F3KnA70uu2qepcR08Qqg==}
@@ -5235,7 +5236,7 @@ packages:
     dependencies:
       http-proxy-agent: 5.0.0
       https-proxy-agent: 5.0.1
-      node-fetch: 2.6.7
+      node-fetch: 2.6.9
       stream-events: 1.0.5
       uuid: 9.0.0
     transitivePeerDependencies:
