@@ -8,6 +8,7 @@ if (!firebaseAdmin.apps.length) {
   }
 
   firebaseAdmin.initializeApp({
+    storageBucket: 'urm-app.appspot.com',
     databaseURL: `https://urm-app.firebaseio.com`,
   });
 }
