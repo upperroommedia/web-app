@@ -74,22 +74,18 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           <CircularProgress size={24} sx={{ margin: 1 }} />
         ) : sermon.status.subsplash === uploadStatus.UPLOADED ? (
           // TODO - Re-enable delete from subsplash
-          <Tooltip title="Remove From Subsplash (Temporaily Disabled)">
+          <Tooltip title="Remove From Subsplash">
             <span>
-              <IconButton
-                disabled={true || disableButtons}
-                aria-label="Upload to Subsplash"
-                onClick={deleteFromSubsplash}
-              >
+              <IconButton disabled={disableButtons} aria-label="Upload to Subsplash" onClick={deleteFromSubsplash}>
                 <UnpublishedIcon style={{ color: 'orangered' }} />
               </IconButton>
             </span>
           </Tooltip>
         ) : (
-          <Tooltip title="Upload to Subsplash (Temporarily Disabled)">
+          <Tooltip title="Upload to Subsplash">
             <span>
               <IconButton
-                disabled={true || disableButtons}
+                disabled={disableButtons}
                 aria-label="Upload to Subsplash"
                 style={{ color: 'lightgreen' }}
                 onClick={() => {
