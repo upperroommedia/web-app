@@ -1,6 +1,6 @@
 import { logger } from 'firebase-functions/v2';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
-import { storage, firestore, database } from 'firebase-admin';
+import firebaseAdmin from '../../firebase/firebaseAdmin';
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import os from 'os';
@@ -213,9 +213,9 @@ const addIntroOutro = onObjectFinalized(
       // This is not a media file
       return logger.log('Not a media file');
     }
-    const bucket = storage().bucket();
-    const realtimeDB = database();
-    const db = firestore();
+    const bucket = firebaseAdmin.storage().bucket();
+    const realtimeDB = firebaseAdmin.database();
+    const db = firebaseAdmin.firestore();
     const fileName = path.basename(filePath);
     const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
     const sermonStatus: sermonStatus = {

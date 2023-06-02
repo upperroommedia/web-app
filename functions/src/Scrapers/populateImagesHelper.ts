@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { firestore } from 'firebase-admin';
+
 import { logger } from 'firebase-functions/v2';
 import { ImageType } from '../../../types/Image';
 import { File, Bucket } from '@google-cloud/storage';
@@ -10,6 +10,7 @@ import path from 'path';
 import { v4 } from 'uuid';
 import sizeOf from 'image-size';
 import { firestoreAdminImagesConverter } from '../firestoreDataConverter';
+import { Firestore } from 'firebase-admin/firestore';
 
 const getImageDimensions = async (file: File): Promise<{ width: number; height: number }> => {
   if (!existsSync(os.tmpdir())) {
@@ -34,7 +35,7 @@ const streamDataToStorage = async (stream: Stream, destinationFile: File): Promi
 async function populateImages(
   bucket: Bucket,
   imageIds: Set<string>,
-  db: firestore.Firestore,
+  db: Firestore,
   subsplashImages: { image: any; imageName: string }[],
   firestoreImagesMap: Map<string, ImageType>
 ): Promise<void> {

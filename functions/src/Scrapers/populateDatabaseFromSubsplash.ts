@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from 'firebase-functions/v2';
-import { storage, firestore } from 'firebase-admin';
+import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { ImageType } from '../../../types/Image';
@@ -14,6 +14,7 @@ import populateSpeakers from './populateSpeakersHelper';
 import populateTopics from './populateTopicsHelper';
 import handleError from '../handleError';
 
+const { firestore, storage } = firebaseAdmin;
 export interface populateDatabaseFromSubsplashInputType {
   speakerTagIds?: string[];
 }

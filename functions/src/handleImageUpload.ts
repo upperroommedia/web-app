@@ -2,7 +2,7 @@ import axios, { AxiosRequestConfig } from 'axios';
 import { logger } from 'firebase-functions';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-import { storage, firestore } from 'firebase-admin';
+import firebaseAdmin from '../../firebase/firebaseAdmin';
 import {
   ImageSizeType,
   ImageSizes,
@@ -121,7 +121,7 @@ const handleImageUpload = onObjectFinalized(
     try {
       originalFile = path.join(os.tmpdir(), filePath);
       const tempLocalDir = path.dirname(originalFile);
-      const bucket = storage().bucket(object.bucket);
+      const bucket = firebaseAdmin.storage().bucket(object.bucket);
 
       // Create the temp directory where the storage file will be downloaded.
       logger.log(`Creating temporary directory: '${tempLocalDir}'`);
@@ -152,7 +152,8 @@ const handleImageUpload = onObjectFinalized(
         dateAddedMillis: new Date().getTime(),
       };
       logger.log('adding image with metadata to firestore', image);
-      await firestore()
+      await firebaseAdmin
+        .firestore()
         .collection('images')
         .withConverter(firestoreAdminImagesConverter)
         .doc(subsplashImageId)

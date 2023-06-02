@@ -3,7 +3,6 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import { ListType, OverflowBehavior } from '../../types/List';
 import handleError from './handleError';
 import { authenticateSubsplash } from './subsplashUtils';
-// import { firestore } from 'firebase-admin';
 import {
   MediaItem,
   getListCount,
@@ -11,7 +10,9 @@ import {
   listMetaDataType,
   addItemToList,
 } from './helpers/addToListHelpers';
-
+import firebaseAdmin from '../../firebase/firebaseAdmin';
+import { firestoreAdminListConverter } from './firestoreDataConverter';
+const firestoreDB = firebaseAdmin.firestore();
 export interface AddtoListInputType {
   listsMetadata: listMetaDataType[];
   mediaItem: MediaItem;
@@ -37,7 +38,6 @@ const addToSingleList = async (
 
   // handle overflow behavior
   if (overflowBehavior === OverflowBehavior.CREATENEWLIST) {
-    logger.log(type);
     throw new HttpsError('unimplemented', 'This function is not implemented yet');
   } else if (overflowBehavior === OverflowBehavior.REMOVEOLDEST) {
     logger.log('Handling overflow behavior: REMOVEOLDEST');
@@ -55,9 +55,9 @@ const addToSingleList = async (
 const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<void> => {
   logger.log('addToList');
 
-  if (request.auth?.token.role !== 'admin') {
-    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-  }
+  // if (request.auth?.token.role !== 'admin') {
+  //   throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
+  // }
   const data = request.data;
   if (!data.listsMetadata || !data.mediaItem) {
     throw new HttpsError('invalid-argument', 'The function must be called with a listsMetadata and mediaItem.');
@@ -67,8 +67,13 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
     const token = await authenticateSubsplash();
     await Promise.all(
       data.listsMetadata.map(async (list) => {
-        logger.log('list', list.listId);
-        await addToSingleList(list.listId, data.mediaItem, list.overflowBehavior, maxListCount, token, list.type);
+        const listRef = firestoreDB.collection('lists').withConverter(firestoreAdminListConverter).doc(list.listId);
+        firestoreDB.runTransaction(async (transaction) => {
+          const firebaseList = await transaction.get(listRef);
+          logger.log('firebaseList', firebaseList.data());
+          logger.log('list', list.listId);
+          await addToSingleList(list.listId, data.mediaItem, list.overflowBehavior, maxListCount, token, list.type);
+        });
       })
     );
   } catch (err) {

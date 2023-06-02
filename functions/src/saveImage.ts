@@ -1,7 +1,7 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import axios, { AxiosRequestConfig } from 'axios';
-import { storage } from 'firebase-admin';
+import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { unlink } from 'fs/promises';
 import fs, { existsSync, mkdirSync } from 'fs';
 import os from 'os';
@@ -53,7 +53,7 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     // Upload your data
     // const bucket = storage().bucket();
     const destinationFilePath = `speaker-images/${request.data.name}`;
-    const bucket = storage().bucket('urm-app-images');
+    const bucket = firebaseAdmin.storage().bucket('urm-app-images');
     await bucket.upload(tempFilePath, {
       destination: destinationFilePath,
     });
