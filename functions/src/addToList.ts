@@ -12,6 +12,7 @@ import {
 } from './helpers/addToListHelpers';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
+import { Timestamp } from 'firebase-admin/firestore';
 const firestoreDB = firebaseAdmin.firestore();
 export interface AddtoListInputType {
   listsMetadata: listMetaDataType[];
@@ -52,7 +53,7 @@ const addToSingleList = async (
   }
 };
 
-const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<void> => {
+const addToList = onCall(async (request: CallableRequest<AddtoListInputType>) => {
   logger.log('addToList');
 
   // if (request.auth?.token.role !== 'admin') {
@@ -62,20 +63,39 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
   if (!data.listsMetadata || !data.mediaItem) {
     throw new HttpsError('invalid-argument', 'The function must be called with a listsMetadata and mediaItem.');
   }
-  const maxListCount = 5;
+  const maxListCount = 200;
   try {
     const token = await authenticateSubsplash();
-    await Promise.all(
+    const result = await Promise.allSettled(
       data.listsMetadata.map(async (list) => {
-        const listRef = firestoreDB.collection('lists').withConverter(firestoreAdminListConverter).doc(list.listId);
-        firestoreDB.runTransaction(async (transaction) => {
-          const firebaseList = await transaction.get(listRef);
-          logger.log('firebaseList', firebaseList.data());
-          logger.log('list', list.listId);
+        const listRef = firestoreDB
+          .collection('lists')
+          .where('subsplashId', '==', list.listId)
+          .limit(1)
+          .withConverter(firestoreAdminListConverter);
+        await firestoreDB.runTransaction(async (transaction) => {
+          const firebaseListSnapshot = await transaction.get(listRef);
+          if (firebaseListSnapshot.empty) {
+            throw new HttpsError(
+              'not-found',
+              `The list you tried to add to does not exist in firestore: ${list.listId}`
+            );
+          }
+          const firebaseList = firebaseListSnapshot.docs[0];
+          firebaseList.ref.update({ updatedAtMillis: Timestamp.now().toMillis() }); // block other transactions from moving past this point
           await addToSingleList(list.listId, data.mediaItem, list.overflowBehavior, maxListCount, token, list.type);
+          firebaseList.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
         });
       })
     );
+    const returnResult = result.map((r, index) => {
+      if (r.status === 'fulfilled') {
+        return { listId: data.listsMetadata[index], status: 'success' };
+      } else {
+        return { listId: data.listsMetadata[index], status: 'error', error: r.reason };
+      }
+    });
+    return returnResult;
   } catch (err) {
     throw handleError(err);
   }
