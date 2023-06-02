@@ -6,7 +6,7 @@ import Typography from '@mui/material/Typography';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { doc, updateDoc, collection } from '../firebase/firestore';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
-import { AddtoListInputType } from '../functions/src/addToList';
+import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
 import {
   CreateNewSubsplashListInputType,
   CreateNewSubsplashListOutputType,
@@ -54,7 +54,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
   const uploadToSubsplash = async () => {
     try {
       const uploadToSubsplashCallable = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
-      const addToList = createFunctionV2<AddtoListInputType, void>('addtolist');
+      const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
       const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
         title: sermon.title,
@@ -76,7 +76,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
       await updateDoc(sermonRef, { subsplashId: id });
       // get series
       // get/create subsplashListId and overflow behavior
-      const listMetadata = await Promise.all(
+      const listsMetadata = await Promise.all(
         listArray.map(async (list) => {
           if (list.subsplashId) {
             return { listId: list.subsplashId, overflowBehavior: list.overflowBehavior, type: list.type };
@@ -96,10 +96,17 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
         })
       );
 
-      await addToList({
-        listMetadata,
-        mediaItemIds: [{ id, type: 'media-item' }],
+      const addToListReturn = await addToList({
+        listsMetadata,
+        mediaItem: { id, type: 'media-item' },
       });
+      if (Array.isArray(addToListReturn)) {
+        addToListReturn.forEach((r) => {
+          if (r.status === 'error') {
+            throw new Error(r.error);
+          }
+        });
+      }
       await updateDoc(sermonRef, {
         status: { ...sermon.status, subsplash: uploadStatus.UPLOADED },
         approverId: user?.uid,

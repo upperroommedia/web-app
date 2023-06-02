@@ -18,6 +18,18 @@ export interface AddtoListInputType {
   listsMetadata: listMetaDataType[];
   mediaItem: MediaItem;
 }
+type status = 'success' | 'error';
+type OutputTypes =
+  | {
+      listId: string;
+      status: 'success';
+    }
+  | {
+      listId: string;
+      status: 'error';
+      error: string;
+    };
+export type AddToListOutputType = OutputTypes[];
 
 const addToSingleList = async (
   listId: string,
@@ -53,7 +65,7 @@ const addToSingleList = async (
   }
 };
 
-const addToList = onCall(async (request: CallableRequest<AddtoListInputType>) => {
+const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
   logger.log('addToList');
 
   // if (request.auth?.token.role !== 'admin') {
@@ -90,9 +102,11 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>) =>
     );
     const returnResult = result.map((r, index) => {
       if (r.status === 'fulfilled') {
-        return { listId: data.listsMetadata[index], status: 'success' };
+        const status: status = 'success';
+        return { listId: data.listsMetadata[index].listId, status };
       } else {
-        return { listId: data.listsMetadata[index], status: 'error', error: r.reason };
+        const status: status = 'error';
+        return { listId: data.listsMetadata[index].listId, status, error: JSON.stringify(r.reason) };
       }
     });
     return returnResult;
