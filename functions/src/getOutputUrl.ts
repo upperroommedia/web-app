@@ -1,6 +1,6 @@
 import logger from 'firebase-functions/lib/logger';
 import { GetSignedUrlConfig } from '@google-cloud/storage';
-import { storage } from 'firebase-admin';
+import firebaseAdmin from '../../firebase/firebaseAdmin';
 
 const getOutputUrl = async (fileBucket: string, fileName: string, transcodeTo: string): Promise<string> => {
   logger.log('Get Output Url with Parameters:', fileBucket, fileName, transcodeTo);
@@ -17,7 +17,8 @@ const getOutputUrl = async (fileBucket: string, fileName: string, transcodeTo: s
     expires: Date.now() + 15 * 60 * 1000, // 15 minutes
     // contentType: tried all of the above
   };
-  const [outputUrl] = await storage()
+  const [outputUrl] = await firebaseAdmin
+    .storage()
     .bucket(fileBucket)
     .file(`processed-sermons/${fileName}.${transcodeTo}`)
     .getSignedUrl(outputOptions);

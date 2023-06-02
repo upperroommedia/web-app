@@ -134,3 +134,26 @@ export async function getListCount(listId: string, token: string): Promise<numbe
   logger.log(`Current list count for list: ${listId} is: ${currentListCount}`);
   return currentListCount;
 }
+
+export async function handleOverflow(
+  listId: string,
+  mediaItem: MediaItem,
+  maxListCount: number,
+  token: string,
+  type: ListType
+) {
+  logger.log(
+    `handleOverflow(listId: ${listId}, itemsToAdd: ${JSON.stringify(mediaItem)}, maxListCount: ${maxListCount})`
+  );
+  const currentListCount = await getListCount(listId, token);
+  const newListCount = currentListCount + 1;
+
+  // Base case: list is not full
+  if (newListCount <= maxListCount) {
+    await addItemToList(mediaItem, listId, newListCount, token);
+    return;
+  }
+
+  // Recursive case: list is full
+  //TODO: 'handle overflow';
+}

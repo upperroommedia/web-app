@@ -1,10 +1,13 @@
+import { DocumentData, QuerySnapshot } from 'firebase-admin/firestore';
 import { firestore, logger } from 'firebase-functions';
-import { firestore as firestoreAdmin } from 'firebase-admin';
+import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { Sermon } from '../../../../types/SermonTypes';
 import handleError from '../../handleError';
 
+const firestoreAdmin = firebaseAdmin.firestore();
+
 async function handleDelete(
-  seriesSermonSnapshot: firestoreAdmin.QuerySnapshot<firestoreAdmin.DocumentData>,
+  seriesSermonSnapshot: QuerySnapshot<DocumentData>,
 
   sermonId: string
 ) {
@@ -12,14 +15,14 @@ async function handleDelete(
   logger.info(`Sermon ${sermonId} deleted`);
 
   // remove sermon from any series
-  const batch = firestoreAdmin().batch();
+  const batch = firestoreAdmin.batch();
   seriesSermonSnapshot.docs.forEach((doc) => {
     batch.delete(doc.ref);
   });
   await batch.commit();
 
   // remove all nested collections
-  await firestoreAdmin().recursiveDelete(firestoreAdmin().doc(`sermons/${sermonId}`));
+  await firestoreAdmin.recursiveDelete(firestoreAdmin.doc(`sermons/${sermonId}`));
 }
 
 const sermonWriteTrigger = firestore.document('sermons/{sermonId}').onWrite(async (change, context) => {
@@ -27,12 +30,12 @@ const sermonWriteTrigger = firestore.document('sermons/{sermonId}').onWrite(asyn
   const sermonBefore = change.before.data() as Sermon | undefined;
   const sermonAfter = change.after.data() as Sermon | undefined;
   try {
-    const seriesSermonSnapshot = await firestoreAdmin().collectionGroup('listItems').where('id', '==', sermonId).get();
+    const seriesSermonSnapshot = await firestoreAdmin.collectionGroup('listItems').where('id', '==', sermonId).get();
     if (sermonBefore && sermonAfter) {
       // Update
       logger.info(`Sermon ${sermonId} updated`);
       // get all sermons in Sermon
-      const batch = firestoreAdmin().batch();
+      const batch = firestoreAdmin.batch();
       seriesSermonSnapshot.docs.forEach((doc) => {
         batch.update(doc.ref, { ...sermonAfter });
       });

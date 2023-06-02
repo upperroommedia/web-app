@@ -1,17 +1,6 @@
 import * as firebaseAdmin from 'firebase-admin';
 import { isDevelopment } from './firebase';
 
-/* eslint-disable no-console */
-const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
-const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-const projectId = process.env.FIREBASE_PROJECT_ID;
-
-if (!privateKey || !clientEmail || !projectId) {
-  console.log(
-    `Failed to load Firebase credentials. Follow the instructions in the README to set your Firebase credentials inside environment variables.`
-  );
-}
-
 if (!firebaseAdmin.apps.length) {
   if (isDevelopment) {
     console.log('Setting Admin SDK to use emulator');
@@ -19,12 +8,7 @@ if (!firebaseAdmin.apps.length) {
   }
 
   firebaseAdmin.initializeApp({
-    credential: firebaseAdmin.credential.cert({
-      projectId,
-      privateKey,
-      clientEmail,
-    }),
-    databaseURL: `https://${projectId}.firebaseio.com`,
+    databaseURL: `https://urm-app.firebaseio.com`,
   });
 }
 export default firebaseAdmin;

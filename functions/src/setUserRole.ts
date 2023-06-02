@@ -1,5 +1,5 @@
 import { ROLES } from '../../context/types';
-import { auth } from 'firebase-admin';
+import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { https } from 'firebase-functions';
 
 const setUserRole = https.onCall(async (data: { uid: string; role: string }, context) => {
@@ -9,13 +9,14 @@ const setUserRole = https.onCall(async (data: { uid: string; role: string }, con
   if (!ROLES.includes(data.role)) {
     return { status: `Invalid Role: Should be either ${ROLES.join(', ')}` };
   }
+  const auth = firebaseAdmin.auth();
   try {
-    const user = await auth().getUser(data.uid);
+    const user = await auth.getUser(data.uid);
     if (user.customClaims?.role === data.role) {
       return { status: `User is already role: ${data.role}` };
     } else {
-      await auth().setCustomUserClaims(user.uid, { role: data.role });
-      await auth().revokeRefreshTokens(user.uid);
+      await auth.setCustomUserClaims(user.uid, { role: data.role });
+      await auth.revokeRefreshTokens(user.uid);
       return { status: 'Success!' };
     }
   } catch (e) {
