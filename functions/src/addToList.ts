@@ -9,6 +9,7 @@ import {
   removeNOldestItems,
   listMetaDataType,
   addItemToList,
+  isAlreadyInList,
 } from './helpers/addToListHelpers';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
@@ -51,9 +52,10 @@ const addToSingleList = async (
 
   // handle overflow behavior
   if (overflowBehavior === OverflowBehavior.CREATENEWLIST) {
+    logger.log('Handling overflow behavior: CREATENEWLIST for list: ', listId);
     throw new HttpsError('unimplemented', 'This function is not implemented yet');
   } else if (overflowBehavior === OverflowBehavior.REMOVEOLDEST) {
-    logger.log('Handling overflow behavior: REMOVEOLDEST');
+    logger.log('Handling overflow behavior: REMOVEOLDEST for list: ', listId);
     await removeNOldestItems(1, listId, token, 'created_at');
     newListCount--;
     await addItemToList(mediaItem, listId, newListCount, token);
@@ -95,7 +97,11 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
           }
           const firebaseList = firebaseListSnapshot.docs[0];
           firebaseList.ref.update({ updatedAtMillis: Timestamp.now().toMillis() }); // block other transactions from moving past this point
-          await addToSingleList(list.listId, data.mediaItem, list.overflowBehavior, maxListCount, token, list.type);
+          if (!(await isAlreadyInList(data.mediaItem, list.listId, token, maxListCount))) {
+            await addToSingleList(list.listId, data.mediaItem, list.overflowBehavior, maxListCount, token, list.type);
+          } else {
+            logger.log(`Media item: ${data.mediaItem.id} is already in list: ${list.listId}, skipping...`);
+          }
           firebaseList.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
         });
       })

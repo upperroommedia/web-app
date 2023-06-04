@@ -18,7 +18,7 @@ import { createFunction, createFunctionV2 } from '../utils/createFunction';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import PopUp from './PopUp';
 // import SeriesSelector from './SeriesSelector';
-import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
+import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { List, listConverter } from '../types/List';
 import ListSelector from './ListSelector';
 import useAuth from '../context/user/UserContext';
@@ -41,7 +41,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
   const { user } = useAuth();
   const [autoPublish, setAutoPublish] = useState<boolean>(false);
   const [listArray, setListArray] = useState<List[]>([]);
-  const [listArrayFirestore, loading, error] = useCollectionDataOnce(
+  const [listArrayFirestore, loading, error] = useCollectionData(
     collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(listConverter)
   );
 
@@ -49,7 +49,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
     if (listArrayFirestore) {
       setListArray(listArrayFirestore);
     }
-  }, [listArrayFirestore]);
+  }, [JSON.stringify(listArrayFirestore)]);
 
   const uploadToSubsplash = async () => {
     try {
@@ -70,10 +70,13 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
       };
       setIsUploadingToSubsplash(true);
       // TODO [1]: Fix return Type
-      const response = (await uploadToSubsplashCallable(data)) as unknown as { id: string };
+      let id = sermon.subsplashId;
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-      const id = response.id;
-      await updateDoc(sermonRef, { subsplashId: id });
+      if (!id) {
+        const response = (await uploadToSubsplashCallable(data)) as unknown as { id: string };
+        id = response.id;
+        await updateDoc(sermonRef, { subsplashId: id });
+      }
       // get series
       // get/create subsplashListId and overflow behavior
       const listsMetadata = await Promise.all(

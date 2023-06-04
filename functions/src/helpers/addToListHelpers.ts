@@ -29,6 +29,32 @@ export interface newSubsplashListRow extends Omit<SubsplashListRow, 'id' | '_emb
 }
 export type sortType = 'position' | 'created_at';
 
+async function getFullList(listId: string, token: string, maxListCount: number): Promise<SubsplashListRow[]> {
+  const listConfig = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${listId}&page[size]=${maxListCount}&sort=position`,
+    token,
+    'GET'
+  );
+  const response = (await axios(listConfig)).data;
+  return response['_embedded']['list-rows'];
+}
+
+export async function isAlreadyInList(
+  mediaItem: MediaItem,
+  listId: string,
+  token: string,
+  maxListCount: number
+): Promise<boolean> {
+  // check if item is already in the list
+  const fullList = await getFullList(listId, token, maxListCount);
+  const alreadyInList = fullList.some((listRow) => {
+    const listRowId = convertSubsplashListRowToMediaItem(listRow).id;
+    logger.log(`listRowId: ${listRowId}, mediaItem.id: ${mediaItem.id}`);
+    return listRowId === mediaItem.id;
+  });
+  return alreadyInList;
+}
+
 export async function addItemToList(mediaItem: MediaItem, listId: string, newListCount: number, token: string) {
   logger.log(`Adding item: ${JSON.stringify(mediaItem)} to subsplash list: ${listId}`);
   const listRow = {
