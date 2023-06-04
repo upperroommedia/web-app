@@ -39,12 +39,8 @@ export const listTypeOptions: {
 };
 
 const NewListPopup = (props: NewListPopupProps) => {
-  // TODO[0]: Make empty list without any specified list type if listtype is not passed in
   const [newList, setNewList] = useState<List>(
     props.existingList ? props.existingList : createEmptyList(props.listType || ListType.SERIES)
-  );
-  const [selectedOverflowBehavior, setSelectedOverflowBehavior] = useState<OverflowBehavior>(
-    OverflowBehavior.CREATENEWLIST
   );
 
   const [submitting, setSubmitting] = useState(false);
@@ -207,12 +203,12 @@ const NewListPopup = (props: NewListPopupProps) => {
         <FormControl fullWidth>
           <InputLabel id="overflow-behavior-select-label">Overflow Behavior</InputLabel>
           <Select
-            value={selectedOverflowBehavior}
+            value={newList.overflowBehavior}
             label="Overflow Behavior"
             labelId="overflow-behavior-select-label"
             id="overflow-behavior-select"
             onChange={(e) => {
-              setSelectedOverflowBehavior(e.target.value as OverflowBehavior);
+              setNewList((oldList) => ({ ...oldList, overflowBehavior: e.target.value as OverflowBehavior }));
             }}
           >
             {(Object.keys(OverflowBehavior) as Array<keyof typeof OverflowBehavior>).map((overflowBehavior) => {
