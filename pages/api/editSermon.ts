@@ -1,4 +1,4 @@
-import firestore, { collection, doc, getDocs, setDoc, writeBatch } from '../../firebase/firestore';
+import firestore, { collectionGroup, doc, getDocs, query, setDoc, where, writeBatch } from '../../firebase/firestore';
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
@@ -52,19 +52,23 @@ const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
   }
 
   // update sermonSeries
-  const sermonSeriesSnapshot = await getDocs(
-    collection(firestore, `lists/${sermonRef.id}/listItems`).withConverter(listConverter)
-  );
+  const sermonSeriesQuery = query(
+    collectionGroup(firestore, 'listItems'),
+    where('id', '==', sermonRef.id)
+  ).withConverter(listConverter);
+
+  const sermonSeriesDocs = await getDocs(sermonSeriesQuery);
+  const seriesListFromFirebase = sermonSeriesDocs.docs.map((doc) => doc.ref.parent.parent?.id || '');
 
   const seriesInFirebase = new Set<string>();
   const batch = writeBatch(firestore);
-  sermonSeriesSnapshot.forEach((snapshot) => {
-    if (sermonSeries.find((series) => series.id === snapshot.id)) {
+  seriesListFromFirebase.forEach((listId) => {
+    if (sermonSeries.find((series) => series.id === listId)) {
       // series exists in both lists
-      seriesInFirebase.add(snapshot.id);
+      seriesInFirebase.add(listId);
     } else {
       // series exists in firebase but not updated list
-      batch.delete(doc(firestore, `lists/${snapshot.id}/listItems/${sermon.id}`));
+      batch.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
     }
   });
 
