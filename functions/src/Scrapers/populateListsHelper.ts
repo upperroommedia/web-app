@@ -118,6 +118,7 @@ async function populateLists(
           firestoreLists.doc(list.id),
           {
             id: list.id,
+            subsplashId: list.id,
             name: list.title,
             count: list.list_rows_count,
             overflowBehavior: OverflowBehavior.CREATENEWLIST,
