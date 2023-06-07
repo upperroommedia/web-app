@@ -13,15 +13,15 @@ import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
-import UploadToSubsplashPopup from './UploadToSubsplashPopup';
+import UploadToSubsplashPopup from './ManageUploadsPopup';
 import { isDevelopment } from '../firebase/firebase';
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
   isUploadingToSubsplash: boolean;
   isUploadingToSoundCloud: boolean;
-  uploadToSubsplashPopup: boolean;
-  setUploadToSubsplashPopup: (boolean: boolean) => void;
+  manageUploadsPopup: boolean;
+  setManageUploadsPopup: (boolean: boolean) => void;
   setIsUploadingToSubsplash: Dispatch<SetStateAction<boolean>>;
   handleDelete: () => Promise<void>;
   uploadToSoundCloud: () => Promise<void>;
@@ -33,8 +33,8 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   sermon,
   isUploadingToSoundCloud,
   isUploadingToSubsplash,
-  uploadToSubsplashPopup,
-  setUploadToSubsplashPopup,
+  manageUploadsPopup,
+  setManageUploadsPopup,
   setIsUploadingToSubsplash,
   handleDelete,
   uploadToSoundCloud,
@@ -72,28 +72,15 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
         )}
         {isUploadingToSubsplash ? (
           <CircularProgress size={24} sx={{ margin: 1 }} />
-        ) : sermon.status.subsplash === uploadStatus.UPLOADED ? (
-          // TODO - Re-enable delete from subsplash
-          <Tooltip title="Remove From Subsplash (Temporarily Disabled)">
-            <span>
-              <IconButton
-                disabled={true || disableButtons}
-                aria-label="Upload to Subsplash"
-                onClick={deleteFromSubsplash}
-              >
-                <UnpublishedIcon style={{ color: 'orangered' }} />
-              </IconButton>
-            </span>
-          </Tooltip>
         ) : (
-          <Tooltip title="Upload to Subsplash (Temporarily Disabled) ">
+          <Tooltip title="Manage Upload">
             <span>
               <IconButton
-                disabled={true || disableButtons}
+                disabled={disableButtons}
                 aria-label="Upload to Subsplash"
                 style={{ color: 'lightgreen' }}
                 onClick={() => {
-                  setUploadToSubsplashPopup(true);
+                  setManageUploadsPopup(true);
                 }}
               >
                 <PublishIcon />
@@ -126,20 +113,24 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           </span>
         </Tooltip>
       </Box>
-      <UploadToSubsplashPopup
-        sermon={sermon}
-        uploadToSubsplashPopupBoolean={uploadToSubsplashPopup}
-        setUploadToSubsplashPopupBoolean={setUploadToSubsplashPopup}
-        setIsUploadingToSubsplash={setIsUploadingToSubsplash}
-        isUploadingToSubsplash={isUploadingToSubsplash}
-      />
-      <DeleteEntityPopup
-        entityBeingDeleten="sermon"
-        handleDelete={handleDelete}
-        deleteConfirmationPopup={deleteConfirmationPopup}
-        setDeleteConfirmationPopup={setDeleteConfirmationPopup}
-        isDeleting={isUploadingToSubsplash}
-      />
+      {manageUploadsPopup && (
+        <UploadToSubsplashPopup
+          sermon={sermon}
+          manageUploadsPopupBoolean={manageUploadsPopup}
+          setManageUploadsPopupBoolean={setManageUploadsPopup}
+          setIsUploadingToSubsplash={setIsUploadingToSubsplash}
+          isUploadingToSubsplash={isUploadingToSubsplash}
+        />
+      )}
+      {deleteConfirmationPopup && (
+        <DeleteEntityPopup
+          entityBeingDeleten="sermon"
+          handleDelete={handleDelete}
+          deleteConfirmationPopup={deleteConfirmationPopup}
+          setDeleteConfirmationPopup={setDeleteConfirmationPopup}
+          isDeleting={isUploadingToSubsplash}
+        />
+      )}
       {editFormPopup && <EditSermonForm open={editFormPopup} setOpen={() => setEditFormPopup(false)} sermon={sermon} />}
     </>
   );

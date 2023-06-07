@@ -1,10 +1,8 @@
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Checkbox from '@mui/material/Checkbox';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
-import firestore, { doc, updateDoc, collection } from '../firebase/firestore';
+import firestore, { doc, updateDoc, collection, writeBatch } from '../firebase/firestore';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
 import {
@@ -19,30 +17,31 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import PopUp from './PopUp';
 // import SeriesSelector from './SeriesSelector';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { List, listConverter } from '../types/List';
-import ListSelector from './ListSelector';
+import { SermonList, sermonListConverter } from '../types/SermonList';
+// import ListSelector from './ListSelector';
 import useAuth from '../context/user/UserContext';
+import UploadStatusList from './UploadStatusList';
+import { isDevelopment } from '../firebase/firebase';
 
-interface UploadToSubsplashPopupProps {
+interface ManageUploadsPopupProps {
   sermon: Sermon;
-  uploadToSubsplashPopupBoolean: boolean;
-  setUploadToSubsplashPopupBoolean: (boolean: boolean) => void;
+  manageUploadsPopupBoolean: boolean;
+  setManageUploadsPopupBoolean: (boolean: boolean) => void;
   setIsUploadingToSubsplash: Dispatch<SetStateAction<boolean>>;
   isUploadingToSubsplash: boolean;
 }
 
-const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = ({
+const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
   sermon,
-  uploadToSubsplashPopupBoolean,
-  setUploadToSubsplashPopupBoolean,
+  manageUploadsPopupBoolean,
+  setManageUploadsPopupBoolean,
   setIsUploadingToSubsplash,
   isUploadingToSubsplash,
-}: UploadToSubsplashPopupProps) => {
+}: ManageUploadsPopupProps) => {
   const { user } = useAuth();
-  const [autoPublish, setAutoPublish] = useState<boolean>(false);
-  const [listArray, setListArray] = useState<List[]>([]);
+  const [listArray, setListArray] = useState<SermonList[]>([]);
   const [listArrayFirestore, loading, error] = useCollectionData(
-    collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(listConverter)
+    collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter)
   );
 
   useEffect(() => {
@@ -51,7 +50,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
     }
   }, [JSON.stringify(listArrayFirestore)]);
 
-  const uploadToSubsplash = async () => {
+  const uploadToSubsplash = async (listsToUploadTo: SermonList[]) => {
     try {
       const uploadToSubsplashCallable = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
@@ -60,7 +59,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
         title: sermon.title,
         subtitle: sermon.subtitle,
         speakers: sermon.speakers,
-        autoPublish,
+        autoPublish: !isDevelopment,
         audioTitle: sermon.title,
         audioUrl: url,
         topics: sermon.topics,
@@ -80,7 +79,7 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
       // get series
       // get/create subsplashListId and overflow behavior
       const listsMetadata = await Promise.all(
-        listArray.map(async (list) => {
+        listsToUploadTo.map(async (list) => {
           if (list.subsplashId) {
             return { listId: list.subsplashId, overflowBehavior: list.overflowBehavior, type: list.type };
           }
@@ -103,35 +102,39 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
         listsMetadata,
         mediaItem: { id, type: 'media-item' },
       });
-      if (Array.isArray(addToListReturn)) {
-        addToListReturn.forEach((r) => {
-          if (r.status === 'error') {
-            throw new Error(r.error);
-          }
-        });
-      }
-      await updateDoc(sermonRef, {
+
+      const batch = writeBatch(firestore);
+
+      addToListReturn.forEach((r) => {
+        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${r.listId}`).withConverter(
+          sermonListConverter
+        );
+        if (r.status === 'success') {
+          batch.update(docRef, { uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId } });
+        } else {
+          batch.update(docRef, { uploadStatus: { status: uploadStatus.ERROR, reason: r.error } });
+        }
+      });
+
+      batch.update(sermonRef, {
         status: { ...sermon.status, subsplash: uploadStatus.UPLOADED },
         approverId: user?.uid,
       });
-      await fetch(`/api/revalidate/sermons?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET}`);
+
+      await batch.commit();
+      // await fetch(`/api/revalidate/sermons?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET}`);
     } catch (error) {
+      console.error(error);
       alert(error);
     }
     setIsUploadingToSubsplash(false);
-    setUploadToSubsplashPopupBoolean(false);
   };
 
   return (
     <PopUp
       title={'Upload Sermon to Supsplash?'}
-      open={uploadToSubsplashPopupBoolean}
-      setOpen={() => setUploadToSubsplashPopupBoolean(false)}
-      button={
-        <Button aria-label="Confirm Upload to Subsplash" onClick={uploadToSubsplash}>
-          {isUploadingToSubsplash ? <CircularProgress /> : 'Upload'}
-        </Button>
-      }
+      open={manageUploadsPopupBoolean}
+      setOpen={() => setManageUploadsPopupBoolean(false)}
     >
       <Box display="flex" flexDirection="column" gap={1}>
         <Box display="flex" alignItems="center" gap={1} marginBottom={1}>
@@ -144,21 +147,35 @@ const UploadToSubsplashPopup: FunctionComponent<UploadToSubsplashPopupProps> = (
           />
           <Typography variant="h6">{sermon.title}</Typography>
         </Box>
-        <Typography variant="body1">The sermon will be added to the following lists:</Typography>
         {error ? (
           <Typography>{`Error: ${error.message}`}</Typography>
         ) : loading ? (
           <CircularProgress />
         ) : (
-          <ListSelector sermonList={listArray} setSermonList={setListArray} />
+          <>
+            <UploadStatusList
+              sectionTitle="Uploaded"
+              sermonListItems={listArray.filter(
+                (sermonListItem) => sermonListItem.uploadStatus?.status === uploadStatus.UPLOADED
+              )}
+              // TODO handle remove from subsplash and delete from subsplash
+              buttonAction={async (list) => console.log('delete from subsplash')}
+              buttonLabel="Remove From Lists"
+              buttonColorVariant="error"
+            />
+            <UploadStatusList
+              sectionTitle="Not Uploaded"
+              sermonListItems={listArray.filter(
+                (sermonListItem) => sermonListItem.uploadStatus?.status !== uploadStatus.UPLOADED
+              )}
+              buttonAction={uploadToSubsplash}
+              buttonLabel="Upload to Subsplash"
+            />
+          </>
         )}
-        <Box display="flex" alignItems={'center'} onClick={() => setAutoPublish((previousValue) => !previousValue)}>
-          <Checkbox checked={autoPublish} />
-          <Typography>Auto publish when upload is complete</Typography>
-        </Box>
       </Box>
     </PopUp>
   );
 };
 
-export default UploadToSubsplashPopup;
+export default ManageUploadsPopup;

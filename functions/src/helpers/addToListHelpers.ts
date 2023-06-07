@@ -44,23 +44,24 @@ export async function isAlreadyInList(
   listId: string,
   token: string,
   maxListCount: number
-): Promise<boolean> {
+): Promise<{ isInList: true; listItemId: string } | { isInList: false }> {
   // check if item is already in the list
   const fullList = await getFullList(listId, token, maxListCount);
-  const alreadyInList = fullList.some((listRow) => {
+  const listRow = fullList.find((listRow) => {
     const listRowId = convertSubsplashListRowToMediaItem(listRow).id;
     logger.log(`listRowId: ${listRowId}, mediaItem.id: ${mediaItem.id}`);
     return listRowId === mediaItem.id;
   });
-  return alreadyInList;
+  return listRow ? { isInList: true, listItemId: listRow.id } : { isInList: false };
 }
 
 export async function addItemToList(mediaItem: MediaItem, listId: string, newListCount: number, token: string) {
   logger.log(`Adding item: ${JSON.stringify(mediaItem)} to subsplash list: ${listId}`);
+  const position = 1;
   const listRow = {
     app_key: '9XTSHD',
     method: 'static',
-    position: 1,
+    position,
     type: mediaItem.type,
     _embedded: {
       [mediaItem.type]: {
@@ -85,8 +86,13 @@ export async function addItemToList(mediaItem: MediaItem, listId: string, newLis
     'PATCH',
     payload
   );
-  await axios(patchListConfig);
-  //TODO: Add mediaItem to firestore
+  const response = await axios(patchListConfig);
+  const data = await response.data();
+  const listItemId = data._embedded['list-rows'][0].id;
+  if (!listItemId) {
+    throw new HttpsError('internal', 'The subsplash list you are adding to is corrupted: unable to find listItemId');
+  }
+  return listItemId;
 }
 
 async function getLastNOldestItems(
