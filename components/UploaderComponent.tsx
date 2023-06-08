@@ -126,6 +126,7 @@ const Uploader = (props: UploaderProps) => {
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
   const [isUploading, setIsUploading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [useYoutubeUrl, _setUseYoutubeUrl] = useState(false);
 
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
@@ -161,7 +162,7 @@ const Uploader = (props: UploaderProps) => {
       );
 
       // fetch latest list
-      if (sermonList.find((list) => list.type === ListType.LATEST) !== undefined) {
+      if (!props.existingSermon && sermonList.find((list) => list.type === ListType.LATEST) === undefined) {
         const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
           listConverter
         );
@@ -500,7 +501,9 @@ const Uploader = (props: UploaderProps) => {
             <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
               <Button
                 onClick={async () => {
+                  setIsEditing(true);
                   await editSermon(sermon, sermonList);
+                  setIsEditing(false);
                   props.setEditFormOpen?.(false);
                 }}
                 disabled={
@@ -508,11 +511,12 @@ const Uploader = (props: UploaderProps) => {
                   sermon.title === '' ||
                   date === null ||
                   sermon.speakers.length === 0 ||
-                  sermon.subtitle === ''
+                  sermon.subtitle === '' ||
+                  isEditing
                 }
                 variant="contained"
               >
-                update sermon
+                {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
               </Button>
             </div>
           ) : (

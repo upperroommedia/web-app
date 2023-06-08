@@ -41,6 +41,7 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
 };
 
 const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA, context): Promise<unknown> => {
+  logger.log('uploadToSubsplash called');
   if (context.auth?.token.role !== 'admin') {
     return { status: 'Not Authorized' };
   }

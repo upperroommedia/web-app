@@ -20,6 +20,8 @@ export const createSermon = ({
     audioStatus: sermonStatusType.PENDING,
   },
   images = <ImageType[]>[],
+  numberOfLists = 0,
+  numberOfListsUploadedTo = 0,
 }): Sermon => {
   return {
     id,
@@ -33,6 +35,8 @@ export const createSermon = ({
     dateString,
     status,
     images,
+    numberOfLists,
+    numberOfListsUploadedTo,
   };
 };
 
@@ -86,5 +90,7 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
     },
     images: [],
     ...(uploaderId && { uploaderId }),
+    numberOfLists: 0,
+    numberOfListsUploadedTo: 0,
   };
 };

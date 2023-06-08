@@ -10,6 +10,7 @@ specifiers:
   '@mui/icons-material': ^5.11.16
   '@mui/material': ^5.11.16
   '@mui/system': ^5.11.16
+  '@mui/types': ^7.2.4
   '@mui/utils': ^5.11.13
   '@mui/x-date-pickers': ^5.0.20
   '@next/bundle-analyzer': ^13.3.0
@@ -101,6 +102,7 @@ dependencies:
 
 devDependencies:
   '@babel/core': 7.21.4
+  '@mui/types': 7.2.4_@types+react@18.0.33
   '@next/bundle-analyzer': 13.3.0
   '@next/eslint-plugin-next': 13.3.0
   '@types/dompurify': 2.4.0
@@ -1312,7 +1314,7 @@ packages:
     dependencies:
       '@babel/runtime': 7.21.0
       '@emotion/is-prop-valid': 1.2.0
-      '@mui/types': 7.2.3_@types+react@18.0.33
+      '@mui/types': 7.2.4_@types+react@18.0.33
       '@mui/utils': 5.11.13_react@18.2.0
       '@popperjs/core': 2.11.7
       '@types/react': 18.0.33
@@ -1367,7 +1369,7 @@ packages:
       '@mui/base': 5.0.0-alpha.124_zn3vyfk3tbnwebg5ldvieekjaq
       '@mui/core-downloads-tracker': 5.11.16
       '@mui/system': 5.11.16_hhds4wqx5d7xrjbeg7y66xx5iy
-      '@mui/types': 7.2.3_@types+react@18.0.33
+      '@mui/types': 7.2.4_@types+react@18.0.33
       '@mui/utils': 5.11.13_react@18.2.0
       '@types/react': 18.0.33
       '@types/react-transition-group': 4.4.5
@@ -1440,7 +1442,7 @@ packages:
       '@emotion/styled': 11.10.6_wk7udrqmfetfur7bcmggr6k6fm
       '@mui/private-theming': 5.11.13_pofolu2o2erjq4lhyzl3hqovzq
       '@mui/styled-engine': 5.11.16_xqp3pgpqjlfxxa3zxu4zoc4fba
-      '@mui/types': 7.2.3_@types+react@18.0.33
+      '@mui/types': 7.2.4_@types+react@18.0.33
       '@mui/utils': 5.11.13_react@18.2.0
       '@types/react': 18.0.33
       clsx: 1.2.1
@@ -1449,8 +1451,8 @@ packages:
       react: 18.2.0
     dev: false
 
-  /@mui/types/7.2.3_@types+react@18.0.33:
-    resolution: {integrity: sha512-tZ+CQggbe9Ol7e/Fs5RcKwg/woU+o8DCtOnccX6KmbBc7YrfqMYEYuaIcXHuhpT880QwNkZZ3wQwvtlDFA2yOw==}
+  /@mui/types/7.2.4_@types+react@18.0.33:
+    resolution: {integrity: sha512-LBcwa8rN84bKF+f5sDyku42w1NTxaPgPyYKODsh01U1fVstTClbUoSA96oyRBnSNyEiAVjKm6Gwx9vjR+xyqHA==}
     peerDependencies:
       '@types/react': '*'
     peerDependenciesMeta:
@@ -1458,7 +1460,6 @@ packages:
         optional: true
     dependencies:
       '@types/react': 18.0.33
-    dev: false
 
   /@mui/utils/5.11.13_react@18.2.0:
     resolution: {integrity: sha512-5ltA58MM9euOuUcnvwFJqpLdEugc9XFsRR8Gt4zZNb31XzMfSKJPR4eumulyhsOTK1rWf7K4D63NKFPfX0AxqA==}

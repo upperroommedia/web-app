@@ -6,7 +6,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import { ReactElement } from 'react';
 
 interface PopUpInfo {
-  title: string;
+  title?: string;
   open: boolean;
   children: string | ReactElement;
   setOpen: (setOpen: boolean) => void;
@@ -26,7 +26,7 @@ const PopUp = (props: PopUpInfo) => {
 
   return (
     <Dialog open={open} onClose={onClose} {...props.dialogProps} aria-labelledby="confirm-dialog">
-      <DialogTitle id="confirm-dialog">{title}</DialogTitle>
+      {title && <DialogTitle id="confirm-dialog">{title}</DialogTitle>}
       <DialogContent>{children}</DialogContent>
       <DialogActions>
         <Button variant="contained" onClick={onClose} color="primary">

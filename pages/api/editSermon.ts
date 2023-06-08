@@ -8,7 +8,7 @@ import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSo
 import { getSquareImageStoragePath } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
 
-const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
+const editSermon = async (sermon: Sermon, sermonList: List[]) => {
   const promises: Promise<any>[] = [];
   if (sermon.subsplashId) {
     const editSubsplashSermon = createFunction<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
@@ -51,19 +51,18 @@ const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
     }
   }
 
-  // update sermonSeries
-  const sermonSeriesQuery = query(
-    collectionGroup(firestore, 'listItems'),
-    where('id', '==', sermonRef.id)
-  ).withConverter(listConverter);
+  // update sermonList
+  const sermonListQuery = query(collectionGroup(firestore, 'listItems'), where('id', '==', sermonRef.id)).withConverter(
+    listConverter
+  );
 
-  const sermonSeriesDocs = await getDocs(sermonSeriesQuery);
-  const seriesListFromFirebase = sermonSeriesDocs.docs.map((doc) => doc.ref.parent.parent?.id || '');
+  const sermonListDocs = await getDocs(sermonListQuery);
+  const seriesListFromFirebase = sermonListDocs.docs.map((doc) => doc.ref.parent.parent?.id || '');
 
   const seriesInFirebase = new Set<string>();
   const batch = writeBatch(firestore);
   seriesListFromFirebase.forEach((listId) => {
-    if (sermonSeries.find((series) => series.id === listId)) {
+    if (sermonList.find((series) => series.id === listId)) {
       // series exists in both lists
       seriesInFirebase.add(listId);
     } else {
@@ -73,7 +72,7 @@ const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
   });
 
   // add any new series to firebase
-  sermonSeries.forEach((series) => {
+  sermonList.forEach((series) => {
     if (!seriesInFirebase.has(series.id)) {
       batch.set(doc(firestore, `lists/${series.id}/listItems/${sermon.id}`).withConverter(sermonConverter), sermon);
     }

@@ -9,6 +9,7 @@ import {
   removeNOldestItems,
   listMetaDataType,
   addItemToList,
+  isAlreadyInList,
 } from './helpers/addToListHelpers';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
@@ -23,6 +24,7 @@ type OutputTypes =
   | {
       listId: string;
       status: 'success';
+      listItemId: string;
     }
   | {
       listId: string;
@@ -38,25 +40,28 @@ const addToSingleList = async (
   maxListCount: number,
   token: string,
   type: ListType
-) => {
+): Promise<string> => {
   const currentListCount = await getListCount(listId, token);
   let newListCount = currentListCount + 1;
 
   // if the new list count is less than the max list count, add the item to the list
   if (newListCount <= maxListCount) {
     logger.log('Adding item to list');
-    await addItemToList(mediaItem, listId, newListCount, token);
-    return;
+    return await addItemToList(mediaItem, listId, newListCount, token);
   }
 
   // handle overflow behavior
   if (overflowBehavior === OverflowBehavior.CREATENEWLIST) {
-    throw new HttpsError('unimplemented', 'This function is not implemented yet');
+    logger.log('Handling overflow behavior: CREATENEWLIST for list: ', listId);
+    throw new HttpsError(
+      'unimplemented',
+      'OverflowBehavior "CREATENEWLIST" is not yet implemented. To upload to this list please manually adjust the list size in subsplash to be less than 200 items then try again.'
+    );
   } else if (overflowBehavior === OverflowBehavior.REMOVEOLDEST) {
-    logger.log('Handling overflow behavior: REMOVEOLDEST');
+    logger.log('Handling overflow behavior: REMOVEOLDEST for list: ', listId);
     await removeNOldestItems(1, listId, token, 'created_at');
     newListCount--;
-    await addItemToList(mediaItem, listId, newListCount, token);
+    return await addItemToList(mediaItem, listId, newListCount, token);
   } else {
     throw new HttpsError(
       'failed-precondition',
@@ -68,9 +73,9 @@ const addToSingleList = async (
 const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
   logger.log('addToList');
 
-  // if (request.auth?.token.role !== 'admin') {
-  //   throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-  // }
+  if (request.auth?.token.role !== 'admin') {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
+  }
   const data = request.data;
   if (!data.listsMetadata || !data.mediaItem) {
     throw new HttpsError('invalid-argument', 'The function must be called with a listsMetadata and mediaItem.');
@@ -85,7 +90,7 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
           .where('subsplashId', '==', list.listId)
           .limit(1)
           .withConverter(firestoreAdminListConverter);
-        await firestoreDB.runTransaction(async (transaction) => {
+        return await firestoreDB.runTransaction(async (transaction) => {
           const firebaseListSnapshot = await transaction.get(listRef);
           if (firebaseListSnapshot.empty) {
             throw new HttpsError(
@@ -95,18 +100,39 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
           }
           const firebaseList = firebaseListSnapshot.docs[0];
           firebaseList.ref.update({ updatedAtMillis: Timestamp.now().toMillis() }); // block other transactions from moving past this point
-          await addToSingleList(list.listId, data.mediaItem, list.overflowBehavior, maxListCount, token, list.type);
+          const alreadyInList = await isAlreadyInList(data.mediaItem, list.listId, token, maxListCount);
+          let listItemId: string;
+          if (!alreadyInList.isInList) {
+            listItemId = await addToSingleList(
+              list.listId,
+              data.mediaItem,
+              list.overflowBehavior,
+              maxListCount,
+              token,
+              list.type
+            );
+          } else {
+            logger.log(`Media item: ${data.mediaItem.id} is already in list: ${list.listId}, skipping...`);
+            listItemId = alreadyInList.listItemId;
+          }
           firebaseList.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
+          return listItemId;
         });
       })
     );
     const returnResult = result.map((r, index) => {
       if (r.status === 'fulfilled') {
         const status: status = 'success';
-        return { listId: data.listsMetadata[index].listId, status };
+        return { listId: data.listsMetadata[index].listId, status, listItemId: r.value };
       } else {
         const status: status = 'error';
-        return { listId: data.listsMetadata[index].listId, status, error: JSON.stringify(r.reason) };
+        let message = '';
+        if ('message' in r.reason) {
+          message = r.reason.message;
+        } else {
+          message = JSON.stringify(r.reason);
+        }
+        return { listId: data.listsMetadata[index].listId, status, error: message };
       }
     });
     return returnResult;

@@ -251,19 +251,23 @@ const AdminList = () => {
         setDeleteConfirmationPopup={setDeleteListPopup}
         isDeleting={isDeleting}
       />
-      <NewListPopup
-        newListPopup={newListPopup}
-        setNewListPopup={setNewListPopup}
-        listArray={list}
-        // setListArray={setList}
-      />
-      <NewListPopup
-        newListPopup={editListPopup}
-        setNewListPopup={setEditListPopup}
-        listArray={list}
-        // setListArray={setList}
-        existingList={selectedList}
-      />
+      {newListPopup && (
+        <NewListPopup
+          newListPopup={newListPopup}
+          setNewListPopup={setNewListPopup}
+          listArray={list}
+          // setListArray={setList}
+        />
+      )}
+      {editListPopup && (
+        <NewListPopup
+          newListPopup={editListPopup}
+          setNewListPopup={setEditListPopup}
+          listArray={list}
+          // setListArray={setList}
+          existingList={selectedList}
+        />
+      )}
     </>
   );
 };
