@@ -29,12 +29,39 @@ export interface newSubsplashListRow extends Omit<SubsplashListRow, 'id' | '_emb
 }
 export type sortType = 'position' | 'created_at';
 
+async function getFullList(listId: string, token: string, maxListCount: number): Promise<SubsplashListRow[]> {
+  const listConfig = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${listId}&page[size]=${maxListCount}&sort=position`,
+    token,
+    'GET'
+  );
+  const response = (await axios(listConfig)).data;
+  return response['_embedded']['list-rows'];
+}
+
+export async function isAlreadyInList(
+  mediaItem: MediaItem,
+  listId: string,
+  token: string,
+  maxListCount: number
+): Promise<{ isInList: true; listItemId: string } | { isInList: false }> {
+  // check if item is already in the list
+  const fullList = await getFullList(listId, token, maxListCount);
+  const listRow = fullList.find((listRow) => {
+    const listRowId = convertSubsplashListRowToMediaItem(listRow).id;
+    logger.log(`listRowId: ${listRowId}, mediaItem.id: ${mediaItem.id}`);
+    return listRowId === mediaItem.id;
+  });
+  return listRow ? { isInList: true, listItemId: listRow.id } : { isInList: false };
+}
+
 export async function addItemToList(mediaItem: MediaItem, listId: string, newListCount: number, token: string) {
   logger.log(`Adding item: ${JSON.stringify(mediaItem)} to subsplash list: ${listId}`);
+  const position = 1;
   const listRow = {
     app_key: '9XTSHD',
     method: 'static',
-    position: 1,
+    position,
     type: mediaItem.type,
     _embedded: {
       [mediaItem.type]: {
@@ -59,8 +86,13 @@ export async function addItemToList(mediaItem: MediaItem, listId: string, newLis
     'PATCH',
     payload
   );
-  await axios(patchListConfig);
-  //TODO: Add mediaItem to firestore
+  const response = await axios(patchListConfig);
+  const data = response.data;
+  const listItemId = data._embedded['list-rows'][0].id;
+  if (!listItemId) {
+    throw new HttpsError('internal', 'The subsplash list you are adding to is corrupted: unable to find listItemId');
+  }
+  return listItemId;
 }
 
 async function getLastNOldestItems(
@@ -77,7 +109,7 @@ async function getLastNOldestItems(
   return listRows;
 }
 
-async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
+export async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
   if (!listRows.length) {
     return;
   }
@@ -93,6 +125,7 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
       await axios(deleteConfig);
     })
   );
+  // TODO: remove from firebase list
 }
 
 export const removeNOldestItems = async (

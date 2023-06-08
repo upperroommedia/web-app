@@ -6,10 +6,12 @@ import Box from '@mui/material/Box';
 
 interface CircularProgressWithLabelProps extends CircularProgressProps {
   value: number;
+  customLabel?: string;
 }
 
 const CircularProgressWithLabel: FunctionComponent<CircularProgressWithLabelProps> = ({
   value,
+  customLabel,
   ...props
 }: CircularProgressWithLabelProps) => {
   return (
@@ -28,7 +30,7 @@ const CircularProgressWithLabel: FunctionComponent<CircularProgressWithLabelProp
         }}
       >
         <Typography variant="caption" component="div" color="text.secondary">
-          {`${Math.round(value)}%`}
+          {customLabel || `${Math.round(value)}%`}
         </Typography>
       </Box>
     </Box>
