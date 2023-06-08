@@ -162,7 +162,7 @@ const Uploader = (props: UploaderProps) => {
       );
 
       // fetch latest list
-      if (sermonList.find((list) => list.type === ListType.LATEST) !== undefined) {
+      if (sermonList.find((list) => list.type === ListType.LATEST) === undefined) {
         const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
           listConverter
         );
