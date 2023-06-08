@@ -6,7 +6,6 @@ import { uploadStatus } from '../types/SermonTypes';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReportProblemRoundedIcon from '@mui/icons-material/ReportProblemRounded';
-import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
 import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
 import Checkbox from '@mui/material/Checkbox';
@@ -14,6 +13,7 @@ import { useState } from 'react';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Button, { ButtonPropsColorOverrides } from '@mui/material/Button';
 import { OverridableStringUnion } from '@mui/types';
+import CircularProgress from '@mui/material/CircularProgress';
 interface UploadStatusListProps {
   sectionTitle: string;
   sermonListItems: SermonList[];
@@ -34,11 +34,14 @@ const UploadStatusList = ({
   buttonLabel,
   buttonColorVariant,
 }: UploadStatusListProps) => {
-  if (sermonListItems.length === 0) {
+  const [loading, setLoading] = useState<boolean>(false);
+  const [loadingListIds, setLoadingListIds] = useState<Set<string>>(new Set());
+  const [checked, setChecked] = useState<boolean[]>(new Array(sermonListItems.length).fill(false));
+
+  if (sermonListItems.length === 0 || checked.length === 0) {
     return <></>;
   }
 
-  const [checked, setChecked] = useState<boolean[]>(new Array(sermonListItems.length).fill(false));
   return (
     <Stack>
       <Typography variant="h5" alignSelf="center">
@@ -81,15 +84,15 @@ const UploadStatusList = ({
                 />
                 <Typography>{sermonList.name}</Typography>
               </Stack>
-              {sermonList.uploadStatus?.status === uploadStatus.UPLOADED ? (
+              {loadingListIds.has(sermonList.id) ? (
+                <CircularProgress size="1.25rem" />
+              ) : sermonList.uploadStatus?.status === uploadStatus.UPLOADED ? (
                 <CheckCircleIcon color="success" />
               ) : sermonList.uploadStatus?.status === uploadStatus.ERROR ? (
                 <Tooltip title={sermonList.uploadStatus.reason} placement="top">
                   <ReportProblemRoundedIcon color="error" />
                 </Tooltip>
-              ) : (
-                <CloudUploadRoundedIcon color="primary" />
-              )}
+              ) : null}
             </ListItem>
           );
         })}
@@ -97,18 +100,26 @@ const UploadStatusList = ({
       <Button
         color={buttonColorVariant}
         variant="contained"
-        disabled={checked.every((value) => value === false)}
+        disabled={checked.every((value) => value === false) || loading}
         onClick={async () => {
+          setLoading(true);
           const selectedItems = sermonListItems.filter((_, index) => checked[index]);
-          // check if all selected
-          if (allSelectedButtonAction && selectedItems.length === sermonListItems.length) {
-            await allSelectedButtonAction(selectedItems);
-            return;
+          setLoadingListIds(new Set(selectedItems.map((item) => item.id)));
+          try {
+            // check if all selected
+            if (allSelectedButtonAction && selectedItems.length === sermonListItems.length) {
+              await allSelectedButtonAction(selectedItems);
+              return;
+            }
+            await buttonAction(selectedItems);
+          } catch (error) {
+            alert(error);
           }
-          await buttonAction(selectedItems);
+          setLoading(false);
+          setLoadingListIds(new Set());
         }}
       >
-        {buttonLabel}
+        {loading ? <CircularProgress size="1.5rem" /> : buttonLabel}
       </Button>
     </Stack>
   );

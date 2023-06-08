@@ -2,7 +2,6 @@ import { FunctionComponent, useState } from 'react';
 
 import firestore, {
   collection,
-  collectionGroup,
   deleteDoc,
   deleteField,
   doc,

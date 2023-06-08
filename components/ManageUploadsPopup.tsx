@@ -28,7 +28,6 @@ interface ManageUploadsPopupProps {
   manageUploadsPopupBoolean: boolean;
   setManageUploadsPopupBoolean: (boolean: boolean) => void;
   setIsUploadingToSubsplash: Dispatch<SetStateAction<boolean>>;
-  isUploadingToSubsplash: boolean;
   deleteFromSubsplash: () => Promise<void>;
 }
 
@@ -37,7 +36,6 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
   manageUploadsPopupBoolean,
   setManageUploadsPopupBoolean,
   setIsUploadingToSubsplash,
-  isUploadingToSubsplash,
   deleteFromSubsplash,
 }: ManageUploadsPopupProps) => {
   const { user } = useAuth();
@@ -51,6 +49,9 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
       setListArray(listArrayFirestore);
     }
   }, [JSON.stringify(listArrayFirestore)]);
+
+  const listItemsNotUploaded = listArray.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED);
+  const listItemsUploaded = listArray.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED);
 
   const uploadToSubsplash = async (listsToUploadTo: SermonList[]) => {
     try {
@@ -133,11 +134,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
   };
 
   return (
-    <PopUp
-      title={'Upload Sermon to Supsplash?'}
-      open={manageUploadsPopupBoolean}
-      setOpen={() => setManageUploadsPopupBoolean(false)}
-    >
+    <PopUp open={manageUploadsPopupBoolean} setOpen={() => setManageUploadsPopupBoolean(false)}>
       <Box display="flex" flexDirection="column" gap={1} sx={{ minWidth: { md: 400 } }}>
         <Box display="flex" alignItems="center" gap={1} marginBottom={1}>
           <AvatarWithDefaultImage
@@ -156,10 +153,9 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
         ) : (
           <>
             <UploadStatusList
+              key={listItemsUploaded.map((list) => list.id).join('') + 'Uploaded'}
               sectionTitle="Uploaded"
-              sermonListItems={listArray.filter(
-                (sermonListItem) => sermonListItem.uploadStatus?.status === uploadStatus.UPLOADED
-              )}
+              sermonListItems={listItemsUploaded}
               // TODO handle remove from subsplash and delete from subsplash
               buttonAction={async (_list) => console.log('Remove From List')}
               allSelectedButtonAction={deleteFromSubsplash}
@@ -167,10 +163,9 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
               buttonColorVariant="error"
             />
             <UploadStatusList
+              key={listItemsNotUploaded.map((list) => list.id).join('') + 'NotUploaded'}
               sectionTitle="Not Uploaded"
-              sermonListItems={listArray.filter(
-                (sermonListItem) => sermonListItem.uploadStatus?.status !== uploadStatus.UPLOADED
-              )}
+              sermonListItems={listItemsNotUploaded}
               buttonAction={uploadToSubsplash}
               buttonLabel="Upload to Subsplash"
             />

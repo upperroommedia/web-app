@@ -13,7 +13,7 @@ import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
-import UploadToSubsplashPopup from './ManageUploadsPopup';
+import ManageUploadsPopup from './ManageUploadsPopup';
 import { isDevelopment } from '../firebase/firebase';
 
 interface SermonCardAdminControlsComponentProps {
@@ -114,12 +114,11 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
         </Tooltip>
       </Box>
       {manageUploadsPopup && (
-        <UploadToSubsplashPopup
+        <ManageUploadsPopup
           sermon={sermon}
           manageUploadsPopupBoolean={manageUploadsPopup}
           setManageUploadsPopupBoolean={setManageUploadsPopup}
           setIsUploadingToSubsplash={setIsUploadingToSubsplash}
-          isUploadingToSubsplash={isUploadingToSubsplash}
           deleteFromSubsplash={deleteFromSubsplash}
         />
       )}
