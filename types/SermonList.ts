@@ -12,7 +12,7 @@ export type listUploadStatus =
       reason: string;
     };
 export interface SermonList extends List {
-  uploadStatus: listUploadStatus;
+  uploadStatus?: listUploadStatus;
 }
 
 export const emptySermonList: SermonList = { ...emptyList, uploadStatus: { status: uploadStatus.NOT_UPLOADED } };

@@ -109,7 +109,7 @@ async function getLastNOldestItems(
   return listRows;
 }
 
-async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
+export async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
   if (!listRows.length) {
     return;
   }
@@ -125,6 +125,7 @@ async function removeListRows(listId: string, listRows: SubsplashListRow[], toke
       await axios(deleteConfig);
     })
   );
+  // TODO: remove from firebase list
 }
 
 export const removeNOldestItems = async (

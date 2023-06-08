@@ -511,11 +511,12 @@ const Uploader = (props: UploaderProps) => {
                   sermon.title === '' ||
                   date === null ||
                   sermon.speakers.length === 0 ||
-                  sermon.subtitle === ''
+                  sermon.subtitle === '' ||
+                  isEditing
                 }
                 variant="contained"
               >
-                {isEditing ? <CircularProgress /> : 'Upload Sermon'}
+                {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
               </Button>
             </div>
           ) : (

@@ -73,14 +73,14 @@ const addToSingleList = async (
 const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
   logger.log('addToList');
 
-  // if (request.auth?.token.role !== 'admin') {
-  //   throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-  // }
+  if (request.auth?.token.role !== 'admin') {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
+  }
   const data = request.data;
   if (!data.listsMetadata || !data.mediaItem) {
     throw new HttpsError('invalid-argument', 'The function must be called with a listsMetadata and mediaItem.');
   }
-  const maxListCount = 5;
+  const maxListCount = 200;
   try {
     const token = await authenticateSubsplash();
     const result = await Promise.allSettled(

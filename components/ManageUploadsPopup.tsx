@@ -5,6 +5,7 @@ import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { doc, updateDoc, collection, writeBatch } from '../firebase/firestore';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
+import { RemoveFromListInputType, RemoveFromListOutputType } from '../functions/src/removeFromList';
 import {
   CreateNewSubsplashListInputType,
   CreateNewSubsplashListOutputType,
@@ -22,6 +23,7 @@ import { SermonList, sermonListConverter } from '../types/SermonList';
 import useAuth from '../context/user/UserContext';
 import UploadStatusList from './UploadStatusList';
 import { isDevelopment } from '../firebase/firebase';
+import CountOfUploadsCircularProgress from './CountOfUploadsCircularProgress';
 
 interface ManageUploadsPopupProps {
   sermon: Sermon;
@@ -127,10 +129,44 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
       await batch.commit();
       // await fetch(`/api/revalidate/sermons?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET}`);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error(error);
       alert(error);
     }
     setIsUploadingToSubsplash(false);
+  };
+
+  const removeFromList = async (listsToRemoveFrom: SermonList[]) => {
+    try {
+      const removeFromListCallable = createFunction<RemoveFromListInputType, RemoveFromListOutputType>(
+        'removefromlist'
+      );
+      const listsToRemoveFiltered = listsToRemoveFrom.filter(
+        (list) => list.uploadStatus?.status === uploadStatus.UPLOADED && list.uploadStatus.listItemId
+      );
+      const removeFromListReturn = await removeFromListCallable({
+        listIds: listsToRemoveFiltered.map((list) => list.subsplashId) as string[],
+        listItemIds: listsToRemoveFiltered.map((list) =>
+          list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : ''
+        ) as string[],
+      });
+      const batch = writeBatch(firestore);
+      removeFromListReturn.forEach((r) => {
+        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${r.listId}`).withConverter(
+          sermonListConverter
+        );
+        if (r.status === 'success') {
+          batch.update(docRef, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
+        } else {
+          throw new Error(r.error);
+        }
+      });
+      await batch.commit();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(error);
+      alert(error);
+    }
   };
 
   return (
@@ -145,6 +181,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
             borderRadius={5}
           />
           <Typography variant="h6">{sermon.title}</Typography>
+          <CountOfUploadsCircularProgress sermon={sermon} />
         </Box>
         {error ? (
           <Typography>{`Error: ${error.message}`}</Typography>
@@ -157,7 +194,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
               sectionTitle="Uploaded"
               sermonListItems={listItemsUploaded}
               // TODO handle remove from subsplash and delete from subsplash
-              buttonAction={async (_list) => console.log('Remove From List')}
+              buttonAction={removeFromList}
               allSelectedButtonAction={deleteFromSubsplash}
               buttonLabel="Remove From Lists"
               buttonColorVariant="error"
