@@ -120,6 +120,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           setManageUploadsPopupBoolean={setManageUploadsPopup}
           setIsUploadingToSubsplash={setIsUploadingToSubsplash}
           isUploadingToSubsplash={isUploadingToSubsplash}
+          deleteFromSubsplash={deleteFromSubsplash}
         />
       )}
       {deleteConfirmationPopup && (

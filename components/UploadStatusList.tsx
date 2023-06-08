@@ -18,6 +18,7 @@ interface UploadStatusListProps {
   sectionTitle: string;
   sermonListItems: SermonList[];
   buttonAction: (lists: SermonList[]) => Promise<void>;
+  allSelectedButtonAction?: (lists?: SermonList[]) => Promise<void>;
   buttonLabel: string;
   buttonColorVariant?: OverridableStringUnion<
     'inherit' | 'primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning',
@@ -29,6 +30,7 @@ const UploadStatusList = ({
   sectionTitle,
   sermonListItems,
   buttonAction,
+  allSelectedButtonAction,
   buttonLabel,
   buttonColorVariant,
 }: UploadStatusListProps) => {
@@ -37,7 +39,6 @@ const UploadStatusList = ({
   }
 
   const [checked, setChecked] = useState<boolean[]>(new Array(sermonListItems.length).fill(false));
-  console.log(checked);
   return (
     <Stack>
       <Typography variant="h5" alignSelf="center">
@@ -59,7 +60,7 @@ const UploadStatusList = ({
         {sermonListItems.map((sermonList, index) => {
           return (
             <ListItem key={sermonList.id} sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Stack gap={1} flexDirection="row" alignItems="center">
+              <Stack gap={1} flexDirection="row" alignItems="center" marginRight={2}>
                 <Checkbox
                   disableRipple
                   inputProps={{ 'aria-label': 'controlled' }}
@@ -99,6 +100,11 @@ const UploadStatusList = ({
         disabled={checked.every((value) => value === false)}
         onClick={async () => {
           const selectedItems = sermonListItems.filter((_, index) => checked[index]);
+          // check if all selected
+          if (allSelectedButtonAction && selectedItems.length === sermonListItems.length) {
+            await allSelectedButtonAction(selectedItems);
+            return;
+          }
           await buttonAction(selectedItems);
         }}
       >

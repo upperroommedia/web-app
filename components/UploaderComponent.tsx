@@ -126,6 +126,7 @@ const Uploader = (props: UploaderProps) => {
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
   const [isUploading, setIsUploading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [useYoutubeUrl, _setUseYoutubeUrl] = useState(false);
 
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
@@ -500,7 +501,9 @@ const Uploader = (props: UploaderProps) => {
             <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
               <Button
                 onClick={async () => {
+                  setIsEditing(true);
                   await editSermon(sermon, sermonList);
+                  setIsEditing(false);
                   props.setEditFormOpen?.(false);
                 }}
                 disabled={
@@ -512,7 +515,7 @@ const Uploader = (props: UploaderProps) => {
                 }
                 variant="contained"
               >
-                update sermon
+                {isEditing ? <CircularProgress /> : 'Upload Sermon'}
               </Button>
             </div>
           ) : (

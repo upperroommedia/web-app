@@ -87,7 +87,7 @@ export async function addItemToList(mediaItem: MediaItem, listId: string, newLis
     payload
   );
   const response = await axios(patchListConfig);
-  const data = await response.data();
+  const data = response.data;
   const listItemId = data._embedded['list-rows'][0].id;
   if (!listItemId) {
     throw new HttpsError('internal', 'The subsplash list you are adding to is corrupted: unable to find listItemId');

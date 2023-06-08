@@ -1,6 +1,15 @@
 import { FunctionComponent, useState } from 'react';
 
-import firestore, { deleteDoc, deleteField, doc, updateDoc } from '../firebase/firestore';
+import firestore, {
+  collection,
+  collectionGroup,
+  deleteDoc,
+  deleteField,
+  doc,
+  getDocs,
+  updateDoc,
+  writeBatch,
+} from '../firebase/firestore';
 
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { createFunction, createFunctionV2 } from '../utils/createFunction';
@@ -11,6 +20,7 @@ import { sermonConverter } from '../types/Sermon';
 import useAuth from '../context/user/UserContext';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
+import { sermonListConverter } from '../types/SermonList';
 
 export interface AdminControlsProps {
   sermon: Sermon;
@@ -141,10 +151,21 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   };
 
   const handleFirestoreDeleteFromSubsplash = async () => {
-    updateDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
+    const batch = writeBatch(firestore);
+    const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(
+      sermonListConverter
+    );
+    const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
+    sermonSeriesListSnapshot.forEach((doc) => {
+      batch.update(doc.ref, {
+        uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+      });
+    });
+    batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
       subsplashId: deleteField(),
       status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
     });
+    await batch.commit();
   };
 
   const deleteFromSubsplashErrorThrowable = async () => {

@@ -29,6 +29,7 @@ interface ManageUploadsPopupProps {
   setManageUploadsPopupBoolean: (boolean: boolean) => void;
   setIsUploadingToSubsplash: Dispatch<SetStateAction<boolean>>;
   isUploadingToSubsplash: boolean;
+  deleteFromSubsplash: () => Promise<void>;
 }
 
 const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
@@ -37,6 +38,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
   setManageUploadsPopupBoolean,
   setIsUploadingToSubsplash,
   isUploadingToSubsplash,
+  deleteFromSubsplash,
 }: ManageUploadsPopupProps) => {
   const { user } = useAuth();
   const [listArray, setListArray] = useState<SermonList[]>([]);
@@ -136,7 +138,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
       open={manageUploadsPopupBoolean}
       setOpen={() => setManageUploadsPopupBoolean(false)}
     >
-      <Box display="flex" flexDirection="column" gap={1}>
+      <Box display="flex" flexDirection="column" gap={1} sx={{ minWidth: { md: 400 } }}>
         <Box display="flex" alignItems="center" gap={1} marginBottom={1}>
           <AvatarWithDefaultImage
             altName={sermon.title}
@@ -159,7 +161,8 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
                 (sermonListItem) => sermonListItem.uploadStatus?.status === uploadStatus.UPLOADED
               )}
               // TODO handle remove from subsplash and delete from subsplash
-              buttonAction={async (list) => console.log('delete from subsplash')}
+              buttonAction={async (_list) => console.log('Remove From List')}
+              allSelectedButtonAction={deleteFromSubsplash}
               buttonLabel="Remove From Lists"
               buttonColorVariant="error"
             />
