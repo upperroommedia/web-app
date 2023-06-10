@@ -580,7 +580,7 @@ const Uploader = (props: UploaderProps) => {
                       isUploading
                     }
                     onClick={async () => {
-                      if (file !== undefined && date != null && user?.role === 'admin') {
+                      if (file !== undefined && date != null && user.isUploader()) {
                         try {
                           setIsUploading(true);
                           await uploadFile({
