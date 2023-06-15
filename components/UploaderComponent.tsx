@@ -336,6 +336,7 @@ const Uploader = (props: UploaderProps) => {
             multiline
             value={sermon.description}
             onChange={handleChange}
+            required
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector
@@ -577,6 +578,7 @@ const Uploader = (props: UploaderProps) => {
                       date === null ||
                       sermon.speakers.length === 0 ||
                       sermon.subtitle === '' ||
+                      sermon.description === '' ||
                       isUploading
                     }
                     onClick={async () => {
