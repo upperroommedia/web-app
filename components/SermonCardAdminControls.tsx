@@ -13,13 +13,14 @@ import firestore, {
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { createFunction, createFunctionV2 } from '../utils/createFunction';
 
-import { Sermon, uploadStatus } from '../types/SermonTypes';
+import { Sermon, reviewStatusType, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
 
 import useAuth from '../context/user/UserContext';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
 import { sermonListConverter } from '../types/SermonList';
+import SermonCardUploaderControlsComponent from './SermonCardUploaderControlsComponent';
 
 export interface AdminControlsProps {
   sermon: Sermon;
@@ -38,6 +39,8 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   const [uploadToSubsplashPopup, setUploadToSubsplashPopup] = useState<boolean>(false);
 
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState<boolean>(false);
+
+  const [provideFeedbackPopup, setProvideFeedbackPopup] = useState<boolean>(false);
 
   const handleDelete = async () => {
     try {
@@ -184,23 +187,79 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       setIsUploadingToSubsplash(false);
     }
   };
-  if (window.location.pathname !== '/admin/sermons' || user?.role !== 'admin') {
+
+  const submitSermonForReview = async () => {
+    try {
+      await updateDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
+        reviewStatus: reviewStatusType.IN_REVIEW,
+      });
+    } catch (error) {
+      alert(error);
+    }
+  };
+
+  const removeSermonFromReview = async () => {
+    try {
+      await updateDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
+        reviewStatus: reviewStatusType.EDITING,
+      });
+    } catch (error) {
+      alert(error);
+    }
+  };
+
+  const approveSermon = async () => {
+    try {
+      await updateDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
+        reviewStatus: reviewStatusType.APPROVED,
+      });
+    } catch (error) {
+      alert(error);
+    }
+  };
+
+  const rejectSermon = async (feedback: string) => {
+    try {
+      await updateDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
+        reviewStatus: reviewStatusType.REJECTED,
+        reviewFeedback: feedback,
+      });
+    } catch (error) {
+      alert(error);
+    }
+  };
+
+  if (window.location.pathname === '/admin/sermons' && user?.role === 'admin') {
+    return (
+      <SermonCardAdminControlsComponent
+        sermon={sermon}
+        isUploadingToSoundCloud={isUploadingToSoundCloud}
+        isUploadingToSubsplash={isUploadingToSubsplash}
+        manageUploadsPopup={uploadToSubsplashPopup}
+        setManageUploadsPopup={setUploadToSubsplashPopup}
+        setIsUploadingToSubsplash={setIsUploadingToSubsplash}
+        handleDelete={handleDelete}
+        uploadToSoundCloud={uploadToSoundCloud}
+        deleteFromSoundCloud={deleteFromSoundCloud}
+        deleteFromSubsplash={deleteFromSubsplash}
+        approveSermon={approveSermon}
+        provideFeedbackPopup={provideFeedbackPopup}
+        setProvideFeedbackPopup={setProvideFeedbackPopup}
+        rejectSermon={rejectSermon}
+      />
+    );
+  } else if (window.location.pathname === '/uploads' && (user?.role === 'uploader' || user?.role === 'admin')) {
+    return (
+      <SermonCardUploaderControlsComponent
+        sermon={sermon}
+        submitSermonForReview={submitSermonForReview}
+        removeSermonFromReview={removeSermonFromReview}
+        handleDelete={handleDelete}
+      />
+    );
+  } else {
     return null;
   }
-  return (
-    <SermonCardAdminControlsComponent
-      sermon={sermon}
-      isUploadingToSoundCloud={isUploadingToSoundCloud}
-      isUploadingToSubsplash={isUploadingToSubsplash}
-      manageUploadsPopup={uploadToSubsplashPopup}
-      setManageUploadsPopup={setUploadToSubsplashPopup}
-      setIsUploadingToSubsplash={setIsUploadingToSubsplash}
-      handleDelete={handleDelete}
-      uploadToSoundCloud={uploadToSoundCloud}
-      deleteFromSoundCloud={deleteFromSoundCloud}
-      deleteFromSubsplash={deleteFromSubsplash}
-    />
-  );
 };
 
 export default AdminControls;

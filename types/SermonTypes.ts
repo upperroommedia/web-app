@@ -14,6 +14,13 @@ export enum uploadStatus {
   UPLOADED = 'UPLOADED',
 }
 
+export enum reviewStatusType {
+  EDITING = 'EDITING',
+  IN_REVIEW = 'IN_REVIEW',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
+
 export interface sermonStatus {
   subsplash: uploadStatus;
   soundCloud: uploadStatus;
@@ -39,4 +46,6 @@ export interface Sermon {
   soundCloudTrackId?: string;
   uploaderId?: string;
   approverId?: string;
+  reviewStatus?: reviewStatusType;
+  reviewFeedback?: string;
 }

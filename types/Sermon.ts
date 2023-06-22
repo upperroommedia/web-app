@@ -1,7 +1,7 @@
 import { Timestamp, QueryDocumentSnapshot, FirestoreDataConverter } from '../firebase/firestore';
 import { ISpeaker } from './Speaker';
 import { v4 as uuidv4 } from 'uuid';
-import { Sermon, sermonStatusType, uploadStatus } from './SermonTypes';
+import { Sermon, reviewStatusType, sermonStatusType, uploadStatus } from './SermonTypes';
 import { ImageType } from './Image';
 
 export const createSermon = ({
@@ -88,6 +88,7 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
       subsplash: uploadStatus.NOT_UPLOADED,
       audioStatus: sermonStatusType.PENDING,
     },
+    reviewStatus: reviewStatusType.EDITING,
     images: [],
     ...(uploaderId && { uploaderId }),
     numberOfLists: 0,

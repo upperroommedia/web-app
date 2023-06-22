@@ -3,6 +3,8 @@ import Image from 'next/image';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import IconButton from '@mui/material/IconButton';
+import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/system/Box';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
@@ -11,11 +13,12 @@ import SoundCloudLogo from '../public/soundcloud.png';
 import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
-import { Sermon, uploadStatus } from '../types/SermonTypes';
+import { Sermon, reviewStatusType, uploadStatus } from '../types/SermonTypes';
 import ManageUploadsPopup from './ManageUploadsPopup';
 import { isDevelopment } from '../firebase/firebase';
 import CountOfUploadsCircularProgress from './CountOfUploadsCircularProgress';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import ProvideFeedbackPopup from './ProvideFeebackPopup';
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
@@ -28,6 +31,10 @@ interface SermonCardAdminControlsComponentProps {
   uploadToSoundCloud: () => Promise<void>;
   deleteFromSoundCloud: () => Promise<void>;
   deleteFromSubsplash: () => Promise<void>;
+  approveSermon: () => Promise<void>;
+  rejectSermon: (feedback: string) => Promise<void>;
+  provideFeedbackPopup: boolean;
+  setProvideFeedbackPopup: Dispatch<SetStateAction<boolean>>;
 }
 
 const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControlsComponentProps> = ({
@@ -41,6 +48,10 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   uploadToSoundCloud,
   deleteFromSoundCloud,
   deleteFromSubsplash,
+  approveSermon,
+  rejectSermon,
+  provideFeedbackPopup,
+  setProvideFeedbackPopup,
 }: SermonCardAdminControlsComponentProps) => {
   const [deleteConfirmationPopup, setDeleteConfirmationPopup] = useState<boolean>(false);
   const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
@@ -52,6 +63,25 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   return (
     <>
       <Box display="flex" alignItems="center">
+        {sermon.reviewStatus !== reviewStatusType.APPROVED && (
+          <>
+            <Tooltip title="Approve Sermon">
+              <span>
+                <IconButton onClick={approveSermon}>
+                  <CheckIcon style={{ color: 'green' }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Reject Sermon">
+              <span>
+                <IconButton onClick={() => setProvideFeedbackPopup(true)}>
+                  <CloseIcon style={{ color: 'red' }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </>
+        )}
+
         {isUploadingToSoundCloud ? (
           <CircularProgress size={24} sx={{ margin: 1 }} />
         ) : sermon.status.soundCloud === uploadStatus.UPLOADED ? (
@@ -138,6 +168,13 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           deleteConfirmationPopup={deleteConfirmationPopup}
           setDeleteConfirmationPopup={setDeleteConfirmationPopup}
           isDeleting={isUploadingToSubsplash}
+        />
+      )}
+      {provideFeedbackPopup && (
+        <ProvideFeedbackPopup
+          provideFeedbackPopup={provideFeedbackPopup}
+          setProvideFeedbackPopup={setProvideFeedbackPopup}
+          handleReject={rejectSermon}
         />
       )}
       {editFormPopup && <EditSermonForm open={editFormPopup} setOpen={() => setEditFormPopup(false)} sermon={sermon} />}

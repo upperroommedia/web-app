@@ -26,7 +26,7 @@ import { useRouter } from 'next/router';
 const Navbar: FunctionComponent = () => {
   const { user, logoutUser } = useAuth();
   const router = useRouter();
-  const pages = ['Uploader', 'Admin'];
+  const pages = ['Uploader', 'Admin', 'Uploads'];
   const settings = user ? ['Profile', 'Logout'] : ['Login'];
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
@@ -123,7 +123,7 @@ const Navbar: FunctionComponent = () => {
           </Box>
           <Avatar variant="square" sx={{ bgcolor: 'transparent' }}>
             <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill />
-          </Avatar>{' '}
+          </Avatar>
           <Link
             href="/"
             style={{

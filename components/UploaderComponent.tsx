@@ -18,7 +18,7 @@ import { isBrowser } from 'react-device-detect';
 
 import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
-import { Sermon } from '../types/SermonTypes';
+import { reviewStatusType, Sermon } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import useAuth from '../context/user/UserContext';
@@ -571,7 +571,7 @@ const Uploader = (props: UploaderProps) => {
                   <input
                     className={styles.button}
                     type="button"
-                    value="Upload"
+                    value="Save for later"
                     disabled={
                       file === undefined ||
                       sermon.title === '' ||
@@ -602,6 +602,82 @@ const Uploader = (props: UploaderProps) => {
                       }
                     }}
                   />
+                  <input
+                    className={styles.button}
+                    type="button"
+                    value="Submit for review"
+                    disabled={
+                      file === undefined ||
+                      sermon.title === '' ||
+                      date === null ||
+                      sermon.speakers.length === 0 ||
+                      sermon.subtitle === '' ||
+                      sermon.description === '' ||
+                      isUploading
+                    }
+                    onClick={async () => {
+                      if (file !== undefined && date != null && user.isUploader()) {
+                        const sermonToUpload = { ...sermon, reviewStatus: reviewStatusType.IN_REVIEW };
+                        try {
+                          setIsUploading(true);
+                          await uploadFile({
+                            file,
+                            setUploadProgress,
+                            trimStart,
+                            sermon: sermonToUpload,
+                            sermonList,
+                          });
+                          setIsUploading(false);
+                          clearForm();
+                        } catch (error) {
+                          setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
+                        }
+                      } else if (user?.role !== 'admin') {
+                        setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
+                      }
+                    }}
+                  />
+                  {user.role === 'admin' && (
+                    <input
+                      className={styles.button}
+                      type="button"
+                      value="Upload"
+                      disabled={
+                        file === undefined ||
+                        sermon.title === '' ||
+                        date === null ||
+                        sermon.speakers.length === 0 ||
+                        sermon.subtitle === '' ||
+                        sermon.description === '' ||
+                        isUploading
+                      }
+                      onClick={async () => {
+                        if (file !== undefined && date != null && user.isUploader()) {
+                          const sermonToUpload = { ...sermon, reviewStatus: reviewStatusType.APPROVED };
+                          try {
+                            setIsUploading(true);
+                            await uploadFile({
+                              file,
+                              setUploadProgress,
+                              trimStart,
+                              sermon: sermonToUpload,
+                              sermonList,
+                            });
+                            setIsUploading(false);
+                            clearForm();
+                          } catch (error) {
+                            setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
+                          }
+                        } else if (user?.role !== 'admin') {
+                          setUploadProgress({
+                            error: true,
+                            message: 'You do not have permission to upload',
+                            percent: 0,
+                          });
+                        }
+                      }}
+                    />
+                  )}
                   <button type="button" className={styles.button} onClick={() => clearForm()}>
                     Clear Form
                   </button>

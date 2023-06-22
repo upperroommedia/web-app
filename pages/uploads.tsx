@@ -9,29 +9,21 @@ import firestore, {
   QueryDocumentSnapshot,
   getDocs,
   where,
-  // updateDoc,
 } from '../firebase/firestore';
-import BottomAudioBar from './BottomAudioBar';
-import SermonsList from './SermonsList';
+import BottomAudioBar from '../components/BottomAudioBar';
+import SermonsList from '../components/SermonsList';
 import { sermonConverter } from '../types/Sermon';
-import SermonListSkeleton from './skeletons/SermonListSkeloten';
-import { FunctionComponent, useEffect, useState } from 'react';
-import { Sermon, reviewStatusType } from '../types/SermonTypes';
+import SermonListSkeleton from '../components/skeletons/SermonListSkeloten';
+import { useEffect, useState } from 'react';
+import { Sermon } from '../types/SermonTypes';
 import Button from '@mui/material/Button';
+import useAuth from '../context/user/UserContext';
 
-interface AdminSermonsListProps {
-  collectionPath: string;
-  count?: number;
-  reviewStatus: reviewStatusType;
-}
+const Uploads = () => {
+  const { user } = useAuth();
 
-const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
-  collectionPath,
-  count,
-  reviewStatus,
-}: AdminSermonsListProps) => {
-  const SERMONSTOLOAD = count || 5;
-  const sermonsRef = collection(firestore, collectionPath);
+  const SERMONSTOLOAD = 20;
+  const sermonsRef = collection(firestore, 'sermons');
   const [sermons, setSermons] = useState<Sermon[]>([]);
   const [error, setError] = useState<any>();
   const [loading, setLoading] = useState<boolean>(true);
@@ -40,14 +32,14 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
     ? query(
         sermonsRef.withConverter(sermonConverter),
         orderBy('date', 'desc'),
+        where('uploaderId', '==', user?.uid),
         limit(SERMONSTOLOAD),
-        where('reviewStatus', '==', reviewStatus),
         startAfter(lastDocument)
       )
     : query(
         sermonsRef.withConverter(sermonConverter),
         orderBy('date', 'desc'),
-        where('reviewStatus', '==', reviewStatus),
+        where('uploaderId', '==', user?.uid),
         limit(SERMONSTOLOAD)
       );
 
@@ -63,14 +55,6 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
     }
   };
 
-  // function that loops through sermons and adds a reviewStatus property to each sermon with value APPROVED
-  // const addReviewStatusToSermons = async () => {
-  //   const snap = await getDocs(sermonsRef.withConverter(sermonConverter));
-  //   snap.forEach((doc) => {
-  //     updateDoc(doc.ref, { reviewStatus: reviewStatusType.APPROVED });
-  //   });
-  // };
-
   useEffect(() => {
     const g = async () => {
       await fetchSermons();
@@ -80,8 +64,7 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
 
   return (
     <Box width="100%" display="flex" flexDirection="column" alignItems="center" gap="10px">
-      {/* <Button onClick={addReviewStatusToSermons}>hi</Button> */}
-      <Typography variant="h3">Manage Sermons</Typography>
+      <Typography variant="h3">Manage Your Uploads</Typography>
       {error && (
         <Typography component="div">
           <Box fontWeight="bold" display="inline">
@@ -89,7 +72,7 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
           </Box>
         </Typography>
       )}
-      {loading && <SermonListSkeleton count={count} />}
+      {loading && <SermonListSkeleton count={SERMONSTOLOAD} />}
       {sermons && <SermonsList sermons={sermons} />}
       {sermons && sermons.length > 0 && lastDocument !== undefined && sermons.length % SERMONSTOLOAD === 0 && (
         <div>
@@ -101,4 +84,4 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
   );
 };
 
-export default AdminSermonsList;
+export default Uploads;
