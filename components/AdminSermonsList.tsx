@@ -1,12 +1,14 @@
 import Typography from '@mui/material/Typography';
 import { Box } from '@mui/system';
-import firestore, { collection, orderBy, query } from '../firebase/firestore';
+import firestore, { collection, orderBy, query, where } from '../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import BottomAudioBar from './BottomAudioBar';
 import SermonsList from './SermonsList';
 import { sermonConverter } from '../types/Sermon';
 import SermonListSkeloten from './skeletons/SermonListSkeloten';
 import { FunctionComponent } from 'react';
+import useAuth from '../context/user/UserContext';
+import { UserRole } from '../types/User';
 
 interface AdminSermonsListProps {
   collectionPath: string;
@@ -17,8 +19,12 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
   collectionPath,
   count,
 }: AdminSermonsListProps) => {
+  const { user } = useAuth();
   const sermonsRef = collection(firestore, collectionPath);
-  const q = query(sermonsRef.withConverter(sermonConverter), orderBy('date', 'desc'));
+  const q =
+    user?.role === UserRole.UPLOADER
+      ? query(sermonsRef.withConverter(sermonConverter), where('uploaderId', '==', user.uid), orderBy('date', 'desc'))
+      : query(sermonsRef.withConverter(sermonConverter), orderBy('date', 'desc'));
   const [sermons, loading, error] = useCollection(q, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });

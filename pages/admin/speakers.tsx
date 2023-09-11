@@ -20,7 +20,10 @@ import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
 // import { adminProtected } from '../../utils/protectedRoutes';
 import { fetchSpeakerResults } from '../../components/UploaderComponent';
+import useAuth from '../../context/user/UserContext';
+
 const AdminSpeakers = () => {
+  const { user } = useAuth();
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
@@ -34,6 +37,10 @@ const AdminSpeakers = () => {
   const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
   const [sortOrder, setSortOrder] = useState<Order>('desc');
+
+  if (!user?.isAdmin()) {
+    return null;
+  }
 
   const handleSort = async (property: keyof ISpeaker, order: Order) => {
     if (sortProperty !== property || sortOrder !== order) {

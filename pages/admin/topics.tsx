@@ -15,8 +15,13 @@ import { topicConverter } from '../../types/Topic';
 // import { adminProtected } from '../../utils/protectedRoutes';
 import Image from 'next/image';
 import { sanitize } from 'dompurify';
+import useAuth from '../../context/user/UserContext';
 
 const AdminTopics = () => {
+  const { user } = useAuth();
+  if (!user?.isAdmin()) {
+    return null;
+  }
   const q = query(collection(firestore, 'topics').withConverter(topicConverter), orderBy('title'));
   const [topics, loading, error] = useCollectionData(q);
 
