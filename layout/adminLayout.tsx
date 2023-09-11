@@ -19,7 +19,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         <CircularProgress />
       </Stack>
     );
-  } else if (!user.isAdmin()) {
+  } else if (!user.isUploader()) {
     return (
       <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
         <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
@@ -47,26 +47,32 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       </Head>
       <Box>
         <Box display="flex" flexWrap={'wrap'} justifyContent="center">
-          {pages.map((page) => (
-            <Link href={`/admin/${page.toLowerCase()}`} passHref key={page}>
-              <Button
-                disableRipple
-                sx={{
-                  textTransform: 'capitalize',
-                  '&:hover': {
-                    bgcolor: 'rgb(55,65,81)',
-                  },
-                  bgcolor: isActive(page) ? 'rgb(17 24 39)' : 'rgb(31 41 55)',
-                  color: isActive(page) ? 'rgb(209 213 219)' : 'rgb(156 163 175)',
-                  marginY: '0.5rem',
-                  marginX: { xs: '0.2rem', sm: '0.5rem' },
-                  fontSize: { xs: '0.75rem', sm: '1rem' },
-                }}
-              >
-                {page}
-              </Button>
-            </Link>
-          ))}
+          {pages.map((page) => {
+            if (page !== 'Sermons' && user.isUploader() && !user.isAdmin()) {
+              return null;
+            } else {
+              return (
+                <Link href={`/admin/${page.toLowerCase()}`} passHref key={page}>
+                  <Button
+                    disableRipple
+                    sx={{
+                      textTransform: 'capitalize',
+                      '&:hover': {
+                        bgcolor: 'rgb(55,65,81)',
+                      },
+                      bgcolor: isActive(page) ? 'rgb(17 24 39)' : 'rgb(31 41 55)',
+                      color: isActive(page) ? 'rgb(209 213 219)' : 'rgb(156 163 175)',
+                      marginY: '0.5rem',
+                      marginX: { xs: '0.2rem', sm: '0.5rem' },
+                      fontSize: { xs: '0.75rem', sm: '1rem' },
+                    }}
+                  >
+                    {page}
+                  </Button>
+                </Link>
+              );
+            }
+          })}
         </Box>
         {children}
       </Box>

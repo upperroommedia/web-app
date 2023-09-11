@@ -31,6 +31,7 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
+import useAuth from '../../context/user/UserContext';
 
 const HITSPERPAGE = 20;
 
@@ -44,6 +45,7 @@ const client =
 const listsIndex = client?.initIndex('lists');
 
 const AdminList = () => {
+  const { user } = useAuth();
   const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
   const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
@@ -58,6 +60,10 @@ const AdminList = () => {
   const [selectedList, setSelectedList] = useState<List>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const disableButtons = isDeleting;
+
+  if (!user?.isAdmin()) {
+    return null;
+  }
 
   const handleListDelete = async () => {
     if (!selectedList) {
