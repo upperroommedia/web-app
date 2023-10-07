@@ -19,7 +19,7 @@ export default function SermonListSkeloten({ minimal, count }: SermonsListSkelot
 
         // bgcolor={'blue'}
       >
-        {Array.from(Array(count || 3).keys()).map((i) => (
+        {Array.from(Array(count || 20).keys()).map((i) => (
           <SermonListCardSkeloten minimal={minimal} key={`sermonListCardSkeloten: ${i}`} />
         ))}
       </List>
