@@ -2,6 +2,8 @@ import { logger } from 'firebase-functions/v2';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
+import { path as ffprobeStatic } from 'ffprobe-static';
 import path from 'path';
 import os from 'os';
 import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'fs';
@@ -12,12 +14,22 @@ import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/Sermon
 import { firestoreAdminSermonConverter } from './firestoreDataConverter';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { Reference } from 'firebase-admin/database';
+import { exec } from 'node:child_process';
 
 type filePaths = {
   INTRO: string | undefined;
   CONTENT: string;
   OUTRO: string | undefined;
 };
+
+if (!ffmpegStatic) {
+  logger.error('ffmpeg-static not found');
+} else {
+  logger.log('ffmpeg-static found', ffmpegStatic);
+  ffmpeg.setFfmpegPath(ffmpegStatic);
+  logger.log('ffprobe-static found', ffprobeStatic);
+  ffmpeg.setFfprobePath(ffprobeStatic);
+}
 
 const createTempFile = (fileName: string, tempFiles: Set<string>) => {
   try {
@@ -52,16 +64,7 @@ const trimAndTranscode = (
   if (duration) proc.setDuration(duration);
   proc
     .audioCodec('libmp3lame')
-    .audioFilters([
-      {
-        filter: 'dynaudnorm', // Normalize audio to help with volume spikes and quiet sections
-        options: 'g=21:m=40:c=1:b=1',
-      },
-      {
-        filter: 'afftdn', // Remove background noise
-        options: {},
-      },
-    ])
+    .audioFilters(['dynaudnorm=g=21:m=40:c=1:b=1', 'afftdn', 'pan=stereo|c0<c0+c1|c1<c0+c1']) // Dynamiaclly adjust volume and remove background noise and balance left right audio
     .audioBitrate(128)
     .audioChannels(2)
     .audioFrequency(44100);
@@ -214,7 +217,7 @@ const downloadFiles = async (bucket: Bucket, filePaths: filePaths, tempFiles: Se
 };
 
 const addIntroOutro = onObjectFinalized(
-  { timeoutSeconds: 300, memory: '1GiB', cpu: 1, concurrency: 1 },
+  { timeoutSeconds: 540, memory: '1GiB', cpu: 1, concurrency: 1 },
   async (storageEvent): Promise<void> => {
     const data = storageEvent.data;
     const filePath = data.name ? data.name : '';
@@ -227,6 +230,14 @@ const addIntroOutro = onObjectFinalized(
       // This is not a media file
       return logger.log('Not a media file');
     }
+
+    exec(`${ffmpegStatic} -version`, (err, stdout) => {
+      if (err) {
+        logger.error('FFMPEG not installed', err);
+      } else {
+        logger.log('FFMPEG version', stdout);
+      }
+    });
     const bucket = firebaseAdmin.storage().bucket();
     const realtimeDB = firebaseAdmin.database();
     const db = firebaseAdmin.firestore();
