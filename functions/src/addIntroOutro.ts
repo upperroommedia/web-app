@@ -50,7 +50,21 @@ const trimAndTranscode = (
   const proc = ffmpeg().format('mp3').input(filePath);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
-  proc.audioCodec('libmp3lame').audioBitrate(128).audioChannels(2).audioFrequency(44100);
+  proc
+    .audioCodec('libmp3lame')
+    .audioFilters([
+      {
+        filter: 'dynaudnorm', // Normalize audio to help with volume spikes and quiet sections
+        options: 'g=21:m=40:c=1:b=1',
+      },
+      {
+        filter: 'afftdn', // Remove background noise
+        options: {},
+      },
+    ])
+    .audioBitrate(128)
+    .audioChannels(2)
+    .audioFrequency(44100);
   let totalTimeMillis: number;
   return new Promise((resolve, reject) => {
     proc
@@ -303,6 +317,12 @@ const addIntroOutro = onObjectFinalized(
       });
       realtimeDB.ref(`addIntroOutro/${fileName}`).set(100);
       await realtimeDB.ref(`addIntroOutro/${fileName}`).remove();
+
+      // delete original audio file
+      logger.log('Deleting original audio file', filePath);
+      await bucket.file(filePath).delete();
+      logger.log('Original audio file deleted');
+
       return logger.log('Files have been merged succesfully');
     } catch (e) {
       let message = 'Something Went Wrong';
