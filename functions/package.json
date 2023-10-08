@@ -11,7 +11,7 @@
     "logs": "firebase functions:log"
   },
   "engines": {
-    "node": "16",
+    "node": "18",
     "pnpm": "7"
   },
   "main": "lib/functions/src/index.js",
@@ -20,6 +20,8 @@
     "@google-cloud/storage": "6.10.1",
     "axios": "^1.4.0",
     "dotenv": "^16.0.3",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
     "firebase": "^9.22.1",
     "firebase-admin": "^11.9.0",
     "firebase-functions": "^4.4.0",
@@ -34,6 +36,7 @@
     "uuidv4": "^6.2.13"
   },
   "devDependencies": {
+    "@types/ffprobe-static": "^2.0.1",
     "@types/fluent-ffmpeg": "^2.1.21",
     "@types/imagemagick": "^0.0.31",
     "@types/node": "^18.15.11",
