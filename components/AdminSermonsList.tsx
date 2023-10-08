@@ -69,6 +69,7 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
     const res = await sermonsIndex?.search<Sermon>(query || searchQuery, {
       hitsPerPage: HITSPERPAGE,
       page: currentPage,
+      ...(user?.role === UserRole.UPLOADER && { filters: `uploaderId:${user.uid}` }),
       ...(filters.length !== 0 && { facetFilters: [filters.map((filter) => `${filter}`)] }),
     });
     if (res && res.hits.length > 0) {
