@@ -6,8 +6,8 @@ import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '..
 // import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useEffect, useState } from 'react';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-import { adminProtected } from '../../utils/protectedRoutes';
+// import { GetServerSideProps, GetServerSidePropsContext } from 'next';
+// import { adminProtected } from '../../utils/protectedRoutes';
 import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
@@ -31,6 +31,7 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
+import useAuth from '../../context/user/UserContext';
 
 const HITSPERPAGE = 20;
 
@@ -44,6 +45,7 @@ const client =
 const listsIndex = client?.initIndex('lists');
 
 const AdminList = () => {
+  const { user } = useAuth();
   const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
   const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
@@ -58,6 +60,10 @@ const AdminList = () => {
   const [selectedList, setSelectedList] = useState<List>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const disableButtons = isDeleting;
+
+  if (!user?.isAdmin()) {
+    return null;
+  }
 
   const handleListDelete = async () => {
     if (!selectedList) {
@@ -251,27 +257,31 @@ const AdminList = () => {
         setDeleteConfirmationPopup={setDeleteListPopup}
         isDeleting={isDeleting}
       />
-      <NewListPopup
-        newListPopup={newListPopup}
-        setNewListPopup={setNewListPopup}
-        listArray={list}
-        // setListArray={setList}
-      />
-      <NewListPopup
-        newListPopup={editListPopup}
-        setNewListPopup={setEditListPopup}
-        listArray={list}
-        // setListArray={setList}
-        existingList={selectedList}
-      />
+      {newListPopup && (
+        <NewListPopup
+          newListPopup={newListPopup}
+          setNewListPopup={setNewListPopup}
+          listArray={list}
+          // setListArray={setList}
+        />
+      )}
+      {editListPopup && (
+        <NewListPopup
+          newListPopup={editListPopup}
+          setNewListPopup={setEditListPopup}
+          listArray={list}
+          // setListArray={setList}
+          existingList={selectedList}
+        />
+      )}
     </>
   );
 };
 
 AdminList.PageLayout = AdminLayout;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   return adminProtected(ctx);
+// };
 
 export default AdminList;

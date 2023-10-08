@@ -1,4 +1,4 @@
-import firestore, { collection, doc, getDocs, setDoc, writeBatch } from '../../firebase/firestore';
+import firestore, { collectionGroup, doc, getDocs, query, setDoc, where, writeBatch } from '../../firebase/firestore';
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
@@ -8,7 +8,7 @@ import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSo
 import { getSquareImageStoragePath } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
 
-const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
+const editSermon = async (sermon: Sermon, sermonList: List[]) => {
   const promises: Promise<any>[] = [];
   if (sermon.subsplashId) {
     const editSubsplashSermon = createFunction<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
@@ -51,25 +51,28 @@ const editSermon = async (sermon: Sermon, sermonSeries: List[]) => {
     }
   }
 
-  // update sermonSeries
-  const sermonSeriesSnapshot = await getDocs(
-    collection(firestore, `lists/${sermonRef.id}/listItems`).withConverter(listConverter)
+  // update sermonList
+  const sermonListQuery = query(collectionGroup(firestore, 'listItems'), where('id', '==', sermonRef.id)).withConverter(
+    listConverter
   );
+
+  const sermonListDocs = await getDocs(sermonListQuery);
+  const seriesListFromFirebase = sermonListDocs.docs.map((doc) => doc.ref.parent.parent?.id || '');
 
   const seriesInFirebase = new Set<string>();
   const batch = writeBatch(firestore);
-  sermonSeriesSnapshot.forEach((snapshot) => {
-    if (sermonSeries.find((series) => series.id === snapshot.id)) {
+  seriesListFromFirebase.forEach((listId) => {
+    if (sermonList.find((series) => series.id === listId)) {
       // series exists in both lists
-      seriesInFirebase.add(snapshot.id);
+      seriesInFirebase.add(listId);
     } else {
       // series exists in firebase but not updated list
-      batch.delete(doc(firestore, `lists/${snapshot.id}/listItems/${sermon.id}`));
+      batch.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
     }
   });
 
   // add any new series to firebase
-  sermonSeries.forEach((series) => {
+  sermonList.forEach((series) => {
     if (!seriesInFirebase.has(series.id)) {
       batch.set(doc(firestore, `lists/${series.id}/listItems/${sermon.id}`).withConverter(sermonConverter), sermon);
     }

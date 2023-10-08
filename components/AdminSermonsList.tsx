@@ -1,6 +1,6 @@
 import Typography from '@mui/material/Typography';
-import { Box } from '@mui/system';
-import firestore, { collection, orderBy, query } from '../firebase/firestore';
+import Box from '@mui/system/Box';
+import firestore, { collection, limit, orderBy, query, where } from '../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import BottomAudioBar from './BottomAudioBar';
 import SermonsList from './SermonsList';
@@ -17,6 +17,9 @@ import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import Checkbox from '@mui/material/Checkbox';
 import ListItemText from '@mui/material/ListItemText';
+import useAuth from '../context/user/UserContext';
+import { UserRole } from '../types/User';
+import Button from '@mui/material/Button';
 
 interface AdminSermonsListProps {
   collectionPath: string;
@@ -33,13 +36,26 @@ const client =
       })
     : undefined;
 const sermonsIndex = client?.initIndex('sermons');
+const limitCount = 20;
 
 const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
   collectionPath,
   count,
 }: AdminSermonsListProps) => {
+  const { user } = useAuth();
+  const [queryLimit, setQueryLimit] = useState<number>(limitCount);
+  const [previousSermonsCount, setPreviousSermonsCount] = useState<number>(0);
+  const [previousSermons, setPreviousSermons] = useState<Sermon[]>([]);
   const sermonsRef = collection(firestore, collectionPath);
-  const q = query(sermonsRef.withConverter(sermonConverter), orderBy('date', 'desc'));
+  const q =
+    user?.role === UserRole.UPLOADER
+      ? query(
+          sermonsRef.withConverter(sermonConverter),
+          where('uploaderId', '==', user.uid),
+          orderBy('date', 'desc'),
+          limit(queryLimit)
+        )
+      : query(sermonsRef.withConverter(sermonConverter), orderBy('date', 'desc'), limit(queryLimit));
   const [sermons, loading, error] = useCollection(q, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
@@ -145,11 +161,31 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
           </Box>
         </Typography>
       )}
-      {loading && <SermonListSkeloten count={count} />}
+      {loading && (
+        <>
+          <SermonsList sermons={previousSermons} />
+          <SermonListSkeloten count={count} />
+        </>
+      )}
       {searchResults ? (
         <SermonsList sermons={searchResults} />
       ) : (
-        sermons && <SermonsList sermons={sermons.docs.map((doc) => doc.data())} />
+        sermons && (
+          <>
+            <SermonsList sermons={sermons.docs.map((doc) => doc.data())} />
+            {(sermons.size ?? 0) - previousSermonsCount === limitCount && (
+              <Button
+                onClick={() => {
+                  setQueryLimit((previousLimit) => previousLimit + limitCount);
+                  setPreviousSermons(sermons.docs.map((doc) => doc.data()));
+                  setPreviousSermonsCount(sermons.size);
+                }}
+              >
+                Load More
+              </Button>
+            )}
+          </>
+        )
       )}
       {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
       <BottomAudioBar />

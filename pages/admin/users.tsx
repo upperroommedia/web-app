@@ -7,10 +7,14 @@ import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Slide from '@mui/material/Slide';
 import { User } from '../../types/User';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-import { adminProtected } from '../../utils/protectedRoutes';
+import useAuth from '../../context/user/UserContext';
 
 const AdminUsers = () => {
+  const { user } = useAuth();
+  if (!user?.isAdmin()) {
+    return null;
+  }
+
   const [users, setUsers] = useState<User[]>([]);
   const [snackBarOpen, setSnackBarOpen] = useState<boolean>(false);
   const [message, setMessage] = useState<{ message: string; id: number }>({ message: '', id: new Date().getTime() });
@@ -64,8 +68,8 @@ const AdminUsers = () => {
 
 AdminUsers.PageLayout = AdminLayout;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   return adminProtected(ctx);
+// };
 
 export default AdminUsers;

@@ -33,6 +33,8 @@ export interface Sermon {
   dateString?: string;
   status: sermonStatus;
   images: ImageType[];
+  numberOfLists: number;
+  numberOfListsUploadedTo: number;
   subsplashId?: string;
   soundCloudTrackId?: string;
   uploaderId?: string;

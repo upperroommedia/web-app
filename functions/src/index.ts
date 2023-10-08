@@ -1,7 +1,6 @@
 // To deploy functions: npm run-script deploy
 // To test functions: npm run-script serve
 
-import * as admin from 'firebase-admin';
 import uploadToSubsplash from './uploadToSubsplash';
 import setUserRole from './setUserRole';
 import addintrooutro from './addIntroOutro';
@@ -16,6 +15,7 @@ import createnewsubsplashlist from './createNewSubsplashList';
 import deletesubsplashlist from './deleteSubsplashList';
 import editsubsplashlist from './editSubsplashList';
 import addtolist from './addToList';
+import removefromlist from './removeFromList';
 import uploadtosoundcloud from './uploadToSoundCloud';
 import deletefromsoundcloud from './deleteFromSoundCloud';
 import editSubsplashSermon from './editSubsplashSermon';
@@ -24,10 +24,12 @@ import listItemOnDelete from './DocumentListeners/Lists/listItemOnDelete';
 import listItemOnCreate from './DocumentListeners/Lists/listItemOnCreate';
 import listOnDelete from './DocumentListeners/Lists/listOnDelete';
 import listOnUpdate from './DocumentListeners/Lists/listOnUpdate';
+import sermonListOnCreate from './DocumentListeners/SermonLists/sermonListOnCreate';
+import sermonListOnDelete from './DocumentListeners/SermonLists/sermonListOnDelete';
+import sermonListOnUpdate from './DocumentListeners/SermonLists/sermonListOnUpdate';
 import sermonOnDelete from './DocumentListeners/Sermons/sermonOnDelete';
 import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
 import repopulatelistfromspeakeritems from './Scrapers/repopulateListFromSpeakerItems';
-admin.initializeApp();
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -44,6 +46,7 @@ exports.createnewsubsplashlist = createnewsubsplashlist;
 exports.deletesubsplashlist = deletesubsplashlist;
 exports.editsubsplashlist = editsubsplashlist;
 exports.addtolist = addtolist;
+exports.removefromlist = removefromlist;
 exports.saveimage = saveimage;
 exports.uploadtosoundcloud = uploadtosoundcloud;
 exports.deletefromsoundcloud = deletefromsoundcloud;
@@ -53,4 +56,7 @@ exports.listOnDelete = listOnDelete;
 exports.listOnUpdate = listOnUpdate;
 exports.listItemOnDelete = listItemOnDelete;
 exports.listItemOnCreate = listItemOnCreate;
+exports.sermonListOnCreate = sermonListOnCreate;
+exports.sermonListOnDelete = sermonListOnDelete;
+exports.sermonListOnUpdate = sermonListOnUpdate;
 exports.repopulatelistfromspeakeritems = repopulatelistfromspeakeritems;

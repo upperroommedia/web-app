@@ -1,6 +1,6 @@
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
+// import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { ChangeEvent, useEffect, useState } from 'react';
 import SpeakerTable from '../../components/SpeakerTable';
 import { Order } from '../../context/types';
@@ -18,10 +18,12 @@ import firestore, {
 } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
-import { adminProtected } from '../../utils/protectedRoutes';
-import { fetchSpeakerResults } from '../uploader';
+// import { adminProtected } from '../../utils/protectedRoutes';
+import { fetchSpeakerResults } from '../../components/UploaderComponent';
+import useAuth from '../../context/user/UserContext';
 
 const AdminSpeakers = () => {
+  const { user } = useAuth();
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
@@ -35,6 +37,10 @@ const AdminSpeakers = () => {
   const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
   const [sortOrder, setSortOrder] = useState<Order>('desc');
+
+  if (!user?.isAdmin()) {
+    return null;
+  }
 
   const handleSort = async (property: keyof ISpeaker, order: Order) => {
     if (sortProperty !== property || sortOrder !== order) {
@@ -79,7 +85,6 @@ const AdminSpeakers = () => {
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
     const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
     // TODO: fix this
-    console.log(result[0]);
     if (result[0] && result[0].nbHits) {
       setTotalSpeakers(result[0].nbHits);
     }
@@ -90,7 +95,6 @@ const AdminSpeakers = () => {
   const getSpeakersFirebase = async () => {
     const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
     const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
-    console.log('Speakers Count', speakersCount);
     setTotalSpeakers(speakersCount);
 
     const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));
@@ -206,8 +210,8 @@ const AdminSpeakers = () => {
 
 AdminSpeakers.PageLayout = AdminLayout;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   return adminProtected(ctx);
+// };
 
 export default AdminSpeakers;

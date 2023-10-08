@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from 'firebase-functions/v2';
-import { storage, firestore } from 'firebase-admin';
+import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { ImageType } from '../../../types/Image';
@@ -14,6 +14,8 @@ import populateSpeakers from './populateSpeakersHelper';
 import populateTopics from './populateTopicsHelper';
 import handleError from '../handleError';
 
+const storage = firebaseAdmin.storage();
+const firestore = firebaseAdmin.firestore();
 export interface populateDatabaseFromSubsplashInputType {
   speakerTagIds?: string[];
 }
@@ -37,8 +39,8 @@ const populateDatabaseFromSubsplash = onCall(
       const listIdToImageIdMap = new Map<string, string[]>();
       const listNameToId = new Map<string, string>();
       const bearerToken = await authenticateSubsplash();
-      const bucket = storage().bucket('urm-app-images');
-      const db = firestore();
+      const bucket = storage.bucket('urm-app-images');
+      const db = firestore;
       const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
       const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
       const firestoreTopics = db.collection('topics').withConverter(firestoreAdminTopicConverter);

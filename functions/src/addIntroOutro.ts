@@ -1,7 +1,9 @@
 import { logger } from 'firebase-functions/v2';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
-import { storage, firestore, database } from 'firebase-admin';
+import firebaseAdmin from '../../firebase/firebaseAdmin';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
+import { path as ffprobeStatic } from 'ffprobe-static';
 import path from 'path';
 import os from 'os';
 import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'fs';
@@ -12,12 +14,22 @@ import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/Sermon
 import { firestoreAdminSermonConverter } from './firestoreDataConverter';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { Reference } from 'firebase-admin/database';
+import { exec } from 'node:child_process';
 
 type filePaths = {
   INTRO: string | undefined;
   CONTENT: string;
   OUTRO: string | undefined;
 };
+
+if (!ffmpegStatic) {
+  logger.error('ffmpeg-static not found');
+} else {
+  logger.log('ffmpeg-static found', ffmpegStatic);
+  ffmpeg.setFfmpegPath(ffmpegStatic);
+  logger.log('ffprobe-static found', ffprobeStatic);
+  ffmpeg.setFfprobePath(ffprobeStatic);
+}
 
 const createTempFile = (fileName: string, tempFiles: Set<string>) => {
   try {
@@ -50,7 +62,12 @@ const trimAndTranscode = (
   const proc = ffmpeg().format('mp3').input(filePath);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
-  proc.audioCodec('libmp3lame').audioBitrate(128).audioChannels(2).audioFrequency(44100);
+  proc
+    .audioCodec('libmp3lame')
+    .audioFilters(['dynaudnorm=g=21:m=40:c=1:b=1', 'afftdn', 'pan=stereo|c0<c0+c1|c1<c0+c1']) // Dynamiaclly adjust volume and remove background noise and balance left right audio
+    .audioBitrate(128)
+    .audioChannels(2)
+    .audioFrequency(44100);
   let totalTimeMillis: number;
   return new Promise((resolve, reject) => {
     proc
@@ -200,7 +217,7 @@ const downloadFiles = async (bucket: Bucket, filePaths: filePaths, tempFiles: Se
 };
 
 const addIntroOutro = onObjectFinalized(
-  { timeoutSeconds: 300, memory: '1GiB', cpu: 1, concurrency: 1 },
+  { timeoutSeconds: 540, memory: '1GiB', cpu: 1, concurrency: 1 },
   async (storageEvent): Promise<void> => {
     const data = storageEvent.data;
     const filePath = data.name ? data.name : '';
@@ -213,9 +230,17 @@ const addIntroOutro = onObjectFinalized(
       // This is not a media file
       return logger.log('Not a media file');
     }
-    const bucket = storage().bucket();
-    const realtimeDB = database();
-    const db = firestore();
+
+    exec(`${ffmpegStatic} -version`, (err, stdout) => {
+      if (err) {
+        logger.error('FFMPEG not installed', err);
+      } else {
+        logger.log('FFMPEG version', stdout);
+      }
+    });
+    const bucket = firebaseAdmin.storage().bucket();
+    const realtimeDB = firebaseAdmin.database();
+    const db = firebaseAdmin.firestore();
     const fileName = path.basename(filePath);
     const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
     const sermonStatus: sermonStatus = {
@@ -303,6 +328,12 @@ const addIntroOutro = onObjectFinalized(
       });
       realtimeDB.ref(`addIntroOutro/${fileName}`).set(100);
       await realtimeDB.ref(`addIntroOutro/${fileName}`).remove();
+
+      // delete original audio file
+      logger.log('Deleting original audio file', filePath);
+      await bucket.file(filePath).delete();
+      logger.log('Original audio file deleted');
+
       return logger.log('Files have been merged succesfully');
     } catch (e) {
       let message = 'Something Went Wrong';

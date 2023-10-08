@@ -1,4 +1,4 @@
-import { auth } from 'firebase-admin';
+import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { https, logger } from 'firebase-functions';
 
 const listUsers = https.onCall(async (data, context) => {
@@ -7,7 +7,7 @@ const listUsers = https.onCall(async (data, context) => {
     return { error: `Unauthorized.` };
   }
   try {
-    const listUsersResult = await auth().listUsers();
+    const listUsersResult = await firebaseAdmin.auth().listUsers();
     // go through users array, and deconstruct user objects down to required fields
     const result = listUsersResult.users.map((user) => {
       return {

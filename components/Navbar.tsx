@@ -26,8 +26,7 @@ import { useRouter } from 'next/router';
 const Navbar: FunctionComponent = () => {
   const { user, logoutUser } = useAuth();
   const router = useRouter();
-  const adminPages = user?.role === 'admin' ? ['Uploader', 'Admin'] : [];
-  const pages = ['Home', 'Sermons', 'About', ...adminPages];
+  const pages = ['Uploader', 'Admin'];
   const settings = user ? ['Profile', 'Logout'] : ['Login'];
   const [anchorElNav, setAnchorElNav] = useState<null | HTMLElement>(null);
   const [anchorElUser, setAnchorElUser] = useState<null | HTMLElement>(null);
@@ -50,7 +49,7 @@ const Navbar: FunctionComponent = () => {
   };
 
   const MenuItemLink = ({ page, children }: { page: string; children: React.ReactNode }) => (
-    <Link href={`/${page === 'Home' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`} passHref>
+    <Link href={`/${page === 'Uploader' ? '' : page === 'Admin' ? 'admin/sermons' : page.toLowerCase()}`} passHref>
       {children}
     </Link>
   );
@@ -189,7 +188,9 @@ const Navbar: FunctionComponent = () => {
                   return (
                     <MenuItemLink
                       key={setting}
-                      page={setting === 'Login' ? `login?callbackUrl=${router.pathname}` : setting}
+                      page={
+                        setting === 'Login' ? `login?callbackUrl=${router.pathname.replace(/^\/|\/$/g, '')}` : setting
+                      }
                     >
                       <MenuItem
                         onClick={() => {

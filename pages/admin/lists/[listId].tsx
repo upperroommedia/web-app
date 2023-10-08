@@ -1,4 +1,3 @@
-import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useDocumentData } from 'react-firebase-hooks/firestore';
@@ -6,9 +5,15 @@ import AdminSermonsList from '../../../components/AdminSermonsList';
 import firestore, { doc } from '../../../firebase/firestore';
 import AdminLayout from '../../../layout/adminLayout';
 import { listConverter } from '../../../types/List';
-import { adminProtected } from '../../../utils/protectedRoutes';
+import useAuth from '../../../context/user/UserContext';
+// import { adminProtected } from '../../../utils/protectedRoutes';
 
 const SeriesSermon = () => {
+  const { user } = useAuth();
+  if (!user?.isAdmin()) {
+    return null;
+  }
+
   const router = useRouter();
   const listId = router.query.listId as string;
   const [series, _loading, _error] = useDocumentData(doc(firestore, `lists/${listId}`).withConverter(listConverter));
@@ -33,9 +38,10 @@ const SeriesSermon = () => {
 
 SeriesSermon.PageLayout = AdminLayout;
 
-export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  return adminProtected(ctx);
-};
+// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
+//   return adminProtected(ctx);
+// };
+
 export default SeriesSermon;
 //  <Box>
 //       <Box display="flex" justifyContent="center" gap={1}>
