@@ -39,4 +39,6 @@ export interface Sermon {
   soundCloudTrackId?: string;
   uploaderId?: string;
   approverId?: string;
+  createdAtMillis: number;
+  editedAtMillis: number;
 }

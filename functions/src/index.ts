@@ -1,6 +1,6 @@
 // To deploy functions: npm run-script deploy
 // To test functions: npm run-script serve
-
+import updatecreatedandeditedatmillis from './updateCreatedAndEditedAtMillis';
 import uploadToSubsplash from './uploadToSubsplash';
 import setUserRole from './setUserRole';
 import addintrooutro from './addIntroOutro';
@@ -60,3 +60,4 @@ exports.sermonListOnCreate = sermonListOnCreate;
 exports.sermonListOnDelete = sermonListOnDelete;
 exports.sermonListOnUpdate = sermonListOnUpdate;
 exports.repopulatelistfromspeakeritems = repopulatelistfromspeakeritems;
+exports.updatecreatedandeditedatmillis = updatecreatedandeditedatmillis;

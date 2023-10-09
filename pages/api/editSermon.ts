@@ -42,6 +42,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[]) => {
   promises.push(
     setDoc(sermonRef.withConverter(sermonConverter), {
       ...sermon,
+      editedAtMillis: new Date().getTime(),
     })
   );
   const results = await Promise.allSettled(promises);
