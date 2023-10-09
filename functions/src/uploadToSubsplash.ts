@@ -80,7 +80,7 @@ const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING
       title: data.title,
       subtitle: data.subtitle,
       summary: data.description,
-      date: new Date(),
+      date: data.date,
       auto_publish: data.autoPublish ?? false,
       _embedded: {
         images: data.images.map((image) => {
