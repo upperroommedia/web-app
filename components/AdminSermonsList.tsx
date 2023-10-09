@@ -33,10 +33,10 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
       ? query(
           sermonsRef.withConverter(sermonConverter),
           where('uploaderId', '==', user.uid),
-          orderBy('uploadedAtMillis', 'desc'),
+          orderBy('createdAtMillis', 'desc'),
           limit(queryLimit)
         )
-      : query(sermonsRef.withConverter(sermonConverter), orderBy('uploadedAtMillis', 'desc'), limit(queryLimit));
+      : query(sermonsRef.withConverter(sermonConverter), orderBy('createdAtMillis', 'desc'), limit(queryLimit));
   const [sermons, loading, error] = useCollection(q, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
