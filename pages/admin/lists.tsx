@@ -185,7 +185,7 @@ const AdminList = () => {
                     <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box display="flex" alignItems="center" gap={1}>
                         <AvatarWithDefaultImage
-                          image={l.images.find((image) => image.type === 'square')}
+                          image={l.images?.find((image) => image.type === 'square')}
                           altName={`Image of List: ${l.name}`}
                           width={50}
                           height={50}
