@@ -428,44 +428,41 @@ const Uploader = (props: UploaderProps) => {
                 renderInput={(params) => <TextField {...params} required label="Bible Chapter" />}
               />
             ))}
-          {sermon.subtitle === SUNDAY_HOMILIES_STRING && (
-            <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
-              {loadingSundayHomiliesMonths ? (
-                <CircularProgress />
-              ) : (
-                <Autocomplete
-                  fullWidth
-                  value={selectedSundayHomaliesMonth || null}
-                  isOptionEqualToValue={(option, value) => option?.id === value?.id}
-                  onChange={async (_, newValue) => {
-                    setSelectedSundayHomaliesMonth(newValue);
-                    setSermonList((oldSermonList) => {
-                      if (!newValue) {
-                        return oldSermonList.filter(
-                          (list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH
-                        );
-                      }
-                      const filteredList = oldSermonList.filter(
-                        (list) =>
-                          list.name !== SUNDAY_HOMILIES_STRING &&
-                          list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH
+          {sermon.subtitle === SUNDAY_HOMILIES_STRING &&
+            (loadingSundayHomiliesMonths ? (
+              <CircularProgress />
+            ) : (
+              <Autocomplete
+                fullWidth
+                value={selectedSundayHomaliesMonth || null}
+                isOptionEqualToValue={(option, value) => option?.id === value?.id}
+                onChange={async (_, newValue) => {
+                  setSelectedSundayHomaliesMonth(newValue);
+                  setSermonList((oldSermonList) => {
+                    if (!newValue) {
+                      return oldSermonList.filter(
+                        (list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH
                       );
-                      return [...filteredList, newValue];
-                    });
-                  }}
-                  id="sunday-homilies-months-input"
-                  options={sundayHomiliesMonths}
-                  getOptionLabel={(option: List) => option.name}
-                  renderOption={(props, option: List) => (
-                    <ListItem {...props} key={option.id}>
-                      {option.name}
-                    </ListItem>
-                  )}
-                  renderInput={(params) => <TextField {...params} required label="Month" />}
-                />
-              )}
-            </Box>
-          )}
+                    }
+                    const filteredList = oldSermonList.filter(
+                      (list) =>
+                        list.name !== SUNDAY_HOMILIES_STRING &&
+                        list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH
+                    );
+                    return [...filteredList, newValue];
+                  });
+                }}
+                id="sunday-homilies-months-input"
+                options={sundayHomiliesMonths}
+                getOptionLabel={(option: List) => option.name}
+                renderOption={(props, option: List) => (
+                  <ListItem {...props} key={option.id}>
+                    {option.name}
+                  </ListItem>
+                )}
+                renderInput={(params) => <TextField {...params} required label="Month" />}
+              />
+            ))}
           <TextField
             sx={{
               display: 'block',
