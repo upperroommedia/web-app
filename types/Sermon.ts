@@ -22,6 +22,8 @@ export const createSermon = ({
   images = <ImageType[]>[],
   numberOfLists = 0,
   numberOfListsUploadedTo = 0,
+  createdAtMillis = new Date().getTime(),
+  editedAtMillis = new Date().getTime(),
 }): Sermon => {
   return {
     id,
@@ -37,6 +39,8 @@ export const createSermon = ({
     images,
     numberOfLists,
     numberOfListsUploadedTo,
+    createdAtMillis,
+    editedAtMillis,
   };
 };
 
@@ -92,5 +96,7 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
     ...(uploaderId && { uploaderId }),
     numberOfLists: 0,
     numberOfListsUploadedTo: 0,
+    createdAtMillis: currentDate.getTime(),
+    editedAtMillis: currentDate.getTime(),
   };
 };

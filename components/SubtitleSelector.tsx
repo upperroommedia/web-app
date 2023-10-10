@@ -33,7 +33,11 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
             );
           } else {
             props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: newValue?.name || '' }));
-            if (props.sermonList.find((list) => list.type === ListType.SERIES) === undefined && newValue) {
+            if (
+              props.sermonList.find((list) => list.type === ListType.SERIES && !list.listTagAndPosition) ===
+                undefined &&
+              newValue
+            ) {
               props.setSermonList((oldSermonList) => [
                 ...oldSermonList.filter((list) => list.type !== ListType.CATEGORY_LIST),
                 newValue,

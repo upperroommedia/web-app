@@ -49,27 +49,12 @@ const ImageUploader = (props: Props) => {
     }
   }
 
-  // const getImageSrc = async (url: string) => {
-  //   if (url.includes('https://core.subsplash.com')) {
-  //     const getImage = createFunction<GetImageInputType, GetImageOutputType>('getimage');
-  //     try {
-  //       const imageResponse = await getImage({ url });
-  //       const imageBuffer = Buffer.from(imageResponse.buffer.data);
-  //       url = URL.createObjectURL(new Blob([imageBuffer], { type: 'image/jpeg' }));
-  //     } catch (error) {
-  //       // TODO: Fix this better since the error is HttpsError from firebase-functions not Error
-  //       const httpError = error as Error;
-  //       alert(httpError.message);
-  //     }
-  //   }
-  //   return url;
-  // };
   if (!imgSrc) {
     return <input type="file" accept="image/*" onChange={onSelectFile} />;
   }
   return (
     <DynamicPopUp
-      title="Select an Image"
+      title="Crop Image"
       open={true}
       setOpen={(bool) => {
         if (!bool) {

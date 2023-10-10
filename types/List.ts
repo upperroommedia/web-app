@@ -14,6 +14,22 @@ export enum ListType {
   LATEST = 'latest',
 }
 
+export enum ListTag {
+  BIBLE_CHAPTER = 'bible-chapter',
+  SUNDAY_HOMILY_MONTH = 'sunday-homily-month',
+}
+
+export type ListTagAndPostionType =
+  | {
+      listTag: ListTag.BIBLE_CHAPTER;
+      position: number;
+    }
+  | {
+      listTag: ListTag.SUNDAY_HOMILY_MONTH;
+      position: number;
+      year: number;
+    };
+
 export interface List {
   id: string;
   name: string;
@@ -26,6 +42,7 @@ export interface List {
   subsplashId?: string;
   moreSermonsRef?: string;
   isMoreSermonsList?: boolean;
+  listTagAndPosition?: ListTagAndPostionType;
 }
 
 export interface ListWithHighlight extends List {

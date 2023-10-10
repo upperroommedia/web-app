@@ -119,9 +119,19 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
           <Box display="flex" alignItems="center" sx={{ gridArea: 'playStatus', paddingTop: { xs: 1, sm: 0 } }}>
             {!minimal && (
               <Box display="flex" gap={0.2} marginRight={3}>
-                <Typography sx={{ whiteSpace: 'nowrap', fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>
-                  {sermon.dateString}
-                </Typography>
+                <Box display="flex" gap={0.0} flexDirection="column">
+                  <Typography sx={{ whiteSpace: 'nowrap', fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>
+                    {`Sermon Date: ${new Date(sermon.dateMillis).toLocaleDateString('en-US', { dateStyle: 'medium' })}`}
+                  </Typography>
+                  <Typography
+                    sx={{ whiteSpace: 'nowrap', color: 'gray', fontSize: { xs: '0.5rem', sm: '0.6rem', md: '.7rem' } }}
+                  >
+                    {`Uploaded At: ${new Date(sermon.createdAtMillis).toLocaleString('en-US', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    })}`}
+                  </Typography>
+                </Box>
                 <Typography sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>·</Typography>
                 {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
                   <>
