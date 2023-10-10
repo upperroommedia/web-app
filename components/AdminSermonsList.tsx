@@ -59,6 +59,10 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
   const [sermons, loading, error] = useCollection(q, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error(error);
+  }
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(0);
   const [searchResults, setSearchResults] = useState<Sermon[]>();
