@@ -40,6 +40,10 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
   const [sermons, loading, error] = useCollection(q, {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error(error);
+  }
   return (
     <Box width="100%" display="flex" flexDirection="column" alignItems="center" gap="10px">
       <Typography variant="h3">Manage Sermons</Typography>
