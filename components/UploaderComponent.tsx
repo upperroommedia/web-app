@@ -16,7 +16,7 @@ import Cancel from '@mui/icons-material/Cancel';
 
 import { isBrowser } from 'react-device-detect';
 
-import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
+import firestore, { collection, getDocs, orderBy, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
 
@@ -43,7 +43,7 @@ import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
-import { List, listConverter, ListType } from '../types/List';
+import { List, listConverter, ListTag, ListType } from '../types/List';
 import SubtitleSelector from '../components/SubtitleSelector';
 import { useRouter } from 'next/router';
 import Stack from '@mui/material/Stack';
@@ -52,6 +52,7 @@ import RequestRoleChange from './RequestUploadPrivalige';
 
 const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
 
+const BIBLE_STUDIES_STRING = 'Bible Studies';
 interface UploaderProps {
   existingSermon?: Sermon;
   existingList?: List[];
@@ -133,6 +134,8 @@ const Uploader = (props: UploaderProps) => {
   const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
 
   const [subtitles, setSubtitles] = useState<List[]>([]);
+  const [bibleChapters, setBibleChapters] = useState<List[]>([]);
+  const [selectedChapter, setSelectedChapter] = useState<List | null>(null);
 
   const [trimStart, setTrimStart] = useState<number>(0);
 
@@ -161,6 +164,14 @@ const Uploader = (props: UploaderProps) => {
         })
       );
 
+      // fetch bible chapters
+      const bibleChapterQuery = query(
+        collection(firestore, 'lists'),
+        where('listTagAndPosition.listTag', '==', ListTag.BIBLE_CHAPTER),
+        orderBy('listTagAndPosition.position', 'asc')
+      ).withConverter(listConverter);
+      setBibleChapters((await getDocs(bibleChapterQuery)).docs.map((doc) => doc.data()));
+
       // fetch latest list
       if (!props.existingSermon && sermonList.find((list) => list.type === ListType.LATEST) === undefined) {
         const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
@@ -182,6 +193,15 @@ const Uploader = (props: UploaderProps) => {
   const listEqual = (list1: List[], list2: List[]): boolean => {
     return JSON.stringify(list1) === JSON.stringify(list2);
   };
+
+  useEffect(() => {
+    if (sermon.subtitle !== BIBLE_STUDIES_STRING) {
+      setSelectedChapter(null);
+      setSermonList((oldSermonList) => {
+        return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
+      });
+    }
+  }, [sermon.subtitle]);
 
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
@@ -323,6 +343,36 @@ const Uploader = (props: UploaderProps) => {
               />
             </LocalizationProvider>
           </Box>
+          {/* mui autocomplete of bible chapters shown when sermon.subtitle is BIBLE_STUDIES_STRING */}
+          {sermon.subtitle === BIBLE_STUDIES_STRING && (
+            <Autocomplete
+              fullWidth
+              value={selectedChapter || null}
+              isOptionEqualToValue={(option, value) => option?.id === value?.id}
+              onChange={async (_, newValue) => {
+                setSelectedChapter(newValue);
+                setSermonList((oldSermonList) => {
+                  if (!newValue) {
+                    return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
+                  }
+                  const filteredList = oldSermonList.filter(
+                    (list) =>
+                      list.name !== BIBLE_STUDIES_STRING && list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER
+                  );
+                  return [...filteredList, newValue];
+                });
+              }}
+              id="bible-chapter-input"
+              options={bibleChapters}
+              getOptionLabel={(option: List) => option.name}
+              renderOption={(props, option: List) => (
+                <ListItem {...props} key={option.id}>
+                  {option.name}
+                </ListItem>
+              )}
+              renderInput={(params) => <TextField {...params} required label="Bible Chapter" />}
+            />
+          )}
           <TextField
             sx={{
               display: 'block',
@@ -579,6 +629,7 @@ const Uploader = (props: UploaderProps) => {
                       sermon.speakers.length === 0 ||
                       sermon.subtitle === '' ||
                       sermon.description === '' ||
+                      (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
                       isUploading
                     }
                     onClick={async () => {

@@ -13,11 +13,36 @@ export type listMetaDataType = { overflowBehavior: OverflowBehavior; listId: str
 export interface SubsplashListRow {
   id: string;
   position: number;
+  created_at: string;
+  updated_at: string;
   _embedded: {
     [key in MediaType]: {
       id: string;
+      title: string;
     };
   };
+}
+
+export interface ListData {
+  _links: {
+    self: {
+      href: string;
+    };
+    'list-rows': {
+      href: string;
+    };
+  };
+  id: string;
+  app_key: string;
+  type: string;
+  title: string;
+  status: string;
+  max_item_count: number;
+  generated: boolean;
+  include_seriesless_media_items: boolean;
+  short_code: string;
+  list_rows_count: number;
+  updated_at: string;
 }
 
 export type existingSubsplashListRow = Omit<SubsplashListRow, '_embedded'>;
