@@ -135,6 +135,7 @@ const Uploader = (props: UploaderProps) => {
 
   const [subtitles, setSubtitles] = useState<List[]>([]);
   const [bibleChapters, setBibleChapters] = useState<List[]>([]);
+  const [loadingBibleChapters, setLoadingBibleChapters] = useState(false);
   const [selectedChapter, setSelectedChapter] = useState<List | null>(null);
 
   const [trimStart, setTrimStart] = useState<number>(0);
@@ -164,14 +165,6 @@ const Uploader = (props: UploaderProps) => {
         })
       );
 
-      // fetch bible chapters
-      const bibleChapterQuery = query(
-        collection(firestore, 'lists'),
-        where('listTagAndPosition.listTag', '==', ListTag.BIBLE_CHAPTER),
-        orderBy('listTagAndPosition.position', 'asc')
-      ).withConverter(listConverter);
-      setBibleChapters((await getDocs(bibleChapterQuery)).docs.map((doc) => doc.data()));
-
       // fetch latest list
       if (!props.existingSermon && sermonList.find((list) => list.type === ListType.LATEST) === undefined) {
         const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
@@ -200,6 +193,21 @@ const Uploader = (props: UploaderProps) => {
       setSermonList((oldSermonList) => {
         return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
       });
+    }
+
+    if (sermon.subtitle === BIBLE_STUDIES_STRING && bibleChapters.length === 0) {
+      const fetchBibleChapters = async () => {
+        setLoadingBibleChapters(true);
+        // fetch bible chapters
+        const bibleChapterQuery = query(
+          collection(firestore, 'lists'),
+          where('listTagAndPosition.listTag', '==', ListTag.BIBLE_CHAPTER),
+          orderBy('listTagAndPosition.position', 'asc')
+        ).withConverter(listConverter);
+        setBibleChapters((await getDocs(bibleChapterQuery)).docs.map((doc) => doc.data()));
+        setLoadingBibleChapters(false);
+      };
+      fetchBibleChapters();
     }
   }, [sermon.subtitle]);
 
@@ -344,35 +352,38 @@ const Uploader = (props: UploaderProps) => {
             </LocalizationProvider>
           </Box>
           {/* mui autocomplete of bible chapters shown when sermon.subtitle is BIBLE_STUDIES_STRING */}
-          {sermon.subtitle === BIBLE_STUDIES_STRING && (
-            <Autocomplete
-              fullWidth
-              value={selectedChapter || null}
-              isOptionEqualToValue={(option, value) => option?.id === value?.id}
-              onChange={async (_, newValue) => {
-                setSelectedChapter(newValue);
-                setSermonList((oldSermonList) => {
-                  if (!newValue) {
-                    return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
-                  }
-                  const filteredList = oldSermonList.filter(
-                    (list) =>
-                      list.name !== BIBLE_STUDIES_STRING && list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER
-                  );
-                  return [...filteredList, newValue];
-                });
-              }}
-              id="bible-chapter-input"
-              options={bibleChapters}
-              getOptionLabel={(option: List) => option.name}
-              renderOption={(props, option: List) => (
-                <ListItem {...props} key={option.id}>
-                  {option.name}
-                </ListItem>
-              )}
-              renderInput={(params) => <TextField {...params} required label="Bible Chapter" />}
-            />
-          )}
+          {sermon.subtitle === BIBLE_STUDIES_STRING &&
+            (loadingBibleChapters ? (
+              <CircularProgress />
+            ) : (
+              <Autocomplete
+                fullWidth
+                value={selectedChapter || null}
+                isOptionEqualToValue={(option, value) => option?.id === value?.id}
+                onChange={async (_, newValue) => {
+                  setSelectedChapter(newValue);
+                  setSermonList((oldSermonList) => {
+                    if (!newValue) {
+                      return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
+                    }
+                    const filteredList = oldSermonList.filter(
+                      (list) =>
+                        list.name !== BIBLE_STUDIES_STRING && list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER
+                    );
+                    return [...filteredList, newValue];
+                  });
+                }}
+                id="bible-chapter-input"
+                options={bibleChapters}
+                getOptionLabel={(option: List) => option.name}
+                renderOption={(props, option: List) => (
+                  <ListItem {...props} key={option.id}>
+                    {option.name}
+                  </ListItem>
+                )}
+                renderInput={(params) => <TextField {...params} required label="Bible Chapter" />}
+              />
+            ))}
           <TextField
             sx={{
               display: 'block',
