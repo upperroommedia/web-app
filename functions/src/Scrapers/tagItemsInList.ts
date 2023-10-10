@@ -7,10 +7,16 @@ import { ListData, SubsplashListRow } from '../helpers/addToListHelpers';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 
-interface TAG_ITEMS_IN_LIST_INCOMING_DATA {
-  listId: string;
-  tag: ListTag;
-}
+type TAG_ITEMS_IN_LIST_INCOMING_DATA =
+  | {
+      listId: string;
+      tag: ListTag.BIBLE_CHAPTER;
+    }
+  | {
+      listId: string;
+      tag: ListTag.SUNDAY_HOMILY_MONTH;
+      year: number;
+    };
 
 const tagItemsInList = https.onCall(
   async (data: TAG_ITEMS_IN_LIST_INCOMING_DATA, context): Promise<HttpsError | number> => {
@@ -28,6 +34,10 @@ const tagItemsInList = https.onCall(
           'invalid-argument',
           `tag is invalid, must be one of the following: ${Object.values(ListTag).join(', ')}`
         );
+      }
+
+      if (data.tag === ListTag.SUNDAY_HOMILY_MONTH && !data.year) {
+        throw new HttpsError('invalid-argument', `year property is required for ${ListTag.SUNDAY_HOMILY_MONTH}`);
       }
 
       const token = await authenticateSubsplash();
@@ -52,10 +62,22 @@ const tagItemsInList = https.onCall(
             .withConverter(firestoreAdminListConverter);
           const listRef = firestoreLists.doc(listId);
           const list = await listRef.get();
+          const listTagAndPosition =
+            data.tag === ListTag.SUNDAY_HOMILY_MONTH
+              ? {
+                  listTag: data.tag,
+                  position: listRow.position,
+                  year: data.year,
+                }
+              : {
+                  listTag: data.tag,
+                  position: listRow.position,
+                };
+
           if (list.exists) {
             logger.log(`Updating list: ${listId}`);
             batch.update(listRef, {
-              listTagAndPosition: { listTag: data.tag, position: listRow.position },
+              listTagAndPosition: listTagAndPosition,
             });
             count++;
           } else {
@@ -77,7 +99,7 @@ const tagItemsInList = https.onCall(
                   new Date(listRow.updated_at).getTime() ||
                   new Date(listRow.created_at).getTime() ||
                   new Date().getTime(),
-                listTagAndPosition: { listTag: data.tag, position: listRow.position },
+                listTagAndPosition: listTagAndPosition,
               },
               { merge: true }
             );
