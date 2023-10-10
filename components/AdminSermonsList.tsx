@@ -106,7 +106,7 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
       <Typography variant="h3">Manage Sermons</Typography>
       <Box display="flex" width="100%" justifyContent="space-between">
         <TextField
-          placeholder="Search a for a sermon by name, subtitle, or description"
+          placeholder="Search a for a sermon by name, subtitle, speaker, or description"
           onChange={async (e) => {
             setSearchQuery(e.target.value);
             setCurrentPage(0);
