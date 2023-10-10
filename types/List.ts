@@ -19,10 +19,16 @@ export enum ListTag {
   SUNDAY_HOMILY_MONTH = 'sunday-homily-month',
 }
 
-export type ListTagAndPostionType = {
-  listTag: ListTag;
-  position: number;
-};
+export type ListTagAndPostionType =
+  | {
+      listTag: ListTag.BIBLE_CHAPTER;
+      position: number;
+    }
+  | {
+      listTag: ListTag.SUNDAY_HOMILY_MONTH;
+      position: number;
+      year: number;
+    };
 
 export interface List {
   id: string;
