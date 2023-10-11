@@ -123,7 +123,12 @@ const Uploader = (props: UploaderProps) => {
     );
   }
 
-  const [sermon, setSermon] = useState<Sermon>(props.existingSermon || createEmptySermon(user?.uid));
+  const [sermon, setSermon] = useState<Sermon>(() => {
+    if (props.existingSermon) {
+      return props.existingSermon;
+    }
+    return createEmptySermon(user.uid);
+  });
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [file, setFile] = useState<UploadableFile>();
   const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
@@ -145,14 +150,16 @@ const Uploader = (props: UploaderProps) => {
   const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<List[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
   const [selectedSundayHomaliesMonth, setSelectedSundayHomaliesMonth] = useState<List | null>(null);
-  const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(new Date().getFullYear());
+  const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(() => new Date().getFullYear());
 
   const [trimStart, setTrimStart] = useState<number>(0);
 
   const [timer, setTimer] = useState<NodeJS.Timeout>();
 
   // TODO: REFACTOR THESE INTO SERMON DATA
-  const [date, setDate] = useState<Date>(props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date());
+  const [date, setDate] = useState<Date>(() =>
+    props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date()
+  );
 
   const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
 
@@ -275,7 +282,7 @@ const Uploader = (props: UploaderProps) => {
   };
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
-    setSermon(createEmptySermon());
+    setSermon(createEmptySermon(user.uid));
     setSermonList([]);
     setDate(new Date());
     clearAudioTrimmer();

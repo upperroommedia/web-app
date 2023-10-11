@@ -75,8 +75,8 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
   },
 };
 
-const currentDate = new Date();
 export const createEmptySermon = (uploaderId?: string): Sermon => {
+  const currentDate = new Date();
   return {
     id: uuidv4(),
     title: '',
