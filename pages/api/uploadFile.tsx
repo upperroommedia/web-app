@@ -18,8 +18,6 @@ interface uploadFileProps {
 
 const uploadFile = async (props: uploadFileProps) => {
   const sermonRef = ref(storage, `sermons/${props.sermon.id}`);
-
-  // const sermonRef = ref(storage, `sermons/${file.name}`);
   let introRef = '';
   let outroRef = '';
   try {
@@ -61,6 +59,7 @@ const uploadFile = async (props: uploadFileProps) => {
       return image;
     })
   );
+
   await setDoc(doc(firestore, 'sermons', props.sermon.id).withConverter(sermonConverter), props.sermon);
   await new Promise<void>((resolve, reject) => {
     uploadBytesResumable(sermonRef, props.file.file, metadata).on(
