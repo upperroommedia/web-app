@@ -10,7 +10,7 @@ const CustomPagination = (props: UsePaginationProps) => {
       variant="outlined"
       shape="rounded"
       color="primary"
-      count={nbPages}
+      count={nbPages - 1}
       onChange={(_, page) => refine(page - 1)}
     />
   );
