@@ -1,10 +1,12 @@
 import AdminLayout from '../../layout/adminLayout';
 // import { adminProtected } from '../../utils/protectedRoutes';
 // import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-import AdminSermonsList from '../../components/AdminSermonsList';
+// import AdminSermonsList from '../../components/AdminSermonsList';
+import SearchableAdminSermonList from '../../components/SearchableAdmonSermonsList';
 
 const AdminSermons = () => {
-  return <AdminSermonsList collectionPath="sermons" />;
+  // return <AdminSermonsList collectionPath="sermons" />;
+  return <SearchableAdminSermonList />;
 };
 
 AdminSermons.PageLayout = AdminLayout;
