@@ -28,7 +28,7 @@ const SearchResultSermonList = (props: Props) => {
   // };
 
   return (
-    <Box display="flex" justifyContent={'start'} width={1}>
+    <Box display="flex" justifyContent={'start'} flex={3}>
       <List
         sx={{
           maxWidth: '1200px',

@@ -7,6 +7,8 @@ import Stack from '@mui/material/Stack';
 import CustomPagination from './algoliaComponents/CustomPagination';
 import SearchResultSermonList from './SearchResultSermonsList';
 import CustomSearchBox from './algoliaComponents/CustomSearchBox';
+import Box from '@mui/material/Box';
+import CustomRefinementList from './algoliaComponents/CustomRefinementList';
 interface SearchableAdminSermonListProps {}
 
 const searchClient =
@@ -20,10 +22,26 @@ const searchClient =
 const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
   return searchClient ? (
     <InstantSearch searchClient={searchClient} indexName="sermons">
-      <Stack justifyContent="center" alignItems="center">
+      <Stack justifyContent="center" alignItems="center" gap={2}>
         <CustomSearchBox />
         <NoResultsBoundary fallback={<NoResults />}>
-          <SearchResultSermonList />
+          <Box display="flex">
+            <SearchResultSermonList />
+            <Stack flex={1} alignItems="center">
+              <Stack gap={2} alignItems="start">
+                <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
+                <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
+                <CustomRefinementList
+                  attribute="speakers.name"
+                  limit={5}
+                  showMore={true}
+                  searchable
+                  searchablePlaceholder="Search Speakers"
+                  title="Speakers"
+                />
+              </Stack>
+            </Stack>
+          </Box>
           <CustomPagination />
         </NoResultsBoundary>
       </Stack>
