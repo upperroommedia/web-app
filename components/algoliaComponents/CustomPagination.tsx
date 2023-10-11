@@ -3,15 +3,18 @@ import React from 'react';
 import { usePagination, UsePaginationProps } from 'react-instantsearch';
 
 const CustomPagination = (props: UsePaginationProps) => {
-  const { nbPages, refine } = usePagination(props);
+  const { currentRefinement, nbPages, refine } = usePagination(props);
 
   return (
     <Pagination
       variant="outlined"
       shape="rounded"
       color="primary"
-      count={nbPages - 1}
-      onChange={(_, page) => refine(page - 1)}
+      count={nbPages}
+      page={currentRefinement + 1}
+      onChange={(_, page) => {
+        refine(page - 1);
+      }}
     />
   );
 };
