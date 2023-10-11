@@ -10,6 +10,7 @@ const CustomSearchBox = (props: UseSearchBoxProps) => {
   return (
     <Stack
       sx={{
+        paddingTop: 2,
         paddingX: 2,
         maxWidth: '1200px',
         width: 1,

@@ -1,53 +1,91 @@
-import { FunctionComponent, ReactNode } from 'react';
-import algoliasearch from 'algoliasearch/lite';
+import { FunctionComponent, ReactNode, useEffect, useState } from 'react';
+import algoliasearch, { SearchClient } from 'algoliasearch';
 import { InstantSearch, useInstantSearch } from 'react-instantsearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
-import Typography from '@mui/material/Typography';
 import Stack from '@mui/material/Stack';
 import CustomPagination from './algoliaComponents/CustomPagination';
 import SearchResultSermonList from './SearchResultSermonsList';
 import CustomSearchBox from './algoliaComponents/CustomSearchBox';
 import Box from '@mui/material/Box';
 import CustomRefinementList from './algoliaComponents/CustomRefinementList';
+import useAuth from '../context/user/UserContext';
+import {
+  GenerateSecuredApiKeyInputType,
+  GenerateSecuredApiKeyOutputType,
+} from '../functions/src/generateAlgoliaSecureApiKey';
+import { createFunction } from '../utils/createFunction';
+import Typography from '@mui/material/Typography';
+import CircularProgress from '@mui/material/CircularProgress';
 interface SearchableAdminSermonListProps {}
 
-const searchClient =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
-        responsesCache: createInMemoryCache(),
-        requestsCache: createInMemoryCache({ serializable: false }),
-      })
-    : undefined;
-
 const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
-  return searchClient ? (
-    <InstantSearch searchClient={searchClient} indexName="sermons">
-      <Stack justifyContent="center" alignItems="center" gap={2}>
-        <CustomSearchBox />
-        <NoResultsBoundary fallback={<NoResults />}>
-          <Box display="flex" width={1}>
-            <SearchResultSermonList />
-            <Stack flex={1} alignItems="center">
-              <Stack gap={2} alignItems="start">
-                <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
-                <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
-                <CustomRefinementList
-                  attribute="speakers.name"
-                  limit={5}
-                  showMore={true}
-                  searchable
-                  searchablePlaceholder="Search Speakers"
-                  title="Speakers"
-                />
-              </Stack>
-            </Stack>
-          </Box>
-          <CustomPagination />
-        </NoResultsBoundary>
-      </Stack>
-    </InstantSearch>
-  ) : (
-    <Typography>Missing Algolia Credentials</Typography>
+  const { user } = useAuth();
+  const [searchClient, setSearchClient] = useState<SearchClient | null>(null);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  if (!(user.isAdmin() || user.isUploader())) {
+    throw new Error('User is not an admin or uploader');
+  }
+
+  useEffect(() => {
+    const init = async () => {
+      if (!searchClient) {
+        if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
+          throw new Error('Missing Algolia Credentials');
+        }
+        const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
+          'generatesecuredapikey'
+        );
+        const publicKey = user.isAdmin()
+          ? process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
+          : await generateSecuredApiKey({ userId: user.uid });
+        setSearchClient(
+          algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, publicKey, {
+            responsesCache: createInMemoryCache(),
+            requestsCache: createInMemoryCache({ serializable: false }),
+          })
+        );
+      }
+    };
+    init();
+  }, [searchClient, user.uid]);
+
+  return (
+    <>
+      {searchClient ? (
+        <InstantSearch searchClient={searchClient} indexName="sermons" future={{ preserveSharedStateOnUnmount: true }}>
+          <Stack justifyContent="center" alignItems="center" gap={2}>
+            <CustomSearchBox />
+            <NoResultsBoundary fallback={<NoResults />}>
+              <Box display="flex" width={1}>
+                <SearchResultSermonList />
+                <Stack flex={1} alignItems="center">
+                  <Stack gap={2} alignItems="start">
+                    <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
+                    <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
+                    <CustomRefinementList
+                      attribute="speakers.name"
+                      limit={5}
+                      showMore={true}
+                      searchable
+                      searchablePlaceholder="Search Speakers"
+                      title="Speakers"
+                    />
+                  </Stack>
+                </Stack>
+              </Box>
+              <CustomPagination />
+            </NoResultsBoundary>
+          </Stack>
+        </InstantSearch>
+      ) : (
+        <Stack margin={3} width={1} display="flex" justifyContent="center" alignItems="center">
+          <Typography variant="h6">Loading</Typography>
+          <CircularProgress />
+        </Stack>
+      )}
+    </>
   );
 };
 
@@ -60,7 +98,7 @@ function NoResultsBoundary({ children, fallback }: { children: ReactNode; fallba
     return (
       <>
         {fallback}
-        <div hidden>{children}</div>
+        <Box hidden>{children}</Box>
       </>
     );
   }
@@ -72,11 +110,13 @@ function NoResults() {
   const { indexUiState } = useInstantSearch();
 
   return (
-    <div>
-      <p>
-        No results for <q>{indexUiState.query}</q>.
-      </p>
-    </div>
+    <Box m={2}>
+      <Typography>
+        {indexUiState.query
+          ? `No results for "${indexUiState.query}".`
+          : 'No sermons found - please upload one from the Uploader tab'}
+      </Typography>
+    </Box>
   );
 }
 

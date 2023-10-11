@@ -7,6 +7,7 @@ const CustomPagination = (props: UsePaginationProps) => {
 
   return (
     <Pagination
+      sx={{ m: 2 }}
       variant="outlined"
       shape="rounded"
       color="primary"
