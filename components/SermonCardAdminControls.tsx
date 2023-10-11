@@ -20,23 +20,17 @@ import useAuth from '../context/user/UserContext';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
 import { sermonListConverter } from '../types/SermonList';
+import useAudioPlayer from '../context/audio/audioPlayerContext';
 
 export interface AdminControlsProps {
   sermon: Sermon;
-  playlist: Sermon[];
-  setPlaylist: (playlist: Sermon[]) => void;
 }
 
-const AdminControls: FunctionComponent<AdminControlsProps> = ({
-  sermon,
-  playlist,
-  setPlaylist,
-}: AdminControlsProps) => {
-  const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState<boolean>(false);
+const AdminControls: FunctionComponent<AdminControlsProps> = ({ sermon }: AdminControlsProps) => {
   const { user } = useAuth();
-
+  const { currentSermon, setCurrentSermon } = useAudioPlayer();
+  const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState<boolean>(false);
   const [uploadToSubsplashPopup, setUploadToSubsplashPopup] = useState<boolean>(false);
-
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState<boolean>(false);
 
   const handleDelete = async () => {
@@ -62,7 +56,9 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
         return;
       }
       await deleteDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter));
-      setPlaylist(playlist.filter((obj) => obj.id !== sermon.id));
+      if (currentSermon?.id === sermon.id) {
+        setCurrentSermon(undefined);
+      }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(error);

@@ -10,25 +10,15 @@ import Replay30Icon from '@mui/icons-material/Replay30';
 import Forward30Icon from '@mui/icons-material/Forward30';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
-import SkipNextIcon from '@mui/icons-material/SkipNext';
-import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
 import { getDownloadURL, getStorage, ref } from 'firebase/storage';
 import firebase from '../firebase/firebase';
 import { sanitize } from 'dompurify';
+import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 
 const storage = getStorage(firebase);
 // const path = useRouter().asPath;
-const BottomAudioBar: FunctionComponent = () => {
-  const {
-    currentSermon,
-    playing,
-    togglePlaying,
-    currentSecond,
-    updateCurrentSecond,
-    setCurrentSermonUrl,
-    previousSermon,
-    nextSermon,
-  } = useAudioPlayer();
+const BottomAudioBar: FunctionComponent<{ currentSermon: SermonWithMetadata }> = ({ currentSermon }) => {
+  const { playing, togglePlaying, currentSecond, updateCurrentSecond, setCurrentSermonUrl } = useAudioPlayer();
   const audioPlayer = useRef<HTMLAudioElement>(new Audio());
   const [seekTime, setSeekTime] = useState(-1);
 
@@ -50,7 +40,7 @@ const BottomAudioBar: FunctionComponent = () => {
     } else if (!playing && audioPlayer.current) {
       audioPlayer.current.pause();
     }
-  }, [currentSermon?.url, playing]);
+  }, [currentSermon.url, playing]);
 
   const onPlaying = () => {
     const newSecond = Math.floor(audioPlayer.current.currentTime);
@@ -84,14 +74,11 @@ const BottomAudioBar: FunctionComponent = () => {
       <div className={styles['vertical-container']}>
         <div className={styles['controls-container']}>
           <Replay30Icon onClick={rewind30Seconds} />
-
-          <SkipPreviousIcon onClick={previousSermon} />
           {playing ? (
             <PauseCircleIcon onClick={() => togglePlaying()} />
           ) : (
             <PlayCircleIcon onClick={() => togglePlaying()} />
           )}
-          <SkipNextIcon onClick={nextSermon} />
           <Forward30Icon onClick={forward30Seconds} />
         </div>
         <div className={styles['progress-container']}>
@@ -114,6 +101,7 @@ const BottomAudioBar: FunctionComponent = () => {
             ref={audioPlayer}
             src={currentSermon.url ? sanitize(currentSermon.url) : undefined}
             onTimeUpdate={onPlaying}
+            onEnded={() => togglePlaying(false)}
           ></audio>
           <span className={styles.duration}>{formatTime(currentSermon.durationSeconds)}</span>
         </div>
@@ -124,7 +112,7 @@ const BottomAudioBar: FunctionComponent = () => {
 
 const BottomAudioBarWrapper = () => {
   const { currentSermon } = useAudioPlayer();
-  return <>{currentSermon && <BottomAudioBar />}</>;
+  return <>{currentSermon && <BottomAudioBar currentSermon={currentSermon} />}</>;
 };
 
 export default BottomAudioBarWrapper;

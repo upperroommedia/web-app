@@ -2,37 +2,25 @@ import { createContext, useReducer, useContext } from 'react';
 import { Sermon } from '../../types/SermonTypes';
 import audioPlayerReducer, { AudioPlayerState, SermonWithMetadata } from '../../reducers/audioPlayerReducer';
 const initialState: AudioPlayerState = {
-  playlist: [],
-  currentSermonIndex: 0,
+  currentSermon: undefined,
   currentSermonSecond: 0,
   playing: false,
 };
 
 type AudioPlayerContextType = {
-  playlist: SermonWithMetadata[];
-  currentSermon: SermonWithMetadata;
+  currentSermon: SermonWithMetadata | undefined;
   currentSecond: number;
   playing: boolean;
-  setPlaylist: (playlist: Sermon[]) => void;
-  // addToPlaylist: (sermon: Sermon) => void;
-  // removeFromPlaylist: (sermon: Sermon) => void;
   setCurrentSermonUrl: (url: string) => void;
-  setCurrentSermon: (sermon: Sermon) => void;
+  setCurrentSermon: (sermon: Sermon | undefined) => void;
   updateCurrentSecond: (second: number) => void;
   togglePlaying: (play?: boolean) => void;
-  nextSermon: () => void;
-  previousSermon: () => void;
 };
 
 const AudioPlayerContext = createContext<AudioPlayerContextType | null>(null);
 
 export const AudioPlayerProvider = ({ children }: any) => {
   const [state, dispatch] = useReducer(audioPlayerReducer, initialState);
-
-  const setPlaylist = (playlist: Sermon[]) => {
-    const playlistWithMetadata = playlist.map((sermon): SermonWithMetadata => ({ ...sermon, currentSecond: 0 }));
-    dispatch({ type: 'SET_PLAYLIST', payload: playlistWithMetadata });
-  };
 
   const updateCurrentSecond = (currentSecond: number) => {
     dispatch({ type: 'UPDATE_CURRENT_SECOND', payload: currentSecond });
@@ -45,35 +33,24 @@ export const AudioPlayerProvider = ({ children }: any) => {
     dispatch({ type: 'TOGGLE_PLAYING', payload: play });
   };
 
-  const setCurrentSermon = (sermon: Sermon) => {
-    if (state.playlist[state.currentSermonIndex].id === sermon.id) return;
-    const currentSermonIndex = state.playlist.findIndex((s: SermonWithMetadata) => s.id === sermon.id);
-    dispatch({ type: 'SET_CURRENT_SERMON_INDEX', payload: currentSermonIndex });
-  };
-  const nextSermon = () => {
-    dispatch({
-      type: 'SET_CURRENT_SERMON_INDEX',
-      payload: (state.currentSermonIndex + 1) % state.playlist.length,
-    });
-  };
-
-  const previousSermon = () => {
-    if (state.currentSermonIndex === 0) {
-      dispatch({
-        type: 'SET_CURRENT_SERMON_INDEX',
-        payload: state.playlist.length - 1,
-      });
-    } else {
-      dispatch({
-        type: 'SET_CURRENT_SERMON_INDEX',
-        payload: (state.currentSermonIndex - 1) % state.playlist.length,
-      });
+  const setCurrentSermon = (sermon: Sermon | undefined) => {
+    if (!sermon) {
+      dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: undefined });
+      return;
     }
+    if (state.currentSermon?.id === sermon.id) return;
+    const newCurrentSermon: SermonWithMetadata = { ...sermon, currentSecond: 0 };
+    dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: newCurrentSermon });
   };
 
   const setCurrentSermonUrl = (url: string) => {
+    if (!state.currentSermon) {
+      // eslint-disable-next-line no-console
+      console.error('No sermon found');
+      return;
+    }
     const sermon: SermonWithMetadata = {
-      ...state.playlist[state.currentSermonIndex],
+      ...state.currentSermon,
       url,
     };
     dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: sermon });
@@ -82,19 +59,13 @@ export const AudioPlayerProvider = ({ children }: any) => {
   return (
     <AudioPlayerContext.Provider
       value={{
-        playlist: state.playlist,
-        currentSermon: state.playlist[state.currentSermonIndex],
+        currentSermon: state.currentSermon,
         currentSecond: state.currentSermonSecond,
         playing: state.playing,
-        setPlaylist,
-        // addToPlaylist,
-        // removeFromPlaylist,
         setCurrentSermonUrl,
         setCurrentSermon,
         updateCurrentSecond,
         togglePlaying,
-        nextSermon,
-        previousSermon,
       }}
     >
       {children}

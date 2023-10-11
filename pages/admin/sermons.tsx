@@ -3,10 +3,16 @@ import AdminLayout from '../../layout/adminLayout';
 // import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 // import AdminSermonsList from '../../components/AdminSermonsList';
 import SearchableAdminSermonList from '../../components/SearchableAdminSermonsList';
+import BottomAudioBar from '../../components/BottomAudioBar';
 
 const AdminSermons = () => {
   // return <AdminSermonsList collectionPath="sermons" />;
-  return <SearchableAdminSermonList />;
+  return (
+    <>
+      <SearchableAdminSermonList />;
+      <BottomAudioBar />
+    </>
+  );
 };
 
 AdminSermons.PageLayout = AdminLayout;

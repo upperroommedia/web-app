@@ -16,16 +16,6 @@ interface Props {}
 
 const SearchResultSermonList = (props: Props) => {
   const { hits } = useHits(props);
-  // const { playing, playlist, setPlaylist, currentSermon, currentSecond } = useAudioPlayer();
-
-  // useEffect(() => {
-  //   setPlaylist(sermons);
-  // }, [sermons]);
-
-  // const handleSermonClick = (sermon: Sermon) => {
-  //   // console.log('handle click');
-  //   // setCurrentSermon(sermon);
-  // };
 
   return (
     <Box display="flex" justifyContent={'start'} flex={3}>

@@ -5,8 +5,6 @@
 import SermonListCard from './SermonListCard';
 
 import { Sermon } from '../types/SermonTypes';
-
-import { useEffect } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import List from '@mui/material/List';
 import Box from '@mui/material/Box';
@@ -17,16 +15,7 @@ interface Props {
 }
 
 const SermonsList = ({ sermons, minimal }: Props) => {
-  const { playing, playlist, setPlaylist, currentSermon, currentSecond } = useAudioPlayer();
-
-  useEffect(() => {
-    setPlaylist(sermons);
-  }, [sermons]);
-
-  // const handleSermonClick = (sermon: Sermon) => {
-  //   // console.log('handle click');
-  //   // setCurrentSermon(sermon);
-  // };
+  const { playing, currentSermon, currentSecond } = useAudioPlayer();
 
   return (
     <Box display="flex" justifyContent={'start'} width={1}>
@@ -36,40 +25,14 @@ const SermonsList = ({ sermons, minimal }: Props) => {
           width: 1,
         }}
       >
-        {minimal
-          ? sermons.map((sermon) => (
-              <SermonListCard
-                sermon={{ ...sermon, currentSecond }}
-                playing={false}
-                key={sermon.id}
-                playlist={playlist}
-                setPlaylist={setPlaylist}
-                minimal={true}
-              />
-            ))
-          : playlist.map((sermon) => {
-              if (currentSermon?.id === sermon.id) {
-                return (
-                  <SermonListCard
-                    sermon={{ ...sermon, currentSecond }}
-                    playing={playing}
-                    key={sermon.id}
-                    playlist={playlist}
-                    setPlaylist={setPlaylist}
-                  />
-                );
-              } else {
-                return (
-                  <SermonListCard
-                    sermon={sermon}
-                    playing={false}
-                    key={sermon.id}
-                    playlist={playlist}
-                    setPlaylist={setPlaylist}
-                  />
-                );
-              }
-            })}
+        {sermons.map((sermon) => (
+          <SermonListCard
+            sermon={{ ...sermon, currentSecond }}
+            playing={currentSermon?.id === sermon.id ? playing : false}
+            key={sermon.id}
+            {...(minimal && { minimal: true })}
+          />
+        ))}
       </List>
     </Box>
   );

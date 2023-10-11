@@ -15,7 +15,7 @@ import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
 import { formatRemainingTime } from '../utils/audioUtils';
 
-import { Sermon, sermonStatusType } from '../types/SermonTypes';
+import { sermonStatusType } from '../types/SermonTypes';
 
 import AdminControls from './SermonCardAdminControls';
 import LinearProgress from '@mui/material/LinearProgress';
@@ -32,14 +32,13 @@ import CircularProgressWithLabel from './CircularProgressWithLabel';
 interface Props {
   sermon: SermonWithMetadata;
   playing: boolean;
-  playlist: Sermon[];
-  setPlaylist: (playlist: Sermon[]) => void;
   minimal?: boolean;
   // handleSermonClick: (sermon: Sermon) => void;
 }
 
-const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, setPlaylist, minimal }: Props) => {
-  const { setCurrentSermon, togglePlaying } = useAudioPlayer();
+const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, minimal }: Props) => {
+  const { setCurrentSermon, togglePlaying, currentSermon } = useAudioPlayer();
+  const currentSecond = currentSermon?.id === sermon.id ? currentSermon.currentSecond : 0;
   const theme = useTheme();
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
@@ -133,11 +132,11 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
                   </Typography>
                 </Box>
                 <Typography sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>·</Typography>
-                {sermon.currentSecond < Math.floor(sermon.durationSeconds) ? (
+                {currentSecond < Math.floor(sermon.durationSeconds) ? (
                   <>
                     <Typography sx={{ whiteSpace: 'nowrap', fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>
-                      {formatRemainingTime(Math.floor(sermon.durationSeconds) - sermon.currentSecond) +
-                        (playing || sermon.currentSecond > 0 ? ' left' : '')}
+                      {formatRemainingTime(Math.floor(sermon.durationSeconds) - currentSecond) +
+                        (playing || currentSecond > 0 ? ' left' : '')}
                     </Typography>
                   </>
                 ) : (
@@ -151,11 +150,11 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
                 )}
               </Box>
             )}
-            {sermon.currentSecond < Math.floor(sermon.durationSeconds) && (playing || sermon.currentSecond > 0) && (
+            {currentSecond < Math.floor(sermon.durationSeconds) && (playing || currentSecond > 0) && (
               <Box sx={{ width: 1, maxWidth: { xs: 100, sm: 200 } }}>
                 <LinearProgress
                   variant="determinate"
-                  value={(sermon.currentSecond / sermon.durationSeconds) * 100}
+                  value={(currentSecond / sermon.durationSeconds) * 100}
                   sx={{
                     borderRadius: 5,
                     color: (theme) => theme.palette.grey[theme.palette.mode === 'light' ? 200 : 800],
@@ -166,7 +165,7 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, playlist, s
           </Box>
           <CardActions sx={{ gridArea: 'actionItems', margin: 0, padding: 0 }}>
             {sermon.status.audioStatus === sermonStatusType.PROCESSED ? (
-              <AdminControls sermon={sermon} playlist={playlist} setPlaylist={setPlaylist} />
+              <AdminControls sermon={sermon} />
             ) : (
               <Box style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                 <Box style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
