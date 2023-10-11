@@ -25,7 +25,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
       <Stack justifyContent="center" alignItems="center" gap={2}>
         <CustomSearchBox />
         <NoResultsBoundary fallback={<NoResults />}>
-          <Box display="flex">
+          <Box display="flex" width={1}>
             <SearchResultSermonList />
             <Stack flex={1} alignItems="center">
               <Stack gap={2} alignItems="start">

@@ -1,23 +1,33 @@
+import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
-import { useSearchBox, UseSearchBoxProps } from 'react-instantsearch';
+import Typography from '@mui/material/Typography';
+import { useSearchBox, UseSearchBoxProps, useStats } from 'react-instantsearch';
 
 const CustomSearchBox = (props: UseSearchBoxProps) => {
   const { refine } = useSearchBox(props);
+  const { nbHits, processingTimeMS } = useStats();
   // const { status } = useInstantSearch();
   return (
-    <TextField
+    <Stack
       sx={{
         paddingX: 2,
         maxWidth: '1200px',
         width: 1,
       }}
-      fullWidth
-      type="search"
-      placeholder="Search a for a sermon by name, subtitle, speaker, or description"
-      onChange={async (e) => {
-        refine(e.target.value);
-      }}
-    />
+    >
+      <TextField
+        fullWidth
+        type="search"
+        placeholder="Search a for a sermon by name, subtitle, speaker, or description"
+        onChange={async (e) => {
+          refine(e.target.value);
+        }}
+      />
+      <Typography
+        variant="subtitle1"
+        sx={{ paddingX: 1, fontSize: { xs: '0.7rem', sm: '0.8rem', md: '0.85rem' } }}
+      >{`${nbHits} ${nbHits === 1 ? 'result' : 'results'} found in ${processingTimeMS}ms`}</Typography>
+    </Stack>
   );
 };
 
