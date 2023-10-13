@@ -48,7 +48,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       <Box>
         <Box display="flex" flexWrap={'wrap'} justifyContent="center">
           {pages.map((page) => {
-            if (page !== 'Sermons' && user.isUploader() && !user.isAdmin()) {
+            if (user.isUploader() && !user.isAdmin()) {
               return null;
             } else {
               return (

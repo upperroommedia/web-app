@@ -204,7 +204,9 @@ const Uploader = (props: UploaderProps) => {
           listConverter
         );
         const latestSnap = await getDocs(latestQuery);
-        setSermonList((oldSermonList) => [...oldSermonList, latestSnap.docs[0].data()]);
+        if (latestSnap.docs.length > 0) {
+          setSermonList((oldSermonList) => [...oldSermonList, latestSnap.docs[0].data()]);
+        }
       }
     };
     fetchData();
@@ -660,6 +662,9 @@ const Uploader = (props: UploaderProps) => {
                   date === null ||
                   sermon.speakers.length === 0 ||
                   sermon.subtitle === '' ||
+                  sermon.description === '' ||
+                  (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
+                  (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomaliesMonth) ||
                   isEditing
                 }
                 variant="contained"

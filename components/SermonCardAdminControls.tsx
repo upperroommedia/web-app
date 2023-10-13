@@ -15,28 +15,19 @@ import { createFunction, createFunctionV2 } from '../utils/createFunction';
 
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
-
-import useAuth from '../context/user/UserContext';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
 import { sermonListConverter } from '../types/SermonList';
+import useAudioPlayer from '../context/audio/audioPlayerContext';
 
 export interface AdminControlsProps {
   sermon: Sermon;
-  playlist: Sermon[];
-  setPlaylist: (playlist: Sermon[]) => void;
 }
 
-const AdminControls: FunctionComponent<AdminControlsProps> = ({
-  sermon,
-  playlist,
-  setPlaylist,
-}: AdminControlsProps) => {
+const AdminControls: FunctionComponent<AdminControlsProps> = ({ sermon }: AdminControlsProps) => {
+  const { currentSermon, setCurrentSermon } = useAudioPlayer();
   const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState<boolean>(false);
-  const { user } = useAuth();
-
   const [uploadToSubsplashPopup, setUploadToSubsplashPopup] = useState<boolean>(false);
-
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState<boolean>(false);
 
   const handleDelete = async () => {
@@ -62,7 +53,9 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
         return;
       }
       await deleteDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter));
-      setPlaylist(playlist.filter((obj) => obj.id !== sermon.id));
+      if (currentSermon?.id === sermon.id) {
+        setCurrentSermon(undefined);
+      }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(error);
@@ -184,7 +177,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
       setIsUploadingToSubsplash(false);
     }
   };
-  if (window.location.pathname !== '/admin/sermons' || user?.role !== 'admin') {
+  if (window.location.pathname !== '/admin/sermons') {
     return null;
   }
   return (

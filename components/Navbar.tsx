@@ -122,7 +122,7 @@ const Navbar: FunctionComponent = () => {
             </Menu>
           </Box>
           <Avatar variant="square" sx={{ bgcolor: 'transparent' }}>
-            <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill />
+            <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="40px, 40px" priority />
           </Avatar>{' '}
           <Link
             href="/"
