@@ -16,11 +16,16 @@ import {
 import { createFunction } from '../utils/createFunction';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
+import FilterIcon from '@mui/icons-material/FilterAlt';
+import AnimateHeight from 'react-animate-height';
+import { StackProps } from '@mui/system/Stack';
 interface SearchableAdminSermonListProps {}
 
 const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
   const { user } = useAuth();
   const [searchClient, setSearchClient] = useState<SearchClient | null>(null);
+  const [showFilters, setShowFilters] = useState<boolean>(false);
   if (!user) {
     throw new Error('User not found');
   }
@@ -51,28 +56,49 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
     init();
   }, [searchClient, user.uid]);
 
+  const FilterButton = () => (
+    <IconButton onClick={() => setShowFilters((prev) => !prev)} sx={{ display: { xs: 'block', md: 'none' } }}>
+      <FilterIcon />
+    </IconButton>
+  );
+
+  const Filters = (props: StackProps) => (
+    <Stack flex={1} alignItems="center" overflow="auto" {...props}>
+      <Stack gap={2} alignItems="start" border={{ xs: 1, md: 0 }} borderRadius={2} p={2} margin={2}>
+        <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
+        <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
+        <CustomRefinementList
+          attribute="speakers.name"
+          limit={5}
+          showMore={true}
+          searchable
+          searchablePlaceholder="Search Speakers"
+          title="Speakers"
+        />
+      </Stack>
+    </Stack>
+  );
+
   return (
     <>
       {searchClient ? (
         <InstantSearch searchClient={searchClient} indexName="sermons" future={{ preserveSharedStateOnUnmount: true }}>
           <Stack justifyContent="center" alignItems="center" gap={2}>
-            <CustomSearchBox />
+            <CustomSearchBox TextFieldEndAdornment={<FilterButton />} />
             <NoResultsBoundary fallback={<NoResults />}>
-              <Box display="flex" width={1}>
-                <SearchResultSermonList />
-                <Stack flex={1} alignItems="center">
-                  <Stack gap={2} alignItems="start">
-                    <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
-                    <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
-                    <CustomRefinementList
-                      attribute="speakers.name"
-                      limit={5}
-                      showMore={true}
-                      searchable
-                      searchablePlaceholder="Search Speakers"
-                      title="Speakers"
-                    />
-                  </Stack>
+              <Box
+                display="grid"
+                gridTemplateAreas={{ xs: `"filters" "results"`, md: `"results filters"` }}
+                gridTemplateColumns={{ xs: '1fr', md: '1fr 300px' }}
+                width={1}
+                // sx={{ flexDirection: { xs: 'column' } }}
+              >
+                <SearchResultSermonList gridArea="results" />
+                <Filters sx={{ display: { xs: 'none', md: 'block' } }} />
+                <Stack sx={{ display: { xs: 'block', md: 'none' } }}>
+                  <AnimateHeight duration={250} height={showFilters ? 'auto' : 0} style={{ gridArea: 'filters' }}>
+                    <Filters />
+                  </AnimateHeight>
                 </Stack>
               </Box>
               <CustomPagination />

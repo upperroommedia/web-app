@@ -58,6 +58,7 @@ specifiers:
   prettier: ^2.8.7
   prop-types: ^15.8.1
   react: ^18.2.0
+  react-animate-height: ^3.2.2
   react-device-detect: ^2.2.3
   react-dom: ^18.2.0
   react-dropzone: ^14.2.3
@@ -97,6 +98,7 @@ dependencies:
   nextjs-progressbar: 0.0.16_next@13.3.0+react@18.2.0
   nookies: 2.5.2
   react: 18.2.0
+  react-animate-height: 3.2.2_biqbaboplfbrettd7655fr4n2y
   react-device-detect: 2.2.3_biqbaboplfbrettd7655fr4n2y
   react-dom: 18.2.0_react@18.2.0
   react-dropzone: 14.2.3_react@18.2.0
@@ -8337,6 +8339,17 @@ packages:
       - supports-color
     dev: false
     optional: true
+
+  /react-animate-height/3.2.2_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-uUOS+RhYVgyJEWcuAJgelVwhcJ2chsMk7HZCpu+wtjSlFAGSFsHU0r4lMTt47HQ1RdQfI5MmFRt43yHTP9lfmQ==}
+    engines: {node: '>= 12.0.0'}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+    dependencies:
+      react: 18.2.0
+      react-dom: 18.2.0_react@18.2.0
+    dev: false
 
   /react-device-detect/2.2.3_biqbaboplfbrettd7655fr4n2y:
     resolution: {integrity: sha512-buYY3qrCnQVlIFHrC5UcUoAj7iANs/+srdkwsnNjI7anr3Tt7UY6MqNxtMLlr0tMBied0O49UZVK8XKs3ZIiPw==}
