@@ -9,7 +9,18 @@ import { getFirestoreCoverageMeta } from './utils';
 import { readFileSync, createWriteStream } from 'node:fs';
 import { get } from 'node:http';
 import { resolve } from 'node:path';
-import { doc, getDoc, setDoc, serverTimestamp, setLogLevel, deleteDoc } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
+  setLogLevel,
+  deleteDoc,
+  collectionGroup,
+  query,
+  getDocs,
+  where,
+} from 'firebase/firestore';
 import { FirebaseFirestore } from '@firebase/firestore-types';
 
 let testEnv: RulesTestEnvironment;
@@ -25,7 +36,10 @@ const firebaseCollections: string[] = [
   'subtitles',
   'topics',
   'transcriptions',
+  'lists/123/listItems',
+  'sermons/123/sermonLists',
 ];
+const firebaseCollectionGroups: string[] = ['listItems', 'sermonLists'];
 const PROJECT_ID = 'urm-app';
 const FIREBASE_JSON = resolve(__dirname, '../firebase.json');
 
@@ -82,6 +96,11 @@ describe('Admin Profile', () => {
       await assertSucceeds(deleteDoc(doc(adminDB, `${collection}/123`)));
     });
   });
+  firebaseCollectionGroups.forEach((collectionGroupId) => {
+    test(`[CollectionGroup]: Read all ${collectionGroupId}`, async function () {
+      await assertSucceeds(getDocs(query(collectionGroup(adminDB, collectionGroupId), where('id', '==', '123'))));
+    });
+  });
 });
 
 describe('Uploader Profile', () => {
@@ -102,7 +121,10 @@ describe('Uploader Profile', () => {
     });
     await assertSucceeds(getDoc(doc(uploaderDB, 'sermons/matchingId')));
     await assertFails(getDoc(doc(uploaderDB, 'sermons/notMatchingId')));
-    await assertFails(getDoc(doc(uploaderDB, 'sermons/123')));
+  });
+
+  test('Read sermon if non existent', async function () {
+    await assertSucceeds(getDoc(doc(uploaderDB, 'sermons/123')));
   });
 
   test('Create sermon', async function () {
@@ -235,7 +257,15 @@ describe('Uploader Profile', () => {
 
 describe('User Profile', () => {
   test('No access to all sermons', async function () {
-    await assertFails(getDoc(doc(userDB, 'sermons/123')));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const securityRulesDisabledDB = context.firestore();
+      await setDoc(doc(securityRulesDisabledDB, 'sermons/existingSermon'), {
+        uploaderId: 'uploaderId',
+        title: 'test sermon',
+        dateMillis: serverTimestamp(),
+      });
+    });
+    await assertFails(getDoc(doc(userDB, 'sermons/existingSermon')));
   });
 
   test('No write to all sermons', async function () {
@@ -243,10 +273,19 @@ describe('User Profile', () => {
   });
 });
 
-describe('User Profile', () => {
+describe('Unauthroized Profile', () => {
   test('No access any collection', async function () {
-    await assertFails(getDoc(doc(unauthorizedDB, 'sermons/123')));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const securityRulesDisabledDB = context.firestore();
+      await setDoc(doc(securityRulesDisabledDB, 'sermons/existingSermon'), {
+        uploaderId: 'uploaderId',
+        title: 'test sermon',
+        dateMillis: serverTimestamp(),
+      });
+    });
+    await assertFails(getDoc(doc(unauthorizedDB, 'sermons/existingSermon')));
     await assertFails(getDoc(doc(unauthorizedDB, 'foo/123')));
+    await assertFails(getDoc(doc(unauthorizedDB, 'sermons/123/sermonLists/123')));
     await assertFails(getDoc(doc(unauthorizedDB, 'users/123')));
   });
 

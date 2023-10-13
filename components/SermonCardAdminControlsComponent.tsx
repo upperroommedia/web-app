@@ -6,12 +6,12 @@ import Tooltip from '@mui/material/Tooltip';
 import EditSermonForm from './EditSermonForm';
 import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
-import { Sermon } from '../types/SermonTypes';
+import { Sermon, uploadStatus } from '../types/SermonTypes';
 import ManageUploadsPopup from './ManageUploadsPopup';
 import ManageSoundcloudButton from './ManageSoundcloudButton';
 import ManageSubsplashButton from './ManageSubsplashButton';
 import useAuth from '../context/user/UserContext';
-import Typography from '@mui/material/Typography';
+import Chip from '@mui/material/Chip';
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
@@ -45,7 +45,9 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
 
   const showEditAndDelete =
     user?.isAdmin() ||
-    (user?.isUploader() && sermon.status.subsplash !== 'UPLOADED' && sermon.status.soundCloud !== 'UPLOADED');
+    (user?.isUploader() &&
+      sermon.status.subsplash !== uploadStatus.UPLOADED &&
+      sermon.status.soundCloud !== uploadStatus.UPLOADED);
 
   useEffect(() => {
     setDisableButtons(isUploadingToSoundCloud || isUploadingToSubsplash);
@@ -98,7 +100,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
             </Tooltip>
           </>
         ) : (
-          <Typography>Uploaded</Typography>
+          <Chip label="Uploaded" color="success" />
         )}
       </Box>
       {manageUploadsPopup && (

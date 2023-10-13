@@ -9,36 +9,43 @@ service cloud.firestore {
     	return request.auth != null && (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin');
     }
 
+    function isAuthorized() {
+      return request.auth != null;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isAuthorized();
+    }
+
     match /images/{document} {
-      allow read: if true;
+      allow read: if isAuthorized();
       allow write: if (isUploader());
     }
     
     match /lists/{document} {
-      allow read: if true;
+      allow read: if isAuthorized();
       allow write: if (isUploader());
     }
     
     match /speakers/{document} {
-      allow read: if true;
+      allow read: if isAuthorized();
       allow write: if (isAdmin());
     }
     
     match /subtitles/{document} {
-      allow read: if true;
+      allow read: if isAuthorized();
       allow write: if (isAdmin());
     }
     
     match /topics/{document} {
-      allow read: if true;
+      allow read: if isAuthorized();
       allow write: if (isUploader());
     }
     
     match /transcriptions/{document} {
-      allow read: if true;
+      allow read: if isAuthorized();
       allow write: if (isUploader());
     }
-  
     
   // Allow read access for admins
     match /sermons/{sermonId} {
@@ -47,9 +54,19 @@ service cloud.firestore {
     
     // Allow read access for uploaders to their own sermons
     match /sermons/{sermonId} {
-      allow read: if isUploader() && resource.data.uploaderId == request.auth.uid;
+      allow read: if resource == null || (isUploader() && resource.data.uploaderId == request.auth.uid);
       allow update, delete: if isUploader() && resource.data.uploaderId == request.auth.uid && resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED';
       allow create: if isUploader();
+    }
+
+    // Collection Groups
+    match /{path=**}/sermonLists/{sermonListId} {
+      allow read: if isAuthorized();
+      allow write: if (isUploader());
+    }
+    match /{path=**}/listItems/{listItemId} {
+      allow read: if isAuthorized();
+      allow write: if (isUploader());
     }
   }
 }
