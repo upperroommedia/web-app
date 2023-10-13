@@ -2,7 +2,6 @@ import { useContext, createContext, useEffect, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   FacebookAuthProvider,
-  getAdditionalUserInfo,
   GoogleAuthProvider,
   OAuthProvider,
   sendPasswordResetEmail,
@@ -14,8 +13,6 @@ import {
 import auth from '../../firebase/auth';
 import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
-import { setDoc, doc, getDoc } from 'firebase/firestore';
-import firestore from '../../firebase/firestore';
 import { User, UserRole } from '../../types/User';
 import Stack from '@mui/material/Stack';
 import Image from 'next/image';
@@ -34,14 +31,6 @@ interface Context {
 
 const UserContext = createContext<Context | null>(null);
 
-const getUserInfoFromFirestore = async (uid: string) => {
-  const userRef = doc(firestore, 'users', uid);
-  const userSnap = await getDoc(userRef);
-  if (userSnap.exists()) {
-    return { firstName: userSnap.data().firstName as string, lastName: userSnap.data().lastName as string };
-  }
-};
-
 export const UserProvider = ({ children }: any) => {
   const [user, setUser] = useState<User>();
   const [artificalLoading, setArtificalLoading] = useState<boolean>(true);
@@ -53,7 +42,6 @@ export const UserProvider = ({ children }: any) => {
     }
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setLoading(true);
-      console.log('here');
       if (!user) {
         setUser(undefined);
         nookies.destroy(null, 'token');
@@ -62,10 +50,10 @@ export const UserProvider = ({ children }: any) => {
         try {
           const token = await user.getIdToken();
           const role = (await user.getIdTokenResult()).claims.role as string;
-          const names = await getUserInfoFromFirestore(user.uid);
           setUser({
             ...user,
-            ...names!,
+            firstName: user.displayName ?? '',
+            lastName: '',
             role,
             isAdmin: () => role === UserRole.ADMIN,
             isUploader: () => role === UserRole.UPLOADER || role === UserRole.ADMIN,
@@ -90,10 +78,6 @@ export const UserProvider = ({ children }: any) => {
     };
   }, []);
 
-  const addNewUserToDb = async (uid: string, email: string, firstName: string, lastName: string) => {
-    await setDoc(doc(firestore, 'users', uid), { firstName, lastName, email, uid });
-  };
-
   // Login User
   const login = async (loginForm: userCredentials) => {
     try {
@@ -106,12 +90,7 @@ export const UserProvider = ({ children }: any) => {
   const loginWithGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      const res = await signInWithPopup(auth, provider);
-      const details = getAdditionalUserInfo(res);
-      const email = res.user.email;
-      if (details?.isNewUser && email) {
-        await addNewUserToDb(res.user.uid, email, res.user.displayName || '', '');
-      }
+      await signInWithPopup(auth, provider);
     } catch (error: any) {
       return error.code;
     }
@@ -120,12 +99,7 @@ export const UserProvider = ({ children }: any) => {
   const loginWithFacebook = async () => {
     try {
       const provider = new FacebookAuthProvider();
-      const res = await signInWithPopup(auth, provider);
-      const details = getAdditionalUserInfo(res);
-      const email = res.user.email;
-      if (details?.isNewUser && email) {
-        await addNewUserToDb(res.user.uid, email, res.user.displayName || '', '');
-      }
+      await signInWithPopup(auth, provider);
     } catch (error: any) {
       return error.code;
     }
@@ -134,12 +108,7 @@ export const UserProvider = ({ children }: any) => {
   const loginWithApple = async () => {
     try {
       const provider = new OAuthProvider('apple.com');
-      const res = await signInWithPopup(auth, provider);
-      const details = getAdditionalUserInfo(res);
-      const email = res.user.email;
-      if (details?.isNewUser && email) {
-        await addNewUserToDb(res.user.uid, email, res.user.displayName || '', '');
-      }
+      await signInWithPopup(auth, provider);
     } catch (error: any) {
       return error.code;
     }
@@ -147,8 +116,7 @@ export const UserProvider = ({ children }: any) => {
 
   const signup = async (loginForm: SignupForm) => {
     try {
-      const res = await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
-      await addNewUserToDb(res.user.uid, loginForm.email, loginForm.firstName, loginForm.lastName);
+      await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
     } catch (error: any) {
       return error.code;
     }
@@ -178,7 +146,7 @@ export const UserProvider = ({ children }: any) => {
           alignItems: 'center',
         }}
       >
-        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} />
+        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} priority />
       </Stack>
     );
   }

@@ -1,5 +1,6 @@
 // To deploy functions: npm run-script deploy
 // To test functions: npm run-script serve
+import generatesecuredapikey from './generateAlgoliaSecureApiKey';
 import tagitemsinlist from './Scrapers/tagItemsInList';
 import updatecreatedandeditedatmillis from './updateCreatedAndEditedAtMillis';
 import uploadToSubsplash from './uploadToSubsplash';
@@ -63,3 +64,4 @@ exports.sermonListOnUpdate = sermonListOnUpdate;
 exports.repopulatelistfromspeakeritems = repopulatelistfromspeakeritems;
 exports.updatecreatedandeditedatmillis = updatecreatedandeditedatmillis;
 exports.tagitemsinlist = tagitemsinlist;
+exports.generatesecuredapikey = generatesecuredapikey;

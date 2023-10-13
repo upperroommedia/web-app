@@ -37,3 +37,4 @@
 sa.json
 
 .firebase/
+firestore-coverage.html

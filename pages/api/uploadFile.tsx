@@ -87,7 +87,7 @@ const uploadFile = async (props: uploadFileProps) => {
           const seriesSermonRef = doc(firestore, 'lists', list.id, 'listItems', props.sermon.id);
           batch.set(seriesSermonRef, props.sermon);
         });
-        batch.commit();
+        await batch.commit();
         props.setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
       }
     );

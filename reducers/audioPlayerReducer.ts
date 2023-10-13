@@ -6,8 +6,7 @@ export interface SermonWithMetadata extends Sermon {
 }
 
 export type AudioPlayerState = {
-  playlist: SermonWithMetadata[];
-  currentSermonIndex: number;
+  currentSermon: SermonWithMetadata | undefined;
   currentSermonSecond: number;
   playing: boolean;
 };
@@ -19,33 +18,11 @@ export default function audioPlayerReducer(
   const { type, payload } = action;
   // console.log(type, payload);
   switch (type) {
-    case 'SET_PLAYLIST': {
-      return {
-        ...state,
-        playlist: payload,
-      };
-    }
-    case 'SET_CURRENT_SERMON_INDEX': {
-      // update playstate of previous sermon
-      const updatedPlaylist = state.playlist;
-      updatedPlaylist[state.currentSermonIndex] = {
-        ...state.playlist[state.currentSermonIndex],
-        currentSecond: state.currentSermonSecond,
-      };
-      return {
-        ...state,
-        playlist: updatedPlaylist,
-        currentSermonSecond: updatedPlaylist[payload].currentSecond,
-        currentSermonIndex: payload,
-      };
-    }
-
     case 'UPDATE_CURRENT_SERMON': {
-      const updatedPlaylist = state.playlist;
-      updatedPlaylist[state.currentSermonIndex] = payload;
       return {
         ...state,
-        playlist: updatedPlaylist,
+        currentSermon: payload,
+        currentSermonSecond: 0,
       };
     }
 
@@ -58,6 +35,7 @@ export default function audioPlayerReducer(
     case 'UPDATE_CURRENT_SECOND':
       return {
         ...state,
+        currentSermon: state.currentSermon ? { ...state.currentSermon, currentSecond: payload } : undefined,
         currentSermonSecond: payload,
       };
 
