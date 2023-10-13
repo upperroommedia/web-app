@@ -177,7 +177,7 @@ export const UserProvider = ({ children }: any) => {
           alignItems: 'center',
         }}
       >
-        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} />
+        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} priority />
       </Stack>
     );
   }

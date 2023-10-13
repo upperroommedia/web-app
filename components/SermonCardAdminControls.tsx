@@ -15,8 +15,6 @@ import { createFunction, createFunctionV2 } from '../utils/createFunction';
 
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
-
-import useAuth from '../context/user/UserContext';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
 import { sermonListConverter } from '../types/SermonList';
@@ -27,7 +25,6 @@ export interface AdminControlsProps {
 }
 
 const AdminControls: FunctionComponent<AdminControlsProps> = ({ sermon }: AdminControlsProps) => {
-  const { user } = useAuth();
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
   const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState<boolean>(false);
   const [uploadToSubsplashPopup, setUploadToSubsplashPopup] = useState<boolean>(false);
@@ -180,7 +177,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({ sermon }: AdminC
       setIsUploadingToSubsplash(false);
     }
   };
-  if (window.location.pathname !== '/admin/sermons' || user?.role !== 'admin') {
+  if (window.location.pathname !== '/admin/sermons') {
     return null;
   }
   return (
