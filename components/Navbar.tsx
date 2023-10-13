@@ -54,6 +54,9 @@ const Navbar: FunctionComponent = () => {
     </Link>
   );
 
+  const formatPageDisplayName = (page: string) => {
+    return page === 'Admin' && !user?.isAdmin() ? 'Manage Sermons' : page;
+  };
   return (
     <AppBar
       position="static"
@@ -107,18 +110,20 @@ const Navbar: FunctionComponent = () => {
                 display: { xs: 'block', md: 'none' },
               }}
             >
-              {pages.map((page) => (
-                <MenuItemLink key={page} page={page}>
-                  <MenuItem
-                    onClick={() => {
-                      handleCloseNavMenu();
-                      // handlePageClicked(page);
-                    }}
-                  >
-                    {page}
-                  </MenuItem>
-                </MenuItemLink>
-              ))}
+              {pages.map((page) => {
+                return (
+                  <MenuItemLink key={page} page={page}>
+                    <MenuItem
+                      onClick={() => {
+                        handleCloseNavMenu();
+                        // handlePageClicked(page);
+                      }}
+                    >
+                      {formatPageDisplayName(page)}
+                    </MenuItem>
+                  </MenuItemLink>
+                );
+              })}
             </Menu>
           </Box>
           <Avatar variant="square" sx={{ bgcolor: 'transparent' }}>
@@ -143,7 +148,7 @@ const Navbar: FunctionComponent = () => {
             {pages.map((page) => (
               <MenuItemLink key={page} page={page}>
                 <NavMenuItem path={page}>
-                  <Typography textAlign="center">{page}</Typography>
+                  <Typography textAlign="center">{formatPageDisplayName(page)}</Typography>
                 </NavMenuItem>
               </MenuItemLink>
             ))}
