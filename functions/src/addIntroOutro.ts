@@ -75,6 +75,7 @@ const trimAndTranscode = (
         logger.log('Trim And Transcode Spawned Ffmpeg with command: ' + commandLine);
       })
       .on('end', async () => {
+        logger.log('Finished Trim and Transcode');
         resolve(tmpFilePath);
       })
       .on('error', (err) => {
@@ -87,18 +88,14 @@ const trimAndTranscode = (
         totalTimeMillis = convertStringToMilliseconds(data.duration);
       })
       .on('progress', (progress) => {
-        console.log('CurrentTimemark', progress.timemark);
         const timeMillis = convertStringToMilliseconds(progress.timemark);
-        logger.log('Trimming and Transcoding: ' + timeMillis + 'ms done', totalTimeMillis);
-        // AND HERE IS THE CALCULATION
         const calculatedDuration = duration
           ? duration * 1000
           : startTime
           ? totalTimeMillis - startTime * 1000
           : totalTimeMillis;
         const percent = ((timeMillis * 0.97) / calculatedDuration) * 100; // go to 97% to leave room for the time it takes to Merge the files
-        realtimeDBRef.set(percent || 0);
-        logger.log('Trimming and Transcoding: ' + percent + '% done');
+        realtimeDBRef.set(percent && percent > 0 ? percent : 0);
       })
       .saveToFile(tmpFilePath);
   });
@@ -151,7 +148,7 @@ const uploadSermon = async (
   bucket: Bucket,
   customMetadata?: { [key: string]: string }
 ) => {
-  logger.log('custom metadata', JSON.stringify(customMetadata));
+  logger.log('custom metadata', customMetadata);
   await bucket.upload(inputFilePath, { destination: destinationFilePath });
   await bucket.file(destinationFilePath).setMetadata({ contentType: 'audio/mpeg', metadata: customMetadata });
 };
@@ -249,6 +246,24 @@ const addIntroOutro = onObjectFinalized(
       audioStatus: sermonStatusType.PROCESSING,
     };
     const tempFiles = new Set<string>();
+    // the document may not exist yet, if it deosnt wait 5 seconds and try again do this for a max of 3 times before throwing an error
+    const maxTries = 3;
+    let currentTry = 0;
+    let docFound = false;
+    while (currentTry < maxTries) {
+      logger.log(`Checking if document exists attempt: ${currentTry + 1}/${maxTries}`);
+      const doc = await docRef.get();
+      if (doc.exists) {
+        docFound = true;
+        break;
+      }
+      currentTry++;
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+    if (!docFound) {
+      throw new HttpsError('not-found', `Sermon Document ${fileName} Not Found`);
+    }
+
     try {
       await docRef.update({
         status: {
