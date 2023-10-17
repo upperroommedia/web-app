@@ -1,4 +1,4 @@
-import firestore, { deleteDoc, doc, setDoc, writeBatch } from '../../firebase/firestore';
+import firestore, { deleteDoc, doc, writeBatch } from '../../firebase/firestore';
 import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
@@ -60,7 +60,6 @@ const uploadFile = async (props: uploadFileProps) => {
     })
   );
 
-  await setDoc(doc(firestore, 'sermons', props.sermon.id).withConverter(sermonConverter), props.sermon);
   await new Promise<void>((resolve, reject) => {
     uploadBytesResumable(sermonRef, props.file.file, metadata).on(
       'state_changed',
@@ -75,20 +74,24 @@ const uploadFile = async (props: uploadFileProps) => {
         }
       },
       async (error) => {
+        // eslint-disable-next-line no-console
+        console.error(error);
+        props.setUploadProgress({ error: true, message: `Error uploading file: ${JSON.stringify(error)}`, percent: 0 });
         await deleteDoc(doc(firestore, 'sermons', props.sermon.id));
         reject(error);
       },
       async () => {
-        resolve();
         // add sermon to series
         // note a firestore function document listener will take care of updating the series subcollection for the sermon
         const batch = writeBatch(firestore);
+        batch.set(doc(firestore, 'sermons', props.sermon.id).withConverter(sermonConverter), props.sermon);
         props.sermonList.forEach((list) => {
           const seriesSermonRef = doc(firestore, 'lists', list.id, 'listItems', props.sermon.id);
           batch.set(seriesSermonRef, props.sermon);
         });
         await batch.commit();
         props.setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
+        resolve();
       }
     );
   });
