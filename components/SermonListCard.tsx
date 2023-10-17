@@ -168,10 +168,21 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, minimal }: 
               <AdminControls sermon={sermon} />
             ) : (
               <Box style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                <Box style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: 0 }}>
                   <Typography variant="subtitle1" sx={{ margin: 0 }}>
                     {sermon.status.audioStatus}
                   </Typography>
+                  {sermon.status.message && (
+                    <Typography
+                      sx={{
+                        whiteSpace: 'nowrap',
+                        color: 'red',
+                        fontSize: { xs: '0.5rem', sm: '0.6rem', md: '.7rem' },
+                      }}
+                    >
+                      {sermon.status.message}
+                    </Typography>
+                  )}
                   {sermon.status.audioStatus === sermonStatusType.PROCESSING && snapshot !== undefined && (
                     <CircularProgressWithLabel value={Number(snapshot.val())} />
                   )}
