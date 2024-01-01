@@ -151,9 +151,15 @@ const Uploader = (props: UploaderProps) => {
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
   const [selectedSundayHomaliesMonth, setSelectedSundayHomaliesMonth] = useState<List | null>(props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH) || null);
   const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(() => {
-                                                                              const sundayHomilyList = props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH)
-                                                                              return sundayHomilyList?.listTagAndPosition?.year || new Date().getFullYear()
-                                                                              });
+  const sundayHomilyList = props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH);
+
+  if (sundayHomilyList?.listTagAndPosition && 'year' in sundayHomilyList.listTagAndPosition) {
+    return sundayHomilyList.listTagAndPosition.year;
+  } else {
+    return new Date().getFullYear();
+  }
+});
+
 
   const [trimStart, setTrimStart] = useState<number>(0);
 
