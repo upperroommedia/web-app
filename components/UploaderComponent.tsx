@@ -144,13 +144,16 @@ const Uploader = (props: UploaderProps) => {
   // Bible Study Helpers
   const [bibleChapters, setBibleChapters] = useState<List[]>([]);
   const [loadingBibleChapters, setLoadingBibleChapters] = useState(false);
-  const [selectedChapter, setSelectedChapter] = useState<List | null>(null);
+  const [selectedChapter, setSelectedChapter] = useState<List | null>(props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER) || null);
 
   // Sunday Homilies Helpers
   const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<List[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
-  const [selectedSundayHomaliesMonth, setSelectedSundayHomaliesMonth] = useState<List | null>(null);
-  const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(() => new Date().getFullYear());
+  const [selectedSundayHomaliesMonth, setSelectedSundayHomaliesMonth] = useState<List | null>(props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH) || null);
+  const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(() => {
+                                                                              const sundayHomilyList = props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH)
+                                                                              return sundayHomilyList?.listTagAndPosition?.year || new Date().getFullYear()
+                                                                              });
 
   const [trimStart, setTrimStart] = useState<number>(0);
 
