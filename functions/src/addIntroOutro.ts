@@ -5,16 +5,15 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import { path as ffprobeStatic } from 'ffprobe-static';
 import path from 'path';
-import os from 'os';
-import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { unlink } from 'fs/promises';
-import { Bucket } from '@google-cloud/storage';
-import axios, { AxiosError, isAxiosError } from 'axios';
+import { Bucket, File, Storage } from '@google-cloud/storage';
+import { AxiosError, isAxiosError } from 'axios';
 import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/SermonTypes';
 import { firestoreAdminSermonConverter } from './firestoreDataConverter';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { Reference } from 'firebase-admin/database';
-import { exec } from 'node:child_process';
+import { Readable } from 'stream';
+
+const storage = new Storage()
 
 type filePaths = {
   INTRO: string | undefined;
@@ -31,35 +30,31 @@ if (!ffmpegStatic) {
   ffmpeg.setFfprobePath(ffprobeStatic);
 }
 
-const createTempFile = (fileName: string, tempFiles: Set<string>) => {
-  try {
-    if (!existsSync(os.tmpdir())) {
-      mkdirSync(os.tmpdir());
-    }
-    const filePath = path.join(os.tmpdir(), fileName);
-    tempFiles.add(filePath);
-    return filePath;
-  } catch (err) {
-    throw new Error(`Error creating temp file: ${err}`);
-  }
-};
 const convertStringToMilliseconds = (timeStr: string): number => {
   // '10:20:30:500'  Example time string
+  if (!timeStr) {
+    return 0
+  }
   const [hours, minutes, secondsAndMilliseconds] = timeStr.split(':');
+  if (!secondsAndMilliseconds) {
+    return 0
+  }
   const [seconds, milliseconds] = secondsAndMilliseconds.split('.');
 
   return (parseInt(hours) * 60 * 60 + parseInt(minutes) * 60 + parseInt(seconds)) * 1000 + parseInt(milliseconds);
 };
 
 const trimAndTranscode = (
+  bucket: Bucket,
   filePath: string,
-  tempFiles: Set<string>,
   realtimeDBRef: Reference,
   startTime?: number,
   duration?: number
-): Promise<string> => {
-  const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'), tempFiles);
-  const proc = ffmpeg().format('mp3').input(filePath);
+): Promise<File> => {
+  const inputFile = bucket.file(filePath);
+  const outputFile = bucket.file(`processed-sermons/${path.basename(filePath)}`);
+
+  const proc = ffmpeg().format('mp3').input(inputFile.createReadStream());
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
   proc
@@ -67,7 +62,8 @@ const trimAndTranscode = (
     .audioFilters(['dynaudnorm=g=21:m=40:c=1:b=1', 'afftdn', 'pan=stereo|c0<c0+c1|c1<c0+c1']) // Dynamiaclly adjust volume and remove background noise and balance left right audio
     .audioBitrate(128)
     .audioChannels(2)
-    .audioFrequency(44100);
+    .audioFrequency(44100)
+    .pipe(outputFile.createWriteStream({ contentType: 'audio/mpeg' }));
   let totalTimeMillis: number;
   return new Promise((resolve, reject) => {
     proc
@@ -76,14 +72,13 @@ const trimAndTranscode = (
       })
       .on('end', async () => {
         logger.log('Finished Trim and Transcode');
-        resolve(tmpFilePath);
+        resolve(outputFile);
       })
       .on('error', (err) => {
         logger.error('Trim and Transcode Error:', err);
         reject(err);
       })
       .on('codecData', (data) => {
-        // HERE YOU GET THE TOTAL TIME
         console.log('Total duration: ' + data.duration);
         totalTimeMillis = convertStringToMilliseconds(data.duration);
       })
@@ -94,127 +89,114 @@ const trimAndTranscode = (
           : startTime
           ? totalTimeMillis - startTime * 1000
           : totalTimeMillis;
-        const percent = ((timeMillis * 0.97) / calculatedDuration) * 100; // go to 97% to leave room for the time it takes to Merge the files
+        const percent = ((timeMillis * 0.96) / calculatedDuration) * 100; // go to 96% to leave room for the time it takes to Merge the files
+        logger.log('Trim and Transcode Progress:', percent);
+        // const memoryUsage = process.memoryUsage();
+        // const memoryUsageInMB = {
+        //   rss: (memoryUsage.rss / (1024 * 1024)).toFixed(2), // Resident Set Size
+        //   heapTotal: (memoryUsage.heapTotal / (1024 * 1024)).toFixed(2), // Total size of the allocated heap
+        //   heapUsed: (memoryUsage.heapUsed / (1024 * 1024)).toFixed(2), // Actual memory used
+        //   external: (memoryUsage.external / (1024 * 1024)).toFixed(2), // Memory used by C++ objects bound to JavaScript objects
+        // };
+      
+        // console.log('Memory usage:', memoryUsageInMB);
         realtimeDBRef.set(percent && percent > 0 ? percent : 0);
-      })
-      .saveToFile(tmpFilePath);
-  });
-};
-
-const mergeFiles = (
-  filePaths: string[],
-  outputFileName: string,
-  tempFiles: Set<string>,
-  realtimeDBref: Reference
-): Promise<string> => {
-  const tmpFilePath = createTempFile(outputFileName, tempFiles);
-  const listFileName = createTempFile('list.txt', tempFiles);
-
-  // ffmpeg -f concat -i mylist.txt -c copy output
-  const filePathsForTxt = filePaths.map((filePath) => `file '${filePath}'`);
-  const fileNames = filePathsForTxt.join('\n');
-
-  logger.log('fileNames', fileNames);
-
-  writeFileSync(listFileName, fileNames);
-
-  const merge = ffmpeg();
-
-  return new Promise((resolve, reject) => {
-    merge
-      .input(listFileName)
-      .inputOptions(['-f concat', '-safe 0'])
-      .outputOptions('-c copy')
-      .outputFormat('mp3')
-      .on('start', function (commandLine) {
-        realtimeDBref.set(98);
-        logger.log('MergeFiles Spawned Ffmpeg with command: ' + commandLine);
-      })
-      .on('end', async function () {
-        realtimeDBref.set(98);
-        resolve(tmpFilePath);
-      })
-      .on('error', function (err) {
-        logger.log('MergeFiles Error:', err);
-        return reject(err);
-      })
-      .save(tmpFilePath);
-  });
-};
-
-const uploadSermon = async (
-  inputFilePath: string,
-  destinationFilePath: string,
-  bucket: Bucket,
-  customMetadata?: { [key: string]: string }
-) => {
-  logger.log('custom metadata', customMetadata);
-  await bucket.upload(inputFilePath, { destination: destinationFilePath });
-  await bucket.file(destinationFilePath).setMetadata({ contentType: 'audio/mpeg', metadata: customMetadata });
-};
-
-const getDurationSeconds = (filePath: string): Promise<number> => {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) {
-        reject(err);
-      }
-      resolve(metadata.format.duration || 0);
-    });
-  });
-};
-
-async function downloadFile(fileUrl: string, outputLocationPath: string): Promise<void> {
-  const writer = createWriteStream(outputLocationPath);
-
-  return axios({
-    method: 'get',
-    url: fileUrl,
-    responseType: 'stream',
-  }).then((response) => {
-    //ensure that the user can call `then()` only when the file has
-    //been downloaded entirely.
-
-    return new Promise((resolve, reject) => {
-      response.data.pipe(writer);
-      let error: unknown = null;
-      writer.on('error', (err: unknown) => {
-        error = err;
-        writer.close();
-        reject(err);
       });
-      writer.on('close', () => {
-        if (!error) {
-          resolve();
-        }
-        //no need to call the reject here, as it will have been called in the
-        //'error' stream;
-      });
-    });
   });
+};
+
+function parseGcsUrl(url: URL): { bucket: string; filePath: string } {
+  const regex = /http.*:\/\/.*\/v0\/b\/([^\/]+)\/o\/([^?]+)\?.*/;
+  const matches = url.toString().match(regex);
+
+  if (matches && matches.length === 3) {
+    return {
+      bucket: matches[1],
+      filePath: decodeURIComponent(matches[2]),
+    };
+  }
+
+  throw new Error('Invalid Google Cloud Storage URL');
 }
 
-const downloadFiles = async (bucket: Bucket, filePaths: filePaths, tempFiles: Set<string>): Promise<filePaths> => {
-  const tempFilePaths: filePaths = { CONTENT: '', INTRO: undefined, OUTRO: undefined };
-  const promises: Promise<unknown>[] = [];
-  // get key and value of filePaths
-  for (const [key, filePath] of Object.entries(filePaths) as [keyof filePaths, string | undefined][]) {
-    if (filePath) {
-      tempFilePaths[key] = createTempFile(path.basename(filePath).split('?')[0], tempFiles);
-      if (key === 'CONTENT') {
-        promises.push(bucket.file(filePath).download({ destination: tempFilePaths[key] }));
-      } else {
-        promises.push(downloadFile(filePath, tempFilePaths[key] as string));
-      }
-      logger.log(`Downloading ${filePath} to ${tempFilePaths[key]}`);
+function getDurationSeconds(outputAudioFile: File): number {
+  const fileSize = outputAudioFile.metadata.size || 0
+  const fileSizeInBits = (fileSize * 8);
+  const duration = fileSizeInBits / 128000; // Duration in seconds
+  logger.log(outputAudioFile.name, "is ", fileSizeInBits, "bits long and", duration, "seconds")
+  return duration;
+
+}
+
+const mergeFiles = async (
+  bucket: Bucket,
+  contentFile: File,
+  realtimeDBref: Reference,
+  introUrl?: URL,
+  outroUrl?: URL
+): Promise<File> => {
+  const outputFilePath = `intro-outro-sermons/${path.basename(contentFile.name)}`;
+  const outputFile = bucket.file(outputFilePath);
+  logger.log("Merging files to:", outputFilePath)
+  const streams: Readable[] = []
+
+  // Add intro
+  if (introUrl) {
+    const {bucket: introBucket, filePath: introFilePath} = parseGcsUrl(introUrl)
+    logger.log("Intro - introBucket:", introBucket, "introFilePath", introFilePath)
+    const introFileStream = storage.bucket(introBucket).file(introFilePath).createReadStream()
+    streams.push(introFileStream)
+  }
+  // Add content
+  const contentFileStream = contentFile.createReadStream();
+  streams.push(contentFileStream);
+  
+  // Add outro
+  if (outroUrl) {
+    const {bucket: outroBucket, filePath: outroFilePath} = parseGcsUrl(outroUrl)
+    logger.log("Outro - outroBucket:", outroBucket, "outroFilePath", outroFilePath)
+    const outroFileStream = storage.bucket(outroBucket).file(outroFilePath).createReadStream()
+    streams.push(outroFileStream)
+  }
+  // Create a write stream to the output file
+  const writeStream = outputFile.createWriteStream()
+
+  function pipeStreams(i: number) {
+    if (i < streams.length) {
+      streams[i].pipe(writeStream, {end: false})
+      streams[i].on('end', () => {
+        const percent = 99 - streams.length + i + 1
+        logger.log("Merge Files percent:", percent)
+        realtimeDBref.set(percent)
+        pipeStreams(i + 1)
+      })
+      streams[i].on('error', function (err) {
+        logger.error('MergeFiles Error:', err);
+        throw err;
+      })
+    } else {
+      writeStream.end()
     }
   }
-  await Promise.all(promises);
-  return tempFilePaths;
+  // Start piping the streams
+  pipeStreams(0)
+
+
+  // Return a promise that resolves with the output file when the write stream finishes
+  return new Promise((resolve, reject) => {
+    writeStream.on('finish', () => resolve(outputFile))
+    writeStream.on('error', (err) => {
+      logger.error('MergeFiles Error:', err);
+      reject(err);
+    })
+  })
 };
 
 const addIntroOutro = onObjectFinalized(
-  { timeoutSeconds: 540, memory: '1GiB', cpu: 1, concurrency: 1 },
+  {
+    timeoutSeconds: 540,
+    // memory: '1GiB', cpu: 1, concurrency: 1
+  },
   async (storageEvent): Promise<void> => {
     const data = storageEvent.data;
     const filePath = data.name ? data.name : '';
@@ -228,13 +210,13 @@ const addIntroOutro = onObjectFinalized(
       return logger.log('Not a media file');
     }
 
-    exec(`${ffmpegStatic} -version`, (err, stdout) => {
-      if (err) {
-        logger.error('FFMPEG not installed', err);
-      } else {
-        logger.log('FFMPEG version', stdout);
-      }
-    });
+    // exec(`${ffmpegStatic} -version`, (err, stdout) => {
+    //   if (err) {
+    //     logger.error('FFMPEG not installed', err);
+    //   } else {
+    //     logger.log('FFMPEG version', stdout);
+    //   }
+    // });
     const bucket = firebaseAdmin.storage().bucket();
     const realtimeDB = firebaseAdmin.database();
     const db = firebaseAdmin.firestore();
@@ -245,26 +227,34 @@ const addIntroOutro = onObjectFinalized(
       soundCloud: uploadStatus.NOT_UPLOADED,
       audioStatus: sermonStatusType.PROCESSING,
     };
-    const tempFiles = new Set<string>();
     // the document may not exist yet, if it deosnt wait 5 seconds and try again do this for a max of 3 times before throwing an error
     const maxTries = 3;
     let currentTry = 0;
     let docFound = false;
     while (currentTry < maxTries) {
       logger.log(`Checking if document exists attempt: ${currentTry + 1}/${maxTries}`);
-      const doc = await docRef.get();
-      if (doc.exists) {
-        docFound = true;
-        break;
+      logger.log('Document Reference', docRef.path);
+      try {
+        const doc = await docRef.get();
+        logger.log('Document', doc);
+        if (doc.exists) {
+          docFound = true;
+          logger.log('Document exists');
+          break;
+        }
+        logger.log(`Document does not exist attempt: ${currentTry + 1}/${maxTries}`);
+        currentTry++;
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      } catch (e) {
+        logger.error('Error getting document', e);
       }
-      currentTry++;
-      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
     if (!docFound) {
       throw new HttpsError('not-found', `Sermon Document ${fileName} Not Found`);
     }
 
     try {
+      logger.log("Adding intro outro is using streaming to reduce function memory requirments")
       await docRef.update({
         status: {
           ...sermonStatus,
@@ -283,8 +273,8 @@ const addIntroOutro = onObjectFinalized(
         audioFilesToMerge.OUTRO = data.metadata.outroUrl;
         customMetadata.outroUrl = data.metadata.outroUrl;
       }
-      logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
-      const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge, tempFiles);
+      // logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
+      // const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge, tempFiles);
       await docRef.update({
         status: {
           ...sermonStatus,
@@ -292,16 +282,19 @@ const addIntroOutro = onObjectFinalized(
           message: 'Trimming and Transcoding',
         },
       });
-      tempFilePaths.CONTENT = await trimAndTranscode(
-        tempFilePaths.CONTENT,
-        tempFiles,
+
+      logger.log('Trimming and Transcoding');
+      let outputAudioFile = await trimAndTranscode(
+        bucket,
+        filePath,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
         parseFloat(data.metadata?.startTime || ''),
         parseFloat(data.metadata?.duration || '')
       );
-      let durationSeconds = await getDurationSeconds(tempFilePaths.CONTENT);
-      await uploadSermon(tempFilePaths.CONTENT, `processed-sermons/${fileName}`, bucket, customMetadata);
-      if (tempFilePaths.INTRO || tempFilePaths.OUTRO) {
+      // let durationSeconds = await getDurationSeconds(tempFilePaths.CONTENT);
+      // await uploadSermon(tempFilePaths.CONTENT, `processed-sermons/${fileName}`, bucket, customMetadata);
+      logger.log('Transcoded Audio File', outputAudioFile.name, outputAudioFile.metadata);
+      if (audioFilesToMerge.INTRO || audioFilesToMerge.OUTRO) {
         await docRef.update({
           status: {
             ...sermonStatus,
@@ -309,37 +302,25 @@ const addIntroOutro = onObjectFinalized(
             message: 'Adding Intro and Outro',
           },
         });
-        logger.log('Merging audio files', JSON.stringify(tempFilePaths));
-        const outputFileName = `intro_outro-${fileName}`;
 
-        //create merge array in order INTRO, CONTENT, OUTRO
-        const filePathsArray: string[] = [];
-        if (tempFilePaths.INTRO) filePathsArray.push(tempFilePaths.INTRO);
-        filePathsArray.push(tempFilePaths.CONTENT);
-        if (tempFilePaths.OUTRO) filePathsArray.push(tempFilePaths.OUTRO);
 
         //merge files
-        logger.log('Merging files', filePathsArray, 'to', outputFileName, '...');
-        const tmpFilePath = await mergeFiles(
-          filePathsArray,
-          outputFileName,
-          tempFiles,
-          realtimeDB.ref(`addIntroOutro/${fileName}`)
+        outputAudioFile = await mergeFiles(
+          bucket,
+          outputAudioFile,
+          realtimeDB.ref(`addIntroOutro/${fileName}`),
+          audioFilesToMerge.INTRO ? new URL(audioFilesToMerge.INTRO) : undefined,
+          audioFilesToMerge.OUTRO ? new URL(audioFilesToMerge.OUTRO) : undefined,
         );
-
-        //upload merged file
-        logger.log('Uploading merged file', tmpFilePath, 'to intro-outro-sermons/', fileName);
-        const destination = `intro-outro-sermons/${fileName}`;
-        durationSeconds = await getDurationSeconds(tmpFilePath);
-        await uploadSermon(tmpFilePath, destination, bucket);
       }
+
       logger.log('Updating status to PROCESSED');
       await docRef.update({
         status: {
           ...sermonStatus,
           audioStatus: sermonStatusType.PROCESSED,
         },
-        durationSeconds: durationSeconds,
+        durationSeconds: getDurationSeconds(outputAudioFile),
       });
       realtimeDB.ref(`addIntroOutro/${fileName}`).set(100);
       await realtimeDB.ref(`addIntroOutro/${fileName}`).remove();
@@ -368,20 +349,10 @@ const addIntroOutro = onObjectFinalized(
         },
       });
       return logger.error('Error', e);
-    } finally {
-      const promises: Promise<void>[] = [];
-      tempFiles.forEach((file) => {
-        logger.log('Deleting temp file', file);
-        promises.push(unlink(file));
-      });
-      try {
-        await Promise.all(promises);
-        logger.log('All temp files deleted');
-      } catch (err) {
-        logger.warn('Error when deleting temporary files', err);
-      }
-    }
+    } 
   }
 );
 
 export default addIntroOutro;
+
+

@@ -1,5 +1,5 @@
 import { DocumentData, QuerySnapshot } from 'firebase-admin/firestore';
-import { firestore, logger } from 'firebase-functions';
+import { firestore, logger } from 'firebase-functions/v2';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { Sermon } from '../../../../types/SermonTypes';
 import handleError from '../../handleError';
@@ -25,10 +25,11 @@ async function handleDelete(
   await firestoreAdmin.recursiveDelete(firestoreAdmin.doc(`sermons/${sermonId}`));
 }
 
-const sermonWriteTrigger = firestore.document('sermons/{sermonId}').onWrite(async (change, context) => {
-  const { sermonId } = context.params;
-  const sermonBefore = change.before.data() as Sermon | undefined;
-  const sermonAfter = change.after.data() as Sermon | undefined;
+const sermonWriteTrigger = firestore.onDocumentWritten('sermons/{sermonId}', async (event) => {
+  const { sermonId } = event.params;
+
+  const sermonBefore = event.data?.before.data() as Sermon | undefined;
+  const sermonAfter = event.data?.after.data() as Sermon | undefined;
   try {
     const seriesSermonSnapshot = await firestoreAdmin.collectionGroup('listItems').where('id', '==', sermonId).get();
     if (sermonBefore && sermonAfter) {
