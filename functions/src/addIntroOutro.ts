@@ -13,7 +13,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { Reference } from 'firebase-admin/database';
 import { Readable } from 'stream';
 
-const storage = new Storage()
+const storage = new Storage();
 
 type filePaths = {
   INTRO: string | undefined;
@@ -33,11 +33,11 @@ if (!ffmpegStatic) {
 const convertStringToMilliseconds = (timeStr: string): number => {
   // '10:20:30:500'  Example time string
   if (!timeStr) {
-    return 0
+    return 0;
   }
   const [hours, minutes, secondsAndMilliseconds] = timeStr.split(':');
   if (!secondsAndMilliseconds) {
-    return 0
+    return 0;
   }
   const [seconds, milliseconds] = secondsAndMilliseconds.split('.');
 
@@ -98,7 +98,7 @@ const trimAndTranscode = (
         //   heapUsed: (memoryUsage.heapUsed / (1024 * 1024)).toFixed(2), // Actual memory used
         //   external: (memoryUsage.external / (1024 * 1024)).toFixed(2), // Memory used by C++ objects bound to JavaScript objects
         // };
-      
+
         // console.log('Memory usage:', memoryUsageInMB);
         realtimeDBRef.set(percent && percent > 0 ? percent : 0);
       });
@@ -106,7 +106,9 @@ const trimAndTranscode = (
 };
 
 function parseGcsUrl(url: URL): { bucket: string; filePath: string } {
+  /* eslint-disable no-useless-escape */
   const regex = /http.*:\/\/.*\/v0\/b\/([^\/]+)\/o\/([^?]+)\?.*/;
+  /* eslint-disable no-useless-escape */
   const matches = url.toString().match(regex);
 
   if (matches && matches.length === 3) {
@@ -120,12 +122,11 @@ function parseGcsUrl(url: URL): { bucket: string; filePath: string } {
 }
 
 function getDurationSeconds(outputAudioFile: File): number {
-  const fileSize = outputAudioFile.metadata.size || 0
-  const fileSizeInBits = (fileSize * 8);
+  const fileSize = outputAudioFile.metadata.size || 0;
+  const fileSizeInBits = fileSize * 8;
   const duration = fileSizeInBits / 128000; // Duration in seconds
-  logger.log(outputAudioFile.name, "is ", fileSizeInBits, "bits long and", duration, "seconds")
+  logger.log(outputAudioFile.name, 'is ', fileSizeInBits, 'bits long and', duration, 'seconds');
   return duration;
-
 }
 
 const mergeFiles = async (
@@ -137,59 +138,58 @@ const mergeFiles = async (
 ): Promise<File> => {
   const outputFilePath = `intro-outro-sermons/${path.basename(contentFile.name)}`;
   const outputFile = bucket.file(outputFilePath);
-  logger.log("Merging files to:", outputFilePath)
-  const streams: Readable[] = []
+  logger.log('Merging files to:', outputFilePath);
+  const streams: Readable[] = [];
 
   // Add intro
   if (introUrl) {
-    const {bucket: introBucket, filePath: introFilePath} = parseGcsUrl(introUrl)
-    logger.log("Intro - introBucket:", introBucket, "introFilePath", introFilePath)
-    const introFileStream = storage.bucket(introBucket).file(introFilePath).createReadStream()
-    streams.push(introFileStream)
+    const { bucket: introBucket, filePath: introFilePath } = parseGcsUrl(introUrl);
+    logger.log('Intro - introBucket:', introBucket, 'introFilePath', introFilePath);
+    const introFileStream = storage.bucket(introBucket).file(introFilePath).createReadStream();
+    streams.push(introFileStream);
   }
   // Add content
   const contentFileStream = contentFile.createReadStream();
   streams.push(contentFileStream);
-  
+
   // Add outro
   if (outroUrl) {
-    const {bucket: outroBucket, filePath: outroFilePath} = parseGcsUrl(outroUrl)
-    logger.log("Outro - outroBucket:", outroBucket, "outroFilePath", outroFilePath)
-    const outroFileStream = storage.bucket(outroBucket).file(outroFilePath).createReadStream()
-    streams.push(outroFileStream)
+    const { bucket: outroBucket, filePath: outroFilePath } = parseGcsUrl(outroUrl);
+    logger.log('Outro - outroBucket:', outroBucket, 'outroFilePath', outroFilePath);
+    const outroFileStream = storage.bucket(outroBucket).file(outroFilePath).createReadStream();
+    streams.push(outroFileStream);
   }
   // Create a write stream to the output file
-  const writeStream = outputFile.createWriteStream()
+  const writeStream = outputFile.createWriteStream();
 
   function pipeStreams(i: number) {
     if (i < streams.length) {
-      streams[i].pipe(writeStream, {end: false})
+      streams[i].pipe(writeStream, { end: false });
       streams[i].on('end', () => {
-        const percent = 99 - streams.length + i + 1
-        logger.log("Merge Files percent:", percent)
-        realtimeDBref.set(percent)
-        pipeStreams(i + 1)
-      })
+        const percent = 99 - streams.length + i + 1;
+        logger.log('Merge Files percent:', percent);
+        realtimeDBref.set(percent);
+        pipeStreams(i + 1);
+      });
       streams[i].on('error', function (err) {
         logger.error('MergeFiles Error:', err);
         throw err;
-      })
+      });
     } else {
-      writeStream.end()
+      writeStream.end();
     }
   }
   // Start piping the streams
-  pipeStreams(0)
-
+  pipeStreams(0);
 
   // Return a promise that resolves with the output file when the write stream finishes
   return new Promise((resolve, reject) => {
-    writeStream.on('finish', () => resolve(outputFile))
+    writeStream.on('finish', () => resolve(outputFile));
     writeStream.on('error', (err) => {
       logger.error('MergeFiles Error:', err);
       reject(err);
-    })
-  })
+    });
+  });
 };
 
 const addIntroOutro = onObjectFinalized(
@@ -254,7 +254,7 @@ const addIntroOutro = onObjectFinalized(
     }
 
     try {
-      logger.log("Adding intro outro is using streaming to reduce function memory requirments")
+      logger.log('Adding intro outro is using streaming to reduce function memory requirments');
       await docRef.update({
         status: {
           ...sermonStatus,
@@ -303,14 +303,13 @@ const addIntroOutro = onObjectFinalized(
           },
         });
 
-
         //merge files
         outputAudioFile = await mergeFiles(
           bucket,
           outputAudioFile,
           realtimeDB.ref(`addIntroOutro/${fileName}`),
           audioFilesToMerge.INTRO ? new URL(audioFilesToMerge.INTRO) : undefined,
-          audioFilesToMerge.OUTRO ? new URL(audioFilesToMerge.OUTRO) : undefined,
+          audioFilesToMerge.OUTRO ? new URL(audioFilesToMerge.OUTRO) : undefined
         );
       }
 
@@ -349,10 +348,8 @@ const addIntroOutro = onObjectFinalized(
         },
       });
       return logger.error('Error', e);
-    } 
+    }
   }
 );
 
 export default addIntroOutro;
-
-

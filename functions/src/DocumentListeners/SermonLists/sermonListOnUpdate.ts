@@ -16,7 +16,9 @@ const sermonListOnUpdate = firestore.onDocumentUpdated(
     const previousUploadStatus = previousList?.uploadStatus?.status;
     const updatedUploadStatus = updatedList?.uploadStatus?.status;
 
-    logger.log(`sermonListOnUpdate called on sermon ${sermonId} sermonList ${sermonListId}. PreviousUploadStatus: ${previousUploadStatus}, updatedUploadStatus: ${updatedUploadStatus}`)
+    logger.log(
+      `sermonListOnUpdate called on sermon ${sermonId} sermonList ${sermonListId}. PreviousUploadStatus: ${previousUploadStatus}, updatedUploadStatus: ${updatedUploadStatus}`
+    );
     try {
       // Sermon was uploaded
       if (previousUploadStatus !== uploadStatus.UPLOADED && updatedUploadStatus === uploadStatus.UPLOADED) {
@@ -39,6 +41,7 @@ const sermonListOnUpdate = firestore.onDocumentUpdated(
     } catch (error) {
       throw handleError(error);
     }
-  });
+  }
+);
 
 export default sermonListOnUpdate;
