@@ -15,7 +15,7 @@ function fileTypeValidator(file: File) {
   // reject any files over 500mb
   if (!file.type.includes('audio/')) return { code: 'file-type', message: 'File must be an audio file' };
   if (file.size > 500000000) {
-  return { code: 'file-size', message: 'File size too large - 500mb max' };
+    return { code: 'file-size', message: 'File size too large - 500mb max' };
   }
   return null;
 }
