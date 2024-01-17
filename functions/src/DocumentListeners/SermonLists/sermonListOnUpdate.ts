@@ -1,20 +1,22 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { firestore, logger } from 'firebase-functions';
+import { firestore, logger } from 'firebase-functions/v2';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { SermonList } from '../../../../types/SermonList';
 import { uploadStatus } from '../../../../types/SermonTypes';
 import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
 
-const sermonListOnUpdate = firestore
-  .document('sermons/{sermonId}/sermonLists/{sermonListId}')
-  .onUpdate(async (change, context) => {
-    const { sermonId } = context.params;
-    const previousList = change.before.data() as SermonList;
-    const updatedList = change.after.data() as SermonList;
+const sermonListOnUpdate = firestore.onDocumentUpdated(
+  'sermons/{sermonId}/sermonLists/{sermonListId}',
+  async (event) => {
+    const { sermonId, sermonListId } = event.params;
+    const previousList = event.data?.before.data() as SermonList;
+    const updatedList = event.data?.after.data() as SermonList;
     const firestore = firebaseAdmin.firestore();
     const previousUploadStatus = previousList?.uploadStatus?.status;
     const updatedUploadStatus = updatedList?.uploadStatus?.status;
+
+    logger.log(`sermonListOnUpdate called on sermon ${sermonId} sermonList ${sermonListId}. PreviousUploadStatus: ${previousUploadStatus}, updatedUploadStatus: ${updatedUploadStatus}`)
     try {
       // Sermon was uploaded
       if (previousUploadStatus !== uploadStatus.UPLOADED && updatedUploadStatus === uploadStatus.UPLOADED) {

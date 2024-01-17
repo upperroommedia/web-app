@@ -5,16 +5,15 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import { path as ffprobeStatic } from 'ffprobe-static';
 import path from 'path';
-// import os from 'os';
-// import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { unlink } from 'fs/promises';
-import { Bucket, File } from '@google-cloud/storage';
+import { Bucket, File, Storage } from '@google-cloud/storage';
 import { AxiosError, isAxiosError } from 'axios';
 import { sermonStatus, sermonStatusType, uploadStatus } from '../../types/SermonTypes';
 import { firestoreAdminSermonConverter } from './firestoreDataConverter';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { Reference } from 'firebase-admin/database';
-// import { exec } from 'node:child_process';
+import { Readable } from 'stream';
+
+const storage = new Storage()
 
 type filePaths = {
   INTRO: string | undefined;
@@ -31,21 +30,15 @@ if (!ffmpegStatic) {
   ffmpeg.setFfprobePath(ffprobeStatic);
 }
 
-// const createTempFile = (fileName: string, tempFiles: Set<string>) => {
-//   try {
-//     if (!existsSync(os.tmpdir())) {
-//       mkdirSync(os.tmpdir());
-//     }
-//     const filePath = path.join(os.tmpdir(), fileName);
-//     tempFiles.add(filePath);
-//     return filePath;
-//   } catch (err) {
-//     throw new Error(`Error creating temp file: ${err}`);
-//   }
-// };
 const convertStringToMilliseconds = (timeStr: string): number => {
   // '10:20:30:500'  Example time string
+  if (!timeStr) {
+    return 0
+  }
   const [hours, minutes, secondsAndMilliseconds] = timeStr.split(':');
+  if (!secondsAndMilliseconds) {
+    return 0
+  }
   const [seconds, milliseconds] = secondsAndMilliseconds.split('.');
 
   return (parseInt(hours) * 60 * 60 + parseInt(minutes) * 60 + parseInt(seconds)) * 1000 + parseInt(milliseconds);
@@ -96,71 +89,108 @@ const trimAndTranscode = (
           : startTime
           ? totalTimeMillis - startTime * 1000
           : totalTimeMillis;
-        const percent = ((timeMillis * 0.97) / calculatedDuration) * 100; // go to 97% to leave room for the time it takes to Merge the files
+        const percent = ((timeMillis * 0.96) / calculatedDuration) * 100; // go to 96% to leave room for the time it takes to Merge the files
+        logger.log('Trim and Transcode Progress:', percent);
+        // const memoryUsage = process.memoryUsage();
+        // const memoryUsageInMB = {
+        //   rss: (memoryUsage.rss / (1024 * 1024)).toFixed(2), // Resident Set Size
+        //   heapTotal: (memoryUsage.heapTotal / (1024 * 1024)).toFixed(2), // Total size of the allocated heap
+        //   heapUsed: (memoryUsage.heapUsed / (1024 * 1024)).toFixed(2), // Actual memory used
+        //   external: (memoryUsage.external / (1024 * 1024)).toFixed(2), // Memory used by C++ objects bound to JavaScript objects
+        // };
+      
+        // console.log('Memory usage:', memoryUsageInMB);
         realtimeDBRef.set(percent && percent > 0 ? percent : 0);
       });
   });
 };
 
-const mergeFiles = (
+function parseGcsUrl(url: URL): { bucket: string; filePath: string } {
+  const regex = /http.*:\/\/.*\/v0\/b\/([^\/]+)\/o\/([^?]+)\?.*/;
+  const matches = url.toString().match(regex);
+
+  if (matches && matches.length === 3) {
+    return {
+      bucket: matches[1],
+      filePath: decodeURIComponent(matches[2]),
+    };
+  }
+
+  throw new Error('Invalid Google Cloud Storage URL');
+}
+
+function getDurationSeconds(outputAudioFile: File): number {
+  const fileSize = outputAudioFile.metadata.size || 0
+  const fileSizeInBits = (fileSize * 8);
+  const duration = fileSizeInBits / 128000; // Duration in seconds
+  logger.log(outputAudioFile.name, "is ", fileSizeInBits, "bits long and", duration, "seconds")
+  return duration;
+
+}
+
+const mergeFiles = async (
   bucket: Bucket,
-  contentFilePath: string,
+  contentFile: File,
   realtimeDBref: Reference,
-  introFilePath?: string,
-  outroFilePath?: string
+  introUrl?: URL,
+  outroUrl?: URL
 ): Promise<File> => {
-  const introFile = introFilePath ? bucket.file(introFilePath).createReadStream() : null;
-  const outroFile = outroFilePath ? bucket.file(outroFilePath).createReadStream() : null;
-  const contentFile = bucket.file(contentFilePath).createReadStream();
-
-  const merge = ffmpeg();
-
-  if (introFile) {
-    merge.input(introFile);
-  }
-
-  merge.input(contentFile);
-
-  if (outroFile) {
-    merge.input(outroFile);
-  }
-
-  const outputFilePath = `intro-outro-sermons/${contentFilePath}`;
+  const outputFilePath = `intro-outro-sermons/${path.basename(contentFile.name)}`;
   const outputFile = bucket.file(outputFilePath);
+  logger.log("Merging files to:", outputFilePath)
+  const streams: Readable[] = []
 
-  merge
-    .output(outputFile.createWriteStream())
-    .outputOptions('-filter_complex', '[0:a][1:a][2:a]concat=n=3:v=0:a=1')
-    .outputFormat('mp3');
+  // Add intro
+  if (introUrl) {
+    const {bucket: introBucket, filePath: introFilePath} = parseGcsUrl(introUrl)
+    logger.log("Intro - introBucket:", introBucket, "introFilePath", introFilePath)
+    const introFileStream = storage.bucket(introBucket).file(introFilePath).createReadStream()
+    streams.push(introFileStream)
+  }
+  // Add content
+  const contentFileStream = contentFile.createReadStream();
+  streams.push(contentFileStream);
+  
+  // Add outro
+  if (outroUrl) {
+    const {bucket: outroBucket, filePath: outroFilePath} = parseGcsUrl(outroUrl)
+    logger.log("Outro - outroBucket:", outroBucket, "outroFilePath", outroFilePath)
+    const outroFileStream = storage.bucket(outroBucket).file(outroFilePath).createReadStream()
+    streams.push(outroFileStream)
+  }
+  // Create a write stream to the output file
+  const writeStream = outputFile.createWriteStream()
 
-  return new Promise((resolve, reject) => {
-    merge
-      .on('start', function (commandLine) {
-        realtimeDBref.set(98);
-        logger.log('MergeFiles Spawned Ffmpeg with command: ' + commandLine);
+  function pipeStreams(i: number) {
+    if (i < streams.length) {
+      streams[i].pipe(writeStream, {end: false})
+      streams[i].on('end', () => {
+        const percent = 99 - streams.length + i + 1
+        logger.log("Merge Files percent:", percent)
+        realtimeDBref.set(percent)
+        pipeStreams(i + 1)
       })
-      .on('end', async function () {
-        realtimeDBref.set(98);
-        resolve(outputFile);
-      })
-      .on('error', function (err) {
+      streams[i].on('error', function (err) {
         logger.error('MergeFiles Error:', err);
-        reject(err);
+        throw err;
       })
-      .run();
-  });
-};
+    } else {
+      writeStream.end()
+    }
+  }
+  // Start piping the streams
+  pipeStreams(0)
 
-// const uploadSermon = async (
-//   inputFilePath: string,
-//   destinationFilePath: string,
-//   bucket: Bucket,
-//   customMetadata?: { [key: string]: string }
-// ) => {
-//   logger.log('custom metadata', customMetadata);
-//   await bucket.upload(inputFilePath, { destination: destinationFilePath });
-//   await bucket.file(destinationFilePath).setMetadata({ contentType: 'audio/mpeg', metadata: customMetadata });
-// };
+
+  // Return a promise that resolves with the output file when the write stream finishes
+  return new Promise((resolve, reject) => {
+    writeStream.on('finish', () => resolve(outputFile))
+    writeStream.on('error', (err) => {
+      logger.error('MergeFiles Error:', err);
+      reject(err);
+    })
+  })
+};
 
 const addIntroOutro = onObjectFinalized(
   {
@@ -171,7 +201,6 @@ const addIntroOutro = onObjectFinalized(
     const data = storageEvent.data;
     const filePath = data.name ? data.name : '';
     logger.log('Object Finalized', filePath);
-    logger.log('USING STREAMING');
     if (!filePath.startsWith('sermons/') || filePath.endsWith('sermon/')) {
       // Not a sermon
       return logger.log('Not a sermon');
@@ -198,7 +227,6 @@ const addIntroOutro = onObjectFinalized(
       soundCloud: uploadStatus.NOT_UPLOADED,
       audioStatus: sermonStatusType.PROCESSING,
     };
-    const tempFiles = new Set<string>();
     // the document may not exist yet, if it deosnt wait 5 seconds and try again do this for a max of 3 times before throwing an error
     const maxTries = 3;
     let currentTry = 0;
@@ -226,6 +254,7 @@ const addIntroOutro = onObjectFinalized(
     }
 
     try {
+      logger.log("Adding intro outro is using streaming to reduce function memory requirments")
       await docRef.update({
         status: {
           ...sermonStatus,
@@ -255,7 +284,7 @@ const addIntroOutro = onObjectFinalized(
       });
 
       logger.log('Trimming and Transcoding');
-      const transcodedAudioFile = await trimAndTranscode(
+      let outputAudioFile = await trimAndTranscode(
         bucket,
         filePath,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
@@ -264,7 +293,7 @@ const addIntroOutro = onObjectFinalized(
       );
       // let durationSeconds = await getDurationSeconds(tempFilePaths.CONTENT);
       // await uploadSermon(tempFilePaths.CONTENT, `processed-sermons/${fileName}`, bucket, customMetadata);
-      logger.log('Transcoded Audio File', transcodedAudioFile.name, transcodedAudioFile.metadata);
+      logger.log('Transcoded Audio File', outputAudioFile.name, outputAudioFile.metadata);
       if (audioFilesToMerge.INTRO || audioFilesToMerge.OUTRO) {
         await docRef.update({
           status: {
@@ -273,45 +302,25 @@ const addIntroOutro = onObjectFinalized(
             message: 'Adding Intro and Outro',
           },
         });
-        logger.log('Merging audio files', JSON.stringify(audioFilesToMerge));
-        const outputFileName = `intro_outro-${fileName}`;
 
-        //create merge array in order INTRO, CONTENT, OUTRO
-        const filePathsArray: string[] = [];
-        if (audioFilesToMerge.INTRO) filePathsArray.push(audioFilesToMerge.INTRO);
-        filePathsArray.push(audioFilesToMerge.CONTENT);
-        if (audioFilesToMerge.OUTRO) filePathsArray.push(audioFilesToMerge.OUTRO);
 
         //merge files
-        logger.log('Merging files', filePathsArray, 'to', outputFileName, '...');
-        const mergedAudioFile = await mergeFiles(
+        outputAudioFile = await mergeFiles(
           bucket,
-          audioFilesToMerge.CONTENT,
+          outputAudioFile,
           realtimeDB.ref(`addIntroOutro/${fileName}`),
-          audioFilesToMerge.INTRO,
-          audioFilesToMerge.OUTRO
+          audioFilesToMerge.INTRO ? new URL(audioFilesToMerge.INTRO) : undefined,
+          audioFilesToMerge.OUTRO ? new URL(audioFilesToMerge.OUTRO) : undefined,
         );
-
-        //upload merged file
-        logger.log(
-          'Uploading merged file',
-          mergedAudioFile.name,
-          'to intro-outro-sermons/',
-          outputFileName,
-          mergedAudioFile.metadata
-        );
-        // logger.log('Uploading merged file', tmpFilePath, 'to intro-outro-sermons/', fileName);
-        // const destination = `intro-outro-sermons/${fileName}`;
-        // durationSeconds = await getDurationSeconds(tmpFilePath);
-        // await uploadSermon(tmpFilePath, destination, bucket);
       }
+
       logger.log('Updating status to PROCESSED');
       await docRef.update({
         status: {
           ...sermonStatus,
           audioStatus: sermonStatusType.PROCESSED,
         },
-        // durationSeconds: durationSeconds,
+        durationSeconds: getDurationSeconds(outputAudioFile),
       });
       realtimeDB.ref(`addIntroOutro/${fileName}`).set(100);
       await realtimeDB.ref(`addIntroOutro/${fileName}`).remove();
@@ -340,20 +349,10 @@ const addIntroOutro = onObjectFinalized(
         },
       });
       return logger.error('Error', e);
-    } finally {
-      const promises: Promise<void>[] = [];
-      tempFiles.forEach((file) => {
-        logger.log('Deleting temp file', file);
-        promises.push(unlink(file));
-      });
-      try {
-        await Promise.all(promises);
-        logger.log('All temp files deleted');
-      } catch (err) {
-        logger.warn('Error when deleting temporary files', err);
-      }
-    }
+    } 
   }
 );
 
 export default addIntroOutro;
+
+
