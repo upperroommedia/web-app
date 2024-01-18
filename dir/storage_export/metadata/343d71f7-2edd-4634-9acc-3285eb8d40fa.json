@@ -1,0 +1,19 @@
+{
+  "name": "outros/default_outro.mp3",
+  "bucket": "urm-app.appspot.com",
+  "metageneration": 1,
+  "generation": 1705612287223,
+  "contentType": "audio/mpeg",
+  "storageClass": "STANDARD",
+  "contentDisposition": "inline",
+  "downloadTokens": [
+    "ec1909c9-36be-43f1-bdb0-84111cc7f536"
+  ],
+  "etag": "87DaK57ua9+gr/uYYF5U0dOdGd0",
+  "customMetadata": {},
+  "timeCreated": "2024-01-18T21:11:27.223Z",
+  "updated": "2024-01-18T21:11:27.223Z",
+  "size": 417220,
+  "md5Hash": "nyt5xrXh2mcl9YJyXKo1iA==",
+  "crc32c": "4078957217"
+}
