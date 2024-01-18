@@ -43,7 +43,7 @@ import YoutubeUrlToMp3 from '../components/YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
-import { List, listConverter, ListTag, ListType } from '../types/List';
+import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from '../types/List';
 import SubtitleSelector from '../components/SubtitleSelector';
 import { useRouter } from 'next/router';
 import Stack from '@mui/material/Stack';
@@ -149,11 +149,12 @@ const Uploader = (props: UploaderProps) => {
   );
 
   // Sunday Homilies Helpers
-  const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<List[]>([]);
+  const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<SundayHomiliesMonthList[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
-  const [selectedSundayHomaliesMonth, setSelectedSundayHomaliesMonth] = useState<List | null>(
-    props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH) || null
+  const [selectedSundayHomiliesMonth, setSelectedSundayHomiliesMonth] = useState<SundayHomiliesMonthList | null>(
+    props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH) as SundayHomiliesMonthList | null
   );
+
   const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(() => {
     const sundayHomilyList = props.existingList?.find(
       (list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH
@@ -179,10 +180,15 @@ const Uploader = (props: UploaderProps) => {
 
   const fetchSundayHomiliesMonths = async (year: number) => {
     setLoadingSundayHomiliesMonths(true);
-    setSelectedSundayHomaliesMonth(null);
-    setSermonList((oldSermonList) => {
-      return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
-    });
+    if (selectedSundayHomiliesMonth) {
+      const selectedSundayHomiliesYear = selectedSundayHomiliesMonth.listTagAndPosition.year
+      if (selectedSundayHomiliesYear !== year) {
+        setSelectedSundayHomiliesMonth(null);
+        setSermonList((oldSermonList) => {
+          return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
+        });
+      }
+    }
     // fetch bible chapters
     const sundayHomiliesMonthsQuery = query(
       collection(firestore, 'lists'),
@@ -190,9 +196,10 @@ const Uploader = (props: UploaderProps) => {
       where('listTagAndPosition.year', '==', year),
       orderBy('listTagAndPosition.position', 'asc')
     ).withConverter(listConverter);
-    setSundayHomiliesMonths((await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data()));
+    setSundayHomiliesMonths((await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList));
     setLoadingSundayHomiliesMonths(false);
   };
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -245,7 +252,7 @@ const Uploader = (props: UploaderProps) => {
     }
 
     if (sermon.subtitle !== SUNDAY_HOMILIES_STRING) {
-      setSelectedSundayHomaliesMonth(null);
+      setSelectedSundayHomiliesMonth(null);
       setSermonList((oldSermonList) => {
         return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
       });
@@ -457,10 +464,10 @@ const Uploader = (props: UploaderProps) => {
             ) : (
               <Autocomplete
                 fullWidth
-                value={selectedSundayHomaliesMonth || null}
+                value={selectedSundayHomiliesMonth || null}
                 isOptionEqualToValue={(option, value) => option?.id === value?.id}
                 onChange={async (_, newValue) => {
-                  setSelectedSundayHomaliesMonth(newValue);
+                  setSelectedSundayHomiliesMonth(newValue);
                   setSermonList((oldSermonList) => {
                     if (!newValue) {
                       return oldSermonList.filter(
@@ -678,7 +685,7 @@ const Uploader = (props: UploaderProps) => {
                   sermon.subtitle === '' ||
                   sermon.description === '' ||
                   (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
-                  (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomaliesMonth) ||
+                  (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
                   isEditing
                 }
                 variant="contained"
@@ -746,7 +753,7 @@ const Uploader = (props: UploaderProps) => {
                       sermon.subtitle === '' ||
                       sermon.description === '' ||
                       (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
-                      (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomaliesMonth) ||
+                      (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
                       isUploading
                     }
                     onClick={async () => {
