@@ -1,9 +1,9 @@
 import firebaseAdmin from '../../firebase/firebaseAdmin';
-import { https, logger } from 'firebase-functions';
+import { https, logger } from 'firebase-functions/v2';
 
-const listUsers = https.onCall(async (data, context) => {
+const listUsers = https.onCall(async (opts) => {
   // check if user is admin (true "admin" custom claim), return error if not
-  if (context?.auth?.token.role !== 'admin') {
+  if (opts.auth?.token.role !== 'admin') {
     return { error: `Unauthorized.` };
   }
   try {
