@@ -65,6 +65,7 @@ const trimAndTranscode = (
     .audioFrequency(44100)
     .pipe(outputFile.createWriteStream({ contentType: 'audio/mpeg' }));
   let totalTimeMillis: number;
+  let previousPercent = -1;
   return new Promise((resolve, reject) => {
     proc
       .on('start', function (commandLine) {
@@ -83,14 +84,6 @@ const trimAndTranscode = (
         totalTimeMillis = convertStringToMilliseconds(data.duration);
       })
       .on('progress', (progress) => {
-        const timeMillis = convertStringToMilliseconds(progress.timemark);
-        const calculatedDuration = duration
-          ? duration * 1000
-          : startTime
-          ? totalTimeMillis - startTime * 1000
-          : totalTimeMillis;
-        const percent = ((timeMillis * 0.96) / calculatedDuration) * 100; // go to 96% to leave room for the time it takes to Merge the files
-        logger.log('Trim and Transcode Progress:', percent);
         // const memoryUsage = process.memoryUsage();
         // const memoryUsageInMB = {
         //   rss: (memoryUsage.rss / (1024 * 1024)).toFixed(2), // Resident Set Size
@@ -100,7 +93,18 @@ const trimAndTranscode = (
         // };
 
         // console.log('Memory usage:', memoryUsageInMB);
-        realtimeDBRef.set(percent && percent > 0 ? percent : 0);
+        const timeMillis = convertStringToMilliseconds(progress.timemark);
+        const calculatedDuration = duration
+          ? duration * 1000
+          : startTime
+          ? totalTimeMillis - startTime * 1000
+          : totalTimeMillis;
+        const percent = Math.round(Math.max(0, ((timeMillis * 0.96) / calculatedDuration) * 100)); // go to 96% to leave room for the time it takes to Merge the files
+        if (percent !== previousPercent) {
+          previousPercent = percent;
+          logger.log('Trim and Transcode Progress:', percent);
+          realtimeDBRef.set(percent);
+        }
       });
   });
 };
