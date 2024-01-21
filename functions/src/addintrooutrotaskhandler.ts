@@ -32,6 +32,8 @@ type filePaths = {
   OUTRO?: string;
 };
 
+type CustomMetadata = { duration: number, title?: string, introUrl?: string; outroUrl?: string }
+
 class CancelToken {
   private shouldCancel = false;
 
@@ -178,11 +180,13 @@ const mergeFiles = async (
   outputFilePath: string,
   durationSeconds: number,
   tempFiles: Set<string>,
-  realtimeDBref: Reference
+  realtimeDBref: Reference,
+  customMetadata: CustomMetadata,
 ): Promise<File> => {
   const listFileName = createTempFile('list.txt', tempFiles);
   const outputFile = bucket.file(outputFilePath);
-  const writeStream = outputFile.createWriteStream({ contentType: 'audio/mpeg' });
+  const contentDisposition = customMetadata.title ? `inline; filename="${customMetadata.title}.mp3"` : 'inline; filename="untitled.mp3"';
+  const writeStream = outputFile.createWriteStream({ contentType: 'audio/mpeg', metadata: { contentDisposition, metadata: customMetadata}});
 
   // ffmpeg -f concat -i mylist.txt -c copy output
   const filePathsForTxt = filePaths.map((filePath) => `file '${filePath}'`);
@@ -237,11 +241,12 @@ const uploadSermon = async (
   inputFilePath: string,
   destinationFilePath: string,
   bucket: Bucket,
-  customMetadata?: { [key: string]: string }
+  customMetadata: CustomMetadata,
 ) => {
   logger.log('custom metadata', customMetadata);
+  const contentDisposition = customMetadata.title ? `inline; filename="${customMetadata.title}.mp3"` : 'inline; filename="untitled.mp3"';
   await bucket.upload(inputFilePath, { destination: destinationFilePath });
-  await bucket.file(destinationFilePath).setMetadata({ contentType: 'audio/mpeg', metadata: customMetadata });
+  await bucket.file(destinationFilePath).setMetadata({ contentType: 'audio/mpeg', contentDisposition, metadata: customMetadata });
 };
 
 const getDurationSeconds = (filePath: string): Promise<number> => {
@@ -323,7 +328,7 @@ const mainFunction = async (
   startTime: number,
   duration: number,
   introUrl?: string,
-  outroUrl?: string
+  outroUrl?: string,
 ): Promise<void> => {
   const fileName = path.basename(filePath);
   exec(`${ffmpegStatic} -version`, (err, stdout) => {
@@ -339,12 +344,14 @@ const mainFunction = async (
   const maxTries = 3;
   let currentTry = 0;
   let docFound = false;
+  let title = 'untitled';
   while (currentTry < maxTries) {
     logger.log(`Checking if document exists attempt: ${currentTry + 1}/${maxTries}`);
     const doc = await docRef.get();
 
     if (doc.exists) {
       docFound = true;
+      title = doc.data()?.title || 'No title found';
       break;
     }
     logger.log(`No document exists attempt: ${currentTry + 1}/${maxTries}`);
@@ -368,7 +375,7 @@ const mainFunction = async (
       },
     });
     const audioFilesToMerge: filePaths = { INTRO: undefined, OUTRO: undefined };
-    const customMetadata: { introUrl?: string; outroUrl?: string } = {};
+    const customMetadata: CustomMetadata = {duration, title};
     if (introUrl) {
       audioFilesToMerge.INTRO = introUrl;
       customMetadata.introUrl = introUrl;
@@ -396,6 +403,10 @@ const mainFunction = async (
       duration
     );
     await uploadSermon(trimAndTranscodePath, `processed-sermons/${fileName}`, bucket, customMetadata);
+    const originalAudioMetadata = await bucket.file(filePath).getMetadata()
+    const trimAndTranscodeMetadata = await  bucket.file(`processed-sermons/${fileName}`).getMetadata()
+    logger.log('Original Audio Metadata', JSON.stringify(originalAudioMetadata))
+    logger.log('Trim and Transcode Metadata', JSON.stringify(trimAndTranscodeMetadata))
     await logMemoryUsage('Memory Usage after trim and transcode:');
     //create merge array in order INTRO, CONTENT, OUTRO
     const filePathsArray: string[] = [];
@@ -408,6 +419,7 @@ const mainFunction = async (
       await Promise.all(filePathsArray.map(async (path) => await getDurationSeconds(path)))
     ).reduce((accumulator, currentValue) => accumulator + currentValue, 0);
 
+    customMetadata.duration = durationSeconds;
     logger.log('Total Duration', secondsToTimeFormat(durationSeconds));
 
     // if there is an intro or outro, merge the files
@@ -431,10 +443,13 @@ const mainFunction = async (
         outputFilePath,
         durationSeconds,
         tempFiles,
-        realtimeDB.ref(`addIntroOutro/${fileName}`)
+        realtimeDB.ref(`addIntroOutro/${fileName}`),
+        customMetadata
       );
       logger.log('MergedFiles saved to', mergedOutputFile.name);
       await logMemoryUsage('Memory Usage after merge:');
+    } else {
+      logger.log('No intro or outro, skipping merge');
     }
     if (cancelToken.isCancellationRequested) return;
     logger.log('Updating status to PROCESSED');
@@ -528,7 +543,7 @@ const addintrooutrotaskhandler = onTaskDispatched(
         data.startTime,
         data.endTime,
         data.introUrl,
-        data.outroUrl
+        data.outroUrl,
       ),
         cancelToken.cancel,
         timeoutMillis)
