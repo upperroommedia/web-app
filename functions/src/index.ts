@@ -5,7 +5,7 @@ import tagitemsinlist from './Scrapers/tagItemsInList';
 import updatecreatedandeditedatmillis from './updateCreatedAndEditedAtMillis';
 import uploadToSubsplash from './uploadToSubsplash';
 import setUserRole from './setUserRole';
-import addintrooutrotaskhandler from './addintrooutrotaskhandler';
+import addintrooutrotaskhandler from './addIntroOutro/addintrooutrotaskhandler';
 import deleteFromSubsplash from './deleteFromSubsplash';
 import uploadimage from './handleImageUpload';
 import saveimage from './saveImage';
