@@ -767,10 +767,11 @@ const Uploader = (props: UploaderProps) => {
                             sermon,
                             sermonList,
                           });
-                          setIsUploading(false);
                           clearForm();
                         } catch (error) {
                           setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
+                        } finally {
+                          setIsUploading(false);
                         }
                       } else if (user?.role !== 'admin') {
                         setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });

@@ -1,7 +1,7 @@
 export type AddIntroOutroInputType = {
     storageFilePath: string,
     startTime: number,
-    endTime: number,
+    duration: number,
     introUrl?: string,
     outroUrl?: string
   }

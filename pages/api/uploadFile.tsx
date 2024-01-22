@@ -1,5 +1,5 @@
 import firestore, { deleteDoc, doc, writeBatch } from '../../firebase/firestore';
-import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL } from '../../firebase/storage';
+import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL, deleteObject } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../../components/DropZone';
@@ -7,6 +7,8 @@ import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { List } from '../../types/List';
+import { createFunctionV2 } from '../../utils/createFunction';
+import {AddIntroOutroInputType} from '../../functions/src/addIntroOutro/types'
 
 interface uploadFileProps {
   file: UploadableFile;
@@ -91,7 +93,23 @@ const uploadFile = async (props: uploadFileProps) => {
         });
         await batch.commit();
         props.setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
-        resolve();
+        try {
+          const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
+          const data: AddIntroOutroInputType = {
+            storageFilePath: sermonRef.fullPath,
+            startTime: props.trimStart,
+            duration: props.sermon.durationSeconds,
+            introUrl: introRef,
+            outroUrl: outroRef
+          };
+          await generateAddIntroOutroTask(data);
+          resolve()
+        } catch (e) {
+          console.error("Error generatingAddIntroOutroTask", e)
+          props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0})
+          await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);
+          reject(e)
+        }
       }
     );
   });

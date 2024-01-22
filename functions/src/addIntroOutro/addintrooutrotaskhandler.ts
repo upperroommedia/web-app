@@ -13,6 +13,7 @@ import { Request, onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { CustomMetadata, AddIntroOutroInputType, FilePaths } from './types';
 import { CancelToken } from './CancelToken';
 import {  logMemoryUsage, secondsToTimeFormat, loadStaticFFMPEG, downloadFiles, getDurationSeconds, uploadSermon, executeWithTimout } from './utils';
+import { TIMEOUT_SECONDS } from './consts';
 import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
 
@@ -186,12 +187,9 @@ const mainFunction = async (
 };
 
 
-
-const timeoutSeconds = 1800; // 30 minutes
-
 const addintrooutrotaskhandler = onTaskDispatched(
   {
-    timeoutSeconds: timeoutSeconds,
+    timeoutSeconds: TIMEOUT_SECONDS,
     memory: '1GiB',
     cpu: 1,
     concurrency: 1,
@@ -201,18 +199,13 @@ const addintrooutrotaskhandler = onTaskDispatched(
     },
   },
   async (request: Request<AddIntroOutroInputType>): Promise<void> => {
-    const timeoutMillis = (timeoutSeconds - 30) * 1000 // 30s less than timeoutSeconds
+    const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000 // 30s less than timeoutSeconds
     // set timeout to 30 seconds less than timeoutSeconds then throw error if it takes longer than that
     const data = request.data;
-    if (!data.storageFilePath || data.startTime === undefined || data.startTime === null || data.endTime === null || data.endTime === undefined) {
+    if (!data.storageFilePath || data.startTime === undefined || data.startTime === null || data.duration === null || data.duration === undefined) {
       const errorMessage = "Data must contain storageFilePath (string), startTime (number), and endTime (number) properties || optionally introUrl (string) and outroUrl (string)"
       logger.error('Invalid Argument', errorMessage);
       throw new HttpsError('invalid-argument', errorMessage)
-    }
-    logger.log('storageFilePath', data.storageFilePath);
-    if (!data.storageFilePath.startsWith('sermons/') || data.storageFilePath.endsWith('sermon/')) {
-      // Not a sermon
-      return logger.log('Not a sermon');
     }
 
 
@@ -237,7 +230,7 @@ const addintrooutrotaskhandler = onTaskDispatched(
         docRef,
         sermonStatus,
         data.startTime,
-        data.endTime,
+        data.duration,
         data.introUrl,
         data.outroUrl,
       ),
