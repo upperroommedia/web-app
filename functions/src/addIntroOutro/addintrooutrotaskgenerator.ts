@@ -56,7 +56,6 @@ const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddInt
   try {
     // check if the storageFilePath exists
     const [fileExists] = await bucket.file(data.storageFilePath).exists();
-    logger.log('File Exists', fileExists);
     if (!fileExists) {
       const errorMessage = `${data.storageFilePath} could not be found`;
       logger.error('Invalid Argument', errorMessage);
@@ -65,7 +64,6 @@ const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddInt
     const queue = getFunctions().taskQueue('addintrooutrotaskhandler');
 
     let targetUri: string;
-    logger.debug('Running in development mode', process.env.FUNCTIONS_EMULATOR === 'true');
 
     if (process.env.FUNCTIONS_EMULATOR === 'true') {
       logger.debug('Running in development mode');

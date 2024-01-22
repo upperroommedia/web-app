@@ -171,9 +171,12 @@ const mainFunction = async (
 
     // delete original audio file
     if (cancelToken.isCancellationRequested) return;
-    logger.log('Deleting original audio file', filePath);
-    await bucket.file(filePath).delete();
-    logger.log('Original audio file deleted');
+    const [originalFileExists] = await bucket.file(filePath).exists();
+    if (originalFileExists) {
+      logger.log('Deleting original audio file', filePath);
+      await bucket.file(filePath).delete();
+      logger.log('Original audio file deleted');
+    }
 
     logger.log('Files have been merged succesfully');
   } finally {
@@ -187,7 +190,7 @@ const mainFunction = async (
       await Promise.all(promises);
       logger.log('All temp files deleted');
     } catch (err) {
-      logger.warn('Error when deleting temporary files', err);
+      logger.error('Error when deleting temporary files', err);
     }
   }
 };
