@@ -152,7 +152,9 @@ const Uploader = (props: UploaderProps) => {
   const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<SundayHomiliesMonthList[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
   const [selectedSundayHomiliesMonth, setSelectedSundayHomiliesMonth] = useState<SundayHomiliesMonthList | null>(
-    props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH) as SundayHomiliesMonthList | null
+    props.existingList?.find(
+      (list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH
+    ) as SundayHomiliesMonthList | null
   );
 
   const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(() => {
@@ -181,7 +183,7 @@ const Uploader = (props: UploaderProps) => {
   const fetchSundayHomiliesMonths = async (year: number) => {
     setLoadingSundayHomiliesMonths(true);
     if (selectedSundayHomiliesMonth) {
-      const selectedSundayHomiliesYear = selectedSundayHomiliesMonth.listTagAndPosition.year
+      const selectedSundayHomiliesYear = selectedSundayHomiliesMonth.listTagAndPosition.year;
       if (selectedSundayHomiliesYear !== year) {
         setSelectedSundayHomiliesMonth(null);
         setSermonList((oldSermonList) => {
@@ -196,10 +198,11 @@ const Uploader = (props: UploaderProps) => {
       where('listTagAndPosition.year', '==', year),
       orderBy('listTagAndPosition.position', 'asc')
     ).withConverter(listConverter);
-    setSundayHomiliesMonths((await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList));
+    setSundayHomiliesMonths(
+      (await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList)
+    );
     setLoadingSundayHomiliesMonths(false);
   };
-
 
   useEffect(() => {
     const fetchData = async () => {

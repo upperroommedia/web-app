@@ -30,8 +30,8 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
         ) : loading ? (
           <CircularProgress />
         ) : (
-        <Uploader existingSermon={sermon} existingList={sermonLists || []} setEditFormOpen={setOpen} />
-         )}
+          <Uploader existingSermon={sermon} existingList={sermonLists || []} setEditFormOpen={setOpen} />
+        )}
       </DialogContent>
       <DialogActions>
         <Button

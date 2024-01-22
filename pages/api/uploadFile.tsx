@@ -1,5 +1,11 @@
 import firestore, { deleteDoc, doc, writeBatch } from '../../firebase/firestore';
-import storage, { ref, uploadBytesResumable, UploadMetadata, getDownloadURL, deleteObject } from '../../firebase/storage';
+import storage, {
+  ref,
+  uploadBytesResumable,
+  UploadMetadata,
+  getDownloadURL,
+  deleteObject,
+} from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../../components/DropZone';
@@ -8,7 +14,7 @@ import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { List } from '../../types/List';
 import { createFunctionV2 } from '../../utils/createFunction';
-import {AddIntroOutroInputType} from '../../functions/src/addIntroOutro/types'
+import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
 
 interface uploadFileProps {
   file: UploadableFile;
@@ -100,15 +106,15 @@ const uploadFile = async (props: uploadFileProps) => {
             startTime: props.trimStart,
             duration: props.sermon.durationSeconds,
             introUrl: introRef,
-            outroUrl: outroRef
+            outroUrl: outroRef,
           };
           await generateAddIntroOutroTask(data);
-          resolve()
+          resolve();
         } catch (e) {
-          console.error("Error generatingAddIntroOutroTask", e)
-          props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0})
+          console.error('Error generatingAddIntroOutroTask', e);
+          props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
           await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);
-          reject(e)
+          reject(e);
         }
       }
     );

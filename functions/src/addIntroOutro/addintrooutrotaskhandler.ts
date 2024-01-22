@@ -1,7 +1,7 @@
 import { logger } from 'firebase-functions/v2';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import path from 'path';
-import { unlink} from 'fs/promises';
+import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
 import { AxiosError, isAxiosError } from 'axios';
 import { Sermon, sermonStatus, sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
@@ -12,11 +12,18 @@ import { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import { Request, onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { CustomMetadata, AddIntroOutroInputType, FilePaths } from './types';
 import { CancelToken } from './CancelToken';
-import {  logMemoryUsage, secondsToTimeFormat, loadStaticFFMPEG, downloadFiles, getDurationSeconds, uploadSermon, executeWithTimout } from './utils';
+import {
+  logMemoryUsage,
+  secondsToTimeFormat,
+  loadStaticFFMPEG,
+  downloadFiles,
+  getDurationSeconds,
+  uploadSermon,
+  executeWithTimout,
+} from './utils';
 import { TIMEOUT_SECONDS } from './consts';
 import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
-
 
 const ffmpeg = loadStaticFFMPEG();
 
@@ -31,7 +38,7 @@ const mainFunction = async (
   startTime: number,
   duration: number,
   introUrl?: string,
-  outroUrl?: string,
+  outroUrl?: string
 ): Promise<void> => {
   const fileName = path.basename(filePath);
   await logMemoryUsage('Initial Memory Usage:');
@@ -56,7 +63,7 @@ const mainFunction = async (
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 
-  logger.log("Out of while loop")
+  logger.log('Out of while loop');
   if (!docFound) {
     throw new HttpsError('not-found', `Sermon Document ${fileName} Not Found`);
   }
@@ -71,7 +78,7 @@ const mainFunction = async (
       },
     });
     const audioFilesToMerge: FilePaths = { INTRO: undefined, OUTRO: undefined };
-    const customMetadata: CustomMetadata = {duration, title};
+    const customMetadata: CustomMetadata = { duration, title };
     if (introUrl) {
       audioFilesToMerge.INTRO = introUrl;
       customMetadata.introUrl = introUrl;
@@ -100,10 +107,10 @@ const mainFunction = async (
       duration
     );
     await uploadSermon(trimAndTranscodePath, `processed-sermons/${fileName}`, bucket, customMetadata);
-    const originalAudioMetadata = await bucket.file(filePath).getMetadata()
-    const trimAndTranscodeMetadata = await  bucket.file(`processed-sermons/${fileName}`).getMetadata()
-    logger.log('Original Audio Metadata', JSON.stringify(originalAudioMetadata))
-    logger.log('Trim and Transcode Metadata', JSON.stringify(trimAndTranscodeMetadata))
+    const originalAudioMetadata = await bucket.file(filePath).getMetadata();
+    const trimAndTranscodeMetadata = await bucket.file(`processed-sermons/${fileName}`).getMetadata();
+    logger.log('Original Audio Metadata', JSON.stringify(originalAudioMetadata));
+    logger.log('Trim and Transcode Metadata', JSON.stringify(trimAndTranscodeMetadata));
     await logMemoryUsage('Memory Usage after trim and transcode:');
     //create merge array in order INTRO, CONTENT, OUTRO
     const filePathsArray: string[] = [];
@@ -162,7 +169,6 @@ const mainFunction = async (
     if (cancelToken.isCancellationRequested) return;
     realtimeDB.ref(`addIntroOutro/${fileName}`).set(100);
 
-
     // delete original audio file
     if (cancelToken.isCancellationRequested) return;
     logger.log('Deleting original audio file', filePath);
@@ -186,7 +192,6 @@ const mainFunction = async (
   }
 };
 
-
 const addintrooutrotaskhandler = onTaskDispatched(
   {
     timeoutSeconds: TIMEOUT_SECONDS,
@@ -199,15 +204,21 @@ const addintrooutrotaskhandler = onTaskDispatched(
     },
   },
   async (request: Request<AddIntroOutroInputType>): Promise<void> => {
-    const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000 // 30s less than timeoutSeconds
+    const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
     // set timeout to 30 seconds less than timeoutSeconds then throw error if it takes longer than that
     const data = request.data;
-    if (!data.storageFilePath || data.startTime === undefined || data.startTime === null || data.duration === null || data.duration === undefined) {
-      const errorMessage = "Data must contain storageFilePath (string), startTime (number), and endTime (number) properties || optionally introUrl (string) and outroUrl (string)"
+    if (
+      !data.storageFilePath ||
+      data.startTime === undefined ||
+      data.startTime === null ||
+      data.duration === null ||
+      data.duration === undefined
+    ) {
+      const errorMessage =
+        'Data must contain storageFilePath (string), startTime (number), and endTime (number) properties || optionally introUrl (string) and outroUrl (string)';
       logger.error('Invalid Argument', errorMessage);
-      throw new HttpsError('invalid-argument', errorMessage)
+      throw new HttpsError('invalid-argument', errorMessage);
     }
-
 
     const bucket = firebaseAdmin.storage().bucket();
     const realtimeDB = firebaseAdmin.database();
@@ -221,21 +232,24 @@ const addintrooutrotaskhandler = onTaskDispatched(
     };
     try {
       const cancelToken = new CancelToken();
-      await executeWithTimout(() => mainFunction(
-        cancelToken,
-        bucket,
-        realtimeDB,
-        db,
-        data.storageFilePath,
-        docRef,
-        sermonStatus,
-        data.startTime,
-        data.duration,
-        data.introUrl,
-        data.outroUrl,
-      ),
+      await executeWithTimout(
+        () =>
+          mainFunction(
+            cancelToken,
+            bucket,
+            realtimeDB,
+            db,
+            data.storageFilePath,
+            docRef,
+            sermonStatus,
+            data.startTime,
+            data.duration,
+            data.introUrl,
+            data.outroUrl
+          ),
         cancelToken.cancel,
-        timeoutMillis)
+        timeoutMillis
+      );
     } catch (e) {
       let message = 'Something Went Wrong';
       if (e instanceof HttpsError) {
@@ -247,7 +261,6 @@ const addintrooutrotaskhandler = onTaskDispatched(
         message = e.message;
       }
       try {
-
         await docRef.update({
           status: {
             ...sermonStatus,
@@ -262,6 +275,7 @@ const addintrooutrotaskhandler = onTaskDispatched(
     } finally {
       await logMemoryUsage('Final Memory Usage:');
     }
-  });
+  }
+);
 
 export default addintrooutrotaskhandler;
