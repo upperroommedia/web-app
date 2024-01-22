@@ -17,7 +17,7 @@ if (process.env.FUNCTIONS_EMULATOR === 'true') {
   logger.log('Overriding enqueue functionality to work with local emulator');
   // Local Queue to run in the emulator
   // This queue is filled when the http call is invoked.
-  let queue: {
+  const queue: {
     func: TaskQueueFunction;
     req: Request<any>;
     state: 'pending' | 'processing' | 'done';
