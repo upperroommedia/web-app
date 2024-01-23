@@ -18,10 +18,6 @@ import { sanitize } from 'dompurify';
 import useAuth from '../../context/user/UserContext';
 
 const AdminTopics = () => {
-  const { user } = useAuth();
-  if (!user?.isAdmin()) {
-    return null;
-  }
   const q = query(collection(firestore, 'topics').withConverter(topicConverter), orderBy('title'));
   const [topics, loading, error] = useCollectionData(q);
 
@@ -112,4 +108,13 @@ AdminTopics.PageLayout = AdminLayout;
 //   return adminProtected(ctx);
 // };
 
-export default AdminTopics;
+const ProtectedAdminTopics = () => {
+  const { user } = useAuth();
+  if (!user?.isAdmin()) {
+    return null;
+  } else {
+    return <AdminTopics />;
+  }
+};
+
+export default ProtectedAdminTopics;

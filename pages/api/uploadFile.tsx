@@ -84,6 +84,7 @@ const uploadFile = async (props: uploadFileProps) => {
           await generateAddIntroOutroTask(data);
           resolve();
         } catch (e) {
+          // eslint-disable-next-line no-console
           console.error('Error generatingAddIntroOutroTask', e);
           props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
           await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);

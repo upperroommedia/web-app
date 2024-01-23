@@ -1,10 +1,10 @@
 import firestore, { doc } from '../firebase/firestore';
-import { FunctionComponent } from 'react';
+import { FunctionComponent, memo } from 'react';
 import { useDocument } from 'react-firebase-hooks/firestore';
 import { sermonConverter } from '../types/Sermon';
 import SermonListCardSkeloten from './skeletons/SermonListCardSkeloten';
 import SermonListCard from './SermonListCard';
-import useAudioPlayer from '../context/audio/audioPlayerContext';
+import { Sermon } from '../types/SermonTypes';
 
 // import { Sermon } from '../types/SermonTypes';
 // import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
@@ -12,16 +12,26 @@ import useAudioPlayer from '../context/audio/audioPlayerContext';
 // TODO: Fix Playablity of SermonListCard
 interface SearchResultSermonListCardProps {
   sermonId: string;
+  isPlaying: boolean;
+  audioPlayerCurrentSecond: number;
+  audioPlayerCurrentSermonId: string | undefined;
+  audioPlayerTogglePlaying: (play?: boolean) => void;
+  audioPlayerSetCurrentSermon: (sermon: Sermon | undefined) => void;
   minimal?: boolean;
 }
 
-const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardProps> = ({ sermonId, minimal }) => {
+const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardProps> = ({
+  sermonId,
+  isPlaying,
+  audioPlayerCurrentSecond,
+  audioPlayerCurrentSermonId,
+  audioPlayerSetCurrentSermon,
+  audioPlayerTogglePlaying,
+  minimal,
+}) => {
   const [sermon, loading, error] = useDocument(doc(firestore, `sermons/${sermonId}`).withConverter(sermonConverter), {
     snapshotListenOptions: { includeMetadataChanges: true },
   });
-
-  const { currentSermon, playing } = useAudioPlayer();
-  const isPlaying = currentSermon?.id === sermonId ? playing : false;
 
   // eslint-disable-next-line no-console
   if (error) console.error(error);
@@ -34,10 +44,18 @@ const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardPr
       {error && <strong>Error: {JSON.stringify(error)}</strong>}
       {loading && <SermonListCardSkeloten />}
       {sermon && sermon.exists() && (
-        <SermonListCard sermon={{ ...sermon.data(), currentSecond: 0 }} playing={isPlaying} minimal={minimal} />
+        <SermonListCard
+          sermon={{ ...sermon.data(), currentSecond: 0 }}
+          playing={isPlaying}
+          audioPlayerCurrentSecond={audioPlayerCurrentSecond}
+          audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
+          audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
+          audioPlayerTogglePlaying={audioPlayerTogglePlaying}
+          minimal={minimal}
+        />
       )}
     </>
   );
 };
 
-export default SearchResultSermonListCard;
+export default memo(SearchResultSermonListCard);

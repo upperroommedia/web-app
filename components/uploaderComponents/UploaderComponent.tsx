@@ -43,7 +43,7 @@ import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from 
 import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
-import AudioTrimmerComponent from '../AudioTrimmerComponent';
+import AudioTrimmerComponent from '../audioTrimmerComponents/AudioTrimmerComponent';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
@@ -295,10 +295,11 @@ const Uploader = (props: UploaderProps) => {
       JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
   };
-  const clearAudioTrimmer = () => {
+  const clearAudioTrimmer = useCallback(() => {
     setFile(undefined);
     setTrimStart(0);
-  };
+  }, [setFile, setTrimStart]);
+
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setSermon(createEmptySermon(props.user.uid));
@@ -361,8 +362,8 @@ const Uploader = (props: UploaderProps) => {
   };
 
   const showAudioTrimmer = useMemo(() => {
-    return showAudioTrimmerBoolean(props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash)
-}, [props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash])
+    return showAudioTrimmerBoolean(props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash);
+  }, [props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash]);
 
   return (
     <>

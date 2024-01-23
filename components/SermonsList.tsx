@@ -15,7 +15,7 @@ interface Props {
 }
 
 const SermonsList = ({ sermons, minimal }: Props) => {
-  const { playing, currentSermon, currentSecond } = useAudioPlayer();
+  const { playing, currentSermon, currentSecond, setCurrentSermon, togglePlaying } = useAudioPlayer();
 
   return (
     <Box display="flex" justifyContent={'start'} width={1}>
@@ -29,6 +29,10 @@ const SermonsList = ({ sermons, minimal }: Props) => {
           <SermonListCard
             sermon={{ ...sermon, currentSecond }}
             playing={currentSermon?.id === sermon.id ? playing : false}
+            audioPlayerCurrentSecond={currentSecond}
+            audioPlayerCurrentSermonId={currentSermon?.id}
+            audioPlayerSetCurrentSermon={setCurrentSermon}
+            audioPlayerTogglePlaying={togglePlaying}
             key={sermon.id}
             {...(minimal && { minimal: true })}
           />

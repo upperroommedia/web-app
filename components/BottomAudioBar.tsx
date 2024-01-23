@@ -40,7 +40,7 @@ const BottomAudioBar: FunctionComponent<{ currentSermon: SermonWithMetadata }> =
     } else if (!playing && audioPlayer.current) {
       audioPlayer.current.pause();
     }
-  }, [currentSermon.url, playing]);
+  }, [currentSecond, currentSermon.id, currentSermon.url, playing, setCurrentSermonUrl]);
 
   const onPlaying = () => {
     const newSecond = Math.floor(audioPlayer.current.currentTime);

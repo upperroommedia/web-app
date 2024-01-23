@@ -5,7 +5,7 @@ import { isBrowser } from 'react-device-detect';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
-const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
+const DynamicAudioTrimmer = dynamic(() => import('./AudioTrimmer'), { ssr: false });
 
 type AudioTrimmerComponentProps = {
   url: string;

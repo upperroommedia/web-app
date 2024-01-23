@@ -39,8 +39,8 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
   const [sermonUrl, setSermonUrl] = useState<SermonURL>({ url: undefined, status: 'loading' });
 
   const showAudioTrimmer = useMemo(() => {
-    return showAudioTrimmerBoolean(sermon.status.soundCloud, sermon.status.subsplash)
-}, [sermon.status.soundCloud, sermon.status.subsplash])
+    return showAudioTrimmerBoolean(sermon.status.soundCloud, sermon.status.subsplash);
+  }, [sermon.status.soundCloud, sermon.status.subsplash]);
 
   useEffect(() => {
     if (!showAudioTrimmer) return;

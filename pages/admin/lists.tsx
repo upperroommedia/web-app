@@ -5,7 +5,7 @@ import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '..
 // import { useCollection } from 'react-firebase-hooks/firestore';
 // import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 // import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 // import { adminProtected } from '../../utils/protectedRoutes';
 import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
@@ -45,7 +45,6 @@ const client =
 const listsIndex = client?.initIndex('lists');
 
 const AdminList = () => {
-  const { user } = useAuth();
   const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
   const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
@@ -60,10 +59,6 @@ const AdminList = () => {
   const [selectedList, setSelectedList] = useState<List>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const disableButtons = isDeleting;
-
-  if (!user?.isAdmin()) {
-    return null;
-  }
 
   const handleListDelete = async () => {
     if (!selectedList) {
@@ -86,20 +81,23 @@ const AdminList = () => {
     }
   };
 
-  const searchLists = async (query?: string) => {
-    const res = await listsIndex?.search<List>(query || searchQuery, {
-      hitsPerPage: HITSPERPAGE,
-      page: currentPage,
-      ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
-    });
-    if (res && res.hits.length > 0) {
-      setNoMoreResults(false);
-      setSearchResults(res.hits);
-    } else {
-      setSearchResults([]);
-      setNoMoreResults(true);
-    }
-  };
+  const searchLists = useCallback(
+    async (query?: string) => {
+      const res = await listsIndex?.search<List>(query || searchQuery, {
+        hitsPerPage: HITSPERPAGE,
+        page: currentPage,
+        ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
+      });
+      if (res && res.hits.length > 0) {
+        setNoMoreResults(false);
+        setSearchResults(res.hits);
+      } else {
+        setSearchResults([]);
+        setNoMoreResults(true);
+      }
+    },
+    [currentPage, filter, searchQuery]
+  );
 
   useEffect(() => {
     if (firebaseList) {
@@ -112,7 +110,7 @@ const AdminList = () => {
       await searchLists();
     };
     fetchData();
-  }, [currentPage, filter]);
+  }, [currentPage, filter, searchLists]);
 
   return (
     <>
@@ -280,8 +278,17 @@ const AdminList = () => {
 
 AdminList.PageLayout = AdminLayout;
 
+const ProtectedAdminList = () => {
+  const { user } = useAuth();
+  if (!user?.isAdmin()) {
+    return null;
+  } else {
+    return <AdminList />;
+  }
+};
+
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
 //   return adminProtected(ctx);
 // };
 
-export default AdminList;
+export default ProtectedAdminList;

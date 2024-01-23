@@ -1,4 +1,4 @@
-import { createContext, useReducer, useContext } from 'react';
+import { createContext, useReducer, useContext, useCallback } from 'react';
 import { Sermon } from '../../types/SermonTypes';
 import audioPlayerReducer, { AudioPlayerState, SermonWithMetadata } from '../../reducers/audioPlayerReducer';
 const initialState: AudioPlayerState = {
@@ -26,35 +26,44 @@ export const AudioPlayerProvider = ({ children }: any) => {
     dispatch({ type: 'UPDATE_CURRENT_SECOND', payload: currentSecond });
   };
 
-  const togglePlaying = (play?: boolean) => {
-    if (play === undefined) {
-      play = !state.playing;
-    }
-    dispatch({ type: 'TOGGLE_PLAYING', payload: play });
-  };
+  const togglePlaying = useCallback(
+    (play?: boolean) => {
+      if (play === undefined) {
+        play = !state.playing;
+      }
+      dispatch({ type: 'TOGGLE_PLAYING', payload: play });
+    },
+    [state.playing]
+  );
 
-  const setCurrentSermon = (sermon: Sermon | undefined) => {
-    if (!sermon) {
-      dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: undefined });
-      return;
-    }
-    if (state.currentSermon?.id === sermon.id) return;
-    const newCurrentSermon: SermonWithMetadata = { ...sermon, currentSecond: 0 };
-    dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: newCurrentSermon });
-  };
+  const setCurrentSermon = useCallback(
+    (sermon: Sermon | undefined) => {
+      if (!sermon) {
+        dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: undefined });
+        return;
+      }
+      if (state.currentSermon?.id === sermon.id) return;
+      const newCurrentSermon: SermonWithMetadata = { ...sermon, currentSecond: 0 };
+      dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: newCurrentSermon });
+    },
+    [state.currentSermon?.id]
+  );
 
-  const setCurrentSermonUrl = (url: string) => {
-    if (!state.currentSermon) {
-      // eslint-disable-next-line no-console
-      console.error('No sermon found');
-      return;
-    }
-    const sermon: SermonWithMetadata = {
-      ...state.currentSermon,
-      url,
-    };
-    dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: sermon });
-  };
+  const setCurrentSermonUrl = useCallback(
+    (url: string) => {
+      if (!state.currentSermon) {
+        // eslint-disable-next-line no-console
+        console.error('No sermon found');
+        return;
+      }
+      const sermon: SermonWithMetadata = {
+        ...state.currentSermon,
+        url,
+      };
+      dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: sermon });
+    },
+    [state.currentSermon]
+  );
 
   return (
     <AudioPlayerContext.Provider

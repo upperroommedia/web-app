@@ -77,6 +77,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
       );
     };
     fetchList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const queryAlgolia = async (query: string) => {

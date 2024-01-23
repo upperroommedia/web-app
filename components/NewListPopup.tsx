@@ -105,7 +105,7 @@ const NewListPopup = (props: NewListPopupProps) => {
     } else {
       setNewListError({ error: false, message: '' });
     }
-  }, [newList, userHasTypedInList, props.listArray]);
+  }, [newList, userHasTypedInList, props.listArray, submitting]);
 
   return (
     <PopUp
