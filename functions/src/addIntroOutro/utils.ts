@@ -115,7 +115,7 @@ export const getDurationSeconds = (filePath: string): Promise<number> => {
       if (err) {
         reject(err);
       }
-      resolve(metadata.format.duration || 0);
+      resolve(metadata?.format?.duration || 0);
     });
   });
 };

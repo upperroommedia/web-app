@@ -138,8 +138,8 @@ const mainFunction = async (
 
     // use reduce to sum up all the durations of the files from filepaths
     const durationSeconds = (
-      await Promise.all(filePathsArray.map(async (path) => await getDurationSeconds(path)))
-    ).reduce((accumulator, currentValue) => accumulator + currentValue, 0);
+      await Promise.all([tempFilePaths.INTRO, tempFilePaths.OUTRO].map(async (path) => path ? await getDurationSeconds(path): 0))
+    ).reduce((accumulator, currentValue) => accumulator + currentValue, duration);
 
     customMetadata.duration = durationSeconds;
     logger.log('Total Duration', secondsToTimeFormat(durationSeconds));
