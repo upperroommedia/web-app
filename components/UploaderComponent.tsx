@@ -15,7 +15,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 
 import firestore, { collection, getDocs, orderBy, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
-import { Sermon, uploadStatus } from '../types/SermonTypes';
+import { Sermon, sermonStatusType, uploadStatus } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import useAuth from '../context/user/UserContext';
@@ -719,11 +719,13 @@ const Uploader = (props: UploaderProps) => {
                 <Button
                   onClick={async () => {
                     setIsEditing(true);
-
+                    const promises = []
+                    const pendingSermon = sermon;
                     if (hasTrimmed) {
+                      pendingSermon.status.audioStatus = sermonStatusType.PENDING;
                       const generateAddIntroOutroTask =
                         createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-                      const { introRef, outroRef } = await getIntroAndOutro(sermon);
+                      const { introRef, outroRef } =  await getIntroAndOutro(sermon);
                       const data: AddIntroOutroInputType = {
                         storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
                         startTime: trimStart,
@@ -733,9 +735,11 @@ const Uploader = (props: UploaderProps) => {
                         introUrl: introRef,
                         outroUrl: outroRef,
                       };
-                      await generateAddIntroOutroTask(data);
+                      promises.push(generateAddIntroOutroTask(data));
+                      promises.push(editSermon(pendingSermon, sermonList));
+                      await Promise.all(promises);
                     }
-                    await editSermon(sermon, sermonList);
+                    promises.push(editSermon(sermon, sermonList));
                     setIsEditing(false);
                     props.setEditFormOpen?.(false);
                   }}
