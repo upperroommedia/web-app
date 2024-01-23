@@ -20,11 +20,11 @@ export enum ListTag {
 }
 
 export interface SundayHomiliesMonthList extends List {
-  listTagAndPosition: Extract<ListTagAndPostionType, {listTag: ListTag.SUNDAY_HOMILY_MONTH}>
+  listTagAndPosition: Extract<ListTagAndPostionType, { listTag: ListTag.SUNDAY_HOMILY_MONTH }>;
 }
 
 export interface BibleStudyList extends List {
-  listTagAndPosition: Extract<ListTagAndPostionType, {listTag: ListTag.BIBLE_CHAPTER}>
+  listTagAndPosition: Extract<ListTagAndPostionType, { listTag: ListTag.BIBLE_CHAPTER }>;
 }
 
 export type ListTagAndPostionType =

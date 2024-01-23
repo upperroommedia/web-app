@@ -12,13 +12,10 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DesktopDatePicker } from '@mui/x-date-pickers/DesktopDatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import Cancel from '@mui/icons-material/Cancel';
-
-import { isBrowser } from 'react-device-detect';
 
 import firestore, { collection, getDocs, orderBy, query, where } from '../firebase/firestore';
 import { createEmptySermon } from '../types/Sermon';
-import { Sermon } from '../types/SermonTypes';
+import { Sermon, sermonStatusType, uploadStatus } from '../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import useAuth from '../context/user/UserContext';
@@ -49,13 +46,18 @@ import { useRouter } from 'next/router';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import RequestRoleChange from './RequestUploadPrivalige';
-
-const DynamicAudioTrimmer = dynamic(() => import('../components/AudioTrimmer'), { ssr: false });
+import AudioTrimmerComponent from './AudioTrimmerComponent';
+import { createFunctionV2 } from '../utils/createFunction';
+import { AddIntroOutroInputType } from '../functions/src/addIntroOutro/types';
+import { getIntroAndOutro } from '../utils/uploadUtils';
+import { PROCESSED_SERMONS_BUCKET } from '../constants/storage_constants';
+import { SermonURL } from './EditSermonForm';
 
 const BIBLE_STUDIES_STRING = 'Bible Studies';
 const SUNDAY_HOMILIES_STRING = 'Sunday Homilies';
 interface UploaderProps {
   existingSermon?: Sermon;
+  existingSermonUrl?: SermonURL;
   existingList?: List[];
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
@@ -152,7 +154,9 @@ const Uploader = (props: UploaderProps) => {
   const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<SundayHomiliesMonthList[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
   const [selectedSundayHomiliesMonth, setSelectedSundayHomiliesMonth] = useState<SundayHomiliesMonthList | null>(
-    props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH) as SundayHomiliesMonthList | null
+    props.existingList?.find(
+      (list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH
+    ) as SundayHomiliesMonthList | null
   );
 
   const [sundayHomiliesYear, setSundayHomiliesYear] = useState<number>(() => {
@@ -168,7 +172,8 @@ const Uploader = (props: UploaderProps) => {
   });
 
   const [trimStart, setTrimStart] = useState<number>(0);
-
+  const [hasTrimmed, setHasTrimmed] = useState(false);
+  
   const [timer, setTimer] = useState<NodeJS.Timeout>();
 
   // TODO: REFACTOR THESE INTO SERMON DATA
@@ -181,7 +186,7 @@ const Uploader = (props: UploaderProps) => {
   const fetchSundayHomiliesMonths = async (year: number) => {
     setLoadingSundayHomiliesMonths(true);
     if (selectedSundayHomiliesMonth) {
-      const selectedSundayHomiliesYear = selectedSundayHomiliesMonth.listTagAndPosition.year
+      const selectedSundayHomiliesYear = selectedSundayHomiliesMonth.listTagAndPosition.year;
       if (selectedSundayHomiliesYear !== year) {
         setSelectedSundayHomiliesMonth(null);
         setSermonList((oldSermonList) => {
@@ -196,10 +201,11 @@ const Uploader = (props: UploaderProps) => {
       where('listTagAndPosition.year', '==', year),
       orderBy('listTagAndPosition.position', 'asc')
     ).withConverter(listConverter);
-    setSundayHomiliesMonths((await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList));
+    setSundayHomiliesMonths(
+      (await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList)
+    );
     setLoadingSundayHomiliesMonths(false);
   };
-
 
   useEffect(() => {
     const fetchData = async () => {
@@ -242,6 +248,17 @@ const Uploader = (props: UploaderProps) => {
   const listEqual = (list1: List[], list2: List[]): boolean => {
     return JSON.stringify(list1) === JSON.stringify(list2);
   };
+
+  const baseButtonDisabled =
+    sermon.title === '' ||
+    date === null ||
+    sermon.speakers.length === 0 ||
+    sermon.subtitle === '' ||
+    sermon.description === '' ||
+    (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
+    (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
+    isUploading ||
+    isEditing;
 
   useEffect(() => {
     if (sermon.subtitle !== BIBLE_STUDIES_STRING) {
@@ -669,54 +686,85 @@ const Uploader = (props: UploaderProps) => {
           }}
         >
           {props.existingSermon && props.existingList ? (
-            <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
-              <Button
-                onClick={async () => {
-                  setIsEditing(true);
-                  await editSermon(sermon, sermonList);
-                  setIsEditing(false);
-                  props.setEditFormOpen?.(false);
-                }}
-                disabled={
-                  (sermonsEqual(props.existingSermon, sermon) && listEqual(props.existingList, sermonList)) ||
-                  sermon.title === '' ||
-                  date === null ||
-                  sermon.speakers.length === 0 ||
-                  sermon.subtitle === '' ||
-                  sermon.description === '' ||
-                  (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
-                  (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
-                  isEditing
-                }
-                variant="contained"
-              >
-                {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
-              </Button>
-            </div>
+            <Stack width={1}>
+              {props.existingSermon.status.soundCloud !== uploadStatus.UPLOADED &&
+              props.existingSermon.status.subsplash !== uploadStatus.UPLOADED ? (
+                props.existingSermonUrl?.status === 'success' ? (
+                  <AudioTrimmerComponent
+                    url={props.existingSermonUrl.url}
+                    trimStart={trimStart}
+                    setTrimStart={setTrimStart}
+                    setTrimDuration={setTrimDuration}
+                    clearAudioTrimmer={clearAudioTrimmer}
+                    setHasTrimmed={setHasTrimmed}
+                  />
+                ) : props.existingSermonUrl?.status === 'loading' ? (
+                  <Stack alignItems="center" flexDirection="row" gap="1rem">
+                    <CircularProgress size={24} />
+                    <Typography variant="caption" sx={{ textAlign: 'center' }}>
+                      Loading audio...
+                    </Typography>
+                  </Stack>
+                ) : (
+                  <Typography variant="caption">
+                    Something went wrong loading the audio. Please try again later
+                  </Typography>
+                )
+              ) : (
+                <Typography variant="caption" sx={{ textAlign: 'center' }}>
+                  Cannot edit audio when sermon has been uploaded to SoundCloud or Subsplash
+                </Typography>
+              )}
+              <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
+                <Button
+                  onClick={async () => {
+                    setIsEditing(true);
+                    const promises = []
+                    const pendingSermon = sermon;
+                    if (hasTrimmed) {
+                      pendingSermon.status.audioStatus = sermonStatusType.PENDING;
+                      const generateAddIntroOutroTask =
+                        createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
+                      const { introRef, outroRef } =  await getIntroAndOutro(sermon);
+                      const data: AddIntroOutroInputType = {
+                        storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
+                        startTime: trimStart,
+                        duration: sermon.durationSeconds,
+                        deleteOriginal: false,
+                        skipTranscode: true,
+                        introUrl: introRef,
+                        outroUrl: outroRef,
+                      };
+                      promises.push(generateAddIntroOutroTask(data));
+                      promises.push(editSermon(pendingSermon, sermonList));
+                      await Promise.all(promises);
+                    }
+                    promises.push(editSermon(sermon, sermonList));
+                    setIsEditing(false);
+                    props.setEditFormOpen?.(false);
+                  }}
+                  disabled={
+                    (sermonsEqual(props.existingSermon, sermon) &&
+                      listEqual(props.existingList, sermonList) &&
+                      !hasTrimmed) ||
+                    baseButtonDisabled
+                  }
+                  variant="contained"
+                >
+                  {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
+                </Button>
+              </div>
+            </Stack>
           ) : (
             <>
               {file ? (
-                <div style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'right' }}>
-                    <Cancel sx={{ color: 'red' }} onClick={clearAudioTrimmer} />
-                  </div>
-                  {isBrowser ? (
-                    <DynamicAudioTrimmer
-                      url={file.preview}
-                      trimStart={trimStart}
-                      setTrimStart={setTrimStart}
-                      setTrimDuration={setTrimDuration}
-                    />
-                  ) : (
-                    <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center">
-                      <audio style={{ width: '100%' }} controls src={file.preview} />
-                      <Typography variant="caption">
-                        Trimming is not currently supported on mobile: please trim your audio on a seperate application
-                        first
-                      </Typography>
-                    </Box>
-                  )}
-                </div>
+                <AudioTrimmerComponent
+                  url={file.preview}
+                  trimStart={trimStart}
+                  setTrimStart={setTrimStart}
+                  setTrimDuration={setTrimDuration}
+                  clearAudioTrimmer={clearAudioTrimmer}
+                />
               ) : (
                 <Box
                   display="flex"
@@ -745,17 +793,7 @@ const Uploader = (props: UploaderProps) => {
                     className={styles.button}
                     type="button"
                     value="Upload"
-                    disabled={
-                      file === undefined ||
-                      sermon.title === '' ||
-                      date === null ||
-                      sermon.speakers.length === 0 ||
-                      sermon.subtitle === '' ||
-                      sermon.description === '' ||
-                      (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
-                      (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
-                      isUploading
-                    }
+                    disabled={file === undefined || baseButtonDisabled}
                     onClick={async () => {
                       if (file !== undefined && date != null && user.isUploader()) {
                         try {
@@ -767,10 +805,11 @@ const Uploader = (props: UploaderProps) => {
                             sermon,
                             sermonList,
                           });
-                          setIsUploading(false);
                           clearForm();
                         } catch (error) {
                           setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
+                        } finally {
+                          setIsUploading(false);
                         }
                       } else if (user?.role !== 'admin') {
                         setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });

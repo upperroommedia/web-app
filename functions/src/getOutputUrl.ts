@@ -1,5 +1,6 @@
 import logger from 'firebase-functions/lib/logger';
 import { GetSignedUrlConfig } from '@google-cloud/storage';
+import { PROCESSED_SERMONS_BUCKET } from '../../constants/storage_constants';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 
 const getOutputUrl = async (fileBucket: string, fileName: string, transcodeTo: string): Promise<string> => {
@@ -20,7 +21,7 @@ const getOutputUrl = async (fileBucket: string, fileName: string, transcodeTo: s
   const [outputUrl] = await firebaseAdmin
     .storage()
     .bucket(fileBucket)
-    .file(`processed-sermons/${fileName}.${transcodeTo}`)
+    .file(`${PROCESSED_SERMONS_BUCKET}/${fileName}.${transcodeTo}`)
     .getSignedUrl(outputOptions);
   logger.log('OutputUrl:', outputUrl);
   return outputUrl;
