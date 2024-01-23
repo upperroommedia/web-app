@@ -740,7 +740,9 @@ const Uploader = (props: UploaderProps) => {
                     props.setEditFormOpen?.(false);
                   }}
                   disabled={
-                    (sermonsEqual(props.existingSermon, sermon) && listEqual(props.existingList, sermonList) && !hasTrimmed) ||
+                    (sermonsEqual(props.existingSermon, sermon) &&
+                      listEqual(props.existingList, sermonList) &&
+                      !hasTrimmed) ||
                     baseButtonDisabled
                   }
                   variant="contained"

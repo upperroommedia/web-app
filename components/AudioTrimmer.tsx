@@ -52,7 +52,13 @@ const calculateTime = (sec: number) => {
   return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
 };
 
-const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, setTrimStart, setTrimDuration, setHasTrimmed }) => {
+const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
+  url,
+  trimStart,
+  setTrimStart,
+  setTrimDuration,
+  setHasTrimmed,
+}) => {
   const [currentTime, setCurrentTime, currentTimeRef] = useStateRef<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const trimStartRef = useRef<number>(trimStart);

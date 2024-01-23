@@ -1,10 +1,5 @@
 import firestore, { deleteDoc, doc, writeBatch } from '../../firebase/firestore';
-import storage, {
-  ref,
-  uploadBytesResumable,
-  UploadMetadata,
-  deleteObject,
-} from '../../firebase/storage';
+import storage, { ref, uploadBytesResumable, UploadMetadata, deleteObject } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../../components/DropZone';
