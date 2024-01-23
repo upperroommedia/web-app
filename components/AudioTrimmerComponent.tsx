@@ -13,6 +13,7 @@ type AudioTrimmerComponentProps = {
   setTrimStart: Dispatch<SetStateAction<number>>;
   setTrimDuration: (duration: number) => void;
   clearAudioTrimmer: () => void;
+  setHasTrimmed?: Dispatch<SetStateAction<boolean>>;
 };
 
 const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
@@ -21,6 +22,7 @@ const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
   setTrimStart,
   setTrimDuration,
   clearAudioTrimmer,
+  setHasTrimmed,
 }) => {
   return (
     <div style={{ width: '100%' }}>
@@ -33,6 +35,7 @@ const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
           trimStart={trimStart}
           setTrimStart={setTrimStart}
           setTrimDuration={setTrimDuration}
+          setHasTrimmed={setHasTrimmed}
         />
       ) : (
         <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center">

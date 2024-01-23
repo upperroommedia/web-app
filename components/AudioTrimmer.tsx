@@ -23,6 +23,7 @@ interface AudioTrimmerProps {
   trimStart: number;
   setTrimStart: Dispatch<SetStateAction<number>>;
   setTrimDuration: (durationSeconds: number) => void;
+  setHasTrimmed?: Dispatch<SetStateAction<boolean>>;
 }
 
 enum CLICK_TARGET {
@@ -51,7 +52,7 @@ const calculateTime = (sec: number) => {
   return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
 };
 
-const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, setTrimStart, setTrimDuration }) => {
+const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, setTrimStart, setTrimDuration, setHasTrimmed }) => {
   const [currentTime, setCurrentTime, currentTimeRef] = useStateRef<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const trimStartRef = useRef<number>(trimStart);
@@ -67,6 +68,10 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({ url, trimStart, se
       trimStartRef.current = trimStart;
     }
     setTrimDuration(stopTrim - trimStart);
+    if (setHasTrimmed) {
+      const hasTrimmed = trimStart !== 0 || stopTrim !== audioPlayer.current.duration;
+      setHasTrimmed(hasTrimmed);
+    }
   }, [trimStart, stopTrim]);
 
   const handleMetaDataLoaded = () => {

@@ -172,6 +172,7 @@ const Uploader = (props: UploaderProps) => {
   });
 
   const [trimStart, setTrimStart] = useState<number>(0);
+  const [hasTrimmed, setHasTrimmed] = useState(false);
 
   const [timer, setTimer] = useState<NodeJS.Timeout>();
 
@@ -303,7 +304,6 @@ const Uploader = (props: UploaderProps) => {
 
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
-    console.log(sermon1.durationSeconds, sermon2.durationSeconds);
     return (
       sermon1.title === sermon2.title &&
       sermon1.subtitle === sermon2.subtitle &&
@@ -313,8 +313,7 @@ const Uploader = (props: UploaderProps) => {
       sermon1Date.getFullYear() === date?.getFullYear() &&
       JSON.stringify(sermon1.images) === JSON.stringify(sermon.images) &&
       JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
-      JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics) &&
-      sermon1.durationSeconds === sermon2.durationSeconds
+      JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
     );
   };
   const clearAudioTrimmer = () => {
@@ -697,6 +696,7 @@ const Uploader = (props: UploaderProps) => {
                     setTrimStart={setTrimStart}
                     setTrimDuration={setTrimDuration}
                     clearAudioTrimmer={clearAudioTrimmer}
+                    setHasTrimmed={setHasTrimmed}
                   />
                 ) : props.existingSermonUrl?.status === 'loading' ? (
                   <Stack alignItems="center" flexDirection="row" gap="1rem">
@@ -740,7 +740,7 @@ const Uploader = (props: UploaderProps) => {
                     props.setEditFormOpen?.(false);
                   }}
                   disabled={
-                    (sermonsEqual(props.existingSermon, sermon) && listEqual(props.existingList, sermonList)) ||
+                    (sermonsEqual(props.existingSermon, sermon) && listEqual(props.existingList, sermonList) && !hasTrimmed) ||
                     baseButtonDisabled
                   }
                   variant="contained"
