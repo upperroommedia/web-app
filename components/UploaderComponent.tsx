@@ -173,7 +173,7 @@ const Uploader = (props: UploaderProps) => {
 
   const [trimStart, setTrimStart] = useState<number>(0);
   const [hasTrimmed, setHasTrimmed] = useState(false);
-  
+
   const [timer, setTimer] = useState<NodeJS.Timeout>();
 
   // TODO: REFACTOR THESE INTO SERMON DATA
@@ -719,13 +719,13 @@ const Uploader = (props: UploaderProps) => {
                 <Button
                   onClick={async () => {
                     setIsEditing(true);
-                    const promises = []
+                    const promises = [];
                     const pendingSermon = sermon;
                     if (hasTrimmed) {
                       pendingSermon.status.audioStatus = sermonStatusType.PENDING;
                       const generateAddIntroOutroTask =
                         createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-                      const { introRef, outroRef } =  await getIntroAndOutro(sermon);
+                      const { introRef, outroRef } = await getIntroAndOutro(sermon);
                       const data: AddIntroOutroInputType = {
                         storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
                         startTime: trimStart,
