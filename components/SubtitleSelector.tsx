@@ -66,7 +66,7 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
           ));
         }}
         renderOption={(props, option: ListWithHighlight) => (
-          <ListItem key={option.id} {...props}>
+          <ListItem {...props} key={option.id}>
             <AvatarWithDefaultImage
               defaultImageURL="/user.png"
               altName={option.name}
