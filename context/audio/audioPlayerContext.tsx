@@ -22,9 +22,9 @@ const AudioPlayerContext = createContext<AudioPlayerContextType | null>(null);
 export const AudioPlayerProvider = ({ children }: any) => {
   const [state, dispatch] = useReducer(audioPlayerReducer, initialState);
 
-  const updateCurrentSecond = (currentSecond: number) => {
+  const updateCurrentSecond = useCallback((currentSecond: number) => {
     dispatch({ type: 'UPDATE_CURRENT_SECOND', payload: currentSecond });
-  };
+  }, []);
 
   const togglePlaying = useCallback(
     (play?: boolean) => {

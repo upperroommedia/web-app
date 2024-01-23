@@ -35,7 +35,6 @@ const BottomAudioBar: FunctionComponent<{ currentSermon: SermonWithMetadata }> =
         });
     }
     if (playing && currentSermon.url) {
-      audioPlayer.current.currentTime = currentSecond;
       audioPlayer.current.play();
     } else if (!playing && audioPlayer.current) {
       audioPlayer.current.pause();
