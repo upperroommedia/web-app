@@ -3,7 +3,6 @@ import storage, {
   ref,
   uploadBytesResumable,
   UploadMetadata,
-  getDownloadURL,
   deleteObject,
 } from '../../firebase/storage';
 
