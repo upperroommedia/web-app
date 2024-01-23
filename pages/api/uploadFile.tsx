@@ -15,6 +15,7 @@ import { ImageType } from '../../types/Image';
 import { List } from '../../types/List';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
+import { getIntroAndOutro } from '../../utils/uploadUtils';
 
 interface uploadFileProps {
   file: UploadableFile;
@@ -26,30 +27,7 @@ interface uploadFileProps {
 
 const uploadFile = async (props: uploadFileProps) => {
   const sermonRef = ref(storage, `sermons/${props.sermon.id}`);
-  let introRef = '';
-  let outroRef = '';
-  try {
-    introRef = await getDownloadURL(ref(storage, `intros/${props.sermon.subtitle}_intro.mp3`));
-  } catch (error) {
-    try {
-      introRef = await getDownloadURL(ref(storage, `intros/default_intro.mp3`));
-    } catch (error) {
-      throw new Error(
-        'Could not find intro audio for sermon: you must have a file called "default_intro.mp3" in your storage bucket'
-      );
-    }
-  }
-  try {
-    outroRef = await getDownloadURL(ref(storage, `outros/${props.sermon.subtitle}_outro.mp3`));
-  } catch (error) {
-    try {
-      outroRef = await getDownloadURL(ref(storage, `outros/default_outro.mp3`));
-    } catch (error) {
-      throw new Error(
-        'Could not find outro audio for sermon: you must have a file called "default_outro.mp3" in your storage bucket'
-      );
-    }
-  }
+  const { introRef, outroRef } = await getIntroAndOutro(props.sermon);
   const metadata: UploadMetadata = {
     customMetadata: {
       startTime: props.trimStart.toString(),
@@ -105,6 +83,7 @@ const uploadFile = async (props: uploadFileProps) => {
             storageFilePath: sermonRef.fullPath,
             startTime: props.trimStart,
             duration: props.sermon.durationSeconds,
+            deleteOriginal: true,
             introUrl: introRef,
             outroUrl: outroRef,
           };

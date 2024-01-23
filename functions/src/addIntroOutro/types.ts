@@ -2,6 +2,8 @@ export type AddIntroOutroInputType = {
   storageFilePath: string;
   startTime: number;
   duration: number;
+  deleteOriginal?: boolean;
+  skipTranscode?: boolean;
   introUrl?: string;
   outroUrl?: string;
 };

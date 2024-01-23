@@ -7,6 +7,8 @@ import { AddIntroOutroInputType } from './types';
 import handleError from '../handleError';
 import { TIMEOUT_SECONDS } from './consts';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import path from 'path';
+import { sermonStatusType } from '../../../types/SermonTypes';
 
 let auth: GoogleAuth | undefined;
 /**
@@ -52,6 +54,10 @@ const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddInt
   }
 
   const bucket = firebaseAdmin.storage().bucket();
+  const db = firebaseAdmin.firestore();
+
+  const fileName = path.basename(data.storageFilePath);
+  const docRef = db.collection('sermons').doc(fileName);
 
   try {
     // check if the storageFilePath exists
@@ -61,6 +67,8 @@ const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddInt
       logger.error('Invalid Argument', errorMessage);
       throw new HttpsError('invalid-argument', errorMessage);
     }
+
+    await docRef.update({ 'status.audioStatus': sermonStatusType.PENDING });
     const queue = getFunctions().taskQueue('addintrooutrotaskhandler');
 
     let targetUri: string;

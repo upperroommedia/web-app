@@ -24,6 +24,8 @@ import {
 import { TIMEOUT_SECONDS } from './consts';
 import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
+import { PROCESSED_SERMONS_BUCKET } from '../../../constants/storage_constants';
+import trim from './trim';
 
 const ffmpeg = loadStaticFFMPEG();
 
@@ -37,6 +39,8 @@ const mainFunction = async (
   sermonStatus: sermonStatus,
   startTime: number,
   duration: number,
+  deleteOriginal?: boolean,
+  skipTranscode?: boolean,
   introUrl?: string,
   outroUrl?: string
 ): Promise<void> => {
@@ -90,32 +94,46 @@ const mainFunction = async (
     logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
     if (cancelToken.isCancellationRequested) return;
     const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge, tempFiles);
+    const trimMessage = skipTranscode ? 'Trimming' : 'Trimming and Transcoding';
     await docRef.update({
       status: {
         ...sermonStatus,
         audioStatus: sermonStatusType.PROCESSING,
-        message: 'Trimming and Transcoding',
+        message: trimMessage,
       },
     });
-    const trimAndTranscodePath = await trimAndTranscode(
-      ffmpeg,
-      cancelToken,
-      bucket.file(filePath),
-      tempFiles,
-      realtimeDB.ref(`addIntroOutro/${fileName}`),
-      startTime,
-      duration
-    );
-    await uploadSermon(trimAndTranscodePath, `processed-sermons/${fileName}`, bucket, customMetadata);
+    let processedFilePath: string;
+    if (skipTranscode) {
+      processedFilePath = await trim(
+        ffmpeg,
+        cancelToken,
+        bucket.file(filePath),
+        tempFiles,
+        realtimeDB.ref(`addIntroOutro/${fileName}`),
+        startTime,
+        duration
+      );
+    } else {
+      processedFilePath = await trimAndTranscode(
+        ffmpeg,
+        cancelToken,
+        bucket.file(filePath),
+        tempFiles,
+        realtimeDB.ref(`addIntroOutro/${fileName}`),
+        startTime,
+        duration
+      );
+    }
+    await uploadSermon(processedFilePath, `${PROCESSED_SERMONS_BUCKET}/${fileName}`, bucket, customMetadata);
     const originalAudioMetadata = await bucket.file(filePath).getMetadata();
-    const trimAndTranscodeMetadata = await bucket.file(`processed-sermons/${fileName}`).getMetadata();
+    const trimAndTranscodeMetadata = await bucket.file(`${PROCESSED_SERMONS_BUCKET}/${fileName}`).getMetadata();
     logger.log('Original Audio Metadata', JSON.stringify(originalAudioMetadata));
-    logger.log('Trim and Transcode Metadata', JSON.stringify(trimAndTranscodeMetadata));
-    await logMemoryUsage('Memory Usage after trim and transcode:');
+    logger.log(`${trimMessage} Metadata`, JSON.stringify(trimAndTranscodeMetadata));
+    await logMemoryUsage(`Memory Usage after ${trimMessage}:`);
     //create merge array in order INTRO, CONTENT, OUTRO
     const filePathsArray: string[] = [];
     if (tempFilePaths.INTRO) filePathsArray.push(tempFilePaths.INTRO);
-    filePathsArray.push(trimAndTranscodePath);
+    filePathsArray.push(processedFilePath);
     if (tempFilePaths.OUTRO) filePathsArray.push(tempFilePaths.OUTRO);
 
     // use reduce to sum up all the durations of the files from filepaths
@@ -172,7 +190,7 @@ const mainFunction = async (
     // delete original audio file
     if (cancelToken.isCancellationRequested) return;
     const [originalFileExists] = await bucket.file(filePath).exists();
-    if (originalFileExists) {
+    if (originalFileExists && deleteOriginal) {
       logger.log('Deleting original audio file', filePath);
       await bucket.file(filePath).delete();
       logger.log('Original audio file deleted');
@@ -247,6 +265,8 @@ const addintrooutrotaskhandler = onTaskDispatched(
             sermonStatus,
             data.startTime,
             data.duration,
+            data.deleteOriginal,
+            data.skipTranscode,
             data.introUrl,
             data.outroUrl
           ),
