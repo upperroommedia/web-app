@@ -1,6 +1,11 @@
 import { firestore } from 'firebase-functions';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import handleError from '../../handleError';
+import {
+  INTRO_OUTRO_SERMONS_BUCKET,
+  PROCESSED_SERMONS_BUCKET,
+  UNPROCESSED_SERMONS_BUCKET,
+} from '../../../../constants/storage_constants';
 
 const sermonOnDelete = firestore.document('sermons/{sermonId}').onDelete(async (_snapshot, context) => {
   const { sermonId } = context.params;
@@ -8,7 +13,7 @@ const sermonOnDelete = firestore.document('sermons/{sermonId}').onDelete(async (
   try {
     await firestore.recursiveDelete(firestore.doc(`sermons/${sermonId}`));
     // Define a list of folder names where the file may exist
-    const folderNames = ['sermons', 'processed-sermons', 'intro-outro-sermons'];
+    const folderNames = [UNPROCESSED_SERMONS_BUCKET, PROCESSED_SERMONS_BUCKET, INTRO_OUTRO_SERMONS_BUCKET];
 
     // Delete the file from each folder asynchronously
     Promise.all(

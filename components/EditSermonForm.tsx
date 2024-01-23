@@ -7,9 +7,13 @@ import { Sermon } from '../types/SermonTypes';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { collection } from 'firebase/firestore';
 import firestore from '../firebase/firestore';
+import firebase from '../firebase/firebase';
 import { listConverter } from '../types/List';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
+import { useEffect, useState } from 'react';
+import { getDownloadURL, getStorage, ref } from '../firebase/storage';
+import { PROCESSED_SERMONS_BUCKET } from '../constants/storage_constants';
 
 interface EditSermonFormInfo {
   open: boolean;
@@ -17,10 +21,33 @@ interface EditSermonFormInfo {
   sermon: Sermon;
 }
 
+export type SermonURL =
+  | {
+      url: string;
+      status: 'success';
+    }
+  | {
+      url: undefined;
+      status: 'loading' | 'error';
+    };
+const storage = getStorage(firebase);
 const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
   const [sermonLists, loading, error, _snapshot] = useCollectionDataOnce(
     collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(listConverter)
   );
+  const [sermonUrl, setSermonUrl] = useState<SermonURL>({ url: undefined, status: 'loading' });
+
+  useEffect(() => {
+    getDownloadURL(ref(storage, `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`))
+      .then((url) => {
+        setSermonUrl({ url, status: 'success' });
+      })
+      .catch((error) => {
+        setSermonUrl({ url: undefined, status: 'error' });
+        // eslint-disable-next-line no-console
+        console.log(error);
+      });
+  }, []);
 
   return (
     <Dialog open={open} onClose={() => setOpen(false)} aria-labelledby="confirm-dialog" maxWidth="lg">
@@ -30,8 +57,13 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
         ) : loading ? (
           <CircularProgress />
         ) : (
-        <Uploader existingSermon={sermon} existingList={sermonLists || []} setEditFormOpen={setOpen} />
-         )}
+          <Uploader
+            existingSermon={sermon}
+            existingList={sermonLists || []}
+            existingSermonUrl={sermonUrl}
+            setEditFormOpen={setOpen}
+          />
+        )}
       </DialogContent>
       <DialogActions>
         <Button
