@@ -62,7 +62,7 @@ const AdminUsers = () => {
   );
 };
 
-AdminUsers.PageLayout = AdminLayout;
+
 
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
 //   return adminProtected(ctx);
@@ -76,5 +76,7 @@ const ProtectedAdminUsers = () => {
     return <AdminUsers />;
   }
 };
+
+ProtectedAdminUsers.PageLayout = AdminLayout;
 
 export default ProtectedAdminUsers;

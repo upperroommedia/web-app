@@ -203,20 +203,21 @@ const AdminSpeakers = () => {
   );
 };
 
-AdminSpeakers.PageLayout = AdminLayout;
 
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-//   return adminProtected(ctx);
-// };
-
-const ProtectedAdminSpeakers = () => {
-  const { user } = useAuth();
-
-  if (!user?.isAdmin()) {
-    return null;
-  } else {
-    return <AdminSpeakers />;
-  }
-};
+  //   return adminProtected(ctx);
+  // };
+  
+  const ProtectedAdminSpeakers = () => {
+    const { user } = useAuth();
+    
+    if (!user?.isAdmin()) {
+      return null;
+    } else {
+      return <AdminSpeakers />;
+    }
+  };
+  
+ProtectedAdminSpeakers.PageLayout = AdminLayout;
 
 export default ProtectedAdminSpeakers;

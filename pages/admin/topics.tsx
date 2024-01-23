@@ -28,7 +28,7 @@ const AdminTopics = () => {
 
   return (
     <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" padding={3} width={1}>
-      <Typography variant="h2">Manage Topics</Typography>
+      <Typography variant="h4">Manage Topics</Typography>
 
       {error ? (
         <Typography color="red">{`Error: ${error.message}`}</Typography>
@@ -102,8 +102,6 @@ const AdminTopics = () => {
   );
 };
 
-AdminTopics.PageLayout = AdminLayout;
-
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
 //   return adminProtected(ctx);
 // };
@@ -116,5 +114,7 @@ const ProtectedAdminTopics = () => {
     return <AdminTopics />;
   }
 };
+
+ProtectedAdminTopics.PageLayout = AdminLayout;
 
 export default ProtectedAdminTopics;

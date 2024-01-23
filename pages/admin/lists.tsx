@@ -276,8 +276,6 @@ const AdminList = () => {
   );
 };
 
-AdminList.PageLayout = AdminLayout;
-
 const ProtectedAdminList = () => {
   const { user } = useAuth();
   if (!user?.isAdmin()) {
@@ -287,8 +285,6 @@ const ProtectedAdminList = () => {
   }
 };
 
-// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-//   return adminProtected(ctx);
-// };
+ProtectedAdminList.PageLayout = AdminLayout;
 
 export default ProtectedAdminList;
