@@ -74,7 +74,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
       trimStartRef.current = trimStart;
     }
     setTrimDuration(stopTrim - trimStart);
-    if (setHasTrimmed) {
+    if (setHasTrimmed && audioPlayer.current.duration) {
       const hasTrimmed = trimStart !== 0 || stopTrim !== audioPlayer.current.duration;
       setHasTrimmed(hasTrimmed);
     }

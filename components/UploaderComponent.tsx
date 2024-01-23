@@ -173,7 +173,7 @@ const Uploader = (props: UploaderProps) => {
 
   const [trimStart, setTrimStart] = useState<number>(0);
   const [hasTrimmed, setHasTrimmed] = useState(false);
-
+  
   const [timer, setTimer] = useState<NodeJS.Timeout>();
 
   // TODO: REFACTOR THESE INTO SERMON DATA
@@ -686,7 +686,7 @@ const Uploader = (props: UploaderProps) => {
           }}
         >
           {props.existingSermon && props.existingList ? (
-            <Stack>
+            <Stack width={1}>
               {props.existingSermon.status.soundCloud !== uploadStatus.UPLOADED &&
               props.existingSermon.status.subsplash !== uploadStatus.UPLOADED ? (
                 props.existingSermonUrl?.status === 'success' ? (
@@ -720,7 +720,7 @@ const Uploader = (props: UploaderProps) => {
                   onClick={async () => {
                     setIsEditing(true);
 
-                    if (props.existingSermon?.durationSeconds !== sermon.durationSeconds) {
+                    if (hasTrimmed) {
                       const generateAddIntroOutroTask =
                         createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
                       const { introRef, outroRef } = await getIntroAndOutro(sermon);
