@@ -9,6 +9,7 @@ const initialState: AudioPlayerState = {
 
 type AudioPlayerContextType = {
   currentSermon: SermonWithMetadata | undefined;
+  currentSermonId: string | undefined;
   currentSecond: number;
   playing: boolean;
   setCurrentSermonUrl: (url: string) => void;
@@ -69,6 +70,7 @@ export const AudioPlayerProvider = ({ children }: any) => {
     <AudioPlayerContext.Provider
       value={{
         currentSermon: state.currentSermon,
+        currentSermonId: state.currentSermon?.id,
         currentSecond: state.currentSermonSecond,
         playing: state.playing,
         setCurrentSermonUrl,

@@ -1,4 +1,4 @@
-function convertToHMS(sec: number): {
+export function convertToHMS(sec: number): {
   hours: number;
   minutes: number;
   seconds: number;
@@ -17,7 +17,7 @@ export function formatTime(sec: number): String {
 export function formatRemainingTime(sec: number): String {
   const { hours, minutes, seconds } = convertToHMS(sec);
   const hr = hours > 0 ? `${hours} hr ` : '';
-  const min = minutes > 0 ? `${minutes} min ` : '';
+  const min = minutes > 0 ? `${seconds > 0 ? minutes + 1 : minutes} min ` : '';
   const s = hours < 1 && minutes < 1 ? `${seconds} sec` : '';
   return (hr + min + s).trim();
 }

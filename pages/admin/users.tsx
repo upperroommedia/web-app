@@ -62,8 +62,6 @@ const AdminUsers = () => {
   );
 };
 
-
-
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
 //   return adminProtected(ctx);
 // };

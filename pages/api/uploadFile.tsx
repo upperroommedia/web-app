@@ -10,10 +10,11 @@ import { List } from '../../types/List';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
+import { UploadProgress } from '../../context/types';
 
 interface uploadFileProps {
   file: UploadableFile;
-  setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string; percent: number }>>;
+  setUploadProgress: Dispatch<SetStateAction<UploadProgress>>;
   trimStart: number;
   sermon: Sermon;
   sermonList: List[];

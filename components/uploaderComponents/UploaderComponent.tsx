@@ -1,43 +1,28 @@
 /**
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
-import dynamic from 'next/dynamic';
-import uploadFile from '../../pages/api/uploadFile';
 import editSermon from '../../pages/api/editSermon';
 import styles from '../../styles/Uploader.module.css';
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
-import Autocomplete from '@mui/material/Autocomplete';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { DesktopDatePicker } from '@mui/x-date-pickers/DesktopDatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 
-import firestore, { collection, getDocs, orderBy, query, where } from '../../firebase/firestore';
+import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
 import { createEmptySermon } from '../../types/Sermon';
 import { Sermon, sermonStatusType } from '../../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 import DropZone, { UploadableFile } from '../DropZone';
-import { ISpeaker } from '../../types/Speaker';
-import Chip from '@mui/material/Chip';
-import { sanitize } from 'dompurify';
 // import ImageUploader from '../components/ImageUploader';
 
-import algoliasearch from 'algoliasearch';
-import { createInMemoryCache } from '@algolia/cache-in-memory';
 import ImageViewer from '../ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../../types/Image';
-import AvatarWithDefaultImage from '../AvatarWithDefaultImage';
-import ListItem from '@mui/material/ListItem';
-import { UploaderFieldError } from '../../context/types';
 import ListSelector from '../ListSelector';
 import FormControl from '@mui/material/FormControl';
 // import Switch from '@mui/material/Switch';
 // import FormControlLabel from '@mui/material/FormControlLabel';
 import YoutubeUrlToMp3 from '../YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
-import LinearProgress from '@mui/material/LinearProgress';
 import Head from 'next/head';
 import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from '../../types/List';
 import SubtitleSelector from '../SubtitleSelector';
@@ -51,56 +36,21 @@ import { PROCESSED_SERMONS_BUCKET } from '../../constants/storage_constants';
 import { User } from '../../types/User';
 import { VerifiedUserUploaderProps } from './VerifiedUserUploaderComponent';
 import { showAudioTrimmerBoolean } from './utils';
-
-const BIBLE_STUDIES_STRING = 'Bible Studies';
-const SUNDAY_HOMILIES_STRING = 'Sunday Homilies';
+import UploaderDatePicker from './UploaderDatePicker';
+import { UploaderFieldError, UploadProgress } from '../../context/types';
+import SpeakerSelector from './SpeakerSelector';
+import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
+import { SUNDAY_HOMILIES_STRING, BIBLE_STUDIES_STRING } from './consts';
+import BibleChapterSelector from './BibleChapterSelector';
+import UploadButton from './UploadButton';
+import UploadProgressComponent from './UploadProgressComponent';
 
 interface UploaderProps extends VerifiedUserUploaderProps {
   user: User;
 }
 
-interface AlgoliaSpeaker extends ISpeaker {
-  nbHits?: number;
-  _highlightResult?: {
-    name: {
-      value: string;
-      matchLevel: 'none' | 'partial' | 'full';
-      fullyHighlighted: boolean;
-      matchedWords: string[];
-    };
-  };
-}
-
-const getSpeakersUnion = (array1: AlgoliaSpeaker[], array2: AlgoliaSpeaker[]) => {
-  const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
-  return [...difference, ...array2].sort((a, b) => (a.name > b.name ? 1 : -1));
-};
-
-const client =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
-        responsesCache: createInMemoryCache(),
-        requestsCache: createInMemoryCache({ serializable: false }),
-      })
-    : undefined;
-const speakersIndex = client?.initIndex('speakers');
-
-export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
-  const speakers: AlgoliaSpeaker[] = [];
-  if (speakersIndex) {
-    const response = await speakersIndex.search<AlgoliaSpeaker>(query, {
-      hitsPerPage,
-      page,
-    });
-    response.hits.forEach((hit) => {
-      speakers.push(hit);
-    });
-  }
-  return speakers;
-};
-const DynamicPopUp = dynamic(() => import('../PopUp'), { ssr: false });
-
 const Uploader = (props: UploaderProps) => {
+  // ======================== START OF STATE ========================
   const [sermon, setSermon] = useState<Sermon>(() => {
     if (props.existingSermon) {
       return props.existingSermon;
@@ -109,26 +59,19 @@ const Uploader = (props: UploaderProps) => {
   });
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [file, setFile] = useState<UploadableFile>();
-  const [uploadProgress, setUploadProgress] = useState({ error: false, percent: 0, message: '' });
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({ error: false, percent: 0, message: '' });
+  const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [useYoutubeUrl, _setUseYoutubeUrl] = useState(false);
-
-  const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
-  const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
-
   const [subtitles, setSubtitles] = useState<List[]>([]);
 
   // Bible Study Helpers
-  const [bibleChapters, setBibleChapters] = useState<List[]>([]);
-  const [loadingBibleChapters, setLoadingBibleChapters] = useState(false);
   const [selectedChapter, setSelectedChapter] = useState<List | null>(
     props.existingList?.find((list) => list.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER) || null
   );
 
   // Sunday Homilies Helpers
-  const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<SundayHomiliesMonthList[]>([]);
-  const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
   const [selectedSundayHomiliesMonth, setSelectedSundayHomiliesMonth] = useState<SundayHomiliesMonthList | null>(
     props.existingList?.find(
       (list) => list.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH
@@ -150,47 +93,27 @@ const Uploader = (props: UploaderProps) => {
   const [trimStart, setTrimStart] = useState<number>(0);
   const [hasTrimmed, setHasTrimmed] = useState(false);
 
-  const [timer, setTimer] = useState<NodeJS.Timeout>();
-
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(() =>
     props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date()
   );
 
-  const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
+  // ======================== END OF STATE ========================
 
-  const fetchSundayHomiliesMonths = useCallback(
-    async (year: number) => {
-      setLoadingSundayHomiliesMonths(true);
-      if (selectedSundayHomiliesMonth) {
-        const selectedSundayHomiliesYear = selectedSundayHomiliesMonth.listTagAndPosition.year;
-        if (selectedSundayHomiliesYear !== year) {
-          setSelectedSundayHomiliesMonth(null);
-          setSermonList((oldSermonList) => {
-            return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
-          });
+  const addList = useCallback(
+    (list: List) => {
+      setSermonList((previousList) => {
+        if (previousList.find((prevList) => prevList.id === list.id)) {
+          return previousList;
         }
-      }
-      // fetch bible chapters
-      const sundayHomiliesMonthsQuery = query(
-        collection(firestore, 'lists'),
-        where('listTagAndPosition.listTag', '==', ListTag.SUNDAY_HOMILY_MONTH),
-        where('listTagAndPosition.year', '==', year),
-        orderBy('listTagAndPosition.position', 'asc')
-      ).withConverter(listConverter);
-      setSundayHomiliesMonths(
-        (await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList)
-      );
-      setLoadingSundayHomiliesMonths(false);
+        return [...previousList, list];
+      });
     },
-    [selectedSundayHomiliesMonth]
+    [setSermonList]
   );
 
   useEffect(() => {
     const fetchData = async () => {
-      // fetch speakers
-      setSpeakersArray(await fetchSpeakerResults('', 20, 0));
-
       // fetch subtitles
       const listQuery = query(
         collection(firestore, 'lists'),
@@ -211,12 +134,12 @@ const Uploader = (props: UploaderProps) => {
         );
         const latestSnap = await getDocs(latestQuery);
         if (latestSnap.docs.length > 0) {
-          setSermonList((oldSermonList) => [...oldSermonList, latestSnap.docs[0].data()]);
+          addList(latestSnap.docs[0].data());
         }
       }
     };
     fetchData();
-  }, [props.existingSermon]);
+  }, [addList, props.existingSermon]);
 
   useEffect(() => {
     if (props.existingList) {
@@ -238,48 +161,6 @@ const Uploader = (props: UploaderProps) => {
     (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
     isUploading ||
     isEditing;
-
-  useEffect(() => {
-    if (sermon.subtitle !== BIBLE_STUDIES_STRING) {
-      setSelectedChapter(null);
-      setSermonList((oldSermonList) => {
-        return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
-      });
-    }
-
-    if (sermon.subtitle !== SUNDAY_HOMILIES_STRING) {
-      setSelectedSundayHomiliesMonth(null);
-      setSermonList((oldSermonList) => {
-        return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
-      });
-    }
-
-    if (sermon.subtitle === BIBLE_STUDIES_STRING && bibleChapters.length === 0) {
-      const fetchBibleChapters = async () => {
-        setLoadingBibleChapters(true);
-        // fetch bible chapters
-        const bibleChapterQuery = query(
-          collection(firestore, 'lists'),
-          where('listTagAndPosition.listTag', '==', ListTag.BIBLE_CHAPTER),
-          orderBy('listTagAndPosition.position', 'asc')
-        ).withConverter(listConverter);
-        setBibleChapters((await getDocs(bibleChapterQuery)).docs.map((doc) => doc.data()));
-        setLoadingBibleChapters(false);
-      };
-      fetchBibleChapters();
-    }
-
-    if (sermon.subtitle === SUNDAY_HOMILIES_STRING && sundayHomiliesMonths.length === 0) {
-      fetchSundayHomiliesMonths(date.getFullYear());
-    }
-  }, [bibleChapters.length, date, fetchSundayHomiliesMonths, sermon.subtitle, sundayHomiliesMonths.length]);
-
-  useEffect(() => {
-    if (date.getFullYear() !== sundayHomiliesYear) {
-      setSundayHomiliesYear(date.getFullYear());
-      fetchSundayHomiliesMonths(date.getFullYear());
-    }
-  }, [date, fetchSundayHomiliesMonths, sundayHomiliesYear]);
 
   const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
     const sermon1Date = new Date(sermon1.dateMillis);
@@ -308,14 +189,17 @@ const Uploader = (props: UploaderProps) => {
     clearAudioTrimmer();
   };
 
-  const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setSermon((prevSermon) => {
-      return {
-        ...prevSermon,
-        [event.target.name]: event.target.value,
-      };
-    });
-  };
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setSermon((prevSermon) => {
+        return {
+          ...prevSermon,
+          [event.target.name]: event.target.value,
+        };
+      });
+    },
+    [setSermon]
+  );
 
   const updateSermon = useCallback(
     <T extends keyof Sermon>(key: T, value: Sermon[T]) => {
@@ -324,10 +208,13 @@ const Uploader = (props: UploaderProps) => {
     [setSermon]
   );
 
-  const handleDateChange = (newValue: Date) => {
-    setDate(newValue);
-    updateSermon('dateMillis', newValue.getTime());
-  };
+  const handleDateChange = useCallback(
+    (newValue: Date) => {
+      setDate(newValue);
+      updateSermon('dateMillis', newValue.getTime());
+    },
+    [setDate, updateSermon]
+  );
 
   const setTrimDuration = useCallback(
     (durationSeconds: number) => {
@@ -336,30 +223,33 @@ const Uploader = (props: UploaderProps) => {
     [updateSermon]
   );
 
-  const handleNewImage = (image: ImageType | ImageSizeType) => {
-    setSermon((oldSermon) => {
-      // check if image is ImageType or ImageSizeType
-      if (isImageType(image)) {
-        const castedImage = image as ImageType;
-        let newImages: ImageType[] = [];
-        if (oldSermon.images.find((img) => img.type === castedImage.type)) {
-          newImages = oldSermon.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+  const handleNewImage = useCallback(
+    (image: ImageType | ImageSizeType) => {
+      setSermon((oldSermon) => {
+        // check if image is ImageType or ImageSizeType
+        if (isImageType(image)) {
+          const castedImage = image as ImageType;
+          let newImages: ImageType[] = [];
+          if (oldSermon.images.find((img) => img.type === castedImage.type)) {
+            newImages = oldSermon.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+          } else {
+            newImages = [...oldSermon.images, castedImage];
+          }
+          return {
+            ...oldSermon,
+            images: newImages,
+          };
         } else {
-          newImages = [...oldSermon.images, castedImage];
+          const imageSizeType = image as ImageSizeType;
+          return {
+            ...oldSermon,
+            images: oldSermon.images.filter((img) => img.type !== imageSizeType),
+          };
         }
-        return {
-          ...oldSermon,
-          images: newImages,
-        };
-      } else {
-        const imageSizeType = image as ImageSizeType;
-        return {
-          ...oldSermon,
-          images: oldSermon.images.filter((img) => img.type !== imageSizeType),
-        };
-      }
-    });
-  };
+      });
+    },
+    [setSermon]
+  );
 
   const showAudioTrimmer = useMemo(() => {
     return showAudioTrimmerBoolean(props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash);
@@ -412,94 +302,29 @@ const Uploader = (props: UploaderProps) => {
           />
           <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
             <SubtitleSelector
+              subtitle={sermon.subtitle}
               sermonList={sermonList}
               setSermonList={setSermonList}
-              sermon={sermon}
               setSermon={setSermon}
               subtitles={subtitles}
             />
-            <LocalizationProvider dateAdapter={AdapterDateFns} sx={{ width: 1 }} fullWidth>
-              <DesktopDatePicker
-                label="Date"
-                inputFormat="MM/dd/yyyy"
-                value={date}
-                onChange={(newValue) => {
-                  if (newValue !== null) {
-                    handleDateChange(new Date(newValue));
-                  }
-                }}
-                renderInput={(params) => <TextField {...params} />}
-              />
-            </LocalizationProvider>
+            <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
           </Box>
-          {/* mui autocomplete of bible chapters shown when sermon.subtitle is BIBLE_STUDIES_STRING */}
-          {sermon.subtitle === BIBLE_STUDIES_STRING &&
-            (loadingBibleChapters ? (
-              <CircularProgress />
-            ) : (
-              <Autocomplete
-                fullWidth
-                value={selectedChapter || null}
-                isOptionEqualToValue={(option, value) => option?.id === value?.id}
-                onChange={async (_, newValue) => {
-                  setSelectedChapter(newValue);
-                  setSermonList((oldSermonList) => {
-                    if (!newValue) {
-                      return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
-                    }
-                    const filteredList = oldSermonList.filter(
-                      (list) =>
-                        list.name !== BIBLE_STUDIES_STRING && list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER
-                    );
-                    return [...filteredList, newValue];
-                  });
-                }}
-                id="bible-chapter-input"
-                options={bibleChapters}
-                getOptionLabel={(option: List) => option.name}
-                renderOption={(props, option: List) => (
-                  <ListItem {...props} key={option.id}>
-                    {option.name}
-                  </ListItem>
-                )}
-                renderInput={(params) => <TextField {...params} required label="Bible Chapter" />}
-              />
-            ))}
-          {sermon.subtitle === SUNDAY_HOMILIES_STRING &&
-            (loadingSundayHomiliesMonths ? (
-              <CircularProgress />
-            ) : (
-              <Autocomplete
-                fullWidth
-                value={selectedSundayHomiliesMonth || null}
-                isOptionEqualToValue={(option, value) => option?.id === value?.id}
-                onChange={async (_, newValue) => {
-                  setSelectedSundayHomiliesMonth(newValue);
-                  setSermonList((oldSermonList) => {
-                    if (!newValue) {
-                      return oldSermonList.filter(
-                        (list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH
-                      );
-                    }
-                    const filteredList = oldSermonList.filter(
-                      (list) =>
-                        list.name !== SUNDAY_HOMILIES_STRING &&
-                        list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH
-                    );
-                    return [...filteredList, newValue];
-                  });
-                }}
-                id="sunday-homilies-months-input"
-                options={sundayHomiliesMonths}
-                getOptionLabel={(option: List) => option.name}
-                renderOption={(props, option: List) => (
-                  <ListItem {...props} key={option.id}>
-                    {option.name}
-                  </ListItem>
-                )}
-                renderInput={(params) => <TextField {...params} required label="Month" />}
-              />
-            ))}
+          <BibleChapterSelector
+            sermonSubtitle={sermon.subtitle}
+            setSermonList={setSermonList}
+            selectedChapter={selectedChapter}
+            setSelectedChapter={setSelectedChapter}
+          />
+          <SundayHomilyMonthSelector
+            sermonSubtitle={sermon.subtitle}
+            date={date}
+            setSermonList={setSermonList}
+            selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
+            setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
+            sundayHomiliesYear={sundayHomiliesYear}
+            setSundayHomiliesYear={setSundayHomiliesYear}
+          />
           <TextField
             sx={{
               display: 'block',
@@ -525,129 +350,14 @@ const Uploader = (props: UploaderProps) => {
               }
             />
           </div>
-          <Autocomplete
-            fullWidth
-            value={sermon.speakers}
-            onBlur={() => {
-              setSpeakerError({ error: false, message: '' });
-            }}
-            onChange={async (_, newValue, _reason, details) => {
-              if (!details?.option.listId) {
-                setSpeakerHasNoListPopup(true);
-              }
-              if (newValue.length === 1) {
-                const currentTypes = sermon.images.map((img) => img.type);
-                const newImages = [
-                  ...sermon.images,
-                  ...newValue[0].images.filter((img) => !currentTypes.includes(img.type)),
-                ];
-                updateSermon('images', newImages);
-              }
-              if (newValue !== null && newValue.length <= 3) {
-                updateSermon(
-                  'speakers',
-                  newValue.map((speaker) => {
-                    const { _highlightResult, ...speakerWithoutHighlight } = speaker;
-                    return speakerWithoutHighlight;
-                  })
-                );
-                if (details?.option.listId) {
-                  const q = query(
-                    collection(firestore, 'lists'),
-                    where('id', '==', details.option.listId)
-                  ).withConverter(listConverter);
-                  const querySnapshot = await getDocs(q);
-                  const list = querySnapshot.docs[0].data();
-                  setSermonList((oldSermonList) => [...oldSermonList, list]);
-                }
-              }
-              if (newValue.length >= 4) {
-                setSpeakerError({
-                  error: true,
-                  message: 'Can only add up to 3 speakers',
-                });
-              } else if (speakerError.error) {
-                setSpeakerError({ error: false, message: '' });
-              }
-            }}
-            onInputChange={async (_, value) => {
-              clearTimeout(timer);
-              const newTimer = setTimeout(async () => {
-                setSpeakersArray(await fetchSpeakerResults(value, 25, 0));
-              }, 300);
-              setTimer(newTimer);
-            }}
-            id="speaker-input"
-            options={getSpeakersUnion(sermon.speakers, speakersArray)}
-            isOptionEqualToValue={(option, value) =>
-              value === undefined || option === undefined || option.id === value.id
-            }
-            renderTags={(speakers, _) => {
-              return speakers.map((speaker) => (
-                <Chip
-                  style={{ margin: '3px' }}
-                  onDelete={() => {
-                    setSpeakerError({ error: false, message: '' });
-                    setSermon((previousSermon) => {
-                      const newImages = previousSermon.images.filter((img) => {
-                        return !speaker.images?.find((image) => image.id === img.id);
-                      });
-                      updateSermon('images', newImages);
-                      const previousSpeakers = previousSermon.speakers;
-                      const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
-                      return {
-                        ...previousSermon,
-                        speakers: newSpeakers,
-                      };
-                    });
-                    setSermonList((oldSermonList) => oldSermonList.filter((list) => list.id !== speaker.listId));
-                  }}
-                  key={speaker.id}
-                  label={speaker.name}
-                  avatar={
-                    <AvatarWithDefaultImage
-                      defaultImageURL="/props.user.png"
-                      altName={speaker.name}
-                      width={24}
-                      height={24}
-                      image={speaker.images?.find((image) => image.type === 'square')}
-                      borderRadius={12}
-                    />
-                  }
-                />
-              ));
-            }}
-            renderOption={(props, option: AlgoliaSpeaker) => (
-              <ListItem key={option.id} {...props}>
-                <AvatarWithDefaultImage
-                  defaultImageURL="/props.user.png"
-                  altName={option.name}
-                  width={30}
-                  height={30}
-                  image={option.images?.find((image) => image.type === 'square')}
-                  borderRadius={5}
-                  sx={{ marginRight: '15px' }}
-                />
-                {option._highlightResult && sermon.speakers?.find((s) => s.id === option?.id) === undefined ? (
-                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
-                ) : (
-                  <div>{option.name}</div>
-                )}
-              </ListItem>
-            )}
-            getOptionLabel={(option: AlgoliaSpeaker) => option.name}
-            multiple
-            renderInput={(params) => {
-              return (
-                <TextField
-                  {...params}
-                  required
-                  label="Speaker(s)"
-                  error={speakerError.error}
-                  helperText={speakerError.message}
-                />
-              );
-            }}
+          <SpeakerSelector
+            sermonSpeakers={sermon.speakers}
+            sermonImages={sermon.images}
+            updateSermon={updateSermon}
+            speakerError={speakerError}
+            setSpeakerError={setSpeakerError}
+            setSermon={setSermon}
+            setSermonList={setSermonList}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.TOPIC_LIST} />
@@ -778,69 +488,33 @@ const Uploader = (props: UploaderProps) => {
               )}
               <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
                 <Box display="flex">
-                  <input
-                    className={styles.button}
-                    type="button"
-                    value="Upload"
-                    disabled={file === undefined || baseButtonDisabled}
-                    onClick={async () => {
-                      if (file !== undefined && date != null && props.user.isUploader()) {
-                        try {
-                          setIsUploading(true);
-                          await uploadFile({
-                            file,
-                            setUploadProgress,
-                            trimStart,
-                            sermon,
-                            sermonList,
-                          });
-                          clearForm();
-                        } catch (error) {
-                          setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
-                        } finally {
-                          setIsUploading(false);
-                        }
-                      } else if (props.user?.role !== 'admin') {
-                        setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
-                      }
-                    }}
+                  <UploadButton
+                    user={props.user}
+                    sermon={sermon}
+                    file={file}
+                    trimStart={trimStart}
+                    sermonList={sermonList}
+                    baseButtonDisabled={baseButtonDisabled}
+                    date={date}
+                    setUploadProgress={setUploadProgress}
+                    setIsUploading={setIsUploading}
+                    clearForm={clearForm}
                   />
                   <button type="button" className={styles.button} onClick={() => clearForm()}>
                     Clear Form
                   </button>
                 </Box>
-                <Box display="flex" width={1} gap={1} justifyContent="center" alignItems="center">
-                  {isUploading && (
-                    <Box width={1}>
-                      <LinearProgress variant="determinate" value={uploadProgress.percent} />
-                    </Box>
-                  )}
-                  {uploadProgress.message && (
-                    <Typography sx={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
-                      {!uploadProgress.error && uploadProgress.percent < 100
-                        ? `${uploadProgress.percent}%`
-                        : uploadProgress.message}
-                    </Typography>
-                  )}
-                </Box>
+                <UploadProgressComponent
+                  isUploading={isUploading}
+                  uploadProgress={uploadProgress}
+                />
               </Box>
             </>
           )}
         </Box>
-        <DynamicPopUp title={'Warning'} open={speakerHasNoListPopup} setOpen={setSpeakerHasNoListPopup}>
-          Speaker has no associated list that this sermon will be added to
-        </DynamicPopUp>
       </FormControl>
     </>
   );
 };
 
 export default Uploader;
-
-// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-//   const userCredentials = await ProtectedRoute(ctx);
-//   if (!userCredentials.props.uid || !['admin', 'uploader'].includes(userCredentials.props.customClaims?.role)) {
-//     return userCredentials;
-//   }
-//   return { props: {} };
-// };

@@ -3,7 +3,7 @@ import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
 import { sanitize } from 'dompurify';
-import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect, useMemo } from 'react';
+import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect, useMemo, memo } from 'react';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
@@ -207,4 +207,4 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
   );
 };
 
-export default ListSelector;
+export default memo(ListSelector);

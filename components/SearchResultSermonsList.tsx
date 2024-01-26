@@ -13,10 +13,12 @@ import List from '@mui/material/List';
 import Box from '@mui/material/Box';
 import { BoxProps } from '@mui/system/Box';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
+import { useMediaState } from '@vidstack/react';
 
 const SearchResultSermonList = (props: BoxProps) => {
   const { hits } = useHits();
-  const { currentSermon, playing, setCurrentSermon, togglePlaying, currentSecond } = useAudioPlayer();
+  const { currentSermonId, setCurrentSermon } = useAudioPlayer();
+  const playing = useMediaState('playing');
 
   return (
     <Box display="flex" justifyContent={'start'} flex={3} {...props}>
@@ -30,11 +32,9 @@ const SearchResultSermonList = (props: BoxProps) => {
           <SearchResultSermonListCard
             key={hit.objectID}
             sermonId={hit.objectID}
-            isPlaying={currentSermon?.id === hit.objectID ? playing : false}
-            audioPlayerCurrentSecond={hit.objectID === currentSermon?.id ? currentSecond : 0}
-            audioPlayerCurrentSermonId={currentSermon?.id}
+            isPlaying={currentSermonId === hit.objectID ? playing : false}
+            audioPlayerCurrentSermonId={currentSermonId}
             audioPlayerSetCurrentSermon={setCurrentSermon}
-            audioPlayerTogglePlaying={togglePlaying}
           />
         ))}
       </List>

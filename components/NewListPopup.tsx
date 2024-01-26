@@ -3,7 +3,7 @@ import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import addNewList from '../pages/api/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
@@ -62,30 +62,33 @@ const NewListPopup = (props: NewListPopupProps) => {
     }
   }, [props.existingList, newList]);
 
-  const handleNewImage = (image: ImageType | ImageSizeType) => {
-    setNewList((oldList) => {
-      // check if image is ImageType or ImageSizeType
-      if (isImageType(image)) {
-        const castedImage = image as ImageType;
-        let newImages: ImageType[] = [];
-        if (oldList.images.find((img) => img.type === castedImage.type)) {
-          newImages = oldList.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+  const handleNewImage = useCallback(
+    (image: ImageType | ImageSizeType) => {
+      setNewList((oldList) => {
+        // check if image is ImageType or ImageSizeType
+        if (isImageType(image)) {
+          const castedImage = image as ImageType;
+          let newImages: ImageType[] = [];
+          if (oldList.images.find((img) => img.type === castedImage.type)) {
+            newImages = oldList.images.map((img) => (img.type === castedImage.type ? castedImage : img));
+          } else {
+            newImages = [...oldList.images, castedImage];
+          }
+          return {
+            ...oldList,
+            images: newImages,
+          };
         } else {
-          newImages = [...oldList.images, castedImage];
+          const imageSizeType = image as ImageSizeType;
+          return {
+            ...oldList,
+            images: oldList.images.filter((img) => img.type !== imageSizeType),
+          };
         }
-        return {
-          ...oldList,
-          images: newImages,
-        };
-      } else {
-        const imageSizeType = image as ImageSizeType;
-        return {
-          ...oldList,
-          images: oldList.images.filter((img) => img.type !== imageSizeType),
-        };
-      }
-    });
-  };
+      });
+    },
+    [setNewList]
+  );
 
   useEffect(() => {
     if (submitting) {

@@ -2,7 +2,6 @@ import Typography from '@mui/material/Typography';
 import Box from '@mui/system/Box';
 import firestore, { collection, limit, orderBy, query, where } from '../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
-import BottomAudioBar from './BottomAudioBar';
 import SermonsList from './SermonsList';
 import { sermonConverter } from '../types/Sermon';
 import SermonListSkeloten from './skeletons/SermonListSkeloten';
@@ -196,7 +195,6 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
         )
       )}
       {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
-      <BottomAudioBar />
     </Box>
   );
 };

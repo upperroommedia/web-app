@@ -1,7 +1,7 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent, memo } from 'react';
+import React, { FunctionComponent, memo } from 'react';
 import IconButton from '@mui/material/IconButton';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
@@ -11,13 +11,9 @@ import Card from '@mui/material/Card';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/system/Box';
 
-import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
-import { formatRemainingTime } from '../utils/audioUtils';
-
 import { Sermon, sermonStatusType } from '../types/SermonTypes';
 
 import AdminControls from './SermonCardAdminControls';
-import LinearProgress from '@mui/material/LinearProgress';
 import CardActions from '@mui/material/CardActions';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -27,13 +23,14 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
+import { useMediaRemote } from '@vidstack/react';
 
 interface Props {
-  sermon: SermonWithMetadata;
+  sermon: Sermon;
   playing: boolean;
-  audioPlayerCurrentSecond: number;
+  remainingTimeComponent: React.ReactNode;
+  trackProgressComponent: React.ReactNode;
   audioPlayerCurrentSermonId: string | undefined;
-  audioPlayerTogglePlaying: (play?: boolean) => void;
   audioPlayerSetCurrentSermon: (sermon: Sermon | undefined) => void;
   minimal?: boolean;
   // handleSermonClick: (sermon: Sermon) => void;
@@ -42,9 +39,9 @@ interface Props {
 const SermonListCard: FunctionComponent<Props> = ({
   sermon,
   playing,
-  audioPlayerCurrentSecond,
+  remainingTimeComponent,
+  trackProgressComponent,
   audioPlayerCurrentSermonId,
-  audioPlayerTogglePlaying,
   audioPlayerSetCurrentSermon,
   minimal,
 }: Props) => {
@@ -52,6 +49,8 @@ const SermonListCard: FunctionComponent<Props> = ({
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
+
+  const remote = useMediaRemote();
 
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
@@ -116,8 +115,11 @@ const SermonListCard: FunctionComponent<Props> = ({
               aria-label="toggle play/pause"
               onClick={(e) => {
                 e.preventDefault();
-                audioPlayerSetCurrentSermon(sermon);
-                audioPlayerTogglePlaying(!playing);
+                if (audioPlayerCurrentSermonId !== sermon.id) {
+                  audioPlayerSetCurrentSermon(sermon);
+                } else {
+                  remote.togglePaused();
+                }
               }}
             >
               {playing ? <PauseCircleIcon fontSize="large" /> : <PlayCircleIcon fontSize="large" />}
@@ -141,37 +143,10 @@ const SermonListCard: FunctionComponent<Props> = ({
                   </Typography>
                 </Box>
                 <Typography sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>·</Typography>
-                {audioPlayerCurrentSecond < Math.floor(sermon.durationSeconds) ? (
-                  <>
-                    <Typography sx={{ whiteSpace: 'nowrap', fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>
-                      {formatRemainingTime(Math.floor(sermon.durationSeconds) - audioPlayerCurrentSecond) +
-                        (playing || audioPlayerCurrentSecond > 0 ? ' left' : '')}
-                    </Typography>
-                  </>
-                ) : (
-                  <>
-                    <Typography sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>Played</Typography>
-                    <Typography sx={{ color: 'lightgreen', fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>
-                      {' '}
-                      &#10003;
-                    </Typography>
-                  </>
-                )}
+                {remainingTimeComponent}
               </Box>
             )}
-            {audioPlayerCurrentSecond < Math.floor(sermon.durationSeconds) &&
-              (playing || audioPlayerCurrentSecond > 0) && (
-                <Box sx={{ width: 1, maxWidth: { xs: 100, sm: 200 } }}>
-                  <LinearProgress
-                    variant="determinate"
-                    value={(audioPlayerCurrentSecond / sermon.durationSeconds) * 100}
-                    sx={{
-                      borderRadius: 5,
-                      color: (theme) => theme.palette.grey[theme.palette.mode === 'light' ? 200 : 800],
-                    }}
-                  />
-                </Box>
-              )}
+            {trackProgressComponent}
           </Box>
           <CardActions sx={{ gridArea: 'actionItems', margin: 0, padding: 0 }}>
             {sermon.status.audioStatus === sermonStatusType.PROCESSED ? (

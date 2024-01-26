@@ -19,8 +19,8 @@ import firestore, {
 import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
 // import { adminProtected } from '../../utils/protectedRoutes';
-import { fetchSpeakerResults } from '../../components/uploaderComponents/UploaderComponent';
 import useAuth from '../../context/user/UserContext';
+import { fetchSpeakerResults } from '../../components/uploaderComponents/SpeakerSelector';
 
 const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
@@ -203,21 +203,20 @@ const AdminSpeakers = () => {
   );
 };
 
-
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-  //   return adminProtected(ctx);
-  // };
-  
-  const ProtectedAdminSpeakers = () => {
-    const { user } = useAuth();
-    
-    if (!user?.isAdmin()) {
-      return null;
-    } else {
-      return <AdminSpeakers />;
-    }
-  };
-  
+//   return adminProtected(ctx);
+// };
+
+const ProtectedAdminSpeakers = () => {
+  const { user } = useAuth();
+
+  if (!user?.isAdmin()) {
+    return null;
+  } else {
+    return <AdminSpeakers />;
+  }
+};
+
 ProtectedAdminSpeakers.PageLayout = AdminLayout;
 
 export default ProtectedAdminSpeakers;

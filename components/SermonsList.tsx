@@ -8,6 +8,8 @@ import { Sermon } from '../types/SermonTypes';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import List from '@mui/material/List';
 import Box from '@mui/material/Box';
+import RemainingTimeComponent from './RemainingTimeComponent';
+import TrackProgressComponent from './TrackProgressComponent';
 
 interface Props {
   sermons: Sermon[];
@@ -15,7 +17,7 @@ interface Props {
 }
 
 const SermonsList = ({ sermons, minimal }: Props) => {
-  const { playing, currentSermon, currentSecond, setCurrentSermon, togglePlaying } = useAudioPlayer();
+  const { playing, currentSermon, setCurrentSermon } = useAudioPlayer();
 
   return (
     <Box display="flex" justifyContent={'start'} width={1}>
@@ -25,18 +27,21 @@ const SermonsList = ({ sermons, minimal }: Props) => {
           width: 1,
         }}
       >
-        {sermons.map((sermon) => (
-          <SermonListCard
-            sermon={{ ...sermon, currentSecond }}
-            playing={currentSermon?.id === sermon.id ? playing : false}
-            audioPlayerCurrentSecond={currentSecond}
-            audioPlayerCurrentSermonId={currentSermon?.id}
-            audioPlayerSetCurrentSermon={setCurrentSermon}
-            audioPlayerTogglePlaying={togglePlaying}
-            key={sermon.id}
-            {...(minimal && { minimal: true })}
-          />
-        ))}
+        {sermons.map((sermon) => {
+          const isPlaying = currentSermon?.id === sermon.id ? playing : false;
+          return (
+            <SermonListCard
+              sermon={sermon}
+              playing={isPlaying}
+              remainingTimeComponent={<RemainingTimeComponent playing={isPlaying} duration={sermon.durationSeconds} />}
+              trackProgressComponent={<TrackProgressComponent playing={isPlaying} duration={sermon.durationSeconds} />}
+              audioPlayerCurrentSermonId={currentSermon?.id}
+              audioPlayerSetCurrentSermon={setCurrentSermon}
+              key={sermon.id}
+              {...(minimal && { minimal: true })}
+            />
+          );
+        })}
       </List>
     </Box>
   );

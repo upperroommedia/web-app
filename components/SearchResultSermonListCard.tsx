@@ -1,10 +1,12 @@
 import firestore, { doc } from '../firebase/firestore';
-import { FunctionComponent, memo } from 'react';
+import { FunctionComponent, memo, useMemo } from 'react';
 import { useDocument } from 'react-firebase-hooks/firestore';
-import { sermonConverter } from '../types/Sermon';
 import SermonListCardSkeloten from './skeletons/SermonListCardSkeloten';
 import SermonListCard from './SermonListCard';
 import { Sermon } from '../types/SermonTypes';
+import { sermonConverter } from '../types/Sermon';
+import RemainingTimeComponent from './RemainingTimeComponent';
+import TrackProgressComponent from './TrackProgressComponent';
 
 // import { Sermon } from '../types/SermonTypes';
 // import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
@@ -13,9 +15,7 @@ import { Sermon } from '../types/SermonTypes';
 interface SearchResultSermonListCardProps {
   sermonId: string;
   isPlaying: boolean;
-  audioPlayerCurrentSecond: number;
   audioPlayerCurrentSermonId: string | undefined;
-  audioPlayerTogglePlaying: (play?: boolean) => void;
   audioPlayerSetCurrentSermon: (sermon: Sermon | undefined) => void;
   minimal?: boolean;
 }
@@ -23,34 +23,44 @@ interface SearchResultSermonListCardProps {
 const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardProps> = ({
   sermonId,
   isPlaying,
-  audioPlayerCurrentSecond,
   audioPlayerCurrentSermonId,
   audioPlayerSetCurrentSermon,
-  audioPlayerTogglePlaying,
   minimal,
 }) => {
-  const [sermon, loading, error] = useDocument(doc(firestore, `sermons/${sermonId}`).withConverter(sermonConverter), {
-    snapshotListenOptions: { includeMetadataChanges: true },
-  });
+  const [sermonSnapshot, loading, error] = useDocument(
+    doc(firestore, `sermons/${sermonId}`).withConverter(sermonConverter),
+    {
+      snapshotListenOptions: { includeMetadataChanges: true },
+    }
+  );
 
-  // eslint-disable-next-line no-console
-  if (error) console.error(error);
-  if (!loading && !sermon?.exists())
+  const sermonData = useMemo(() => sermonSnapshot?.data(), [sermonSnapshot]);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error(error);
+    return <strong>Error: {JSON.stringify(error)}</strong>;
+  }
+  if (!loading && !sermonSnapshot?.exists()) {
     // eslint-disable-next-line no-console
     console.warn(`No Sermon Found for objectID: ${sermonId} - if this was recently deleted you can ignore`);
 
+    return <></>;
+  }
+  if (loading) {
+    return loading && <SermonListCardSkeloten />;
+  }
+  const sermon = sermonData;
   return (
     <>
-      {error && <strong>Error: {JSON.stringify(error)}</strong>}
-      {loading && <SermonListCardSkeloten />}
-      {sermon && sermon.exists() && (
+      {sermon && (
         <SermonListCard
-          sermon={{ ...sermon.data(), currentSecond: 0 }}
+          sermon={sermon}
           playing={isPlaying}
-          audioPlayerCurrentSecond={audioPlayerCurrentSecond}
+          remainingTimeComponent={<RemainingTimeComponent playing={isPlaying} duration={sermon.durationSeconds} />}
+          trackProgressComponent={<TrackProgressComponent playing={isPlaying} duration={sermon.durationSeconds} />}
           audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
           audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
-          audioPlayerTogglePlaying={audioPlayerTogglePlaying}
           minimal={minimal}
         />
       )}
