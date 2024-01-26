@@ -1,12 +1,10 @@
 import AdminLayout from '../../layout/adminLayout';
 import SearchableAdminSermonList from '../../components/SearchableAdminSermonsList';
-import BottomAudioBar from '../../components/BottomAudioBar';
 
 const AdminSermons = () => {
   return (
     <>
       <SearchableAdminSermonList />;
-      <BottomAudioBar />
     </>
   );
 };

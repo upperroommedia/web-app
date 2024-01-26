@@ -9,11 +9,6 @@ import useAuth from '../../../context/user/UserContext';
 // import { adminProtected } from '../../../utils/protectedRoutes';
 
 const SeriesSermon = () => {
-  const { user } = useAuth();
-  if (!user?.isAdmin()) {
-    return null;
-  }
-
   const router = useRouter();
   const listId = router.query.listId as string;
   const [series, _loading, _error] = useDocumentData(doc(firestore, `lists/${listId}`).withConverter(listConverter));
@@ -42,7 +37,16 @@ SeriesSermon.PageLayout = AdminLayout;
 //   return adminProtected(ctx);
 // };
 
-export default SeriesSermon;
+const ProtectedSeriesSermon = () => {
+  const { user } = useAuth();
+  if (!user?.isAdmin()) {
+    return null;
+  } else {
+    return <SeriesSermon />;
+  }
+};
+
+export default ProtectedSeriesSermon;
 //  <Box>
 //       <Box display="flex" justifyContent="center" gap={1}>
 //         <Button

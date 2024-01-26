@@ -50,6 +50,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
     if (listArrayFirestore) {
       setListArray(listArrayFirestore);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(listArrayFirestore)]);
 
   const listItemsNotUploaded = listArray.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED);
@@ -181,7 +182,10 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
             borderRadius={5}
           />
           <Typography variant="h6">{sermon.title}</Typography>
-          <CountOfUploadsCircularProgress sermon={sermon} />
+          <CountOfUploadsCircularProgress
+            sermonNumberOfListsUploadedTo={sermon.numberOfListsUploadedTo}
+            sermonNumberOfLists={sermon.numberOfLists}
+          />
         </Box>
         {error ? (
           <Typography>{`Error: ${error.message}`}</Typography>

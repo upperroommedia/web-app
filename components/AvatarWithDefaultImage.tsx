@@ -3,6 +3,7 @@ import { ImageType } from '../types/Image';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import { BoxProps } from '@mui/system';
+import { memo } from 'react';
 
 interface AvatarWithDefaultImageProps extends BoxProps {
   altName: string;
@@ -13,7 +14,7 @@ interface AvatarWithDefaultImageProps extends BoxProps {
   defaultImageURL?: string;
 }
 
-export default function AvatarWithDefaultImage({
+function AvatarWithDefaultImage({
   image,
   altName,
   width,
@@ -56,3 +57,5 @@ export default function AvatarWithDefaultImage({
     </Box>
   );
 }
+
+export default memo(AvatarWithDefaultImage);

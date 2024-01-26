@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { ChangeEvent, useEffect, useState, Dispatch, SetStateAction } from 'react';
+import { ChangeEvent, useEffect, useState, Dispatch, SetStateAction, useCallback } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -223,86 +223,95 @@ const SpeakerTable = (props: {
   //   hasBannerImage: false,
   // });
 
-  const handleImageUpdate = async (newImage: ImageType | ImageSizeType) => {
-    if (isImageType(newImage)) {
-      await setSpeakerImage(newImage as ImageType);
-    } else {
-      await removeImage(newImage as ImageSizeType);
-    }
-  };
-
-  const removeImage = async (imageType: ImageSizeType) => {
-    if (!selectedSpeaker) {
-      return;
-    }
-    try {
-      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
-        images: selectedSpeaker.images.filter((image) => image.type !== imageType),
-      });
-      props.setSpeakers((oldSpeakers) =>
-        oldSpeakers.map((speaker) => {
-          if (speaker.id === selectedSpeaker.id) {
+  const removeImage = useCallback(
+    async (imageType: ImageSizeType) => {
+      if (!selectedSpeaker) {
+        return;
+      }
+      try {
+        await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
+          images: selectedSpeaker.images.filter((image) => image.type !== imageType),
+        });
+        props.setSpeakers((oldSpeakers) =>
+          oldSpeakers.map((speaker) => {
+            if (speaker.id === selectedSpeaker.id) {
+              return {
+                ...speaker,
+                images: speaker.images.filter((image) => image.type !== imageType),
+              };
+            }
+            return speaker;
+          })
+        );
+        setSelectedSpeaker((oldSpeaker) => {
+          if (oldSpeaker) {
             return {
-              ...speaker,
-              images: speaker.images.filter((image) => image.type !== imageType),
+              ...oldSpeaker,
+              images: oldSpeaker.images.filter((image) => image.type !== imageType),
             };
           }
-          return speaker;
-        })
-      );
-      setSelectedSpeaker((oldSpeaker) => {
-        if (oldSpeaker) {
-          return {
-            ...oldSpeaker,
-            images: oldSpeaker.images.filter((image) => image.type !== imageType),
-          };
-        }
-        return oldSpeaker;
-      });
-    } catch (error) {
-      alert(error);
-    }
-  };
+          return oldSpeaker;
+        });
+      } catch (error) {
+        alert(error);
+      }
+    },
+    [props, selectedSpeaker]
+  );
 
-  const setSpeakerImage = async (newImage: ImageType) => {
-    if (!selectedSpeaker) {
-      return;
-    }
-    try {
-      await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
-        images: selectedSpeaker.images.find((image) => image.type === newImage.type)
-          ? selectedSpeaker.images.map((image) => {
-              if (image.type === newImage.type) {
-                return newImage;
-              }
-              return image;
-            })
-          : [...selectedSpeaker.images, newImage],
-      });
-      props.setSpeakers((oldSpeakers) =>
-        oldSpeakers.map((speaker) => {
-          if (speaker.id === selectedSpeaker.id) {
-            const newSpeaker = {
-              ...speaker,
-              images: speaker.images.find((image) => image.type === newImage.type)
-                ? speaker.images.map((image) => {
-                    if (image.type === newImage.type) {
-                      return newImage;
-                    }
-                    return image;
-                  })
-                : [...speaker.images, newImage],
-            };
-            setSelectedSpeaker(newSpeaker);
-            return newSpeaker;
-          }
-          return speaker;
-        })
-      );
-    } catch (e) {
-      alert(e);
-    }
-  };
+  const setSpeakerImage = useCallback(
+    async (newImage: ImageType) => {
+      if (!selectedSpeaker) {
+        return;
+      }
+      try {
+        await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
+          images: selectedSpeaker.images.find((image) => image.type === newImage.type)
+            ? selectedSpeaker.images.map((image) => {
+                if (image.type === newImage.type) {
+                  return newImage;
+                }
+                return image;
+              })
+            : [...selectedSpeaker.images, newImage],
+        });
+        props.setSpeakers((oldSpeakers) =>
+          oldSpeakers.map((speaker) => {
+            if (speaker.id === selectedSpeaker.id) {
+              const newSpeaker = {
+                ...speaker,
+                images: speaker.images.find((image) => image.type === newImage.type)
+                  ? speaker.images.map((image) => {
+                      if (image.type === newImage.type) {
+                        return newImage;
+                      }
+                      return image;
+                    })
+                  : [...speaker.images, newImage],
+              };
+              setSelectedSpeaker(newSpeaker);
+              return newSpeaker;
+            }
+            return speaker;
+          })
+        );
+      } catch (e) {
+        alert(e);
+      }
+    },
+    [props, selectedSpeaker]
+  );
+
+  const handleImageUpdate = useCallback(
+    async (newImage: ImageType | ImageSizeType) => {
+      if (isImageType(newImage)) {
+        await setSpeakerImage(newImage as ImageType);
+      } else {
+        await removeImage(newImage as ImageSizeType);
+      }
+    },
+    [removeImage, setSpeakerImage]
+  );
 
   const handleRequestSort = async (_: any, property: keyof ISpeaker) => {
     const isAsc = props.sortOrder === 'asc';

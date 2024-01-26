@@ -1,7 +1,7 @@
 import { AspectRatio, ImageSizeType, ImageSizes, ImageType } from '../types/Image';
 import { sanitize } from 'dompurify';
 import ImageSelector from './ImageSelector';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import styles from '../styles/ImageViewer.module.css';
@@ -146,4 +146,4 @@ const ImageViewer = (props: propsType) => {
   );
 };
 
-export default ImageViewer;
+export default memo(ImageViewer);

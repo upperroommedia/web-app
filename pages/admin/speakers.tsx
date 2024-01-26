@@ -19,11 +19,10 @@ import firestore, {
 import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
 // import { adminProtected } from '../../utils/protectedRoutes';
-import { fetchSpeakerResults } from '../../components/UploaderComponent';
 import useAuth from '../../context/user/UserContext';
+import { fetchSpeakerResults } from '../../components/uploaderComponents/SpeakerSelector';
 
 const AdminSpeakers = () => {
-  const { user } = useAuth();
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
   const [visitedPages, setVisitedPages] = useState<number[]>([0]);
@@ -37,10 +36,6 @@ const AdminSpeakers = () => {
   const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
   const [sortOrder, setSortOrder] = useState<Order>('desc');
-
-  if (!user?.isAdmin()) {
-    return null;
-  }
 
   const handleSort = async (property: keyof ISpeaker, order: Order) => {
     if (sortProperty !== property || sortOrder !== order) {
@@ -92,26 +87,6 @@ const AdminSpeakers = () => {
     return result;
   };
 
-  const getSpeakersFirebase = async () => {
-    const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
-    const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
-    setTotalSpeakers(speakersCount);
-
-    const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));
-    setQueryState(q);
-    const querySnapshot = await getDocs(q);
-    const res: ISpeaker[] = [];
-    querySnapshot.forEach((doc) => {
-      res.push(doc.data());
-    });
-    setSpeakers(res);
-    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    const result = await fetchSpeakerResults('', 1, 0);
-    if (result[0] && result[0].nbHits) {
-      setTotalSpeakers(result[0].nbHits);
-    }
-  };
-
   const getMoreSpeakersFirebase = async () => {
     const q = query(
       collection(firestore, 'speakers'),
@@ -159,10 +134,30 @@ const AdminSpeakers = () => {
   };
 
   useEffect(() => {
+    const getSpeakersFirebase = async () => {
+      const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
+      const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
+      setTotalSpeakers(speakersCount);
+
+      const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));
+      setQueryState(q);
+      const querySnapshot = await getDocs(q);
+      const res: ISpeaker[] = [];
+      querySnapshot.forEach((doc) => {
+        res.push(doc.data());
+      });
+      setSpeakers(res);
+      setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
+      const result = await fetchSpeakerResults('', 1, 0);
+      if (result[0] && result[0].nbHits) {
+        setTotalSpeakers(result[0].nbHits);
+      }
+    };
     const g = async () => {
       await getSpeakersFirebase();
     };
     g();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -208,10 +203,20 @@ const AdminSpeakers = () => {
   );
 };
 
-AdminSpeakers.PageLayout = AdminLayout;
-
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
 //   return adminProtected(ctx);
 // };
 
-export default AdminSpeakers;
+const ProtectedAdminSpeakers = () => {
+  const { user } = useAuth();
+
+  if (!user?.isAdmin()) {
+    return null;
+  } else {
+    return <AdminSpeakers />;
+  }
+};
+
+ProtectedAdminSpeakers.PageLayout = AdminLayout;
+
+export default ProtectedAdminSpeakers;

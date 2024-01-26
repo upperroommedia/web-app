@@ -1,19 +1,20 @@
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import { Sermon } from '../types/SermonTypes';
 import CountOfUploadsCircularProgress from './CountOfUploadsCircularProgress';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
 interface ManageSubsplashButtonProps {
-  sermon: Sermon;
+  sermonNumberOfListsUploadedTo: number | undefined;
+  sermonNumberOfLists: number | undefined;
   isUploadingToSubsplash: boolean;
   disableButtons: boolean;
   setManageUploadsPopup: (boolean: boolean) => void;
 }
 
 const ManageSubsplashButton = ({
-  sermon,
+  sermonNumberOfListsUploadedTo,
+  sermonNumberOfLists,
   isUploadingToSubsplash,
   disableButtons,
   setManageUploadsPopup,
@@ -22,7 +23,7 @@ const ManageSubsplashButton = ({
     <>
       {isUploadingToSubsplash ? (
         <CircularProgress size={24} sx={{ margin: 1 }} />
-      ) : !sermon.numberOfLists ? (
+      ) : !sermonNumberOfLists ? (
         <Tooltip title="This sermon is not added to any lists. Please edit the sermon to add it to lists.">
           <span>
             <IconButton disabled>
@@ -41,7 +42,11 @@ const ManageSubsplashButton = ({
                 setManageUploadsPopup(true);
               }}
             >
-              <CountOfUploadsCircularProgress sermon={sermon} size={30} />
+              <CountOfUploadsCircularProgress
+                sermonNumberOfListsUploadedTo={sermonNumberOfListsUploadedTo}
+                sermonNumberOfLists={sermonNumberOfLists}
+                size={30}
+              />
             </IconButton>
           </span>
         </Tooltip>

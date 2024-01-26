@@ -19,14 +19,6 @@ export enum ListTag {
   SUNDAY_HOMILY_MONTH = 'sunday-homily-month',
 }
 
-export interface SundayHomiliesMonthList extends List {
-  listTagAndPosition: Extract<ListTagAndPostionType, { listTag: ListTag.SUNDAY_HOMILY_MONTH }>;
-}
-
-export interface BibleStudyList extends List {
-  listTagAndPosition: Extract<ListTagAndPostionType, { listTag: ListTag.BIBLE_CHAPTER }>;
-}
-
 export type ListTagAndPostionType =
   | {
       listTag: ListTag.BIBLE_CHAPTER;
@@ -51,6 +43,14 @@ export interface List {
   moreSermonsRef?: string;
   isMoreSermonsList?: boolean;
   listTagAndPosition?: ListTagAndPostionType;
+}
+
+export interface SundayHomiliesMonthList extends List {
+  listTagAndPosition: Extract<ListTagAndPostionType, { listTag: ListTag.SUNDAY_HOMILY_MONTH }>;
+}
+
+export interface BibleStudyList extends List {
+  listTagAndPosition: Extract<ListTagAndPostionType, { listTag: ListTag.BIBLE_CHAPTER }>;
 }
 
 export interface ListWithHighlight extends List {

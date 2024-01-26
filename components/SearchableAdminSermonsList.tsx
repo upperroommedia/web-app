@@ -54,7 +54,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
       }
     };
     init();
-  }, [searchClient, user.uid]);
+  }, [searchClient, user, user.uid]);
 
   const FilterButton = () => (
     <IconButton onClick={() => setShowFilters((prev) => !prev)} sx={{ display: { xs: 'block', md: 'none' } }}>

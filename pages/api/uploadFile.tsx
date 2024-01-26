@@ -10,10 +10,11 @@ import { List } from '../../types/List';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
+import { UploadProgress } from '../../context/types';
 
 interface uploadFileProps {
   file: UploadableFile;
-  setUploadProgress: Dispatch<SetStateAction<{ error: boolean; message: string; percent: number }>>;
+  setUploadProgress: Dispatch<SetStateAction<UploadProgress>>;
   trimStart: number;
   sermon: Sermon;
   sermonList: List[];
@@ -84,6 +85,7 @@ const uploadFile = async (props: uploadFileProps) => {
           await generateAddIntroOutroTask(data);
           resolve();
         } catch (e) {
+          // eslint-disable-next-line no-console
           console.error('Error generatingAddIntroOutroTask', e);
           props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
           await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);

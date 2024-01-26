@@ -11,7 +11,6 @@ import firestore, { collection, getDocs, query, where } from '../firebase/firest
 import SermonsList from '../components/SermonsList';
 import Head from 'next/head';
 
-const DynamicBottomAudioBar = dynamic(() => import('../components/BottomAudioBar'), { ssr: false });
 interface Props {
   sermons: Sermon[];
 }
@@ -32,7 +31,6 @@ const Sermons: NextPage<Props> = ({ sermons }: Props) => {
         <h1>Sermons</h1>
         <SermonsList sermons={sermons} />
       </div>
-      <DynamicBottomAudioBar />
     </>
   );
 };

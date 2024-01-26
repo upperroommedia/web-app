@@ -15,3 +15,4 @@ export const ROLES = ['user', 'admin', 'uploader'];
 export type Order = 'asc' | 'desc';
 
 export type UploaderFieldError = { error: boolean; message: string };
+export type UploadProgress = { error: boolean; percent: number; message: string };

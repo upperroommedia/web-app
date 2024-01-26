@@ -1,24 +1,29 @@
 import { CircularProgressProps } from '@mui/material/CircularProgress';
-import { Sermon } from '../types/SermonTypes';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
+import { memo } from 'react';
 
 interface CountOfUploadsCircularProgressProps extends CircularProgressProps {
-  sermon: Sermon;
+  sermonNumberOfListsUploadedTo: number | undefined;
+  sermonNumberOfLists: number | undefined;
 }
 
-const CountOfUploadsCircularProgress = ({ sermon, ...props }: CountOfUploadsCircularProgressProps) => {
+const CountOfUploadsCircularProgress = ({
+  sermonNumberOfListsUploadedTo,
+  sermonNumberOfLists,
+  ...props
+}: CountOfUploadsCircularProgressProps) => {
   const value =
-    sermon?.numberOfLists > 0 && sermon?.numberOfListsUploadedTo !== undefined
-      ? (sermon.numberOfListsUploadedTo / sermon.numberOfLists) * 100
+    sermonNumberOfLists && sermonNumberOfListsUploadedTo !== undefined
+      ? (sermonNumberOfListsUploadedTo / sermonNumberOfLists) * 100
       : 0;
   return (
     <CircularProgressWithLabel
       value={value}
-      customLabel={`${sermon?.numberOfListsUploadedTo || 0}/${sermon?.numberOfLists || 0}`}
+      customLabel={`${sermonNumberOfListsUploadedTo || 0}/${sermonNumberOfLists || 0}`}
       color={value === 100 ? 'success' : 'primary'}
       {...props}
     />
   );
 };
 
-export default CountOfUploadsCircularProgress;
+export default memo(CountOfUploadsCircularProgress);

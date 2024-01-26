@@ -2,11 +2,10 @@ import Typography from '@mui/material/Typography';
 import Box from '@mui/system/Box';
 import firestore, { collection, limit, orderBy, query, where } from '../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
-import BottomAudioBar from './BottomAudioBar';
 import SermonsList from './SermonsList';
 import { sermonConverter } from '../types/Sermon';
 import SermonListSkeloten from './skeletons/SermonListSkeloten';
-import { FunctionComponent, useEffect, useState } from 'react';
+import { FunctionComponent, useCallback, useEffect, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
@@ -69,21 +68,24 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
   const [noMoreResults, setNoMoreResults] = useState(false);
   const [filters, setFilters] = useState<string[]>([]);
 
-  const searchLists = async (query?: string) => {
-    const res = await sermonsIndex?.search<Sermon>(query || searchQuery, {
-      hitsPerPage: HITSPERPAGE,
-      page: currentPage,
-      ...(user?.role === UserRole.UPLOADER && { filters: `uploaderId:${user.uid}` }),
-      ...(filters.length !== 0 && { facetFilters: [filters.map((filter) => `${filter}`)] }),
-    });
-    if (res && res.hits.length > 0) {
-      setNoMoreResults(false);
-      setSearchResults(res.hits);
-    } else {
-      setNoMoreResults(true);
-      setSearchResults([]);
-    }
-  };
+  const searchLists = useCallback(
+    async (query?: string) => {
+      const res = await sermonsIndex?.search<Sermon>(query || searchQuery, {
+        hitsPerPage: HITSPERPAGE,
+        page: currentPage,
+        ...(user?.role === UserRole.UPLOADER && { filters: `uploaderId:${user.uid}` }),
+        ...(filters.length !== 0 && { facetFilters: [filters.map((filter) => `${filter}`)] }),
+      });
+      if (res && res.hits.length > 0) {
+        setNoMoreResults(false);
+        setSearchResults(res.hits);
+      } else {
+        setNoMoreResults(true);
+        setSearchResults([]);
+      }
+    },
+    [currentPage, filters, searchQuery, user?.role, user?.uid]
+  );
 
   useEffect(() => {
     const fetchData = async () => {
@@ -92,7 +94,7 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
       }
     };
     fetchData();
-  }, [currentPage, filters]);
+  }, [currentPage, filters, searchLists, searchQuery]);
 
   const filterOptions = [
     { value: 'status.soundCloud:NOT_UPLOADED', label: 'Not Uploaded on SoundCloud' },
@@ -193,7 +195,6 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
         )
       )}
       {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
-      <BottomAudioBar />
     </Box>
   );
 };

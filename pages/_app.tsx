@@ -2,11 +2,16 @@ import '../styles/globals.css';
 import type { AppProps } from 'next/app';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
+// import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import { UserProvider } from '../context/user/UserContext';
 import { createTheme, responsiveFontSizes } from '@mui/material/styles';
 import ThemeProvider from '@mui/system/ThemeProvider';
 import Head from 'next/head';
+import '@vidstack/react/player/styles/default/theme.css';
+import Box from '@mui/material/Box';
+import React from 'react';
+import MediaPlayerComponent from '../components/MediaPlayerComponent';
+import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 
 let theme = createTheme();
 theme = responsiveFontSizes(theme, { factor: 4 });
@@ -33,17 +38,23 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
       </Head>
       <UserProvider>
         <ThemeProvider theme={theme}>
-          <Navbar />
           <AudioPlayerProvider>
-            {Component.PageLayout ? (
-              <Component.PageLayout>
-                <Component {...pageProps} />
-              </Component.PageLayout>
-            ) : (
-              <Component {...pageProps} />
-            )}
+            <MediaPlayerComponent>
+              <Box
+                style={{ width: '100%', display: 'flex', flexDirection: 'column', overflowY: 'scroll', flexGrow: 1 }}
+              >
+                <Navbar />
+                {Component.PageLayout ? (
+                  <Component.PageLayout>
+                    <Component {...pageProps} />
+                  </Component.PageLayout>
+                ) : (
+                  <Component {...pageProps} />
+                )}
+                <Footer />
+              </Box>
+            </MediaPlayerComponent>
           </AudioPlayerProvider>
-          <Footer />
         </ThemeProvider>
       </UserProvider>
     </>

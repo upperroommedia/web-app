@@ -1,24 +1,16 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import { FunctionComponent } from 'react';
-import IconButton from '@mui/material/IconButton';
-import PlayCircleIcon from '@mui/icons-material/PlayCircle';
-import PauseCircleIcon from '@mui/icons-material/PauseCircle';
+import React, { FunctionComponent, memo } from 'react';
 import ListItem from '@mui/material/ListItem';
 import Divider from '@mui/material/Divider';
 import Card from '@mui/material/Card';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/system/Box';
 
-import useAudioPlayer from '../context/audio/audioPlayerContext';
-import { SermonWithMetadata } from '../reducers/audioPlayerReducer';
-import { formatRemainingTime } from '../utils/audioUtils';
-
-import { sermonStatusType } from '../types/SermonTypes';
+import { Sermon, sermonStatusType } from '../types/SermonTypes';
 
 import AdminControls from './SermonCardAdminControls';
-import LinearProgress from '@mui/material/LinearProgress';
 import CardActions from '@mui/material/CardActions';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -28,17 +20,27 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
+import  PlayButton from './PlayButton';
 
 interface Props {
-  sermon: SermonWithMetadata;
+  sermon: Sermon;
   playing: boolean;
+  remainingTimeComponent: React.ReactNode;
+  trackProgressComponent: React.ReactNode;
+  audioPlayerCurrentSermonId: string | undefined;
+  audioPlayerSetCurrentSermon: (sermon: Sermon | undefined) => void;
   minimal?: boolean;
   // handleSermonClick: (sermon: Sermon) => void;
 }
 
-const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, minimal }: Props) => {
-  const { setCurrentSermon, togglePlaying, currentSermon } = useAudioPlayer();
-  const currentSecond = currentSermon?.id === sermon.id ? currentSermon.currentSecond : 0;
+const SermonListCard: FunctionComponent<Props> = ({
+  sermon,
+  remainingTimeComponent,
+  trackProgressComponent,
+  audioPlayerCurrentSermonId,
+  audioPlayerSetCurrentSermon,
+  minimal,
+}: Props) => {
   const theme = useTheme();
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
@@ -101,19 +103,12 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, minimal }: 
           >
             {sermon.description}
           </Typography>
-          {!minimal && sermon.status.audioStatus === sermonStatusType.PROCESSED && (
-            <IconButton
-              sx={{ gridArea: 'playPause', flexShrink: 0, alignSelf: 'center' }}
-              aria-label="toggle play/pause"
-              onClick={(e) => {
-                e.preventDefault();
-                setCurrentSermon(sermon);
-                togglePlaying(!playing);
-              }}
-            >
-              {playing ? <PauseCircleIcon fontSize="large" /> : <PlayCircleIcon fontSize="large" />}
-            </IconButton>
-          )}
+          <PlayButton 
+          minimal={minimal}
+          sermon={sermon}
+          audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
+          audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
+          />
 
           <Box display="flex" alignItems="center" sx={{ gridArea: 'playStatus', paddingTop: { xs: 1, sm: 0 } }}>
             {!minimal && (
@@ -132,40 +127,18 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, minimal }: 
                   </Typography>
                 </Box>
                 <Typography sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>·</Typography>
-                {currentSecond < Math.floor(sermon.durationSeconds) ? (
-                  <>
-                    <Typography sx={{ whiteSpace: 'nowrap', fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>
-                      {formatRemainingTime(Math.floor(sermon.durationSeconds) - currentSecond) +
-                        (playing || currentSecond > 0 ? ' left' : '')}
-                    </Typography>
-                  </>
-                ) : (
-                  <>
-                    <Typography sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>Played</Typography>
-                    <Typography sx={{ color: 'lightgreen', fontSize: { xs: '0.8rem', sm: '0.9rem', md: '1rem' } }}>
-                      {' '}
-                      &#10003;
-                    </Typography>
-                  </>
-                )}
+                {remainingTimeComponent}
               </Box>
             )}
-            {currentSecond < Math.floor(sermon.durationSeconds) && (playing || currentSecond > 0) && (
-              <Box sx={{ width: 1, maxWidth: { xs: 100, sm: 200 } }}>
-                <LinearProgress
-                  variant="determinate"
-                  value={(currentSecond / sermon.durationSeconds) * 100}
-                  sx={{
-                    borderRadius: 5,
-                    color: (theme) => theme.palette.grey[theme.palette.mode === 'light' ? 200 : 800],
-                  }}
-                />
-              </Box>
-            )}
+            {trackProgressComponent}
           </Box>
           <CardActions sx={{ gridArea: 'actionItems', margin: 0, padding: 0 }}>
             {sermon.status.audioStatus === sermonStatusType.PROCESSED ? (
-              <AdminControls sermon={sermon} />
+              <AdminControls
+                sermon={sermon}
+                audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
+                audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
+              />
             ) : (
               <Box style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                 <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: 0 }}>
@@ -195,4 +168,4 @@ const SermonListCard: FunctionComponent<Props> = ({ sermon, playing, minimal }: 
     </ErrorBoundary>
   );
 };
-export default SermonListCard;
+export default memo(SermonListCard);

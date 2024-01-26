@@ -12,9 +12,13 @@ import { useHits } from 'react-instantsearch';
 import List from '@mui/material/List';
 import Box from '@mui/material/Box';
 import { BoxProps } from '@mui/system/Box';
+import useAudioPlayer from '../context/audio/audioPlayerContext';
+import { useMediaState } from '@vidstack/react';
 
 const SearchResultSermonList = (props: BoxProps) => {
   const { hits } = useHits();
+  const { currentSermonId, setCurrentSermon } = useAudioPlayer();
+  const playing = useMediaState('playing');
 
   return (
     <Box display="flex" justifyContent={'start'} flex={3} {...props}>
@@ -25,7 +29,13 @@ const SearchResultSermonList = (props: BoxProps) => {
         }}
       >
         {hits.map((hit) => (
-          <SearchResultSermonListCard key={hit.objectID} sermonId={hit.objectID} />
+          <SearchResultSermonListCard
+            key={hit.objectID}
+            sermonId={hit.objectID}
+            isPlaying={currentSermonId === hit.objectID ? playing : false}
+            audioPlayerCurrentSermonId={currentSermonId}
+            audioPlayerSetCurrentSermon={setCurrentSermon}
+          />
         ))}
       </List>
     </Box>
