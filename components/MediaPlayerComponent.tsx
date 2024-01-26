@@ -28,7 +28,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
       load="eager"
       autoplay
       title={currentSermon?.title}
-      style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}
+      style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}
       src={{ src, type: 'audio/mpeg' }}
       viewType="audio"
     >
