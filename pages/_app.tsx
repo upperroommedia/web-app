@@ -10,8 +10,11 @@ import Head from 'next/head';
 import '@vidstack/react/player/styles/default/theme.css';
 import Box from '@mui/material/Box';
 import React from 'react';
-import MediaPlayerComponent from '../components/MediaPlayerComponent';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
+import dynamic from 'next/dynamic';
+
+const MediaPlayerComponent = dynamic(() => import('../components/MediaPlayerComponent'));
+
 
 let theme = createTheme();
 theme = responsiveFontSizes(theme, { factor: 4 });

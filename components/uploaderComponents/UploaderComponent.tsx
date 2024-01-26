@@ -28,7 +28,6 @@ import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from 
 import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
-import AudioTrimmerComponent from '../audioTrimmerComponents/AudioTrimmerComponent';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
@@ -44,6 +43,9 @@ import { SUNDAY_HOMILIES_STRING, BIBLE_STUDIES_STRING } from './consts';
 import BibleChapterSelector from './BibleChapterSelector';
 import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
+import dynamic from 'next/dynamic';
+
+const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'))
 
 interface UploaderProps extends VerifiedUserUploaderProps {
   user: User;

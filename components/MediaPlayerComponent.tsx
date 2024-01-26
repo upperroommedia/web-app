@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { getDownloadURL, getStorage, ref } from '../firebase/storage';
 import { MediaPlayer } from '@vidstack/react';
-import BottomAudioBar from './BottomAudioBar';
+import dynamic from 'next/dynamic';
+
+const DynamicBottomAudioBar = dynamic(() => import ('./BottomAudioBar'))
 
 const storage = getStorage();
 function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
@@ -33,7 +35,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
       viewType="audio"
     >
       {children}
-      {currentSermon && <BottomAudioBar />}
+      {currentSermon && <DynamicBottomAudioBar />}
     </MediaPlayer>
   );
 }
