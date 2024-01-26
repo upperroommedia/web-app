@@ -504,10 +504,7 @@ const Uploader = (props: UploaderProps) => {
                     Clear Form
                   </button>
                 </Box>
-                <UploadProgressComponent
-                  isUploading={isUploading}
-                  uploadProgress={uploadProgress}
-                />
+                <UploadProgressComponent isUploading={isUploading} uploadProgress={uploadProgress} />
               </Box>
             </>
           )}

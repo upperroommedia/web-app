@@ -24,7 +24,7 @@ function SundayHomilyMonthSelector({
   selectedSundayHomiliesMonth,
   setSelectedSundayHomiliesMonth,
   sundayHomiliesYear,
-  setSundayHomiliesYear
+  setSundayHomiliesYear,
 }: SuncayHomilyMonthSelectorProps) {
   const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<SundayHomiliesMonthList[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
@@ -63,8 +63,7 @@ function SundayHomilyMonthSelector({
         return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
       });
     }
-  }, [sermonSubtitle, setSelectedSundayHomiliesMonth, setSermonList])
-
+  }, [sermonSubtitle, setSelectedSundayHomiliesMonth, setSermonList]);
 
   useEffect(() => {
     if (date.getFullYear() !== sundayHomiliesYear) {
