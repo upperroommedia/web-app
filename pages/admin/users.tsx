@@ -10,14 +10,10 @@ import { User } from '../../types/User';
 import useAuth from '../../context/user/UserContext';
 
 const AdminUsers = () => {
-  const { user } = useAuth();
-  if (!user?.isAdmin()) {
-    return null;
-  }
-
   const [users, setUsers] = useState<User[]>([]);
   const [snackBarOpen, setSnackBarOpen] = useState<boolean>(false);
   const [message, setMessage] = useState<{ message: string; id: number }>({ message: '', id: new Date().getTime() });
+
   const fetchUsers = async () => {
     const getImage = createFunction<any, any>('listusers');
     const res = await getImage({});
@@ -66,10 +62,19 @@ const AdminUsers = () => {
   );
 };
 
-AdminUsers.PageLayout = AdminLayout;
-
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
 //   return adminProtected(ctx);
 // };
 
-export default AdminUsers;
+const ProtectedAdminUsers = () => {
+  const { user } = useAuth();
+  if (!user?.isAdmin()) {
+    return null;
+  } else {
+    return <AdminUsers />;
+  }
+};
+
+ProtectedAdminUsers.PageLayout = AdminLayout;
+
+export default ProtectedAdminUsers;

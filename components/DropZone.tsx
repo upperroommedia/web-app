@@ -26,19 +26,22 @@ if (typeof window !== 'undefined') {
 }
 const DropZone = ({ setFile }: DropZoneProps) => {
   const [fileRejections, setFileRejections] = useState<FileRejection[]>([]);
-  const onDrop = useCallback((acceptedFiles: File[], fileRejections: FileRejection[]) => {
-    setFileRejections(fileRejections);
-    if (acceptedFiles.length === 0) {
-      setFile(undefined);
-      return;
-    }
-    const mappedAccepted = {
-      file: acceptedFiles[0],
-      preview: Url.createObjectURL(acceptedFiles[0]),
-      name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
-    };
-    setFile(mappedAccepted);
-  }, []);
+  const onDrop = useCallback(
+    (acceptedFiles: File[], fileRejections: FileRejection[]) => {
+      setFileRejections(fileRejections);
+      if (acceptedFiles.length === 0) {
+        setFile(undefined);
+        return;
+      }
+      const mappedAccepted = {
+        file: acceptedFiles[0],
+        preview: Url.createObjectURL(acceptedFiles[0]),
+        name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
+      };
+      setFile(mappedAccepted);
+    },
+    [setFile]
+  );
 
   const { getRootProps, getInputProps, isFocused } = useDropzone({
     onDrop,

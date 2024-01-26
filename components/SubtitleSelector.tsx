@@ -2,7 +2,7 @@ import TextField from '@mui/material/TextField';
 import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
-import { FunctionComponent, Dispatch, SetStateAction } from 'react';
+import { FunctionComponent, Dispatch, SetStateAction, memo } from 'react';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import { List, ListType, ListWithHighlight } from '../types/List';
@@ -10,8 +10,8 @@ import { Sermon } from '../types/SermonTypes';
 
 interface SubtitleSelectorProps {
   sermonList: List[];
+  subtitle: string;
   setSermonList: Dispatch<SetStateAction<List[]>>;
-  sermon: Sermon;
   setSermon: Dispatch<SetStateAction<Sermon>>;
   subtitles: List[];
 }
@@ -21,7 +21,7 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
     <Box display="flex" gap={1} width={1} alignItems="center">
       <Autocomplete
         fullWidth
-        value={props.subtitles.find((subtitle) => subtitle.name === props.sermon.subtitle) || null}
+        value={props.subtitles.find((subtitle) => subtitle.name === props.subtitle) || null}
         onChange={async (_, newValue) => {
           if (
             newValue === null &&
@@ -66,7 +66,7 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
           ));
         }}
         renderOption={(props, option: ListWithHighlight) => (
-          <ListItem key={option.id} {...props}>
+          <ListItem {...props} key={option.id}>
             <AvatarWithDefaultImage
               defaultImageURL="/user.png"
               altName={option.name}
@@ -89,4 +89,4 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
   );
 };
 
-export default SubtitleSelector;
+export default memo(SubtitleSelector);

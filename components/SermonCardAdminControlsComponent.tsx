@@ -65,7 +65,8 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
               deleteFromSoundCloud={deleteFromSoundCloud}
             />
             <ManageSubsplashButton
-              sermon={sermon}
+              sermonNumberOfListsUploadedTo={sermon.numberOfListsUploadedTo}
+              sermonNumberOfLists={sermon.numberOfLists}
               isUploadingToSubsplash={isUploadingToSubsplash}
               disableButtons={disableButtons}
               setManageUploadsPopup={setManageUploadsPopup}

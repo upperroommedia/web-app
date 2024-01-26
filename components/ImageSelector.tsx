@@ -54,18 +54,6 @@ const ImageSelector = (props: {
   const [lastImage, setLastImage] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [imageUploading, setImageUploading] = useState<boolean>(false);
 
-  const fetchImages = async () => {
-    const q = query(
-      collection(firestore, 'images'),
-      limit(25),
-      where('type', '==', props.selectedImageFromSpeakerDetails.type),
-      orderBy('dateAddedMillis', 'desc')
-    );
-    const querySnapshot = await getDocs(q);
-    setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    setImages(querySnapshot.docs.map((doc) => doc.data() as ImageType));
-  };
-
   const fetchMoreImages = async () => {
     const q = query(
       collection(firestore, 'images'),
@@ -97,10 +85,23 @@ const ImageSelector = (props: {
   };
 
   useEffect(() => {
+    const fetchImages = async () => {
+      const q = query(
+        collection(firestore, 'images'),
+        limit(25),
+        where('type', '==', props.selectedImageFromSpeakerDetails.type),
+        orderBy('dateAddedMillis', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
+      setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
+      setImages(querySnapshot.docs.map((doc) => doc.data() as ImageType));
+    };
+
     const g = async () => {
       await fetchImages();
     };
     g();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const saveImage = async (croppedImageData: CroppedImageData, name: string) => {
