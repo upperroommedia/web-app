@@ -21,6 +21,7 @@ import Link from 'next/link';
 import useTheme from '@mui/system/useTheme';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useRouter } from 'next/router';
+import Container from '@mui/material/Container';
 
 const Navbar: FunctionComponent = () => {
   const { user, logoutUser } = useAuth();
@@ -64,7 +65,7 @@ const Navbar: FunctionComponent = () => {
         backgroundColor: 'rgb(31 41 55)',
       }}
     >
-      <Box>
+      <Container maxWidth='xl'>
         <Toolbar disableGutters>
           <Link
             href="/"
@@ -211,7 +212,7 @@ const Navbar: FunctionComponent = () => {
             </Menu>
           </Box>
         </Toolbar>
-      </Box>
+      </Container>
     </AppBar>
   );
 };
