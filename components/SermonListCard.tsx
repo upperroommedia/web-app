@@ -2,9 +2,6 @@
  * SermonListCard: A component to display sermons in a list
  */
 import React, { FunctionComponent, memo } from 'react';
-import IconButton from '@mui/material/IconButton';
-import PlayCircleIcon from '@mui/icons-material/PlayCircle';
-import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import ListItem from '@mui/material/ListItem';
 import Divider from '@mui/material/Divider';
 import Card from '@mui/material/Card';
@@ -23,7 +20,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
-import { useMediaRemote } from '@vidstack/react';
+import  PlayButton from './PlayButton';
 
 interface Props {
   sermon: Sermon;
@@ -38,7 +35,6 @@ interface Props {
 
 const SermonListCard: FunctionComponent<Props> = ({
   sermon,
-  playing,
   remainingTimeComponent,
   trackProgressComponent,
   audioPlayerCurrentSermonId,
@@ -49,8 +45,6 @@ const SermonListCard: FunctionComponent<Props> = ({
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
-
-  const remote = useMediaRemote();
 
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
@@ -109,22 +103,12 @@ const SermonListCard: FunctionComponent<Props> = ({
           >
             {sermon.description}
           </Typography>
-          {!minimal && sermon.status.audioStatus === sermonStatusType.PROCESSED && (
-            <IconButton
-              sx={{ gridArea: 'playPause', flexShrink: 0, alignSelf: 'center' }}
-              aria-label="toggle play/pause"
-              onClick={(e) => {
-                e.preventDefault();
-                if (audioPlayerCurrentSermonId !== sermon.id) {
-                  audioPlayerSetCurrentSermon(sermon);
-                } else {
-                  remote.togglePaused();
-                }
-              }}
-            >
-              {playing ? <PauseCircleIcon fontSize="large" /> : <PlayCircleIcon fontSize="large" />}
-            </IconButton>
-          )}
+          <PlayButton 
+          minimal={minimal}
+          sermon={sermon}
+          audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
+          audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
+          />
 
           <Box display="flex" alignItems="center" sx={{ gridArea: 'playStatus', paddingTop: { xs: 1, sm: 0 } }}>
             {!minimal && (

@@ -25,6 +25,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
 
   return (
     <MediaPlayer
+      load="eager"
       autoplay
       title={currentSermon?.title}
       style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}
