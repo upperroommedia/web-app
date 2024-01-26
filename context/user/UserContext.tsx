@@ -139,7 +139,7 @@ export const UserProvider = ({ children }: any) => {
       <Stack
         sx={{
           width: '100vw',
-          height: '100vh',
+          height: '100dvh',
           // bgcolor: 'rgb(31 41 55)',
 
           justifyContent: 'center',
