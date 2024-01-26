@@ -3,15 +3,17 @@ import EditIcon from '@mui/icons-material/Edit';
 import IconButton from '@mui/material/IconButton';
 import Box from '@mui/system/Box';
 import Tooltip from '@mui/material/Tooltip';
-import EditSermonForm from './EditSermonForm';
-import DeleteEntityPopup from './DeleteEntityPopup';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
-import ManageUploadsPopup from './ManageUploadsPopup';
 import ManageSoundcloudButton from './ManageSoundcloudButton';
 import ManageSubsplashButton from './ManageSubsplashButton';
 import useAuth from '../context/user/UserContext';
 import Chip from '@mui/material/Chip';
+import dynamic from 'next/dynamic';
+
+const ManageUploadsPopup = dynamic(() => import('./ManageUploadsPopup'))
+const DeleteEntityPopup = dynamic(() => import('./DeleteEntityPopup'))
+const EditSermonForm = dynamic(() => import('./EditSermonForm'))
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;

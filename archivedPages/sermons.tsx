@@ -1,7 +1,6 @@
 /**
  * Sermons page for viewing all sermons test
  */
-import dynamic from 'next/dynamic';
 import type { GetStaticProps, NextPage } from 'next';
 // import PropTypes from 'prop-types';
 
