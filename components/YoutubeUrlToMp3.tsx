@@ -1,60 +1,45 @@
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import { Dispatch, FunctionComponent, SetStateAction, useState } from 'react';
-import Button from '@mui/material/Button';
 import { UploadableFile } from './DropZone';
 import Typography from '@mui/material/Typography';
-import CircularProgress from '@mui/material/CircularProgress';
-import auth from '../firebase/auth';
-import { isDevelopment } from '../firebase/firebase';
+import { MediaCanPlayDetail, MediaCanPlayEvent, MediaPlayer, MediaProvider, MediaProviderAdapter, MediaProviderChangeEvent, isYouTubeProvider } from '@vidstack/react';
+import styles from '../styles/AudioTrimmer.module.css';
+import { VideoLayout } from './vidstackComponents/VideoLayout';
+import { CustomSlider } from './vidstackComponents/sliders';
+import { formatTime } from '../utils/audioUtils';
 
 interface YoutubeUrlToMp3Props {
   setFile: Dispatch<SetStateAction<UploadableFile | undefined>>;
 }
 
-async function convertToMp3(url: string, setError: Dispatch<SetStateAction<string>>) {
-  try {
-    const domain = isDevelopment
-      ? 'http://127.0.0.1:8081/'
-      : 'https://youtube-to-mp3-cloud-run-yshbijirxq-uc.a.run.app/';
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) {
-      throw new Error('User is not authenticated');
-    }
-    const response = await fetch(`${domain}?url=${url}`, {
-      method: 'GET',
-      headers: {
-        responseType: 'blob',
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (!response.ok) {
-      throw new Error('There was an error converting the input url');
-    }
-    const blob = await response.blob();
-    const downloadUrl = URL.createObjectURL(blob);
-    const uploadableFile: UploadableFile = {
-      file: new File([blob], 'youtubeMp3.mp3', { type: 'audio/mp3' }),
-      name: 'youtubeMp3.mp3',
-      preview: downloadUrl,
-    };
-    return uploadableFile;
-  } catch (err) {
-    if (err instanceof Error) {
-      const additionalInfo = isDevelopment
-        ? ' - Make sure to run the index.js (in youtube-to-mp3-cloud-run) file following these instructions: https://cloud.google.com/code/docs/vscode/develop-service'
-        : '';
-      setError(err.message + additionalInfo);
-    }
-  }
-}
-
 const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = ({ setFile }: YoutubeUrlToMp3Props) => {
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState('');
+  const [showMediaPlayer, setShowMediaPlayer] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [startTime, setStartTime] = useState(0);
+  const [endTime, setEndTime] = useState(0);
+
+  function onProviderChange(
+    provider: MediaProviderAdapter | null,
+    _nativeEvent: MediaProviderChangeEvent,
+  ) {
+    // We can configure provider's here.
+    if (isYouTubeProvider(provider)) {
+      console.log('provider', provider)
+      setShowMediaPlayer(true)
+    }
+  }
+
+  // We can listen for the `can-play` event to be notified when the player is ready.
+  function onCanPlay(detail: MediaCanPlayDetail, _nativeEvent: MediaCanPlayEvent) {
+    console.log('can play detail', detail)
+    setShowMediaPlayer(true)
+  }
+
   return (
-    <Box display="flex" width={1} flexDirection="column" justifyContent="center" alignItems="center">
+    <Box display="flex" width={1} flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
       <Box display="flex" width={1} justifyContent="center" alignItems="center" gap={1}>
         <TextField
           sx={{
@@ -71,29 +56,50 @@ const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = ({ setFile }: Y
           disabled={isLoading}
           onChange={(e) => {
             setInputText(e.target.value);
+            // setShowMediaPlayer(false)
             if (error) {
               setError('');
             }
           }}
         />
-        <Button
-          variant="contained"
-          disabled={isLoading || !inputText}
-          onClick={async () => {
-            setIsLoading(true);
-            const uploadableFile = await convertToMp3(inputText, setError);
-            setIsLoading(false);
-            setFile(uploadableFile);
-          }}
-        >
-          {isLoading ? <CircularProgress size={24} /> : 'Convert'}
-        </Button>
       </Box>
       {error && (
         <Typography variant="caption" color="red">
           {error}
         </Typography>
       )}
+      {/* TODO: FIND A WAY TO KNOW WHEN A VALID VIDEO IS LOADED */}
+       <MediaPlayer
+        className={`${styles.player} media-player`}
+        src={inputText}
+        onProviderChange={onProviderChange}
+        onCanPlay={onCanPlay}
+        hideControlsOnMouseLeave={false}
+        hidden={false}
+        // onWaiting={() => console.log('waiting')}
+        // onInvalid={() => console.log('invalid')}
+        // onError={() => console.log('YOUSSEF error')}
+        // onErrorCapture={() => console.log('error capture')}
+        // onSourceChange={() => console.log('source change')}
+        // onLoadedMetadata={() => console.log('loaded metadata')}
+        crossorigin
+        playsinline
+        viewType='video'
+        style={{ display: showMediaPlayer ? 'block' : 'none' }}
+      >
+        <MediaProvider >
+          </MediaProvider>
+        <VideoLayout customSlider={<CustomSlider 
+        startTime={startTime}
+        endTime={endTime}
+        setStartTime={setStartTime}
+        setEndTime={setEndTime}
+        />} />
+      </MediaPlayer>
+      <Box display='flex' width={1} justifyContent='space-around' gap={1}>
+      <p>Start Time: {formatTime(startTime)}</p>
+      <p>End Time: {formatTime(endTime)}</p>
+      </Box>
     </Box>
   );
 };

@@ -19,8 +19,8 @@ import ImageViewer from '../ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../../types/Image';
 import ListSelector from '../ListSelector';
 import FormControl from '@mui/material/FormControl';
-// import Switch from '@mui/material/Switch';
-// import FormControlLabel from '@mui/material/FormControlLabel';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import YoutubeUrlToMp3 from '../YoutubeUrlToMp3';
 import Typography from '@mui/material/Typography';
 import Head from 'next/head';
@@ -45,6 +45,7 @@ import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
 
+
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'))
 
 interface UploaderProps extends VerifiedUserUploaderProps {
@@ -65,7 +66,7 @@ const Uploader = (props: UploaderProps) => {
   const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [useYoutubeUrl, _setUseYoutubeUrl] = useState(false);
+  const [useYoutubeUrl, setUseYoutubeUrl] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
 
   // Bible Study Helpers
@@ -475,7 +476,7 @@ const Uploader = (props: UploaderProps) => {
                   alignItems="center"
                   gap={1}
                 >
-                  {/* <FormControlLabel
+                  <FormControlLabel
                     control={
                       <Switch
                         checked={useYoutubeUrl}
@@ -484,7 +485,7 @@ const Uploader = (props: UploaderProps) => {
                       />
                     }
                     label="Upload from Youtube Url"
-                  /> */}
+                  />
                   {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
                 </Box>
               )}
