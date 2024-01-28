@@ -182,28 +182,27 @@ function Volume() {
 
 const BottomAudioBar: FunctionComponent = () => {
   return (
-    <MediaProvider>
-      <Box className={`${styles.player} media-player`}>
-        <Controls.Root className={`${styles.controls} vds-controls`}>
-          <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
-            <Slider />
-          </Controls.Group>
-          <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
-            <Seek seconds={-10} tooltipPlacement="top start" />
-            <Play tooltipPlacement="top" />
-            {/* <BufferingIndicator/> */}
-            <Seek seconds={10} tooltipPlacement="top" />
-            <TimeGroup />
-            {/* <MarqueeComponent> */}
-            <ChapterTitle className="vds-chapter-title" />
-            {/* </MarqueeComponent> */}
-            <Mute tooltipPlacement="top" />
-            <Volume />
-            {/* <Settings placement="top end" tooltipPlacement="top end" /> */}
-          </Controls.Group>
-        </Controls.Root>
-      </Box>
-    </MediaProvider>
+    <Box className={`${styles.player} media-player`}>
+      <MediaProvider />
+      <Controls.Root className={`${styles.controls} vds-controls`}>
+        <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
+          <Slider />
+        </Controls.Group>
+        <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
+          <Seek seconds={-10} tooltipPlacement="top start" />
+          <Play tooltipPlacement="top" />
+          {/* <BufferingIndicator/> */}
+          <Seek seconds={10} tooltipPlacement="top" />
+          <TimeGroup />
+          {/* <MarqueeComponent> */}
+          <ChapterTitle className="vds-chapter-title" />
+          {/* </MarqueeComponent> */}
+          <Mute tooltipPlacement="top" />
+          <Volume />
+          {/* <Settings placement="top end" tooltipPlacement="top end" /> */}
+        </Controls.Group>
+      </Controls.Root>
+    </Box>
   );
 };
 
