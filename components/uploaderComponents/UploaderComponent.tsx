@@ -45,8 +45,7 @@ import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
 
-
-const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'))
+const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
 interface UploaderProps extends VerifiedUserUploaderProps {
   user: User;
@@ -486,7 +485,7 @@ const Uploader = (props: UploaderProps) => {
                     }
                     label="Upload from Youtube Url"
                   />
-                  {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
+                  {useYoutubeUrl ? <YoutubeUrlToMp3 /> : <DropZone setFile={setFile} />}
                 </Box>
               )}
               <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>

@@ -65,7 +65,7 @@ const Navbar: FunctionComponent = () => {
         backgroundColor: 'rgb(31 41 55)',
       }}
     >
-      <Container maxWidth='xl'>
+      <Container maxWidth="xl">
         <Toolbar disableGutters>
           <Link
             href="/"

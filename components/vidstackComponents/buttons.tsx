@@ -45,19 +45,13 @@ export function Play({ tooltipPlacement }: MediaButtonProps) {
 }
 
 export function Mute({ tooltipPlacement }: MediaButtonProps) {
-  const volume = useMediaState('volume'),
-    isMuted = useMediaState('muted');
+  const volume = useMediaState('volume');
+  const isMuted = useMediaState('muted');
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
         <MuteButton className="vds-button">
-          {isMuted || volume == 0 ? (
-            <MuteIcon />
-          ) : volume < 0.5 ? (
-            <VolumeLowIcon />
-          ) : (
-            <VolumeHighIcon />
-          )}
+          {isMuted || volume === 0 ? <MuteIcon /> : volume < 0.5 ? <VolumeLowIcon /> : <VolumeHighIcon />}
         </MuteButton>
       </Tooltip.Trigger>
       <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
@@ -68,14 +62,12 @@ export function Mute({ tooltipPlacement }: MediaButtonProps) {
 }
 
 export function Caption({ tooltipPlacement }: MediaButtonProps) {
-  const track = useMediaState('textTrack'),
-    isOn = track && isTrackCaptionKind(track);
+  const track = useMediaState('textTrack');
+  const isOn = track && isTrackCaptionKind(track);
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <CaptionButton className="vds-button">
-          {isOn ? <ClosedCaptionsOnIcon /> : <ClosedCaptionsIcon />}
-        </CaptionButton>
+        <CaptionButton className="vds-button">{isOn ? <ClosedCaptionsOnIcon /> : <ClosedCaptionsIcon />}</CaptionButton>
       </Tooltip.Trigger>
       <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
         {isOn ? 'Closed-Captions Off' : 'Closed-Captions On'}

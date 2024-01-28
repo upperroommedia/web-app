@@ -20,7 +20,7 @@ export function VideoLayout({ thumbnails, customSlider }: VideoLayoutProps) {
       <Controls.Root className={`${styles.controls} vds-controls`}>
         <div className="vds-controls-spacer" />
         <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
-          {customSlider !== undefined ? customSlider : <Sliders.Time thumbnails={thumbnails}/> }
+          {customSlider !== undefined ? customSlider : <Sliders.Time thumbnails={thumbnails} />}
         </Controls.Group>
         <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
           <Buttons.Play tooltipPlacement="top start" />
@@ -41,7 +41,7 @@ export function VideoLayout({ thumbnails, customSlider }: VideoLayoutProps) {
 
 function Gestures() {
   return (
-    <div style={{backgroundColor: 'green'}}>
+    <div style={{ backgroundColor: 'green' }}>
       <Gesture className={styles.gesture} event="pointerup" action="toggle:paused" />
       <Gesture className={styles.gesture} event="dblpointerup" action="toggle:fullscreen" />
       <Gesture className={styles.gesture} event="pointerup" action="toggle:controls" />

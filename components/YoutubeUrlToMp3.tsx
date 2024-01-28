@@ -3,39 +3,44 @@ import Box from '@mui/material/Box';
 import { Dispatch, FunctionComponent, SetStateAction, useState } from 'react';
 import { UploadableFile } from './DropZone';
 import Typography from '@mui/material/Typography';
-import { MediaCanPlayDetail, MediaCanPlayEvent, MediaPlayer, MediaProvider, MediaProviderAdapter, MediaProviderChangeEvent, isYouTubeProvider } from '@vidstack/react';
+import {
+  MediaCanPlayDetail,
+  MediaCanPlayEvent,
+  MediaPlayer,
+  MediaProvider,
+  MediaProviderAdapter,
+  MediaProviderChangeEvent,
+  isYouTubeProvider,
+} from '@vidstack/react';
 import styles from '../styles/AudioTrimmer.module.css';
 import { VideoLayout } from './vidstackComponents/VideoLayout';
 import { CustomSlider } from './vidstackComponents/sliders';
 import { formatTime } from '../utils/audioUtils';
 
 interface YoutubeUrlToMp3Props {
-  setFile: Dispatch<SetStateAction<UploadableFile | undefined>>;
+  setFile?: Dispatch<SetStateAction<UploadableFile | undefined>>;
 }
 
-const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = ({ setFile }: YoutubeUrlToMp3Props) => {
+const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = () => {
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState('');
   const [showMediaPlayer, setShowMediaPlayer] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, _setIsLoading] = useState(false);
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(0);
 
-  function onProviderChange(
-    provider: MediaProviderAdapter | null,
-    _nativeEvent: MediaProviderChangeEvent,
-  ) {
+  function onProviderChange(provider: MediaProviderAdapter | null, _nativeEvent: MediaProviderChangeEvent) {
     // We can configure provider's here.
     if (isYouTubeProvider(provider)) {
-      console.log('provider', provider)
-      setShowMediaPlayer(true)
+      // console.log('provider', provider);
+      setShowMediaPlayer(true);
     }
   }
 
   // We can listen for the `can-play` event to be notified when the player is ready.
-  function onCanPlay(detail: MediaCanPlayDetail, _nativeEvent: MediaCanPlayEvent) {
-    console.log('can play detail', detail)
-    setShowMediaPlayer(true)
+  function onCanPlay(_detail: MediaCanPlayDetail, _nativeEvent: MediaCanPlayEvent) {
+    // console.log('can play detail', detail);
+    setShowMediaPlayer(true);
   }
 
   return (
@@ -69,7 +74,7 @@ const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = ({ setFile }: Y
         </Typography>
       )}
       {/* TODO: FIND A WAY TO KNOW WHEN A VALID VIDEO IS LOADED */}
-       <MediaPlayer
+      <MediaPlayer
         className={`${styles.player} media-player`}
         src={inputText}
         onProviderChange={onProviderChange}
@@ -84,21 +89,19 @@ const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = ({ setFile }: Y
         // onLoadedMetadata={() => console.log('loaded metadata')}
         crossorigin
         playsinline
-        viewType='video'
+        viewType="video"
         style={{ display: showMediaPlayer ? 'block' : 'none' }}
       >
-        <MediaProvider >
-          </MediaProvider>
-        <VideoLayout customSlider={<CustomSlider 
-        startTime={startTime}
-        endTime={endTime}
-        setStartTime={setStartTime}
-        setEndTime={setEndTime}
-        />} />
+        <MediaProvider></MediaProvider>
+        <VideoLayout
+          customSlider={
+            <CustomSlider startTime={startTime} endTime={endTime} setStartTime={setStartTime} setEndTime={setEndTime} />
+          }
+        />
       </MediaPlayer>
-      <Box display='flex' width={1} justifyContent='space-around' gap={1}>
-      <p>Start Time: {formatTime(startTime)}</p>
-      <p>End Time: {formatTime(endTime)}</p>
+      <Box display="flex" width={1} justifyContent="space-around" gap={1}>
+        <p>Start Time: {formatTime(startTime)}</p>
+        <p>End Time: {formatTime(endTime)}</p>
       </Box>
     </Box>
   );

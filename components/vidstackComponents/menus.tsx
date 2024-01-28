@@ -1,18 +1,5 @@
-import type { ReactNode } from 'react';
-
-import {
-  Menu,
-  Tooltip,
-  useCaptionOptions,
-  type MenuPlacement,
-  type TooltipPlacement,
-} from '@vidstack/react';
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  ClosedCaptionsIcon,
-  SettingsIcon,
-} from '@vidstack/react/icons';
+import { Menu, Tooltip, useCaptionOptions, type MenuPlacement, type TooltipPlacement } from '@vidstack/react';
+import { ChevronLeftIcon, ChevronRightIcon, ClosedCaptionsIcon, SettingsIcon } from '@vidstack/react/icons';
 
 export interface SettingsProps {
   placement: MenuPlacement;
@@ -40,16 +27,11 @@ export function Settings({ placement, tooltipPlacement }: SettingsProps) {
 }
 
 function CaptionSubmenu() {
-  const options = useCaptionOptions(),
-    hint = options.selectedTrack?.label ?? 'Off';
+  const options = useCaptionOptions();
+  const hint = options.selectedTrack?.label ?? 'Off';
   return (
     <Menu.Root>
-      <SubmenuButton
-        label="Captions"
-        hint={hint}
-        disabled={options.disabled}
-        icon={ClosedCaptionsIcon}
-      />
+      <SubmenuButton label="Captions" hint={hint} disabled={options.disabled} icon={ClosedCaptionsIcon} />
       <Menu.Content className="vds-menu-items">
         <Menu.RadioGroup className="vds-radio-group" value={options.selectedValue}>
           {options.map(({ label, value, select }) => (
@@ -68,7 +50,7 @@ export interface SubmenuButtonProps {
   label: string;
   hint: string;
   disabled?: boolean;
-  icon: ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
 }
 
 function SubmenuButton({ label, hint, icon: Icon, disabled }: SubmenuButtonProps) {
