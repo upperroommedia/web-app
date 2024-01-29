@@ -88,7 +88,7 @@ export function CustomSlider({ startTime, endTime, setStartTime, setEndTime }: C
       return previousValue;
     });
     setEndTime(duration);
-  }, [duration, setValue]);
+  }, [duration, setEndTime, setValue]);
 
   const updateValue = useCallback(
     (newValue: number[]) => {

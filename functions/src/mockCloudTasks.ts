@@ -19,6 +19,7 @@ if (process.env.FUNCTIONS_EMULATOR === 'true') {
   // This queue is filled when the http call is invoked.
   const queue: {
     func: TaskQueueFunction;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     req: Request<any>;
     state: 'pending' | 'processing' | 'done';
     opts?: TaskOptions;

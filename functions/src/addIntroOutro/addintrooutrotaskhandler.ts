@@ -10,7 +10,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { Database } from 'firebase-admin/database';
 import { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import { Request, onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { CustomMetadata, AddIntroOutroInputType, FilePaths } from './types';
+import { CustomMetadata, AddIntroOutroInputType, FilePaths, AudioSource } from './types';
 import { CancelToken } from './CancelToken';
 import {
   logMemoryUsage,
@@ -20,6 +20,8 @@ import {
   getDurationSeconds,
   uploadSermon,
   executeWithTimout,
+  validateAddIntroOutroData,
+  getAudioSource,
 } from './utils';
 import { TIMEOUT_SECONDS } from './consts';
 import trimAndTranscode from './trimAndTranscode';
@@ -34,7 +36,7 @@ const mainFunction = async (
   bucket: Bucket,
   realtimeDB: Database,
   db: Firestore,
-  filePath: string,
+  audioSource: AudioSource,
   docRef: DocumentReference<Sermon>,
   sermonStatus: sermonStatus,
   startTime: number,
@@ -44,7 +46,7 @@ const mainFunction = async (
   introUrl?: string,
   outroUrl?: string
 ): Promise<void> => {
-  const fileName = path.basename(filePath);
+  const fileName = audioSource.id;
   await logMemoryUsage('Initial Memory Usage:');
   const tempFiles = new Set<string>();
   // the document may not exist yet, if it deosnt wait 5 seconds and try again do this for a max of 3 times before throwing an error
@@ -104,10 +106,16 @@ const mainFunction = async (
     });
     let processedFilePath: string;
     if (skipTranscode) {
+      if (audioSource.type !== 'StorageFilePath') {
+        throw new HttpsError(
+          'invalid-argument',
+          'Audio source must be a file from processed-sermons in order to trim without transcoding'
+        );
+      }
       processedFilePath = await trim(
         ffmpeg,
         cancelToken,
-        bucket.file(filePath),
+        bucket.file(audioSource.source),
         tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
         startTime,
@@ -117,7 +125,7 @@ const mainFunction = async (
       processedFilePath = await trimAndTranscode(
         ffmpeg,
         cancelToken,
-        bucket.file(filePath),
+        audioSource.type === 'StorageFilePath' ? bucket.file(audioSource.source) : audioSource.source,
         tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
         startTime,
@@ -125,10 +133,6 @@ const mainFunction = async (
       );
     }
     await uploadSermon(processedFilePath, `${PROCESSED_SERMONS_BUCKET}/${fileName}`, bucket, customMetadata);
-    const originalAudioMetadata = await bucket.file(filePath).getMetadata();
-    const trimAndTranscodeMetadata = await bucket.file(`${PROCESSED_SERMONS_BUCKET}/${fileName}`).getMetadata();
-    logger.log('Original Audio Metadata', JSON.stringify(originalAudioMetadata));
-    logger.log(`${trimMessage} Metadata`, JSON.stringify(trimAndTranscodeMetadata));
     await logMemoryUsage(`Memory Usage after ${trimMessage}:`);
     //create merge array in order INTRO, CONTENT, OUTRO
     const filePathsArray: string[] = [];
@@ -191,11 +195,13 @@ const mainFunction = async (
 
     // delete original audio file
     if (cancelToken.isCancellationRequested) return;
-    const [originalFileExists] = await bucket.file(filePath).exists();
-    if (originalFileExists && deleteOriginal) {
-      logger.log('Deleting original audio file', filePath);
-      await bucket.file(filePath).delete();
-      logger.log('Original audio file deleted');
+    if (audioSource.type === 'StorageFilePath') {
+      const [originalFileExists] = await bucket.file(audioSource.source).exists();
+      if (originalFileExists && deleteOriginal) {
+        logger.log('Deleting original audio file', audioSource.source);
+        await bucket.file(audioSource.source).delete();
+        logger.log('Original audio file deleted');
+      }
     }
 
     logger.log('Files have been merged succesfully');
@@ -230,29 +236,32 @@ const addintrooutrotaskhandler = onTaskDispatched(
     const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
     // set timeout to 30 seconds less than timeoutSeconds then throw error if it takes longer than that
     const data = request.data;
-    if (
-      !data.storageFilePath ||
-      data.startTime === undefined ||
-      data.startTime === null ||
-      data.duration === null ||
-      data.duration === undefined
-    ) {
-      const errorMessage =
-        'Data must contain storageFilePath (string), startTime (number), and endTime (number) properties || optionally introUrl (string) and outroUrl (string)';
-      logger.error('Invalid Argument', errorMessage);
-      throw new HttpsError('invalid-argument', errorMessage);
+
+    // data checks
+    if (!validateAddIntroOutroData(data)) {
+      throw new HttpsError(
+        'invalid-argument',
+        `Invalid data: data must be an object with the following field: 
+         id (string),
+         startTime (number),
+         duration (number),
+         youtubeUrl (string) || storageFilePath (string),
+         introUrl (string),
+         outroUrl (string)`
+      );
     }
 
+    const audioSource = getAudioSource(data);
     const bucket = firebaseAdmin.storage().bucket();
     const realtimeDB = firebaseAdmin.database();
     const db = firebaseAdmin.firestore();
-    const fileName = path.basename(data.storageFilePath);
-    const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
+    const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(data.id);
     const sermonStatus: sermonStatus = {
       subsplash: uploadStatus.NOT_UPLOADED,
       soundCloud: uploadStatus.NOT_UPLOADED,
       audioStatus: sermonStatusType.PROCESSING,
     };
+
     try {
       const cancelToken = new CancelToken();
       await executeWithTimout(
@@ -262,7 +271,7 @@ const addintrooutrotaskhandler = onTaskDispatched(
             bucket,
             realtimeDB,
             db,
-            data.storageFilePath,
+            audioSource,
             docRef,
             sermonStatus,
             data.startTime,

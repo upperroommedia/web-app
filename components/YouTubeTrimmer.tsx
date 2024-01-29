@@ -1,7 +1,6 @@
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import { Dispatch, FunctionComponent, SetStateAction, useState } from 'react';
-import { UploadableFile } from './DropZone';
 import Typography from '@mui/material/Typography';
 import {
   MediaCanPlayDetail,
@@ -16,12 +15,13 @@ import styles from '../styles/AudioTrimmer.module.css';
 import { VideoLayout } from './vidstackComponents/VideoLayout';
 import { CustomSlider } from './vidstackComponents/sliders';
 import { formatTime } from '../utils/audioUtils';
+import { AudioSource } from '../pages/api/uploadFile';
 
-interface YoutubeUrlToMp3Props {
-  setFile?: Dispatch<SetStateAction<UploadableFile | undefined>>;
+interface YouTubeTrimmerProps {
+  setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
 }
 
-const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = () => {
+const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({ setAudioSource }) => {
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState('');
   const [showMediaPlayer, setShowMediaPlayer] = useState(false);
@@ -33,6 +33,7 @@ const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = () => {
     // We can configure provider's here.
     if (isYouTubeProvider(provider)) {
       // console.log('provider', provider);
+      setAudioSource({ source: inputText, type: 'YoutubeUrl' });
       setShowMediaPlayer(true);
     }
   }
@@ -107,4 +108,4 @@ const YoutubeUrlToMp3: FunctionComponent<YoutubeUrlToMp3Props> = () => {
   );
 };
 
-export default YoutubeUrlToMp3;
+export default YouTubeTrimmer;

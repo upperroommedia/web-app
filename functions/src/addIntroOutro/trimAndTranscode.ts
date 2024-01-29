@@ -5,18 +5,30 @@ import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { File } from '@google-cloud/storage';
 import { convertStringToMilliseconds, createTempFile } from './utils';
+import { YouTubeUrl } from './types';
+import { Readable } from 'node:stream';
+import { getYouTubeStream } from './getYouTubeStream';
+
+const ytdlpPath = path.join(__dirname, '../../..', '..', 'bin', 'yt-dlp');
+logger.log(ytdlpPath);
 
 const trimAndTranscode = (
   ffmpeg: typeof import('fluent-ffmpeg'),
   cancelToken: CancelToken,
-  contentFile: File,
+  source: File | YouTubeUrl,
   tempFiles: Set<string>,
   realtimeDBRef: Reference,
   startTime?: number,
   duration?: number
 ): Promise<string> => {
   const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'), tempFiles);
-  const proc = ffmpeg().format('mp3').input(contentFile.createReadStream());
+  let inputStream: Readable | null;
+  if (source instanceof File) {
+    inputStream = source.createReadStream();
+  } else {
+    inputStream = getYouTubeStream(ytdlpPath, source, cancelToken); //write this
+  }
+  const proc = ffmpeg().format('mp3').input(inputStream);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
   proc

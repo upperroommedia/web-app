@@ -12,15 +12,43 @@ import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types'
 import { getIntroAndOutro } from '../../utils/uploadUtils';
 import { UploadProgress } from '../../context/types';
 
-interface uploadFileProps {
-  file: UploadableFile;
+export type AudioSource =
+  | {
+      type: 'YoutubeUrl';
+      source: string;
+    }
+  | {
+      type: 'File';
+      source: UploadableFile;
+    };
+
+type UploadFileProps = {
+  audioSource: AudioSource;
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>;
   trimStart: number;
   sermon: Sermon;
   sermonList: List[];
-}
+};
 
-const uploadFile = async (props: uploadFileProps) => {
+const addFirestoreDocument = async (
+  sermon: Sermon,
+  sermonList: List[],
+  setUploadProgress: Dispatch<SetStateAction<UploadProgress>>
+) => {
+  // add sermon to series
+  // note a firestore function document listener will take care of updating the series subcollection for the sermon
+  const batch = writeBatch(firestore);
+  batch.set(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), sermon);
+  sermonList.forEach((list) => {
+    const seriesSermonRef = doc(firestore, 'lists', list.id, 'listItems', sermon.id);
+    batch.set(seriesSermonRef, sermon);
+  });
+  await batch.commit();
+  setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
+};
+
+const uploadFile = async (props: UploadFileProps) => {
+  const audioSource = props.audioSource;
   const sermonRef = ref(storage, `sermons/${props.sermon.id}`);
   const { introRef, outroRef } = await getIntroAndOutro(props.sermon);
   const metadata: UploadMetadata = {
@@ -41,58 +69,77 @@ const uploadFile = async (props: uploadFileProps) => {
     })
   );
 
-  await new Promise<void>((resolve, reject) => {
-    uploadBytesResumable(sermonRef, props.file.file, metadata).on(
-      'state_changed',
-      (snapshot) => {
-        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        props.setUploadProgress({ error: false, percent: Math.round(progress), message: 'Uploading...' });
-        switch (snapshot.state) {
-          case 'paused':
-            break;
-          case 'running':
-            break;
-        }
-      },
-      async (error) => {
-        // eslint-disable-next-line no-console
-        console.error(error);
-        props.setUploadProgress({ error: true, message: `Error uploading file: ${JSON.stringify(error)}`, percent: 0 });
-        await deleteDoc(doc(firestore, 'sermons', props.sermon.id));
-        reject(error);
-      },
-      async () => {
-        // add sermon to series
-        // note a firestore function document listener will take care of updating the series subcollection for the sermon
-        const batch = writeBatch(firestore);
-        batch.set(doc(firestore, 'sermons', props.sermon.id).withConverter(sermonConverter), props.sermon);
-        props.sermonList.forEach((list) => {
-          const seriesSermonRef = doc(firestore, 'lists', list.id, 'listItems', props.sermon.id);
-          batch.set(seriesSermonRef, props.sermon);
-        });
-        await batch.commit();
-        props.setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
-        try {
-          const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-          const data: AddIntroOutroInputType = {
-            storageFilePath: sermonRef.fullPath,
-            startTime: props.trimStart,
-            duration: props.sermon.durationSeconds,
-            deleteOriginal: true,
-            introUrl: introRef,
-            outroUrl: outroRef,
-          };
-          await generateAddIntroOutroTask(data);
-          resolve();
-        } catch (e) {
+  if (audioSource.type === 'YoutubeUrl') {
+    await addFirestoreDocument(props.sermon, props.sermonList, props.setUploadProgress);
+    try {
+      const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
+      const data: AddIntroOutroInputType = {
+        id: props.sermon.id,
+        youtubeUrl: audioSource.source,
+        startTime: props.trimStart,
+        duration: props.sermon.durationSeconds,
+        deleteOriginal: true,
+        introUrl: introRef,
+        outroUrl: outroRef,
+      };
+      await generateAddIntroOutroTask(data);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Error generatingAddIntroOutroTask', e);
+      props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
+      await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);
+    }
+    // handle processing youtube video
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      uploadBytesResumable(sermonRef, audioSource.source.file, metadata).on(
+        'state_changed',
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          props.setUploadProgress({ error: false, percent: Math.round(progress), message: 'Uploading...' });
+          switch (snapshot.state) {
+            case 'paused':
+              break;
+            case 'running':
+              break;
+          }
+        },
+        async (error) => {
           // eslint-disable-next-line no-console
-          console.error('Error generatingAddIntroOutroTask', e);
-          props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
-          await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);
-          reject(e);
+          console.error(error);
+          props.setUploadProgress({
+            error: true,
+            message: `Error uploading file: ${JSON.stringify(error)}`,
+            percent: 0,
+          });
+          await deleteDoc(doc(firestore, 'sermons', props.sermon.id));
+          reject(error);
+        },
+        async () => {
+          await addFirestoreDocument(props.sermon, props.sermonList, props.setUploadProgress);
+          try {
+            const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
+            const data: AddIntroOutroInputType = {
+              id: props.sermon.id,
+              storageFilePath: sermonRef.fullPath,
+              startTime: props.trimStart,
+              duration: props.sermon.durationSeconds,
+              deleteOriginal: true,
+              introUrl: introRef,
+              outroUrl: outroRef,
+            };
+            await generateAddIntroOutroTask(data);
+            resolve();
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('Error generatingAddIntroOutroTask', e);
+            props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
+            await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);
+            reject(e);
+          }
         }
-      }
-    );
-  });
+      );
+    });
+  }
 };
 export default uploadFile;
