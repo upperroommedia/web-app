@@ -15,7 +15,6 @@ import dynamic from 'next/dynamic';
 
 const MediaPlayerComponent = dynamic(() => import('../components/MediaPlayerComponent'));
 
-
 let theme = createTheme();
 theme = responsiveFontSizes(theme, { factor: 4 });
 

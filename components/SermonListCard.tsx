@@ -20,7 +20,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
-import  PlayButton from './PlayButton';
+import PlayButton from './PlayButton';
 
 interface Props {
   sermon: Sermon;
@@ -103,11 +103,11 @@ const SermonListCard: FunctionComponent<Props> = ({
           >
             {sermon.description}
           </Typography>
-          <PlayButton 
-          minimal={minimal}
-          sermon={sermon}
-          audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
-          audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
+          <PlayButton
+            minimal={minimal}
+            sermon={sermon}
+            audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
+            audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
           />
 
           <Box display="flex" alignItems="center" sx={{ gridArea: 'playStatus', paddingTop: { xs: 1, sm: 0 } }}>

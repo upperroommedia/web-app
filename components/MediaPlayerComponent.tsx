@@ -5,14 +5,13 @@ import { MediaPlayer } from '@vidstack/react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
 
-const DynamicBottomAudioBar = dynamic(() => import ('./BottomAudioBar'))
+const DynamicBottomAudioBar = dynamic(() => import('./BottomAudioBar'));
 
 const storage = getStorage();
 function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   const { currentSermon } = useAudioPlayer();
   const [src, setSrc] = useState('');
-  const router = useRouter()
-
+  const router = useRouter();
 
   useEffect(() => {
     if (!currentSermon) return;

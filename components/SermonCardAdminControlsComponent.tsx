@@ -11,9 +11,9 @@ import useAuth from '../context/user/UserContext';
 import Chip from '@mui/material/Chip';
 import dynamic from 'next/dynamic';
 
-const ManageUploadsPopup = dynamic(() => import('./ManageUploadsPopup'))
-const DeleteEntityPopup = dynamic(() => import('./DeleteEntityPopup'))
-const EditSermonForm = dynamic(() => import('./EditSermonForm'))
+const ManageUploadsPopup = dynamic(() => import('./ManageUploadsPopup'));
+const DeleteEntityPopup = dynamic(() => import('./DeleteEntityPopup'));
+const EditSermonForm = dynamic(() => import('./EditSermonForm'));
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
