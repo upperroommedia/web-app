@@ -44,6 +44,7 @@ import BibleChapterSelector from './BibleChapterSelector';
 import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/router';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -51,8 +52,11 @@ interface UploaderProps extends VerifiedUserUploaderProps {
   user: User;
 }
 
+const emptySermon = createEmptySermon();
+
 const Uploader = (props: UploaderProps) => {
   // ======================== START OF STATE ========================
+  const router = useRouter();
   const [sermon, setSermon] = useState<Sermon>(() => {
     if (props.existingSermon) {
       return props.existingSermon;
@@ -100,7 +104,35 @@ const Uploader = (props: UploaderProps) => {
     props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date()
   );
 
+  const [emptyListWithLatest, setEmptyListWithLatest] = useState<List[]>([]);
+
   // ======================== END OF STATE ========================
+
+  const sermonsEqual = useCallback(
+    (sermon1: Sermon, sermon2: Sermon): boolean => {
+      const sermon1Date = new Date(sermon1.dateMillis);
+      return (
+        sermon1.title === sermon2.title &&
+        sermon1.subtitle === sermon2.subtitle &&
+        sermon1.description === sermon2.description &&
+        sermon1Date.getDate() === date?.getDate() &&
+        sermon1Date.getMonth() === date?.getMonth() &&
+        sermon1Date.getFullYear() === date?.getFullYear() &&
+        JSON.stringify(sermon1.images) === JSON.stringify(sermon2.images) &&
+        JSON.stringify(sermon1.speakers) === JSON.stringify(sermon2.speakers) &&
+        JSON.stringify(sermon1.topics) === JSON.stringify(sermon2.topics)
+      );
+    },
+    [date]
+  );
+
+  const listEqual = (list1: List[], list2: List[]): boolean => {
+    return JSON.stringify(list1) === JSON.stringify(list2);
+  };
+
+  const sermonEdited =
+    !sermonsEqual(sermon, props.existingSermon || emptySermon) ||
+    !listEqual(sermonList, props.existingList || emptyListWithLatest);
 
   const addList = useCallback(
     (list: List) => {
@@ -136,7 +168,9 @@ const Uploader = (props: UploaderProps) => {
         );
         const latestSnap = await getDocs(latestQuery);
         if (latestSnap.docs.length > 0) {
-          addList(latestSnap.docs[0].data());
+          const latestList = latestSnap.docs[0].data();
+          setEmptyListWithLatest([latestList]);
+          addList(latestList);
         }
       }
     };
@@ -149,9 +183,26 @@ const Uploader = (props: UploaderProps) => {
     }
   }, [props.existingList]);
 
-  const listEqual = (list1: List[], list2: List[]): boolean => {
-    return JSON.stringify(list1) === JSON.stringify(list2);
-  };
+  useEffect(() => {
+    const warningText = 'You have unsaved changes - are you sure you wish to leave this page?';
+    const handleWindowClose = (e: BeforeUnloadEvent) => {
+      if (!sermonEdited) return;
+      e.preventDefault();
+      return (e.returnValue = warningText);
+    };
+    const handleBrowseAway = () => {
+      if (!sermonEdited) return;
+      if (window.confirm(warningText)) return;
+      router.events.emit('routeChangeError');
+      throw new Error('routeChange aborted.');
+    };
+    window.addEventListener('beforeunload', handleWindowClose);
+    router.events.on('routeChangeStart', handleBrowseAway);
+    return () => {
+      window.removeEventListener('beforeunload', handleWindowClose);
+      router.events.off('routeChangeStart', handleBrowseAway);
+    };
+  }, [router.events, sermonEdited]);
 
   const baseButtonDisabled =
     sermon.title === '' ||
@@ -164,20 +215,6 @@ const Uploader = (props: UploaderProps) => {
     isUploading ||
     isEditing;
 
-  const sermonsEqual = (sermon1: Sermon, sermon2: Sermon): boolean => {
-    const sermon1Date = new Date(sermon1.dateMillis);
-    return (
-      sermon1.title === sermon2.title &&
-      sermon1.subtitle === sermon2.subtitle &&
-      sermon1.description === sermon2.description &&
-      sermon1Date.getDate() === date?.getDate() &&
-      sermon1Date.getMonth() === date?.getMonth() &&
-      sermon1Date.getFullYear() === date?.getFullYear() &&
-      JSON.stringify(sermon1.images) === JSON.stringify(sermon.images) &&
-      JSON.stringify(sermon1.speakers) === JSON.stringify(sermon.speakers) &&
-      JSON.stringify(sermon1.topics) === JSON.stringify(sermon.topics)
-    );
-  };
   const clearAudioTrimmer = useCallback(() => {
     setFile(undefined);
     setTrimStart(0);

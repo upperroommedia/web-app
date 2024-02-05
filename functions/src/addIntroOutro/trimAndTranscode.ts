@@ -16,7 +16,8 @@ const trimAndTranscode = (
   duration?: number
 ): Promise<string> => {
   const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'), tempFiles);
-  const proc = ffmpeg().format('mp3').input(contentFile.createReadStream());
+  const inputStream = contentFile.createReadStream();
+  const proc = ffmpeg().format('mp3').input(inputStream);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
   proc
@@ -28,6 +29,13 @@ const trimAndTranscode = (
   let totalTimeMillis: number;
   let previousPercent = -1;
   return new Promise((resolve, reject) => {
+    inputStream.on('error', (error) => {
+      logger.error('Trim and Transcode input stream error:', error);
+      reject(error);
+    });
+    inputStream.on('end', () => {
+      logger.log('Trim and Transcode end of input stream');
+    });
     proc
       .on('start', function (commandLine) {
         logger.log('Trim And Transcode Spawned Ffmpeg with command: ' + commandLine);
