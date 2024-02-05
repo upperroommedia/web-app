@@ -33,6 +33,9 @@ const trimAndTranscode = (
       logger.error('Trim and Transcode input stream error:', error);
       reject(error);
     });
+    inputStream.on('response', (response) => {
+      logger.log('Trim and Transcode input stream response:', response);
+    });
     inputStream.on('end', () => {
       logger.log('Trim and Transcode end of input stream');
     });
