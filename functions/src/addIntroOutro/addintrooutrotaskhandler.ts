@@ -18,8 +18,8 @@ import {
   loadStaticFFMPEG,
   downloadFiles,
   getDurationSeconds,
-  uploadSermon,
   executeWithTimout,
+  createTempFile,
 } from './utils';
 import { TIMEOUT_SECONDS } from './consts';
 import trimAndTranscode from './trimAndTranscode';
@@ -81,6 +81,7 @@ const mainFunction = async (
         message: 'Getting Data',
       },
     });
+    const processedStoragePath = `${PROCESSED_SERMONS_BUCKET}/${fileName}`;
     const audioFilesToMerge: FilePaths = { INTRO: undefined, OUTRO: undefined };
     const customMetadata: CustomMetadata = { duration, title };
     if (introUrl) {
@@ -93,7 +94,10 @@ const mainFunction = async (
     }
     logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
     if (cancelToken.isCancellationRequested) return;
-    const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge, tempFiles);
+    const rawSourceFile = createTempFile(`raw-${fileName}`, tempFiles);
+    logger.log('Downloading raw audio source to', rawSourceFile);
+    await bucket.file(filePath).download({ destination: rawSourceFile });
+    logger.log('Successfully downloaded raw audio source');
     const trimMessage = skipTranscode ? 'Trimming' : 'Trimming and Transcoding';
     await docRef.update({
       status: {
@@ -102,34 +106,45 @@ const mainFunction = async (
         message: trimMessage,
       },
     });
-    let processedFilePath: string;
     if (skipTranscode) {
-      processedFilePath = await trim(
+      await trim(
         ffmpeg,
         cancelToken,
-        bucket.file(filePath),
+        rawSourceFile,
         tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
         startTime,
         duration
       );
     } else {
-      processedFilePath = await trimAndTranscode(
+      await trimAndTranscode(
         ffmpeg,
         cancelToken,
-        bucket.file(filePath),
-        tempFiles,
+        bucket,
+        rawSourceFile,
+        processedStoragePath,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
+        customMetadata,
         startTime,
         duration
       );
     }
-    await uploadSermon(processedFilePath, `${PROCESSED_SERMONS_BUCKET}/${fileName}`, bucket, customMetadata);
-    const originalAudioMetadata = await bucket.file(filePath).getMetadata();
-    const trimAndTranscodeMetadata = await bucket.file(`${PROCESSED_SERMONS_BUCKET}/${fileName}`).getMetadata();
-    logger.log('Original Audio Metadata', JSON.stringify(originalAudioMetadata));
-    logger.log(`${trimMessage} Metadata`, JSON.stringify(trimAndTranscodeMetadata));
-    await logMemoryUsage(`Memory Usage after ${trimMessage}:`);
+    // Delete raw audio from temp memory
+    await logMemoryUsage('Before raw audio delete memory:');
+    logger.log('Deleting raw audio temp file:', rawSourceFile);
+    await unlink(rawSourceFile);
+    tempFiles.delete(rawSourceFile);
+    logger.log('Successfully deleted raw audio temp file:', rawSourceFile);
+    await logMemoryUsage('After raw audio delete memory:');
+
+    // download processed audio for merging
+    const processedFilePath = createTempFile(`processed-${fileName}`, tempFiles);
+    logger.log('Downloading processed audio to', processedFilePath);
+    const [tempFilePaths] = await Promise.all([
+      await downloadFiles(bucket, audioFilesToMerge, tempFiles),
+      await bucket.file(processedStoragePath).download({ destination: processedFilePath }),
+    ]);
+    logger.log('Successfully downloaded processed audio');
     //create merge array in order INTRO, CONTENT, OUTRO
     const filePathsArray: string[] = [];
     if (tempFilePaths.INTRO) filePathsArray.push(tempFilePaths.INTRO);
@@ -155,7 +170,6 @@ const mainFunction = async (
           message: 'Adding Intro and Outro',
         },
       });
-      logger.log('Merging audio files', JSON.stringify(tempFilePaths));
       const outputFileName = `intro_outro-${fileName}`;
       const outputFilePath = `intro-outro-sermons/${path.basename(fileName)}`;
       //merge files

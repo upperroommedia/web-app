@@ -3,20 +3,19 @@ import path from 'path';
 import { Reference } from 'firebase-admin/database';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { File } from '@google-cloud/storage';
 import { convertStringToMilliseconds, createTempFile } from './utils';
 
 const trimAndTranscode = (
   ffmpeg: typeof import('fluent-ffmpeg'),
   cancelToken: CancelToken,
-  contentFile: File,
+  filePath: string,
   tempFiles: Set<string>,
   realtimeDBRef: Reference,
   startTime?: number,
   duration?: number
 ): Promise<string> => {
   const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'), tempFiles);
-  const proc = ffmpeg().input(contentFile.createReadStream());
+  const proc = ffmpeg().input(filePath);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
   proc.outputOption('-c copy');

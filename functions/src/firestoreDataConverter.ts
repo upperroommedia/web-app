@@ -15,11 +15,12 @@ export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
     const { date, ...data } = snapshot.data();
+    const currentTime = Timestamp.now();
     return {
       ...createEmptySermon(),
       ...data,
-      dateMillis: date.toMillis(),
-      dateString: getDateString(date.toDate()),
+      dateMillis: date?.toMillis() || currentTime.toMillis(),
+      dateString: getDateString(date?.toDate() || currentTime.toDate()),
       id: snapshot.id,
     };
   },

@@ -1,23 +1,40 @@
 import { CancelToken } from './CancelToken';
-import path from 'path';
+import { Bucket, File } from '@google-cloud/storage';
 import { Reference } from 'firebase-admin/database';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { File } from '@google-cloud/storage';
-import { convertStringToMilliseconds, createTempFile } from './utils';
+import { convertStringToMilliseconds } from './utils';
+import { CustomMetadata } from './types';
+
+const throwErrorOnSpecificStderr = (stderrLine: string) => {
+  const errorMessages = ['Invalid data', 'Output file is empty'];
+  for (const errorMessage of errorMessages) {
+    if (stderrLine.includes(errorMessage)) {
+      throw new Error(`Ffmpeg error: ${errorMessage} found in stderr: ${stderrLine}`);
+    }
+  }
+};
 
 const trimAndTranscode = (
   ffmpeg: typeof import('fluent-ffmpeg'),
   cancelToken: CancelToken,
-  contentFile: File,
-  tempFiles: Set<string>,
+  bucket: Bucket,
+  filePath: string,
+  outputFilePath: string,
   realtimeDBRef: Reference,
+  customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number
-): Promise<string> => {
-  const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'), tempFiles);
-  const inputStream = contentFile.createReadStream();
-  const proc = ffmpeg().format('mp3').input(inputStream);
+): Promise<File> => {
+  const outputFile = bucket.file(outputFilePath);
+  const contentDisposition = customMetadata.title
+    ? `inline; filename="${customMetadata.title}.mp3"`
+    : 'inline; filename="untitled.mp3"';
+  const writeStream = outputFile.createWriteStream({
+    contentType: 'audio/mpeg',
+    metadata: { contentDisposition, metadata: customMetadata },
+  });
+  const proc = ffmpeg().format('mp3').input(filePath);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
   proc
@@ -29,23 +46,13 @@ const trimAndTranscode = (
   let totalTimeMillis: number;
   let previousPercent = -1;
   return new Promise((resolve, reject) => {
-    inputStream.on('error', (error) => {
-      logger.error('Trim and Transcode input stream error:', error);
-      reject(error);
-    });
-    inputStream.on('response', (response) => {
-      logger.log('Trim and Transcode input stream response:', response);
-    });
-    inputStream.on('end', () => {
-      logger.log('Trim and Transcode end of input stream');
-    });
     proc
       .on('start', function (commandLine) {
         logger.log('Trim And Transcode Spawned Ffmpeg with command: ' + commandLine);
       })
       .on('end', async () => {
         logger.log('Finished Trim and Transcode');
-        resolve(tmpFilePath);
+        resolve(outputFile);
       })
       .on('error', (err) => {
         logger.error('Trim and Transcode Error:', err);
@@ -56,7 +63,16 @@ const trimAndTranscode = (
         console.log('Total duration: ' + data.duration);
         totalTimeMillis = convertStringToMilliseconds(data.duration);
       })
+      .on('stderr', (stderrLine) => {
+        logger.debug('Ffmpeg stdout:', stderrLine);
+        try {
+          throwErrorOnSpecificStderr(stderrLine);
+        } catch (err) {
+          reject(err);
+        }
+      })
       .on('progress', async (progress) => {
+        logger.debug('Trim and Transcode progress:', progress);
         if (cancelToken.isCancellationRequested) {
           logger.log('Cancellation requested, killing ffmpeg process');
           proc.kill('SIGTERM'); // this sends a termination signal to the process
@@ -75,7 +91,7 @@ const trimAndTranscode = (
           realtimeDBRef.set(percent);
         }
       })
-      .saveToFile(tmpFilePath);
+      .pipe(writeStream);
   });
 };
 
