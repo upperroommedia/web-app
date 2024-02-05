@@ -45,7 +45,7 @@ const uploadFile = async (props: uploadFileProps) => {
     uploadBytesResumable(sermonRef, props.file.file, metadata).on(
       'state_changed',
       (snapshot) => {
-        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 98;
         props.setUploadProgress({ error: false, percent: Math.round(progress), message: 'Uploading...' });
         switch (snapshot.state) {
           case 'paused':
@@ -71,7 +71,7 @@ const uploadFile = async (props: uploadFileProps) => {
           batch.set(seriesSermonRef, props.sermon);
         });
         await batch.commit();
-        props.setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
+        props.setUploadProgress({ error: false, message: 'Starting Audio Processing', percent: 99 });
         try {
           const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
           const data: AddIntroOutroInputType = {
@@ -83,6 +83,7 @@ const uploadFile = async (props: uploadFileProps) => {
             outroUrl: outroRef,
           };
           await generateAddIntroOutroTask(data);
+          props.setUploadProgress({ error: false, message: 'Upload Successful', percent: 100 });
           resolve();
         } catch (e) {
           // eslint-disable-next-line no-console
