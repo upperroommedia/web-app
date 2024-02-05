@@ -223,6 +223,7 @@ const Uploader = (props: UploaderProps) => {
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
     setSermon(createEmptySermon(props.user.uid));
+    setEmptyListWithLatest([]);
     setSermonList([]);
     setDate(new Date());
     clearAudioTrimmer();
