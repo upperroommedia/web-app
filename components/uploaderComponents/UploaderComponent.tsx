@@ -186,12 +186,12 @@ const Uploader = (props: UploaderProps) => {
   useEffect(() => {
     const warningText = 'You have unsaved changes - are you sure you wish to leave this page?';
     const handleWindowClose = (e: BeforeUnloadEvent) => {
-      if (!sermonEdited) return;
+      if (!sermonEdited && !isUploading) return;
       e.preventDefault();
       return (e.returnValue = warningText);
     };
     const handleBrowseAway = () => {
-      if (!sermonEdited) return;
+      if (!sermonEdited && !isUploading) return;
       if (window.confirm(warningText)) return;
       router.events.emit('routeChangeError');
       throw new Error('routeChange aborted.');
@@ -202,7 +202,7 @@ const Uploader = (props: UploaderProps) => {
       window.removeEventListener('beforeunload', handleWindowClose);
       router.events.off('routeChangeStart', handleBrowseAway);
     };
-  }, [router.events, sermonEdited]);
+  }, [router.events, sermonEdited, isUploading]);
 
   const baseButtonDisabled =
     sermon.title === '' ||
