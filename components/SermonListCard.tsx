@@ -133,35 +133,35 @@ const SermonListCard: FunctionComponent<Props> = ({
             {trackProgressComponent}
           </Box>
           <CardActions sx={{ gridArea: 'actionItems', margin: 0, padding: 0 }}>
-            {sermon.status.audioStatus === sermonStatusType.PROCESSED ? (
-              <AdminControls
-                sermon={sermon}
-                audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
-                audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
-              />
-            ) : (
-              <Box style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: 0 }}>
+            <Box style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: 0 }}>
+                {sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
                   <Typography variant="subtitle1" sx={{ margin: 0 }}>
                     {sermon.status.audioStatus}
                   </Typography>
-                  {sermon.status.message && (
-                    <Typography
-                      sx={{
-                        whiteSpace: 'nowrap',
-                        color: 'red',
-                        fontSize: { xs: '0.5rem', sm: '0.6rem', md: '.7rem' },
-                      }}
-                    >
-                      {sermon.status.message}
-                    </Typography>
-                  )}
-                  {sermon.status.audioStatus === sermonStatusType.PROCESSING && snapshot !== undefined && (
-                    <CircularProgressWithLabel value={Number(snapshot.val())} />
-                  )}
-                </Box>
+                )}
+                {sermon.status.message && (
+                  <Typography
+                    sx={{
+                      whiteSpace: 'nowrap',
+                      color: 'red',
+                      fontSize: { xs: '0.5rem', sm: '0.6rem', md: '.7rem' },
+                    }}
+                  >
+                    {sermon.status.message}
+                  </Typography>
+                )}
+                {sermon.status.audioStatus === sermonStatusType.PROCESSING && snapshot !== undefined ? (
+                  <CircularProgressWithLabel value={Number(snapshot.val())} />
+                ) : (
+                  <AdminControls
+                    sermon={sermon}
+                    audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
+                    audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
+                  />
+                )}
               </Box>
-            )}
+            </Box>
           </CardActions>
         </Card>
       </ListItem>
