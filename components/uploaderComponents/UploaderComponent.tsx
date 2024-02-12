@@ -162,6 +162,7 @@ const Uploader = (props: UploaderProps) => {
     sermon.description === '' ||
     (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
     (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
+    sermon.durationSeconds <= 0 ||
     isUploading ||
     isEditing;
 
@@ -426,6 +427,7 @@ const Uploader = (props: UploaderProps) => {
                     const pendingSermon = sermon;
                     if (hasTrimmed) {
                       pendingSermon.status.audioStatus = sermonStatusType.PENDING;
+                      pendingSermon.status.message = '';
                       const generateAddIntroOutroTask =
                         createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
                       const { introRef, outroRef } = await getIntroAndOutro(sermon);
@@ -489,7 +491,13 @@ const Uploader = (props: UploaderProps) => {
                     label="Upload from Youtube Url"
                   />
                   {useYouTubeUrl ? (
-                    <YouTubeTrimmer setAudioSource={setAudioSource} />
+                    <YouTubeTrimmer
+                      trimStart={trimStart}
+                      duration={sermon.durationSeconds}
+                      setTrimStart={setTrimStart}
+                      setDuration={setTrimDuration}
+                      setAudioSource={setAudioSource}
+                    />
                   ) : (
                     <DropZone setAudioSource={setAudioSource} />
                   )}

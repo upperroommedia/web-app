@@ -16,11 +16,13 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import useTheme from '@mui/system/useTheme';
 import { ErrorBoundary } from 'react-error-boundary';
+import ErrorIcon from '@mui/icons-material/Error';
 
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
 import PlayButton from './PlayButton';
+import Tooltip from '@mui/material/Tooltip';
 
 interface Props {
   sermon: Sermon;
@@ -136,11 +138,18 @@ const SermonListCard: FunctionComponent<Props> = ({
             <Box style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
               <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: 0 }}>
                 {sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
-                  <Typography variant="subtitle1" sx={{ margin: 0 }}>
-                    {sermon.status.audioStatus}
-                  </Typography>
+                  <Box display='flex' gap={1}>
+                    <Typography variant="subtitle1" sx={{ margin: 0 }}>
+                      {sermon.status.audioStatus}
+                    </Typography>
+                    {sermon.status.audioStatus === sermonStatusType.ERROR && sermon.status.message && (
+                      <Tooltip title={sermon.status.message} placement="top">
+                        <ErrorIcon color='error' />
+                      </Tooltip>
+                    )}
+                  </Box>
                 )}
-                {sermon.status.message && (
+                {sermon.status.audioStatus === sermonStatusType.PROCESSING && sermon.status.message && (
                   <Typography
                     sx={{
                       whiteSpace: 'nowrap',

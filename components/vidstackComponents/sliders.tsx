@@ -56,18 +56,18 @@ export function Time({ thumbnails }: TimeSliderProps) {
 const minDistance = 5;
 interface CustomSliderProps {
   startTime: number;
-  endTime: number;
   setStartTime: Dispatch<SetStateAction<number>>;
-  setEndTime: Dispatch<SetStateAction<number>>;
+  setDuration: (duration: number) => void;
 }
 
-export function CustomSlider({ startTime, endTime, setStartTime, setEndTime }: CustomSliderProps) {
+export function CustomSlider({ startTime, setStartTime, setDuration }: CustomSliderProps) {
   const time = useMediaState('currentTime');
-  const duration = useMediaState('duration');
+  const mediaStateDuration = useMediaState('duration');
   const seeking = useMediaState('seeking');
   const remote = useMediaRemote();
-  const [value, setValue, valueRef] = useStateRef([startTime, time, endTime]);
+  const [value, setValue, valueRef] = useStateRef([startTime, time, startTime + mediaStateDuration]);
   const activeIndexRef = useRef(0);
+  const changeCommited = useRef(false);
 
   // Keep slider value in-sync with playback.
   useEffect(() => {
@@ -84,33 +84,39 @@ export function CustomSlider({ startTime, endTime, setStartTime, setEndTime }: C
 
   useEffect(() => {
     setValue((previousValue) => {
-      previousValue[2] = duration;
+      previousValue[2] = mediaStateDuration;
       return previousValue;
     });
-    setEndTime(duration);
-  }, [duration, setEndTime, setValue]);
+    setDuration(mediaStateDuration);
+  }, [mediaStateDuration, setDuration, setValue]);
 
   const updateValue = useCallback(
     (newValue: number[]) => {
       setValue(newValue);
       setStartTime(newValue[0]);
-      setEndTime(newValue[2]);
+      setDuration(newValue[2] - newValue[0]);
     },
-    [setValue, setStartTime, setEndTime]
+    [setValue, setStartTime, setDuration]
   );
 
   const handleOnChange = useCallback(
     (e: Event, newValue: number | number[], activeIndex: number) => {
-      activeIndexRef.current = activeIndex;
+      if (changeCommited.current) {
+        activeIndexRef.current = activeIndex;
+      }
+      changeCommited.current = false;
       if (!Array.isArray(newValue)) return;
-      if (activeIndex === 0) {
-        updateValue([newValue[0], newValue[0] + minDistance, newValue[2]]);
-      } else if (activeIndex === 1) {
+      const newChangedValue = newValue[activeIndex];
+      let newTime: number;
+      if (activeIndexRef.current === 0) {
+        newTime = newChangedValue + minDistance;
+        updateValue([newChangedValue, newTime, newValue[2]]);
+      } else if (activeIndexRef.current === 1) {
         let startTime = newValue[0];
-        let newTime = newValue[1];
+        newTime = newChangedValue;
         let endTime = newValue[2];
         if (endTime - newTime < minDistance) {
-          const clamped = Math.min(newTime, duration - minDistance);
+          const clamped = Math.min(newTime, mediaStateDuration - minDistance);
           endTime = clamped + minDistance;
           newTime = clamped;
         } else if (newTime - startTime < minDistance) {
@@ -118,18 +124,20 @@ export function CustomSlider({ startTime, endTime, setStartTime, setEndTime }: C
           startTime = clamped - minDistance;
           newTime = clamped;
         }
-        remote.seeking(newTime);
 
         updateValue([startTime, newTime, endTime]);
-      } else if (activeIndex === 2) {
-        updateValue([newValue[0], newValue[2] - minDistance, newValue[2]]);
+      } else {
+        newTime = newChangedValue - minDistance;
+        updateValue([newValue[0], newTime, newChangedValue]);
       }
+      remote.seeking(newTime);
     },
-    [updateValue, remote, duration]
+    [updateValue, remote, mediaStateDuration]
   );
 
   const handleOnChangeCommitted = useCallback(
     (e: Event | SyntheticEvent<Element, Event>, value: number | number[]) => {
+      changeCommited.current = true;
       if (!Array.isArray(value)) return;
       let newTime = value[1];
       if (activeIndexRef.current === 0) {
@@ -148,13 +156,12 @@ export function CustomSlider({ startTime, endTime, setStartTime, setEndTime }: C
   return (
     <Slider
       min={0}
-      max={duration}
+      max={mediaStateDuration}
       value={value}
       onChange={handleOnChange}
       onChangeCommitted={handleOnChangeCommitted}
       valueLabelFormat={formatTime}
       valueLabelDisplay="on"
-      disableSwap
       sx={{
         color: 'rgb(254, 148, 26)',
         height: 4,

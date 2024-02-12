@@ -1,10 +1,8 @@
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
-import { Dispatch, FunctionComponent, SetStateAction, useState } from 'react';
+import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import Typography from '@mui/material/Typography';
 import {
-  MediaCanPlayDetail,
-  MediaCanPlayEvent,
   MediaPlayer,
   MediaProvider,
   MediaProviderAdapter,
@@ -13,36 +11,60 @@ import {
 } from '@vidstack/react';
 import styles from '../styles/AudioTrimmer.module.css';
 import { VideoLayout } from './vidstackComponents/VideoLayout';
-import { CustomSlider } from './vidstackComponents/sliders';
 import { formatTime } from '../utils/audioUtils';
 import { AudioSource } from '../pages/api/uploadFile';
+import CircularProgress from '@mui/material/CircularProgress';
 
 interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
+  trimStart: number;
+  duration: number;
+  setTrimStart: Dispatch<SetStateAction<number>>;
+  setDuration: (duration: number) => void;
 }
 
-const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({ setAudioSource }) => {
+const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
+  setAudioSource,
+  trimStart,
+  duration,
+  setTrimStart,
+  setDuration,
+}) => {
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState('');
-  const [showMediaPlayer, setShowMediaPlayer] = useState(false);
   const [isLoading, _setIsLoading] = useState(false);
-  const [startTime, setStartTime] = useState(0);
-  const [endTime, setEndTime] = useState(0);
+  const [isValidYouTubeUrl, setIsValidYouTubeUrl] = useState(false);
 
   function onProviderChange(provider: MediaProviderAdapter | null, _nativeEvent: MediaProviderChangeEvent) {
     // We can configure provider's here.
     if (isYouTubeProvider(provider)) {
       // console.log('provider', provider);
       setAudioSource({ source: inputText, type: 'YoutubeUrl' });
-      setShowMediaPlayer(true);
     }
   }
 
-  // We can listen for the `can-play` event to be notified when the player is ready.
-  function onCanPlay(_detail: MediaCanPlayDetail, _nativeEvent: MediaCanPlayEvent) {
-    // console.log('can play detail', detail);
-    setShowMediaPlayer(true);
-  }
+  // write a function that will set an error after 10 seconds which gets reset when the user types
+  useEffect(() => {
+    if (isValidYouTubeUrl || !inputText.trim()) return;
+    const timeoutId = setTimeout(() => {
+      if (!isValidYouTubeUrl) {
+        setError('Could not find YouTube video, please make sure the link is valid');
+      }
+    }, 3000);
+
+    return () => {
+      setError('');
+      clearTimeout(timeoutId);
+    };
+  }, [inputText, isValidYouTubeUrl]);
+
+  useEffect(() => {
+    if (trimStart + duration > 0) {
+      setIsValidYouTubeUrl(true);
+    } else {
+      setIsValidYouTubeUrl(false);
+    }
+  }, [trimStart, duration]);
 
   return (
     <Box display="flex" width={1} flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
@@ -62,47 +84,39 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({ setAudioSource
           disabled={isLoading}
           onChange={(e) => {
             setInputText(e.target.value);
+            setTrimStart(0);
             // setShowMediaPlayer(false)
             if (error) {
-              setError('');
+              setError(error);
             }
           }}
         />
       </Box>
-      {error && (
+      {error ? (
         <Typography variant="caption" color="red">
           {error}
         </Typography>
+      ) : (
+        !isValidYouTubeUrl && inputText.trim() && <CircularProgress />
       )}
-      {/* TODO: FIND A WAY TO KNOW WHEN A VALID VIDEO IS LOADED */}
       <MediaPlayer
         className={`${styles.player} media-player`}
         src={inputText}
+        load="eager"
         onProviderChange={onProviderChange}
-        onCanPlay={onCanPlay}
         hideControlsOnMouseLeave={false}
-        hidden={false}
-        // onWaiting={() => console.log('waiting')}
-        // onInvalid={() => console.log('invalid')}
-        // onError={() => console.log('YOUSSEF error')}
-        // onErrorCapture={() => console.log('error capture')}
-        // onSourceChange={() => console.log('source change')}
-        // onLoadedMetadata={() => console.log('loaded metadata')}
-        crossorigin
-        playsinline
+        controlsDelay={10000000000000}
+        crossOrigin
+        playsInline
         viewType="video"
-        style={{ display: showMediaPlayer ? 'block' : 'none' }}
+        style={{ display: isValidYouTubeUrl ? 'block' : 'none' }}
       >
         <MediaProvider></MediaProvider>
-        <VideoLayout
-          customSlider={
-            <CustomSlider startTime={startTime} endTime={endTime} setStartTime={setStartTime} setEndTime={setEndTime} />
-          }
-        />
+        <VideoLayout startTime={trimStart} duration={duration} setStartTime={setTrimStart} setDuration={setDuration} />
       </MediaPlayer>
       <Box display="flex" width={1} justifyContent="space-around" gap={1}>
-        <p>Start Time: {formatTime(startTime)}</p>
-        <p>End Time: {formatTime(endTime)}</p>
+        <p>Start Time: {formatTime(trimStart)}</p>
+        <p>End Time: {formatTime(trimStart + duration)}</p>
       </Box>
     </Box>
   );

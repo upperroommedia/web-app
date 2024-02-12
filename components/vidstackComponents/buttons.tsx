@@ -16,10 +16,12 @@ import {
   FullscreenExitIcon,
   FullscreenIcon,
   MuteIcon,
+  NextIcon,
   PauseIcon,
   PictureInPictureExitIcon,
   PictureInPictureIcon,
   PlayIcon,
+  PreviousIcon,
   SeekBackward10Icon,
   SeekForward10Icon,
   VolumeHighIcon,
@@ -123,6 +125,32 @@ export function Seek({ seconds, tooltipPlacement }: SeekButtonProps) {
       </Tooltip.Trigger>
       <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
         {isBackward ? 'Seek Backward' : 'Seek Forward'}
+      </Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+export interface CustomSeekButtonProps extends MediaButtonProps {
+  startTime: number;
+  duration: number;
+  forward: boolean;
+}
+export function CustomSeek({ startTime, duration, forward, tooltipPlacement }: CustomSeekButtonProps) {
+  const time = useMediaState('currentTime');
+  let secondsToSeek: number;
+  if (forward) {
+    secondsToSeek = Math.max(startTime + duration - 5, startTime) - time;
+  } else {
+    secondsToSeek = startTime - time;
+  }
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <SeekButton className="vds-button" seconds={secondsToSeek}>
+          {forward ? <NextIcon /> : <PreviousIcon />}
+        </SeekButton>
+      </Tooltip.Trigger>
+      <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
+        {forward ? 'Jump to End' : 'Jump to Start'}
       </Tooltip.Content>
     </Tooltip.Root>
   );
