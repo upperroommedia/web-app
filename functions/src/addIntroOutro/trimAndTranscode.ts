@@ -7,7 +7,7 @@ import { convertStringToMilliseconds } from './utils';
 import { CustomMetadata } from './types';
 
 const throwErrorOnSpecificStderr = (stderrLine: string) => {
-  const errorMessages = ['Invalid data', 'Output file is empty'];
+  const errorMessages = ['Output file is empty'];
   for (const errorMessage of errorMessages) {
     if (stderrLine.includes(errorMessage)) {
       throw new Error(`Ffmpeg error: ${errorMessage} found in stderr: ${stderrLine}`);
