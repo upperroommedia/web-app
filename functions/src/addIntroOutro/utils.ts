@@ -12,6 +12,15 @@ import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 
+export const throwErrorOnSpecificStderr = (stderrLine: string) => {
+  const errorMessages = ['Output file is empty'];
+  for (const errorMessage of errorMessages) {
+    if (stderrLine.includes(errorMessage)) {
+      throw new Error(`Ffmpeg error: ${errorMessage} found in stderr: ${stderrLine}`);
+    }
+  }
+};
+
 export const logMemoryUsage = async (message: string) => {
   const memoryUsage = process.memoryUsage();
   const tempDir = os.tmpdir();

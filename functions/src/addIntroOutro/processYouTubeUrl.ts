@@ -3,16 +3,17 @@ import { YouTubeUrl } from './types';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { spawn } from 'node:child_process';
 import { logger } from 'firebase-functions/v2';
+import { Writable } from 'stream';
 
 export const processYouTubeUrl = (
   ytdlpPath: string,
   url: YouTubeUrl,
   cancelToken: CancelToken,
-  outputFilePath: string,
+  outputWritableStream: Writable,
   startTime?: number,
   duration?: number,
   ffmpegOptions?: string[]
-): Promise<string> => {
+): Promise<void> => {
   return new Promise((resolve, reject) => {
     logger.log('Streaming audio from youtube video:', url);
     if (cancelToken.isCancellationRequested) {
@@ -20,7 +21,7 @@ export const processYouTubeUrl = (
     }
     let totalBytes = 0;
     //pipes output to stdout
-    const args = ['-f', 'bestaudio', '-x', '--audio-format', 'mp3', '-o', outputFilePath];
+    const args = ['-f', 'bestaudio', '-x', '--audio-format', 'mp3', '-o', '-'];
     if (startTime || duration) {
       args.push('--download-sections');
       const startTimeCommand = startTime || 0;
@@ -47,7 +48,7 @@ export const processYouTubeUrl = (
     ytdlp.stdout.on('end', () => {
       logger.log('ytdlp stdout ended');
       logger.log('Number of MB streamed', totalBytes / (1024 * 1024));
-      resolve(outputFilePath);
+      resolve();
     });
 
     ytdlp.stderr?.on('data', (data) => {
@@ -57,5 +58,7 @@ export const processYouTubeUrl = (
     ytdlp.stdout?.on('data', (data) => {
       totalBytes += data.length;
     });
+
+    ytdlp.stdout.pipe(outputWritableStream);
   });
 };

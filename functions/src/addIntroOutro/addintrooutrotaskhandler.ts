@@ -18,8 +18,8 @@ import {
   loadStaticFFMPEG,
   downloadFiles,
   getDurationSeconds,
-  uploadSermon,
   executeWithTimout,
+  createTempFile,
   validateAddIntroOutroData,
   getAudioSource,
 } from './utils';
@@ -83,6 +83,7 @@ const mainFunction = async (
         message: 'Getting Data',
       },
     });
+    const processedStoragePath = `${PROCESSED_SERMONS_BUCKET}/${fileName}`;
     const audioFilesToMerge: FilePaths = { INTRO: undefined, OUTRO: undefined };
     const customMetadata: CustomMetadata = { duration, title };
     if (introUrl) {
@@ -95,7 +96,6 @@ const mainFunction = async (
     }
     logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
     if (cancelToken.isCancellationRequested) return;
-    const tempFilePaths = await downloadFiles(bucket, audioFilesToMerge, tempFiles);
     const trimMessage = skipTranscode ? 'Trimming' : 'Trimming and Transcoding';
     await docRef.update({
       status: {
@@ -104,7 +104,6 @@ const mainFunction = async (
         message: trimMessage,
       },
     });
-    let processedFilePath: string;
     if (skipTranscode) {
       if (audioSource.type !== 'StorageFilePath') {
         throw new HttpsError(
@@ -112,28 +111,41 @@ const mainFunction = async (
           'Audio source must be a file from processed-sermons in order to trim without transcoding'
         );
       }
-      processedFilePath = await trim(
+      await trim(
         ffmpeg,
         cancelToken,
-        bucket.file(audioSource.source),
+        bucket,
+        audioSource.source,
+        processedStoragePath,
         tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
+        customMetadata,
         startTime,
         duration
       );
     } else {
-      processedFilePath = await trimAndTranscode(
+      await trimAndTranscode(
         ffmpeg,
         cancelToken,
-        audioSource.type === 'StorageFilePath' ? bucket.file(audioSource.source) : audioSource.source,
+        bucket,
+        audioSource,
+        processedStoragePath,
         tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
+        customMetadata,
         startTime,
         duration
       );
     }
-    await uploadSermon(processedFilePath, `${PROCESSED_SERMONS_BUCKET}/${fileName}`, bucket, customMetadata);
-    await logMemoryUsage(`Memory Usage after ${trimMessage}:`);
+
+    // download processed audio for merging
+    const processedFilePath = createTempFile(`processed-${fileName}`, tempFiles);
+    logger.log('Downloading processed audio to', processedFilePath);
+    const [tempFilePaths] = await Promise.all([
+      await downloadFiles(bucket, audioFilesToMerge, tempFiles),
+      await bucket.file(processedStoragePath).download({ destination: processedFilePath }),
+    ]);
+    logger.log('Successfully downloaded processed audio');
     //create merge array in order INTRO, CONTENT, OUTRO
     const filePathsArray: string[] = [];
     if (tempFilePaths.INTRO) filePathsArray.push(tempFilePaths.INTRO);
@@ -159,7 +171,6 @@ const mainFunction = async (
           message: 'Adding Intro and Outro',
         },
       });
-      logger.log('Merging audio files', JSON.stringify(tempFilePaths));
       const outputFileName = `intro_outro-${fileName}`;
       const outputFilePath = `intro-outro-sermons/${path.basename(fileName)}`;
       //merge files

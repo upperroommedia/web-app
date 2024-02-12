@@ -58,6 +58,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
 
   const uploadToSubsplash = async (listsToUploadTo: SermonList[]) => {
     try {
+      const subsplashIdToListIdMap = new Map<string, string>();
       const uploadToSubsplashCallable = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
@@ -87,6 +88,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
       const listsMetadata = await Promise.all(
         listsToUploadTo.map(async (list) => {
           if (list.subsplashId) {
+            subsplashIdToListIdMap.set(list.subsplashId, list.id);
             return { listId: list.subsplashId, overflowBehavior: list.overflowBehavior, type: list.type };
           }
           // upload series to subsplash
@@ -100,6 +102,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
             images: list.images,
           });
           await updateDoc(doc(firestore, `lists/${list.id}`), { subsplashId: listId });
+          subsplashIdToListIdMap.set(listId, list.id);
           return { listId, overflowBehavior: list.overflowBehavior, type: list.type };
         })
       );
@@ -112,9 +115,11 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
       const batch = writeBatch(firestore);
 
       addToListReturn.forEach((r) => {
-        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${r.listId}`).withConverter(
-          sermonListConverter
-        );
+        const listId = subsplashIdToListIdMap.get(r.listId);
+        if (!listId) {
+          throw new Error(`ListId for subsplashList ${r.listId} not found`);
+        }
+        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`).withConverter(sermonListConverter);
         if (r.status === 'success') {
           batch.update(docRef, { uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId } });
         } else {

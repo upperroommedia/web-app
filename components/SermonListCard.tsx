@@ -138,13 +138,13 @@ const SermonListCard: FunctionComponent<Props> = ({
             <Box style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
               <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: 0 }}>
                 {sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
-                  <Box display='flex' gap={1}>
+                  <Box display="flex" gap={1}>
                     <Typography variant="subtitle1" sx={{ margin: 0 }}>
                       {sermon.status.audioStatus}
                     </Typography>
                     {sermon.status.audioStatus === sermonStatusType.ERROR && sermon.status.message && (
                       <Tooltip title={sermon.status.message} placement="top">
-                        <ErrorIcon color='error' />
+                        <ErrorIcon color="error" />
                       </Tooltip>
                     )}
                   </Box>
