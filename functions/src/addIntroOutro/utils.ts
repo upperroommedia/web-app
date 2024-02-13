@@ -16,7 +16,7 @@ export const throwErrorOnSpecificStderr = (stderrLine: string) => {
   const errorMessages = ['Output file is empty'];
   for (const errorMessage of errorMessages) {
     if (stderrLine.includes(errorMessage)) {
-      throw new Error(`Ffmpeg error: ${errorMessage} found in stderr: ${stderrLine}`);
+      throw new HttpsError('internal', `Ffmpeg error: ${errorMessage} found in stderr: ${stderrLine}`);
     }
   }
 };
