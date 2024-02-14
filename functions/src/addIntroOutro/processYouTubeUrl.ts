@@ -23,7 +23,7 @@ export const processYouTubeUrl = (
   }
   let totalBytes = 0;
   //pipes output to stdout
-  const args = ['-f', 'bestaudio', '-x', '--audio-format', 'mp3', '-N 4', '-o', '-'];
+  const args = ['-f', 'bestaudio', '-N 4', '-o', '-'];
   args.push(url);
 
   // Log the actual command
