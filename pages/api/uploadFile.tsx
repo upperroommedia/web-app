@@ -70,7 +70,11 @@ const uploadFile = async (props: UploadFileProps) => {
   );
 
   if (audioSource.type === 'YoutubeUrl') {
-    await addFirestoreDocument(props.sermon, props.sermonList, props.setUploadProgress);
+    await addFirestoreDocument(
+      { ...props.sermon, youtubeUrl: audioSource.source },
+      props.sermonList,
+      props.setUploadProgress
+    );
     try {
       const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
       const data: AddIntroOutroInputType = {
