@@ -21,17 +21,30 @@ export default function RetryProcessButton({ sermon }: RetryProcessButtonProps) 
     try {
       setLoading(true);
       const { introRef, outroRef } = await getIntroAndOutro(sermon);
-      const storageRef = ref(storage, `sermons/${sermon.id}`);
+      let data: AddIntroOutroInputType;
+      if (sermon.youtubeUrl) {
+        data = {
+          id: sermon.id,
+          youtubeUrl: sermon.youtubeUrl,
+          startTime: 0,
+          duration: sermon.durationSeconds,
+          deleteOriginal: true,
+          introUrl: introRef,
+          outroUrl: outroRef,
+        };
+      } else {
+        const storageRef = ref(storage, `sermons/${sermon.id}`);
+        data = {
+          id: sermon.id,
+          storageFilePath: storageRef.fullPath,
+          startTime: 0,
+          duration: sermon.durationSeconds,
+          deleteOriginal: true,
+          introUrl: introRef,
+          outroUrl: outroRef,
+        };
+      }
       const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-      const data: AddIntroOutroInputType = {
-        id: sermon.id,
-        storageFilePath: storageRef.fullPath,
-        startTime: 0,
-        duration: sermon.durationSeconds,
-        deleteOriginal: true,
-        introUrl: introRef,
-        outroUrl: outroRef,
-      };
       await generateAddIntroOutroTask(data);
     } catch (e) {
       let errorMessage: string;

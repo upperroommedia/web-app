@@ -41,4 +41,5 @@ export interface Sermon {
   approverId?: string;
   createdAtMillis: number;
   editedAtMillis: number;
+  youtubeUrl?: string;
 }
