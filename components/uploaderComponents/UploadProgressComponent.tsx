@@ -28,7 +28,7 @@ export default function UploadProgressComponent({
       )}
       {uploadProgress.message && (
         <Typography sx={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
-          {!uploadProgress.error && uploadProgress.percent < 100
+          {!uploadProgress.error && uploadProgress.percent < 100 && audioSource?.type === 'YoutubeUrl'
             ? `${uploadProgress.percent}%`
             : uploadProgress.message}
         </Typography>
