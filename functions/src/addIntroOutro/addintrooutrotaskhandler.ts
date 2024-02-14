@@ -99,7 +99,11 @@ const mainFunction = async (
     }
     logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
     if (cancelToken.isCancellationRequested) return;
-    const trimMessage = skipTranscode ? 'Trimming' : 'Trimming and Transcoding';
+    const trimMessage = skipTranscode
+      ? 'Trimming'
+      : audioSource.type === 'StorageFilePath'
+      ? 'Trimming and Transcoding'
+      : 'Downloading YouTube Audio';
     await docRef.update({
       status: {
         ...sermonStatus,
@@ -136,6 +140,8 @@ const mainFunction = async (
         processedStoragePath,
         tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
+        docRef,
+        sermonStatus,
         customMetadata,
         startTime,
         duration

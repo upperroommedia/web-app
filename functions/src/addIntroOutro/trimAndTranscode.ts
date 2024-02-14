@@ -9,6 +9,7 @@ import { processYouTubeUrl } from './processYouTubeUrl';
 import { unlink } from 'fs/promises';
 import { PassThrough, Readable } from 'stream';
 import { ChildProcessWithoutNullStreams } from 'child_process';
+import { sermonStatus, sermonStatusType } from '../../../types/SermonTypes';
 
 const trimAndTranscode = async (
   ffmpeg: typeof import('fluent-ffmpeg'),
@@ -19,6 +20,8 @@ const trimAndTranscode = async (
   outputFilePath: string,
   tempFiles: Set<string>,
   realtimeDBRef: Reference,
+  docRef: FirebaseFirestore.DocumentReference,
+  sermonStatus: sermonStatus,
   customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number
@@ -33,10 +36,20 @@ const trimAndTranscode = async (
   });
   let inputSource: string | Readable;
   let ytdlp: ChildProcessWithoutNullStreams;
+  let transcodingStarted = false;
+  const updateDownloadProgress = (progress: number) => {
+    if (!transcodingStarted) {
+      logger.log('Youtube Download progress (while transcoding has not yet started):', progress);
+      realtimeDBRef.set(progress);
+    } else {
+      logger.log('Youtube Download progress:', progress);
+    }
+  };
+
   if (audioSource.type === 'YouTubeUrl') {
     // Process the audio source from YouTube
     const passThrough = new PassThrough();
-    ytdlp = processYouTubeUrl(ytdlpPath, audioSource.source, cancelToken, passThrough);
+    ytdlp = processYouTubeUrl(ytdlpPath, audioSource.source, cancelToken, passThrough, updateDownloadProgress);
     inputSource = passThrough;
   } else {
     // Process the audio source from storage
@@ -64,7 +77,7 @@ const trimAndTranscode = async (
   let previousPercent = -1;
   const promiseResult = await new Promise<File>((resolve, reject) => {
     proc
-      .on('start', function (commandLine) {
+      .on('start', async function (commandLine) {
         logger.log('Trim And Transcode Spawned Ffmpeg with command: ' + commandLine);
       })
       .on('end', async () => {
@@ -93,7 +106,6 @@ const trimAndTranscode = async (
         }
       })
       .on('progress', async (progress) => {
-        logger.debug('Trim and Transcode progress:', progress);
         if (cancelToken.isCancellationRequested) {
           logger.log('Cancellation requested, killing ffmpeg process');
           proc.kill('SIGTERM'); // this sends a termination signal to the process
@@ -102,6 +114,16 @@ const trimAndTranscode = async (
             ytdlp.kill('SIGTERM'); // this sends a termination signal to the process
           }
           reject(new HttpsError('aborted', 'Trim and Transcode operation was cancelled'));
+        }
+        if (!transcodingStarted) {
+          transcodingStarted = true;
+          await docRef.update({
+            status: {
+              ...sermonStatus,
+              audioStatus: sermonStatusType.PROCESSING,
+              message: 'Trimming and Transcoding',
+            },
+          });
         }
         const timeMillis = convertStringToMilliseconds(progress.timemark);
         const calculatedDuration = duration

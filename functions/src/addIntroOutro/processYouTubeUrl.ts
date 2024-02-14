@@ -5,11 +5,17 @@ import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { logger } from 'firebase-functions/v2';
 import { Writable } from 'stream';
 
+function extractPercent(line: string): number | null {
+  const percentMatch = line.match(/(100(\.0{1,2})?|\d{1,2}(\.\d{1,2})?)%/);
+  return percentMatch ? parseFloat(percentMatch[1]) : null;
+}
+
 export const processYouTubeUrl = (
   ytdlpPath: string,
   url: YouTubeUrl,
   cancelToken: CancelToken,
-  passThrough: Writable
+  passThrough: Writable,
+  updateProgressCallback: (progress: number) => void
 ): ChildProcessWithoutNullStreams => {
   logger.log('Streaming audio from youtube video:', url);
   if (cancelToken.isCancellationRequested) {
@@ -32,7 +38,7 @@ export const processYouTubeUrl = (
 
   ytdlp.on('close', (code) => {
     logger.log('ytdlp spawn closed with code', code);
-    if (code !== 0) {
+    if (code && code !== 0) {
       logger.error('Spawn closed with non-zero code of:', code);
       throw new HttpsError(
         'internal',
@@ -58,6 +64,13 @@ export const processYouTubeUrl = (
   ytdlp.stderr?.on('data', (data) => {
     if (cancelToken.isCancellationRequested) {
       throw new HttpsError('aborted', 'getYouTubeStream operation was cancelled');
+    }
+    if (data.includes('download')) {
+      const percent = extractPercent(data.toString());
+      if (percent) {
+        // update progress only when transcoding has not started
+        updateProgressCallback(percent);
+      }
     }
     logger.debug('ytdlp stderr:', data.toString());
   });
