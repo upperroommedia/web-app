@@ -50,7 +50,7 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
       if (!isValidYouTubeUrl) {
         setError('Could not find YouTube video, please make sure the link is valid');
       }
-    }, 3000);
+    }, 5000);
 
     return () => {
       setError('');
