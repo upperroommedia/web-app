@@ -67,7 +67,7 @@ export function CustomSlider({ startTime, setStartTime, setDuration }: CustomSli
   const remote = useMediaRemote();
   const [value, setValue, valueRef] = useStateRef([startTime, time, startTime + mediaStateDuration]);
   const activeIndexRef = useRef(0);
-  const changeCommited = useRef(false);
+  const changeCommited = useRef(true);
 
   // Keep slider value in-sync with playback.
   useEffect(() => {
