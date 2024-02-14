@@ -187,6 +187,7 @@ export async function executeWithTimout<T>(
     const id = setTimeout(() => {
       clearTimeout(id);
       cancelFunc();
+      logger.log('Function timeout', `Timeout of ${delay / 1000} seconds exceeded`);
       reject(new HttpsError('deadline-exceeded', `Timeout of ${delay / 1000} seconds exceeded`));
     }, delay);
   });

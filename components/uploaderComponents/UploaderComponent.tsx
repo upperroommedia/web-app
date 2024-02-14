@@ -214,6 +214,7 @@ const Uploader = (props: UploaderProps) => {
     (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
     (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
     sermon.durationSeconds <= 0 ||
+    sermon.durationSeconds > 2 * 3600 ||
     isUploading ||
     isEditing;
 
@@ -542,6 +543,14 @@ const Uploader = (props: UploaderProps) => {
                 </Box>
               )}
               <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
+                <Typography
+                  variant="caption"
+                  color="orange"
+                  textAlign="center"
+                  visibility={sermon.durationSeconds > 3600 * 2 ? 'visible' : 'hidden'}
+                >
+                  Please trim the video to a duration less than 2 hours using the handles in the video player
+                </Typography>
                 <Box display="flex">
                   <UploadButton
                     user={props.user}
