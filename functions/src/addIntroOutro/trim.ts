@@ -1,34 +1,53 @@
 import { CancelToken } from './CancelToken';
 import path from 'path';
+import { Bucket, File } from '@google-cloud/storage';
 import { Reference } from 'firebase-admin/database';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { convertStringToMilliseconds, createTempFile } from './utils';
+import { convertStringToMilliseconds, createTempFile, logMemoryUsage } from './utils';
+import { CustomMetadata } from './types';
+import { unlink } from 'fs/promises';
 
-const trimAndTranscode = (
+const trimAndTranscode = async (
   ffmpeg: typeof import('fluent-ffmpeg'),
   cancelToken: CancelToken,
-  filePath: string,
+  bucket: Bucket,
+  storageFilePath: string,
+  outputFilePath: string,
   tempFiles: Set<string>,
   realtimeDBRef: Reference,
+  customMetadata: CustomMetadata,
   startTime?: number,
   duration?: number
-): Promise<string> => {
-  const tmpFilePath = createTempFile(path.basename('temp-transcoded-file.mp3'), tempFiles);
-  const proc = ffmpeg().input(filePath);
+): Promise<File> => {
+  // Download the raw audio source from storage
+  const rawSourceFile = createTempFile(`raw-${path.basename(storageFilePath)}`, tempFiles);
+  logger.log('Downloading raw audio source to', rawSourceFile);
+  await bucket.file(storageFilePath).download({ destination: rawSourceFile });
+  logger.log('Successfully downloaded raw audio source');
+
+  const outputFile = bucket.file(outputFilePath);
+  const contentDisposition = customMetadata.title
+    ? `inline; filename="${customMetadata.title}.mp3"`
+    : 'inline; filename="untitled.mp3"';
+  const writeStream = outputFile.createWriteStream({
+    contentType: 'audio/mpeg',
+    metadata: { contentDisposition, metadata: customMetadata },
+  });
+  const proc = ffmpeg().input(rawSourceFile);
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
   proc.outputOption('-c copy');
   let totalTimeMillis: number;
   let previousPercent = -1;
-  return new Promise((resolve, reject) => {
+  const promiseResult = await new Promise<File>((resolve, reject) => {
     proc
       .on('start', function (commandLine) {
         logger.log('Trim Spawned Ffmpeg with command: ' + commandLine);
       })
       .on('end', async () => {
         logger.log('Finished Trim');
-        resolve(tmpFilePath);
+        resolve(outputFile);
       })
       .on('error', (err) => {
         logger.error('Trim Error:', err);
@@ -58,8 +77,18 @@ const trimAndTranscode = (
           realtimeDBRef.set(percent);
         }
       })
-      .saveToFile(tmpFilePath);
+      .pipe(writeStream);
   });
+
+  // Delete raw audio from temp memory
+  await logMemoryUsage('Before raw audio delete memory:');
+  logger.log('Deleting raw audio temp file:', rawSourceFile);
+  await unlink(rawSourceFile);
+  tempFiles.delete(rawSourceFile);
+  logger.log('Successfully deleted raw audio temp file:', rawSourceFile);
+  await logMemoryUsage('After raw audio delete memory:');
+
+  return promiseResult;
 };
 
 export default trimAndTranscode;

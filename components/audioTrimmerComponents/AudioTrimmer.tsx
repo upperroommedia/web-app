@@ -37,6 +37,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   const audioPlayer = useRef<HTMLAudioElement>(new Audio(url)); // reference for our audio component
   const scrubberContainer = useRef<HTMLDivElement>(null);
   const { trimStartTime, trimEndTime } = useTrimTimes(trimStart, stopTrim);
+  const mouseDownInTrimmerRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (trimStartRef.current !== trimStart) {
@@ -83,6 +84,9 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   }, [setIsPlaying]);
 
   const handleMouseUp = useCallback(() => {
+    if (!mouseDownInTrimmerRef.current) return;
+    // reset mouseDownInTrimmerRef
+    mouseDownInTrimmerRef.current = false;
     if (previousPlayingStateRef.current) {
       audioPlayer.current.play();
     }
@@ -193,6 +197,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
 
   const MouseDown = useCallback(
     (e: React.MouseEvent | React.TouchEvent, target: CLICK_TARGET) => {
+      mouseDownInTrimmerRef.current = true;
       previousPlayingStateRef.current = !audioPlayer.current.paused;
       if (!audioPlayer.current.paused) {
         audioPlayer.current.pause();

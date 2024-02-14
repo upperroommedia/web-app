@@ -1,7 +1,6 @@
 import React, { Dispatch, SetStateAction } from 'react';
 import styles from '../../styles/Uploader.module.css';
-import uploadFile from '../../pages/api/uploadFile';
-import { UploadableFile } from '../DropZone';
+import uploadFile, { AudioSource } from '../../pages/api/uploadFile';
 import { User } from '../../types/User';
 import { UploadProgress } from '../../context/types';
 import { List } from '../../types/List';
@@ -10,7 +9,7 @@ import { Sermon } from '../../types/SermonTypes';
 interface UploadButtonProps {
   user: User;
   sermon: Sermon;
-  file: UploadableFile | undefined;
+  audioSource: AudioSource | undefined;
   trimStart: number;
   sermonList: List[];
   baseButtonDisabled: boolean;
@@ -23,7 +22,7 @@ interface UploadButtonProps {
 export default function UploadButton({
   user,
   sermon,
-  file,
+  audioSource,
   trimStart,
   sermonList,
   baseButtonDisabled,
@@ -37,13 +36,13 @@ export default function UploadButton({
       className={styles.button}
       type="button"
       value="Upload"
-      disabled={file === undefined || baseButtonDisabled}
+      disabled={audioSource === undefined || baseButtonDisabled}
       onClick={async () => {
-        if (file !== undefined && date != null && user.isUploader()) {
+        if (audioSource !== undefined && date != null && user.isUploader()) {
           try {
             setIsUploading(true);
             await uploadFile({
-              file,
+              audioSource,
               setUploadProgress,
               trimStart,
               sermon,

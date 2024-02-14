@@ -12,16 +12,15 @@ import { createEmptySermon } from '../../types/Sermon';
 import { Sermon, sermonStatusType } from '../../types/SermonTypes';
 
 import Button from '@mui/material/Button';
-import DropZone, { UploadableFile } from '../DropZone';
 // import ImageUploader from '../components/ImageUploader';
 
 import ImageViewer from '../ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../../types/Image';
 import ListSelector from '../ListSelector';
 import FormControl from '@mui/material/FormControl';
-// import Switch from '@mui/material/Switch';
-// import FormControlLabel from '@mui/material/FormControlLabel';
-import YoutubeUrlToMp3 from '../YoutubeUrlToMp3';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import YouTubeTrimmer from '../YouTubeTrimmer';
 import Typography from '@mui/material/Typography';
 import Head from 'next/head';
 import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from '../../types/List';
@@ -45,6 +44,8 @@ import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
+import { AudioSource } from '../../pages/api/uploadFile';
+import DropZone from '../DropZone';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -64,12 +65,12 @@ const Uploader = (props: UploaderProps) => {
     return createEmptySermon(props.user.uid);
   });
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
-  const [file, setFile] = useState<UploadableFile>();
+  const [audioSource, setAudioSource] = useState<AudioSource | undefined>();
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({ error: false, percent: 0, message: '' });
   const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [useYoutubeUrl, _setUseYoutubeUrl] = useState(false);
+  const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
 
   // Bible Study Helpers
@@ -212,13 +213,16 @@ const Uploader = (props: UploaderProps) => {
     sermon.description === '' ||
     (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
     (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
+    sermon.durationSeconds <= 0 ||
+    sermon.durationSeconds > 2 * 3600 ||
     isUploading ||
     isEditing;
 
   const clearAudioTrimmer = useCallback(() => {
-    setFile(undefined);
+    setUseYouTubeUrl(false);
+    setAudioSource(undefined);
     setTrimStart(0);
-  }, [setFile, setTrimStart]);
+  }, [setAudioSource, setTrimStart]);
 
   const clearForm = () => {
     setSpeakerError({ error: false, message: '' });
@@ -462,10 +466,12 @@ const Uploader = (props: UploaderProps) => {
                     const pendingSermon = sermon;
                     if (hasTrimmed) {
                       pendingSermon.status.audioStatus = sermonStatusType.PENDING;
+                      pendingSermon.status.message = '';
                       const generateAddIntroOutroTask =
                         createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
                       const { introRef, outroRef } = await getIntroAndOutro(sermon);
                       const data: AddIntroOutroInputType = {
+                        id: sermon.id,
                         storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
                         startTime: trimStart,
                         duration: sermon.durationSeconds,
@@ -496,9 +502,9 @@ const Uploader = (props: UploaderProps) => {
             </Stack>
           ) : (
             <>
-              {file ? (
+              {audioSource?.type === 'File' ? (
                 <AudioTrimmerComponent
-                  url={file.preview}
+                  url={audioSource.source.preview}
                   trimStart={trimStart}
                   setTrimStart={setTrimStart}
                   setTrimDuration={setTrimDuration}
@@ -513,25 +519,43 @@ const Uploader = (props: UploaderProps) => {
                   alignItems="center"
                   gap={1}
                 >
-                  {/* <FormControlLabel
+                  <FormControlLabel
                     control={
                       <Switch
-                        checked={useYoutubeUrl}
-                        onChange={() => setUseYoutubeUrl((prevValue) => !prevValue)}
+                        checked={useYouTubeUrl}
+                        onChange={() => setUseYouTubeUrl((prevValue) => !prevValue)}
                         inputProps={{ 'aria-label': 'controlled' }}
                       />
                     }
                     label="Upload from Youtube Url"
-                  /> */}
-                  {useYoutubeUrl ? <YoutubeUrlToMp3 setFile={setFile} /> : <DropZone setFile={setFile} />}
+                  />
+                  {useYouTubeUrl ? (
+                    <YouTubeTrimmer
+                      trimStart={trimStart}
+                      duration={sermon.durationSeconds}
+                      setTrimStart={setTrimStart}
+                      setDuration={setTrimDuration}
+                      setAudioSource={setAudioSource}
+                    />
+                  ) : (
+                    <DropZone setAudioSource={setAudioSource} />
+                  )}
                 </Box>
               )}
               <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
+                <Typography
+                  variant="caption"
+                  color="orange"
+                  textAlign="center"
+                  visibility={sermon.durationSeconds > 3600 * 2 ? 'visible' : 'hidden'}
+                >
+                  Please trim the video to a duration less than 2 hours using the handles in the video player
+                </Typography>
                 <Box display="flex">
                   <UploadButton
                     user={props.user}
                     sermon={sermon}
-                    file={file}
+                    audioSource={audioSource}
                     trimStart={trimStart}
                     sermonList={sermonList}
                     baseButtonDisabled={baseButtonDisabled}
@@ -544,7 +568,11 @@ const Uploader = (props: UploaderProps) => {
                     Clear Form
                   </button>
                 </Box>
-                <UploadProgressComponent isUploading={isUploading} uploadProgress={uploadProgress} />
+                <UploadProgressComponent
+                  audioSource={audioSource}
+                  isUploading={isUploading}
+                  uploadProgress={uploadProgress}
+                />
               </Box>
             </>
           )}

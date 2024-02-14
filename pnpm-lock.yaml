@@ -36,8 +36,8 @@ dependencies:
     specifier: ^5.0.20
     version: 5.0.20(@emotion/react@11.11.3)(@emotion/styled@11.11.0)(@mui/material@5.15.4)(@mui/system@5.15.4)(@types/react@18.2.48)(date-fns@2.30.0)(react-dom@18.2.0)(react@18.2.0)
   '@vidstack/react':
-    specifier: ^1.9.8
-    version: 1.9.8(@types/react@18.2.48)(react@18.2.0)
+    specifier: ^1.10.5
+    version: 1.10.5(@types/react@18.2.48)(react@18.2.0)
   algoliasearch:
     specifier: ^4.17.0
     version: 4.22.1
@@ -129,7 +129,7 @@ devDependencies:
     version: 7.23.7
   '@firebase/firestore-types':
     specifier: ^3.0.0
-    version: 3.0.0(@firebase/app-types@0.9.0)(@firebase/util@1.9.3)
+    version: 3.0.0(@firebase/app-types@0.9.0)(@firebase/util@1.9.4)
   '@firebase/rules-unit-testing':
     specifier: ^2.0.7
     version: 2.0.7(firebase@9.22.1)
@@ -1089,14 +1089,14 @@ packages:
       '@firebase/app-types': 0.9.0
       '@firebase/util': 1.9.3
 
-  /@firebase/firestore-types@3.0.0(@firebase/app-types@0.9.0)(@firebase/util@1.9.3):
+  /@firebase/firestore-types@3.0.0(@firebase/app-types@0.9.0)(@firebase/util@1.9.4):
     resolution: {integrity: sha512-Meg4cIezHo9zLamw0ymFYBD4SMjLb+ZXIbuN7T7ddXN6MGoICmOTq3/ltdCGoDCS2u+H1XJs2u/cYp75jsX9Qw==}
     peerDependencies:
       '@firebase/app-types': 0.x
       '@firebase/util': 1.x
     dependencies:
       '@firebase/app-types': 0.9.0
-      '@firebase/util': 1.9.3
+      '@firebase/util': 1.9.4
     dev: true
 
   /@firebase/firestore@3.12.1(@firebase/app@0.9.11):
@@ -1332,6 +1332,12 @@ packages:
     resolution: {integrity: sha512-DY02CRhOZwpzO36fHpuVysz6JZrscPiBXD0fXp6qSrL9oNOx5KWICKdR95C0lSITzxp0TZosVyHqzatE8JbcjA==}
     dependencies:
       tslib: 2.6.2
+
+  /@firebase/util@1.9.4:
+    resolution: {integrity: sha512-WLonYmS1FGHT97TsUmRN3qnTh5TeeoJp1Gg5fithzuAgdZOUtsYECfy7/noQ3llaguios8r5BuXSEiK82+UrxQ==}
+    dependencies:
+      tslib: 2.6.2
+    dev: true
 
   /@firebase/webchannel-wrapper@0.10.1:
     resolution: {integrity: sha512-Dq5rYfEpdeel0bLVN+nfD1VWmzCkK+pJbSjIawGE+RY4+NIJqhbUDDQjvV0NUK84fMfwxvtFoCtEe70HfZjFcw==}
@@ -2740,8 +2746,8 @@ packages:
     resolution: {integrity: sha512-zuVdFrMJiuCDQUMCzQaD6KL28MjnqqN8XnAqiEq9PNm/hCPTSGfrXCOfwj1ow4LFb/tNymJPwsNbVePc1xFqrQ==}
     dev: true
 
-  /@vidstack/react@1.9.8(@types/react@18.2.48)(react@18.2.0):
-    resolution: {integrity: sha512-1gGlCXpmGriKZ+sgP1WLgm4tpkU2buXeAIPFoh8t7V4X3jV1l15oZS4whfPswCY6/9jAwVKq0jQBLryAuBYZww==}
+  /@vidstack/react@1.10.5(@types/react@18.2.48)(react@18.2.0):
+    resolution: {integrity: sha512-EenrfDm3or3uPvFhNtNFBKzNbCs362X/t7nYMxP3KS7Hsi1h0QuYqBLxWsBPfRgyQrjbccYmLDoXZTSKy7LkTg==}
     engines: {node: '>=18'}
     peerDependencies:
       '@types/react': ^18.0.0
@@ -3442,7 +3448,7 @@ packages:
   /builtins@5.0.1:
     resolution: {integrity: sha512-qwVpFEHNfhYJIzNRBvd2C1kyo6jz3ZSMPyyuR47OPdiKWlbYnZNyDWuyR175qDnAJLiCo5fBBqPb3RiXgWlkOQ==}
     dependencies:
-      semver: 7.5.4
+      semver: 7.6.0
     dev: true
 
   /busboy@1.6.0:
@@ -4652,12 +4658,12 @@ packages:
       eslint-plugin-es-x: 7.5.0(eslint@8.56.0)
       get-tsconfig: 4.7.2
       globals: 13.24.0
-      ignore: 5.3.0
+      ignore: 5.3.1
       is-builtin-module: 3.2.1
       is-core-module: 2.13.1
       minimatch: 3.1.2
       resolve: 1.22.8
-      semver: 7.5.4
+      semver: 7.6.0
     dev: true
 
   /eslint-plugin-node@11.1.0(eslint@8.56.0):
@@ -6001,6 +6007,11 @@ packages:
 
   /ignore@5.3.0:
     resolution: {integrity: sha512-g7dmpshy+gD7mh88OC9NwSGTKoc3kyLAZQRU1mt53Aw/vnvfXnbC+F/7F7QoYVKbV+KNvJx8wArewKy1vXMtlg==}
+    engines: {node: '>= 4'}
+    dev: true
+
+  /ignore@5.3.1:
+    resolution: {integrity: sha512-5Fytz/IraMjqpwfd34ke28PTVMjZjJG2MPn5t7OE4eUCUNf8BAa7b5WUS9/Qvr6mwOQS7Mk6vdsMno5he+T8Xw==}
     engines: {node: '>= 4'}
     dev: true
 
@@ -9149,6 +9160,14 @@ packages:
     hasBin: true
     dependencies:
       lru-cache: 6.0.0
+
+  /semver@7.6.0:
+    resolution: {integrity: sha512-EnwXhrlwXMk9gKu5/flx5sv/an57AkRplG3hTK68W7FRDN+k+OWBj65M7719OkA82XLBxrcX0KSHj+X5COhOVg==}
+    engines: {node: '>=10'}
+    hasBin: true
+    dependencies:
+      lru-cache: 6.0.0
+    dev: true
 
   /send@0.18.0:
     resolution: {integrity: sha512-qqWzuOjSFOuqPjFe4NOsMLafToQQwBSOEpS+FwEt3A2V3vKubTquT3vmLTQpFgMXp8AlFWFuP1qKaJZOtPpVXg==}

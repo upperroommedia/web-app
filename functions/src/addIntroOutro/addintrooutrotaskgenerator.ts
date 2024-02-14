@@ -7,8 +7,8 @@ import { AddIntroOutroInputType } from './types';
 import handleError from '../handleError';
 import { TIMEOUT_SECONDS } from './consts';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
-import path from 'path';
 import { sermonStatusType } from '../../../types/SermonTypes';
+import { getAudioSource, validateAddIntroOutroData } from './utils';
 
 let auth: GoogleAuth | undefined;
 /**
@@ -29,6 +29,7 @@ async function getFunctionUrl(name: string, location = 'us-central1'): Promise<s
     'https://cloudfunctions.googleapis.com/v2beta/' + `projects/${projectId}/locations/${location}/functions/${name}`;
 
   const client = await auth.getClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const res = await client.request<any>({ url });
   logger.log(res);
   const uri = res.data?.serviceConfig?.uri as string;
@@ -40,32 +41,36 @@ async function getFunctionUrl(name: string, location = 'us-central1'): Promise<s
 
 const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
   const data = request.data;
-  if (
-    !data.storageFilePath ||
-    data.startTime === undefined ||
-    data.startTime === null ||
-    data.duration === null ||
-    data.duration === undefined
-  ) {
-    const errorMessage =
-      'Data must contain storageFilePath (string), startTime (number), and endTime (number) properties || optionally introUrl (string) and outroUrl (string)';
-    logger.error('Invalid Argument', errorMessage);
-    throw new HttpsError('invalid-argument', errorMessage);
+
+  if (!validateAddIntroOutroData(data)) {
+    throw new HttpsError(
+      'invalid-argument',
+      `Invalid data: data must be an object with the following field: 
+       id (string),
+       startTime (number),
+       duration (number),
+       youtubeUrl (string) || storageFilePath (string),
+       introUrl (string),
+       outroUrl (string)`
+    );
   }
+
+  const audioSource = getAudioSource(data);
 
   const bucket = firebaseAdmin.storage().bucket();
   const db = firebaseAdmin.firestore();
 
-  const fileName = path.basename(data.storageFilePath);
-  const docRef = db.collection('sermons').doc(fileName);
+  const docRef = db.collection('sermons').doc(data.id);
 
   try {
-    // check if the storageFilePath exists
-    const [fileExists] = await bucket.file(data.storageFilePath).exists();
-    if (!fileExists) {
-      const errorMessage = `${data.storageFilePath} could not be found`;
-      logger.error('Invalid Argument', errorMessage);
-      throw new HttpsError('invalid-argument', errorMessage);
+    if (audioSource.type === 'StorageFilePath') {
+      // check if the storageFilePath exists
+      const [fileExists] = await bucket.file(audioSource.source).exists();
+      if (!fileExists) {
+        const errorMessage = `${audioSource.source} could not be found`;
+        logger.error('Invalid Argument', errorMessage);
+        throw new HttpsError('invalid-argument', errorMessage);
+      }
     }
 
     await docRef.update({ 'status.audioStatus': sermonStatusType.PENDING });

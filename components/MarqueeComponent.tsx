@@ -24,9 +24,9 @@ export default function MarqueeComponent({ children }: MarqueeComponentProps) {
   //     }
   // };
 
-  const marqueeRefCallback = useCallback((node: HTMLDivElement) => {
-    console.log('ClientWidth', node.clientWidth);
-    console.log('ScrollWidth', node.scrollWidth);
+  const marqueeRefCallback = useCallback((_node: HTMLDivElement) => {
+    // console.log('ClientWidth', node.clientWidth);
+    // console.log('ScrollWidth', node.scrollWidth);
   }, []);
 
   // useLayoutEffect(() => {

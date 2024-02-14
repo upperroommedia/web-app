@@ -4,12 +4,13 @@ import IconButton from '@mui/material/IconButton';
 import Box from '@mui/system/Box';
 import Tooltip from '@mui/material/Tooltip';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
-import { Sermon, uploadStatus } from '../types/SermonTypes';
+import { Sermon, sermonStatusType, uploadStatus } from '../types/SermonTypes';
 import ManageSoundcloudButton from './ManageSoundcloudButton';
 import ManageSubsplashButton from './ManageSubsplashButton';
 import useAuth from '../context/user/UserContext';
 import Chip from '@mui/material/Chip';
 import dynamic from 'next/dynamic';
+import RetryProcessButton from './RetryProcessButton';
 
 const ManageUploadsPopup = dynamic(() => import('./ManageUploadsPopup'));
 const DeleteEntityPopup = dynamic(() => import('./DeleteEntityPopup'));
@@ -45,11 +46,26 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   const [disableButtons, setDisableButtons] = useState<boolean>(false);
   const { user } = useAuth();
 
-  const showEditAndDelete =
-    user?.isAdmin() ||
+  const showDelete =
+    (user?.isAdmin() && sermon.status.audioStatus !== sermonStatusType.PENDING) ||
     (user?.isUploader() &&
       sermon.status.subsplash !== uploadStatus.UPLOADED &&
-      sermon.status.soundCloud !== uploadStatus.UPLOADED);
+      sermon.status.soundCloud !== uploadStatus.UPLOADED &&
+      sermon.status.audioStatus !== sermonStatusType.PENDING);
+
+  const showEdit =
+    sermon.status.audioStatus === sermonStatusType.PROCESSED &&
+    (user?.isAdmin() ||
+      (user?.isUploader() &&
+        sermon.status.subsplash !== uploadStatus.UPLOADED &&
+        sermon.status.soundCloud !== uploadStatus.UPLOADED));
+
+  const showUploadedTag =
+    !user?.isAdmin() &&
+    (sermon.status.subsplash === uploadStatus.UPLOADED || sermon.status.soundCloud === uploadStatus.UPLOADED);
+
+  const showUploadButtons = user?.isAdmin() && sermon.status.audioStatus === sermonStatusType.PROCESSED;
+  const showRetry = sermon.status.audioStatus === sermonStatusType.ERROR;
 
   useEffect(() => {
     setDisableButtons(isUploadingToSoundCloud || isUploadingToSubsplash);
@@ -57,7 +73,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   return (
     <>
       <Box display="flex" alignItems="center">
-        {user?.isAdmin() && (
+        {showUploadButtons && (
           <>
             <ManageSoundcloudButton
               sermon={sermon}
@@ -75,35 +91,36 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
             />
           </>
         )}
-        {showEditAndDelete ? (
-          <>
-            <Tooltip title="Edit Sermon">
-              <span>
-                <IconButton
-                  disabled={disableButtons}
-                  aria-label="edit sermon"
-                  style={{ color: 'lightblue' }}
-                  onClick={() => setEditFormPopup(true)}
-                >
-                  <EditIcon />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="Delete Sermon From All Systems">
-              <span>
-                <IconButton
-                  disabled={disableButtons}
-                  aria-label="delete sermon"
-                  style={{ color: 'red' }}
-                  onClick={() => setDeleteConfirmationPopup(true)}
-                >
-                  <DeleteIcon />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </>
-        ) : (
-          <Chip label="Uploaded" color="success" />
+        {showEdit && (
+          <Tooltip title="Edit Sermon">
+            <span>
+              <IconButton
+                disabled={disableButtons}
+                aria-label="edit sermon"
+                style={{ color: 'lightblue' }}
+                onClick={() => setEditFormPopup(true)}
+              >
+                <EditIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+        )}
+        {showUploadedTag && !user?.isAdmin() && <Chip label="Uploaded" color="success" />}
+
+        {showRetry && <RetryProcessButton sermon={sermon} />}
+        {showDelete && (
+          <Tooltip title="Delete Sermon From All Systems">
+            <span>
+              <IconButton
+                disabled={disableButtons}
+                aria-label="delete sermon"
+                style={{ color: 'red' }}
+                onClick={() => setDeleteConfirmationPopup(true)}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
         )}
       </Box>
       {manageUploadsPopup && (
