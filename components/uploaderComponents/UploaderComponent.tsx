@@ -559,7 +559,11 @@ const Uploader = (props: UploaderProps) => {
                     Clear Form
                   </button>
                 </Box>
-                <UploadProgressComponent isUploading={isUploading} uploadProgress={uploadProgress} />
+                <UploadProgressComponent
+                  audioSource={audioSource}
+                  isUploading={isUploading}
+                  uploadProgress={uploadProgress}
+                />
               </Box>
             </>
           )}

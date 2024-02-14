@@ -44,7 +44,7 @@ const addFirestoreDocument = async (
     batch.set(seriesSermonRef, sermon);
   });
   await batch.commit();
-  setUploadProgress({ error: false, message: 'Uploaded!', percent: 100 });
+  setUploadProgress({ error: false, message: 'Uploading...', percent: 99 });
 };
 
 const uploadFile = async (props: UploadFileProps) => {
@@ -83,6 +83,7 @@ const uploadFile = async (props: UploadFileProps) => {
         outroUrl: outroRef,
       };
       await generateAddIntroOutroTask(data);
+      props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Error generatingAddIntroOutroTask', e);
@@ -95,7 +96,7 @@ const uploadFile = async (props: UploadFileProps) => {
       uploadBytesResumable(sermonRef, audioSource.source.file, metadata).on(
         'state_changed',
         (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 98;
           props.setUploadProgress({ error: false, percent: Math.round(progress), message: 'Uploading...' });
           switch (snapshot.state) {
             case 'paused':
@@ -129,6 +130,7 @@ const uploadFile = async (props: UploadFileProps) => {
               outroUrl: outroRef,
             };
             await generateAddIntroOutroTask(data);
+            props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
             resolve();
           } catch (e) {
             // eslint-disable-next-line no-console
