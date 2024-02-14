@@ -7,10 +7,19 @@ import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { readdir, stat } from 'fs/promises';
 import { path as ffprobeStatic } from 'ffprobe-static';
 import { logger } from 'firebase-functions/v2';
-import { CustomMetadata, FilePaths } from './types';
+import { AddIntroOutroInputType, AudioSource, CustomMetadata, FilePaths } from './types';
 import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
+
+export const throwErrorOnSpecificStderr = (stderrLine: string) => {
+  const errorMessages = ['Output file is empty'];
+  for (const errorMessage of errorMessages) {
+    if (stderrLine.includes(errorMessage)) {
+      throw new HttpsError('internal', `Ffmpeg error: ${errorMessage} found in stderr: ${stderrLine}`);
+    }
+  }
+};
 
 export const logMemoryUsage = async (message: string) => {
   const memoryUsage = process.memoryUsage();
@@ -178,9 +187,64 @@ export async function executeWithTimout<T>(
     const id = setTimeout(() => {
       clearTimeout(id);
       cancelFunc();
+      logger.error('Function timeout', `Timeout of ${delay / 1000} seconds exceeded`);
       reject(new HttpsError('deadline-exceeded', `Timeout of ${delay / 1000} seconds exceeded`));
     }, delay);
   });
 
   return Promise.race([asyncFunc(), timeoutPromise]);
+}
+
+export function validateAddIntroOutroData(data: unknown): data is AddIntroOutroInputType {
+  if (!(data instanceof Object)) return false;
+  const inputData = data as Partial<AddIntroOutroInputType>;
+
+  if ('youtubeUrl' in inputData) {
+    if (!inputData.youtubeUrl) {
+      const errorMessage = 'youtubeUrl cannot be empty if defined';
+      logger.error('Invalid Argument', errorMessage);
+      return false;
+    }
+  } else if ('storageFilePath' in inputData) {
+    if (!inputData.storageFilePath) {
+      const errorMessage = 'storageFilePath cannot me empty if defined';
+      logger.error('Invalid Argument', errorMessage);
+      return false;
+    }
+  } else {
+    const errorMessage =
+      'inputData must contain either a valid youtubeUrl (string) or storageFilePath (string) properties';
+    logger.error('Invalid Argument', errorMessage);
+    return false;
+  }
+
+  if (
+    !inputData.id ||
+    inputData.startTime === undefined ||
+    inputData.startTime === null ||
+    inputData.duration === null ||
+    inputData.duration === undefined
+  ) {
+    const errorMessage =
+      'Data must contain id (string), startTime (number), and endTime (number) properties || optionally introUrl (string) and outroUrl (string)';
+    logger.error('Invalid Argument', errorMessage);
+    return false;
+  }
+  return true;
+}
+
+export function getAudioSource(data: AddIntroOutroInputType): AudioSource {
+  if ('youtubeUrl' in data) {
+    return {
+      id: data.id,
+      source: data.youtubeUrl,
+      type: 'YouTubeUrl',
+    };
+  } else {
+    return {
+      id: data.id,
+      source: data.storageFilePath,
+      type: 'StorageFilePath',
+    };
+  }
 }

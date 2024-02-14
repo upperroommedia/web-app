@@ -10,7 +10,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { Database } from 'firebase-admin/database';
 import { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import { Request, onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { CustomMetadata, AddIntroOutroInputType, FilePaths } from './types';
+import { CustomMetadata, AddIntroOutroInputType, FilePaths, AudioSource } from './types';
 import { CancelToken } from './CancelToken';
 import {
   logMemoryUsage,
@@ -20,6 +20,8 @@ import {
   getDurationSeconds,
   executeWithTimout,
   createTempFile,
+  validateAddIntroOutroData,
+  getAudioSource,
 } from './utils';
 import { TIMEOUT_SECONDS } from './consts';
 import trimAndTranscode from './trimAndTranscode';
@@ -29,12 +31,15 @@ import trim from './trim';
 
 const ffmpeg = loadStaticFFMPEG();
 
+const ytdlpPath = path.join(__dirname, '../../..', '..', 'bin', 'yt-dlp');
+logger.log(ytdlpPath);
+
 const mainFunction = async (
   cancelToken: CancelToken,
   bucket: Bucket,
   realtimeDB: Database,
   db: Firestore,
-  filePath: string,
+  audioSource: AudioSource,
   docRef: DocumentReference<Sermon>,
   sermonStatus: sermonStatus,
   startTime: number,
@@ -44,7 +49,7 @@ const mainFunction = async (
   introUrl?: string,
   outroUrl?: string
 ): Promise<void> => {
-  const fileName = path.basename(filePath);
+  const fileName = audioSource.id;
   await logMemoryUsage('Initial Memory Usage:');
   const tempFiles = new Set<string>();
   // the document may not exist yet, if it deosnt wait 5 seconds and try again do this for a max of 3 times before throwing an error
@@ -94,11 +99,11 @@ const mainFunction = async (
     }
     logger.log('Audio File Download Paths', JSON.stringify(audioFilesToMerge));
     if (cancelToken.isCancellationRequested) return;
-    const rawSourceFile = createTempFile(`raw-${fileName}`, tempFiles);
-    logger.log('Downloading raw audio source to', rawSourceFile);
-    await bucket.file(filePath).download({ destination: rawSourceFile });
-    logger.log('Successfully downloaded raw audio source');
-    const trimMessage = skipTranscode ? 'Trimming' : 'Trimming and Transcoding';
+    const trimMessage = skipTranscode
+      ? 'Trimming'
+      : audioSource.type === 'StorageFilePath'
+      ? 'Trimming and Transcoding'
+      : 'Downloading YouTube Audio';
     await docRef.update({
       status: {
         ...sermonStatus,
@@ -107,35 +112,41 @@ const mainFunction = async (
       },
     });
     if (skipTranscode) {
+      if (audioSource.type !== 'StorageFilePath') {
+        throw new HttpsError(
+          'invalid-argument',
+          'Audio source must be a file from processed-sermons in order to trim without transcoding'
+        );
+      }
       await trim(
         ffmpeg,
         cancelToken,
-        rawSourceFile,
+        bucket,
+        audioSource.source,
+        processedStoragePath,
         tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
+        customMetadata,
         startTime,
         duration
       );
     } else {
       await trimAndTranscode(
         ffmpeg,
+        ytdlpPath,
         cancelToken,
         bucket,
-        rawSourceFile,
+        audioSource,
         processedStoragePath,
+        tempFiles,
         realtimeDB.ref(`addIntroOutro/${fileName}`),
+        docRef,
+        sermonStatus,
         customMetadata,
         startTime,
         duration
       );
     }
-    // Delete raw audio from temp memory
-    await logMemoryUsage('Before raw audio delete memory:');
-    logger.log('Deleting raw audio temp file:', rawSourceFile);
-    await unlink(rawSourceFile);
-    tempFiles.delete(rawSourceFile);
-    logger.log('Successfully deleted raw audio temp file:', rawSourceFile);
-    await logMemoryUsage('After raw audio delete memory:');
 
     // download processed audio for merging
     const processedFilePath = createTempFile(`processed-${fileName}`, tempFiles);
@@ -205,11 +216,13 @@ const mainFunction = async (
 
     // delete original audio file
     if (cancelToken.isCancellationRequested) return;
-    const [originalFileExists] = await bucket.file(filePath).exists();
-    if (originalFileExists && deleteOriginal) {
-      logger.log('Deleting original audio file', filePath);
-      await bucket.file(filePath).delete();
-      logger.log('Original audio file deleted');
+    if (audioSource.type === 'StorageFilePath') {
+      const [originalFileExists] = await bucket.file(audioSource.source).exists();
+      if (originalFileExists && deleteOriginal) {
+        logger.log('Deleting original audio file', audioSource.source);
+        await bucket.file(audioSource.source).delete();
+        logger.log('Original audio file deleted');
+      }
     }
 
     logger.log('Files have been merged succesfully');
@@ -244,29 +257,32 @@ const addintrooutrotaskhandler = onTaskDispatched(
     const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
     // set timeout to 30 seconds less than timeoutSeconds then throw error if it takes longer than that
     const data = request.data;
-    if (
-      !data.storageFilePath ||
-      data.startTime === undefined ||
-      data.startTime === null ||
-      data.duration === null ||
-      data.duration === undefined
-    ) {
-      const errorMessage =
-        'Data must contain storageFilePath (string), startTime (number), and endTime (number) properties || optionally introUrl (string) and outroUrl (string)';
-      logger.error('Invalid Argument', errorMessage);
-      throw new HttpsError('invalid-argument', errorMessage);
+
+    // data checks
+    if (!validateAddIntroOutroData(data)) {
+      throw new HttpsError(
+        'invalid-argument',
+        `Invalid data: data must be an object with the following field: 
+         id (string),
+         startTime (number),
+         duration (number),
+         youtubeUrl (string) || storageFilePath (string),
+         introUrl (string),
+         outroUrl (string)`
+      );
     }
 
+    const audioSource = getAudioSource(data);
     const bucket = firebaseAdmin.storage().bucket();
     const realtimeDB = firebaseAdmin.database();
     const db = firebaseAdmin.firestore();
-    const fileName = path.basename(data.storageFilePath);
-    const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(fileName);
+    const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(data.id);
     const sermonStatus: sermonStatus = {
       subsplash: uploadStatus.NOT_UPLOADED,
       soundCloud: uploadStatus.NOT_UPLOADED,
       audioStatus: sermonStatusType.PROCESSING,
     };
+
     try {
       const cancelToken = new CancelToken();
       await executeWithTimout(
@@ -276,7 +292,7 @@ const addintrooutrotaskhandler = onTaskDispatched(
             bucket,
             realtimeDB,
             db,
-            data.storageFilePath,
+            audioSource,
             docRef,
             sermonStatus,
             data.startTime,

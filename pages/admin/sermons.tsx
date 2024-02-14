@@ -4,7 +4,7 @@ import SearchableAdminSermonList from '../../components/SearchableAdminSermonsLi
 const AdminSermons = () => {
   return (
     <>
-      <SearchableAdminSermonList />;
+      <SearchableAdminSermonList />
     </>
   );
 };

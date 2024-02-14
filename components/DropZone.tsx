@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { FileRejection, useDropzone } from 'react-dropzone';
 import styles from '../styles/DropZone.module.css';
+import { AudioSource } from '../pages/api/uploadFile';
 export interface UploadableFile {
   file: File;
   name: string;
@@ -8,7 +9,7 @@ export interface UploadableFile {
 }
 
 interface DropZoneProps {
-  setFile: (file: UploadableFile | undefined) => void;
+  setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
 }
 
 function fileTypeValidator(file: File) {
@@ -24,13 +25,13 @@ let Url: any;
 if (typeof window !== 'undefined') {
   Url = window.URL || window.webkitURL;
 }
-const DropZone = ({ setFile }: DropZoneProps) => {
+const DropZone = ({ setAudioSource }: DropZoneProps) => {
   const [fileRejections, setFileRejections] = useState<FileRejection[]>([]);
   const onDrop = useCallback(
     (acceptedFiles: File[], fileRejections: FileRejection[]) => {
       setFileRejections(fileRejections);
       if (acceptedFiles.length === 0) {
-        setFile(undefined);
+        setAudioSource(undefined);
         return;
       }
       const mappedAccepted = {
@@ -38,9 +39,9 @@ const DropZone = ({ setFile }: DropZoneProps) => {
         preview: Url.createObjectURL(acceptedFiles[0]),
         name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
       };
-      setFile(mappedAccepted);
+      setAudioSource({ source: mappedAccepted, type: 'File' });
     },
-    [setFile]
+    [setAudioSource]
   );
 
   const { getRootProps, getInputProps, isFocused } = useDropzone({

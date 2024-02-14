@@ -3,18 +3,27 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Typography from '@mui/material/Typography';
 import React from 'react';
 import { UploadProgress } from '../../context/types';
+import { AudioSource } from '../../pages/api/uploadFile';
 
 interface UploadProgressComponentProps {
+  audioSource: AudioSource | undefined;
   isUploading: boolean;
   uploadProgress: UploadProgress;
 }
 
-export default function UploadProgressComponent({ isUploading, uploadProgress }: UploadProgressComponentProps) {
+export default function UploadProgressComponent({
+  audioSource,
+  isUploading,
+  uploadProgress,
+}: UploadProgressComponentProps) {
   return (
     <Box display="flex" width={1} gap={1} justifyContent="center" alignItems="center">
       {isUploading && (
         <Box width={1}>
-          <LinearProgress variant="determinate" value={uploadProgress.percent} />
+          <LinearProgress
+            variant={audioSource?.type === 'YoutubeUrl' ? 'indeterminate' : 'determinate'}
+            value={uploadProgress.percent}
+          />
         </Box>
       )}
       {uploadProgress.message && (
