@@ -5,11 +5,11 @@ import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { convertStringToMilliseconds, createTempFile, logMemoryUsage, throwErrorOnSpecificStderr } from './utils';
 import { CustomMetadata, AudioSource } from './types';
-import { processYouTubeUrl } from './processYouTubeUrl';
 import { unlink } from 'fs/promises';
-import { PassThrough, Readable } from 'stream';
+import { Readable } from 'stream';
 import { ChildProcessWithoutNullStreams } from 'child_process';
 import { sermonStatus, sermonStatusType } from '../../../types/SermonTypes';
+import ytdl from 'ytdl-core';
 
 const trimAndTranscode = async (
   ffmpeg: typeof import('fluent-ffmpeg'),
@@ -39,18 +39,42 @@ const trimAndTranscode = async (
   let transcodingStarted = false;
   const updateDownloadProgress = (progress: number) => {
     if (!transcodingStarted) {
-      logger.log('Youtube Download progress (while transcoding has not yet started):', progress);
       realtimeDBRef.set(progress);
-    } else {
-      logger.log('Youtube Download progress:', progress);
     }
   };
 
   if (audioSource.type === 'YouTubeUrl') {
     // Process the audio source from YouTube
-    const passThrough = new PassThrough();
-    ytdlp = processYouTubeUrl(ytdlpPath, audioSource.source, cancelToken, passThrough, updateDownloadProgress);
-    inputSource = passThrough;
+    const ytdlOptions: ytdl.downloadOptions = {
+      quality: 'highestaudio',
+      filter: 'audioonly',
+    };
+    // this doesn't seem consistent with live videos so leaving it out for now
+    // if (startTime) {
+    //   ytdlOptions['begin'] = `${startTime}s`;
+    // }
+    logger.debug('ytdlOptions:', ytdlOptions);
+    inputSource = ytdl(audioSource.source, ytdlOptions);
+    let perviousProgress = -1;
+    let lastDownloaded = 0;
+    let lastTimestamp = Date.now();
+    inputSource.on('progress', (chunkLength, downloaded, total) => {
+      const progress = Math.round((downloaded / total) * 100);
+      if (progress !== perviousProgress) {
+        perviousProgress = progress;
+        updateDownloadProgress(progress);
+        const now = Date.now();
+        const elapsed = (now - lastTimestamp) / 1000; // convert ms to s
+        const bytesDownloaded = downloaded - lastDownloaded;
+        const downloadRate = bytesDownloaded / elapsed / 1024 / 1024; // MB per second
+        const totalMiB = total / 1024 / 1024;
+
+        logger.log(`Youtube Download ${progress}% of ${totalMiB.toFixed(2)}MiB at ${downloadRate.toFixed(2)} MB/s`);
+
+        lastDownloaded = downloaded;
+        lastTimestamp = now;
+      }
+    });
   } else {
     // Process the audio source from storage
     const rawSourceFile = createTempFile(`raw-${audioSource.id}`, tempFiles);
