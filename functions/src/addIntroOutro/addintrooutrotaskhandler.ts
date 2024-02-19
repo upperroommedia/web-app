@@ -31,9 +31,6 @@ import trim from './trim';
 
 const ffmpeg = loadStaticFFMPEG();
 
-const ytdlpPath = path.join(__dirname, '../../..', '..', 'bin', 'yt-dlp');
-logger.log(ytdlpPath);
-
 const mainFunction = async (
   cancelToken: CancelToken,
   bucket: Bucket,
@@ -133,7 +130,6 @@ const mainFunction = async (
     } else {
       await trimAndTranscode(
         ffmpeg,
-        ytdlpPath,
         cancelToken,
         bucket,
         audioSource,

@@ -7,13 +7,11 @@ import { convertStringToMilliseconds, createTempFile, logMemoryUsage, throwError
 import { CustomMetadata, AudioSource } from './types';
 import { unlink } from 'fs/promises';
 import { Readable } from 'stream';
-import { ChildProcessWithoutNullStreams } from 'child_process';
 import { sermonStatus, sermonStatusType } from '../../../types/SermonTypes';
 import ytdl from 'ytdl-core';
 
 const trimAndTranscode = async (
   ffmpeg: typeof import('fluent-ffmpeg'),
-  ytdlpPath: string,
   cancelToken: CancelToken,
   bucket: Bucket,
   audioSource: AudioSource,
@@ -35,7 +33,6 @@ const trimAndTranscode = async (
     metadata: { contentDisposition, metadata: customMetadata },
   });
   let inputSource: string | Readable;
-  let ytdlp: ChildProcessWithoutNullStreams;
   let transcodingStarted = false;
   const updateDownloadProgress = (progress: number) => {
     if (!transcodingStarted) {
@@ -107,9 +104,9 @@ const trimAndTranscode = async (
       })
       .on('end', async () => {
         logger.log('Finished Trim and Transcode');
-        if (ytdlp) {
+        if (inputSource instanceof Readable) {
           logger.log('Killing ytdlp process');
-          ytdlp.kill('SIGTERM'); // this sends a termination signal to the process
+          inputSource.destroy(); // this sends a termination signal to the process
         }
         resolve(outputFile);
       })
@@ -134,9 +131,9 @@ const trimAndTranscode = async (
         if (cancelToken.isCancellationRequested) {
           logger.log('Cancellation requested, killing ffmpeg process');
           proc.kill('SIGTERM'); // this sends a termination signal to the process
-          if (ytdlp) {
+          if (inputSource instanceof Readable) {
             logger.log('Killing ytdlp process');
-            ytdlp.kill('SIGTERM'); // this sends a termination signal to the process
+            inputSource.destroy(); // this sends a termination signal to the process
           }
           reject(new HttpsError('aborted', 'Trim and Transcode operation was cancelled'));
         }
