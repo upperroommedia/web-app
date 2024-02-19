@@ -38,7 +38,7 @@ import UploaderDatePicker from './UploaderDatePicker';
 import { UploaderFieldError, UploadProgress } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
 import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
-import { SUNDAY_HOMILIES_STRING, BIBLE_STUDIES_STRING } from './consts';
+import { SUNDAY_HOMILIES_STRING, BIBLE_STUDIES_STRING, MAX_DURATION_SECONDS } from './consts';
 import BibleChapterSelector from './BibleChapterSelector';
 import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
@@ -214,7 +214,7 @@ const Uploader = (props: UploaderProps) => {
     (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
     (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
     sermon.durationSeconds <= 0 ||
-    sermon.durationSeconds > 2 * 3600 ||
+    sermon.durationSeconds > MAX_DURATION_SECONDS ||
     isUploading ||
     isEditing;
 
@@ -547,9 +547,11 @@ const Uploader = (props: UploaderProps) => {
                   variant="caption"
                   color="orange"
                   textAlign="center"
-                  visibility={sermon.durationSeconds > 3600 * 2 ? 'visible' : 'hidden'}
+                  visibility={sermon.durationSeconds > MAX_DURATION_SECONDS ? 'visible' : 'hidden'}
                 >
-                  Please trim the video to a duration less than 2 hours using the handles in the video player
+                  {`Please trim the video to a duration less than ${
+                    MAX_DURATION_SECONDS / 3600
+                  } hours using the handles in the video player`}
                 </Typography>
                 <Box display="flex">
                   <UploadButton
