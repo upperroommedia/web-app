@@ -45,6 +45,7 @@ const trimAndTranscode = async (
 
   if (audioSource.type === 'YouTubeUrl') {
     // Process the audio source from YouTube
+    logger.log('Streaming audio from youtube video:', audioSource.source);
     const ytdlOptions: ytdl.downloadOptions = {
       quality: 'highestaudio',
       filter: 'audioonly',

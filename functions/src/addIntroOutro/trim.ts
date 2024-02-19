@@ -21,6 +21,7 @@ const trimAndTranscode = async (
   duration?: number
 ): Promise<File> => {
   // Download the raw audio source from storage
+  logger.log('Trimming but not transcoding audio source:', storageFilePath);
   const rawSourceFile = createTempFile(`raw-${path.basename(storageFilePath)}`, tempFiles);
   logger.log('Downloading raw audio source to', rawSourceFile);
   await bucket.file(storageFilePath).download({ destination: rawSourceFile });
@@ -34,7 +35,7 @@ const trimAndTranscode = async (
     contentType: 'audio/mpeg',
     metadata: { contentDisposition, metadata: customMetadata },
   });
-  const proc = ffmpeg().input(rawSourceFile);
+  const proc = ffmpeg().input(rawSourceFile).format('mp3');
   if (startTime) proc.setStartTime(startTime);
   if (duration) proc.setDuration(duration);
   proc.outputOption('-c copy');
@@ -49,8 +50,10 @@ const trimAndTranscode = async (
         logger.log('Finished Trim');
         resolve(outputFile);
       })
-      .on('error', (err) => {
+      .on('error', (err, stdout, stderr) => {
         logger.error('Trim Error:', err);
+        logger.error('ffmpeg stdout:', stdout);
+        logger.error('ffmpeg stderr:', stderr);
         reject(err);
       })
       .on('codecData', (data) => {
