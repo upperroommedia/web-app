@@ -34,7 +34,8 @@
     "mkdirp": "^2.1.6",
     "node-fetch": "3.3.0",
     "sharp": "^0.31.3",
-    "uuidv4": "^6.2.13"
+    "uuidv4": "^6.2.13",
+    "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
     "@types/ffprobe-static": "^2.0.3",
