@@ -48,6 +48,7 @@ const addFirestoreDocument = async (
 };
 
 const uploadFile = async (props: UploadFileProps) => {
+  props.setUploadProgress({ error: false, message: 'Uploading...', percent: 0 });
   const audioSource = props.audioSource;
   const sermonRef = ref(storage, `sermons/${props.sermon.id}`);
   const { introRef, outroRef } = await getIntroAndOutro(props.sermon);
