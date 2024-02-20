@@ -56,23 +56,31 @@ const trimAndTranscode = async (
     let perviousProgress = -1;
     let lastDownloaded = 0;
     let lastTimestamp = Date.now();
-    inputSource.on('progress', (chunkLength, downloaded, total) => {
-      const progress = Math.round((downloaded / total) * 100);
-      if (progress !== perviousProgress) {
-        perviousProgress = progress;
-        updateDownloadProgress(progress);
-        const now = Date.now();
-        const elapsed = (now - lastTimestamp) / 1000; // convert ms to s
-        const bytesDownloaded = downloaded - lastDownloaded;
-        const downloadRate = bytesDownloaded / elapsed / 1024 / 1024; // MB per second
-        const totalMiB = total / 1024 / 1024;
+    inputSource
+      .on('progress', (chunkLength, downloaded, total) => {
+        const progress = Math.round((downloaded / total) * 100);
+        if (progress !== perviousProgress) {
+          perviousProgress = progress;
+          updateDownloadProgress(progress);
+          const now = Date.now();
+          const elapsed = (now - lastTimestamp) / 1000; // convert ms to s
+          const bytesDownloaded = downloaded - lastDownloaded;
+          const downloadRate = bytesDownloaded / elapsed / 1024 / 1024; // MB per second
+          const totalMiB = total / 1024 / 1024;
 
-        logger.log(`Youtube Download ${progress}% of ${totalMiB.toFixed(2)}MiB at ${downloadRate.toFixed(2)} MB/s`);
+          logger.log(`Youtube Download ${progress}% of ${totalMiB.toFixed(2)}MiB at ${downloadRate.toFixed(2)} MB/s`);
 
-        lastDownloaded = downloaded;
-        lastTimestamp = now;
-      }
-    });
+          lastDownloaded = downloaded;
+          lastTimestamp = now;
+        }
+      })
+      .on('error', (err) => {
+        logger.error('ytdl Error:', err);
+        throw new HttpsError('internal', 'getYoutubeStream error', err);
+      })
+      .on('end', () => {
+        logger.log('ytdl stream ended');
+      });
   } else {
     // Process the audio source from storage
     const rawSourceFile = createTempFile(`raw-${audioSource.id}`, tempFiles);
