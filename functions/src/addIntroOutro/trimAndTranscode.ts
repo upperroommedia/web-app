@@ -69,7 +69,7 @@ const trimAndTranscode = async (
           const downloadRate = bytesDownloaded / elapsed / 1024 / 1024; // MB per second
           if (downloadRate < 0.1) {
             slowBandwidthCount++;
-            if (slowBandwidthCount > 5) {
+            if (slowBandwidthCount > 2) {
               logger.error('Bandwidth too slow, aborting download');
               if (inputSource instanceof Readable) {
                 inputSource.emit('end');
