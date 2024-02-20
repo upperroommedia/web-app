@@ -113,6 +113,8 @@ const trimAndTranscode = async (
       .on('end', async () => {
         logger.log('Finished Trim and Transcode');
         if (inputSource instanceof Readable) {
+          logger.log('Ending ytdl stream');
+          inputSource.emit('end');
           logger.log('Killing ytdlp process');
           inputSource.destroy(); // this sends a termination signal to the process
         }
@@ -140,6 +142,8 @@ const trimAndTranscode = async (
           logger.log('Cancellation requested, killing ffmpeg process');
           proc.kill('SIGTERM'); // this sends a termination signal to the process
           if (inputSource instanceof Readable) {
+            logger.log('Ending ytdl stream');
+            inputSource.emit('end');
             logger.log('Killing ytdlp process');
             inputSource.destroy(); // this sends a termination signal to the process
           }
