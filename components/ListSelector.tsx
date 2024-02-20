@@ -3,16 +3,38 @@ import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
 import { sanitize } from 'dompurify';
-import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect, useMemo, memo } from 'react';
+import {
+  Fragment,
+  FunctionComponent,
+  Dispatch,
+  SetStateAction,
+  useState,
+  useEffect,
+  useMemo,
+  memo,
+  useRef,
+  useCallback,
+} from 'react';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewListPopup from './NewListPopup';
-import firestore, { query, collection, getDocs, where, limit, orderBy, QueryConstraint } from '../firebase/firestore';
+import firestore, {
+  query,
+  collection,
+  getDocs,
+  where,
+  limit,
+  orderBy,
+  QueryConstraint,
+  startAfter,
+  QueryDocumentSnapshot,
+} from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import algoliasearch from 'algoliasearch';
+import CircularProgress from '@mui/material/CircularProgress';
 
 interface ListSelectorProps {
   sermonList: List[];
@@ -33,6 +55,10 @@ const listIndex = client?.initIndex('lists');
 const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorProps) => {
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
+  const [open, setOpen] = useState(false);
+  const [isQuerying, setIsQuerying] = useState(false);
+  const lastDoc = useRef<QueryDocumentSnapshot<List> | null>(null);
+  const loading = open && isQuerying;
 
   const updateSermonList = (listWithHighlight: ListWithHighlight[]) => {
     const listArray: List[] = listWithHighlight.map((s) => {
@@ -60,32 +86,36 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
       }
     }
   };
+  const fetchList = useCallback(async () => {
+    setIsQuerying(true);
+    const queryConstraints: QueryConstraint[] = [orderBy('name', 'asc'), startAfter(lastDoc.current), limit(15)];
+    if (props.listType) {
+      queryConstraints.push(where('type', '==', props.listType));
+    }
+    const listQuery = query(collection(firestore, 'lists'), ...queryConstraints).withConverter(listConverter);
+    const listQuerySnapshot = await getDocs(listQuery);
+    if (listQuerySnapshot.docs.length > 0) {
+      lastDoc.current = listQuerySnapshot.docs[listQuerySnapshot.docs.length - 1];
+    }
+    setAllListArray((existingList) => {
+      return [...existingList, ...listQuerySnapshot.docs.map((doc) => doc.data())];
+    });
+    setIsQuerying(false);
+  }, [props.listType]);
 
   useEffect(() => {
-    const fetchList = async () => {
-      const queryConstraints: QueryConstraint[] = [limit(5), orderBy('updatedAtMillis', 'desc')];
-      if (props.listType) {
-        queryConstraints.push(where('type', '==', props.listType));
-      }
-      const listQuery = query(collection(firestore, 'lists'), ...queryConstraints).withConverter(listConverter);
-      const listQuerySnapshot = await getDocs(listQuery);
-      setAllListArray(
-        listQuerySnapshot.docs.map((doc) => {
-          const list = doc.data();
-          return list;
-        })
-      );
-    };
     fetchList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const queryAlgolia = async (query: string) => {
     if (listIndex) {
+      setIsQuerying(true);
       const result = await listIndex.search<ListWithHighlight>(query, {
         hitsPerPage: 5,
         ...(props.listType && { facetFilters: `type:${props.listType}` }),
       });
+      setIsQuerying(false);
       return result.hits;
     }
     return [];
@@ -97,7 +127,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
 
   const getListUnion = (array1: ListWithHighlight[], array2: ListWithHighlight[]) => {
     const difference = array1.filter((s1) => !array2.find((s2) => s1.id === s2.id));
-    return [...difference, ...array2].sort((a, b) => (a.name > b.name ? -1 : 1));
+    return [...difference, ...array2].sort((a, b) => (a.name < b.name ? -1 : 1));
   };
 
   return (
@@ -107,6 +137,14 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           multiple
           fullWidth
           value={value}
+          onOpen={() => {
+            setOpen(true);
+          }}
+          onClose={() => {
+            setOpen(false);
+          }}
+          loading={loading}
+          loadingText="Loading..."
           onChange={async (_, newValue, reason) => {
             if (props.listType === ListType.CATEGORY_LIST && newValue.length > 1) {
               newValue = newValue.slice(1);
@@ -150,22 +188,24 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
             setAllListArray(await queryAlgolia(newInputValue));
           }}
           renderOption={(props, option: ListWithHighlight) => (
-            <ListItem {...props} key={option.id}>
-              <AvatarWithDefaultImage
-                defaultImageURL="/user.png"
-                altName={option.name}
-                width={30}
-                height={30}
-                image={option.images?.find((image) => image.type === 'square')}
-                borderRadius={5}
-                sx={{ marginRight: '15px' }}
-              />
-              {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
-                <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
-              ) : (
-                <div>{option.name}</div>
-              )}
-            </ListItem>
+            <>
+              <ListItem {...props} key={option.id}>
+                <AvatarWithDefaultImage
+                  defaultImageURL="/user.png"
+                  altName={option.name}
+                  width={30}
+                  height={30}
+                  image={option.images?.find((image) => image.type === 'square')}
+                  borderRadius={5}
+                  sx={{ marginRight: '15px' }}
+                />
+                {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
+                  <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+                ) : (
+                  <div>{option.name}</div>
+                )}
+              </ListItem>
+            </>
           )}
           getOptionLabel={(option: ListWithHighlight) => option.name}
           isOptionEqualToValue={(option, value) =>
@@ -180,6 +220,15 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
                   ? props.listType.charAt(0).toUpperCase() + props.listType.split('-')[0].slice(1)
                   : 'Lists'
               }
+              InputProps={{
+                ...params.InputProps,
+                endAdornment: (
+                  <Fragment>
+                    {loading ? <CircularProgress color="inherit" size={20} /> : null}
+                    {params.InputProps.endAdornment}
+                  </Fragment>
+                ),
+              }}
             />
           )}
         />
