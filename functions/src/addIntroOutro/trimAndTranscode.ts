@@ -9,6 +9,7 @@ import { unlink } from 'fs/promises';
 import { Readable } from 'stream';
 import { sermonStatus, sermonStatusType } from '../../../types/SermonTypes';
 import ytdl from 'ytdl-core';
+// import { HttpsProxyAgent } from 'https-proxy-agent';
 
 const trimAndTranscode = async (
   ffmpeg: typeof import('fluent-ffmpeg'),
@@ -40,12 +41,17 @@ const trimAndTranscode = async (
     }
   };
 
+  let inputSourceError: HttpsError;
   if (audioSource.type === 'YouTubeUrl') {
     // Process the audio source from YouTube
     logger.log('Streaming audio from youtube video:', audioSource.source);
+    // Remove 'user:pass@' if you don't need to authenticate to your proxy.
+    // const proxy = 'http://111.111.111.111:8080';
+    // const agent = new HttpsProxyAgent(proxy);
     const ytdlOptions: ytdl.downloadOptions = {
       quality: 'highestaudio',
       filter: 'audioonly',
+      // requestOptions: { agent },
     };
     // this doesn't seem consistent with live videos so leaving it out for now
     // if (startTime) {
@@ -64,7 +70,7 @@ const trimAndTranscode = async (
         const bytesDownloaded = downloaded - lastDownloaded;
         const progress = Math.round((downloaded / total) * 100);
         const downloadRate = bytesDownloaded / elapsed / 1024 / 1024; // MB per second
-        if (downloadRate < 0.1) {
+        if (!transcodingStarted && downloadRate < 0.1) {
           slowBandwidthCount++;
           if (slowBandwidthCount > 5) {
             logger.error('Bandwidth too slow, aborting download');
@@ -72,24 +78,27 @@ const trimAndTranscode = async (
               inputSource.emit('end');
               inputSource.destroy();
             }
-            throw new HttpsError('resource-exhausted', 'Bandwidth too slow, aborting download');
+            inputSourceError = new HttpsError('resource-exhausted', 'Bandwidth too slow, aborting download');
+            throw inputSourceError;
           }
         }
         if (progress !== perviousProgress) {
           perviousProgress = progress;
           updateDownloadProgress(progress);
-
           const totalMiB = total / 1024 / 1024;
-
           logger.log(`Youtube Download ${progress}% of ${totalMiB.toFixed(2)}MiB at ${downloadRate.toFixed(2)} MB/s`);
-
           lastDownloaded = downloaded;
           lastTimestamp = now;
         }
       })
       .on('error', (err) => {
         logger.error('ytdl Error:', err);
-        throw new HttpsError('internal', 'getYoutubeStream error', err);
+        if (inputSource instanceof Readable) {
+          inputSource.emit('end');
+          inputSource.destroy();
+        }
+        inputSourceError = new HttpsError('internal', 'getYoutubeStream error', err);
+        throw inputSourceError;
       })
       .on('end', () => {
         logger.log('ytdl stream ended');
@@ -135,7 +144,11 @@ const trimAndTranscode = async (
       })
       .on('error', (err) => {
         logger.error('Trim and Transcode Error:', err);
-        reject(err);
+        if (inputSourceError) {
+          reject(inputSourceError);
+        } else {
+          reject(err);
+        }
       })
       .on('codecData', (data) => {
         // HERE YOU GET THE TOTAL TIME
@@ -147,7 +160,11 @@ const trimAndTranscode = async (
         try {
           throwErrorOnSpecificStderr(stderrLine);
         } catch (err) {
-          reject(err);
+          if (inputSourceError) {
+            reject(inputSourceError);
+          } else {
+            reject(err);
+          }
         }
       })
       .on('progress', async (progress) => {
