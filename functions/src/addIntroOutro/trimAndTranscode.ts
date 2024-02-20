@@ -56,6 +56,7 @@ const trimAndTranscode = async (
     let perviousProgress = -1;
     let lastDownloaded = 0;
     let lastTimestamp = Date.now();
+    let slowBandwidthCount = 0;
     inputSource
       .on('progress', (chunkLength, downloaded, total) => {
         const progress = Math.round((downloaded / total) * 100);
@@ -66,6 +67,17 @@ const trimAndTranscode = async (
           const elapsed = (now - lastTimestamp) / 1000; // convert ms to s
           const bytesDownloaded = downloaded - lastDownloaded;
           const downloadRate = bytesDownloaded / elapsed / 1024 / 1024; // MB per second
+          if (downloadRate < 0.1) {
+            slowBandwidthCount++;
+            if (slowBandwidthCount > 5) {
+              logger.error('Bandwidth too slow, aborting download');
+              if (inputSource instanceof Readable) {
+                inputSource.emit('end');
+                inputSource.destroy();
+              }
+              throw new HttpsError('resource-exhausted', 'Bandwidth too slow, aborting download');
+            }
+          }
           const totalMiB = total / 1024 / 1024;
 
           logger.log(`Youtube Download ${progress}% of ${totalMiB.toFixed(2)}MiB at ${downloadRate.toFixed(2)} MB/s`);
