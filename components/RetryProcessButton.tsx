@@ -26,7 +26,7 @@ export default function RetryProcessButton({ sermon }: RetryProcessButtonProps) 
         data = {
           id: sermon.id,
           youtubeUrl: sermon.youtubeUrl,
-          startTime: 0,
+          startTime: sermon.sourceStartTime,
           duration: sermon.durationSeconds,
           deleteOriginal: true,
           introUrl: introRef,
@@ -37,7 +37,7 @@ export default function RetryProcessButton({ sermon }: RetryProcessButtonProps) 
         data = {
           id: sermon.id,
           storageFilePath: storageRef.fullPath,
-          startTime: 0,
+          startTime: sermon.sourceStartTime,
           duration: sermon.durationSeconds,
           deleteOriginal: true,
           introUrl: introRef,

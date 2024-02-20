@@ -96,8 +96,6 @@ const Uploader = (props: UploaderProps) => {
       return new Date().getFullYear();
     }
   });
-
-  const [trimStart, setTrimStart] = useState<number>(0);
   const [hasTrimmed, setHasTrimmed] = useState(false);
 
   // TODO: REFACTOR THESE INTO SERMON DATA
@@ -218,21 +216,6 @@ const Uploader = (props: UploaderProps) => {
     isUploading ||
     isEditing;
 
-  const clearAudioTrimmer = useCallback(() => {
-    setUseYouTubeUrl(false);
-    setAudioSource(undefined);
-    setTrimStart(0);
-  }, [setAudioSource, setTrimStart]);
-
-  const clearForm = () => {
-    setSpeakerError({ error: false, message: '' });
-    setSermon(createEmptySermon(props.user.uid));
-    setEmptyListWithLatest([]);
-    setSermonList([]);
-    setDate(new Date());
-    clearAudioTrimmer();
-  };
-
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setSermon((prevSermon) => {
@@ -266,6 +249,28 @@ const Uploader = (props: UploaderProps) => {
     },
     [updateSermon]
   );
+
+  const setTrimStartTime = useCallback(
+    (trimStartTime: number) => {
+      updateSermon('sourceStartTime', trimStartTime);
+    },
+    [updateSermon]
+  );
+
+  const clearAudioTrimmer = useCallback(() => {
+    setUseYouTubeUrl(false);
+    setAudioSource(undefined);
+    setTrimStartTime(0);
+  }, [setAudioSource, setTrimStartTime]);
+
+  const clearForm = () => {
+    setSpeakerError({ error: false, message: '' });
+    setSermon(createEmptySermon(props.user.uid));
+    setEmptyListWithLatest([]);
+    setSermonList([]);
+    setDate(new Date());
+    clearAudioTrimmer();
+  };
 
   const handleNewImage = useCallback(
     (image: ImageType | ImageSizeType) => {
@@ -435,8 +440,8 @@ const Uploader = (props: UploaderProps) => {
                 props.existingSermonUrl?.status === 'success' ? (
                   <AudioTrimmerComponent
                     url={props.existingSermonUrl.url}
-                    trimStart={trimStart}
-                    setTrimStart={setTrimStart}
+                    trimStart={sermon.sourceStartTime}
+                    setTrimStart={setTrimStartTime}
                     setTrimDuration={setTrimDuration}
                     clearAudioTrimmer={clearAudioTrimmer}
                     setHasTrimmed={setHasTrimmed}
@@ -473,7 +478,7 @@ const Uploader = (props: UploaderProps) => {
                       const data: AddIntroOutroInputType = {
                         id: sermon.id,
                         storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
-                        startTime: trimStart,
+                        startTime: sermon.sourceStartTime,
                         duration: sermon.durationSeconds,
                         deleteOriginal: false,
                         skipTranscode: true,
@@ -505,8 +510,8 @@ const Uploader = (props: UploaderProps) => {
               {audioSource?.type === 'File' ? (
                 <AudioTrimmerComponent
                   url={audioSource.source.preview}
-                  trimStart={trimStart}
-                  setTrimStart={setTrimStart}
+                  trimStart={sermon.sourceStartTime}
+                  setTrimStart={setTrimStartTime}
                   setTrimDuration={setTrimDuration}
                   clearAudioTrimmer={clearAudioTrimmer}
                 />
@@ -523,7 +528,10 @@ const Uploader = (props: UploaderProps) => {
                     control={
                       <Switch
                         checked={useYouTubeUrl}
-                        onChange={() => setUseYouTubeUrl((prevValue) => !prevValue)}
+                        onChange={() => {
+                          setTrimStartTime(0);
+                          setUseYouTubeUrl((prevValue) => !prevValue);
+                        }}
                         inputProps={{ 'aria-label': 'controlled' }}
                       />
                     }
@@ -531,9 +539,9 @@ const Uploader = (props: UploaderProps) => {
                   />
                   {useYouTubeUrl ? (
                     <YouTubeTrimmer
-                      trimStart={trimStart}
+                      trimStart={sermon.sourceStartTime}
                       duration={sermon.durationSeconds}
-                      setTrimStart={setTrimStart}
+                      setTrimStart={setTrimStartTime}
                       setDuration={setTrimDuration}
                       setAudioSource={setAudioSource}
                     />
@@ -558,7 +566,7 @@ const Uploader = (props: UploaderProps) => {
                     user={props.user}
                     sermon={sermon}
                     audioSource={audioSource}
-                    trimStart={trimStart}
+                    trimStart={sermon.sourceStartTime}
                     sermonList={sermonList}
                     baseButtonDisabled={baseButtonDisabled}
                     date={date}
