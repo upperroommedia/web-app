@@ -48,7 +48,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
 
   const showDelete =
     (user?.isAdmin() && sermon.status.audioStatus !== sermonStatusType.PENDING) ||
-    (user?.isUploader() &&
+    (user?.canUpload() &&
       sermon.status.subsplash !== uploadStatus.UPLOADED &&
       sermon.status.soundCloud !== uploadStatus.UPLOADED &&
       sermon.status.audioStatus !== sermonStatusType.PENDING);
@@ -56,7 +56,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   const showEdit =
     sermon.status.audioStatus === sermonStatusType.PROCESSED &&
     (user?.isAdmin() ||
-      (user?.isUploader() &&
+      (user?.canUpload() &&
         sermon.status.subsplash !== uploadStatus.UPLOADED &&
         sermon.status.soundCloud !== uploadStatus.UPLOADED));
 

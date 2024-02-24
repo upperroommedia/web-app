@@ -38,7 +38,7 @@ export default function UploadButton({
       value="Upload"
       disabled={audioSource === undefined || baseButtonDisabled}
       onClick={async () => {
-        if (audioSource !== undefined && date != null && user.isUploader()) {
+        if (audioSource !== undefined && date != null && user.canUpload()) {
           try {
             setIsUploading(true);
             await uploadFile({
@@ -54,7 +54,7 @@ export default function UploadButton({
           } finally {
             setIsUploading(false);
           }
-        } else if (!user.isUploader()) {
+        } else if (!user.canUpload()) {
           setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
         }
       }}

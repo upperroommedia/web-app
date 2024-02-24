@@ -1,15 +1,19 @@
 import adminFirebase from 'firebase/auth';
 
-export interface User extends adminFirebase.User {
-  role?: string;
-  firstName: string;
-  lastName: string;
-  isUploader: () => boolean;
-  isAdmin: () => boolean;
-}
-
 export const UserRole = {
   ADMIN: 'admin',
   UPLOADER: 'uploader',
   USER: 'user',
-};
+  PUBLISHER: 'publisher',
+} as const;
+
+export type UserRoleType = (typeof UserRole)[keyof typeof UserRole];
+
+export interface User extends adminFirebase.User {
+  role?: UserRoleType;
+  firstName: string;
+  lastName: string;
+  canUpload: () => boolean;
+  canPublish: () => boolean;
+  isAdmin: () => boolean;
+}
