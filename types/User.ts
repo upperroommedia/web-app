@@ -8,6 +8,9 @@ export const UserRole = {
 } as const;
 
 export type UserRoleType = (typeof UserRole)[keyof typeof UserRole];
+export function canUserRolePublish(role: string | undefined) {
+  return role === UserRole.ADMIN || role === UserRole.PUBLISHER;
+}
 
 export interface User extends adminFirebase.User {
   role?: UserRoleType;

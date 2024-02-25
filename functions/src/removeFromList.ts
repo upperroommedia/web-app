@@ -3,6 +3,7 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { canUserRolePublish } from '../../types/User';
 
 export interface RemoveFromListInputType {
   listIds: string[];
@@ -53,7 +54,7 @@ const removeFromListCallable = onCall(
   async (request: CallableRequest<RemoveFromListInputType>): Promise<RemoveFromListOutputType> => {
     logger.log('removeFromList');
 
-    if (request.auth?.token.role !== 'admin') {
+    if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     const data = request.data;
