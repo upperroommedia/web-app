@@ -17,9 +17,12 @@ export function debounce<T extends (...args: any[]) => any>(func: T, wait: numbe
       func(...args);
     };
     if (timeout) {
-      console.log('Debounced');
       clearTimeout(timeout);
     }
     timeout = setTimeout(later, wait);
   }) as T;
 }
+
+export const removeQueryParams = (url: string) => {
+  return url.split('?')[0];
+};
