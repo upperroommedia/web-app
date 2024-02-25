@@ -47,7 +47,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   const { user } = useAuth();
 
   const showDelete =
-    (user?.isAdmin() && sermon.status.audioStatus !== sermonStatusType.PENDING) ||
+    (user?.canPublish() && sermon.status.audioStatus !== sermonStatusType.PENDING) ||
     (user?.canUpload() &&
       sermon.status.subsplash !== uploadStatus.UPLOADED &&
       sermon.status.soundCloud !== uploadStatus.UPLOADED &&
@@ -55,16 +55,16 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
 
   const showEdit =
     sermon.status.audioStatus === sermonStatusType.PROCESSED &&
-    (user?.isAdmin() ||
+    (user?.canPublish() ||
       (user?.canUpload() &&
         sermon.status.subsplash !== uploadStatus.UPLOADED &&
         sermon.status.soundCloud !== uploadStatus.UPLOADED));
 
   const showUploadedTag =
-    !user?.isAdmin() &&
+    !user?.canPublish() &&
     (sermon.status.subsplash === uploadStatus.UPLOADED || sermon.status.soundCloud === uploadStatus.UPLOADED);
 
-  const showUploadButtons = user?.isAdmin() && sermon.status.audioStatus === sermonStatusType.PROCESSED;
+  const showUploadButtons = user?.canPublish() && sermon.status.audioStatus === sermonStatusType.PROCESSED;
   const showRetry = sermon.status.audioStatus === sermonStatusType.ERROR;
 
   useEffect(() => {
@@ -105,7 +105,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
             </span>
           </Tooltip>
         )}
-        {showUploadedTag && !user?.isAdmin() && <Chip label="Uploaded" color="success" />}
+        {showUploadedTag && !user?.canPublish() && <Chip label="Uploaded" color="success" />}
 
         {showRetry && <RetryProcessButton sermon={sermon} />}
         {showDelete && (
