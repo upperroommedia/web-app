@@ -317,9 +317,23 @@ const Uploader = (props: UploaderProps) => {
           justifyContent: 'center',
         }}
       >
-        <h1 style={{ justifySelf: 'center', gridColumn: '1/-1' }}>
-          {props.existingSermon ? 'Edit Sermon' : 'Uploader'}
-        </h1>
+        <Stack
+          direction="row"
+          justifyContent={'center'}
+          alignItems="center"
+          sx={{ gridColumn: '1/-1', position: 'relative' }}
+        >
+          <Typography variant={'h3'} sx={{ justifySelf: 'center', pt: 1, fontWeight: '500' }}>
+            {props.existingSermon ? 'Edit Sermon' : 'Uploader'}
+          </Typography>
+          {props.onCancel && (
+            <Box sx={{ position: 'absolute', right: 0 }}>
+              <Button onClick={props.onCancel} variant="contained" size="small">
+                Cancel
+              </Button>
+            </Box>
+          )}
+        </Stack>
         <Box
           sx={{
             display: 'flex',

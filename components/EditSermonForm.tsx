@@ -1,7 +1,3 @@
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
-import Dialog from '@mui/material/Dialog';
-import Button from '@mui/material/Button';
 import VerifiedUserUploader from './uploaderComponents/VerifiedUserUploaderComponent';
 import { Sermon } from '../types/SermonTypes';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
@@ -17,9 +13,8 @@ import { PROCESSED_SERMONS_BUCKET } from '../constants/storage_constants';
 import { showAudioTrimmerBoolean } from './uploaderComponents/utils';
 
 interface EditSermonFormInfo {
-  open: boolean;
-  setOpen: any;
   sermon: Sermon;
+  onCancel?: () => void;
 }
 
 export type SermonURL =
@@ -32,7 +27,7 @@ export type SermonURL =
       status: 'loading' | 'error';
     };
 const storage = getStorage(firebase);
-const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
+const EditSermonForm = ({ sermon, onCancel }: EditSermonFormInfo) => {
   const [sermonLists, loading, error, _snapshot] = useCollectionDataOnce(
     collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(listConverter)
   );
@@ -56,33 +51,20 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
   }, [sermon.id, showAudioTrimmer]);
 
   return (
-    <Dialog open={open} onClose={() => setOpen(false)} aria-labelledby="confirm-dialog" maxWidth="lg">
-      <DialogContent>
-        {error ? (
-          <Box>{error.message}</Box>
-        ) : loading ? (
-          <CircularProgress />
-        ) : (
-          <VerifiedUserUploader
-            existingSermon={sermon}
-            existingList={sermonLists || []}
-            existingSermonUrl={sermonUrl}
-            setEditFormOpen={setOpen}
-          />
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button
-          variant="contained"
-          onClick={() => {
-            setOpen(false);
-          }}
-          color="primary"
-        >
-          Close
-        </Button>
-      </DialogActions>
-    </Dialog>
+    <>
+      {error ? (
+        <Box>{error.message}</Box>
+      ) : loading ? (
+        <CircularProgress />
+      ) : (
+        <VerifiedUserUploader
+          existingSermon={sermon}
+          existingList={sermonLists || []}
+          existingSermonUrl={sermonUrl}
+          onCancel={onCancel}
+        />
+      )}
+    </>
   );
 };
 export default EditSermonForm;

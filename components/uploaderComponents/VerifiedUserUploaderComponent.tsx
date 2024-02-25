@@ -14,6 +14,7 @@ export interface VerifiedUserUploaderProps {
   existingSermon?: Sermon;
   existingSermonUrl?: SermonURL;
   existingList?: List[];
+  onCancel?: () => void;
   setEditFormOpen?: Dispatch<SetStateAction<boolean>>;
 }
 
