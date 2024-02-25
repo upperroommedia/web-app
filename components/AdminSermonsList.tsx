@@ -23,7 +23,6 @@ import UserRoleGuard from './UserRoleGuard';
 interface AdminSermonsListProps {
   collectionPath: string;
   count?: number;
-  user: User;
 }
 
 interface AdminSermonsListWithUserProps extends AdminSermonsListProps {
@@ -46,7 +45,7 @@ const AdminSermonsListWithUser: FunctionComponent<AdminSermonsListWithUserProps>
   collectionPath,
   count,
   user,
-}: AdminSermonsListProps) => {
+}) => {
   const [queryLimit, setQueryLimit] = useState<number>(limitCount);
   const [previousSermonsCount, setPreviousSermonsCount] = useState<number>(0);
   const [previousSermons, setPreviousSermons] = useState<Sermon[]>([]);
@@ -204,11 +203,13 @@ const AdminSermonsListWithUser: FunctionComponent<AdminSermonsListWithUserProps>
   );
 };
 
-const AdminSermonsList = (props: AdminSermonsListProps) => {
-  <UserRoleGuard
-    allowedUserRoles={['admin', 'uploader', 'publisher']}
-    renderItems={(user) => <AdminSermonsListWithUser {...props} user={user} />}
-  />;
+const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = (props) => {
+  return (
+    <UserRoleGuard
+      allowedUserRoles={['admin', 'uploader', 'publisher']}
+      renderItems={(user) => <AdminSermonsListWithUser {...props} user={user} />}
+    />
+  );
 };
 
 export default AdminSermonsList;
