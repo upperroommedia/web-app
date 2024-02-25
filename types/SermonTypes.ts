@@ -28,6 +28,7 @@ export interface Sermon {
   speakers: ISpeaker[];
   subtitle: string;
   dateMillis: number;
+  sourceStartTime: number;
   durationSeconds: number;
   topics: string[];
   dateString?: string;
