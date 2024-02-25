@@ -6,12 +6,11 @@ import * as Buttons from './buttons';
 import * as Menus from './menus';
 import * as Sliders from './sliders';
 import { TimeGroup } from './time-group';
-import { Dispatch, SetStateAction } from 'react';
 
 export interface VideoLayoutProps {
   startTime: number;
   duration: number;
-  setStartTime: Dispatch<SetStateAction<number>>;
+  setStartTime: (trimStartTime: number) => void;
   setDuration: (duration: number) => void;
   thumbnails?: string;
 }

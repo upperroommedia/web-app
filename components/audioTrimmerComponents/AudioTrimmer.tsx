@@ -13,7 +13,7 @@ import { calculateTime, useStateRef, useTrimTimes } from './utils';
 interface AudioTrimmerProps {
   url: string;
   trimStart: number;
-  setTrimStart: Dispatch<SetStateAction<number>>;
+  setTrimStart: (trimStartTime: number) => void;
   setTrimDuration: (durationSeconds: number) => void;
   setHasTrimmed?: Dispatch<SetStateAction<boolean>>;
 }

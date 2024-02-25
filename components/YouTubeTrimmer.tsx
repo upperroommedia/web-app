@@ -19,7 +19,7 @@ interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
   trimStart: number;
   duration: number;
-  setTrimStart: Dispatch<SetStateAction<number>>;
+  setTrimStart: (trimStartTime: number) => void;
   setDuration: (duration: number) => void;
 }
 

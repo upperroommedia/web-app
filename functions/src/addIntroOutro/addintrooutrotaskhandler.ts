@@ -28,8 +28,13 @@ import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
 import { PROCESSED_SERMONS_BUCKET } from '../../../constants/storage_constants';
 import trim from './trim';
+// import http from 'http';
 
+// These will remain constant between function invocations
 const ffmpeg = loadStaticFFMPEG();
+const bucket = firebaseAdmin.storage().bucket();
+const realtimeDB = firebaseAdmin.database();
+const db = firebaseAdmin.firestore();
 
 const mainFunction = async (
   cancelToken: CancelToken,
@@ -53,6 +58,7 @@ const mainFunction = async (
   const maxTries = 3;
   let currentTry = 0;
   let docFound = false;
+  let existingStatus = sermonStatus;
   let title = 'untitled';
   while (currentTry < maxTries) {
     logger.log(`Checking if document exists attempt: ${currentTry + 1}/${maxTries}`);
@@ -61,6 +67,7 @@ const mainFunction = async (
     if (doc.exists) {
       docFound = true;
       title = doc.data()?.title || 'No title found';
+      existingStatus = doc.data()?.status || sermonStatus;
       break;
     }
     logger.log(`No document exists attempt: ${currentTry + 1}/${maxTries}`);
@@ -78,7 +85,7 @@ const mainFunction = async (
     if (cancelToken.isCancellationRequested) return;
     await docRef.update({
       status: {
-        ...sermonStatus,
+        ...existingStatus,
         audioStatus: sermonStatusType.PROCESSING,
         message: 'Getting Data',
       },
@@ -246,10 +253,13 @@ const addintrooutrotaskhandler = onTaskDispatched(
     concurrency: 1,
     retryConfig: {
       maxAttempts: 2,
-      minBackoffSeconds: 10,
     },
   },
   async (request: Request<AddIntroOutroInputType>): Promise<void> => {
+    // Setting the `keepAlive` option to `true` keeps
+    // connections open between function invocations
+    // new http.Agent({ keepAlive: false });
+
     const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
     // set timeout to 30 seconds less than timeoutSeconds then throw error if it takes longer than that
     const data = request.data;
@@ -269,9 +279,6 @@ const addintrooutrotaskhandler = onTaskDispatched(
     }
 
     const audioSource = getAudioSource(data);
-    const bucket = firebaseAdmin.storage().bucket();
-    const realtimeDB = firebaseAdmin.database();
-    const db = firebaseAdmin.firestore();
     const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(data.id);
     const sermonStatus: sermonStatus = {
       subsplash: uploadStatus.NOT_UPLOADED,

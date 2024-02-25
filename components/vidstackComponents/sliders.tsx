@@ -1,6 +1,6 @@
 import Slider from '@mui/material/Slider';
 import { TimeSlider, VolumeSlider, useMediaRemote, useMediaState } from '@vidstack/react';
-import { Dispatch, SetStateAction, SyntheticEvent, useCallback, useEffect, useRef } from 'react';
+import { SyntheticEvent, useCallback, useEffect, useRef } from 'react';
 import { useStateRef } from '../audioTrimmerComponents/utils';
 import { formatTime } from '../../utils/audioUtils';
 
@@ -56,7 +56,7 @@ export function Time({ thumbnails }: TimeSliderProps) {
 const minDistance = 5;
 interface CustomSliderProps {
   startTime: number;
-  setStartTime: Dispatch<SetStateAction<number>>;
+  setStartTime: (trimStartTime: number) => void;
   setDuration: (duration: number) => void;
 }
 
