@@ -8,9 +8,9 @@ export interface GetUserInputType {
   uid: string;
 }
 
-export type GetUserOutputType = Promise<FunctionOutputType<User>>;
+export type GetUserOutputType = FunctionOutputType<User>;
 
-const getUser = https.onCall(async (request: CallableRequest<GetUserInputType>): GetUserOutputType => {
+const getUser = https.onCall(async (request: CallableRequest<GetUserInputType>): Promise<GetUserOutputType> => {
   // check if user is admin (true "admin" custom claim), return error if not
   if (request.auth?.token.role !== 'admin') {
     return { status: 'error', error: `Unauthorized.` };

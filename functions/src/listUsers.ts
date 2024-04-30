@@ -10,9 +10,9 @@ export interface ListUsersInputType {
   pageToken?: string;
 }
 
-export type ListUsersOutputType = Promise<FunctionOutputType<User[]>>;
+export type ListUsersOutputType = FunctionOutputType<User[]>;
 
-const listUsers = https.onCall(async (request: CallableRequest<ListUsersInputType>): ListUsersOutputType => {
+const listUsers = https.onCall(async (request: CallableRequest<ListUsersInputType>): Promise<ListUsersOutputType> => {
   // check if user is admin (true "admin" custom claim), return error if not
   logger.debug('role', request.auth?.token.role);
   if (request.auth?.token.role !== 'admin') {
