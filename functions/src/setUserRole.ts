@@ -1,29 +1,39 @@
 import { ROLES } from '../../context/types';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
-import { https } from 'firebase-functions';
+import { https, logger } from 'firebase-functions/v2';
+import { CallableRequest } from 'firebase-functions/v2/https';
+import { FunctionOutputType } from '../../types/Function';
+export interface SetUserRoleInputType {
+  uid: string;
+  role: string;
+}
 
-const setUserRole = https.onCall(async (data: { uid: string; role: string }, context) => {
-  if (context.auth?.token.role !== 'admin') {
-    return { status: 'Not Authorized' };
+export type SetUserRoleOutputType = Promise<FunctionOutputType<'success'>>;
+
+const setUserRole = https.onCall(async (request: CallableRequest<SetUserRoleInputType>): SetUserRoleOutputType => {
+  logger.debug('role', request.auth?.token.role);
+  if (request.auth?.token.role !== 'admin') {
+    logger.error(`Not Authorized, current user is ${request.auth?.token.role ?? 'unknown'} and must be admin.`);
+    return { status: 'error', error: 'Not Authorized' };
   }
-  if (!ROLES.includes(data.role)) {
-    return { status: `Invalid Role: Should be either ${ROLES.join(', ')}` };
+  if (!ROLES.includes(request.data.role)) {
+    return { status: 'error', error: `Invalid Role: Should be either ${ROLES.join(', ')}` };
   }
   const auth = firebaseAdmin.auth();
   try {
-    const user = await auth.getUser(data.uid);
-    if (user.customClaims?.role === data.role) {
-      return { status: `User is already role: ${data.role}` };
+    const user = await auth.getUser(request.data.uid);
+    if (user.customClaims?.role === request.data.role) {
+      return { status: 'error', error: `User is already role: ${request.data.role}` };
     } else {
-      await auth.setCustomUserClaims(user.uid, { role: data.role });
+      await auth.setCustomUserClaims(user.uid, { role: request.data.role });
       await auth.revokeRefreshTokens(user.uid);
-      return { status: 'Success!' };
+      return { status: 'success', data: 'success' };
     }
   } catch (e) {
     if (e instanceof Error) {
-      return { status: e.message };
+      return { status: 'error', error: e.message };
     }
-    return { status: JSON.stringify(e) };
+    return { status: 'error', error: JSON.stringify(e) };
   }
 });
 

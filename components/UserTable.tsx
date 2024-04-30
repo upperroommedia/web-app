@@ -16,11 +16,13 @@ import { visuallyHidden } from '@mui/utils';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import { Order, ROLES } from '../context/types';
-import { User } from '../types/User';
+import { User, UserWithLoading } from '../types/User';
 import useAuth from '../context/user/UserContext';
+import FormControl from '@mui/material/FormControl';
+import CircularProgress from '@mui/material/CircularProgress';
 
-const stableSort = (array: User[], order: Order, orderBy: keyof User) => {
-  function compareEmail(a: User, b: User) {
+const stableSort = <T extends User>(array: T[], order: Order, orderBy: keyof T) => {
+  function compareEmail(a: T, b: T) {
     if (a.email && b.email) {
       return a.email.localeCompare(b.email);
     } else if (a.email) {
@@ -140,7 +142,10 @@ const UserTableToolbar = () => {
   );
 };
 
-const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role: string) => void }) => {
+const UserTable = (props: {
+  usersWithLoading: UserWithLoading[];
+  handleRoleChange: (uid: string, role: string) => Promise<void>;
+}) => {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof User>('email');
   const { user: currentUser } = useAuth();
@@ -164,7 +169,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   };
 
   // Avoid a layout jump when reaching the last page with empty rows.
-  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
+  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.usersWithLoading.length) : 0;
   return (
     <Box width={1} maxWidth={800} display="flex" padding="30px" justifyContent="center">
       <Paper
@@ -179,12 +184,12 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
               order={order}
               orderBy={orderBy}
               onRequestSort={handleRequestSort}
-              rowCount={props.users.length}
+              rowCount={props.usersWithLoading.length}
             />
             <TableBody>
               {/* if you don't need to support IE11, you can replace the `stableSort` call with:
                 rows.sort(getComparator(order, orderBy)).slice() */}
-              {stableSort(props.users, order, orderBy)
+              {stableSort(props.usersWithLoading, order, orderBy)
                 .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map((user) => {
                   const displayName = user.displayName || user.email;
@@ -195,18 +200,32 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
                         {currentUser?.uid === user.uid ? (
                           <Typography>{user.role}</Typography>
                         ) : (
-                          <Select
-                            labelId="demo-simple-select-label"
-                            id="demo-simple-select"
-                            value={user.role}
-                            onChange={(e) => props.handleRoleChange(user.uid, e.target.value)}
-                          >
-                            {ROLES.map((role) => (
-                              <MenuItem key={role} value={role}>
-                                {role}
-                              </MenuItem>
-                            ))}
-                          </Select>
+                          <FormControl disabled={user.loading}>
+                            <Select
+                              labelId="demo-simple-select-label"
+                              id="demo-simple-select"
+                              value={user.role}
+                              onChange={async (e) => {
+                                await props.handleRoleChange(user.uid, e.target.value);
+                              }}
+                            >
+                              {ROLES.map((role) => (
+                                <MenuItem key={role} value={role}>
+                                  <Box
+                                    sx={{
+                                      display: 'flex',
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      gap: '16px',
+                                      minWidth: '75px',
+                                    }}
+                                  >
+                                    {user.loading ? <CircularProgress size={24} color="inherit" /> : role}
+                                  </Box>
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
                         )}
                       </TableCell>
                       <TableCell align="center">
@@ -244,7 +263,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
         <TablePagination
           rowsPerPageOptions={[5, 10, 25]}
           component="div"
-          count={props.users.length}
+          count={props.usersWithLoading.length}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}
@@ -255,8 +274,11 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   );
 };
 
-function userTablesAreEqual(prevProps: { users: User[] }, nextProps: { users: User[] }) {
-  return JSON.stringify(prevProps.users) === JSON.stringify(nextProps.users);
+function userTablesAreEqual(
+  prevProps: { usersWithLoading: UserWithLoading[] },
+  nextProps: { usersWithLoading: UserWithLoading[] }
+) {
+  return JSON.stringify(prevProps.usersWithLoading) === JSON.stringify(nextProps.usersWithLoading);
 }
 
 export default memo(UserTable, userTablesAreEqual);

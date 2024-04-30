@@ -8,9 +8,11 @@ export const UserRole = {
 } as const;
 
 export type UserRoleType = (typeof UserRole)[keyof typeof UserRole];
-export function canUserRolePublish(role: string | undefined) {
-  return role === UserRole.ADMIN || role === UserRole.PUBLISHER;
-}
+
+export const isUserRoleAdmin = (role: UserRoleType) => role === UserRole.ADMIN;
+export const canUserRoleUpload = (role: UserRoleType) =>
+  role === UserRole.UPLOADER || role === UserRole.ADMIN || role === UserRole.PUBLISHER;
+export const canUserRolePublish = (role: UserRoleType) => role === UserRole.ADMIN || role === UserRole.PUBLISHER;
 
 export interface User extends adminFirebase.User {
   role?: UserRoleType;
@@ -20,3 +22,7 @@ export interface User extends adminFirebase.User {
   canPublish: () => boolean;
   isAdmin: () => boolean;
 }
+
+export type UserWithLoading = User & {
+  loading: boolean;
+};
