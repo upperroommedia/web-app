@@ -13,6 +13,7 @@ import { UserWithLoading } from '../../types/User';
 
 const AdminUsers = () => {
   const [usersWithLoading, setUsersWithLoading] = useState<UserWithLoading[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [snackBarOpen, setSnackBarOpen] = useState<boolean>(false);
   const [message, setMessage] = useState<{ status: 'success' | 'error'; message: string; id: number }>({
     status: 'success',
@@ -21,7 +22,9 @@ const AdminUsers = () => {
   });
 
   const fetchUsers = async () => {
+    setLoadingUsers(true);
     const listUsers = createFunctionV2<ListUsersInputType, ListUsersOutputType>('listusers');
+
     const listUsersOutput = await listUsers({});
     if (listUsersOutput.status === 'error') {
       setMessage({ status: 'error', message: listUsersOutput.error, id: new Date().getTime() });
@@ -29,6 +32,7 @@ const AdminUsers = () => {
       return;
     }
     setUsersWithLoading(listUsersOutput.data.map((listUserOutput) => ({ ...listUserOutput, loading: false })));
+    setLoadingUsers(false);
   };
 
   const setUserLoading = (uid: string, loading: boolean) => {
@@ -94,7 +98,7 @@ const AdminUsers = () => {
 
   return (
     <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-      <UserTable usersWithLoading={usersWithLoading} handleRoleChange={handleRoleChange} />
+      <UserTable usersWithLoading={usersWithLoading} handleRoleChange={handleRoleChange} loading={loadingUsers} />
       <Snackbar
         key={message.id}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
