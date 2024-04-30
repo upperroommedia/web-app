@@ -33,18 +33,23 @@ const stableSort = <T extends User>(array: T[], order: Order, orderBy: keyof T) 
     return 0;
   }
 
+  function compareOtherColumn(a: T, b: T) {
+    if (a.role && b.role) {
+      const comparison = a.role?.localeCompare(b.role);
+      if (comparison === 0) {
+        return compareEmail(a, b);
+      }
+      return comparison;
+    } else if (a.role) return 1;
+    else if (b.role) return -1;
+    return 0;
+  }
+
   if (orderBy === 'email') {
-    return order === 'desc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
+    return order === 'asc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
   } else if (orderBy === 'role') {
     array.sort((a, b) => {
-      if (a.role && b.role) {
-        return order === 'desc' ? a.role.localeCompare(b.role) : b.role.localeCompare(a.role);
-      } else if (a.role) {
-        return order === 'desc' ? 1 : -1;
-      } else if (b.role) {
-        return order === 'desc' ? -1 : 1;
-      }
-      return 0;
+      return order === 'asc' ? compareOtherColumn(a, b) : compareOtherColumn(b, a);
     });
   }
   return array;
