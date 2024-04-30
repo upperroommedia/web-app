@@ -13,7 +13,7 @@ import {
 import auth from '../../firebase/auth';
 import { SignupForm, userCredentials } from '../types';
 import nookies from 'nookies';
-import { User, UserRole } from '../../types/User';
+import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '../../types/User';
 import Stack from '@mui/material/Stack';
 import Image from 'next/image';
 
@@ -49,14 +49,15 @@ export const UserProvider = ({ children }: any) => {
       } else {
         try {
           const token = await user.getIdToken();
-          const role = (await user.getIdTokenResult()).claims.role as string;
+          const role = (await user.getIdTokenResult()).claims.role as UserRoleType;
           setUser({
             ...user,
             firstName: user.displayName ?? '',
             lastName: '',
             role,
-            isAdmin: () => role === UserRole.ADMIN,
-            isUploader: () => role === UserRole.UPLOADER || role === UserRole.ADMIN,
+            isAdmin: () => isUserRoleAdmin(role),
+            canUpload: () => canUserRoleUpload(role),
+            canPublish: () => canUserRolePublish(role),
           });
           nookies.destroy(null, 'token');
           nookies.set(null, 'token', token, { path: '/' });

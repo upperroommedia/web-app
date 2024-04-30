@@ -5,6 +5,7 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import { ImageType } from '../../types/Image';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { canUserRolePublish } from '../../types/User';
 
 export interface CreateNewSubsplashListInputType {
   title: string;
@@ -18,7 +19,7 @@ export interface CreateNewSubsplashListOutputType {
 const createNewSubsplashListCallable = onCall(
   async (request: CallableRequest<CreateNewSubsplashListInputType>): Promise<CreateNewSubsplashListOutputType> => {
     logger.log('createNewSubsplashList', request);
-    if (request.auth?.token.role !== 'admin') {
+    if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     try {

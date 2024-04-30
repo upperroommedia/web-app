@@ -15,6 +15,7 @@ import {
 } from './firestoreDataConverter';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { canUserRolePublish } from '../../types/User';
 const firestore = firebaseAdmin.firestore();
 const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list'] as const;
 type MediaType = (typeof mediaTypes)[number];
@@ -435,7 +436,7 @@ const addToSingleList = async (
 
 const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<void> => {
   logger.log('addToList', request);
-  if (request.auth?.token.role !== 'admin') {
+  if (!canUserRolePublish(request.auth?.token.role)) {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
   const data = request.data;

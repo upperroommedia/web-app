@@ -27,7 +27,7 @@ export default function VerifiedUserUploaderComponent(props: VerifiedUserUploade
         <CircularProgress />
       </Stack>
     );
-  } else if (!user.isUploader()) {
+  } else if (!user.canUpload()) {
     return (
       <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
         <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>

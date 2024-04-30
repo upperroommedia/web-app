@@ -5,8 +5,8 @@ service cloud.firestore {
     	return request.auth != null && request.auth.token.role == 'admin';
     }
     
-    function isUploader() {
-    	return request.auth != null && (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin');
+    function canUpload() {
+    	return request.auth != null && (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin' || request.auth.token.role == 'publisher');
     }
 
     function isAuthorized() {
@@ -19,12 +19,12 @@ service cloud.firestore {
 
     match /images/{document} {
       allow read: if isAuthorized();
-      allow write: if (isUploader());
+      allow write: if (canUpload());
     }
     
     match /lists/{document} {
       allow read: if isAuthorized();
-      allow write: if (isUploader());
+      allow write: if (canUpload());
     }
     
     match /speakers/{document} {
@@ -39,12 +39,12 @@ service cloud.firestore {
     
     match /topics/{document} {
       allow read: if isAuthorized();
-      allow write: if (isUploader());
+      allow write: if (canUpload());
     }
     
     match /transcriptions/{document} {
       allow read: if isAuthorized();
-      allow write: if (isUploader());
+      allow write: if (canUpload());
     }
     
   // Allow read access for admins
@@ -54,19 +54,19 @@ service cloud.firestore {
     
     // Allow read access for uploaders to their own sermons
     match /sermons/{sermonId} {
-      allow read: if resource == null || (isUploader() && resource.data.uploaderId == request.auth.uid);
-      allow update, delete: if isUploader() && resource.data.uploaderId == request.auth.uid && resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED';
-      allow create: if isUploader();
+      allow read: if resource == null || (canUpload() && resource.data.uploaderId == request.auth.uid);
+      allow update, delete: if canUpload() && resource.data.uploaderId == request.auth.uid && resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED';
+      allow create: if canUpload();
     }
 
     // Collection Groups
     match /{path=**}/sermonLists/{sermonListId} {
       allow read: if isAuthorized();
-      allow write: if (isUploader());
+      allow write: if (canUpload());
     }
     match /{path=**}/listItems/{listItemId} {
       allow read: if isAuthorized();
-      allow write: if (isUploader());
+      allow write: if (canUpload());
     }
   }
 }

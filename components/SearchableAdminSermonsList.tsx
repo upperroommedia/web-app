@@ -29,7 +29,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
   if (!user) {
     throw new Error('User not found');
   }
-  if (!(user.isAdmin() || user.isUploader())) {
+  if (!user.role || user.role === 'user') {
     throw new Error('User is not an admin or uploader');
   }
 

@@ -3,7 +3,7 @@ service firebase.storage {
   match /b/{bucket}/o {
     match /{allPaths=**} {
     allow write: if request.auth != null && 
-                    (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin');
+                    (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin' || request.auth.token.role == 'publisher');
     allow read;
     }
   }

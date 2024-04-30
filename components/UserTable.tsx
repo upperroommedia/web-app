@@ -16,11 +16,13 @@ import { visuallyHidden } from '@mui/utils';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import { Order, ROLES } from '../context/types';
-import { User } from '../types/User';
+import { User, UserWithLoading } from '../types/User';
 import useAuth from '../context/user/UserContext';
+import FormControl from '@mui/material/FormControl';
+import CircularProgress from '@mui/material/CircularProgress';
 
-const stableSort = (array: User[], order: Order, orderBy: keyof User) => {
-  function compareEmail(a: User, b: User) {
+const stableSort = <T extends User>(array: T[], order: Order, orderBy: keyof T) => {
+  function compareEmail(a: T, b: T) {
     if (a.email && b.email) {
       return a.email.localeCompare(b.email);
     } else if (a.email) {
@@ -31,18 +33,23 @@ const stableSort = (array: User[], order: Order, orderBy: keyof User) => {
     return 0;
   }
 
+  function compareOtherColumn(a: T, b: T) {
+    if (a.role && b.role) {
+      const comparison = a.role?.localeCompare(b.role);
+      if (comparison === 0) {
+        return compareEmail(a, b);
+      }
+      return comparison;
+    } else if (a.role) return 1;
+    else if (b.role) return -1;
+    return 0;
+  }
+
   if (orderBy === 'email') {
-    return order === 'desc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
+    return order === 'asc' ? array.sort((a, b) => compareEmail(a, b)) : array.sort((a, b) => compareEmail(b, a));
   } else if (orderBy === 'role') {
     array.sort((a, b) => {
-      if (a.role && b.role) {
-        return order === 'desc' ? a.role.localeCompare(b.role) : b.role.localeCompare(a.role);
-      } else if (a.role) {
-        return order === 'desc' ? 1 : -1;
-      } else if (b.role) {
-        return order === 'desc' ? -1 : 1;
-      }
-      return 0;
+      return order === 'asc' ? compareOtherColumn(a, b) : compareOtherColumn(b, a);
     });
   }
   return array;
@@ -140,13 +147,17 @@ const UserTableToolbar = () => {
   );
 };
 
-const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role: string) => void }) => {
+const UserTable = (props: {
+  usersWithLoading: UserWithLoading[];
+  handleRoleChange: (uid: string, role: string) => Promise<void>;
+  loading: boolean;
+}) => {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof User>('email');
   const { user: currentUser } = useAuth();
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const handleRequestSort = (_: any, property: keyof User) => {
     const isAsc = order === 'asc';
@@ -164,7 +175,7 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   };
 
   // Avoid a layout jump when reaching the last page with empty rows.
-  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.users.length) : 0;
+  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.usersWithLoading.length) : 0;
   return (
     <Box width={1} maxWidth={800} display="flex" padding="30px" justifyContent="center">
       <Paper
@@ -179,56 +190,80 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
               order={order}
               orderBy={orderBy}
               onRequestSort={handleRequestSort}
-              rowCount={props.users.length}
+              rowCount={props.usersWithLoading.length}
             />
             <TableBody>
               {/* if you don't need to support IE11, you can replace the `stableSort` call with:
                 rows.sort(getComparator(order, orderBy)).slice() */}
-              {stableSort(props.users, order, orderBy)
-                .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                .map((user) => {
-                  const displayName = user.displayName || user.email;
-                  return (
-                    <TableRow hover tabIndex={-1} key={user.uid}>
-                      <TableCell align="center">{user.email}</TableCell>
-                      <TableCell align="center">
-                        {currentUser?.uid === user.uid ? (
-                          <Typography>{user.role}</Typography>
-                        ) : (
-                          <Select
-                            labelId="demo-simple-select-label"
-                            id="demo-simple-select"
-                            value={user.role}
-                            onChange={(e) => props.handleRoleChange(user.uid, e.target.value)}
+              {props.loading ? (
+                <TableRow>
+                  <TableCell rowSpan={3} colSpan={3}>
+                    <Box display="flex" justifyContent="center" alignContent="center">
+                      <CircularProgress />
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                stableSort(props.usersWithLoading, order, orderBy)
+                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                  .map((user) => {
+                    const displayName = user.displayName || user.email;
+                    return (
+                      <TableRow hover tabIndex={-1} key={user.uid}>
+                        <TableCell align="center">{user.email}</TableCell>
+                        <TableCell align="center">
+                          {currentUser?.uid === user.uid ? (
+                            <Typography>{user.role}</Typography>
+                          ) : (
+                            <FormControl disabled={user.loading}>
+                              <Select
+                                labelId="demo-simple-select-label"
+                                id="demo-simple-select"
+                                value={user.role}
+                                onChange={async (e) => {
+                                  await props.handleRoleChange(user.uid, e.target.value);
+                                }}
+                              >
+                                {ROLES.map((role) => (
+                                  <MenuItem key={role} value={role}>
+                                    <Box
+                                      sx={{
+                                        display: 'flex',
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        gap: '16px',
+                                        minWidth: '75px',
+                                      }}
+                                    >
+                                      {user.loading ? <CircularProgress size={24} color="inherit" /> : role}
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          )}
+                        </TableCell>
+                        <TableCell align="center">
+                          <div
+                            style={{
+                              margin: 'auto',
+                              borderRadius: '2px',
+                              overflow: 'hidden',
+                              position: 'relative',
+                              width: 50,
+                              height: 50,
+                              backgroundImage: `url(${'/user.png'})`,
+                              backgroundPosition: 'center center',
+                              backgroundSize: 'cover',
+                            }}
                           >
-                            {ROLES.map((role) => (
-                              <MenuItem key={role} value={role}>
-                                {role}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        )}
-                      </TableCell>
-                      <TableCell align="center">
-                        <div
-                          style={{
-                            margin: 'auto',
-                            borderRadius: '2px',
-                            overflow: 'hidden',
-                            position: 'relative',
-                            width: 50,
-                            height: 50,
-                            backgroundImage: `url(${'/user.png'})`,
-                            backgroundPosition: 'center center',
-                            backgroundSize: 'cover',
-                          }}
-                        >
-                          {user.photoURL && <Image src={user.photoURL} alt={`Image of ${displayName}`} fill />}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                            {user.photoURL && <Image src={user.photoURL} alt={`Image of ${displayName}`} fill />}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+              )}
               {emptyRows > 0 && (
                 <TableRow
                   style={{
@@ -242,9 +277,9 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
           </Table>
         </TableContainer>
         <TablePagination
-          rowsPerPageOptions={[5, 10, 25]}
+          rowsPerPageOptions={[25, 50, 100]}
           component="div"
-          count={props.users.length}
+          count={props.usersWithLoading.length}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}
@@ -255,8 +290,14 @@ const UserTable = (props: { users: User[]; handleRoleChange: (uid: string, role:
   );
 };
 
-function userTablesAreEqual(prevProps: { users: User[] }, nextProps: { users: User[] }) {
-  return JSON.stringify(prevProps.users) === JSON.stringify(nextProps.users);
+function userTablesAreEqual(
+  prevProps: { usersWithLoading: UserWithLoading[]; loading: boolean },
+  nextProps: { usersWithLoading: UserWithLoading[]; loading: boolean }
+) {
+  return (
+    prevProps.loading === nextProps.loading &&
+    JSON.stringify(prevProps.usersWithLoading) === JSON.stringify(nextProps.usersWithLoading)
+  );
 }
 
 export default memo(UserTable, userTablesAreEqual);

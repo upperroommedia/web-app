@@ -4,6 +4,7 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import { ImageType } from '../../types/Image';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { canUserRolePublish } from '../../types/User';
 
 export interface EditSubsplashListInputType {
   listId: string;
@@ -15,8 +16,8 @@ export type EditSubsplashListOutputType = void;
 
 const editSubpslashList = onCall(
   async (request: CallableRequest<EditSubsplashListInputType>): Promise<EditSubsplashListOutputType> => {
-    logger.log('deleteSubsplashList', request);
-    if (request.auth?.token.role !== 'admin') {
+    logger.log('editSubsplashList', request);
+    if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     const data = request.data;

@@ -3,6 +3,7 @@ import axios, { AxiosResponse } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '../../types/Speaker';
 import { ImageType } from '../../types/Image';
+import { canUserRolePublish } from '../../types/User';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   title: string;
@@ -42,7 +43,7 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
 
 const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA, context): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
-  if (context.auth?.token.role !== 'admin') {
+  if (!canUserRolePublish(context.auth?.token.role)) {
     return { status: 'Not Authorized' };
   }
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {

@@ -3,6 +3,7 @@ import FormData from 'form-data';
 import handleError from './handleError';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
+import { canUserRolePublish } from '../../types/User';
 
 export interface DeleteFromSoundCloudInputType {
   soundCloudTrackId: string;
@@ -38,7 +39,7 @@ const deleteFromSoundCloudHelper = async (soundCloudTrackId: string) => {
 const deleteFromSoundCloud = onCall(
   async (request: CallableRequest<DeleteFromSoundCloudInputType>): Promise<DeleteFromSoundCloudReturnType> => {
     logger.log('deleteFromSoundCloud', request);
-    if (request.auth?.token.role !== 'admin') {
+    if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     try {

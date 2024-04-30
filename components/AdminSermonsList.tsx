@@ -16,13 +16,17 @@ import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import Checkbox from '@mui/material/Checkbox';
 import ListItemText from '@mui/material/ListItemText';
-import useAuth from '../context/user/UserContext';
-import { UserRole } from '../types/User';
+import { User, UserRole } from '../types/User';
 import Button from '@mui/material/Button';
+import UserRoleGuard from './UserRoleGuard';
 
 interface AdminSermonsListProps {
   collectionPath: string;
   count?: number;
+}
+
+interface AdminSermonsListWithUserProps extends AdminSermonsListProps {
+  user: User;
 }
 
 const HITSPERPAGE = 20;
@@ -37,17 +41,17 @@ const client =
 const sermonsIndex = client?.initIndex('sermons');
 const limitCount = 20;
 
-const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
+const AdminSermonsListWithUser: FunctionComponent<AdminSermonsListWithUserProps> = ({
   collectionPath,
   count,
-}: AdminSermonsListProps) => {
-  const { user } = useAuth();
+  user,
+}) => {
   const [queryLimit, setQueryLimit] = useState<number>(limitCount);
   const [previousSermonsCount, setPreviousSermonsCount] = useState<number>(0);
   const [previousSermons, setPreviousSermons] = useState<Sermon[]>([]);
   const sermonsRef = collection(firestore, collectionPath);
   const q =
-    user?.role === UserRole.UPLOADER
+    user.role !== UserRole.ADMIN
       ? query(
           sermonsRef.withConverter(sermonConverter),
           where('uploaderId', '==', user.uid),
@@ -73,7 +77,7 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
       const res = await sermonsIndex?.search<Sermon>(query || searchQuery, {
         hitsPerPage: HITSPERPAGE,
         page: currentPage,
-        ...(user?.role === UserRole.UPLOADER && { filters: `uploaderId:${user.uid}` }),
+        ...(user.role !== UserRole.ADMIN && { filters: `uploaderId:${user.uid}` }),
         ...(filters.length !== 0 && { facetFilters: [filters.map((filter) => `${filter}`)] }),
       });
       if (res && res.hits.length > 0) {
@@ -196,6 +200,15 @@ const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = ({
       )}
       {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
     </Box>
+  );
+};
+
+const AdminSermonsList: FunctionComponent<AdminSermonsListProps> = (props) => {
+  return (
+    <UserRoleGuard
+      allowedUserRoles={['admin', 'uploader', 'publisher']}
+      renderItems={(user) => <AdminSermonsListWithUser {...props} user={user} />}
+    />
   );
 };
 

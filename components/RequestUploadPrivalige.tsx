@@ -3,7 +3,7 @@ import InputLabel from '@mui/material/InputLabel';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import { useState } from 'react';
-import { UserRole } from '../types/User';
+import { UserRole, UserRoleType } from '../types/User';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Tooltip from '@mui/material/Tooltip';
@@ -11,7 +11,7 @@ import Stack from '@mui/system/Stack';
 
 const RequestRoleChange = () => {
   const defaultValue = UserRole.UPLOADER;
-  const [role, setRole] = useState(defaultValue);
+  const [role, setRole] = useState<UserRoleType>(defaultValue);
   const [reason, setReason] = useState('');
   return (
     <FormControl sx={{ display: 'flex', gap: 2, width: 1, maxWidth: 600 }}>
@@ -22,10 +22,15 @@ const RequestRoleChange = () => {
         id="role-select"
         value={role}
         label="Age"
-        onChange={(event) => setRole(event.target.value)}
+        onChange={(event) => setRole(event.target.value as UserRoleType)}
       >
-        <MenuItem value={UserRole.UPLOADER}>Uploader</MenuItem>
-        <MenuItem value={UserRole.ADMIN}>Admin</MenuItem>
+        {Object.values(UserRole)
+          .filter((role) => role !== 'user')
+          .map((role) => (
+            <MenuItem key={role} value={role}>
+              {role}
+            </MenuItem>
+          ))}
       </Select>
       <TextField
         sx={{
