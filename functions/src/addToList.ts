@@ -14,6 +14,7 @@ import {
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
 import { Timestamp } from 'firebase-admin/firestore';
+import { canUserRolePublish } from '../../types/User';
 const firestoreDB = firebaseAdmin.firestore();
 export interface AddtoListInputType {
   listsMetadata: listMetaDataType[];
@@ -73,7 +74,7 @@ const addToSingleList = async (
 const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
   logger.log('addToList');
 
-  if (request.auth?.token.role !== 'admin') {
+  if (!canUserRolePublish(request.auth?.token.role)) {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
   const data = request.data;

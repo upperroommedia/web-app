@@ -19,7 +19,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         <CircularProgress />
       </Stack>
     );
-  } else if (!user.isUploader()) {
+  } else if (!user.canUpload()) {
     return (
       <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
         <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
@@ -48,9 +48,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       <Box>
         <Box display="flex" flexWrap={'wrap'} justifyContent="center">
           {pages.map((page) => {
-            if (user.isUploader() && !user.isAdmin()) {
-              return null;
-            } else {
+            if (user.isAdmin()) {
               return (
                 <Link href={`/admin/${page.toLowerCase()}`} passHref key={page}>
                   <Button
@@ -71,6 +69,8 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                   </Button>
                 </Link>
               );
+            } else {
+              return null;
             }
           })}
         </Box>

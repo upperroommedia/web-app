@@ -3,6 +3,7 @@ import handleError from './handleError';
 import { UploadToSoundCloudInputType } from './uploadToSoundCloud';
 import { https, logger } from 'firebase-functions';
 import { HttpsError } from 'firebase-functions/v2/https';
+import { canUserRolePublish } from '../../types/User';
 
 export interface EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA
   extends Partial<Omit<UploadToSoundCloudInputType, 'audioStoragePath'>> {
@@ -15,7 +16,7 @@ function reformatedTags(tags: string[]) {
 
 const editOnSoundCloud = https.onCall(
   async (data: EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA, context: https.CallableContext): Promise<void> => {
-    if (context.auth?.token.role !== 'admin') {
+    if (!canUserRolePublish(context.auth?.token.role)) {
       throw new HttpsError('permission-denied', 'You do not have the correct permissions for this action.');
     }
     if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {

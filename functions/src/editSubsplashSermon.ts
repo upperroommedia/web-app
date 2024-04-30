@@ -2,6 +2,7 @@ import { logger, https } from 'firebase-functions';
 import axios from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from './uploadToSubsplash';
+import { canUserRolePublish } from '../../types/User';
 
 export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   extends Partial<Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'audioUrl' | 'autoPublish'>> {
@@ -10,7 +11,7 @@ export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
 
 const editSubsplashSermon = https.onCall(
   async (data: EDIT_SUBSPLASH_SERMON_INCOMING_DATA, context): Promise<unknown> => {
-    if (context.auth?.token.role !== 'admin') {
+    if (!canUserRolePublish(context.auth?.token.role)) {
       return { status: 'Not Authorized' };
     }
     if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
