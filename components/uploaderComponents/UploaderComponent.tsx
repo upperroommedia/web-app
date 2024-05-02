@@ -53,8 +53,18 @@ interface UploaderProps extends VerifiedUserUploaderProps {
   user: User;
 }
 
+const fieldsToValidate = [
+  'title',
+  'subtitle',
+  'description',
+  'audioSource',
+  'speakers',
+  'bibleChapter',
+  'sundayHomiliesMonth',
+] as const;
+
 type FormErrors = {
-  [key in keyof Sermon]?: UploaderFieldError;
+  [K in (typeof fieldsToValidate)[number]]?: UploaderFieldError;
 };
 
 const emptySermon = createEmptySermon();
@@ -80,6 +90,7 @@ const Uploader = (props: UploaderProps) => {
     description: { error: true, message: createFormErrorMessage('description'), initialState: true },
     subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
     speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
+    audioSource: { error: true, message: 'You must select an audio source before uploading', initialState: true },
   });
 
   // Bible Study Helpers
@@ -229,12 +240,14 @@ const Uploader = (props: UploaderProps) => {
     setUploadProgress({ error: false, percent: 0, message: '' });
   }, [setUploadProgress]);
 
+  // ======================== START OF ERROR HANDLING ========================
+
   const setFormErrorCallback = useCallback(
-    (key: keyof Sermon, errorStatus: boolean, message?: string) => {
+    (key: (typeof fieldsToValidate)[number], errorStatus: boolean, message?: string, initialState: boolean = false) => {
       const newUploaderFieldError: UploaderFieldError = {
         error: errorStatus,
         message: message ?? '',
-        initialState: false,
+        initialState,
       };
       setFormErrors((prevFormErrors): FormErrors => {
         return {
@@ -247,10 +260,44 @@ const Uploader = (props: UploaderProps) => {
     [setFormErrors, clearUploadProgress]
   );
 
+  const setAudioSourceError = useCallback(
+    (error: boolean, message: string) => {
+      setFormErrorCallback('audioSource', error, message);
+    },
+    [setFormErrorCallback]
+  );
+
+  const setSubtitleError = useCallback(
+    (error: boolean, message: string) => {
+      setFormErrorCallback('subtitle', error, message);
+    },
+    [setFormErrorCallback]
+  );
+
+  const setBibleChapterError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('bibleChapter', error, message, initialState);
+    },
+    [setFormErrorCallback]
+  );
+
+  const setSundayHomiliesMonthError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('sundayHomiliesMonth', error, message, initialState);
+    },
+    [setFormErrorCallback]
+  );
+  const setSpeakerError = useCallback(
+    (error: boolean, message: string) => {
+      setFormErrorCallback('speakers', error, message);
+    },
+    [setFormErrorCallback]
+  );
+
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setFormErrorCallback(
-        event.target.name as keyof Sermon,
+        event.target.name as (typeof fieldsToValidate)[number],
         !event.target.validity.valid,
         createFormErrorMessage(event.target.name)
       );
@@ -266,14 +313,26 @@ const Uploader = (props: UploaderProps) => {
 
   const handleBlur = useCallback(
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      setFormErrorCallback(
-        event.target.name as keyof Sermon,
-        !event.target.validity.valid,
-        createFormErrorMessage(event.target.name)
-      );
+      const key = event.target.name as (typeof fieldsToValidate)[number];
+      setFormErrorCallback(key, !event.target.validity.valid, createFormErrorMessage(key));
     },
     [setFormErrorCallback]
   );
+
+  const validateForm = useCallback((): boolean => {
+    setFormErrors((previousFormErrors) => {
+      const newFormErrors: FormErrors = {};
+      Object.entries(previousFormErrors).forEach(([key, uploaderFieldError]) => {
+        const newUploaderFieldError: UploaderFieldError = { ...uploaderFieldError, initialState: false };
+        newFormErrors[key as keyof FormErrors] = newUploaderFieldError;
+      });
+
+      return newFormErrors;
+    });
+    return Object.values(formErrors).every(({ error }) => !error);
+  }, [formErrors]);
+
+  // ======================== END OF ERROR HANDLING ========================
 
   const updateSermon = useCallback(
     <T extends keyof Sermon>(key: T, value: Sermon[T]) => {
@@ -318,19 +377,6 @@ const Uploader = (props: UploaderProps) => {
     setDate(new Date());
     clearAudioTrimmer();
   };
-
-  const validateForm = useCallback((): boolean => {
-    setFormErrors((previousFormErrors) => {
-      const newFormErrors: FormErrors = {};
-      Object.entries(previousFormErrors).forEach(([key, uploaderFieldError]) => {
-        const newUploaderFieldError: UploaderFieldError = { ...uploaderFieldError, initialState: false };
-        newFormErrors[key as keyof FormErrors] = newUploaderFieldError;
-      });
-
-      return newFormErrors;
-    });
-    return Object.values(formErrors).every(({ error }) => !error);
-  }, [formErrors]);
 
   const handleNewImage = useCallback(
     (image: ImageType | ImageSizeType) => {
@@ -420,7 +466,7 @@ const Uploader = (props: UploaderProps) => {
               setSermon={setSermon}
               subtitles={subtitles}
               subtitleError={formErrors?.subtitle}
-              setSubtitleError={(error: boolean, message: string) => setFormErrorCallback('subtitle', error, message)}
+              setSubtitleError={setSubtitleError}
             />
             <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
           </Box>
@@ -429,6 +475,8 @@ const Uploader = (props: UploaderProps) => {
             setSermonList={setSermonList}
             selectedChapter={selectedChapter}
             setSelectedChapter={setSelectedChapter}
+            bibleChapterError={formErrors?.bibleChapter}
+            setBibleChapterError={setBibleChapterError}
           />
           <SundayHomilyMonthSelector
             sermonSubtitle={sermon.subtitle}
@@ -438,6 +486,8 @@ const Uploader = (props: UploaderProps) => {
             setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
             sundayHomiliesYear={sundayHomiliesYear}
             setSundayHomiliesYear={setSundayHomiliesYear}
+            sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
+            setSundayHomiliesMonthError={setSundayHomiliesMonthError}
           />
           <TextField
             sx={{
@@ -474,7 +524,7 @@ const Uploader = (props: UploaderProps) => {
             setSermon={setSermon}
             setSermonList={setSermonList}
             speakerError={formErrors?.speakers}
-            setSpeakerError={(error: boolean, message: string) => setFormErrorCallback('speakers', error, message)}
+            setSpeakerError={setSpeakerError}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.TOPIC_LIST} />
@@ -612,9 +662,15 @@ const Uploader = (props: UploaderProps) => {
                       setTrimStart={setTrimStartTime}
                       setDuration={setTrimDuration}
                       setAudioSource={setAudioSource}
+                      audioSourceError={formErrors?.audioSource}
+                      setAudioSourceError={setAudioSourceError}
                     />
                   ) : (
-                    <DropZone setAudioSource={setAudioSource} />
+                    <DropZone
+                      setAudioSource={setAudioSource}
+                      audioSourceError={formErrors?.audioSource}
+                      setAudioSourceError={setAudioSourceError}
+                    />
                   )}
                 </Box>
               )}

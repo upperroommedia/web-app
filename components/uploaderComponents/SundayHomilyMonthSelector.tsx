@@ -6,6 +6,8 @@ import React, { Dispatch, SetStateAction, memo, useCallback, useEffect, useState
 import { List, ListTag, SundayHomiliesMonthList, listConverter } from '../../types/List';
 import firestore, { collection, getDocs, orderBy, query, where } from '../../firebase/firestore';
 import { SUNDAY_HOMILIES_STRING } from './consts';
+import { UploaderFieldError } from '../../context/types';
+import { getErrorMessage, showError } from './utils';
 
 interface SuncayHomilyMonthSelectorProps {
   sermonSubtitle: string;
@@ -15,6 +17,8 @@ interface SuncayHomilyMonthSelectorProps {
   setSelectedSundayHomiliesMonth: Dispatch<SetStateAction<SundayHomiliesMonthList | null>>;
   sundayHomiliesYear: number;
   setSundayHomiliesYear: Dispatch<SetStateAction<number>>;
+  sundayHomiliesMonthError?: UploaderFieldError;
+  setSundayHomiliesMonthError: (error: boolean, message: string, intitialState?: boolean) => void;
 }
 
 function SundayHomilyMonthSelector({
@@ -25,6 +29,8 @@ function SundayHomilyMonthSelector({
   setSelectedSundayHomiliesMonth,
   sundayHomiliesYear,
   setSundayHomiliesYear,
+  sundayHomiliesMonthError,
+  setSundayHomiliesMonthError,
 }: SuncayHomilyMonthSelectorProps) {
   const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<SundayHomiliesMonthList[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
@@ -58,12 +64,16 @@ function SundayHomilyMonthSelector({
 
   useEffect(() => {
     if (sermonSubtitle !== SUNDAY_HOMILIES_STRING) {
+      setSundayHomiliesMonthError(false, '');
       setSelectedSundayHomiliesMonth(null);
       setSermonList((oldSermonList) => {
         return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
       });
+    } else {
+      // initialize the initial error state to make sure this field is required if upload is clicked early
+      setSundayHomiliesMonthError(true, 'You must select a sunday homily month', true);
     }
-  }, [sermonSubtitle, setSelectedSundayHomiliesMonth, setSermonList]);
+  }, [sermonSubtitle, setSelectedSundayHomiliesMonth, setSermonList, setSundayHomiliesMonthError]);
 
   useEffect(() => {
     if (date.getFullYear() !== sundayHomiliesYear) {
@@ -88,6 +98,13 @@ function SundayHomilyMonthSelector({
             fullWidth
             value={selectedSundayHomiliesMonth || null}
             isOptionEqualToValue={(option, value) => option?.id === value?.id}
+            onBlur={() => {
+              if (!selectedSundayHomiliesMonth) {
+                setSundayHomiliesMonthError(true, 'You must select a sunday homily month');
+              } else {
+                setSundayHomiliesMonthError(false, '');
+              }
+            }}
             onChange={async (_, newValue) => {
               setSelectedSundayHomiliesMonth(newValue);
               setSermonList((oldSermonList) => {
@@ -96,6 +113,7 @@ function SundayHomilyMonthSelector({
                     (list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH
                   );
                 }
+                setSundayHomiliesMonthError(false, '');
                 const filteredList = oldSermonList.filter(
                   (list) =>
                     list.name !== SUNDAY_HOMILIES_STRING &&
@@ -112,7 +130,15 @@ function SundayHomilyMonthSelector({
                 {option.name}
               </ListItem>
             )}
-            renderInput={(params) => <TextField {...params} required label="Month" />}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                required
+                error={showError(sundayHomiliesMonthError)}
+                helperText={getErrorMessage(sundayHomiliesMonthError)}
+                label="Month"
+              />
+            )}
           />
         ))}
     </>
