@@ -151,29 +151,30 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   }, []);
 
   useEffect(() => {
-    audioPlayer.current.addEventListener('loadedmetadata', handleMetaDataLoaded);
-    audioPlayer.current.addEventListener('play', handlePlay);
-    audioPlayer.current.addEventListener('pause', handlePause);
-    audioPlayer.current.addEventListener('timeupdate', handleTimeUpdate);
-    audioPlayer.current.addEventListener('ended', handleComplete);
-    audioPlayer.current.addEventListener('error', handleError);
+    const currentAudioPlayer = audioPlayer.current;
+    currentAudioPlayer.addEventListener('loadedmetadata', handleMetaDataLoaded);
+    currentAudioPlayer.addEventListener('play', handlePlay);
+    currentAudioPlayer.addEventListener('pause', handlePause);
+    currentAudioPlayer.addEventListener('timeupdate', handleTimeUpdate);
+    currentAudioPlayer.addEventListener('ended', handleComplete);
+    currentAudioPlayer.addEventListener('error', handleError);
     addEventListener('touchmove', handleMove);
     addEventListener('mousemove', handleMove);
     addEventListener('mouseup', handleMouseUp);
     addEventListener('touchend', handleMouseUp);
 
     return () => {
-      audioPlayer.current.removeEventListener('loadedmetadata', handleMetaDataLoaded);
-      audioPlayer.current.removeEventListener('play', handlePlay);
-      audioPlayer.current.removeEventListener('pause', handlePause);
-      audioPlayer.current.removeEventListener('timeupdate', handleTimeUpdate);
-      audioPlayer.current.removeEventListener('ended', handleComplete);
-      audioPlayer.current.removeEventListener('error', handleError);
+      currentAudioPlayer.removeEventListener('loadedmetadata', handleMetaDataLoaded);
+      currentAudioPlayer.removeEventListener('play', handlePlay);
+      currentAudioPlayer.removeEventListener('pause', handlePause);
+      currentAudioPlayer.removeEventListener('timeupdate', handleTimeUpdate);
+      currentAudioPlayer.removeEventListener('ended', handleComplete);
+      currentAudioPlayer.removeEventListener('error', handleError);
       removeEventListener('touchmove', handleMove);
       removeEventListener('mousemove', handleMove);
       removeEventListener('mouseup', handleMouseUp);
       removeEventListener('touchend', handleMouseUp);
-      audioPlayer.current.pause();
+      currentAudioPlayer.pause();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
