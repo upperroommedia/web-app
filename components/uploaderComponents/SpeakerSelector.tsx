@@ -97,10 +97,16 @@ function SpeakerSelector({
         onBlur={() => {
           if (sermonSpeakers.length === 0) {
             setSpeakerError(true, 'You must select at least one speaker');
+          } else {
+            setSpeakerError(false, '');
           }
         }}
         onChange={async (event, newValue, reason, details) => {
           setSpeakerError(false, '');
+          if (newValue.length >= 4) {
+            alert('You can only add up to 3 speakers');
+            return;
+          }
           if (reason === 'removeOption' && details?.option.listId) {
             setSermonList((previousList) => {
               return previousList.filter((prevList) => prevList.id !== details.option.listId);
@@ -147,8 +153,6 @@ function SpeakerSelector({
                 return [...oldSermonList, list];
               });
             }
-          } else if (newValue.length >= 4) {
-            setSpeakerError(true, 'Can only add up to 3 speakers');
           }
         }}
         onInputChange={async (_, value) => {
