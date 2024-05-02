@@ -1,7 +1,9 @@
 import { AxiosError, isAxiosError } from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
+import { logger } from 'firebase-functions/v2';
 
 const handleError = (error: unknown): HttpsError => {
+  logger.error(error);
   if (error instanceof HttpsError) {
     return error;
   }

@@ -133,6 +133,7 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
         } else {
           message = JSON.stringify(r.reason);
         }
+        logger.error(r.status, r.reason);
         return { listId: data.listsMetadata[index].listId, status, error: message };
       }
     });

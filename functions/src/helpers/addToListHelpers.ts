@@ -82,6 +82,7 @@ export async function isAlreadyInList(
 
 export async function addItemToList(mediaItem: MediaItem, listId: string, newListCount: number, token: string) {
   logger.log(`Adding item: ${JSON.stringify(mediaItem)} to subsplash list: ${listId}`);
+  // TODO: Read the list currently and send a patch with the new data
   const position = 1;
   const listRow = {
     app_key: '9XTSHD',
@@ -111,7 +112,9 @@ export async function addItemToList(mediaItem: MediaItem, listId: string, newLis
     'PATCH',
     payload
   );
+  logger.debug('addItemToList axiosConfig:', patchListConfig);
   const response = await axios(patchListConfig);
+  logger.debug(`response from: https://core.subsplash.com/builder/v1/lists/${listId}: `, response);
   const data = response.data;
   const listItemId = data._embedded['list-rows'][0].id;
   if (!listItemId) {
@@ -130,7 +133,16 @@ async function getLastNOldestItems(
   const url = `https://core.subsplash.com/builder/v1/list-rows?filter%5Bapp_key%5D=9XTSHD&filter%5Bsource_list%5D=${listId}&sort=${`${sortOrder}${sort}`}&page%5Bnumber%5D=1&page%5Bsize%5D=${n}`;
   const config = createAxiosConfig(url, token, 'GET');
   const response = await axios(config);
-  const listRows: SubsplashListRow[] = response.data['_embedded']['list-rows'];
+  let listRows: SubsplashListRow[] = [];
+  if (response.data.count === n) {
+    listRows = response.data['_embedded']['list-rows'];
+  } else {
+    const newN = n + (n - response.data.count);
+    const url = `https://core.subsplash.com/builder/v1/list-rows?filter%5Bapp_key%5D=9XTSHD&filter%5Bsource_list%5D=${listId}&sort=${`${sortOrder}${sort}`}&page%5Bnumber%5D=1&page%5Bsize%5D=${newN}`;
+    const config = createAxiosConfig(url, token, 'GET');
+    const newResponse = await axios(config);
+    listRows = newResponse.data['_embedded']['list-rows'];
+  }
   return listRows;
 }
 
@@ -160,6 +172,7 @@ export const removeNOldestItems = async (
   sort: sortType
 ): Promise<void> => {
   const listRows = await getLastNOldestItems(numberToRemove, listId, token, sort);
+  logger.debug('Items to be removed:', listRows);
   await removeListRows(listId, listRows, token);
 };
 
