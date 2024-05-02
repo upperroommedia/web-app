@@ -50,7 +50,7 @@ export default function BibleChapterSelector({
       };
       fetchBibleChapters();
     }
-    if (!selectedChapter) {
+    if (sermonSubtitle === BIBLE_STUDIES_STRING && !selectedChapter) {
       setBibleChapterError(true, 'You must select a bible chapter', true);
     }
   }, [sermonSubtitle, bibleChapters.length, setSelectedChapter, setSermonList, setBibleChapterError, selectedChapter]);

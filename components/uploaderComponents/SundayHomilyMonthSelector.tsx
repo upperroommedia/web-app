@@ -71,7 +71,7 @@ function SundayHomilyMonthSelector({
       });
     }
 
-    if (!selectedSundayHomiliesMonth) {
+    if (sermonSubtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) {
       // initialize the initial error state to make sure this field is required if upload is clicked early
       setSundayHomiliesMonthError(true, 'You must select a sunday homily month', true);
     }
