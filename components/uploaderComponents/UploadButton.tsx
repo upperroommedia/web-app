@@ -12,9 +12,10 @@ interface UploadButtonProps {
   audioSource: AudioSource | undefined;
   trimStart: number;
   sermonList: List[];
-  baseButtonDisabled: boolean;
   date: Date;
+  validateForm: () => boolean;
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>;
+  setInvalidFormMessage: Dispatch<SetStateAction<string | undefined>>;
   setIsUploading: Dispatch<SetStateAction<boolean>>;
   clearForm: () => void;
 }
@@ -25,9 +26,9 @@ export default function UploadButton({
   audioSource,
   trimStart,
   sermonList,
-  baseButtonDisabled,
-  date,
+  validateForm,
   setUploadProgress,
+  setInvalidFormMessage,
   setIsUploading,
   clearForm,
 }: UploadButtonProps) {
@@ -36,9 +37,9 @@ export default function UploadButton({
       className={styles.button}
       type="button"
       value="Upload"
-      disabled={audioSource === undefined || baseButtonDisabled}
       onClick={async () => {
-        if (audioSource !== undefined && date != null && user.canUpload()) {
+        // if (audioSource !== undefined && date != null && user.canUpload()) {
+        if (validateForm() && audioSource != null) {
           try {
             setIsUploading(true);
             await uploadFile({
@@ -56,6 +57,8 @@ export default function UploadButton({
           }
         } else if (!user.canUpload()) {
           setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
+        } else {
+          setInvalidFormMessage('Please make sure all required fields are filled out');
         }
       }}
     />

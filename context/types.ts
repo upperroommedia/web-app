@@ -14,5 +14,5 @@ export type CustomClaims = { [key: string]: any };
 export const ROLES = ['user', 'admin', 'uploader', 'publisher'];
 export type Order = 'asc' | 'desc';
 
-export type UploaderFieldError = { error: boolean; message: string };
+export type UploaderFieldError = { error: boolean; message: string; initialState: boolean };
 export type UploadProgress = { error: boolean; percent: number; message: string };

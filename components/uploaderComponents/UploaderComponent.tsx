@@ -33,12 +33,12 @@ import { getIntroAndOutro } from '../../utils/uploadUtils';
 import { PROCESSED_SERMONS_BUCKET } from '../../constants/storage_constants';
 import { User } from '../../types/User';
 import { VerifiedUserUploaderProps } from './VerifiedUserUploaderComponent';
-import { showAudioTrimmerBoolean } from './utils';
+import { createFormErrorMessage, getErrorMessage, showAudioTrimmerBoolean, showError } from './utils';
 import UploaderDatePicker from './UploaderDatePicker';
 import { UploaderFieldError, UploadProgress } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
 import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
-import { SUNDAY_HOMILIES_STRING, BIBLE_STUDIES_STRING, MAX_DURATION_SECONDS } from './consts';
+import { MAX_DURATION_SECONDS } from './consts';
 import BibleChapterSelector from './BibleChapterSelector';
 import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
@@ -52,6 +52,21 @@ const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/Au
 interface UploaderProps extends VerifiedUserUploaderProps {
   user: User;
 }
+
+const fieldsToValidate = [
+  'title',
+  'subtitle',
+  'description',
+  'audioSource',
+  'speakers',
+  'bibleChapter',
+  'sundayHomiliesMonth',
+  'durationSeconds',
+] as const;
+
+type FormErrors = {
+  [K in (typeof fieldsToValidate)[number]]?: UploaderFieldError;
+};
 
 const emptySermon = createEmptySermon();
 
@@ -67,11 +82,22 @@ const Uploader = (props: UploaderProps) => {
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [audioSource, setAudioSource] = useState<AudioSource | undefined>();
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({ error: false, percent: 0, message: '' });
-  const [speakerError, setSpeakerError] = useState<UploaderFieldError>({ error: false, message: '' });
+  const [invalidFormMessage, setInvalidFormMessage] = useState<string>();
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
+  const [formErrors, setFormErrors] = useState<FormErrors>(
+    !props.existingSermon
+      ? {
+          title: { error: true, message: createFormErrorMessage('title'), initialState: true },
+          description: { error: true, message: createFormErrorMessage('description'), initialState: true },
+          subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
+          speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
+          audioSource: { error: true, message: 'You must select an audio source before uploading', initialState: true },
+        }
+      : {}
+  );
 
   // Bible Study Helpers
   const [selectedChapter, setSelectedChapter] = useState<List | null>(
@@ -203,21 +229,67 @@ const Uploader = (props: UploaderProps) => {
     };
   }, [router.events, sermonEdited, isUploading]);
 
-  const baseButtonDisabled =
-    sermon.title === '' ||
-    date === null ||
-    sermon.speakers.length === 0 ||
-    sermon.subtitle === '' ||
-    sermon.description === '' ||
-    (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
-    (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
-    sermon.durationSeconds <= 0 ||
-    sermon.durationSeconds > MAX_DURATION_SECONDS ||
-    isUploading ||
-    isEditing;
+  // ======================== START OF ERROR HANDLING ========================
+
+  const setFormErrorCallback = useCallback(
+    (key: (typeof fieldsToValidate)[number], errorStatus: boolean, message?: string, initialState: boolean = false) => {
+      const newUploaderFieldError: UploaderFieldError = {
+        error: errorStatus,
+        message: message ?? '',
+        initialState,
+      };
+      setFormErrors((prevFormErrors): FormErrors => {
+        return {
+          ...prevFormErrors,
+          [key]: newUploaderFieldError,
+        };
+      });
+      setInvalidFormMessage(undefined);
+    },
+    [setFormErrors, setInvalidFormMessage]
+  );
+
+  const setAudioSourceError = useCallback(
+    (error: boolean, message: string) => {
+      setFormErrorCallback('audioSource', error, message);
+    },
+    [setFormErrorCallback]
+  );
+
+  const setSubtitleError = useCallback(
+    (error: boolean, message: string) => {
+      setFormErrorCallback('subtitle', error, message);
+    },
+    [setFormErrorCallback]
+  );
+
+  const setBibleChapterError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('bibleChapter', error, message, initialState);
+    },
+    [setFormErrorCallback]
+  );
+
+  const setSundayHomiliesMonthError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('sundayHomiliesMonth', error, message, initialState);
+    },
+    [setFormErrorCallback]
+  );
+  const setSpeakerError = useCallback(
+    (error: boolean, message: string) => {
+      setFormErrorCallback('speakers', error, message);
+    },
+    [setFormErrorCallback]
+  );
 
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setFormErrorCallback(
+        event.target.name as (typeof fieldsToValidate)[number],
+        !event.target.validity.valid,
+        createFormErrorMessage(event.target.name)
+      );
       setSermon((prevSermon) => {
         return {
           ...prevSermon,
@@ -225,8 +297,47 @@ const Uploader = (props: UploaderProps) => {
         };
       });
     },
-    [setSermon]
+    [setSermon, setFormErrorCallback]
   );
+
+  const handleBlur = useCallback(
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const key = event.target.name as (typeof fieldsToValidate)[number];
+      setFormErrorCallback(key, !event.target.validity.valid, createFormErrorMessage(key));
+    },
+    [setFormErrorCallback]
+  );
+
+  const validateForm = useCallback((): boolean => {
+    setFormErrors((previousFormErrors) => {
+      const newFormErrors: FormErrors = {};
+      Object.entries(previousFormErrors).forEach(([key, uploaderFieldError]) => {
+        const newUploaderFieldError: UploaderFieldError = { ...uploaderFieldError, initialState: false };
+        newFormErrors[key as keyof FormErrors] = newUploaderFieldError;
+      });
+
+      if (sermon.durationSeconds <= 0) {
+        const newUploaderFieldError: UploaderFieldError = {
+          error: true,
+          message: 'Sermon audio duration must be longer than 0 seconds',
+          initialState: false,
+        };
+        newFormErrors.durationSeconds = newUploaderFieldError;
+      } else if (sermon.durationSeconds > MAX_DURATION_SECONDS) {
+        const newUploaderFieldError: UploaderFieldError = {
+          error: true,
+          message: `Sermon audio duration must be shorter than ${MAX_DURATION_SECONDS / 3600} hours`,
+          initialState: false,
+        };
+        newFormErrors.durationSeconds = newUploaderFieldError;
+      }
+
+      return newFormErrors;
+    });
+    return Object.values(formErrors).every(({ error }) => !error);
+  }, [formErrors, sermon.durationSeconds]);
+
+  // ======================== END OF ERROR HANDLING ========================
 
   const updateSermon = useCallback(
     <T extends keyof Sermon>(key: T, value: Sermon[T]) => {
@@ -246,8 +357,19 @@ const Uploader = (props: UploaderProps) => {
   const setTrimDuration = useCallback(
     (durationSeconds: number) => {
       updateSermon('durationSeconds', durationSeconds);
+      if (durationSeconds <= 0) {
+        setFormErrorCallback('durationSeconds', true, 'Sermon audio duration must be longer than 0 seconds');
+      } else if (durationSeconds > MAX_DURATION_SECONDS) {
+        setFormErrorCallback(
+          'durationSeconds',
+          true,
+          `Sermon audio duration must be shorter than ${MAX_DURATION_SECONDS / 3600} hours`
+        );
+      } else {
+        setFormErrorCallback('durationSeconds', false, '');
+      }
     },
-    [updateSermon]
+    [updateSermon, setFormErrorCallback]
   );
 
   const setTrimStartTime = useCallback(
@@ -258,13 +380,14 @@ const Uploader = (props: UploaderProps) => {
   );
 
   const clearAudioTrimmer = useCallback(() => {
+    setAudioSourceError(true, 'You must select an audio source before uploading');
     setUseYouTubeUrl(false);
     setAudioSource(undefined);
     setTrimStartTime(0);
-  }, [setAudioSource, setTrimStartTime]);
+  }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
   const clearForm = () => {
-    setSpeakerError({ error: false, message: '' });
+    setFormErrors({});
     setSermon(createEmptySermon(props.user.uid));
     setEmptyListWithLatest([]);
     setSermonList([]);
@@ -346,7 +469,10 @@ const Uploader = (props: UploaderProps) => {
             name="title"
             variant="outlined"
             value={sermon.title}
+            error={showError(formErrors.title)}
+            helperText={getErrorMessage(formErrors.title)}
             onChange={handleChange}
+            onBlur={handleBlur}
             required
           />
           <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
@@ -356,6 +482,8 @@ const Uploader = (props: UploaderProps) => {
               setSermonList={setSermonList}
               setSermon={setSermon}
               subtitles={subtitles}
+              subtitleError={formErrors?.subtitle}
+              setSubtitleError={setSubtitleError}
             />
             <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
           </Box>
@@ -364,6 +492,8 @@ const Uploader = (props: UploaderProps) => {
             setSermonList={setSermonList}
             selectedChapter={selectedChapter}
             setSelectedChapter={setSelectedChapter}
+            bibleChapterError={formErrors?.bibleChapter}
+            setBibleChapterError={setBibleChapterError}
           />
           <SundayHomilyMonthSelector
             sermonSubtitle={sermon.subtitle}
@@ -373,6 +503,8 @@ const Uploader = (props: UploaderProps) => {
             setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
             sundayHomiliesYear={sundayHomiliesYear}
             setSundayHomiliesYear={setSundayHomiliesYear}
+            sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
+            setSundayHomiliesMonthError={setSundayHomiliesMonthError}
           />
           <TextField
             sx={{
@@ -387,6 +519,9 @@ const Uploader = (props: UploaderProps) => {
             multiline
             value={sermon.description}
             onChange={handleChange}
+            onBlur={handleBlur}
+            error={showError(formErrors.description)}
+            helperText={getErrorMessage(formErrors.description)}
             required
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
@@ -403,10 +538,10 @@ const Uploader = (props: UploaderProps) => {
             sermonSpeakers={sermon.speakers}
             sermonImages={sermon.images}
             updateSermon={updateSermon}
-            speakerError={speakerError}
-            setSpeakerError={setSpeakerError}
             setSermon={setSermon}
             setSermonList={setSermonList}
+            speakerError={formErrors?.speakers}
+            setSpeakerError={setSpeakerError}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.TOPIC_LIST} />
@@ -466,6 +601,11 @@ const Uploader = (props: UploaderProps) => {
               <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
                 <Button
                   onClick={async () => {
+                    if (!validateForm()) {
+                      setInvalidFormMessage('Please make sure all required fields are filled out');
+                      return;
+                    }
+                    setInvalidFormMessage(undefined);
                     setIsEditing(true);
                     const promises = [];
                     const pendingSermon = sermon;
@@ -494,16 +634,18 @@ const Uploader = (props: UploaderProps) => {
                     props.setEditFormOpen?.(false);
                   }}
                   disabled={
-                    (sermonsEqual(props.existingSermon, sermon) &&
-                      listEqual(props.existingList, sermonList) &&
-                      !hasTrimmed) ||
-                    baseButtonDisabled
+                    sermonsEqual(props.existingSermon, sermon) &&
+                    listEqual(props.existingList, sermonList) &&
+                    !hasTrimmed
                   }
                   variant="contained"
                 >
                   {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
                 </Button>
               </div>
+              {invalidFormMessage && (
+                <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
+              )}
             </Stack>
           ) : (
             <>
@@ -544,22 +686,26 @@ const Uploader = (props: UploaderProps) => {
                       setTrimStart={setTrimStartTime}
                       setDuration={setTrimDuration}
                       setAudioSource={setAudioSource}
+                      audioSourceError={formErrors?.audioSource}
+                      setAudioSourceError={setAudioSourceError}
                     />
                   ) : (
-                    <DropZone setAudioSource={setAudioSource} />
+                    <DropZone
+                      setAudioSource={setAudioSource}
+                      audioSourceError={formErrors?.audioSource}
+                      setAudioSourceError={setAudioSourceError}
+                    />
                   )}
                 </Box>
               )}
               <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
                 <Typography
                   variant="caption"
-                  color="orange"
+                  color="error.dark"
                   textAlign="center"
-                  visibility={sermon.durationSeconds > MAX_DURATION_SECONDS ? 'visible' : 'hidden'}
+                  visibility={showError(formErrors.durationSeconds) ? 'visible' : 'hidden'}
                 >
-                  {`Please trim the video to a duration less than ${
-                    MAX_DURATION_SECONDS / 3600
-                  } hours using the handles in the video player`}
+                  {getErrorMessage(formErrors.durationSeconds)}
                 </Typography>
                 <Box display="flex">
                   <UploadButton
@@ -568,9 +714,10 @@ const Uploader = (props: UploaderProps) => {
                     audioSource={audioSource}
                     trimStart={sermon.sourceStartTime}
                     sermonList={sermonList}
-                    baseButtonDisabled={baseButtonDisabled}
                     date={date}
+                    validateForm={validateForm}
                     setUploadProgress={setUploadProgress}
+                    setInvalidFormMessage={setInvalidFormMessage}
                     setIsUploading={setIsUploading}
                     clearForm={clearForm}
                   />
@@ -578,6 +725,9 @@ const Uploader = (props: UploaderProps) => {
                     Clear Form
                   </button>
                 </Box>
+                {invalidFormMessage && (
+                  <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
+                )}
                 <UploadProgressComponent
                   audioSource={audioSource}
                   isUploading={isUploading}
