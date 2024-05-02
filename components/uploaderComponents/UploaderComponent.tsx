@@ -38,7 +38,7 @@ import UploaderDatePicker from './UploaderDatePicker';
 import { UploaderFieldError, UploadProgress } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
 import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
-import { SUNDAY_HOMILIES_STRING, BIBLE_STUDIES_STRING, MAX_DURATION_SECONDS } from './consts';
+import { MAX_DURATION_SECONDS } from './consts';
 import BibleChapterSelector from './BibleChapterSelector';
 import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
@@ -61,6 +61,7 @@ const fieldsToValidate = [
   'speakers',
   'bibleChapter',
   'sundayHomiliesMonth',
+  'durationSeconds',
 ] as const;
 
 type FormErrors = {
@@ -223,19 +224,6 @@ const Uploader = (props: UploaderProps) => {
     };
   }, [router.events, sermonEdited, isUploading]);
 
-  const baseButtonDisabled =
-    sermon.title === '' ||
-    date === null ||
-    sermon.speakers.length === 0 ||
-    sermon.subtitle === '' ||
-    sermon.description === '' ||
-    (sermon.subtitle === BIBLE_STUDIES_STRING && !selectedChapter) ||
-    (sermon.subtitle === SUNDAY_HOMILIES_STRING && !selectedSundayHomiliesMonth) ||
-    sermon.durationSeconds <= 0 ||
-    sermon.durationSeconds > MAX_DURATION_SECONDS ||
-    isUploading ||
-    isEditing;
-
   const clearUploadProgress = useCallback(() => {
     setUploadProgress({ error: false, percent: 0, message: '' });
   }, [setUploadProgress]);
@@ -327,10 +315,26 @@ const Uploader = (props: UploaderProps) => {
         newFormErrors[key as keyof FormErrors] = newUploaderFieldError;
       });
 
+      if (sermon.durationSeconds <= 0) {
+        const newUploaderFieldError: UploaderFieldError = {
+          error: true,
+          message: 'Sermon audio duration must be longer than 0 seconds',
+          initialState: false,
+        };
+        newFormErrors.durationSeconds = newUploaderFieldError;
+      } else if (sermon.durationSeconds > MAX_DURATION_SECONDS) {
+        const newUploaderFieldError: UploaderFieldError = {
+          error: true,
+          message: `Sermon audio duration must be shorter than ${MAX_DURATION_SECONDS / 3600} hours`,
+          initialState: false,
+        };
+        newFormErrors.durationSeconds = newUploaderFieldError;
+      }
+
       return newFormErrors;
     });
     return Object.values(formErrors).every(({ error }) => !error);
-  }, [formErrors]);
+  }, [formErrors, sermon.durationSeconds]);
 
   // ======================== END OF ERROR HANDLING ========================
 
@@ -352,8 +356,19 @@ const Uploader = (props: UploaderProps) => {
   const setTrimDuration = useCallback(
     (durationSeconds: number) => {
       updateSermon('durationSeconds', durationSeconds);
+      if (durationSeconds <= 0) {
+        setFormErrorCallback('durationSeconds', true, 'Sermon audio duration must be longer than 0 seconds');
+      } else if (durationSeconds > MAX_DURATION_SECONDS) {
+        setFormErrorCallback(
+          'durationSeconds',
+          true,
+          `Sermon audio duration must be shorter than ${MAX_DURATION_SECONDS / 3600} hours`
+        );
+      } else {
+        setFormErrorCallback('durationSeconds', false, '');
+      }
     },
-    [updateSermon]
+    [updateSermon, setFormErrorCallback]
   );
 
   const setTrimStartTime = useCallback(
@@ -612,10 +627,9 @@ const Uploader = (props: UploaderProps) => {
                     props.setEditFormOpen?.(false);
                   }}
                   disabled={
-                    (sermonsEqual(props.existingSermon, sermon) &&
-                      listEqual(props.existingList, sermonList) &&
-                      !hasTrimmed) ||
-                    baseButtonDisabled
+                    sermonsEqual(props.existingSermon, sermon) &&
+                    listEqual(props.existingList, sermonList) &&
+                    !hasTrimmed
                   }
                   variant="contained"
                 >
@@ -677,13 +691,11 @@ const Uploader = (props: UploaderProps) => {
               <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
                 <Typography
                   variant="caption"
-                  color="orange"
+                  color="error.dark"
                   textAlign="center"
-                  visibility={sermon.durationSeconds > MAX_DURATION_SECONDS ? 'visible' : 'hidden'}
+                  visibility={showError(formErrors.durationSeconds) ? 'visible' : 'hidden'}
                 >
-                  {`Please trim the video to a duration less than ${
-                    MAX_DURATION_SECONDS / 3600
-                  } hours using the handles in the video player`}
+                  {getErrorMessage(formErrors.durationSeconds)}
                 </Typography>
                 <Box display="flex">
                   <UploadButton
