@@ -15,6 +15,7 @@ interface UploadButtonProps {
   date: Date;
   validateForm: () => boolean;
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>;
+  setInvalidFormMessage: Dispatch<SetStateAction<string | undefined>>;
   setIsUploading: Dispatch<SetStateAction<boolean>>;
   clearForm: () => void;
 }
@@ -27,6 +28,7 @@ export default function UploadButton({
   sermonList,
   validateForm,
   setUploadProgress,
+  setInvalidFormMessage,
   setIsUploading,
   clearForm,
 }: UploadButtonProps) {
@@ -56,11 +58,7 @@ export default function UploadButton({
         } else if (!user.canUpload()) {
           setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
         } else {
-          setUploadProgress({
-            error: true,
-            message: 'Please make sure all required fields are filled out',
-            percent: 0,
-          });
+          setInvalidFormMessage('Please make sure all required fields are filled out');
         }
       }}
     />

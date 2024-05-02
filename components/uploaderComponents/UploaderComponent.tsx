@@ -82,6 +82,7 @@ const Uploader = (props: UploaderProps) => {
   const [sermonList, setSermonList] = useState<List[]>(props.existingList || []);
   const [audioSource, setAudioSource] = useState<AudioSource | undefined>();
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({ error: false, percent: 0, message: '' });
+  const [invalidFormMessage, setInvalidFormMessage] = useState<string>();
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
@@ -224,10 +225,6 @@ const Uploader = (props: UploaderProps) => {
     };
   }, [router.events, sermonEdited, isUploading]);
 
-  const clearUploadProgress = useCallback(() => {
-    setUploadProgress({ error: false, percent: 0, message: '' });
-  }, [setUploadProgress]);
-
   // ======================== START OF ERROR HANDLING ========================
 
   const setFormErrorCallback = useCallback(
@@ -243,9 +240,9 @@ const Uploader = (props: UploaderProps) => {
           [key]: newUploaderFieldError,
         };
       });
-      clearUploadProgress();
+      setInvalidFormMessage(undefined);
     },
-    [setFormErrors, clearUploadProgress]
+    [setFormErrors, setInvalidFormMessage]
   );
 
   const setAudioSourceError = useCallback(
@@ -379,10 +376,11 @@ const Uploader = (props: UploaderProps) => {
   );
 
   const clearAudioTrimmer = useCallback(() => {
+    setAudioSourceError(true, 'You must select an audio source before uploading');
     setUseYouTubeUrl(false);
     setAudioSource(undefined);
     setTrimStartTime(0);
-  }, [setAudioSource, setTrimStartTime]);
+  }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
   const clearForm = () => {
     setFormErrors({});
@@ -599,6 +597,11 @@ const Uploader = (props: UploaderProps) => {
               <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
                 <Button
                   onClick={async () => {
+                    if (!validateForm()) {
+                      setInvalidFormMessage('Please make sure all required fields are filled out');
+                      return;
+                    }
+                    setInvalidFormMessage(undefined);
                     setIsEditing(true);
                     const promises = [];
                     const pendingSermon = sermon;
@@ -635,6 +638,9 @@ const Uploader = (props: UploaderProps) => {
                 >
                   {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
                 </Button>
+                {invalidFormMessage && (
+                  <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
+                )}
               </div>
             </Stack>
           ) : (
@@ -707,6 +713,7 @@ const Uploader = (props: UploaderProps) => {
                     date={date}
                     validateForm={validateForm}
                     setUploadProgress={setUploadProgress}
+                    setInvalidFormMessage={setInvalidFormMessage}
                     setIsUploading={setIsUploading}
                     clearForm={clearForm}
                   />
@@ -714,6 +721,9 @@ const Uploader = (props: UploaderProps) => {
                     Clear Form
                   </button>
                 </Box>
+                {invalidFormMessage && (
+                  <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
+                )}
                 <UploadProgressComponent
                   audioSource={audioSource}
                   isUploading={isUploading}
