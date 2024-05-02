@@ -71,6 +71,23 @@ type FormErrors = {
 const emptySermon = createEmptySermon();
 
 const Uploader = (props: UploaderProps) => {
+  const getFormErrorInitialState = useCallback(
+    (): FormErrors =>
+      !props.existingSermon
+        ? {
+            title: { error: true, message: createFormErrorMessage('title'), initialState: true },
+            description: { error: true, message: createFormErrorMessage('description'), initialState: true },
+            subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
+            speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
+            audioSource: {
+              error: true,
+              message: 'You must select an audio source before uploading',
+              initialState: true,
+            },
+          }
+        : {},
+    [props.existingSermon]
+  );
   // ======================== START OF STATE ========================
   const router = useRouter();
   const [sermon, setSermon] = useState<Sermon>(() => {
@@ -87,17 +104,7 @@ const Uploader = (props: UploaderProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
-  const [formErrors, setFormErrors] = useState<FormErrors>(
-    !props.existingSermon
-      ? {
-          title: { error: true, message: createFormErrorMessage('title'), initialState: true },
-          description: { error: true, message: createFormErrorMessage('description'), initialState: true },
-          subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
-          speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
-          audioSource: { error: true, message: 'You must select an audio source before uploading', initialState: true },
-        }
-      : {}
-  );
+  const [formErrors, setFormErrors] = useState<FormErrors>(getFormErrorInitialState());
 
   // Bible Study Helpers
   const [selectedChapter, setSelectedChapter] = useState<List | null>(
@@ -392,7 +399,7 @@ const Uploader = (props: UploaderProps) => {
     setSermonList([]);
     setDate(new Date());
     clearAudioTrimmer();
-    setFormErrors({});
+    setFormErrors(getFormErrorInitialState());
   };
 
   const handleNewImage = useCallback(
