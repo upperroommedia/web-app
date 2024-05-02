@@ -87,13 +87,17 @@ const Uploader = (props: UploaderProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
-  const [formErrors, setFormErrors] = useState<FormErrors>({
-    title: { error: true, message: createFormErrorMessage('title'), initialState: true },
-    description: { error: true, message: createFormErrorMessage('description'), initialState: true },
-    subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
-    speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
-    audioSource: { error: true, message: 'You must select an audio source before uploading', initialState: true },
-  });
+  const [formErrors, setFormErrors] = useState<FormErrors>(
+    !props.existingSermon
+      ? {
+          title: { error: true, message: createFormErrorMessage('title'), initialState: true },
+          description: { error: true, message: createFormErrorMessage('description'), initialState: true },
+          subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
+          speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
+          audioSource: { error: true, message: 'You must select an audio source before uploading', initialState: true },
+        }
+      : {}
+  );
 
   // Bible Study Helpers
   const [selectedChapter, setSelectedChapter] = useState<List | null>(
@@ -638,10 +642,10 @@ const Uploader = (props: UploaderProps) => {
                 >
                   {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
                 </Button>
-                {invalidFormMessage && (
-                  <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
-                )}
               </div>
+              {invalidFormMessage && (
+                <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
+              )}
             </Stack>
           ) : (
             <>
