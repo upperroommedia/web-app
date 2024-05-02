@@ -7,6 +7,8 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import { List, ListType, ListWithHighlight } from '../types/List';
 import { Sermon } from '../types/SermonTypes';
+import { UploaderFieldError } from '../context/types';
+import { getErrorMessage, showError } from './uploaderComponents/utils';
 
 interface SubtitleSelectorProps {
   sermonList: List[];
@@ -14,6 +16,8 @@ interface SubtitleSelectorProps {
   setSermonList: Dispatch<SetStateAction<List[]>>;
   setSermon: Dispatch<SetStateAction<Sermon>>;
   subtitles: List[];
+  subtitleError?: UploaderFieldError;
+  setSubtitleError: (error: boolean, message: string) => void;
 }
 
 const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: SubtitleSelectorProps) => {
@@ -22,6 +26,13 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
       <Autocomplete
         fullWidth
         value={props.subtitles.find((subtitle) => subtitle.name === props.subtitle) || null}
+        onBlur={() => {
+          if (props.sermonList.find((list) => list.type === ListType.CATEGORY_LIST) === undefined) {
+            props.setSubtitleError(true, 'You must select at least one subtitle');
+          } else {
+            props.setSubtitleError(false, '');
+          }
+        }}
         onChange={async (_, newValue) => {
           if (
             newValue === null &&
@@ -32,6 +43,7 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
               oldSermonList.filter((list) => list.type !== ListType.CATEGORY_LIST)
             );
           } else {
+            props.setSubtitleError(false, '');
             props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: newValue?.name || '' }));
             if (
               props.sermonList.find((list) => list.type === ListType.SERIES && !list.listTagAndPosition) ===
@@ -83,7 +95,15 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
         isOptionEqualToValue={(option, value) =>
           value.name === undefined || option.name === undefined || option.id === value.id
         }
-        renderInput={(params) => <TextField {...params} required label="Subtitle" />}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            required
+            error={showError(props.subtitleError)}
+            helperText={getErrorMessage(props.subtitleError)}
+            label="Subtitle"
+          />
+        )}
       />
     </Box>
   );

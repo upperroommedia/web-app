@@ -14,6 +14,7 @@ import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
+import { getErrorMessage, showError } from './utils';
 
 const DynamicPopUp = dynamic(() => import('../PopUp'), { ssr: false });
 
@@ -34,9 +35,9 @@ interface SpeakerSelectorProps {
   sermonImages: ImageType[];
   setSermon: Dispatch<SetStateAction<Sermon>>;
   updateSermon: <T extends keyof Sermon>(key: T, value: Sermon[T]) => void;
-  speakerError: UploaderFieldError;
-  setSpeakerError: Dispatch<SetStateAction<UploaderFieldError>>;
+  speakerError?: UploaderFieldError;
   setSermonList: Dispatch<SetStateAction<List[]>>;
+  setSpeakerError: (error: boolean, message: string) => void;
 }
 
 const client =
@@ -73,8 +74,8 @@ function SpeakerSelector({
   setSermon,
   updateSermon,
   speakerError,
-  setSpeakerError,
   setSermonList,
+  setSpeakerError,
 }: SpeakerSelectorProps) {
   const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
@@ -94,9 +95,13 @@ function SpeakerSelector({
         fullWidth
         value={sermonSpeakers}
         onBlur={() => {
-          setSpeakerError({ error: false, message: '' });
+          if (sermonSpeakers.length === 0) {
+            setSpeakerError(true, 'You must select at least one speaker');
+          } else {
+            setSpeakerError(false, '');
+          }
         }}
-        onChange={async (_, newValue, reason, details) => {
+        onChange={async (event, newValue, reason, details) => {
           if (reason === 'removeOption' && details?.option.listId) {
             setSermonList((previousList) => {
               return previousList.filter((prevList) => prevList.id !== details.option.listId);
@@ -144,12 +149,9 @@ function SpeakerSelector({
               });
             }
           } else if (newValue.length >= 4) {
-            setSpeakerError({
-              error: true,
-              message: 'Can only add up to 3 speakers',
-            });
-          } else if (speakerError.error) {
-            setSpeakerError({ error: false, message: '' });
+            setSpeakerError(true, 'Can only add up to 3 speakers');
+          } else if (speakerError?.error) {
+            setSpeakerError(false, '');
           }
         }}
         onInputChange={async (_, value) => {
@@ -167,7 +169,7 @@ function SpeakerSelector({
             <Chip
               style={{ margin: '3px' }}
               onDelete={() => {
-                setSpeakerError({ error: false, message: '' });
+                setSpeakerError(false, '');
                 setSermon((previousSermon) => {
                   const newImages = previousSermon.images.filter((img) => {
                     return !speaker.images?.find((image) => image.id === img.id);
@@ -223,8 +225,8 @@ function SpeakerSelector({
               {...params}
               required
               label="Speaker(s)"
-              error={speakerError.error}
-              helperText={speakerError.message}
+              error={showError(speakerError)}
+              helperText={getErrorMessage(speakerError)}
             />
           );
         }}

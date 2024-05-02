@@ -1,7 +1,6 @@
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
-import Typography from '@mui/material/Typography';
 import {
   MediaPlayer,
   MediaProvider,
@@ -14,6 +13,8 @@ import { VideoLayout } from './vidstackComponents/VideoLayout';
 import { formatTime } from '../utils/audioUtils';
 import { AudioSource } from '../pages/api/uploadFile';
 import CircularProgress from '@mui/material/CircularProgress';
+import { UploaderFieldError } from '../context/types';
+import { getErrorMessage, showError } from './uploaderComponents/utils';
 
 interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
@@ -21,6 +22,8 @@ interface YouTubeTrimmerProps {
   duration: number;
   setTrimStart: (trimStartTime: number) => void;
   setDuration: (duration: number) => void;
+  audioSourceError?: UploaderFieldError;
+  setAudioSourceError: (error: boolean, message: string) => void;
 }
 
 const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
@@ -29,9 +32,10 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   duration,
   setTrimStart,
   setDuration,
+  audioSourceError,
+  setAudioSourceError,
 }) => {
   const [inputText, setInputText] = useState('');
-  const [error, setError] = useState('');
   const [isLoading, _setIsLoading] = useState(false);
   const [isValidYouTubeUrl, setIsValidYouTubeUrl] = useState(false);
 
@@ -48,15 +52,15 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
     if (isValidYouTubeUrl || !inputText.trim()) return;
     const timeoutId = setTimeout(() => {
       if (!isValidYouTubeUrl) {
-        setError('Could not find YouTube video, please make sure the link is valid');
+        setAudioSourceError(true, 'Could not find YouTube video, please make sure the link is valid');
       }
     }, 5000);
 
     return () => {
-      setError('');
+      setAudioSourceError(false, '');
       clearTimeout(timeoutId);
     };
-  }, [inputText, isValidYouTubeUrl]);
+  }, [inputText, isValidYouTubeUrl, setAudioSourceError]);
 
   useEffect(() => {
     if (trimStart + duration > 0) {
@@ -80,25 +84,22 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
           name="Youtube Link"
           variant="outlined"
           required
+          error={showError(audioSourceError)}
+          helperText={getErrorMessage(audioSourceError)}
           value={inputText}
           disabled={isLoading}
           onChange={(e) => {
             setInputText(e.target.value);
             setTrimStart(0);
+            setAudioSourceError(false, '');
             // setShowMediaPlayer(false)
-            if (error) {
-              setError(error);
-            }
+            // if (error) {
+            //   setError(error);
+            // }
           }}
         />
       </Box>
-      {error ? (
-        <Typography variant="caption" color="red">
-          {error}
-        </Typography>
-      ) : (
-        !isValidYouTubeUrl && inputText.trim() && <CircularProgress />
-      )}
+      {!showError(audioSourceError) && !isValidYouTubeUrl && inputText.trim() && <CircularProgress />}
       <MediaPlayer
         className={`${styles.player} media-player`}
         src={inputText}

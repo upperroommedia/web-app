@@ -28,7 +28,7 @@ export default function UploadProgressComponent({
         </Box>
       )}
       {uploadProgress.message && (
-        <Typography sx={{ textAlign: 'center', color: uploadProgress.error ? 'red' : 'black' }}>
+        <Typography sx={{ textAlign: 'center', color: uploadProgress.error ? 'error.dark' : 'black' }}>
           {!uploadProgress.error && uploadProgress.percent < 100 ? percent : uploadProgress.message}
         </Typography>
       )}
