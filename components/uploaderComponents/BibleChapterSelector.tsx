@@ -37,7 +37,6 @@ export default function BibleChapterSelector({
         return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.BIBLE_CHAPTER);
       });
     } else if (sermonSubtitle === BIBLE_STUDIES_STRING && bibleChapters.length === 0) {
-      setBibleChapterError(true, 'You must select a bible chapter', true);
       const fetchBibleChapters = async () => {
         setLoadingBibleChapters(true);
         // fetch bible chapters
@@ -51,7 +50,10 @@ export default function BibleChapterSelector({
       };
       fetchBibleChapters();
     }
-  }, [sermonSubtitle, bibleChapters.length, setSelectedChapter, setSermonList, setBibleChapterError]);
+    if (!selectedChapter) {
+      setBibleChapterError(true, 'You must select a bible chapter', true);
+    }
+  }, [sermonSubtitle, bibleChapters.length, setSelectedChapter, setSermonList, setBibleChapterError, selectedChapter]);
 
   return (
     <>

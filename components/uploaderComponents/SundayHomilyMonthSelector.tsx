@@ -69,11 +69,19 @@ function SundayHomilyMonthSelector({
       setSermonList((oldSermonList) => {
         return oldSermonList.filter((list) => list.listTagAndPosition?.listTag !== ListTag.SUNDAY_HOMILY_MONTH);
       });
-    } else {
+    }
+
+    if (!selectedSundayHomiliesMonth) {
       // initialize the initial error state to make sure this field is required if upload is clicked early
       setSundayHomiliesMonthError(true, 'You must select a sunday homily month', true);
     }
-  }, [sermonSubtitle, setSelectedSundayHomiliesMonth, setSermonList, setSundayHomiliesMonthError]);
+  }, [
+    sermonSubtitle,
+    setSelectedSundayHomiliesMonth,
+    setSermonList,
+    setSundayHomiliesMonthError,
+    selectedSundayHomiliesMonth,
+  ]);
 
   useEffect(() => {
     if (date.getFullYear() !== sundayHomiliesYear) {
