@@ -2,10 +2,9 @@ import React, { Dispatch, FunctionComponent, SetStateAction } from 'react';
 import Cancel from '@mui/icons-material/Cancel';
 import dynamic from 'next/dynamic';
 import { isBrowser } from 'react-device-detect';
-import Box from '@mui/material/Box';
-import Typography from '@mui/material/Typography';
 
 const DynamicAudioTrimmer = dynamic(() => import('./AudioTrimmer'), { ssr: false });
+const DynamicMobileAudioTrimmer = dynamic(() => import('./MobileAudioTrimmerComponent'), { ssr: false });
 
 type AudioTrimmerComponentProps = {
   url: string;
@@ -38,12 +37,7 @@ const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
           setHasTrimmed={setHasTrimmed}
         />
       ) : (
-        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center">
-          <audio style={{ width: '100%' }} controls src={url} />
-          <Typography variant="caption">
-            Trimming is not currently supported on mobile: please trim your audio on a seperate application first
-          </Typography>
-        </Box>
+        <DynamicMobileAudioTrimmer url={url} setDuration={setTrimDuration} />
       )}
     </div>
   );
