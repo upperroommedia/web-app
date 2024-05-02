@@ -27,7 +27,8 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
         fullWidth
         value={props.subtitles.find((subtitle) => subtitle.name === props.subtitle) || null}
         onBlur={() => {
-          if (props.sermonList.find((list) => list.type === ListType.CATEGORY_LIST) === undefined) {
+          console.log(props.sermonList);
+          if (!props.subtitle) {
             props.setSubtitleError(true, 'You must select at least one subtitle');
           } else {
             props.setSubtitleError(false, '');
@@ -38,20 +39,29 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
             newValue === null &&
             props.sermonList.find((list) => list.type === ListType.CATEGORY_LIST) !== undefined
           ) {
+            // user cleared the selection - remove sermon from list
             props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: '' }));
             props.setSermonList((oldSermonList) =>
               oldSermonList.filter((list) => list.type !== ListType.CATEGORY_LIST)
             );
-          } else {
+          } else if (!newValue) {
+            // cleared selector with no existing sermon list
+            props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: '' }));
+          } else if (newValue) {
+            // a new value has been selected
             props.setSubtitleError(false, '');
-            props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: newValue?.name || '' }));
+            props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: newValue.name }));
+            const listWithSameName = props.sermonList.find((list) => list.name === newValue.name);
             if (
-              props.sermonList.find((list) => list.type === ListType.SERIES && !list.listTagAndPosition) ===
-                undefined &&
-              newValue
+              props.sermonList.find((list) => list.type === ListType.SERIES && !list.listTagAndPosition) === undefined
             ) {
               props.setSermonList((oldSermonList) => [
                 ...oldSermonList.filter((list) => list.type !== ListType.CATEGORY_LIST),
+                newValue,
+              ]);
+            } else if (listWithSameName !== undefined) {
+              props.setSermonList((oldSermonList) => [
+                ...oldSermonList.filter((list) => list.name !== newValue.name),
                 newValue,
               ]);
             }
