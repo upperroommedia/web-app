@@ -387,12 +387,12 @@ const Uploader = (props: UploaderProps) => {
   }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
   const clearForm = () => {
-    setFormErrors({});
     setSermon(createEmptySermon(props.user.uid));
     setEmptyListWithLatest([]);
     setSermonList([]);
     setDate(new Date());
     clearAudioTrimmer();
+    setFormErrors({});
   };
 
   const handleNewImage = useCallback(
