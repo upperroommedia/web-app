@@ -11,10 +11,10 @@ import useAuth from '../context/user/UserContext';
 import Chip from '@mui/material/Chip';
 import dynamic from 'next/dynamic';
 import RetryProcessButton from './RetryProcessButton';
+import Link from 'next/link';
 
 const ManageUploadsPopup = dynamic(() => import('./ManageUploadsPopup'));
 const DeleteEntityPopup = dynamic(() => import('./DeleteEntityPopup'));
-const EditSermonForm = dynamic(() => import('./EditSermonForm'));
 
 interface SermonCardAdminControlsComponentProps {
   sermon: Sermon;
@@ -42,7 +42,6 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
   deleteFromSubsplash,
 }: SermonCardAdminControlsComponentProps) => {
   const [deleteConfirmationPopup, setDeleteConfirmationPopup] = useState<boolean>(false);
-  const [editFormPopup, setEditFormPopup] = useState<boolean>(false);
   const [disableButtons, setDisableButtons] = useState<boolean>(false);
   const { user } = useAuth();
 
@@ -94,14 +93,11 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
         {showEdit && (
           <Tooltip title="Edit Sermon">
             <span>
-              <IconButton
-                disabled={disableButtons}
-                aria-label="edit sermon"
-                style={{ color: 'lightblue' }}
-                onClick={() => setEditFormPopup(true)}
-              >
-                <EditIcon />
-              </IconButton>
+              <Link href={`/admin/sermons/${sermon.id}?edit`}>
+                <IconButton disabled={disableButtons} aria-label="edit sermon" style={{ color: 'lightblue' }}>
+                  <EditIcon />
+                </IconButton>
+              </Link>
             </span>
           </Tooltip>
         )}
@@ -141,7 +137,6 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
           isDeleting={isUploadingToSubsplash}
         />
       )}
-      {editFormPopup && <EditSermonForm open={editFormPopup} setOpen={() => setEditFormPopup(false)} sermon={sermon} />}
     </>
   );
 };
