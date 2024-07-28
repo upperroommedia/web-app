@@ -34,6 +34,7 @@ import sermonOnDelete from './DocumentListeners/Sermons/sermonOnDelete';
 import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
 import repopulatelistfromspeakeritems from './Scrapers/repopulateListFromSpeakerItems';
 import getuser from './getUser';
+import transcribe from './transcribe';
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -69,3 +70,4 @@ exports.repopulatelistfromspeakeritems = repopulatelistfromspeakeritems;
 exports.updatecreatedandeditedatmillis = updatecreatedandeditedatmillis;
 exports.tagitemsinlist = tagitemsinlist;
 exports.generatesecuredapikey = generatesecuredapikey;
+exports.transcribe = transcribe;
