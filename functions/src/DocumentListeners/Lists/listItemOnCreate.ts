@@ -15,7 +15,7 @@ const listItemOnCreate = firestore
       if (!list) {
         throw new HttpsError('internal', 'Something went wrong, please try again later');
       }
-      const { count: _, listNoCount } = list;
+      const { count: _, ...listNoCount } = list;
       const batch = firestore.batch();
       batch.create(
         firestore
