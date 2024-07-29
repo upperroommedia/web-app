@@ -7,13 +7,14 @@ import handleError from '../../handleError';
 const listOnUpdate = firestore.document('lists/{listId}').onUpdate(async (change, context) => {
   const { listId } = context.params;
   logger.log('listOnUpdate triggered for: ', listId);
+  const originalList = change.before.data();
   const updatedList = change.after.data();
   const firestore = firebaseAdmin.firestore();
-  const originalList = change.before.data();
   const { count: _countBefore, ...originalListNoCount } = originalList;
   const { count: _countAfter, ...updatedListNoCount } = updatedList;
   const onlyCountUpdated = isEqual(originalListNoCount, updatedListNoCount);
-  logger.debug('Original list vs updated list for list id: ', listId, originalList, updatedList);
+  logger.debug('Original list: ', originalList);
+  logger.debug('Updated list: ', updatedList);
   if (onlyCountUpdated) {
     logger.log(`The count was the only property that changed for ${listId}. Returning early`);
     return;
