@@ -179,7 +179,7 @@ const AdminList = () => {
             <MaterialList>
               {(searchResults || list).map((l) => {
                 return (
-                  <Link href={`/admin/lists/${l.id}?count=${l.count}`} key={l.id}>
+                  <Link href={`/admin/lists/${l.id}?count=${l.count || 20}`} key={l.id}>
                     <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box display="flex" alignItems="center" gap={1}>
                         <AvatarWithDefaultImage
@@ -190,7 +190,7 @@ const AdminList = () => {
                           borderRadius={5}
                         />
                         <Typography>{l.name}</Typography>
-                        <Typography>{`Count: ${l.count}`}</Typography>
+                        {l.count !== undefined && <Typography>{`Count: ${l.count}`}</Typography>}
                         <Typography>{`Type: ${l.type}`}</Typography>
                       </Box>
                       <Box>
