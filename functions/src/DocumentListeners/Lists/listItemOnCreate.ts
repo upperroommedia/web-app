@@ -15,6 +15,7 @@ const listItemOnCreate = firestore
       if (!list) {
         throw new HttpsError('internal', 'Something went wrong, please try again later');
       }
+      const { count: _, listNoCount } = list;
       const batch = firestore.batch();
       batch.create(
         firestore
@@ -23,7 +24,7 @@ const listItemOnCreate = firestore
           .collection('sermonLists')
           .doc(listId)
           .withConverter(firestoreAdminListConverter),
-        list
+        listNoCount
       );
       batch.update(firestore.doc(`lists/${listId}`).withConverter(firestoreAdminListConverter), {
         count: FieldValue.increment(1),
