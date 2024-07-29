@@ -38,9 +38,8 @@ const SearchResultSermonList = (props: BoxProps) => {
             </Box>
           </Typography>
         )}
-        {[...Array(20)].map((_, i) => (
-          <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />
-        ))}
+        {(status === 'loading' || status === 'stalled') &&
+          [...Array(20)].map((_, i) => <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />)}
         {status === 'idle' &&
           hits.map((hit) => (
             <SearchResultSermonListCard
