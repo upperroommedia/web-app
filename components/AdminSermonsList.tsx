@@ -19,6 +19,7 @@ import ListItemText from '@mui/material/ListItemText';
 import { User, UserRole } from '../types/User';
 import Button from '@mui/material/Button';
 import UserRoleGuard from './UserRoleGuard';
+import { useInstantSearch } from 'react-instantsearch';
 
 interface AdminSermonsListProps {
   collectionPath: string;
@@ -49,6 +50,8 @@ const AdminSermonsListWithUser: FunctionComponent<AdminSermonsListWithUserProps>
   const [queryLimit, setQueryLimit] = useState<number>(limitCount);
   const [previousSermonsCount, setPreviousSermonsCount] = useState<number>(0);
   const [previousSermons, setPreviousSermons] = useState<Sermon[]>([]);
+  const { status } = useInstantSearch();
+
   const sermonsRef = collection(firestore, collectionPath);
   const q =
     user.role !== UserRole.ADMIN
@@ -172,7 +175,14 @@ const AdminSermonsListWithUser: FunctionComponent<AdminSermonsListWithUserProps>
           </Box>
         </Typography>
       )}
-      {loading && (
+      {status === 'error' && (
+        <Typography component="div">
+          <Box fontWeight="bold" display="inline">
+            Error: Algolia search errored please try again later
+          </Box>
+        </Typography>
+      )}
+      {(loading || status === 'loading' || status === 'stalled') && (
         <>
           <SermonsList sermons={previousSermons} />
           <SermonListSkeloten count={count} />

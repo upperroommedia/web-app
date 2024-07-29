@@ -1,11 +1,12 @@
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useSearchBox, UseSearchBoxProps, useStats } from 'react-instantsearch';
+import { useInstantSearch, useSearchBox, UseSearchBoxProps, useStats } from 'react-instantsearch';
 
 const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: React.ReactElement }) => {
   const { refine } = useSearchBox(props);
   const { nbHits, processingTimeMS } = useStats();
+  const { status } = useInstantSearch();
   // const { status } = useInstantSearch();
   return (
     <Stack
@@ -25,10 +26,20 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
         }}
         InputProps={props.TextFieldEndAdornment ? { endAdornment: props.TextFieldEndAdornment } : {}}
       />
-      <Typography
-        variant="subtitle1"
-        sx={{ paddingX: 1, fontSize: { xs: '0.7rem', sm: '0.8rem', md: '0.85rem' } }}
-      >{`${nbHits} ${nbHits === 1 ? 'result' : 'results'} found in ${processingTimeMS}ms`}</Typography>
+      {status === 'error' ? (
+        <Typography
+          variant="subtitle1"
+          sx={{ color: 'error.dark', paddingX: 1, fontSize: { xs: '0.7rem', sm: '0.8rem', md: '0.85rem' } }}
+        >
+          Error
+        </Typography>
+      ) : (
+        <Typography variant="subtitle1" sx={{ paddingX: 1, fontSize: { xs: '0.7rem', sm: '0.8rem', md: '0.85rem' } }}>
+          {status === 'stalled' || status === 'loading'
+            ? 'Loading...'
+            : `${nbHits} ${nbHits === 1 ? 'result' : 'results'} found in ${processingTimeMS}ms`}
+        </Typography>
+      )}
     </Stack>
   );
 };
