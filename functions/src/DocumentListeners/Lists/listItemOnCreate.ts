@@ -11,11 +11,15 @@ const listItemOnCreate = firestore
     const { listId, sermonId } = context.params;
     const firestore = firebaseAdmin.firestore();
     try {
-      const list = (await firestore.collection('lists').doc(listId).get()).data();
+      const list = (
+        await firestore.collection('lists').doc(listId).withConverter(firestoreAdminListConverter).get()
+      ).data();
       if (!list) {
         throw new HttpsError('internal', 'Something went wrong, please try again later');
       }
-      const { count: _, ...listNoCount } = list;
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { count: _count, updatedAtMillis: _updatedAtMillis, ...listNoCountOrUpdatedAtMillis } = list;
       const batch = firestore.batch();
       batch.create(
         firestore
@@ -24,7 +28,7 @@ const listItemOnCreate = firestore
           .collection('sermonLists')
           .doc(listId)
           .withConverter(firestoreAdminListConverter),
-        listNoCount
+        listNoCountOrUpdatedAtMillis
       );
       batch.update(firestore.doc(`lists/${listId}`).withConverter(firestoreAdminListConverter), {
         count: FieldValue.increment(1),

@@ -37,7 +37,7 @@ export interface List {
   overflowBehavior: OverflowBehavior;
   count?: number;
   type: ListType;
-  updatedAtMillis: number;
+  updatedAtMillis?: number;
   createdAtMillis: number;
   subsplashId?: string;
   moreSermonsRef?: string;

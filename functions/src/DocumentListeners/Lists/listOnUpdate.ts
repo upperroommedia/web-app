@@ -1,22 +1,36 @@
 import { firestore, logger } from 'firebase-functions';
 import { isEqual } from 'lodash';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import { List } from '../../../../types/List';
 import { firestoreAdminSermonListConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
 
 const listOnUpdate = firestore.document('lists/{listId}').onUpdate(async (change, context) => {
   const { listId } = context.params;
   logger.log('listOnUpdate triggered for: ', listId);
-  const originalList = change.before.data();
-  const updatedList = change.after.data();
+  const originalList = change.before.data() as List;
+  const updatedList = change.after.data() as List;
   const firestore = firebaseAdmin.firestore();
-  const { count: _countBefore, ...originalListNoCount } = originalList;
-  const { count: _countAfter, ...updatedListNoCount } = updatedList;
-  const onlyCountUpdated = isEqual(originalListNoCount, updatedListNoCount);
+
+  const {
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    count: _countBefore,
+    updatedAtMillis: _updatedAtMillisBefore,
+    /* eslint-enable @typescript-eslint/no-unused-vars */
+    ...originalListNoCountOrUpdatedAt
+  } = originalList;
+  const {
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    count: _countAfter,
+    updatedAtMillis: _updatedAtMillisAfter,
+    /* eslint-enable @typescript-eslint/no-unused-vars */
+    ...updatedListNoCountOrUpdatedAt
+  } = updatedList;
+  const onlyCountUpdated = isEqual(originalListNoCountOrUpdatedAt, updatedListNoCountOrUpdatedAt);
   logger.debug('Original list: ', originalList);
   logger.debug('Updated list: ', updatedList);
   if (onlyCountUpdated) {
-    logger.log(`The count was the only property that changed for ${listId}. Returning early`);
+    logger.log(`The count or updatedAtMillis were the only properties that changed for ${listId}. Returning early`);
     return;
   }
   try {
