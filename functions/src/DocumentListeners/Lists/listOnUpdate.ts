@@ -9,9 +9,11 @@ const listOnUpdate = firestore.document('lists/{listId}').onUpdate(async (change
   logger.log('listOnUpdate triggered for: ', listId);
   const updatedList = change.after.data();
   const firestore = firebaseAdmin.firestore();
-  const { count: _countBefore, ...originalListNoCount } = change.before.data();
+  const originalList = change.before.data();
+  const { count: _countBefore, ...originalListNoCount } = originalList;
   const { count: _countAfter, ...updatedListNoCount } = updatedList;
   const onlyCountUpdated = isEqual(originalListNoCount, updatedListNoCount);
+  logger.debug('Original list vs updated list for list id: ', listId, originalList, updatedList);
   if (onlyCountUpdated) {
     logger.log(`The count was the only property that changed for ${listId}. Returning early`);
     return;
@@ -20,7 +22,6 @@ const listOnUpdate = firestore.document('lists/{listId}').onUpdate(async (change
     // update all series instances of sermon
 
     logger.log('Updating list: ', listId, ' in all sermon series');
-    logger.log('Updated list: ', updatedList);
     const sermonListSnapshot = await firestore
       .collectionGroup('sermonLists')
       .withConverter(firestoreAdminSermonListConverter)
