@@ -3,7 +3,7 @@
  */
 
 import SearchResultSermonListCard from './SearchResultSermonListCard';
-import { useHits } from 'react-instantsearch';
+import { useHits, useInstantSearch } from 'react-instantsearch';
 
 // import { Sermon } from '../types/SermonTypes';
 
@@ -14,9 +14,12 @@ import Box from '@mui/material/Box';
 import { BoxProps } from '@mui/system/Box';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { useMediaState } from '@vidstack/react';
+import SermonListCardSkeloten from './skeletons/SermonListCardSkeloten';
+import Typography from '@mui/material/Typography';
 
 const SearchResultSermonList = (props: BoxProps) => {
   const { hits } = useHits();
+  const { status } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
   const playing = useMediaState('playing');
 
@@ -28,15 +31,26 @@ const SearchResultSermonList = (props: BoxProps) => {
           width: 1,
         }}
       >
-        {hits.map((hit) => (
-          <SearchResultSermonListCard
-            key={hit.objectID}
-            sermonId={hit.objectID}
-            isPlaying={currentSermonId === hit.objectID ? playing : false}
-            audioPlayerCurrentSermonId={currentSermonId}
-            audioPlayerSetCurrentSermon={setCurrentSermon}
-          />
+        {status === 'error' && (
+          <Typography component="div">
+            <Box fontWeight="bold" display="inline">
+              Error: Algolia search errored please try again later
+            </Box>
+          </Typography>
+        )}
+        {[...Array(20)].map((_, i) => (
+          <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />
         ))}
+        {status === 'idle' &&
+          hits.map((hit) => (
+            <SearchResultSermonListCard
+              key={hit.objectID}
+              sermonId={hit.objectID}
+              isPlaying={currentSermonId === hit.objectID ? playing : false}
+              audioPlayerCurrentSermonId={currentSermonId}
+              audioPlayerSetCurrentSermon={setCurrentSermon}
+            />
+          ))}
       </List>
     </Box>
   );
