@@ -35,9 +35,9 @@ export interface List {
   name: string;
   images: ImageType[];
   overflowBehavior: OverflowBehavior;
-  count: number;
+  count?: number;
   type: ListType;
-  updatedAtMillis: number;
+  updatedAtMillis?: number;
   createdAtMillis: number;
   subsplashId?: string;
   moreSermonsRef?: string;
