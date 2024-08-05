@@ -27,7 +27,6 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
         fullWidth
         value={props.subtitles.find((subtitle) => subtitle.name === props.subtitle) || null}
         onBlur={() => {
-          console.log(props.sermonList);
           if (!props.subtitle) {
             props.setSubtitleError(true, 'You must select at least one subtitle');
           } else {
