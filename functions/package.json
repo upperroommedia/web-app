@@ -2,7 +2,7 @@
   "name": "functions",
   "scripts": {
     "lint": "eslint --ext .js,.ts .",
-    "test-watch": "firebase emulators:exec --only firestore \"jest --watchAll\"",
+    "test-watch": "firebase emulators:exec --only firestore --ui \"jest --watchAll\"",
     "test": "firebase emulators:exec --only firestore jest",
     "build": "tsc",
     "build-watch": "tsc -w",
