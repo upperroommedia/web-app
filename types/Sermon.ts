@@ -47,7 +47,7 @@ export const createSermon = ({
 };
 
 export interface FirebaseSermon extends Omit<Sermon, 'dateMillis' | 'dateString'> {
-  date: Timestamp;
+  date: Omit<Timestamp, 'toJSON'>;
 }
 
 export const getDateString = (date: Date) => {

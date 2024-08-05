@@ -2,7 +2,8 @@
   "name": "functions",
   "scripts": {
     "lint": "eslint --ext .js,.ts .",
-    "test": "jest --watchAll",
+    "test-watch": "firebase emulators:exec --only firestore \"jest --watchAll\"",
+    "test": "firebase emulators:exec --only firestore jest",
     "build": "tsc",
     "build-watch": "tsc -w",
     "serve": "pnpm run build && firebase emulators:start --only functions",
@@ -23,8 +24,8 @@
     "dotenv": "^16.3.1",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
-    "firebase": "^9.23.0",
-    "firebase-admin": "^11.9.0",
+    "firebase": "^10.12.0",
+    "firebase-admin": "^11.11.1",
     "firebase-functions": "^4.4.0",
     "fluent-ffmpeg": "^2.1.2",
     "form-data": "^4.0.0",
@@ -40,6 +41,7 @@
     "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
+    "@firebase/firestore-types": "^3.0.2",
     "@types/ffprobe-static": "^2.0.3",
     "@types/fluent-ffmpeg": "^2.1.24",
     "@types/imagemagick": "^0.0.31",
