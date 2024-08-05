@@ -16,8 +16,10 @@ export function parseHostAndPort(hostAndPort: string | undefined): { host: strin
 
 export function getFirestoreCoverageMeta(projectId: string, firebaseJsonPath: string) {
   const { emulators } = require(firebaseJsonPath);
-  const hostAndPort = parseHostAndPort(`127.0.0.1:8080`);
-  const { host, port } = hostAndPort !== undefined ? hostAndPort : emulators.firestore!;
+  const host = '127.0.0.1';
+  const port = parseInt(emulators.firestore.port);
+  // eslint-disable-next-line no-console
+  console.log(`Attempting to connect to firestore at ${host}:${port}`);
   const coverageUrl = `http://${host}:${port}/emulator/v1/projects/${projectId}:ruleCoverage.html`;
   return {
     host,
