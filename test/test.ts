@@ -9,18 +9,7 @@ import { getFirestoreCoverageMeta } from './utils';
 import { readFileSync, createWriteStream } from 'node:fs';
 import { get } from 'node:http';
 import { resolve } from 'node:path';
-import {
-  doc,
-  getDoc,
-  setDoc,
-  serverTimestamp,
-  setLogLevel,
-  deleteDoc,
-  collectionGroup,
-  query,
-  getDocs,
-  where,
-} from 'firebase/firestore';
+import { serverTimestamp, setLogLevel } from 'firebase/firestore';
 import { FirebaseFirestore } from '@firebase/firestore-types';
 
 let testEnv: RulesTestEnvironment;
@@ -86,19 +75,19 @@ beforeEach(async () => {
 describe('Admin Profile', () => {
   firebaseCollections.forEach((collection) => {
     test(`Read all ${collection}`, async function () {
-      await assertSucceeds(getDoc(doc(adminDB, `${collection}/123`)));
+      await assertSucceeds(adminDB.doc(`${collection}/123`).get());
     });
     test(`Write to all ${collection}`, async function () {
-      await assertSucceeds(setDoc(doc(adminDB, `${collection}/123`), { title: 'test sermon' }));
-      await assertSucceeds(setDoc(doc(adminDB, `${collection}/123`), { title: 'test sermon' }));
+      await assertSucceeds(adminDB.doc(`${collection}/123`).set({ title: 'test sermon' }));
+      await assertSucceeds(adminDB.doc(`${collection}/123`).set({ title: 'test sermon' }));
     });
     test(`Delete all ${collection}`, async function () {
-      await assertSucceeds(deleteDoc(doc(adminDB, `${collection}/123`)));
+      await assertSucceeds(adminDB.doc(`${collection}/123`).delete());
     });
   });
   firebaseCollectionGroups.forEach((collectionGroupId) => {
     test(`[CollectionGroup]: Read all ${collectionGroupId}`, async function () {
-      await assertSucceeds(getDocs(query(collectionGroup(adminDB, collectionGroupId), where('id', '==', '123'))));
+      await assertSucceeds(adminDB.collectionGroup(collectionGroupId).where('id', '==', '123').get());
     });
   });
 });
@@ -108,35 +97,35 @@ describe('Uploader Profile', () => {
     // add a sermon with uploaderId uploaderId to the database
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const securityRulesDisabledDB = context.firestore();
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/matchingId'), {
+      await securityRulesDisabledDB.doc('sermons/matchingId').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         dateMillis: serverTimestamp(),
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/notMatchingId'), {
+      await securityRulesDisabledDB.doc('sermons/notMatchingId').set({
         uploaderId: 'notMatchingId',
         title: 'test sermon',
         dateMillis: serverTimestamp(),
       });
     });
-    await assertSucceeds(getDoc(doc(uploaderDB, 'sermons/matchingId')));
-    await assertFails(getDoc(doc(uploaderDB, 'sermons/notMatchingId')));
+    await assertSucceeds(uploaderDB.doc('sermons/matchingId').get());
+    await assertFails(uploaderDB.doc('sermons/notMatchingId').get());
   });
 
   test('Read sermon if non existent', async function () {
-    await assertSucceeds(getDoc(doc(uploaderDB, 'sermons/123')));
+    await assertSucceeds(uploaderDB.doc('sermons/123').get());
   });
 
   test('Create sermon', async function () {
     // add a sermon with uploaderId uploaderId to the database
-    await assertSucceeds(setDoc(doc(uploaderDB, 'sermons/matchingId'), { uploaderId: 'uploaderId' }));
+    await assertSucceeds(uploaderDB.doc('sermons/matchingId').set({ uploaderId: 'uploaderId' }));
   });
 
   test('Update sermon only if uploaderId matches', async function () {
     // add a sermon with uploaderId uploaderId to the database
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const securityRulesDisabledDB = context.firestore();
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/matchingId'), {
+      await securityRulesDisabledDB.doc('sermons/matchingId').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -146,7 +135,7 @@ describe('Uploader Profile', () => {
         },
         dateMillis: serverTimestamp(),
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/notMatchingId'), {
+      await securityRulesDisabledDB.doc('sermons/notMatchingId').set({
         uploaderId: 'notMatchingId',
         title: 'test sermon',
         status: {
@@ -157,15 +146,15 @@ describe('Uploader Profile', () => {
         dateMillis: serverTimestamp(),
       });
     });
-    await assertSucceeds(setDoc(doc(uploaderDB, 'sermons/matchingId'), { title: 'Edited Title' }));
-    await assertFails(setDoc(doc(uploaderDB, 'sermons/notMatchingId'), { title: 'Edited Title' }));
+    await assertSucceeds(uploaderDB.doc('sermons/matchingId').set({ title: 'Edited Title' }));
+    await assertFails(uploaderDB.doc('sermons/notMatchingId').set({ title: 'Edited Title' }));
   });
 
   test('Update sermon only if not published to Soundcloud or Subsplash', async function () {
     // add a sermon with uploaderId uploaderId to the database
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const securityRulesDisabledDB = context.firestore();
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/uploadedToBoth'), {
+      await securityRulesDisabledDB.doc('sermons/uploadedToBoth').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -174,7 +163,7 @@ describe('Uploader Profile', () => {
           subsplash: 'UPLOADED',
         },
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/uploadedToSoundCloud'), {
+      await securityRulesDisabledDB.doc('sermons/uploadedToSoundCloud').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -183,7 +172,7 @@ describe('Uploader Profile', () => {
           subsplash: 'NOT_UPLOADED',
         },
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/uploadedToSubsplash'), {
+      await securityRulesDisabledDB.doc('sermons/uploadedToSubsplash').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -192,7 +181,7 @@ describe('Uploader Profile', () => {
           subsplash: 'NOT_UPLOADED',
         },
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/notUploaded'), {
+      await securityRulesDisabledDB.doc('sermons/notUploaded').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -202,16 +191,16 @@ describe('Uploader Profile', () => {
         },
       });
     });
-    await assertSucceeds(setDoc(doc(uploaderDB, 'sermons/notUploaded'), { title: 'Edited Title' }));
-    await assertFails(setDoc(doc(uploaderDB, 'sermons/uploadedToBoth'), { title: 'Edited Title' }));
-    await assertFails(setDoc(doc(uploaderDB, 'sermons/uploadedToSoundCloud'), { title: 'Edited Title' }));
-    await assertFails(setDoc(doc(uploaderDB, 'sermons/uploadedToSubsplash'), { title: 'Edited Title' }));
+    await assertSucceeds(uploaderDB.doc('sermons/notUploaded').set({ title: 'Edited Title' }));
+    await assertFails(uploaderDB.doc('sermons/uploadedToBoth').set({ title: 'Edited Title' }));
+    await assertFails(uploaderDB.doc('sermons/uploadedToSoundCloud').set({ title: 'Edited Title' }));
+    await assertFails(uploaderDB.doc('sermons/uploadedToSubsplash').set({ title: 'Edited Title' }));
   });
   test('Delete sermon only if not published to Soundcloud or Subsplash', async function () {
     // add a sermon with uploaderId uploaderId to the database
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const securityRulesDisabledDB = context.firestore();
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/uploadedToBoth'), {
+      await securityRulesDisabledDB.doc('sermons/uploadedToBoth').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -220,7 +209,7 @@ describe('Uploader Profile', () => {
           subsplash: 'UPLOADED',
         },
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/uploadedToSoundCloud'), {
+      await securityRulesDisabledDB.doc('sermons/uploadedToSoundCloud').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -229,7 +218,7 @@ describe('Uploader Profile', () => {
           subsplash: 'NOT_UPLOADED',
         },
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/uploadedToSubsplash'), {
+      await securityRulesDisabledDB.doc('sermons/uploadedToSubsplash').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -238,7 +227,7 @@ describe('Uploader Profile', () => {
           subsplash: 'NOT_UPLOADED',
         },
       });
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/notUploaded'), {
+      await securityRulesDisabledDB.doc('sermons/notUploaded').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         status: {
@@ -248,10 +237,10 @@ describe('Uploader Profile', () => {
         },
       });
     });
-    await assertSucceeds(deleteDoc(doc(uploaderDB, 'sermons/notUploaded')));
-    await assertFails(deleteDoc(doc(uploaderDB, 'sermons/uploadedToBoth')));
-    await assertFails(deleteDoc(doc(uploaderDB, 'sermons/uploadedToSoundCloud')));
-    await assertFails(deleteDoc(doc(uploaderDB, 'sermons/uploadedToSubsplash')));
+    await assertSucceeds(uploaderDB.doc('sermons/notUploaded').delete());
+    await assertFails(uploaderDB.doc('sermons/uploadedToBoth').delete());
+    await assertFails(uploaderDB.doc('sermons/uploadedToSoundCloud').delete());
+    await assertFails(uploaderDB.doc('sermons/uploadedToSubsplash').delete());
   });
 });
 
@@ -259,17 +248,17 @@ describe('User Profile', () => {
   test('No access to all sermons', async function () {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const securityRulesDisabledDB = context.firestore();
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/existingSermon'), {
+      await securityRulesDisabledDB.doc('sermons/existingSermon').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         dateMillis: serverTimestamp(),
       });
     });
-    await assertFails(getDoc(doc(userDB, 'sermons/existingSermon')));
+    await assertFails(userDB.doc('sermons/existingSermon').get());
   });
 
   test('No write to all sermons', async function () {
-    await assertFails(setDoc(doc(userDB, 'sermons/123'), { title: 'test sermon' }));
+    await assertFails(userDB.doc('sermons/123').set({ title: 'test sermon' }));
   });
 });
 
@@ -277,21 +266,21 @@ describe('Unauthroized Profile', () => {
   test('No access any collection', async function () {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const securityRulesDisabledDB = context.firestore();
-      await setDoc(doc(securityRulesDisabledDB, 'sermons/existingSermon'), {
+      await securityRulesDisabledDB.doc('sermons/existingSermon').set({
         uploaderId: 'uploaderId',
         title: 'test sermon',
         dateMillis: serverTimestamp(),
       });
     });
-    await assertFails(getDoc(doc(unauthorizedDB, 'sermons/existingSermon')));
-    await assertFails(getDoc(doc(unauthorizedDB, 'foo/123')));
-    await assertFails(getDoc(doc(unauthorizedDB, 'sermons/123/sermonLists/123')));
-    await assertFails(getDoc(doc(unauthorizedDB, 'users/123')));
+    await assertFails(unauthorizedDB.doc('sermons/existingSermon').get());
+    await assertFails(unauthorizedDB.doc('foo/123').get());
+    await assertFails(unauthorizedDB.doc('sermons/123/sermonLists/123').get());
+    await assertFails(unauthorizedDB.doc('users/123').get());
   });
 
   test('No write to any collection', async function () {
-    await assertFails(setDoc(doc(unauthorizedDB, 'sermons/123'), { title: 'test sermon' }));
-    await assertFails(setDoc(doc(unauthorizedDB, 'foo/123'), { title: 'test sermon' }));
-    await assertFails(setDoc(doc(unauthorizedDB, 'list/123'), { title: 'test sermon' }));
+    await assertFails(unauthorizedDB.doc('sermons/123').set({ title: 'test sermon' }));
+    await assertFails(unauthorizedDB.doc('foo/123').set({ title: 'test sermon' }));
+    await assertFails(unauthorizedDB.doc('list/123').set({ title: 'test sermon' }));
   });
 });
