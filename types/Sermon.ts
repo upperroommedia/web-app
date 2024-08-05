@@ -14,7 +14,7 @@ export const createSermon = ({
   durationSeconds = 0,
   speakers = <ISpeaker[]>[],
   topics = <string[]>[],
-  dateString = new Date().toLocaleDateString(),
+  dateString = getDateString(new Date()),
   status = {
     soundCloud: uploadStatus.NOT_UPLOADED,
     subsplash: uploadStatus.NOT_UPLOADED,
@@ -90,7 +90,7 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
     durationSeconds: 0,
     speakers: [],
     topics: [],
-    dateString: currentDate.toLocaleDateString(),
+    dateString: getDateString(currentDate),
     status: {
       soundCloud: uploadStatus.NOT_UPLOADED,
       subsplash: uploadStatus.NOT_UPLOADED,
