@@ -16,7 +16,7 @@ export interface SubsplashListRow {
   created_at: string;
   updated_at: string;
   _embedded: {
-    [key in MediaType]: {
+    [key in MediaType]?: {
       id: string;
       title: string;
     };
@@ -60,7 +60,7 @@ async function getFullList(listId: string, token: string, maxListCount: number):
     token,
     'GET'
   );
-  const response = (await axios(listConfig)).data;
+  const response = (await axios.request(listConfig)).data;
   return response['_embedded']['list-rows'];
 }
 
@@ -111,7 +111,7 @@ export async function addItemToList(mediaItem: MediaItem, listId: string, newLis
     'PATCH',
     payload
   );
-  const response = await axios(patchListConfig);
+  const response = await axios.request(patchListConfig);
   const data = response.data;
   const listItemId = data._embedded['list-rows'][0].id;
   if (!listItemId) {
