@@ -266,14 +266,16 @@ const SpeakerTable = (props: {
       }
       try {
         await updateDoc(doc(firestore, 'speakers', selectedSpeaker.id).withConverter(speakerConverter), {
-          images: selectedSpeaker.images.find((image) => image.type === newImage.type)
-            ? selectedSpeaker.images.map((image) => {
-                if (image.type === newImage.type) {
-                  return newImage;
-                }
-                return image;
-              })
-            : [...selectedSpeaker.images, newImage],
+          images:
+            Array.isArray(selectedSpeaker.images) &&
+            selectedSpeaker.images.find((image) => image.type === newImage.type)
+              ? selectedSpeaker.images.map((image) => {
+                  if (image.type === newImage.type) {
+                    return newImage;
+                  }
+                  return image;
+                })
+              : [...(selectedSpeaker.images || []), newImage],
         });
         props.setSpeakers((oldSpeakers) =>
           oldSpeakers.map((speaker) => {
