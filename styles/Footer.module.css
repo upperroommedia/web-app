@@ -1,6 +1,5 @@
 .footer {
   display: flex;
-  flex-direction: column;
   flex: 1;
   padding: 2rem 0;
   border-top: 1px solid #eaeaea;
@@ -22,13 +21,4 @@
   border-radius: 10px;
   overflow: hidden;
   margin-left: 0.5rem;
-}
-
-.link {
-  color: blue;
-  cursor: pointer;
-}
-
-.link:hover {
-  text-decoration: underline;
 }
