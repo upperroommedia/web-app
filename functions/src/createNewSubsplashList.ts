@@ -4,7 +4,7 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { ImageType } from '../../types/Image';
 import handleError from './handleError';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 
 export interface CreateNewSubsplashListInputType {
@@ -19,11 +19,11 @@ export interface CreateNewSubsplashListOutputType {
 const createNewSubsplashListCallable = onCall(
   async (request: CallableRequest<CreateNewSubsplashListInputType>): Promise<CreateNewSubsplashListOutputType> => {
     logger.log('createNewSubsplashList', request);
-    if (!canUserRolePublish(request.auth?.token.role)) {
+    if (!request.auth || !canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     try {
-      return await createNewSubsplashList(request.data);
+      return await createNewSubsplashList(request.data, request.auth.uid);
     } catch (error) {
       const httpsError = handleError(error);
       logger.error(httpsError);
@@ -32,7 +32,7 @@ const createNewSubsplashListCallable = onCall(
   }
 );
 
-export async function createNewSubsplashList(input: CreateNewSubsplashListInputType) {
+export async function createNewSubsplashList(input: CreateNewSubsplashListInputType, uid: string) {
   logger.log('CreatingNewListFrom', input);
   const url = 'https://core.subsplash.com/builder/v1/lists';
   const payload = {
@@ -55,7 +55,7 @@ export async function createNewSubsplashList(input: CreateNewSubsplashListInputT
         }
       : {},
   };
-  const config = createAxiosConfig(url, await authenticateSubsplash(), 'POST', payload);
+  const config = createAxiosConfig(url, await authenticateSubsplashV2(uid), 'POST', payload);
   const response = (await axios(config)).data;
   // the response also returns the display options for the list which determine how the list is displayed on the different platforms
   // since this will not be changable through our ui, the display options are not returned

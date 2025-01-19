@@ -36,6 +36,7 @@ async function populateImages(
   bucket: Bucket,
   imageIds: Set<string>,
   db: Firestore,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   subsplashImages: { image: any; imageName: string }[],
   firestoreImagesMap: Map<string, ImageType>
 ): Promise<void> {

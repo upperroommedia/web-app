@@ -1,8 +1,8 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { ListType, OverflowBehavior } from '../../types/List';
+import { OverflowBehavior } from '../../types/List';
 import handleError from './handleError';
-import { authenticateSubsplash } from './subsplashUtils';
+import { authenticateSubsplashV2 } from './subsplashUtils';
 import {
   MediaItem,
   getListCount,
@@ -39,8 +39,7 @@ const addToSingleList = async (
   mediaItem: MediaItem,
   overflowBehavior: OverflowBehavior,
   maxListCount: number,
-  token: string,
-  type: ListType
+  token: string
 ): Promise<string> => {
   const currentListCount = await getListCount(listId, token);
   let newListCount = currentListCount + 1;
@@ -74,7 +73,7 @@ const addToSingleList = async (
 const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
   logger.log('addToList');
 
-  if (!canUserRolePublish(request.auth?.token.role)) {
+  if (!request.auth || !canUserRolePublish(request.auth?.token.role)) {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
   const data = request.data;
@@ -83,7 +82,7 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
   }
   const maxListCount = 200;
   try {
-    const token = await authenticateSubsplash();
+    const token = await authenticateSubsplashV2(request.auth.token.uid);
     const result = await Promise.allSettled(
       data.listsMetadata.map(async (list) => {
         const listRef = firestoreDB
@@ -104,14 +103,7 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
           const alreadyInList = await isAlreadyInList(data.mediaItem, list.listId, token, maxListCount);
           let listItemId: string;
           if (!alreadyInList.isInList) {
-            listItemId = await addToSingleList(
-              list.listId,
-              data.mediaItem,
-              list.overflowBehavior,
-              maxListCount,
-              token,
-              list.type
-            );
+            listItemId = await addToSingleList(list.listId, data.mediaItem, list.overflowBehavior, maxListCount, token);
           } else {
             logger.log(`Media item: ${data.mediaItem.id} is already in list: ${list.listId}, skipping...`);
             listItemId = alreadyInList.listItemId;

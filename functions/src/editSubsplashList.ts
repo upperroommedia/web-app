@@ -3,7 +3,7 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { ImageType } from '../../types/Image';
 import handleError from './handleError';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 
 export interface EditSubsplashListInputType {
@@ -17,7 +17,7 @@ export type EditSubsplashListOutputType = void;
 const editSubpslashList = onCall(
   async (request: CallableRequest<EditSubsplashListInputType>): Promise<EditSubsplashListOutputType> => {
     logger.log('editSubsplashList', request);
-    if (!canUserRolePublish(request.auth?.token.role)) {
+    if (!request.auth || !canUserRolePublish(request.auth.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     const data = request.data;
@@ -44,7 +44,7 @@ const editSubpslashList = onCall(
     try {
       const config = createAxiosConfig(
         `https://core.subsplash.com/builder/v1/lists/${data.listId}`,
-        await authenticateSubsplash(),
+        await authenticateSubsplashV2(request.auth.uid),
         'PATCH',
         requestData
       );

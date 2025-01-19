@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
 import { CollectionReference, Firestore } from 'firebase-admin/firestore';

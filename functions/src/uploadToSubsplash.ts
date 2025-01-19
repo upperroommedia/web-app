@@ -1,6 +1,6 @@
 import { logger, https } from 'firebase-functions';
 import axios, { AxiosResponse } from 'axios';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '../../types/Speaker';
 import { ImageType } from '../../types/Image';
 import { canUserRolePublish } from '../../types/User';
@@ -43,7 +43,7 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
 
 const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA, context): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
-  if (!canUserRolePublish(context.auth?.token.role)) {
+  if (!context.auth || !canUserRolePublish(context.auth?.token.role)) {
     return { status: 'Not Authorized' };
   }
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
@@ -51,7 +51,7 @@ const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING
   }
   logger.log('data', data);
   try {
-    const bearerToken = await authenticateSubsplash();
+    const bearerToken = await authenticateSubsplashV2(context.auth.uid);
     // create media item with title
     let tags: string[] = [];
     if (Array.isArray(data.speakers)) {

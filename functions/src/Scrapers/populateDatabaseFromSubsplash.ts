@@ -2,7 +2,7 @@
 import { logger } from 'firebase-functions/v2';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { authenticateSubsplash } from '../subsplashUtils';
+import { authenticateSubsplashV2 } from '../subsplashUtils';
 import { ImageType } from '../../../types/Image';
 import {
   firestoreAdminListConverter,
@@ -38,7 +38,7 @@ const populateDatabaseFromSubsplash = onCall(
       const firestoreImagesMap = new Map<string, ImageType>();
       const listIdToImageIdMap = new Map<string, string[]>();
       const listNameToId = new Map<string, string>();
-      const bearerToken = await authenticateSubsplash();
+      const bearerToken = await authenticateSubsplashV2(request.auth.uid);
       const bucket = storage.bucket('urm-app-images');
       const db = firestore;
       const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);

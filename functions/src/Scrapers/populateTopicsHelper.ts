@@ -40,6 +40,7 @@ async function populateTopics(
     // get first sermon for each speaker
     // push promises to array to make the rest of the calls asyncronously
     const batch = db.batch();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     topics.forEach((topic: any) => {
       const listId = listNameToId.get(topic.title);
       const imageIds = listId ? listIdToImageIdMap.get(listId) : [];
