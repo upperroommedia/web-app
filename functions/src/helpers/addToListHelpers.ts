@@ -193,13 +193,7 @@ export async function getListCount(listId: string, token: string): Promise<numbe
   return currentListCount;
 }
 
-export async function handleOverflow(
-  listId: string,
-  mediaItem: MediaItem,
-  maxListCount: number,
-  token: string,
-  type: ListType
-) {
+export async function handleOverflow(listId: string, mediaItem: MediaItem, maxListCount: number, token: string) {
   logger.log(
     `handleOverflow(listId: ${listId}, itemsToAdd: ${JSON.stringify(mediaItem)}, maxListCount: ${maxListCount})`
   );

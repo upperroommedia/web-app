@@ -14,7 +14,7 @@ import {
   firestoreAdminSermonConverter,
 } from './firestoreDataConverter';
 import handleError from './handleError';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 const firestore = firebaseAdmin.firestore();
 const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list'] as const;
@@ -344,7 +344,8 @@ async function handleOverflow(
   itemsToAdd: MediaItem[],
   maxListCount: number,
   token: string,
-  type: ListType
+  type: ListType,
+  uid: string
 ) {
   // if items to add + current list items <= maxListCount add items to list
   logger.log(
@@ -391,7 +392,7 @@ async function handleOverflow(
   }
 
   // recursively call handleOverflow to add items to moreList before removing them from the current list
-  await handleOverflow(moreListId, overflowItems, maxListCount, token, type);
+  await handleOverflow(moreListId, overflowItems, maxListCount, token, type, uid);
   // remove items from current list
   await removeListRows(listId, itemsToRemove, token);
   // add items to list after room is available
@@ -409,7 +410,8 @@ const addToSingleList = async (
   overflowBehavior: OverflowBehavior,
   maxListCount: number,
   token: string,
-  type: ListType
+  type: ListType,
+  uid: string
 ) => {
   const currentListCount = await getListCount(listId, token);
   let newListCount = currentListCount + mediaItemIds.length;
@@ -421,7 +423,7 @@ const addToSingleList = async (
 
   // handle list overflow
   if (overflowBehavior === 'CREATENEWLIST') {
-    await handleOverflow(listId, mediaItemIds, maxListCount, token, type);
+    await handleOverflow(listId, mediaItemIds, maxListCount, token, type, uid);
   } else if (overflowBehavior === 'REMOVEOLDEST') {
     const numberToRemove = newListCount - maxListCount;
     logger.log('Removing', numberToRemove, 'items from list', listId);
@@ -436,16 +438,17 @@ const addToSingleList = async (
 
 const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): Promise<void> => {
   logger.log('addToList', request);
-  if (!canUserRolePublish(request.auth?.token.role)) {
+  if (!request.auth || !canUserRolePublish(request.auth?.token.role)) {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
+  const uid = request.auth.uid;
   const data = request.data;
   const maxListCount = 200;
   const tooManyItemsError = new HttpsError(
     'invalid-argument',
     `Too many items to add. The list size has a max of ${maxListCount}`
   );
-  const token = await authenticateSubsplash();
+  const token = await authenticateSubsplashV2();
   try {
     await Promise.all(
       data.listMetadata.map(async (list) => {
@@ -453,7 +456,15 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
           throw tooManyItemsError;
         }
         logger.log('list', list.listId);
-        await addToSingleList(list.listId, data.mediaItemIds, list.overflowBehavior, maxListCount, token, list.type);
+        await addToSingleList(
+          list.listId,
+          data.mediaItemIds,
+          list.overflowBehavior,
+          maxListCount,
+          token,
+          list.type,
+          uid
+        );
       })
     );
   } catch (err) {

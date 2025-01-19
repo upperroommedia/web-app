@@ -3,7 +3,7 @@ import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import handleError from '../handleError';
-import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from '../subsplashUtils';
 
 const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list'] as const;
 type MediaType = (typeof mediaTypes)[number];
@@ -158,7 +158,7 @@ const repopulateListFromSpeakerItems = onCall(
     }
     const data = request.data;
     const maxListCount = 200;
-    const token = await authenticateSubsplash();
+    const token = await authenticateSubsplashV2();
     try {
       const mediaItemIds: MediaItem[] = await getSpeakerItems(data.speakerId, token);
       await addToSingleList(data.listId, mediaItemIds, maxListCount, token);

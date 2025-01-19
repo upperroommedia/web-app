@@ -1,7 +1,7 @@
 import axios, { AxiosRequestConfig } from 'axios';
 import { logger } from 'firebase-functions';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import {
   ImageSizeType,
@@ -33,7 +33,8 @@ import { firestoreAdminImagesConverter } from './firestoreDataConverter';
 const uploadImageToSubsplash = async (name: string, originalFile: string): Promise<string> => {
   //add resized image references to firestore image data
   logger.log('Getting subsplash info for new image upload');
-  const bearerToken = await authenticateSubsplash();
+
+  const bearerToken = await authenticateSubsplashV2();
   const requestData = {
     app_key: '9XTSHD',
     content_type: 'image/jpeg',
