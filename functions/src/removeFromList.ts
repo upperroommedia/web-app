@@ -23,11 +23,7 @@ type OutputTypes =
     };
 export type RemoveFromListOutputType = OutputTypes[];
 export const removeFromList = async (listIds: string[], listItemIds: string[]) => {
-  if (!process.env.YOUSSEF_UID) {
-    throw new Error('Could not find YOUSSEF_UID in .env');
-  }
-  const uid = process.env.YOUSSEF_UID;
-  const token = await authenticateSubsplashV2(uid);
+  const token = await authenticateSubsplashV2();
   const result = await Promise.allSettled(
     listItemIds.map(async (id) => {
       logger.log(`Deleting item with id: ${id}`);

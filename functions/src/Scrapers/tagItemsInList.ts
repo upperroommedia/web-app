@@ -44,7 +44,7 @@ const tagItemsInList = https.onCall(
         throw new Error('No auth in context');
       }
 
-      const token = await authenticateSubsplashV2(context.auth.uid);
+      const token = await authenticateSubsplashV2();
       const url = `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${data.listId}&page[size]=200`;
       const config = createAxiosConfig(url, token, 'GET');
       const response = await axios(config);

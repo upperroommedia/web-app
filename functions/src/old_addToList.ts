@@ -253,7 +253,7 @@ const removeNOldestItems = async (
   await removeListRows(listId, listRows, token);
 };
 
-async function createMoreList(listId: string, type: ListType, uid: string): Promise<string> {
+async function createMoreList(listId: string, type: ListType): Promise<string> {
   //Creating a new list
   logger.log(`createMoreList{listId: ${listId}}`);
   const seriesArray = await firestore
@@ -269,13 +269,10 @@ async function createMoreList(listId: string, type: ListType, uid: string): Prom
   }
   const series = seriesArray.docs[0].data();
   const title = series.isMoreSermonsList ? series.name : `More ${series.name} Sermons`;
-  const { listId: moreListId } = await createNewSubsplashList(
-    {
-      title: title,
-      images: series.images,
-    },
-    uid
-  );
+  const { listId: moreListId } = await createNewSubsplashList({
+    title: title,
+    images: series.images,
+  });
   // create new series in firestore
   const moreSermonsList: List = {
     id: moreListId,
@@ -375,7 +372,7 @@ async function handleOverflow(
     itemsToRemove = itemsToRemove.filter((item) => item.id !== moreListId);
   } else {
     // create more list and add it to items to add
-    moreListId = await createMoreList(listId, type, uid);
+    moreListId = await createMoreList(listId, type);
     newMoreListCreated = true;
   }
   logger.log('Items to remove', itemsToRemove);
@@ -451,7 +448,7 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
     'invalid-argument',
     `Too many items to add. The list size has a max of ${maxListCount}`
   );
-  const token = await authenticateSubsplashV2(uid);
+  const token = await authenticateSubsplashV2();
   try {
     await Promise.all(
       data.listMetadata.map(async (list) => {

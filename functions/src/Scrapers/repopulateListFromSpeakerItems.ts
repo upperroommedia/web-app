@@ -158,7 +158,7 @@ const repopulateListFromSpeakerItems = onCall(
     }
     const data = request.data;
     const maxListCount = 200;
-    const token = await authenticateSubsplashV2(request.auth.uid);
+    const token = await authenticateSubsplashV2();
     try {
       const mediaItemIds: MediaItem[] = await getSpeakerItems(data.speakerId, token);
       await addToSingleList(data.listId, mediaItemIds, maxListCount, token);

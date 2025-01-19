@@ -82,7 +82,7 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
   }
   const maxListCount = 200;
   try {
-    const token = await authenticateSubsplashV2(request.auth.token.uid);
+    const token = await authenticateSubsplashV2();
     const result = await Promise.allSettled(
       data.listsMetadata.map(async (list) => {
         const listRef = firestoreDB

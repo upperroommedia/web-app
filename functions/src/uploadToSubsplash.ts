@@ -51,7 +51,7 @@ const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING
   }
   logger.log('data', data);
   try {
-    const bearerToken = await authenticateSubsplashV2(context.auth.uid);
+    const bearerToken = await authenticateSubsplashV2();
     // create media item with title
     let tags: string[] = [];
     if (Array.isArray(data.speakers)) {

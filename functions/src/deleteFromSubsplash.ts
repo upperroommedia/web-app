@@ -13,7 +13,7 @@ const deleteFromSubsplash = https.onCall(async (data: string, context): Promise<
   const url = `https://core.subsplash.com/media/v1/media-items/${data}`;
   logger.log(`Calling delete on "${url}"`);
   try {
-    const bearerToken = await authenticateSubsplashV2(context.auth.uid);
+    const bearerToken = await authenticateSubsplashV2();
     const config = createAxiosConfig(url, bearerToken, 'DELETE');
     logger.debug('config', config);
     await axios(config);

@@ -44,7 +44,7 @@ const editSubpslashList = onCall(
     try {
       const config = createAxiosConfig(
         `https://core.subsplash.com/builder/v1/lists/${data.listId}`,
-        await authenticateSubsplashV2(request.auth.uid),
+        await authenticateSubsplashV2(),
         'PATCH',
         requestData
       );

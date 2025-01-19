@@ -23,7 +23,7 @@ const createNewSubsplashListCallable = onCall(
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     try {
-      return await createNewSubsplashList(request.data, request.auth.uid);
+      return await createNewSubsplashList(request.data);
     } catch (error) {
       const httpsError = handleError(error);
       logger.error(httpsError);
@@ -32,7 +32,7 @@ const createNewSubsplashListCallable = onCall(
   }
 );
 
-export async function createNewSubsplashList(input: CreateNewSubsplashListInputType, uid: string) {
+export async function createNewSubsplashList(input: CreateNewSubsplashListInputType) {
   logger.log('CreatingNewListFrom', input);
   const url = 'https://core.subsplash.com/builder/v1/lists';
   const payload = {
@@ -55,7 +55,7 @@ export async function createNewSubsplashList(input: CreateNewSubsplashListInputT
         }
       : {},
   };
-  const config = createAxiosConfig(url, await authenticateSubsplashV2(uid), 'POST', payload);
+  const config = createAxiosConfig(url, await authenticateSubsplashV2(), 'POST', payload);
   const response = (await axios(config)).data;
   // the response also returns the display options for the list which determine how the list is displayed on the different platforms
   // since this will not be changable through our ui, the display options are not returned

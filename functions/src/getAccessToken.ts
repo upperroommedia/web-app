@@ -12,7 +12,7 @@ const getAccessToken = https.onCall(async (request: CallableRequest): Promise<Ge
   }
   try {
     console.log(request.auth.token);
-    const accessToken = await authenticateSubsplashV2(request.auth.token.uid);
+    const accessToken = await authenticateSubsplashV2();
     return { status: 'success', data: accessToken };
   } catch (error) {
     return { status: 'error', error: `${error}` };

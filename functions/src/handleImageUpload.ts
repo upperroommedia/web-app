@@ -33,11 +33,8 @@ import { firestoreAdminImagesConverter } from './firestoreDataConverter';
 const uploadImageToSubsplash = async (name: string, originalFile: string): Promise<string> => {
   //add resized image references to firestore image data
   logger.log('Getting subsplash info for new image upload');
-  if (!process.env.YOUSSEF_UID) {
-    throw new Error('Could not find YOUSSEF_UID in .env');
-  }
-  const uid = process.env.YOUSSEF_UID;
-  const bearerToken = await authenticateSubsplashV2(uid);
+
+  const bearerToken = await authenticateSubsplashV2();
   const requestData = {
     app_key: '9XTSHD',
     content_type: 'image/jpeg',

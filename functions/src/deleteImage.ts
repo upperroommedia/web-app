@@ -10,7 +10,7 @@ const setUserRole = https.onCall(async (imageId: string, context) => {
     return { status: 'Invalid image id' };
   }
   try {
-    const bearerToken = await authenticateSubsplashV2(context.auth.uid);
+    const bearerToken = await authenticateSubsplashV2();
     const config = createAxiosConfig(`https://core.subsplash.com/files/v1/images/${imageId}`, bearerToken, 'DELETE');
     return (await axios(config)).data;
   } catch (e) {

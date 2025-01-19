@@ -5,6 +5,9 @@ import FormData from 'form-data';
 import * as crypto from 'crypto';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { SignInWithPuppeteerOutputType } from './signInWithPuppeteer';
+import { GoogleAuth } from 'google-auth-library';
+
+const auth = new GoogleAuth();
 const db = firebaseAdmin.database();
 
 type HTTPMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
@@ -235,18 +238,21 @@ const refreshToken = async (
   }
 };
 
-export const signInWithPuppeteer = async (uid: string): Promise<AccessToken> => {
+export const signInWithPuppeteer = async (): Promise<AccessToken> => {
   const name = 'signinwithpuppeteer';
   const url =
     process.env.FUNCTIONS_EMULATOR == 'true'
       ? `http://127.0.0.1:5001/urm-app/us-central1/${name}`
       : `https://${name}-yshbijirxq-uc.a.run.app`;
   try {
+    console.info(`request ${url} with target audience ${url}`);
+    const client = await auth.getIdTokenClient(url);
+    const token = await client.idTokenProvider.fetchIdToken(url);
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${await firebaseAdmin.auth().createCustomToken(uid, { role: 'admin' })}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         data: '',
@@ -269,7 +275,7 @@ export const signInWithPuppeteer = async (uid: string): Promise<AccessToken> => 
   }
 };
 
-export const authenticateSubsplashV2 = async (uid: string): Promise<AccessToken> => {
+export const authenticateSubsplashV2 = async (): Promise<AccessToken> => {
   if (!process.env.EMAIL || !process.env.PASSWORD || !process.env.ENCRYPTION_KEY) {
     throw new Error('Missing email or password or encryption_key  in .env file');
   }
@@ -282,7 +288,7 @@ export const authenticateSubsplashV2 = async (uid: string): Promise<AccessToken>
     // get storedToken
     const currentStoredToken = await retrieveDecryptedTokens(email, encryption_key);
     if (!currentStoredToken) {
-      return await signInWithPuppeteer(uid);
+      return await signInWithPuppeteer();
     }
     // check if refresh needed
     const currentTimeSeconds = Date.now() / 1000;
@@ -294,7 +300,7 @@ export const authenticateSubsplashV2 = async (uid: string): Promise<AccessToken>
     if (accessToken) {
       return accessToken;
     }
-    return await signInWithPuppeteer(uid);
+    return await signInWithPuppeteer();
   } catch (error) {
     console.error('Error in authenticateSubsplashV2:', error);
     throw error; // Re-throw the error for further handling

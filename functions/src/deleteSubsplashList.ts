@@ -19,7 +19,7 @@ const deleteSubsplashList = onCall(
     }
     const url = `https://core.subsplash.com/builder/v1/lists/${request.data.listId}`;
     try {
-      const config = createAxiosConfig(url, await authenticateSubsplashV2(request.auth.uid), 'DELETE');
+      const config = createAxiosConfig(url, await authenticateSubsplashV2(), 'DELETE');
       await axios(config);
     } catch (error) {
       const httpsError = handleError(error);
