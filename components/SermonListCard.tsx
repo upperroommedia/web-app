@@ -61,7 +61,7 @@ const SermonListCard: FunctionComponent<Props> = ({
       'uploader',
     [uploader]
   );
-  const uploaderWidthHeight = useMemo(() => (mdMatches ? 40 : smMatches ? 30 : 20), [mdMatches, smMatches]);
+  const uploaderAvatarSize = useMemo(() => (mdMatches ? 40 : smMatches ? 30 : 20), [mdMatches, smMatches]);
 
   useEffect(() => {
     const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
@@ -120,7 +120,7 @@ const SermonListCard: FunctionComponent<Props> = ({
             </Typography>
             {uploaderLoading ? (
               <Box m={0} p={0}>
-                <CircularProgress size={uploaderWidthHeight} />
+                <CircularProgress size={uploaderAvatarSize} />
               </Box>
             ) : (
               <Tooltip placement="top" title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}>
@@ -128,8 +128,8 @@ const SermonListCard: FunctionComponent<Props> = ({
                   <UserAvatar
                     user={uploader}
                     sx={{
-                      width: uploaderWidthHeight,
-                      height: uploaderWidthHeight,
+                      width: uploaderAvatarSize,
+                      height: uploaderAvatarSize,
                       altName: uploaderName,
                     }}
                   />
