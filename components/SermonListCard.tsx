@@ -1,7 +1,8 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import React, { FunctionComponent, memo } from 'react';
+import React, { FunctionComponent, memo, useEffect, useMemo, useState } from 'react';
+import { GetUserInputType, GetUserOutputType } from '../functions/src/getUser';
 import ListItem from '@mui/material/ListItem';
 import Divider from '@mui/material/Divider';
 import Card from '@mui/material/Card';
@@ -23,6 +24,10 @@ import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
 import PlayButton from './PlayButton';
 import Tooltip from '@mui/material/Tooltip';
+import { User } from '../types/User';
+import { createFunctionV2 } from '../utils/createFunction';
+import UserAvatar from './UserAvatar';
+import CircularProgress from '@mui/material/CircularProgress';
 
 interface Props {
   sermon: Sermon;
@@ -47,6 +52,31 @@ const SermonListCard: FunctionComponent<Props> = ({
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
+  const [uploader, setUploader] = useState<User>();
+  const [uploaderLoading, setUploaderLoading] = useState(false);
+  const uploaderName = useMemo(
+    () =>
+      (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
+      uploader?.email ??
+      'uploader',
+    [uploader]
+  );
+  const uploaderAvatarSize = useMemo(() => (mdMatches ? 40 : smMatches ? 30 : 20), [mdMatches, smMatches]);
+
+  useEffect(() => {
+    const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
+    const fetchUser = async () => {
+      setUploaderLoading(true);
+      if (sermon.uploaderId) {
+        const result = await getUser({ uid: sermon.uploaderId });
+        if (result.status === 'success') {
+          setUploader(result.data);
+        }
+      }
+      setUploaderLoading(false);
+    };
+    fetchUser();
+  }, [sermon.uploaderId]);
 
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
@@ -84,10 +114,28 @@ const SermonListCard: FunctionComponent<Props> = ({
             borderRadius={5}
             image={sermon.images?.find((image) => image.type === 'square')}
           />
-          <Box display="flex" alignItems="center" sx={{ gridArea: 'title' }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ gridArea: 'title' }}>
             <Typography variant="h5">
               <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
             </Typography>
+            {uploaderLoading ? (
+              <Box m={0} p={0}>
+                <CircularProgress size={uploaderAvatarSize} />
+              </Box>
+            ) : (
+              <Tooltip placement="top" title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}>
+                <div>
+                  <UserAvatar
+                    user={uploader}
+                    sx={{
+                      width: uploaderAvatarSize,
+                      height: uploaderAvatarSize,
+                      altName: uploaderName,
+                    }}
+                  />
+                </div>
+              </Tooltip>
+            )}
           </Box>
           <Typography
             sx={{
