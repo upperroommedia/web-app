@@ -69,12 +69,10 @@ const SermonListCard: FunctionComponent<Props> = ({
         if (result.status === 'success') {
           setUploader(result.data);
         }
-      } else {
-        console.error("Couldn't find uploader for sermon:", sermon);
       }
     };
     fetchUser();
-  }, []);
+  }, [sermon.uploaderId]);
 
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
