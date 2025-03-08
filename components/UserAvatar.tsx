@@ -4,7 +4,7 @@ import Image from 'next/image';
 import { User } from '../types/User';
 
 interface IUserAvatar extends AvatarProps {
-  user: User | undefined;
+  user?: User;
 }
 function stringToColor(string: string) {
   let hash = 0;
@@ -32,7 +32,6 @@ export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar
     .join('');
   const size = (sx as any)?.width || (sx as any)?.height || 40;
   const fontSize = Math.min(16, size * 0.4); // Scale font dynamically
-  console.log('Math.max(12, 40 / initials.length)', fontSize, size);
 
   if (displayName) {
     return (

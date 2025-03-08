@@ -59,6 +59,7 @@ const SermonListCard: FunctionComponent<Props> = ({
       'uploader',
     [uploader]
   );
+  const uploaderWidthHeight = useMemo(() => (mdMatches ? 40 : smMatches ? 30 : 20), [mdMatches, smMatches]);
 
   useEffect(() => {
     const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
@@ -115,23 +116,18 @@ const SermonListCard: FunctionComponent<Props> = ({
             <Typography variant="h5">
               <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
             </Typography>
-            {uploader ? (
-              <Tooltip placement="top" title={uploaderName}>
-                <div>
-                  <UserAvatar
-                    user={uploader}
-                    sx={{
-                      width: mdMatches ? 40 : smMatches ? 30 : 20,
-                      height: mdMatches ? 40 : smMatches ? 30 : 20,
-                      borderRadius: mdMatches ? 40 / 2 : smMatches ? 30 / 2 : 20 / 2,
-                      altName: uploaderName,
-                    }}
-                  />
-                </div>
-              </Tooltip>
-            ) : (
-              <span>n/a</span>
-            )}
+            <Tooltip placement="top" title={uploader ? uploaderName : 'No Uploader Found'}>
+              <div>
+                <UserAvatar
+                  user={uploader}
+                  sx={{
+                    width: uploaderWidthHeight,
+                    height: uploaderWidthHeight,
+                    altName: uploaderName,
+                  }}
+                />
+              </div>
+            </Tooltip>
           </Box>
           <Typography
             sx={{
