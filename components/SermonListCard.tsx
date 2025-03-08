@@ -27,6 +27,7 @@ import Tooltip from '@mui/material/Tooltip';
 import { User } from '../types/User';
 import { createFunctionV2 } from '../utils/createFunction';
 import UserAvatar from './UserAvatar';
+import CircularProgress from '@mui/material/CircularProgress';
 
 interface Props {
   sermon: Sermon;
@@ -52,6 +53,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
   const [uploader, setUploader] = useState<User>();
+  const [uploaderLoading, setUploaderLoading] = useState(false);
   const uploaderName = useMemo(
     () =>
       (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
@@ -64,12 +66,14 @@ const SermonListCard: FunctionComponent<Props> = ({
   useEffect(() => {
     const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
     const fetchUser = async () => {
+      setUploaderLoading(true);
       if (sermon.uploaderId) {
         const result = await getUser({ uid: sermon.uploaderId });
         if (result.status === 'success') {
           setUploader(result.data);
         }
       }
+      setUploaderLoading(false);
     };
     fetchUser();
   }, [sermon.uploaderId]);
@@ -114,18 +118,24 @@ const SermonListCard: FunctionComponent<Props> = ({
             <Typography variant="h5">
               <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
             </Typography>
-            <Tooltip placement="top" title={uploader ? uploaderName : 'No Uploader Found'}>
-              <div>
-                <UserAvatar
-                  user={uploader}
-                  sx={{
-                    width: uploaderWidthHeight,
-                    height: uploaderWidthHeight,
-                    altName: uploaderName,
-                  }}
-                />
-              </div>
-            </Tooltip>
+            {uploaderLoading ? (
+              <Box m={0} p={0}>
+                <CircularProgress size={uploaderWidthHeight} />
+              </Box>
+            ) : (
+              <Tooltip placement="top" title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}>
+                <div>
+                  <UserAvatar
+                    user={uploader}
+                    sx={{
+                      width: uploaderWidthHeight,
+                      height: uploaderWidthHeight,
+                      altName: uploaderName,
+                    }}
+                  />
+                </div>
+              </Tooltip>
+            )}
           </Box>
           <Typography
             sx={{
