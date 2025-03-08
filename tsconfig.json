@@ -1,11 +1,7 @@
 {
   "compilerOptions": {
     "target": "es5",
-    "lib": [
-      "esnext",
-      "dom",
-      "dom.iterable"
-    ],
+    "lib": ["esnext", "dom", "dom.iterable"],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -22,17 +18,9 @@
       {
         "name": "next"
       }
-    ]
+    ],
+    "types": ["node"]
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    "components/Footer.js",
-    ".next/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "functions"
-  ]
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "components/Footer.js", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "functions"]
 }
