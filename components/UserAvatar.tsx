@@ -1,3 +1,4 @@
+import Typography from '@mui/material/Typography';
 import Avatar, { AvatarProps } from '@mui/material/Avatar';
 import Image from 'next/image';
 import { User } from '../types/User';
@@ -24,18 +25,29 @@ function stringToColor(string: string) {
 }
 
 export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar) {
-  const displayName = user?.displayName || user?.email;
+  const displayName = user?.displayName || user?.email || '';
+  const initials = displayName
+    .split(' ')
+    .map((n) => n[0])
+    .join('');
+  const size = (sx as any)?.width || (sx as any)?.height || 40;
+  const fontSize = Math.min(16, size * 0.4); // Scale font dynamically
+  console.log('Math.max(12, 40 / initials.length)', fontSize, size);
 
   if (displayName) {
     return (
-      <Avatar sx={{ ...sx, bgcolor: stringToColor(displayName) }} {...props}>
+      <Avatar sx={{ ...sx, bgcolor: stringToColor(displayName), fontSize }} {...props}>
         {user?.photoURL ? (
           <Image src={user.photoURL} alt={`Image for ${displayName}`} fill></Image>
         ) : (
-          displayName
-            .split(' ')
-            .map((n) => n[0])
-            .join('')
+          <Typography
+            sx={{
+              fontSize: 'inherit', // Ensures it inherits the Avatar’s font size
+              lineHeight: 1, // Prevents text from overflowing
+            }}
+          >
+            {initials}
+          </Typography>
         )}
         {children}
       </Avatar>

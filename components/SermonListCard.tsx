@@ -1,7 +1,8 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import React, { FunctionComponent, memo } from 'react';
+import React, { FunctionComponent, memo, useEffect, useMemo, useState } from 'react';
+import { GetUserInputType, GetUserOutputType } from '../functions/src/getUser';
 import ListItem from '@mui/material/ListItem';
 import Divider from '@mui/material/Divider';
 import Card from '@mui/material/Card';
@@ -23,6 +24,9 @@ import database, { ref } from '../firebase/database';
 import CircularProgressWithLabel from './CircularProgressWithLabel';
 import PlayButton from './PlayButton';
 import Tooltip from '@mui/material/Tooltip';
+import { User } from '../types/User';
+import { createFunctionV2 } from '../utils/createFunction';
+import UserAvatar from './UserAvatar';
 
 interface Props {
   sermon: Sermon;
@@ -47,6 +51,29 @@ const SermonListCard: FunctionComponent<Props> = ({
   const mdMatches = useMediaQuery(theme.breakpoints.up('md'));
   const smMatches = useMediaQuery(theme.breakpoints.up('sm'));
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
+  const [uploader, setUploader] = useState<User>();
+  const uploaderName = useMemo(
+    () =>
+      (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
+      uploader?.email ??
+      'uploader',
+    [uploader]
+  );
+
+  useEffect(() => {
+    const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
+    const fetchUser = async () => {
+      if (sermon.uploaderId) {
+        const result = await getUser({ uid: sermon.uploaderId });
+        if (result.status === 'success') {
+          setUploader(result.data);
+        }
+      } else {
+        console.error("Couldn't find uploader for sermon:", sermon);
+      }
+    };
+    fetchUser();
+  }, []);
 
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
@@ -84,10 +111,27 @@ const SermonListCard: FunctionComponent<Props> = ({
             borderRadius={5}
             image={sermon.images?.find((image) => image.type === 'square')}
           />
-          <Box display="flex" alignItems="center" sx={{ gridArea: 'title' }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ gridArea: 'title' }}>
             <Typography variant="h5">
               <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
             </Typography>
+            {uploader ? (
+              <Tooltip placement="top" title={uploaderName}>
+                <div>
+                  <UserAvatar
+                    user={uploader}
+                    sx={{
+                      width: mdMatches ? 40 : smMatches ? 30 : 20,
+                      height: mdMatches ? 40 : smMatches ? 30 : 20,
+                      borderRadius: mdMatches ? 40 / 2 : smMatches ? 30 / 2 : 20 / 2,
+                      altName: uploaderName,
+                    }}
+                  />
+                </div>
+              </Tooltip>
+            ) : (
+              <span>n/a</span>
+            )}
           </Box>
           <Typography
             sx={{
