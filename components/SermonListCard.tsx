@@ -54,6 +54,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
   const [uploader, setUploader] = useState<User>();
   const [uploaderLoading, setUploaderLoading] = useState(false);
+  const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
   const uploaderName = useMemo(
     () =>
       (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
@@ -123,8 +124,14 @@ const SermonListCard: FunctionComponent<Props> = ({
                 <CircularProgress size={uploaderAvatarSize} />
               </Box>
             ) : (
-              <Tooltip placement="top" title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}>
-                <div>
+              <Tooltip
+                open={showUploaderTooltip}
+                onOpen={() => setShowUploaderTooltip(true)}
+                onClose={() => setShowUploaderTooltip(false)}
+                placement="top"
+                title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}
+              >
+                <div onClick={() => setShowUploaderTooltip((prev) => !prev)}>
                   <UserAvatar
                     user={uploader}
                     sx={{
