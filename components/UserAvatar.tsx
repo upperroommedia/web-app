@@ -38,6 +38,7 @@ export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar
     return (
       <Skeleton
         variant="circular"
+        animation="wave"
         sx={{
           ...sx,
         }}
