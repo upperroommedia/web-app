@@ -2,9 +2,11 @@ import Typography from '@mui/material/Typography';
 import Avatar, { AvatarProps } from '@mui/material/Avatar';
 import Image from 'next/image';
 import { User } from '../types/User';
+import Skeleton from '@mui/material/Skeleton';
 
 interface IUserAvatar extends AvatarProps {
   user?: User;
+  loading?: boolean;
 }
 function stringToColor(string: string) {
   let hash = 0;
@@ -32,7 +34,16 @@ export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar
     .join('');
   const size = (sx as any)?.width || (sx as any)?.height || 40;
   const fontSize = Math.min(16, size * 0.4); // Scale font dynamically
-
+  if (props.loading) {
+    return (
+      <Skeleton
+        variant="circular"
+        sx={{
+          ...sx,
+        }}
+      />
+    );
+  }
   if (displayName) {
     return (
       <Avatar sx={{ ...sx, bgcolor: stringToColor(displayName), fontSize }} {...props}>
