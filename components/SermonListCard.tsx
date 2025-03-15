@@ -27,7 +27,6 @@ import Tooltip from '@mui/material/Tooltip';
 import { User } from '../types/User';
 import { createFunctionV2 } from '../utils/createFunction';
 import UserAvatar from './UserAvatar';
-import CircularProgress from '@mui/material/CircularProgress';
 
 interface Props {
   sermon: Sermon;
@@ -119,30 +118,26 @@ const SermonListCard: FunctionComponent<Props> = ({
             <Typography variant="h5">
               <Box sx={{ fontWeight: 'bold' }}>{`${sermon.title}: ${sermon.subtitle}`}</Box>
             </Typography>
-            {uploaderLoading ? (
-              <Box m={0} p={0}>
-                <CircularProgress size={uploaderAvatarSize} />
-              </Box>
-            ) : (
-              <Tooltip
-                open={showUploaderTooltip}
-                onOpen={() => setShowUploaderTooltip(true)}
-                onClose={() => setShowUploaderTooltip(false)}
-                placement="top"
-                title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}
-              >
-                <div onClick={() => setShowUploaderTooltip((prev) => !prev)}>
-                  <UserAvatar
-                    user={uploader}
-                    sx={{
-                      width: uploaderAvatarSize,
-                      height: uploaderAvatarSize,
-                      altName: uploaderName,
-                    }}
-                  />
-                </div>
-              </Tooltip>
-            )}
+
+            <Tooltip
+              open={showUploaderTooltip}
+              onOpen={() => setShowUploaderTooltip(true)}
+              onClose={() => setShowUploaderTooltip(false)}
+              placement="top"
+              title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}
+            >
+              <div onClick={() => setShowUploaderTooltip((prev) => !prev)}>
+                <UserAvatar
+                  user={uploader}
+                  sx={{
+                    width: uploaderAvatarSize,
+                    height: uploaderAvatarSize,
+                    altName: uploaderName,
+                  }}
+                  loading={uploaderLoading}
+                />
+              </div>
+            </Tooltip>
           </Box>
           <Typography
             sx={{
