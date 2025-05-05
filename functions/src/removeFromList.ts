@@ -2,7 +2,7 @@ import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import handleError from './handleError';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 
 export interface RemoveFromListInputType {
@@ -23,7 +23,7 @@ type OutputTypes =
     };
 export type RemoveFromListOutputType = OutputTypes[];
 export const removeFromList = async (listIds: string[], listItemIds: string[]) => {
-  const token = await authenticateSubsplash();
+  const token = await authenticateSubsplashV2();
   const result = await Promise.allSettled(
     listItemIds.map(async (id) => {
       logger.log(`Deleting item with id: ${id}`);

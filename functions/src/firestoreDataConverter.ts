@@ -75,9 +75,11 @@ export const firestoreAdminListItemConverter: FirestoreDataConverter<ListItem<Li
     // handle converting the media item to the correct firestore type
     switch (listItem.type) {
       case 'sermon':
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         listItem.mediaItem = firestoreAdminSermonConverter.toFirestore(listItem.mediaItem as Sermon) as any;
         break;
       case 'list':
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         listItem.mediaItem = firestoreAdminListConverter.toFirestore(listItem.mediaItem as List) as any;
         break;
       default:

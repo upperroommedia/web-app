@@ -1,10 +1,10 @@
 import axios, { isAxiosError } from 'axios';
 import { logger, https } from 'firebase-functions';
 import { HttpsError, FunctionsErrorCode } from 'firebase-functions/v2/https';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 const deleteFromSubsplash = https.onCall(async (data: string, context): Promise<HttpsError | string | number> => {
-  if (!canUserRolePublish(context.auth?.token.role)) {
+  if (!context.auth || !canUserRolePublish(context.auth?.token.role)) {
     return 'Not Authorized';
   }
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
@@ -13,7 +13,7 @@ const deleteFromSubsplash = https.onCall(async (data: string, context): Promise<
   const url = `https://core.subsplash.com/media/v1/media-items/${data}`;
   logger.log(`Calling delete on "${url}"`);
   try {
-    const bearerToken = await authenticateSubsplash();
+    const bearerToken = await authenticateSubsplashV2();
     const config = createAxiosConfig(url, bearerToken, 'DELETE');
     logger.debug('config', config);
     await axios(config);

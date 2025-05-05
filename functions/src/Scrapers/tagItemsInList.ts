@@ -4,7 +4,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { ListTag, ListType, OverflowBehavior } from '../../../types/List';
 import { firestoreAdminListConverter } from '../firestoreDataConverter';
 import { ListData, SubsplashListRow } from '../helpers/addToListHelpers';
-import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from '../subsplashUtils';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 
 type TAG_ITEMS_IN_LIST_INCOMING_DATA =
@@ -40,7 +40,11 @@ const tagItemsInList = https.onCall(
         throw new HttpsError('invalid-argument', `year property is required for ${ListTag.SUNDAY_HOMILY_MONTH}`);
       }
 
-      const token = await authenticateSubsplash();
+      if (!context.auth) {
+        throw new Error('No auth in context');
+      }
+
+      const token = await authenticateSubsplashV2();
       const url = `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${data.listId}&page[size]=200`;
       const config = createAxiosConfig(url, token, 'GET');
       const response = await axios(config);

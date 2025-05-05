@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { https } from 'firebase-functions';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplashV2, createAxiosConfig } from './subsplashUtils';
 
 const setUserRole = https.onCall(async (imageId: string, context) => {
   if (context.auth?.token.role !== 'admin') {
@@ -10,7 +10,7 @@ const setUserRole = https.onCall(async (imageId: string, context) => {
     return { status: 'Invalid image id' };
   }
   try {
-    const bearerToken = await authenticateSubsplash();
+    const bearerToken = await authenticateSubsplashV2();
     const config = createAxiosConfig(`https://core.subsplash.com/files/v1/images/${imageId}`, bearerToken, 'DELETE');
     return (await axios(config)).data;
   } catch (e) {
