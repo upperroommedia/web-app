@@ -55,7 +55,7 @@
     "react-infinite-scroll-component": "^6.1.0",
     "react-instantsearch": "^7.5.1",
     "react-social-login-buttons": "^3.9.1",
-    "sharp": "^0.34.2",
+    "sharp": "^0.32.6",
     "tmp": "^0.2.1",
     "uuid": "^9.0.1"
   },
