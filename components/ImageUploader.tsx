@@ -1,7 +1,7 @@
 import Button from '@mui/material/Button';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import getCroppedImg, { CroppedImageData } from '../utils/cropImage';
 
 import Cropper, { Area } from 'react-easy-crop';
@@ -33,7 +33,7 @@ const ImageUploader = (props: Props) => {
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area>();
-
+  const inputRef = useRef<HTMLInputElement>(null);
   const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
@@ -49,8 +49,19 @@ const ImageUploader = (props: Props) => {
     }
   }
 
+  const handleClick = () => {
+    inputRef.current?.click();
+  };
+
   if (!imgSrc) {
-    return <input type="file" accept="image/*" onChange={onSelectFile} />;
+    return (
+      <>
+        <input type="file" accept="image/*" onChange={onSelectFile} ref={inputRef} style={{ display: 'none' }} />
+        <Button variant="contained" onClick={handleClick}>
+          Upload Image
+        </Button>
+      </>
+    );
   }
   return (
     <DynamicPopUp
