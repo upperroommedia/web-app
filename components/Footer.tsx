@@ -8,9 +8,6 @@ import styles from '../styles/Footer.module.css';
 
 const Footer: FunctionComponent = () => (
   <footer className={styles.footer}>
-    <Link href="https://forms.gle/5Nw35vnq6JUkHEe59" target="_blank" rel="noopener noreferrer" className={styles.link}>
-      Give us feedback!
-    </Link>
     <div>
       <p>
         Powered by{' '}
