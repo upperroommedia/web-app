@@ -28,6 +28,7 @@ import { createInMemoryCache } from '@algolia/cache-in-memory';
 import algoliasearch from 'algoliasearch';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
+import InputAdornment from '@mui/material/InputAdornment';
 
 const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
@@ -163,6 +164,18 @@ const ImageSelector = (props: {
             fullWidth
             placeholder="Search for an image"
             sx={{ paddingBottom: '5px' }}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <ImageUploader
+                    onFinish={async (imgSrc, name) => saveImage(imgSrc, name)}
+                    type={props.selectedImageFromSpeakerDetails.type}
+                    title={title}
+                    setTitle={setTitle}
+                  />
+                </InputAdornment>
+              ),
+            }}
           />
           {imageSearchQuery !== '' && imageSearchResults ? (
             <InfiniteScroll
@@ -297,12 +310,6 @@ const ImageSelector = (props: {
               ))}
             </InfiniteScroll>
           )}
-          <ImageUploader
-            onFinish={async (imgSrc, name) => saveImage(imgSrc, name)}
-            type={props.selectedImageFromSpeakerDetails.type}
-            title={title}
-            setTitle={setTitle}
-          />
         </>
       )}
     </div>
