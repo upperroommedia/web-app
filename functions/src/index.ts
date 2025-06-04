@@ -35,6 +35,10 @@ import sermonWriteTrigger from './DocumentListeners/Sermons/sermonWriteTrigger';
 import repopulatelistfromspeakeritems from './Scrapers/repopulateListFromSpeakerItems';
 import getuser from './getUser';
 import fixsermonCounts from './fixSermonCounts';
+import { createTopicBundle } from './createTopicBundle';
+import topicOnWrite from './DocumentListeners/Topics/topicOnWrite';
+import { createSubtitleBundle } from './createSubtitleBundle';
+import subtitleListOnWrite from './DocumentListeners/Lists/subtitleListOnWrite';
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -71,3 +75,7 @@ exports.updatecreatedandeditedatmillis = updatecreatedandeditedatmillis;
 exports.tagitemsinlist = tagitemsinlist;
 exports.generatesecuredapikey = generatesecuredapikey;
 exports.fixsermoncounts = fixsermonCounts;
+exports.createtopicbundle = createTopicBundle;
+exports.topiconwrite = topicOnWrite;
+exports.createsubtitlebundle = createSubtitleBundle;
+exports.subtitlelistonwrite = subtitleListOnWrite;
