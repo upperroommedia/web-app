@@ -53,18 +53,20 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
   useEffect(() => {
     if (listArrayFirestore) {
       setListArray(listArrayFirestore);
-      
+
       // Validate counts when data loads
       const actualNumberOfLists = listArrayFirestore.length;
       const actualNumberOfListsUploadedTo = listArrayFirestore.filter(
         (list) => list.uploadStatus?.status === uploadStatus.UPLOADED
       ).length;
-      
+
       const expectedNumberOfLists = sermon.numberOfLists || 0;
       const expectedNumberOfListsUploadedTo = sermon.numberOfListsUploadedTo || 0;
-      
-      if (actualNumberOfLists !== expectedNumberOfLists || 
-          actualNumberOfListsUploadedTo !== expectedNumberOfListsUploadedTo) {
+
+      if (
+        actualNumberOfLists !== expectedNumberOfLists ||
+        actualNumberOfListsUploadedTo !== expectedNumberOfListsUploadedTo
+      ) {
         setCountValidationIssue(
           `Count mismatch detected! Expected: ${expectedNumberOfListsUploadedTo}/${expectedNumberOfLists}, Actual: ${actualNumberOfListsUploadedTo}/${actualNumberOfLists}`
         );
@@ -77,20 +79,20 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
 
   const fixSermonCounts = async () => {
     if (!listArray) return;
-    
+
     setIsFixingCounts(true);
     try {
       const actualNumberOfLists = listArray.length;
       const actualNumberOfListsUploadedTo = listArray.filter(
         (list) => list.uploadStatus?.status === uploadStatus.UPLOADED
       ).length;
-      
+
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       await updateDoc(sermonRef, {
         numberOfLists: actualNumberOfLists,
         numberOfListsUploadedTo: actualNumberOfListsUploadedTo,
       });
-      
+
       setCountValidationIssue(null);
       // eslint-disable-next-line no-console
       console.log(`Fixed counts for sermon ${sermon.id}: ${actualNumberOfListsUploadedTo}/${actualNumberOfLists}`);
@@ -242,17 +244,12 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
             sermonNumberOfLists={sermon.numberOfLists}
           />
         </Box>
-        
+
         {countValidationIssue && (
-          <Alert 
-            severity="warning" 
+          <Alert
+            severity="warning"
             action={
-              <Button 
-                color="inherit" 
-                size="small" 
-                onClick={fixSermonCounts}
-                disabled={isFixingCounts}
-              >
+              <Button color="inherit" size="small" onClick={fixSermonCounts} disabled={isFixingCounts}>
                 {isFixingCounts ? 'Fixing...' : 'Fix Counts'}
               </Button>
             }
@@ -260,7 +257,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
             {countValidationIssue}
           </Alert>
         )}
-        
+
         {error ? (
           <Typography>{`Error: ${error.message}`}</Typography>
         ) : loading ? (

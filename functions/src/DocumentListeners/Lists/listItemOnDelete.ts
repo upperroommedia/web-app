@@ -37,7 +37,11 @@ const listItemOnDelete = firestore
         .update({ count: FieldValue.increment(-1) });
       logger.info(`Successfully decremented count for list ${listId}`);
     } catch (error) {
-      logger.error(`Error decrementing list count for ${listId}:`, error, '- this can be ignored if the list was deleted');
+      logger.error(
+        `Error decrementing list count for ${listId}:`,
+        error,
+        '- this can be ignored if the list was deleted'
+      );
       // Don't throw here as this is expected when the list is being deleted
     }
   });

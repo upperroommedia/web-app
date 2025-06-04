@@ -32,7 +32,8 @@ const sermonListOnDelete = firestore
       await firestoreDb.runTransaction(async (transaction) => {
         const sermonDoc = await transaction.get(sermonRef);
         if (sermonDoc.exists) {
-          const decrementUploadedCount = data.uploadStatus && data.uploadStatus.status === 'UPLOADED' && removeFromSubsplashSuccess ? -1 : 0;
+          const decrementUploadedCount =
+            data.uploadStatus && data.uploadStatus.status === 'UPLOADED' && removeFromSubsplashSuccess ? -1 : 0;
 
           transaction.update(sermonRef, {
             numberOfLists: FieldValue.increment(-1),
@@ -42,7 +43,6 @@ const sermonListOnDelete = firestore
           console.warn(`Sermon ${sermonId} does not exist, skipping counter updates`);
         }
       });
-
     } catch (error) {
       console.error(`Error in sermonListOnDelete for sermon ${sermonId}:`, error);
       throw handleError(error);
