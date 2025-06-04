@@ -24,5 +24,6 @@ module.exports = {
   plugins: ['@typescript-eslint', 'import'],
   rules: {
     'import/no-unresolved': 0,
+    'prettier/prettier': 'off', // don't show prettier errors as it will be fixed when saved anyway
   },
 };
