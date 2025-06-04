@@ -1,5 +1,9 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
+# Root project linting and formatting
 pnpm style:lint
 pnpm make-pretty
+
+# Firebase functions linting and build (same as deployment predeploy)
+cd functions && npm run lint && npm run build && cd ..

@@ -10,7 +10,7 @@ const sermonListOnCreate = firestore
     const { sermonId } = context.params;
     const firestore = firebaseAdmin.firestore();
     try {
-      firestore
+      await firestore
         .doc(`sermons/${sermonId}`)
         .withConverter(firestoreAdminSermonConverter)
         .update({
