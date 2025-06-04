@@ -39,6 +39,9 @@ import { createTopicBundle } from './createTopicBundle';
 import topicOnWrite from './DocumentListeners/Topics/topicOnWrite';
 import { createSubtitleBundle } from './createSubtitleBundle';
 import subtitleListOnWrite from './DocumentListeners/Lists/subtitleListOnWrite';
+import { createBibleChapterBundle } from './createBibleChapterBundle';
+import { createSundayHomilyBundle } from './createSundayHomilyBundle';
+import { bibleChapterListOnWrite, sundayHomilyListOnWrite } from './DocumentListeners/Lists/taggedListOnWrite';
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -79,3 +82,7 @@ exports.createtopicbundle = createTopicBundle;
 exports.topiconwrite = topicOnWrite;
 exports.createsubtitlebundle = createSubtitleBundle;
 exports.subtitlelistonwrite = subtitleListOnWrite;
+exports.createbiblechapterbundle = createBibleChapterBundle;
+exports.createsundayhomilybundle = createSundayHomilyBundle;
+exports.biblechapterlistonwrite = bibleChapterListOnWrite;
+exports.sundayhomilylistonwrite = sundayHomilyListOnWrite;

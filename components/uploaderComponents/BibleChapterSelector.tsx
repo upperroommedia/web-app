@@ -8,6 +8,8 @@ import ListItem from '@mui/material/ListItem';
 import TextField from '@mui/material/TextField';
 import { UploaderFieldError } from '../../context/types';
 import { getErrorMessage, showError } from './utils';
+import { getBibleChaptersFromBundle } from '../../utils/bundleHelpers';
+import { LocalSearch } from '../../utils/localSearch';
 
 interface BibleChapterSelectorProps {
   sermonSubtitle: string;
@@ -28,6 +30,8 @@ export default function BibleChapterSelector({
 }: BibleChapterSelectorProps) {
   const [loadingBibleChapters, setLoadingBibleChapters] = useState(false);
   const [bibleChapters, setBibleChapters] = useState<List[]>([]);
+  const [bibleChapterSearch, setBibleChapterSearch] = useState<LocalSearch<List> | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (sermonSubtitle !== BIBLE_STUDIES_STRING) {
@@ -39,14 +43,30 @@ export default function BibleChapterSelector({
     } else if (sermonSubtitle === BIBLE_STUDIES_STRING && bibleChapters.length === 0) {
       const fetchBibleChapters = async () => {
         setLoadingBibleChapters(true);
-        // fetch bible chapters
-        const bibleChapterQuery = query(
-          collection(firestore, 'lists'),
-          where('listTagAndPosition.listTag', '==', ListTag.BIBLE_CHAPTER),
-          orderBy('listTagAndPosition.position', 'asc')
-        ).withConverter(listConverter);
-        setBibleChapters((await getDocs(bibleChapterQuery)).docs.map((doc) => doc.data()));
-        setLoadingBibleChapters(false);
+        try {
+          console.log('Loading bible chapters from bundle...');
+          const chaptersFromBundle = await getBibleChaptersFromBundle();
+          setBibleChapters(chaptersFromBundle);
+          // Initialize local search
+          const search = new LocalSearch(chaptersFromBundle, 'name', 'bible chapters');
+          setBibleChapterSearch(search);
+          console.log(`Loaded ${chaptersFromBundle.length} bible chapters from bundle`);
+        } catch (error) {
+          console.error('Error loading bible chapters from bundle, falling back to Firestore:', error);
+          // Fallback to original Firestore query
+          const bibleChapterQuery = query(
+            collection(firestore, 'lists'),
+            where('listTagAndPosition.listTag', '==', ListTag.BIBLE_CHAPTER),
+            orderBy('listTagAndPosition.position', 'asc')
+          ).withConverter(listConverter);
+          const chapters = (await getDocs(bibleChapterQuery)).docs.map((doc) => doc.data());
+          setBibleChapters(chapters);
+          // Initialize local search with fallback data
+          const search = new LocalSearch(chapters, 'name', 'bible chapters');
+          setBibleChapterSearch(search);
+        } finally {
+          setLoadingBibleChapters(false);
+        }
       };
       fetchBibleChapters();
     }
@@ -54,6 +74,17 @@ export default function BibleChapterSelector({
       setBibleChapterError(true, 'You must select a bible chapter', true);
     }
   }, [sermonSubtitle, bibleChapters.length, setSelectedChapter, setSermonList, setBibleChapterError, selectedChapter]);
+
+  // Get filtered options based on search query
+  const getFilteredOptions = () => {
+    if (!bibleChapterSearch) return bibleChapters;
+    
+    if (!searchQuery.trim()) {
+      return bibleChapterSearch.getAllItems();
+    }
+    
+    return bibleChapterSearch.search(searchQuery).map(result => result.item);
+  };
 
   return (
     <>
@@ -87,8 +118,12 @@ export default function BibleChapterSelector({
                 return [...filteredList, newValue];
               });
             }}
+            onInputChange={(_, newInputValue) => {
+              setSearchQuery(newInputValue);
+            }}
+            filterOptions={(options) => options} // Disable built-in filtering since we handle it
             id="bible-chapter-input"
-            options={bibleChapters}
+            options={getFilteredOptions()}
             getOptionLabel={(option: List) => option.name}
             renderOption={(props, option: List) => (
               <ListItem {...props} key={option.id}>
