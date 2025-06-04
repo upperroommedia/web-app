@@ -8,7 +8,7 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewListPopup from './NewListPopup';
-import firestore, { query, collection, getDocs, where, limit, orderBy, QueryConstraint } from '../firebase/firestore';
+import firestore, { query, collection, getDocs, where, orderBy, QueryConstraint } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight, OverflowBehavior } from '../types/List';
 import { BundleManager } from '../utils/bundleManager';
