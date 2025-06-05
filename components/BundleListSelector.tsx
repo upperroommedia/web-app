@@ -351,7 +351,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
             />
           )}
         />
-        {props.listType !== ListType.CATEGORY_LIST && (
+        {(props.listType !== ListType.CATEGORY_LIST && props.listType !== ListType.TOPIC_LIST) && (
           <IconButton
             size="small"
             sx={{ flexShrink: 0 }}
