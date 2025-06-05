@@ -76,9 +76,7 @@ export class LocalSearch<T extends SearchableItem> {
 
         try {
             this.fuse = new Fuse(this.items, defaultOptions);
-            console.log(`LocalSearch initialized with ${this.items.length} ${this.displayName}`);
         } catch (error) {
-            console.error(`Error initializing Fuse.js for ${this.displayName}:`, error);
             this.fuse = null;
         }
     }
@@ -94,21 +92,12 @@ export class LocalSearch<T extends SearchableItem> {
         try {
             const results: FuseResult<T>[] = this.fuse.search(query, { limit });
 
-            console.log(`${this.displayName} search for "${query}" found ${results.length} results`);
-            if (results.length > 0) {
-                console.log(`Top 3 ${this.displayName} results:`, results.slice(0, 3).map(r => ({
-                    [this.searchFieldKey]: r.item[this.searchFieldKey],
-                    score: r.score
-                })));
-            }
-
             return results.map((result) => ({
                 item: result.item,
                 score: result.score,
                 matches: result.matches ? [...result.matches] : undefined
             }));
         } catch (error) {
-            console.error(`Error during ${this.displayName} search:`, error);
             return [];
         }
     }
@@ -147,12 +136,4 @@ export class LocalSearch<T extends SearchableItem> {
         return [...this.items].sort(sortFn);
     }
 
-    // Debug method to test search configuration
-    public testSearch(query: string): void {
-        console.log(`Testing ${this.displayName} search for: "${query}"`);
-        const results = this.search(query, 5);
-        results.forEach((result, index) => {
-            console.log(`${index + 1}. "${result.item[this.searchFieldKey]}" (score: ${result.score})`);
-        });
-    }
 } 
