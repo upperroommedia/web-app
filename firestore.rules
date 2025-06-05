@@ -59,6 +59,13 @@ service cloud.firestore {
       allow create: if canUpload();
     }
 
+    // Bundle metadata - allow public read access for bundle timestamp checking
+    // These documents only contain timestamps and counts, not sensitive data
+    match /metadata/{bundleDoc} {
+      allow read: if true;  // Public read access for bundle metadata
+      allow write: if false; // Only server functions can write metadata
+    }
+
     // Collection Groups
     match /{path=**}/sermonLists/{sermonListId} {
       allow read: if isAuthorized();
