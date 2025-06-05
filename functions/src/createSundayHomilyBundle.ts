@@ -2,14 +2,15 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
 import { createBundleHandler, BundleCreationConfig } from './utils/bundleCreationUtils';
 import { List, ListTag } from '../../types/List';
+import { BUNDLE_METADATA_PATHS, BUNDLE_STORAGE_PATHS, BUNDLE_NAMES, NAMED_QUERIES } from '../../shared/bundleConstants';
 
 const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleCreationConfig<List> = {
     collectionName: 'lists',
     converter: firestoreAdminListConverter,
-    bundleName: 'sunday-homilies-bundle',
-    namedQueryName: 'latest-sunday-homilies-query',
-    bundlePath: 'bundles/sunday-homilies-bundle.bin',
-    metadataDocPath: 'metadata/sunday-homily-bundle',
+    bundleName: BUNDLE_NAMES.SUNDAY_HOMILIES,
+    namedQueryName: NAMED_QUERIES.SUNDAY_HOMILIES,
+    bundlePath: BUNDLE_STORAGE_PATHS.SUNDAY_HOMILIES,
+    metadataDocPath: BUNDLE_METADATA_PATHS.SUNDAY_HOMILIES,
     countFieldName: 'sundayHomilies',
     displayName: 'sunday homilies',
     orderByField: 'listTagAndPosition.position',

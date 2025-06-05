@@ -93,4 +93,44 @@ export const checkBibleChapterBundleUpdates = async (): Promise<boolean> => {
 export const checkSundayHomilyBundleUpdates = async (): Promise<boolean> => {
     const manager = getSundayHomilyBundleManager();
     return manager.checkForUpdates();
+};
+
+// Convenience functions for preloading bundles in background
+export const preloadTopicBundleIfNeeded = async (): Promise<void> => {
+    const manager = getTopicBundleManager();
+    return manager.preloadIfNeeded();
+};
+
+export const preloadSubtitleBundleIfNeeded = async (): Promise<void> => {
+    const manager = getSubtitleBundleManager();
+    return manager.preloadIfNeeded();
+};
+
+export const preloadBibleChapterBundleIfNeeded = async (): Promise<void> => {
+    const manager = getBibleChapterBundleManager();
+    return manager.preloadIfNeeded();
+};
+
+export const preloadSundayHomilyBundleIfNeeded = async (): Promise<void> => {
+    const manager = getSundayHomilyBundleManager();
+    return manager.preloadIfNeeded();
+};
+
+export const preloadAllBundlesIfNeeded = async (): Promise<void> => {
+    await Promise.all([
+        preloadTopicBundleIfNeeded(),
+        preloadSubtitleBundleIfNeeded(),
+        preloadBibleChapterBundleIfNeeded(),
+        preloadSundayHomilyBundleIfNeeded()
+    ]);
+};
+
+// Get detailed cache status for all bundles
+export const getAllBundleCacheStatus = () => {
+    return {
+        topics: getTopicBundleManager().getCacheStatus(),
+        subtitles: getSubtitleBundleManager().getCacheStatus(),
+        bibleChapters: getBibleChapterBundleManager().getCacheStatus(),
+        sundayHomilies: getSundayHomilyBundleManager().getCacheStatus()
+    };
 }; 

@@ -2,14 +2,15 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
 import { createBundleHandler, BundleCreationConfig } from './utils/bundleCreationUtils';
 import { List, ListType } from '../../types/List';
+import { BUNDLE_METADATA_PATHS, BUNDLE_STORAGE_PATHS, BUNDLE_NAMES, NAMED_QUERIES } from '../../shared/bundleConstants';
 
 const SUBTITLE_BUNDLE_CONFIG: BundleCreationConfig<List> = {
     collectionName: 'lists',
     converter: firestoreAdminListConverter,
-    bundleName: 'subtitles-bundle',
-    namedQueryName: 'latest-subtitles-query',
-    bundlePath: 'bundles/subtitles-bundle.bin',
-    metadataDocPath: 'metadata/subtitle-bundle',
+    bundleName: BUNDLE_NAMES.SUBTITLES,
+    namedQueryName: NAMED_QUERIES.SUBTITLES,
+    bundlePath: BUNDLE_STORAGE_PATHS.SUBTITLES,
+    metadataDocPath: BUNDLE_METADATA_PATHS.SUBTITLES,
     countFieldName: 'subtitles',
     displayName: 'subtitles',
     orderByField: 'name',

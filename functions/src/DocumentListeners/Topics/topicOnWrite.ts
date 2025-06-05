@@ -1,12 +1,13 @@
 import { generateAndStoreBundle } from '../../utils/bundleCreationUtils';
 import { TOPIC_BUNDLE_CONFIG } from '../../createTopicBundle';
 import { createBundleDocumentListener, BundleListenerConfig } from '../../utils/bundleListenerUtils';
+import { BUNDLE_METADATA_PATHS, COLLECTION_PATHS } from '../../../../shared/bundleConstants';
 
 const TOPIC_LISTENER_CONFIG: BundleListenerConfig = {
-    collectionPath: 'topics/{topicId}',
+    collectionPath: COLLECTION_PATHS.TOPICS,
     bundleRegenerationFunction: () => generateAndStoreBundle(TOPIC_BUNDLE_CONFIG),
     displayName: 'topic',
-    metadataDocPath: 'metadata/topic-bundle',
+    metadataDocPath: BUNDLE_METADATA_PATHS.TOPICS,
     shouldTrigger: (): boolean => {
         // Always trigger for any topic changes
         return true;

@@ -2,14 +2,15 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { firestoreAdminTopicConverter } from './firestoreDataConverter';
 import { createBundleHandler, BundleCreationConfig } from './utils/bundleCreationUtils';
 import { Topic } from '../../types/Topic';
+import { BUNDLE_METADATA_PATHS, BUNDLE_STORAGE_PATHS, BUNDLE_NAMES, NAMED_QUERIES } from '../../shared/bundleConstants';
 
 const TOPIC_BUNDLE_CONFIG: BundleCreationConfig<Topic> = {
     collectionName: 'topics',
     converter: firestoreAdminTopicConverter,
-    bundleName: 'topics-bundle',
-    namedQueryName: 'latest-topics-query',
-    bundlePath: 'bundles/topics-bundle.bin',
-    metadataDocPath: 'metadata/topic-bundle',
+    bundleName: BUNDLE_NAMES.TOPICS,
+    namedQueryName: NAMED_QUERIES.TOPICS,
+    bundlePath: BUNDLE_STORAGE_PATHS.TOPICS,
+    metadataDocPath: BUNDLE_METADATA_PATHS.TOPICS,
     countFieldName: 'topics',
     displayName: 'topics',
     orderByField: 'title'
