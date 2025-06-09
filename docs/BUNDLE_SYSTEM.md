@@ -1,80 +1,141 @@
 # Firebase Bundle System
 
-This implementation uses Firebase bundles to improve performance and reduce costs when loading data from Firestore. The system is generic and currently supports topics, subtitles (category lists), bible chapters, and sunday homilies.
+This implementation uses [Firebase bundles](https://firebase.google.com/docs/firestore/bundles) to improve performance and reduce costs when loading frequently accessed data from Firestore. The system provides a generic, type-safe architecture that currently supports topics, subtitles (category lists), bible chapters, and sunday homilies.
 
 ## Overview
 
-Firebase bundles allow you to package Firestore queries and documents into a cached format that can be served directly to clients. This reduces database reads and provides faster loading times.
+Firebase bundles allow you to package Firestore queries and documents into a binary format that can be cached and served directly to clients. This reduces database reads, provides faster loading times, and enables offline functionality.
+
+### Key Benefits
+
+- **Performance**: Data loads from local cache instead of network requests
+- **Cost Reduction**: Fewer Firestore reads through bundle caching
+- **Offline Support**: Works without internet connection once cached
+- **Type Safety**: Full TypeScript support with generic architecture
+- **Consistency**: Unified logging and error handling across all bundle types
 
 ## Architecture
 
-### Generic Bundle Manager
+### Core Components
 
-The `BundleManager<T>` class is a generic singleton that can handle any data type:
+The bundle system consists of four main layers:
+
+1. **Shared Configurations** (`shared/bundleConfigs.ts`)
+2. **Server-side Bundle Creation** (Cloud Functions)
+3. **Client-side Bundle Management** (`utils/bundleManager.ts`)
+4. **UI Components** with bundle integration
+
+## Bundle Configurations
+
+All bundle types share a common configuration structure defined in `shared/bundleConfigs.ts`:
 
 ```typescript
-const topicManager = BundleManager.getInstance<Topic>(TOPIC_BUNDLE_CONFIG);
-const subtitleManager = BundleManager.getInstance<List>(SUBTITLE_BUNDLE_CONFIG);
-const bibleChapterManager = BundleManager.getInstance<List>(BIBLE_CHAPTER_BUNDLE_CONFIG);
-const sundayHomilyManager = BundleManager.getInstance<List>(SUNDAY_HOMILY_BUNDLE_CONFIG);
+export interface BundleConfig<T> {
+    bundleType: string;           // Unique identifier for the bundle type
+    functionName: string;         // Cloud Function name for serving bundles
+    namedQuery: string;          // Named query identifier in the bundle
+    cacheKeyPrefix: string;      // Prefix for localStorage cache keys
+    displayName: string;         // Human-readable name for logging
+    metadataDocPath: string;     // Realtime Database path for metadata
+    bundlePath: string;          // Cloud Storage path for bundle files
+    collectionName: string;      // Firestore collection name
+    collectionPath: string;      // Document listener path pattern
+    converter: FirestoreDataConverter<T>;  // Firestore data converter
+    shouldTrigger: (beforeData: any, afterData: any) => boolean;  // Trigger logic
+    orderByField?: string;       // Optional field to order results
+    whereConditions?: Array<{    // Optional query filters
+        field: string; 
+        operator: any; 
+        value: any;
+    }>;
+}
 ```
 
-### Bundle Configurations
+### Current Bundle Types
 
-Each bundle type has its own configuration:
-
+#### Topics Bundle
 ```typescript
-export const TOPIC_BUNDLE_CONFIG: BundleCreationConfig<Topic> = {
-    collectionName: 'topics',
-    converter: firestoreAdminTopicConverter,
-    bundleName: 'topics-bundle',
-    namedQueryName: 'latest-topics-query',
-    bundlePath: 'bundles/topics-bundle.bin',
-    metadataDocPath: 'metadata/topic-bundle',
-    countFieldName: 'topics',
+export const TOPIC_BUNDLE_CONFIG: BundleConfig<Topic> = {
+    bundleType: 'topics',
+    functionName: 'createtopicbundle',
+    namedQuery: 'latest-topics-query',
+    cacheKeyPrefix: 'topic',
     displayName: 'topics',
-    orderByField: 'title'
+    metadataDocPath: 'bundle-metadata/topic-bundle',
+    bundlePath: 'bundles/topics-bundle.bin',
+    collectionName: 'topics',
+    collectionPath: 'topics/{topicId}',
+    converter: firestoreAdminTopicConverter,
+    shouldTrigger: () => true,
+    orderByField: 'title',
 };
+```
 
-export const SUBTITLE_BUNDLE_CONFIG: BundleCreationConfig<List> = {
-    collectionName: 'lists',
-    converter: firestoreAdminListConverter,
-    bundleName: 'subtitles-bundle',
-    namedQueryName: 'latest-subtitles-query',
-    bundlePath: 'bundles/subtitles-bundle.bin',
-    metadataDocPath: 'metadata/subtitle-bundle',
-    countFieldName: 'subtitles',
+#### Subtitles Bundle (Category Lists)
+```typescript
+export const SUBTITLE_BUNDLE_CONFIG: BundleConfig<List> = {
+    bundleType: 'subtitles',
+    functionName: 'createsubtitlebundle',
+    namedQuery: 'latest-subtitles-query',
+    cacheKeyPrefix: 'subtitle',
     displayName: 'subtitles',
+    metadataDocPath: 'bundle-metadata/subtitle-bundle',
+    bundlePath: 'bundles/subtitles-bundle.bin',
+    collectionName: 'lists',
+    collectionPath: 'lists/{listId}',
+    converter: firestoreAdminListConverter,
+    shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
+        return (beforeData?.type === ListType.CATEGORY_LIST) || 
+               (afterData?.type === ListType.CATEGORY_LIST);
+    },
     orderByField: 'name',
     whereConditions: [
         { field: 'type', operator: '==', value: ListType.CATEGORY_LIST }
     ]
 };
+```
 
-export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleCreationConfig<List> = {
-    collectionName: 'lists',
-    converter: firestoreAdminListConverter,
-    bundleName: 'bible-chapters-bundle',
-    namedQueryName: 'latest-bible-chapters-query',
-    bundlePath: 'bundles/bible-chapters-bundle.bin',
-    metadataDocPath: 'metadata/bible-chapter-bundle',
-    countFieldName: 'bibleChapters',
+#### Bible Chapters Bundle
+```typescript
+export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleConfig<List> = {
+    bundleType: 'bible-chapters',
+    functionName: 'createbiblechapterbundle',
+    namedQuery: 'latest-bible-chapters-query',
+    cacheKeyPrefix: 'bible-chapter',
     displayName: 'bible chapters',
+    metadataDocPath: 'bundle-metadata/bible-chapter-bundle',
+    bundlePath: 'bundles/bible-chapters-bundle.bin',
+    collectionName: 'lists',
+    collectionPath: 'lists/{listId}',
+    converter: firestoreAdminListConverter,
+    shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
+        return (beforeData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER) ||
+               (afterData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER);
+    },
     orderByField: 'listTagAndPosition.position',
     whereConditions: [
         { field: 'listTagAndPosition.listTag', operator: '==', value: ListTag.BIBLE_CHAPTER }
     ]
 };
+```
 
-export const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleCreationConfig<List> = {
-    collectionName: 'lists',
-    converter: firestoreAdminListConverter,
-    bundleName: 'sunday-homilies-bundle',
-    namedQueryName: 'latest-sunday-homilies-query',
-    bundlePath: 'bundles/sunday-homilies-bundle.bin',
-    metadataDocPath: 'metadata/sunday-homily-bundle',
-    countFieldName: 'sundayHomilies',
+#### Sunday Homilies Bundle
+```typescript
+export const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleConfig<List> = {
+    bundleType: 'sunday-homilies',
+    functionName: 'createsundayhomilybundle',
+    namedQuery: 'latest-sunday-homilies-query',
+    cacheKeyPrefix: 'sunday-homily',
     displayName: 'sunday homilies',
+    metadataDocPath: 'bundle-metadata/sunday-homily-bundle',
+    bundlePath: 'bundles/sunday-homilies-bundle.bin',
+    collectionName: 'lists',
+    collectionPath: 'lists/{listId}',
+    converter: firestoreAdminListConverter,
+    shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
+        return (beforeData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH) ||
+               (afterData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH);
+    },
     orderByField: 'listTagAndPosition.position',
     whereConditions: [
         { field: 'listTagAndPosition.listTag', operator: '==', value: ListTag.SUNDAY_HOMILY_MONTH }
@@ -82,178 +143,227 @@ export const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleCreationConfig<List> = {
 };
 ```
 
-### Server-side Components
+## Server-side Implementation
 
-1. **Generic Bundle Creation Utilities** (`functions/src/utils/bundleCreationUtils.ts`)
-   - `createBundleHandler`: Generic HTTP handler for serving bundles
-   - `generateAndStoreBundle`: Generic function for creating and storing bundles
-   - `serveBundleFromStorage`: Utility for serving cached bundles
+### Bundle Creation Utilities
 
-2. **Bundle Cloud Functions**
-   - `createTopicBundle`: Uses generic utilities with topic configuration
-   - `createSubtitleBundle`: Uses generic utilities with subtitle configuration
-   - `createBibleChapterBundle`: Uses generic utilities with bible chapter configuration
-   - `createSundayHomilyBundle`: Uses generic utilities with sunday homily configuration
-   - All export their configurations for use by listeners
+The server-side uses generic utilities in `functions/src/utils/bundleCreationUtils.ts`:
 
-3. **Generic Document Listener Utilities** (`functions/src/utils/bundleListenerUtils.ts`)
-   - `createBundleDocumentListener`: Generic listener factory with metadata tracking
-   - Handles operation detection, logging, and bundle regeneration
-   - Tracks regeneration metadata for debugging and monitoring
+#### Core Functions
 
-4. **Document Listeners** (all use identical structure)
-   - `topicOnWrite`: Uses generic listener utility with topic configuration
-   - `subtitleListOnWrite`: Uses generic listener utility with subtitle configuration
-   - `bibleChapterListOnWrite`: Uses generic listener utility with bible chapter configuration
-   - `sundayHomilyListOnWrite`: Uses generic listener utility with sunday homily configuration
+```typescript
+// Serves existing bundles from Cloud Storage
+export async function serveBundleFromStorage<T>(
+    config: BundleConfig<T>,
+    response: any
+): Promise<boolean>
 
-### Client-side Components
+// Generates new bundles and stores them
+export async function generateAndStoreBundle<T>(
+    config: BundleConfig<T>,
+    response?: any
+): Promise<number>
 
-1. **Generic BundleManager** (`utils/bundleManager.ts`)
-   - Singleton pattern with type safety
-   - Handles bundle loading, caching, and fallbacks
-   - Automatic cache invalidation
+// Main HTTP handler for bundle requests
+export async function createBundleHandler<T>(
+    config: BundleConfig<T>,
+    request: any,
+    response: any
+): Promise<void>
+```
 
-2. **Generic Local Search** (`utils/localSearch.ts`)
-   - `LocalSearch<T>`: Generic search class using Fuse.js
-   - Type-safe and configurable for any searchable data type
+### Cloud Functions
 
-3. **Helper Functions** (`utils/bundleHelpers.ts`)
-   - Convenient access to bundle managers
-   - Simplified data fetching functions
-   - Support for all bundle types
+Each bundle type has a dedicated Cloud Function that uses the generic handler:
 
-4. **UI Components**
-   - `BundleListSelector`: Enhanced ListSelector that uses bundles for topics and subtitles
-   - `BibleChapterSelector`: Uses bible chapter bundles with fallback to Firestore
-   - `SundayHomilyMonthSelector`: Uses sunday homily bundles with local year filtering
-   - Falls back to Algolia/Firestore for other list types
+```typescript
+// functions/src/createTopicBundle.ts
+import { onRequest } from 'firebase-functions/v2/https';
+import { createBundleHandler } from './utils/bundleCreationUtils';
+import { TOPIC_BUNDLE_CONFIG } from '../../shared/bundleConfigs';
 
-## Benefits
+export const createtopicbundle = onRequest({}, async (request, response) => {
+    await createBundleHandler(TOPIC_BUNDLE_CONFIG, request, response);
+});
+```
 
-### Performance
-- **Faster loading**: Data loads from local cache instead of network requests
-- **Offline support**: Works without internet connection once cached
-- **Reduced latency**: No API calls needed for searching
-- **Local filtering**: Complex queries (like year filtering) happen client-side
+### Document Listeners
 
-### Cost Reduction
-- **Fewer Firestore reads**: Bundle contains all data upfront
-- **Reduced bandwidth**: Only downloads when data changes
-- **No additional search service costs**: Local search replaces external services
-- **Efficient queries**: Pre-sorted and filtered data bundles
+Generic document listeners automatically regenerate bundles when data changes:
 
-### Code Quality
-- **DRY Principle**: Generic utilities eliminate code duplication
-- **Type Safety**: Full TypeScript support with generics
-- **Maintainability**: Single source of truth for bundle logic
-- **Consistent Structure**: All components follow the same patterns
+```typescript
+// functions/src/utils/bundleListenerUtils.ts
+export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
+    return firestore.onDocumentWritten(
+        config.collectionPath,
+        async (event) => {
+            const beforeData = event.data?.before?.data();
+            const afterData = event.data?.after?.data();
 
-### Better User Experience
-- **Instant search**: No network delay for search results
-- **Consistent performance**: Not dependent on network conditions
-- **Progressive enhancement**: Falls back gracefully if bundles fail
-- **Responsive filtering**: Year/position filtering happens instantly
+            if (!config.shouldTrigger(beforeData, afterData)) {
+                return;
+            }
 
-## Usage
+            logger.info(`Regenerating ${config.displayName} bundle.`);
+            
+            const count = await generateAndStoreBundle(config);
+            
+            await database.ref(config.metadataDocPath).update({
+                lastUpdated: Date.now(),
+                [`${config.bundleType}-count`]: count,
+            });
+        }
+    );
+}
+```
 
-### Using Bundle Managers Directly
+## Client-side Implementation
+
+### BundleManager Class
+
+The `BundleManager<T>` class provides a generic, type-safe interface for working with bundles:
+
+```typescript
+export class BundleManager<T> {
+    // Singleton pattern with type safety
+    public static getInstance<T>(config: BundleConfig<T>): BundleManager<T>
+    
+    // Main data retrieval method
+    public async getData(): Promise<T[]>
+    
+    // Check for available updates
+    public async checkForUpdates(): Promise<boolean>
+    
+    // Preload bundles in background
+    public async preloadIfNeeded(): Promise<void>
+    
+    // Cache management
+    public clearCache(): void
+    public getCacheStatus(): CacheStatus
+}
+```
+
+#### Key Features
+
+- **Automatic Caching**: Uses localStorage and memory caching
+- **Consistent Logging**: All log messages use format `[BundleManager: displayName] message`
+- **Fallback Strategy**: Falls back to cached data if bundle loading fails
+- **Race Condition Protection**: Prevents duplicate simultaneous requests
+- **Metadata Tracking**: Reduces unnecessary Firestore reads
+
+### Helper Functions
+
+The `utils/bundleHelpers.ts` file provides convenient access functions:
+
+```typescript
+// Data retrieval
+export const getTopicsFromBundle = async (): Promise<Topic[]>
+export const getSubtitlesFromBundle = async (): Promise<List[]>
+export const getBibleChaptersFromBundle = async (): Promise<List[]>
+export const getSundayHomiliesFromBundle = async (): Promise<List[]>
+
+// Cache management
+export const clearAllBundleCaches = (): void
+export const preloadAllBundlesIfNeeded = async (): Promise<void>
+export const getAllBundleCacheStatus = () => CacheStatusMap
+
+// Update checking
+export const checkTopicBundleUpdates = async (): Promise<boolean>
+export const checkSubtitleBundleUpdates = async (): Promise<boolean>
+// ... etc
+```
+
+## Usage Examples
+
+### Basic Data Retrieval
 
 ```typescript
 import { BundleManager } from '../utils/bundleManager';
-import { 
-    TOPIC_BUNDLE_CONFIG, 
-    SUBTITLE_BUNDLE_CONFIG,
-    BIBLE_CHAPTER_BUNDLE_CONFIG,
-    SUNDAY_HOMILY_BUNDLE_CONFIG 
-} from '../utils/bundleConfigs';
+import { TOPIC_BUNDLE_CONFIG } from '../shared/bundleConfigs';
 
-// Get different data types
+// Using BundleManager directly
 const topicManager = BundleManager.getInstance<Topic>(TOPIC_BUNDLE_CONFIG);
 const topics = await topicManager.getData();
 
-const subtitleManager = BundleManager.getInstance<List>(SUBTITLE_BUNDLE_CONFIG);
-const subtitles = await subtitleManager.getData();
-
-const bibleChapterManager = BundleManager.getInstance<List>(BIBLE_CHAPTER_BUNDLE_CONFIG);
-const bibleChapters = await bibleChapterManager.getData();
-
-const sundayHomilyManager = BundleManager.getInstance<List>(SUNDAY_HOMILY_BUNDLE_CONFIG);
-const sundayHomilies = await sundayHomilyManager.getData();
+// Using helper functions
+import { getTopicsFromBundle } from '../utils/bundleHelpers';
+const topics = await getTopicsFromBundle();
 ```
 
-### Using Helper Functions
+### In React Components
+
+```tsx
+import { useEffect, useState } from 'react';
+import { getSubtitlesFromBundle } from '../utils/bundleHelpers';
+import { List } from '../types/List';
+
+function SubtitleSelector() {
+    const [subtitles, setSubtitles] = useState<List[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const loadSubtitles = async () => {
+            try {
+                const data = await getSubtitlesFromBundle();
+                setSubtitles(data);
+            } catch (error) {
+                console.error('Failed to load subtitles:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadSubtitles();
+    }, []);
+
+    // Component render logic...
+}
+```
+
+### Cache Management
 
 ```typescript
 import { 
-    getTopicsFromBundle, 
-    getSubtitlesFromBundle,
-    getBibleChaptersFromBundle,
-    getSundayHomiliesFromBundle 
+    clearAllBundleCaches, 
+    preloadAllBundlesIfNeeded,
+    getAllBundleCacheStatus 
 } from '../utils/bundleHelpers';
 
-// Simplified access
-const topics = await getTopicsFromBundle();
-const subtitles = await getSubtitlesFromBundle();
-const bibleChapters = await getBibleChaptersFromBundle();
-const sundayHomilies = await getSundayHomiliesFromBundle();
+// Clear all caches
+clearAllBundleCaches();
 
-// With year filtering for sunday homilies
-const currentYear = new Date().getFullYear();
-const thisYearHomilies = sundayHomilies.filter(
-    homily => homily.listTagAndPosition.year === currentYear
-);
+// Preload bundles in background
+await preloadAllBundlesIfNeeded();
+
+// Check cache status
+const status = getAllBundleCacheStatus();
+console.log('Topics cache size:', status.topics.cacheSize);
+console.log('Is subtitles loading:', status.subtitles.isLoading);
 ```
 
-### Using Generic Search
+## UI Components
 
-```typescript
-import { LocalSearch } from '../utils/localSearch';
+### BundleListSelector
 
-// For topics
-const topicSearch = new LocalSearch(topics, 'title', 'topics');
-const topicResults = topicSearch.search('faith');
-
-// For subtitles
-const subtitleSearch = new LocalSearch(subtitles, 'name', 'subtitles');
-const subtitleResults = subtitleSearch.search('worship');
-
-// For bible chapters (search by name, already ordered by position)
-const bibleChapterSearch = new LocalSearch(bibleChapters, 'name', 'bible chapters');
-const chapterResults = bibleChapterSearch.search('genesis');
-
-// For sunday homilies with custom filtering
-const sundayHomilySearch = new LocalSearch(sundayHomilies, 'name', 'sunday homilies');
-const homilyResults = sundayHomilySearch.filterItems(
-    homily => homily.listTagAndPosition.year === 2024
-);
-```
-
-### In Components
+Enhanced list selector that uses bundles for topics and subtitles:
 
 ```tsx
-// Topic lists
 <BundleListSelector 
   sermonList={sermonList} 
   setSermonList={setSermonList} 
   listType={ListType.TOPIC_LIST} 
 />
+```
 
-// Subtitle lists
-<BundleListSelector 
-  sermonList={sermonList} 
-  setSermonList={setSermonList} 
-  listType={ListType.CATEGORY_LIST} 
-/>
+### Specialized Selectors
 
+```tsx
 // Bible chapters (when subtitle is "Bible Studies")
 <BibleChapterSelector 
   sermonSubtitle={sermon.subtitle}
   setSermonList={setSermonList}
   selectedChapter={selectedChapter}
   setSelectedChapter={setSelectedChapter}
-  bibleChapterError={bibleChapterError}
-  setBibleChapterError={setBibleChapterError}
 />
 
 // Sunday homilies (when subtitle is "Sunday Homilies")
@@ -265,151 +375,134 @@ const homilyResults = sundayHomilySearch.filterItems(
   setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
   sundayHomiliesYear={sundayHomiliesYear}
   setSundayHomiliesYear={setSundayHomiliesYear}
-  sundayHomiliesMonthError={sundayHomiliesMonthError}
-  setSundayHomiliesMonthError={setSundayHomiliesMonthError}
 />
+```
+
+## Deployment
+
+Deploy bundle functions individually when changed:
+
+```bash
+firebase deploy --only functions:createtopicbundle,functions:createsubtitlebundle,functions:createbiblechapterbundle,functions:createsundayhomilybundle
+```
+
+Deploy document listeners:
+
+```bash
+firebase deploy --only functions:topiconwrite,functions:subtitlelistonwrite,functions:taggedlistonwrite
+```
+
+## Storage and Metadata
+
+### Cloud Storage Structure
+```
+bundles/
+├── topics-bundle.bin
+├── subtitles-bundle.bin
+├── bible-chapters-bundle.bin
+└── sunday-homilies-bundle.bin
+```
+
+### Realtime Database Metadata
+```
+bundle-metadata/
+├── topic-bundle/
+│   ├── lastUpdated: timestamp
+│   ├── topics-count: number
+│   └── storagePath: string
+├── subtitle-bundle/
+│   ├── lastUpdated: timestamp
+│   ├── subtitles-count: number
+│   └── storagePath: string
+└── ...
 ```
 
 ## Adding New Bundle Types
 
-To add a new bundle type, use the consistent pattern:
+To add a new bundle type, follow this pattern:
 
-1. **Create Bundle Configuration (Client)**
+1. **Add Configuration** in `shared/bundleConfigs.ts`
+2. **Create Cloud Function** using `createBundleHandler`
+3. **Add Document Listener** using `createBundleDocumentListener`
+4. **Add Helper Functions** in `utils/bundleHelpers.ts`
+5. **Update UI Components** as needed
+
+Example for a new "authors" bundle:
+
 ```typescript
-export const NEW_BUNDLE_CONFIG: BundleConfig = {
-    bundleType: 'newtype',
-    functionName: 'createnewbundle',
-    namedQuery: 'latest-newtype-query',
-    cacheKeyPrefix: 'newtype',
-    displayName: 'new items'
+// 1. Configuration
+export const AUTHOR_BUNDLE_CONFIG: BundleConfig<Author> = {
+    bundleType: 'authors',
+    functionName: 'createauthorbundle',
+    namedQuery: 'latest-authors-query',
+    cacheKeyPrefix: 'author',
+    displayName: 'authors',
+    metadataDocPath: 'bundle-metadata/author-bundle',
+    bundlePath: 'bundles/authors-bundle.bin',
+    collectionName: 'authors',
+    collectionPath: 'authors/{authorId}',
+    converter: firestoreAdminAuthorConverter,
+    shouldTrigger: () => true,
+    orderByField: 'name',
 };
-```
 
-2. **Create Bundle Configuration (Server)**
-```typescript
-export const NEW_BUNDLE_CONFIG: BundleCreationConfig<NewType> = {
-    collectionName: 'newcollection',
-    converter: firestoreAdminNewTypeConverter,
-    bundleName: 'newtype-bundle',
-    namedQueryName: 'latest-newtype-query',
-    bundlePath: 'bundles/newtype-bundle.bin',
-    metadataDocPath: 'metadata/newtype-bundle',
-    countFieldName: 'newtype',
-    displayName: 'new items',
-    orderByField: 'name'
-};
-```
-
-3. **Create Cloud Function**
-```typescript
-import { createBundleHandler } from './utils/bundleCreationUtils';
-
-export const createNewBundle = onRequest({}, async (request, response) => {
-    await createBundleHandler(NEW_BUNDLE_CONFIG, request, response);
+// 2. Cloud Function
+export const createauthorbundle = onRequest({}, async (request, response) => {
+    await createBundleHandler(AUTHOR_BUNDLE_CONFIG, request, response);
 });
 
-export { NEW_BUNDLE_CONFIG };
-```
+// 3. Document Listener
+const authorOnWrite = createBundleDocumentListener(AUTHOR_BUNDLE_CONFIG);
+export default authorOnWrite;
 
-4. **Create Document Listener**
-```typescript
-import { generateAndStoreBundle } from '../../utils/bundleCreationUtils';
-import { NEW_BUNDLE_CONFIG } from '../../createNewBundle';
-import { createBundleDocumentListener, BundleListenerConfig } from '../../utils/bundleListenerUtils';
-
-const NEW_LISTENER_CONFIG: BundleListenerConfig = {
-    collectionPath: 'newcollection/{docId}',
-    bundleRegenerationFunction: () => generateAndStoreBundle(NEW_BUNDLE_CONFIG),
-    displayName: 'new item',
-    metadataDocPath: 'metadata/newtype-bundle',
-    shouldTrigger: () => true // Or custom logic
-};
-
-const newTypeOnWrite = createBundleDocumentListener(NEW_LISTENER_CONFIG);
-export default newTypeOnWrite;
-```
-
-5. **Add Helper Functions**
-```typescript
-export const getNewItemsFromBundle = async (forceRefresh: boolean = false): Promise<NewType[]> => {
-    const manager = BundleManager.getInstance<NewType>(NEW_BUNDLE_CONFIG);
-    return manager.getData(forceRefresh);
+// 4. Helper Function
+export const getAuthorsFromBundle = async (): Promise<Author[]> => {
+    const manager = BundleManager.getInstance<Author>(AUTHOR_BUNDLE_CONFIG);
+    return manager.getData();
 };
 ```
 
-6. **Use in Components**
-```typescript
-const searchInstance = new LocalSearch(newItems, 'searchField', 'new items');
-const results = searchInstance.search(query);
+## Monitoring and Debugging
+
+### Logging
+All bundle operations use consistent logging with the format:
+```
+[BundleManager: displayName] message
 ```
 
-## Monitoring & Debugging
+### Console Methods
+- View cache status: `getAllBundleCacheStatus()`
+- Clear caches: `clearAllBundleCaches()`
+- Force refresh: `manager.getData()` after `manager.clearCache()`
 
-### Automatic Metadata Tracking
-Each bundle regeneration is tracked with:
-- `lastRegeneratedReason`: What triggered the regeneration
-- `lastRegeneratedAt`: Timestamp of last regeneration
-- `lastOperation`: Type of operation (created/updated/deleted)
+### Firebase Console
+- Monitor Cloud Function executions
+- Check Cloud Storage for bundle files
+- View Realtime Database for metadata
+- Review function logs for bundle generation
 
-### Bundle-specific Metadata Documents
-- `metadata/topic-bundle`
-- `metadata/subtitle-bundle`
-- `metadata/bible-chapter-bundle`
-- `metadata/sunday-homily-bundle`
+## Environment Configuration
 
-### Monitoring
-Monitor bundle performance through:
-- Firebase Console (Cloud Functions logs)
-- Browser DevTools (Network tab)
-- Bundle metadata documents in Firestore
-- Console logs from bundle managers
-
-## Environment Setup
-
-Add the following environment variable:
+Set the Firebase Functions URL:
 ```
-NEXT_PUBLIC_FIREBASE_FUNCTIONS_URL=https://your-region-your-project.cloudfunctions.net
+NEXT_PUBLIC_FIREBASE_FUNCTIONS_URL=https://us-central1-your-project.cloudfunctions.net
 ```
 
-## Troubleshooting
+The system automatically detects development/emulator mode and adjusts URLs accordingly.
 
-### Bundle Loading Fails
-- Check network connectivity
-- Verify Cloud Function deployment
-- Check console logs for detailed error messages
-- System automatically falls back to cached data or Firestore queries
+## Performance Considerations
 
-### Search Not Working
-- Verify Fuse.js is installed
-- Check that data is loaded into LocalSearch instances
-- Ensure bundle contains expected data
+- Bundle files are served with appropriate cache headers
+- Metadata checks are optimized to reduce Firestore reads
+- localStorage is used for client-side caching with size limits (1MB)
+- Background preloading prevents blocking user interactions
+- Fallback strategies ensure the app remains functional even if bundles fail
 
-### Cache Issues
-- Clear browser localStorage
-- Force refresh with `manager.getData(true)`
-- Check bundle metadata in Firestore
+## Error Handling
 
-### Year Filtering Issues (Sunday Homilies)
-- Verify `listTagAndPosition.year` field exists on documents
-- Check client-side filtering logic
-- Ensure proper typing with `SundayHomiliesMonthList`
-
-## Migration from Previous Implementation
-
-The system now uses a completely consistent pattern across all bundle types:
-
-```typescript
-// Consistent structure for all bundle types
-const bundleManager = BundleManager.getInstance<DataType>(BUNDLE_CONFIG);
-const data = await bundleManager.getData();
-
-// Generic search for any data type
-const search = new LocalSearch(data, 'searchField', 'display name');
-const results = search.search(query);
-
-// Helper functions for convenience
-const data = await getDataFromBundle();
-
-// Local filtering for complex queries
-const filteredData = data.filter(item => item.someField === someValue);
-``` 
+The system includes comprehensive error handling:
+- Automatic fallback to cached data
+- Graceful degradation to Firestore queries
+- Detailed error logging with context
+- Race condition protection
+- Metadata consistency validation 
