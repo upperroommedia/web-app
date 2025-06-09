@@ -8,6 +8,8 @@ import firestore, { collection, getDocs, orderBy, query, where } from '../../fir
 import { SUNDAY_HOMILIES_STRING } from './consts';
 import { UploaderFieldError } from '../../context/types';
 import { getErrorMessage, showError } from './utils';
+import { getSundayHomiliesFromBundle } from '../../utils/bundleHelpers';
+import { LocalSearch } from '../../utils/localSearch';
 
 interface SuncayHomilyMonthSelectorProps {
   sermonSubtitle: string;
@@ -34,6 +36,9 @@ function SundayHomilyMonthSelector({
 }: SuncayHomilyMonthSelectorProps) {
   const [sundayHomiliesMonths, setSundayHomiliesMonths] = useState<SundayHomiliesMonthList[]>([]);
   const [loadingSundayHomiliesMonths, setLoadingSundayHomiliesMonths] = useState(false);
+  const [allSundayHomilies, setAllSundayHomilies] = useState<SundayHomiliesMonthList[]>([]);
+  const [sundayHomilySearch, setSundayHomilySearch] = useState<LocalSearch<SundayHomiliesMonthList> | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchSundayHomiliesMonths = useCallback(
     async (year: number) => {
@@ -47,19 +52,44 @@ function SundayHomilyMonthSelector({
           });
         }
       }
-      // fetch bible chapters
-      const sundayHomiliesMonthsQuery = query(
-        collection(firestore, 'lists'),
-        where('listTagAndPosition.listTag', '==', ListTag.SUNDAY_HOMILY_MONTH),
-        where('listTagAndPosition.year', '==', year),
-        orderBy('listTagAndPosition.position', 'asc')
-      ).withConverter(listConverter);
-      setSundayHomiliesMonths(
-        (await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList)
-      );
-      setLoadingSundayHomiliesMonths(false);
+
+      try {
+        // Load all sunday homilies from bundle if not already loaded
+        if (allSundayHomilies.length === 0) {
+          console.log('Loading sunday homilies from bundle...');
+          const homiliesFromBundle = await getSundayHomiliesFromBundle();
+          const typedHomilies = homiliesFromBundle as SundayHomiliesMonthList[];
+          setAllSundayHomilies(typedHomilies);
+          // Initialize local search
+          const search = new LocalSearch(typedHomilies, 'name', 'sunday homilies');
+          setSundayHomilySearch(search);
+          console.log(`Loaded ${homiliesFromBundle.length} sunday homilies from bundle`);
+        }
+
+        // Filter by year locally
+        const filteredByYear = allSundayHomilies.filter(
+          (homily) => homily.listTagAndPosition.year === year
+        );
+        setSundayHomiliesMonths(filteredByYear);
+      } catch (error) {
+        console.error('Error loading sunday homilies from bundle, falling back to Firestore:', error);
+        // Fallback to original Firestore query
+        const sundayHomiliesMonthsQuery = query(
+          collection(firestore, 'lists'),
+          where('listTagAndPosition.listTag', '==', ListTag.SUNDAY_HOMILY_MONTH),
+          where('listTagAndPosition.year', '==', year),
+          orderBy('listTagAndPosition.position', 'asc')
+        ).withConverter(listConverter);
+        const homilies = (await getDocs(sundayHomiliesMonthsQuery)).docs.map((doc) => doc.data() as SundayHomiliesMonthList);
+        setSundayHomiliesMonths(homilies);
+        // Initialize local search with fallback data (all homilies from this year only)
+        const search = new LocalSearch(homilies, 'name', 'sunday homilies');
+        setSundayHomilySearch(search);
+      } finally {
+        setLoadingSundayHomiliesMonths(false);
+      }
     },
-    [selectedSundayHomiliesMonth, setSelectedSundayHomiliesMonth, setSermonList]
+    [selectedSundayHomiliesMonth, setSelectedSundayHomiliesMonth, setSermonList, allSundayHomilies]
   );
 
   useEffect(() => {
@@ -91,10 +121,38 @@ function SundayHomilyMonthSelector({
   }, [date, fetchSundayHomiliesMonths, setSundayHomiliesYear, sundayHomiliesYear]);
 
   useEffect(() => {
-    if (sermonSubtitle === SUNDAY_HOMILIES_STRING && sundayHomiliesMonths.length === 0) {
+    if (sermonSubtitle === SUNDAY_HOMILIES_STRING) {
       fetchSundayHomiliesMonths(date.getFullYear());
     }
-  }, [sermonSubtitle, date, sundayHomiliesMonths.length, fetchSundayHomiliesMonths]);
+  }, [sermonSubtitle, date, fetchSundayHomiliesMonths]);
+
+  // Update filtered months when allSundayHomilies changes
+  useEffect(() => {
+    if (allSundayHomilies.length > 0 && sermonSubtitle === SUNDAY_HOMILIES_STRING) {
+      const filteredByYear = allSundayHomilies.filter(
+        (homily) => homily.listTagAndPosition.year === sundayHomiliesYear
+      );
+      setSundayHomiliesMonths(filteredByYear);
+    }
+  }, [allSundayHomilies, sundayHomiliesYear, sermonSubtitle]);
+
+  // Get filtered options based on search query and year
+  const getFilteredOptions = () => {
+    if (!sundayHomilySearch) return sundayHomiliesMonths;
+    
+    let items: SundayHomiliesMonthList[];
+    
+    if (!searchQuery.trim()) {
+      // No search query - use all items from the search instance
+      items = sundayHomilySearch.getAllItems();
+    } else {
+      // Search and get results
+      items = sundayHomilySearch.search(searchQuery).map(result => result.item);
+    }
+    
+    // Filter by year
+    return items.filter((homily) => homily.listTagAndPosition.year === sundayHomiliesYear);
+  };
 
   return (
     <>
@@ -130,8 +188,12 @@ function SundayHomilyMonthSelector({
                 return [...filteredList, newValue];
               });
             }}
+            onInputChange={(_, newInputValue) => {
+              setSearchQuery(newInputValue);
+            }}
+            filterOptions={(options) => options} // Disable built-in filtering since we handle it
             id="sunday-homilies-months-input"
-            options={sundayHomiliesMonths}
+            options={getFilteredOptions()}
             getOptionLabel={(option: List) => option.name}
             renderOption={(props, option: List) => (
               <ListItem {...props} key={option.id}>

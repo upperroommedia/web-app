@@ -1,0 +1,14 @@
+import { onRequest } from 'firebase-functions/v2/https';
+import { createBundleHandler } from './utils/bundleCreationUtils';
+import { TOPIC_BUNDLE_CONFIG } from '../../shared/bundleConfigs';
+
+export const createTopicBundle = onRequest(
+    {
+        timeoutSeconds: 60,
+        memory: '512MiB',
+        cors: true
+    },
+    async (request, response) => {
+        await createBundleHandler(TOPIC_BUNDLE_CONFIG, request, response);
+    }
+);
