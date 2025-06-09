@@ -8,37 +8,12 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewListPopup from './NewListPopup';
-import firestore, { query, collection, getDocs, where, orderBy, QueryConstraint } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
-import { List, listConverter, ListType, ListWithHighlight, OverflowBehavior } from '../types/List';
+import { List, ListType, ListWithHighlight, OverflowBehavior } from '../types/List';
 import { BundleManager } from '../utils/bundleManager';
-import { TOPIC_BUNDLE_CONFIG, SUBTITLE_BUNDLE_CONFIG } from '../utils/bundleConfigs';
 import { LocalSearch } from '../utils/localSearch';
 import { Topic } from '../types/Topic';
-
-// Conditionally import Algolia only if not using topic lists and API keys are available
-let algoliaClient: any = null;
-let listIndex: any = null;
-
-if (process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
-  try {
-    import('algoliasearch').then(({ default: algoliasearch }) => {
-      import('@algolia/cache-in-memory').then(({ createInMemoryCache }) => {
-        algoliaClient = algoliasearch(
-          process.env.NEXT_PUBLIC_ALGOLIA_APP_ID!,
-          process.env.NEXT_PUBLIC_ALGOLIA_API_KEY!,
-          {
-            responsesCache: createInMemoryCache(),
-            requestsCache: createInMemoryCache({ serializable: false }),
-          }
-        );
-        listIndex = algoliaClient.initIndex('lists');
-      });
-    });
-  } catch (error) {
-    console.warn('Algolia not available:', error);
-  }
-}
+import { TOPIC_BUNDLE_CONFIG } from '../shared/bundleConfigs';
 
 interface BundleListSelectorProps {
   sermonList: List[];
@@ -51,12 +26,11 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
   const [localTopicSearch, setLocalTopicSearch] = useState<LocalSearch<Topic> | null>(null);
-  const [localSubtitleSearch, setLocalSubtitleSearch] = useState<LocalSearch<List> | null>(null);
   const [isLoadingBundles, setIsLoadingBundles] = useState<boolean>(false);
   const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [cachedTopics, setCachedTopics] = useState<Topic[]>([]); // Store loaded topics data
 
   // Configuration constants for better scrolling
-  const SEARCH_RESULTS_LIMIT = 50;  // Show more search results
   const MAX_DROPDOWN_HEIGHT = 300;  // Max height for scrollable dropdown
 
   const updateSermonList = (listWithHighlight: ListWithHighlight[]) => {
@@ -118,117 +92,32 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           const searchInstance = new LocalSearch(topics, 'title', 'topics');
           setLocalTopicSearch(searchInstance);
           
+          // Cache the topics data to avoid re-fetching when search is cleared
+          setCachedTopics(topics);
         } catch (error) {
           console.error('Error loading topics from bundle:', error);
-          // Fallback to regular Firestore query
-          console.log('Falling back to regular Firestore query for topics');
-          await fetchRegularList();
         } finally {
           setIsLoadingBundles(false);
         }
       }
       // For category lists (subtitles), use subtitle bundles
-      else if (props.listType === ListType.CATEGORY_LIST) {
-        setIsLoadingBundles(true);
-        try {
-          console.log('Loading subtitles from bundle...');
-          const bundleManager = BundleManager.getInstance<List>(SUBTITLE_BUNDLE_CONFIG);
-          const subtitles = await bundleManager.getData();
-          
-          console.log(`Loaded ${subtitles.length} subtitles from bundle`);
-          
-          setAllListArray(subtitles);
-          
-          // Initialize local search for subtitles
-          const searchInstance = new LocalSearch(subtitles, 'name', 'subtitles');
-          setLocalSubtitleSearch(searchInstance);
-          
-        } catch (error) {
-          console.error('Error loading subtitles from bundle:', error);
-          // Fallback to regular Firestore query
-          console.log('Falling back to regular Firestore query for subtitles');
-          await fetchRegularList();
-        } finally {
-          setIsLoadingBundles(false);
-        }
-      } else {
-        await fetchRegularList();
-      }
-    };
-
-    const fetchRegularList = async () => {
-      const queryConstraints: QueryConstraint[] = [orderBy('title', 'asc')];
-      if (props.listType) {
-        queryConstraints.push(where('type', '==', props.listType));
-      }
-      const listQuery = query(collection(firestore, 'lists'), ...queryConstraints).withConverter(listConverter);
-      const listQuerySnapshot = await getDocs(listQuery);
-      setAllListArray(
-        listQuerySnapshot.docs.map((doc) => {
-          const list = doc.data();
-          return list;
-        })
-      );
-    };
-
-    fetchList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.listType]);
-
-  const queryAlgolia = async (query: string): Promise<ListWithHighlight[]> => {
-    try {
-      if (!listIndex) {
-        console.warn('Algolia not initialized, using empty results');
-        return [];
-      }
-      
-      const result = await listIndex.search(query, {
-        hitsPerPage: SEARCH_RESULTS_LIMIT,
-        ...(props.listType && { facetFilters: `type:${props.listType}` }),
-      });
-      return result.hits || [];
-    } catch (error) {
-      console.error('Error querying Algolia:', error);
-      return [];
+      else {
+        throw new Error('List type not supported');
+       }  
     }
-  };
+    fetchList();
+  }, [props.listType]);
 
   const searchTopicsLocally = async (query: string): Promise<ListWithHighlight[]> => {
     try {
       if (!localTopicSearch || !query.trim()) {
         // Return more initial topics if no query
-        const bundleManager = BundleManager.getInstance<Topic>(TOPIC_BUNDLE_CONFIG);
-        const topics = await bundleManager.getData();
-        return topics.map(topicToListWithHighlight);
+        return cachedTopics.map(topicToListWithHighlight);
       }
-
-      console.log(`Searching topics locally for: "${query}"`);
-      const searchResults = localTopicSearch.search(query, SEARCH_RESULTS_LIMIT);
-      console.log(`Found ${searchResults.length} topic results`);
-      
+      const searchResults = localTopicSearch.search(query);
       return searchResults.map(result => topicToListWithHighlight(result.item));
     } catch (error) {
       console.error('Error searching topics locally:', error);
-      return [];
-    }
-  };
-
-  const searchSubtitlesLocally = async (query: string): Promise<ListWithHighlight[]> => {
-    try {
-      if (!localSubtitleSearch || !query.trim()) {
-        // Return more initial subtitles if no query
-        const bundleManager = BundleManager.getInstance<List>(SUBTITLE_BUNDLE_CONFIG);
-        const subtitles = await bundleManager.getData();
-        return subtitles;
-      }
-
-      console.log(`Searching subtitles locally for: "${query}"`);
-      const searchResults = localSubtitleSearch.search(query, SEARCH_RESULTS_LIMIT);
-      console.log(`Found ${searchResults.length} subtitle results`);
-      
-      return searchResults.map(result => result.item);
-    } catch (error) {
-      console.error('Error searching subtitles locally:', error);
       return [];
     }
   };
@@ -308,14 +197,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           onInputChange={async (_, newInputValue) => {
             const hasQuery = newInputValue.trim().length > 0;
             setIsSearching(hasQuery);
-            
-            if (props.listType === ListType.TOPIC_LIST) {
-              setAllListArray(await searchTopicsLocally(newInputValue));
-            } else if (props.listType === ListType.CATEGORY_LIST) {
-              setAllListArray(await searchSubtitlesLocally(newInputValue));
-            } else {
-              setAllListArray(await queryAlgolia(newInputValue));
-            }
+            setAllListArray(await searchTopicsLocally(newInputValue));
           }}
           renderOption={(props, option: ListWithHighlight) => (
             <ListItem {...props} key={option.id} dense>

@@ -1,9 +1,11 @@
 import { logger } from 'firebase-functions/v2';
-import { FieldValue, FirestoreDataConverter, Query } from 'firebase-admin/firestore';
+import { FirestoreDataConverter, Query } from 'firebase-admin/firestore';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import { BundleConfig, BundleMetadata } from '../../../shared/bundleConfigs';
 
 const firestoreAdmin = firebaseAdmin.firestore();
 const storage = firebaseAdmin.storage();
+const database = firebaseAdmin.database();
 const BUNDLE_BUCKET = 'urm-app.appspot.com';
 
 export interface BundleCreationConfig<T> {
@@ -19,25 +21,43 @@ export interface BundleCreationConfig<T> {
     whereConditions?: Array<{ field: string; operator: any; value: any }>;
 }
 
-export async function serveBundleFromStorage(
-    bundlePath: string,
-    displayName: string,
+export async function serveBundleFromStorage<T>(
+    config: BundleConfig<T>,
     response: any
 ): Promise<boolean> {
     const bucket = storage.bucket(BUNDLE_BUCKET);
-    const bundleFile = bucket.file(bundlePath);
+    const bundleFile = bucket.file(config.bundlePath);
     const [exists] = await bundleFile.exists();
 
     if (exists) {
-        logger.info(`Serving cached ${displayName} bundle from Cloud Storage`);
+        logger.info(`Serving cached ${config.displayName} bundle from Cloud Storage`);
 
-        // Get bundle metadata
-        const [metadata] = await bundleFile.getMetadata();
-        const bundleTimestamp = metadata.metadata?.timestamp || Date.now();
+        // Get bundle metadata from storage
+        const [storageMetadata] = await bundleFile.getMetadata();
+        const bundleTimestamp = parseInt(storageMetadata.metadata?.timestamp) || Date.now();
+        const bundleCount = parseInt(storageMetadata.metadata?.[`${config.bundleType}-count`]) || 0;
+
+        // Check if metadata exists in Realtime Database
+        const rtdbMetadataRef = database.ref(config.metadataDocPath);
+        const rtdbSnapshot = await rtdbMetadataRef.once('value');
+        const rtdbMetadata = rtdbSnapshot.val();
+
+        // If RTDB metadata doesn't exist but bundle exists, save metadata to RTDB
+        if (!rtdbMetadata) {
+            logger.info(`Bundle exists but metadata missing in Realtime Database, saving metadata for ${config.displayName}`);
+
+            const metadataUpdate = {
+                lastUpdated: bundleTimestamp,
+                [`${config.bundleType}-count`]: bundleCount,
+                storagePath: config.bundlePath,
+            } as BundleMetadata;
+
+            await rtdbMetadataRef.set(metadataUpdate);
+            logger.info(`Metadata saved to Realtime Database for ${config.displayName} bundle`);
+        }
 
         // Set response headers
         response.set('Content-Type', 'application/octet-stream');
-        response.set('Cache-Control', 'public, max-age=3600');
         response.set('X-Bundle-Timestamp', bundleTimestamp.toString());
         response.set('X-Bundle-Source', 'storage-cache');
 
@@ -51,9 +71,9 @@ export async function serveBundleFromStorage(
 }
 
 export async function generateAndStoreBundle<T>(
-    config: BundleCreationConfig<T>,
+    config: BundleConfig<T>,
     response?: any
-): Promise<void> {
+): Promise<number> {
     try {
         logger.info(`Generating new ${config.displayName} bundle`);
 
@@ -78,15 +98,10 @@ export async function generateAndStoreBundle<T>(
         logger.info(`Retrieved ${snapshot.size} ${config.displayName} sorted by ${config.orderByField || 'default'} for bundle generation`);
 
         // Create bundle
-        const bundle = firestoreAdmin.bundle(config.bundleName);
+        const bundle = firestoreAdmin.bundle(`${config.bundleType}-bundle`);
 
-        // Add documents to the bundle individually
-        snapshot.docs.forEach(doc => {
-            bundle.add(doc);
-        });
-
-        // Add the named query with the snapshot
-        bundle.add(config.namedQueryName, snapshot);
+        // Add the named query with the snapshot (this automatically includes all documents)
+        bundle.add(config.namedQuery, snapshot);
 
         // Build the final bundle
         const bundleBuffer = bundle.build();
@@ -95,39 +110,38 @@ export async function generateAndStoreBundle<T>(
         // Save bundle to Cloud Storage
         const bucket = storage.bucket(BUNDLE_BUCKET);
         const bundleFile = bucket.file(config.bundlePath);
-
+        const count = snapshot.size;
         await bundleFile.save(bundleBuffer, {
             metadata: {
                 contentType: 'application/octet-stream',
-                cacheControl: 'public, max-age=3600',
                 metadata: {
                     timestamp: bundleTimestamp.toString(),
-                    [`${config.countFieldName}Count`]: snapshot.size.toString(),
+                    [`${config.bundleType}-count`]: count.toString(),
                     generatedAt: new Date().toISOString()
                 }
             }
         });
 
-        // Update bundle metadata in Firestore
+        // Update bundle metadata in Realtime Database
         const metadataUpdate = {
             lastUpdated: bundleTimestamp,
-            [config.countFieldName + 'Count']: snapshot.size,
+            [`${config.bundleType}-count`]: count,
             storagePath: config.bundlePath,
-            createdAt: FieldValue.serverTimestamp()
-        };
+        } as BundleMetadata;
 
-        await firestoreAdmin.doc(config.metadataDocPath).set(metadataUpdate);
+        await database.ref(config.metadataDocPath).set(metadataUpdate);
 
         logger.info(`New ${config.displayName} bundle generated and stored with ${snapshot.size} ${config.displayName}`);
 
         // If this was called from HTTP request, serve the bundle
         if (response) {
             response.set('Content-Type', 'application/octet-stream');
-            response.set('Cache-Control', 'public, max-age=3600');
             response.set('X-Bundle-Timestamp', bundleTimestamp.toString());
             response.set('X-Bundle-Source', 'newly-generated');
             response.send(bundleBuffer);
         }
+
+        return count;
 
     } catch (error) {
         logger.error(`Error generating ${config.displayName} bundle:`, error);
@@ -136,7 +150,7 @@ export async function generateAndStoreBundle<T>(
 }
 
 export async function createBundleHandler<T>(
-    config: BundleCreationConfig<T>,
+    config: BundleConfig<T>,
     request: any,
     response: any
 ): Promise<void> {
@@ -145,8 +159,7 @@ export async function createBundleHandler<T>(
 
         // Try to serve from storage first
         const servedFromCache = await serveBundleFromStorage(
-            config.bundlePath,
-            config.displayName,
+            config,
             response
         );
 

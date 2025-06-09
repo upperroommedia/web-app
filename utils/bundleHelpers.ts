@@ -4,7 +4,7 @@ import {
     SUBTITLE_BUNDLE_CONFIG,
     BIBLE_CHAPTER_BUNDLE_CONFIG,
     SUNDAY_HOMILY_BUNDLE_CONFIG
-} from './bundleConfigs';
+} from '../shared/bundleConfigs';
 import { Topic } from '../types/Topic';
 import { List } from '../types/List';
 
@@ -26,24 +26,24 @@ export const getSundayHomilyBundleManager = (): BundleManager<List> => {
 };
 
 // Convenience functions for getting data
-export const getTopicsFromBundle = async (forceRefresh: boolean = false): Promise<Topic[]> => {
+export const getTopicsFromBundle = async (): Promise<Topic[]> => {
     const manager = getTopicBundleManager();
-    return manager.getData(forceRefresh);
+    return manager.getData();
 };
 
-export const getSubtitlesFromBundle = async (forceRefresh: boolean = false): Promise<List[]> => {
+export const getSubtitlesFromBundle = async (): Promise<List[]> => {
     const manager = getSubtitleBundleManager();
-    return manager.getData(forceRefresh);
+    return manager.getData();
 };
 
-export const getBibleChaptersFromBundle = async (forceRefresh: boolean = false): Promise<List[]> => {
+export const getBibleChaptersFromBundle = async (): Promise<List[]> => {
     const manager = getBibleChapterBundleManager();
-    return manager.getData(forceRefresh);
+    return manager.getData();
 };
 
-export const getSundayHomiliesFromBundle = async (forceRefresh: boolean = false): Promise<List[]> => {
+export const getSundayHomiliesFromBundle = async (): Promise<List[]> => {
     const manager = getSundayHomilyBundleManager();
-    return manager.getData(forceRefresh);
+    return manager.getData();
 };
 
 // Convenience functions for cache management

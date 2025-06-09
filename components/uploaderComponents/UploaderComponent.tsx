@@ -184,10 +184,8 @@ const Uploader = (props: UploaderProps) => {
     const fetchData = async () => {
       // fetch subtitles using bundle system
       try {
-        console.log('Loading subtitles from bundle...');
         const subtitlesFromBundle = await getSubtitlesFromBundle();
         setSubtitles(subtitlesFromBundle);
-        console.log(`Loaded ${subtitlesFromBundle.length} subtitles from bundle`);
       } catch (error) {
         console.error('Error loading subtitles from bundle, falling back to Firestore:', error);
         // Fallback to manual fetch

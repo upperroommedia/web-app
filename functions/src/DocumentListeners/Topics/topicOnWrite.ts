@@ -1,19 +1,6 @@
-import { generateAndStoreBundle } from '../../utils/bundleCreationUtils';
-import { TOPIC_BUNDLE_CONFIG } from '../../createTopicBundle';
-import { createBundleDocumentListener, BundleListenerConfig } from '../../utils/bundleListenerUtils';
-import { BUNDLE_METADATA_PATHS, COLLECTION_PATHS } from '../../../../shared/bundleConstants';
+import { createBundleDocumentListener } from '../../utils/bundleListenerUtils';
+import { TOPIC_BUNDLE_CONFIG } from '../../../../shared/bundleConfigs';
 
-const TOPIC_LISTENER_CONFIG: BundleListenerConfig = {
-    collectionPath: COLLECTION_PATHS.TOPICS,
-    bundleRegenerationFunction: () => generateAndStoreBundle(TOPIC_BUNDLE_CONFIG),
-    displayName: 'topic',
-    metadataDocPath: BUNDLE_METADATA_PATHS.TOPICS,
-    shouldTrigger: (): boolean => {
-        // Always trigger for any topic changes
-        return true;
-    }
-};
-
-const topicOnWrite = createBundleDocumentListener(TOPIC_LISTENER_CONFIG);
+const topicOnWrite = createBundleDocumentListener(TOPIC_BUNDLE_CONFIG);
 
 export default topicOnWrite; 

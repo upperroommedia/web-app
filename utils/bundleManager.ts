@@ -1,4 +1,6 @@
 import firestore, { loadBundle, namedQuery, getDocsFromCache, doc, getDoc } from '../firebase/firestore';
+import database, { ref, get } from '../firebase/database';
+import { BundleConfig } from '../shared/bundleConfigs';
 
 export interface BundleMetadata {
     lastUpdated: number;
@@ -7,22 +9,13 @@ export interface BundleMetadata {
     createdAt: any;
 }
 
-export interface BundleConfig {
-    bundleType: string;
-    functionName: string;
-    namedQuery: string;
-    cacheKeyPrefix: string;
-    displayName: string;
-    metadataDocPath: string;
-}
-
 export class BundleManager<T> {
     private static instances: Map<string, BundleManager<any>> = new Map();
     private cachedData: T[] | null = null;
     private lastBundleTimestamp: number | null = null;
     private readonly cacheKey: string;
     private readonly dataCacheKey: string;
-    private readonly config: BundleConfig;
+    private readonly config: BundleConfig<T>;
 
     // Race condition protection
     private loadingPromise: Promise<T[]> | null = null;
@@ -30,9 +23,8 @@ export class BundleManager<T> {
     // Metadata caching to reduce Firestore reads
     private lastMetadataCheck: number | null = null;
     private cachedMetadataTimestamp: number | null = null;
-    private readonly METADATA_CACHE_TTL = 30000; // 30 seconds
 
-    private constructor(config: BundleConfig) {
+    private constructor(config: BundleConfig<T>) {
         this.config = config;
         this.cacheKey = `${config.cacheKeyPrefix}-bundle-timestamp`;
         this.dataCacheKey = `cached-${config.cacheKeyPrefix}`;
@@ -41,11 +33,27 @@ export class BundleManager<T> {
         const storedTimestamp = localStorage.getItem(this.cacheKey);
         if (storedTimestamp) {
             this.lastBundleTimestamp = parseInt(storedTimestamp);
-            console.log(`Initialized ${config.displayName} bundle manager with cached timestamp: ${this.lastBundleTimestamp}`);
+            this.log(`Initialized bundle manager with cached timestamp: ${new Date(this.lastBundleTimestamp).toISOString()}`);
+        }
+
+        // Initialize cached data from localStorage if available
+        const cachedDataJson = localStorage.getItem(this.dataCacheKey);
+        if (cachedDataJson) {
+            try {
+                this.cachedData = JSON.parse(cachedDataJson) as T[];
+                this.log(`Initialized bundle manager with cached data: ${this.cachedData.length} items`);
+            } catch (parseError) {
+                console.error(`[${this.config.displayName}] Error parsing cached data from localStorage during initialization:`, parseError);
+                localStorage.removeItem(this.dataCacheKey);
+            }
         }
     }
 
-    public static getInstance<T>(config: BundleConfig): BundleManager<T> {
+    private log(message: string): void {
+        console.log(`[BundleManager: ${this.config.displayName}] ${message}`);
+    }
+
+    public static getInstance<T>(config: BundleConfig<T>): BundleManager<T> {
         if (!BundleManager.instances.has(config.bundleType)) {
             BundleManager.instances.set(config.bundleType, new BundleManager<T>(config));
         }
@@ -71,13 +79,14 @@ export class BundleManager<T> {
 
     private async fetchBundleFromServer(): Promise<{ buffer: ArrayBuffer; timestamp: number; source: string }> {
         const bundleUrl = this.getBundleUrl();
-        console.log(`Fetching ${this.config.displayName} bundle from: ${bundleUrl}`);
+        this.log(`Fetching bundle from: ${bundleUrl}`);
 
         const response = await fetch(bundleUrl, {
             method: 'GET',
             headers: {
                 'Accept': 'application/octet-stream',
             },
+            cache: 'no-cache' // Disable browser HTTP cache to force fresh bundle
         });
 
         if (!response.ok) {
@@ -87,7 +96,7 @@ export class BundleManager<T> {
         const bundleTimestamp = parseInt(response.headers.get('X-Bundle-Timestamp') || Date.now().toString());
         const bundleSource = response.headers.get('X-Bundle-Source') || 'unknown';
 
-        console.log(`${this.config.displayName} bundle fetched from: ${bundleSource} (timestamp: ${bundleTimestamp})`);
+        this.log(`bundle fetched from: ${bundleSource} (timestamp: ${new Date(bundleTimestamp).toISOString()})`);
 
         return {
             buffer: await response.arrayBuffer(),
@@ -98,15 +107,15 @@ export class BundleManager<T> {
 
     private async loadBundleIntoFirestore(bundleBuffer: ArrayBuffer): Promise<void> {
         try {
-            console.log(`Loading ${this.config.displayName} bundle into Firestore (${bundleBuffer.byteLength} bytes)`);
+            this.log(`Loading bundle into Firestore (${bundleBuffer.byteLength} bytes)`);
             const loadTask = loadBundle(firestore, bundleBuffer);
 
             // Wait for the bundle to load
             const progress = await loadTask;
-            console.log(`${this.config.displayName} bundle loaded successfully. Documents loaded: ${progress.documentsLoaded}, Bytes loaded: ${progress.bytesLoaded}`);
+            this.log(`bundle loaded successfully. Documents loaded: ${progress.documentsLoaded}, Bytes loaded: ${progress.bytesLoaded}`);
 
         } catch (error) {
-            console.error(`Error loading ${this.config.displayName} bundle into Firestore:`, error);
+            console.error(`[${this.config.displayName}] Error loading bundle into Firestore:`, error);
             throw error;
         }
     }
@@ -119,134 +128,99 @@ export class BundleManager<T> {
                 throw new Error(`Named query "${this.config.namedQuery}" not found in bundle`);
             }
 
-            console.log(`Executing named query from ${this.config.displayName} bundle...`);
+            this.log(`Executing named query from bundle...`);
 
             // Execute the query against the cache
             const snapshot = await getDocsFromCache(query);
             const data = snapshot.docs.map(doc => {
+                this.log(`doc data: ${JSON.stringify(doc.data().title)}`);
                 const docData = doc.data() as T;
                 return { ...docData, id: doc.id };
             });
 
-            console.log(`Retrieved ${data.length} ${this.config.displayName} from bundle cache`);
+            this.log(`Retrieved ${data.length} from bundle cache`);
             return data;
 
         } catch (error) {
-            console.error(`Error getting ${this.config.displayName} from bundle:`, error);
+            console.error(`[${this.config.displayName}] Error getting data from bundle:`, error);
             throw error;
         }
     }
 
     private async checkBundleMetadata(): Promise<number | null> {
         try {
-            const now = Date.now();
+            this.log(`Checking bundle metadata from Realtime Database...`);
 
-            // Use cached metadata if it's still fresh
-            if (this.lastMetadataCheck &&
-                this.cachedMetadataTimestamp !== null &&
-                (now - this.lastMetadataCheck) < this.METADATA_CACHE_TTL) {
-                console.log(`Using cached metadata for ${this.config.displayName} (${Math.round((now - this.lastMetadataCheck) / 1000)}s old)`);
-                return this.cachedMetadataTimestamp;
-            }
+            const metadataRef = ref(database, this.config.metadataDocPath);
+            const snapshot = await get(metadataRef);
+            const metadata = snapshot.val();
 
-            console.log(`Checking ${this.config.displayName} bundle metadata from Firestore...`);
-
-            const metadataDoc = await getDoc(doc(firestore, this.config.metadataDocPath));
-
-            if (metadataDoc.exists()) {
-                const metadata = metadataDoc.data() as BundleMetadata;
+            if (metadata) {
                 const serverTimestamp = metadata.lastUpdated;
 
-                // Cache the metadata result
-                this.lastMetadataCheck = now;
-                this.cachedMetadataTimestamp = serverTimestamp;
-
-                console.log(`${this.config.displayName} bundle metadata: server timestamp ${serverTimestamp}, cached timestamp ${this.lastBundleTimestamp}`);
+                this.log(`bundle metadata: server timestamp ${new Date(serverTimestamp).toISOString()}, cached timestamp ${new Date(this.lastBundleTimestamp || 0).toISOString()}`);
                 return serverTimestamp;
             } else {
-                // Cache the "not found" result to avoid repeated checks
-                this.lastMetadataCheck = now;
-                this.cachedMetadataTimestamp = null;
-
-                console.log(`${this.config.displayName} bundle metadata document does not exist`);
+                this.log(`bundle metadata does not exist`);
                 return null;
             }
         } catch (error) {
             console.error(`Error checking ${this.config.displayName} bundle metadata:`, error);
-
-            // Don't cache error results, allow retry
             return null;
         }
     }
 
-    private shouldFetchNewBundle(serverTimestamp: number): boolean {
+    private shouldFetchNewBundle(serverTimestamp: number | null): boolean {
         // Always fetch if we don't have a cached timestamp
-        if (!this.lastBundleTimestamp) {
-            console.log(`No cached timestamp for ${this.config.displayName}, fetching new bundle`);
+        if (!this.lastBundleTimestamp || !serverTimestamp || !this.cachedData) {
+            if (!this.lastBundleTimestamp) {
+                this.log(`bundle is not initialized, fetching new bundle`);
+            } else if (!serverTimestamp) {
+                this.log(`bundle has no server timestamp, fetching new bundle`);
+            } else if (!this.cachedData) {
+                this.log(`bundle has no cached data, fetching new bundle`);
+            }
             return true;
         }
 
         // Fetch if server has a newer version
         const isNewer = serverTimestamp > this.lastBundleTimestamp;
         if (isNewer) {
-            console.log(`Server ${this.config.displayName} bundle is newer (${serverTimestamp} > ${this.lastBundleTimestamp}), fetching update`);
+            this.log(`Server bundle is newer (${serverTimestamp} > ${this.lastBundleTimestamp}), fetching update`);
         } else {
-            console.log(`${this.config.displayName} bundle is up to date (${serverTimestamp} <= ${this.lastBundleTimestamp})`);
+            this.log(`bundle is up to date (${serverTimestamp} <= ${this.lastBundleTimestamp})`);
         }
 
         return isNewer;
     }
 
-    public async getData(forceRefresh: boolean = false): Promise<T[]> {
+    public async getData(): Promise<T[]> {
         try {
             // If already loading and not forcing refresh, return the existing promise
-            if (this.loadingPromise && !forceRefresh) {
-                console.log(`${this.config.displayName} bundle already loading, waiting for existing request...`);
+            if (this.loadingPromise) {
+                this.log(`bundle already loading, waiting for existing request...`);
                 return this.loadingPromise;
-            }
-
-            // If forcing refresh, skip metadata check and fetch new bundle
-            if (forceRefresh) {
-                console.log(`Force refresh requested for ${this.config.displayName} bundle`);
-                this.loadingPromise = this.loadFreshBundle();
-                const result = await this.loadingPromise;
-                this.loadingPromise = null;
-                return result;
             }
 
             // Check metadata first (with caching)
             const serverTimestamp = await this.checkBundleMetadata();
-
+            this.log(`Server timestamp for bundle: ${serverTimestamp}`);
             // If no metadata exists, fetch bundle to create it
-            if (serverTimestamp === null) {
-                console.log(`No metadata found for ${this.config.displayName}, fetching bundle...`);
+            if (this.shouldFetchNewBundle(serverTimestamp)) {
+                this.log(`No metadata found, fetching bundle...`);
                 this.loadingPromise = this.loadFreshBundle();
                 const result = await this.loadingPromise;
                 this.loadingPromise = null;
                 return result;
             }
-
-            // Check if we need to update based on metadata
-            const needsUpdate = this.shouldFetchNewBundle(serverTimestamp);
-
-            // If we have cached data and it's up to date, use it
-            if (this.cachedData && !needsUpdate) {
-                console.log(`Using cached ${this.config.displayName} from memory (${this.cachedData.length} items) - bundle is up to date`);
-                return this.cachedData;
-            }
-
-            // Need to fetch new bundle
-            if (needsUpdate) {
-                console.log(`${this.config.displayName} bundle needs update, fetching from server...`);
+            if (!this.cachedData) {
+                this.log(`No cached data, fetching bundle...`);
                 this.loadingPromise = this.loadFreshBundle();
                 const result = await this.loadingPromise;
                 this.loadingPromise = null;
                 return result;
-            } else {
-                // This shouldn't happen based on the logic above, but handle gracefully
-                console.log(`${this.config.displayName} bundle unchanged, using existing cache`);
-                return this.cachedData || [];
             }
+            return this.cachedData;
 
         } catch (error) {
             // Clear loading promise on error
@@ -256,7 +230,7 @@ export class BundleManager<T> {
 
             // Fallback to cached data if available
             if (this.cachedData) {
-                console.log(`Using memory cache as fallback (${this.cachedData.length} ${this.config.displayName})`);
+                this.log(`Using memory cache as fallback (${this.cachedData.length} items)`);
                 return this.cachedData;
             }
 
@@ -266,7 +240,7 @@ export class BundleManager<T> {
                 try {
                     const cachedData = JSON.parse(cachedDataJson) as T[];
                     this.cachedData = cachedData;
-                    console.log(`Using localStorage cache as fallback (${cachedData.length} ${this.config.displayName})`);
+                    this.log(`Using localStorage cache as fallback (${cachedData.length} items)`);
                     return cachedData;
                 } catch (parseError) {
                     console.error(`Error parsing cached ${this.config.displayName} from localStorage:`, parseError);
@@ -303,7 +277,7 @@ export class BundleManager<T> {
             if (dataString.length < 1024 * 1024) { // 1MB limit
                 localStorage.setItem(this.dataCacheKey, dataString);
             } else {
-                console.log(`${this.config.displayName} data too large for localStorage (${Math.round(dataString.length / 1024)}KB), skipping`);
+                this.log(`data too large for localStorage (${Math.round(dataString.length / 1024)}KB), skipping`);
                 localStorage.removeItem(this.dataCacheKey);
             }
         } catch (e) {
@@ -311,7 +285,7 @@ export class BundleManager<T> {
             localStorage.removeItem(this.dataCacheKey);
         }
 
-        console.log(`Successfully loaded ${data.length} ${this.config.displayName} from ${source} bundle`);
+        this.log(`Successfully loaded ${data.length} items from ${source} bundle`);
         return data;
     }
 
@@ -323,7 +297,7 @@ export class BundleManager<T> {
         this.cachedMetadataTimestamp = null;
         localStorage.removeItem(this.cacheKey);
         localStorage.removeItem(this.dataCacheKey);
-        console.log(`${this.config.displayName} bundle cache cleared`);
+        this.log(`bundle cache cleared`);
     }
 
     private async validateBundleConsistency(bundleTimestamp: number): Promise<void> {
@@ -386,15 +360,15 @@ export class BundleManager<T> {
 
             const serverTimestamp = await this.checkBundleMetadata();
             if (serverTimestamp && this.shouldFetchNewBundle(serverTimestamp)) {
-                console.log(`Preloading ${this.config.displayName} bundle in background...`);
+                this.log(`Preloading bundle in background...`);
                 this.loadingPromise = this.loadFreshBundle();
                 await this.loadingPromise;
                 this.loadingPromise = null;
-                console.log(`${this.config.displayName} bundle preloaded successfully`);
+                this.log(`bundle preloaded successfully`);
             }
         } catch (error) {
             this.loadingPromise = null;
-            console.log(`Background preload failed for ${this.config.displayName}:`, error);
+            this.log(`Background preload failed: ${error}`);
             // Don't throw - this is a background operation
         }
     }
