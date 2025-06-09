@@ -2,7 +2,6 @@ import TextField from '@mui/material/TextField';
 import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
-import CircularProgress from '@mui/material/CircularProgress';
 import { FunctionComponent, Dispatch, SetStateAction, memo, useState, useEffect } from 'react';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
