@@ -1,8 +1,6 @@
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
-import Alert from '@mui/material/Alert';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { doc, updateDoc, collection, writeBatch } from '../firebase/firestore';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
@@ -44,8 +42,6 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
 }: ManageUploadsPopupProps) => {
   const { user } = useAuth();
   const [listArray, setListArray] = useState<SermonList[]>([]);
-  const [isFixingCounts, setIsFixingCounts] = useState(false);
-  const [countValidationIssue, setCountValidationIssue] = useState<string | null>(null);
   const [listArrayFirestore, loading, error] = useCollectionData(
     collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter)
   );
@@ -54,56 +50,12 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
     if (listArrayFirestore) {
       setListArray(listArrayFirestore);
 
-      // Validate counts when data loads
-      const actualNumberOfLists = listArrayFirestore.length;
-      const actualNumberOfListsUploadedTo = listArrayFirestore.filter(
-        (list) => list.uploadStatus?.status === uploadStatus.UPLOADED
-      ).length;
 
-      const expectedNumberOfLists = sermon.numberOfLists || 0;
-      const expectedNumberOfListsUploadedTo = sermon.numberOfListsUploadedTo || 0;
 
-      if (
-        actualNumberOfLists !== expectedNumberOfLists ||
-        actualNumberOfListsUploadedTo !== expectedNumberOfListsUploadedTo
-      ) {
-        setCountValidationIssue(
-          `Count mismatch detected! Expected: ${expectedNumberOfListsUploadedTo}/${expectedNumberOfLists}, Actual: ${actualNumberOfListsUploadedTo}/${actualNumberOfLists}`
-        );
-      } else {
-        setCountValidationIssue(null);
-      }
+
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(listArrayFirestore), sermon.numberOfLists, sermon.numberOfListsUploadedTo]);
-
-  const fixSermonCounts = async () => {
-    if (!listArray) return;
-
-    setIsFixingCounts(true);
-    try {
-      const actualNumberOfLists = listArray.length;
-      const actualNumberOfListsUploadedTo = listArray.filter(
-        (list) => list.uploadStatus?.status === uploadStatus.UPLOADED
-      ).length;
-
-      const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-      await updateDoc(sermonRef, {
-        numberOfLists: actualNumberOfLists,
-        numberOfListsUploadedTo: actualNumberOfListsUploadedTo,
-      });
-
-      setCountValidationIssue(null);
-      // eslint-disable-next-line no-console
-      console.log(`Fixed counts for sermon ${sermon.id}: ${actualNumberOfListsUploadedTo}/${actualNumberOfLists}`);
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Error fixing sermon counts:', error);
-      alert('Failed to fix sermon counts. Please try again.');
-    } finally {
-      setIsFixingCounts(false);
-    }
-  };
+  }, [JSON.stringify(listArrayFirestore)]);
 
   const listItemsNotUploaded = listArray.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED);
   const listItemsUploaded = listArray.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED);
@@ -240,23 +192,12 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
           />
           <Typography variant="h6">{sermon.title}</Typography>
           <CountOfUploadsCircularProgress
-            sermonNumberOfListsUploadedTo={sermon.numberOfListsUploadedTo}
-            sermonNumberOfLists={sermon.numberOfLists}
+            sermonNumberOfListsUploadedTo={listArrayFirestore?.filter(
+              (list) => list.uploadStatus?.status === uploadStatus.UPLOADED
+            ).length || 0}
+            sermonNumberOfLists={listArrayFirestore?.length || 0}
           />
         </Box>
-
-        {countValidationIssue && (
-          <Alert
-            severity="warning"
-            action={
-              <Button color="inherit" size="small" onClick={fixSermonCounts} disabled={isFixingCounts}>
-                {isFixingCounts ? 'Fixing...' : 'Fix Counts'}
-              </Button>
-            }
-          >
-            {countValidationIssue}
-          </Alert>
-        )}
 
         {error ? (
           <Typography>{`Error: ${error.message}`}</Typography>
