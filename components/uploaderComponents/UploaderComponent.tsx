@@ -106,6 +106,7 @@ const Uploader = (props: UploaderProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
+  const [subtitlesLoading, setSubtitlesLoading] = useState(true);
   const [formErrors, setFormErrors] = useState<FormErrors>(getFormErrorInitialState());
 
   // Bible Study Helpers
@@ -184,6 +185,7 @@ const Uploader = (props: UploaderProps) => {
     const fetchData = async () => {
       // fetch subtitles using bundle system
       try {
+        setSubtitlesLoading(true);
         const subtitlesFromBundle = await getSubtitlesFromBundle();
         setSubtitles(subtitlesFromBundle);
       } catch (error) {
@@ -200,6 +202,8 @@ const Uploader = (props: UploaderProps) => {
             return list;
           })
         );
+      } finally {
+        setSubtitlesLoading(false);
       }
 
       // fetch latest list
@@ -500,6 +504,7 @@ const Uploader = (props: UploaderProps) => {
               subtitles={subtitles}
               subtitleError={formErrors?.subtitle}
               setSubtitleError={setSubtitleError}
+              isLoading={subtitlesLoading}
             />
             <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
           </Box>
