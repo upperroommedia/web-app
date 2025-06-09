@@ -2,6 +2,7 @@ import TextField from '@mui/material/TextField';
 import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
+import CircularProgress from '@mui/material/CircularProgress';
 import { FunctionComponent, Dispatch, SetStateAction, memo, useState, useEffect } from 'react';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
@@ -19,6 +20,7 @@ interface SubtitleSelectorProps {
   subtitles: List[];
   subtitleError?: UploaderFieldError;
   setSubtitleError: (error: boolean, message: string) => void;
+  isLoading?: boolean;
 }
 
 const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: SubtitleSelectorProps) => {
@@ -61,6 +63,7 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
         options={filteredSubtitles}
         // Disable Material-UI's built-in filtering to preserve our search order
         filterOptions={(options) => options}
+        loading={props.isLoading}
         onInputChange={async (_, newInputValue) => {
           const hasQuery = newInputValue.trim().length > 0;
           setIsSearching(hasQuery);
