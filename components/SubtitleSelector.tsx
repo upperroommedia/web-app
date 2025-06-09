@@ -147,15 +147,33 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
         isOptionEqualToValue={(option, value) =>
           value.name === undefined || option.name === undefined || option.id === value.id
         }
-        renderInput={(params) => (
-          <TextField
-            {...params}
-            required
-            error={showError(props.subtitleError)}
-            helperText={getErrorMessage(props.subtitleError)}
-            label="Subtitle"
-          />
-        )}
+        renderInput={(params) => {
+          const selectedSubtitle = props.subtitles.find((subtitle) => subtitle.name === props.subtitle);
+          
+          return (
+            <TextField
+              {...params}
+              required
+              error={showError(props.subtitleError)}
+              helperText={getErrorMessage(props.subtitleError)}
+              label="Subtitle"
+              InputProps={{
+                ...params.InputProps,
+                startAdornment: selectedSubtitle && (
+                  <AvatarWithDefaultImage
+                    defaultImageURL="/user.png"
+                    altName={selectedSubtitle.name}
+                    width={30}
+                    height={30}
+                    borderRadius={5}
+                    image={selectedSubtitle.images?.find((image) => image.type === 'square')}
+                    sx={{ marginRight: 1 }}
+                  />
+                ),
+              }}
+            />
+          );
+        }}
       />
     </Box>
   );
