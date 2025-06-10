@@ -116,7 +116,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
               props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
             }
           }}
-          id="list-selector-input"
+          id={`${props.listType}-list-selector-input`}
           options={getListUnion(value, allListArray)}
           renderTags={(list, _) => {
             return list.map((list) => (
