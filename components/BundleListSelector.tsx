@@ -80,8 +80,11 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
         try {
           console.log('Loading topics from bundle...');
           const bundleManager = BundleManager.getInstance<Topic>(TOPIC_BUNDLE_CONFIG);
-          const topics = await bundleManager.getData();
-          
+          let topics = await bundleManager.getData();
+          // update listId to id so that the list selector can use the listId
+          topics = topics.filter((topic) => topic.listId !== undefined);
+          topics = topics.map((topic) => ({ ...topic, id: topic.listId } as Topic));
+         
           console.log(`Loaded ${topics.length} topics from bundle`);
           
           // Convert topics to the format expected by ListSelector
