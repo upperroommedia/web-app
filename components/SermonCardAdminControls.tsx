@@ -11,7 +11,7 @@ import firestore, {
 } from '../firebase/firestore';
 
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
-import { createFunction, createFunctionV2 } from '../utils/createFunction';
+import { createFunctionV2 } from '../utils/createFunction';
 
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
@@ -84,7 +84,7 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   }, [sermon.id, sermon.status]);
 
   const deleteFromSubsplashErrorThrowable = useCallback(async () => {
-    const deleteFromSubsplashCall = createFunction<string, void>('deleteFromSubsplash');
+    const deleteFromSubsplashCall = createFunctionV2<string, void>('deletefromsubsplash');
     try {
       setIsUploadingToSubsplash(true);
       await deleteFromSubsplashCall(sermon.subsplashId!);

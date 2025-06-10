@@ -48,7 +48,7 @@ import { updateSubsplashTag } from './Scrapers/updateSubsplashTag';
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
 exports.editSoundCloudSermon = editSoundCloudSermon;
-exports.deleteFromSubsplash = deleteFromSubsplash;
+exports.deletefromsubsplash = deleteFromSubsplash;
 exports.setuserrole = setuserrole;
 exports.addintrooutrotaskhandler = addintrooutrotaskhandler;
 exports.addintrooutrotaskgenerator = addintrooutrotaskgenerator;
