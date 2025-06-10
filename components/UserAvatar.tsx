@@ -49,7 +49,7 @@ export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar
     return (
       <Avatar sx={{ ...sx, bgcolor: stringToColor(displayName), fontSize }} {...props}>
         {user?.photoURL ? (
-          <Image src={user.photoURL} alt={`Image for ${displayName}`} fill></Image>
+          <Image src={user.photoURL} alt={`Image for ${displayName}`} fill sizes="40px"></Image>
         ) : (
           <Typography
             sx={{
@@ -66,7 +66,7 @@ export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar
   }
   return (
     <Avatar sx={{ ...sx, bgcolor: 'white' }} {...props}>
-      <Image src={'/user.png'} alt={`Default User Image`} fill></Image>
+      <Image src={'/user.png'} alt={`Default User Image`} fill sizes="40px"></Image>
       {children}
     </Avatar>
   );
