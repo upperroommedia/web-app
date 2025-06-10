@@ -109,7 +109,7 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
             }
           }
         }}
-        id="list-input"
+        id="subtitle-selector-input"
         renderTags={(list, _) => {
           return list.map((list) => (
             <Chip

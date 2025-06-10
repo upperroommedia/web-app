@@ -719,7 +719,8 @@ const Uploader = (props: UploaderProps) => {
                           setTrimStartTime(0);
                           setUseYouTubeUrl((prevValue) => !prevValue);
                         }}
-                        inputProps={{ 'aria-label': 'controlled' }}
+                        name="useYouTubeUrl"
+                        inputProps={{ 'aria-label': 'Upload from Youtube Url toggle' }}
                       />
                     }
                     label="Upload from Youtube Url"

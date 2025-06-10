@@ -178,7 +178,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
               props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
             }
           }}
-          id="list-input"
+          id="bundle-list-selector-input"
           options={getListUnion(value, allListArray)}
           renderTags={(list, _) => {
             return list.map((list) => (
