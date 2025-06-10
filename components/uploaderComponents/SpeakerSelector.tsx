@@ -141,17 +141,23 @@ function SpeakerSelector({
                 listConverter
               );
               const querySnapshot = await getDocs(q);
-              const list = querySnapshot.docs[0].data();
-              setSermonList((oldSermonList) => {
-                if (
-                  oldSermonList.find((existingSermon) => {
-                    return existingSermon.id === list.id;
-                  })
-                ) {
-                  return oldSermonList;
-                }
-                return [...oldSermonList, list];
-              });
+              
+              if (querySnapshot.docs.length > 0) {
+                const list = querySnapshot.docs[0].data();
+                setSermonList((oldSermonList) => {
+                  if (
+                    oldSermonList.find((existingSermon) => {
+                      return existingSermon.id === list.id;
+                    })
+                  ) {
+                    return oldSermonList;
+                  }
+                  return [...oldSermonList, list];
+                });
+              } else {
+                console.warn(`No list found with id: ${details.option.listId}`);
+                setSpeakerHasNoListPopup(true);
+              }
             }
           }
         }}
