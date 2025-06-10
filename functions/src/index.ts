@@ -42,6 +42,8 @@ import subtitleListOnWrite from './DocumentListeners/Lists/subtitleListOnWrite';
 import { createBibleChapterBundle } from './createBibleChapterBundle';
 import { createSundayHomilyBundle } from './createSundayHomilyBundle';
 import { bibleChapterListOnWrite, sundayHomilyListOnWrite } from './DocumentListeners/Lists/taggedListOnWrite';
+import { fixPhantomListItems } from './Scrapers/fixPhantomListItems';
+import { updateSubsplashTag } from './Scrapers/updateSubsplashTag';
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -86,3 +88,5 @@ exports.createbiblechapterbundle = createBibleChapterBundle;
 exports.createsundayhomilybundle = createSundayHomilyBundle;
 exports.biblechapterlistonwrite = bibleChapterListOnWrite;
 exports.sundayhomilylistonwrite = sundayHomilyListOnWrite;
+exports.fixphantomlistitems = fixPhantomListItems;
+exports.updatesubsplashtag = updateSubsplashTag;
