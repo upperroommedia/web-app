@@ -366,6 +366,15 @@ const Uploader = (props: UploaderProps) => {
     [setSermon]
   );
 
+  // Convert selected topic lists to sermon.topics string array
+  useEffect(() => {
+    const topicNames = sermonList
+      .filter((list) => list.type === ListType.TOPIC_LIST)
+      .map((list) => list.name);
+    
+    updateSermon('topics', topicNames);
+  }, [sermonList, updateSermon]);
+
   const handleDateChange = useCallback(
     (newValue: Date) => {
       setDate(newValue);
