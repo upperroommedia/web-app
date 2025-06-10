@@ -14,12 +14,16 @@ import { BundleManager } from '../utils/bundleManager';
 import { LocalSearch } from '../utils/localSearch';
 import { Topic } from '../types/Topic';
 import { TOPIC_BUNDLE_CONFIG } from '../shared/bundleConfigs';
+import { UploaderFieldError } from '../context/types';
+import { getErrorMessage, showError } from './uploaderComponents/utils';
 
 interface BundleListSelectorProps {
   sermonList: List[];
   setSermonList: Dispatch<SetStateAction<List[]>>;
   listType?: ListType;
   subtitle?: List;
+  error?: UploaderFieldError;
+  setError?: (error: boolean, message: string) => void;
 }
 
 const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: BundleListSelectorProps) => {
@@ -80,8 +84,11 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
         try {
           console.log('Loading topics from bundle...');
           const bundleManager = BundleManager.getInstance<Topic>(TOPIC_BUNDLE_CONFIG);
-          const topics = await bundleManager.getData();
-          
+          let topics = await bundleManager.getData();
+          // update listId to id so that the list selector can use the listId
+          topics = topics.filter((topic) => topic.listId !== undefined);
+          topics = topics.map((topic) => ({ ...topic, id: topic.listId } as Topic));
+         
           console.log(`Loaded ${topics.length} topics from bundle`);
           
           // Convert topics to the format expected by ListSelector
@@ -155,6 +162,13 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           }}
           // Show more options before scrolling
           limitTags={3}
+          onBlur={() => {
+            // Mark field as touched for error display
+            if (props.setError && props.listType === ListType.TOPIC_LIST) {
+              const hasTopics = value.length > 0;
+              props.setError(!hasTopics, hasTopics ? '' : 'You must select at least one topic');
+            }
+          }}
           onChange={async (_, newValue, reason) => {
             if (props.listType === ListType.CATEGORY_LIST && newValue.length > 1) {
               newValue = newValue.slice(1);
@@ -224,7 +238,9 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           renderInput={(params) => (
             <TextField
               {...params}
-              required={props.listType === ListType.CATEGORY_LIST}
+              required={props.listType === ListType.TOPIC_LIST}
+              error={showError(props.error)}
+              helperText={getErrorMessage(props.error)}
               label={
                 props.listType
                   ? props.listType.charAt(0).toUpperCase() + props.listType.split('-')[0].slice(1)
