@@ -64,6 +64,7 @@ const fieldsToValidate = [
   'bibleChapter',
   'sundayHomiliesMonth',
   'durationSeconds',
+  'topics',
 ] as const;
 
 type FormErrors = {
@@ -86,6 +87,7 @@ const Uploader = (props: UploaderProps) => {
               message: 'You must select an audio source before uploading',
               initialState: true,
             },
+            topics: { error: true, message: 'You must select at least one topic', initialState: true },
           }
         : {},
     [props.existingSermon]
@@ -299,6 +301,13 @@ const Uploader = (props: UploaderProps) => {
   const setSpeakerError = useCallback(
     (error: boolean, message: string) => {
       setFormErrorCallback('speakers', error, message);
+    },
+    [setFormErrorCallback]
+  );
+
+  const setTopicsError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('topics', error, message, initialState);
     },
     [setFormErrorCallback]
   );
@@ -574,7 +583,13 @@ const Uploader = (props: UploaderProps) => {
             setSpeakerError={setSpeakerError}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <BundleListSelector sermonList={sermonList} setSermonList={setSermonList} listType={ListType.TOPIC_LIST} />
+            <BundleListSelector 
+              sermonList={sermonList} 
+              setSermonList={setSermonList} 
+              listType={ListType.TOPIC_LIST}
+              error={formErrors?.topics}
+              setError={setTopicsError}
+            />
           </div>
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector sermonList={sermonList} setSermonList={setSermonList} />
