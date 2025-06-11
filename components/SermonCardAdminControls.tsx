@@ -11,13 +11,14 @@ import firestore, {
 } from '../firebase/firestore';
 
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
-import { createFunction, createFunctionV2 } from '../utils/createFunction';
+import { createFunctionV2 } from '../utils/createFunction';
 
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { sermonConverter } from '../types/Sermon';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
 import { sermonListConverter } from '../types/SermonList';
+import { DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType } from '../functions/src/deleteFromSubsplash';
 
 export interface AdminControlsProps {
   sermon: Sermon;
@@ -84,10 +85,10 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   }, [sermon.id, sermon.status]);
 
   const deleteFromSubsplashErrorThrowable = useCallback(async () => {
-    const deleteFromSubsplashCall = createFunction<string, void>('deleteFromSubsplash');
+    const deleteFromSubsplashCall = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>('deletefromsubsplash');
     try {
       setIsUploadingToSubsplash(true);
-      await deleteFromSubsplashCall(sermon.subsplashId!);
+      await deleteFromSubsplashCall({ subsplashId: sermon.subsplashId! });
       await handleFirestoreDeleteFromSubsplash();
       setIsUploadingToSubsplash(false);
     } catch (error: any) {

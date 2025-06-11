@@ -47,15 +47,12 @@ service cloud.firestore {
       allow write: if (canUpload());
     }
     
-  // Allow read access for admins
+    
+    // Sermon permissions: Admins have full access, uploaders/publishers can manage their own sermons
     match /sermons/{sermonId} {
       allow read, write: if isAdmin();
-    }
-    
-    // Allow read access for uploaders to their own sermons
-    match /sermons/{sermonId} {
-      allow read: if resource == null || (canUpload() && resource.data.uploaderId == request.auth.uid);
-      allow update, delete: if canUpload() && resource.data.uploaderId == request.auth.uid && resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED';
+      allow read, update: if resource == null || (canUpload() && resource.data.uploaderId == request.auth.uid);
+      allow delete: if canUpload() && resource.data.uploaderId == request.auth.uid && (resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED');
       allow create: if canUpload();
     }
 
