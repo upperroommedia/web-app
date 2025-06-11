@@ -7,7 +7,6 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'reac
 import addNewList from '../pages/api/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
-import isEqual from 'lodash/isEqual';
 import MenuItem from '@mui/material/MenuItem';
 import Box from '@mui/material/Box';
 import InputLabel from '@mui/material/InputLabel';
@@ -17,6 +16,25 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { EditSubsplashListInputType, EditSubsplashListOutputType } from '../functions/src/editSubsplashList';
 import { createFunctionV2 } from '../utils/createFunction';
 import { createEmptyList, emptyList, List, ListType, OverflowBehavior } from '../types/List';
+
+// Custom utility function to compare arrays of ImageType objects
+const areImageArraysEqual = (arr1?: ImageType[], arr2?: ImageType[]): boolean => {
+  if (!arr1 && !arr2) return true;
+  if (!arr1 || !arr2) return false;
+  if (arr1.length !== arr2.length) return false;
+  
+  // Sort both arrays by type and id for consistent comparison
+  const sorted1 = [...arr1].sort((a, b) => `${a.type}-${a.id}`.localeCompare(`${b.type}-${b.id}`));
+  const sorted2 = [...arr2].sort((a, b) => `${a.type}-${a.id}`.localeCompare(`${b.type}-${b.id}`));
+  
+  return sorted1.every((img1, index) => {
+    const img2 = sorted2[index];
+    return img1.id === img2.id && 
+           img1.type === img2.type && 
+           img1.downloadLink === img2.downloadLink &&
+           img1.name === img2.name;
+  });
+};
 
 interface NewListPopupProps {
   newListPopup: boolean;
@@ -124,7 +142,7 @@ const NewListPopup = (props: NewListPopupProps) => {
           variant="contained"
           disabled={
             (props.listArray.map((list) => list.name.toLowerCase()).includes(newList.name.toLowerCase()) &&
-              isEqual(props.existingList?.images, newList.images)) ||
+              areImageArraysEqual(props.existingList?.images, newList.images)) ||
             newList.name === '' ||
             newList.images.length === 0 ||
             submitting

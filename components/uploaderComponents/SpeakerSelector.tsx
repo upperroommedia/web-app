@@ -9,9 +9,8 @@ import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import { List, ListType, listConverter } from '../../types/List';
 import dynamic from 'next/dynamic';
-import { sanitize } from 'dompurify';
-import algoliasearch from 'algoliasearch';
-import { createInMemoryCache } from '@algolia/cache-in-memory';
+import DOMPurify from 'dompurify';
+import { algoliasearch, SearchResponse } from 'algoliasearch';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { getErrorMessage, showError } from './utils';
@@ -42,23 +41,28 @@ interface SpeakerSelectorProps {
 
 const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
-        responsesCache: createInMemoryCache(),
-        requestsCache: createInMemoryCache({ serializable: false }),
-      })
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
-const speakersIndex = client?.initIndex('speakers');
 
-export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number) => {
+export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number): Promise<AlgoliaSpeaker[]> => {
   const speakers: AlgoliaSpeaker[] = [];
-  if (speakersIndex) {
-    const response = await speakersIndex.search<AlgoliaSpeaker>(query, {
-      hitsPerPage,
-      page,
-    });
-    response.hits.forEach((hit) => {
-      speakers.push(hit);
-    });
+  if (client) {
+    try {
+      const response: SearchResponse<AlgoliaSpeaker> = await client.searchSingleIndex({
+        indexName: 'speakers',
+        searchParams: {
+          query,
+          hitsPerPage,
+          page,
+        }
+      });
+      response.hits.forEach((hit) => {
+        speakers.push(hit);
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Search error:', error);
+    }
   }
   return speakers;
 };
@@ -155,6 +159,7 @@ function SpeakerSelector({
                   return [...oldSermonList, list];
                 });
               } else {
+                // eslint-disable-next-line no-console
                 console.warn(`No list found with id: ${details.option.listId}`);
                 setSpeakerHasNoListPopup(true);
               }
@@ -218,7 +223,7 @@ function SpeakerSelector({
               sx={{ marginRight: '15px' }}
             />
             {option._highlightResult && sermonSpeakers?.find((s) => s.id === option?.id) === undefined ? (
-              <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+                                    <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
             ) : (
               <div>{option.name}</div>
             )}

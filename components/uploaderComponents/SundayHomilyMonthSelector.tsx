@@ -56,14 +56,12 @@ function SundayHomilyMonthSelector({
       try {
         // Load all sunday homilies from bundle if not already loaded
         if (allSundayHomilies.length === 0) {
-          console.log('Loading sunday homilies from bundle...');
           const homiliesFromBundle = await getSundayHomiliesFromBundle();
           const typedHomilies = homiliesFromBundle as SundayHomiliesMonthList[];
           setAllSundayHomilies(typedHomilies);
           // Initialize local search
           const search = new LocalSearch(typedHomilies, 'name', 'sunday homilies');
           setSundayHomilySearch(search);
-          console.log(`Loaded ${homiliesFromBundle.length} sunday homilies from bundle`);
         }
 
         // Filter by year locally
@@ -72,6 +70,7 @@ function SundayHomilyMonthSelector({
         );
         setSundayHomiliesMonths(filteredByYear);
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error('Error loading sunday homilies from bundle, falling back to Firestore:', error);
         // Fallback to original Firestore query
         const sundayHomiliesMonthsQuery = query(
