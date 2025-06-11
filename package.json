@@ -22,9 +22,7 @@
     "style:lint": "eslint '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
     "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
     "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
-    "import-from-prod": "gsutil rm -r gs://urm-app.appspot.com/firestore_export && gcloud firestore export gs://urm-app.appspot.com/firestore_export && gsutil -m cp -r gs://urm-app.appspot.com/firestore_export ./dir",
-    "test": "jest --forceExit test/test.ts",
-    "postinstall": "cd functions && pnpm install"
+    "import-from-prod": "gsutil rm -r gs://urm-app.appspot.com/firestore_export && gcloud firestore export gs://urm-app.appspot.com/firestore_export && gsutil -m cp -r gs://urm-app.appspot.com/firestore_export ./dir"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -116,5 +114,8 @@
       "sharp"
     ]
   },
-  "packageManager": "pnpm@10.10.0+sha512.d615db246fe70f25dcfea6d8d73dee782ce23e2245e3c4f6f888249fb568149318637dca73c2c5c8ef2a4ca0d5657fb9567188bfab47f566d1ee6ce987815c39"
+  "packageManager": "pnpm@10.10.0+sha512.d615db246fe70f25dcfea6d8d73dee782ce23e2245e3c4f6f888249fb568149318637dca73c2c5c8ef2a4ca0d5657fb9567188bfab47f566d1ee6ce987815c39",
+  "engines": {
+    "node": "22"
+  }
 }

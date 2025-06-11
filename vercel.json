@@ -1,5 +1,10 @@
 {
-    "buildCommand": "pnpm install && pnpm run build",
+    "buildCommand": "pnpm build-functions && pnpm build",
     "installCommand": "pnpm install",
-    "framework": "nextjs"
+    "framework": "nextjs",
+    "build": {
+        "env": {
+            "ENABLE_EXPERIMENTAL_COREPACK": "1"
+        }
+    }
 }
