@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { logger, https } from 'firebase-functions';
+import { logger } from 'firebase-functions/v2';
+import { onCall, CallableRequest } from 'firebase-functions/v2/https';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { ListTag, ListType, OverflowBehavior } from '../../../types/List';
 import { firestoreAdminListConverter } from '../firestoreDataConverter';
@@ -9,17 +10,18 @@ import firebaseAdmin from '../../../firebase/firebaseAdmin';
 
 type TAG_ITEMS_IN_LIST_INCOMING_DATA =
   | {
-      listId: string;
-      tag: ListTag.BIBLE_CHAPTER;
-    }
+    listId: string;
+    tag: ListTag.BIBLE_CHAPTER;
+  }
   | {
-      listId: string;
-      tag: ListTag.SUNDAY_HOMILY_MONTH;
-      year: number;
-    };
+    listId: string;
+    tag: ListTag.SUNDAY_HOMILY_MONTH;
+    year: number;
+  };
 
-const tagItemsInList = https.onCall(
-  async (data: TAG_ITEMS_IN_LIST_INCOMING_DATA, context): Promise<HttpsError | number> => {
+const tagItemsInList = onCall(
+  async (request: CallableRequest<TAG_ITEMS_IN_LIST_INCOMING_DATA>): Promise<HttpsError | number> => {
+    const data = request.data;
     try {
       //gets all sermons
       if (!data.listId) {
@@ -65,14 +67,14 @@ const tagItemsInList = https.onCall(
           const listTagAndPosition =
             data.tag === ListTag.SUNDAY_HOMILY_MONTH
               ? {
-                  listTag: data.tag,
-                  position: listRow.position,
-                  year: data.year,
-                }
+                listTag: data.tag,
+                position: listRow.position,
+                year: data.year,
+              }
               : {
-                  listTag: data.tag,
-                  position: listRow.position,
-                };
+                listTag: data.tag,
+                position: listRow.position,
+              };
 
           if (list.exists) {
             logger.log(`Updating list: ${listId}`);
