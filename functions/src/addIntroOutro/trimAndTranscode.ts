@@ -1,6 +1,7 @@
 import { CancelToken } from './CancelToken';
 import { Bucket, File } from '@google-cloud/storage';
 import { Reference } from 'firebase-admin/database';
+import { DocumentReference } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { convertStringToMilliseconds, createTempFile, logMemoryUsage, throwErrorOnSpecificStderr } from './utils';
@@ -19,7 +20,7 @@ const trimAndTranscode = async (
   outputFilePath: string,
   tempFiles: Set<string>,
   realtimeDBRef: Reference,
-  docRef: FirebaseFirestore.DocumentReference,
+  docRef: DocumentReference,
   sermonStatus: sermonStatus,
   customMetadata: CustomMetadata,
   startTime?: number,
@@ -193,8 +194,8 @@ const trimAndTranscode = async (
         const calculatedDuration = duration
           ? duration * 1000
           : startTime
-          ? totalTimeMillis - startTime * 1000
-          : totalTimeMillis;
+            ? totalTimeMillis - startTime * 1000
+            : totalTimeMillis;
         const percent = Math.round(Math.max(0, ((timeMillis * 0.95) / calculatedDuration) * 100)); // go to 95% to leave room for the time it takes to Merge the files
         if (percent !== previousPercent) {
           previousPercent = percent;

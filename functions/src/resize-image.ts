@@ -17,7 +17,7 @@ export interface ResizedImageResult {
   success: boolean;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function convertType(buffer: Buffer, format: resizeFormat, outputOptions?: any) {
   if (format === 'jpeg') {
     return sharp(buffer).jpeg(outputOptions).toBuffer();

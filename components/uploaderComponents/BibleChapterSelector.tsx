@@ -44,14 +44,13 @@ export default function BibleChapterSelector({
       const fetchBibleChapters = async () => {
         setLoadingBibleChapters(true);
         try {
-          console.log('Loading bible chapters from bundle...');
           const chaptersFromBundle = await getBibleChaptersFromBundle();
           setBibleChapters(chaptersFromBundle);
           // Initialize local search
           const search = new LocalSearch(chaptersFromBundle, 'name', 'bible chapters');
           setBibleChapterSearch(search);
-          console.log(`Loaded ${chaptersFromBundle.length} bible chapters from bundle`);
         } catch (error) {
+          // eslint-disable-next-line no-console
           console.error('Error loading bible chapters from bundle, falling back to Firestore:', error);
           // Fallback to original Firestore query
           const bibleChapterQuery = query(

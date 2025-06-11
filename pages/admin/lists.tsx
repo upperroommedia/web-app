@@ -24,8 +24,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ListItemButton from '@mui/material/ListItemButton';
 import { listConverter, List, ListType } from '../../types/List';
-import { createInMemoryCache } from '@algolia/cache-in-memory';
-import algoliasearch from 'algoliasearch';
+import { algoliasearch, SearchResponse } from 'algoliasearch';
 import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
@@ -37,12 +36,8 @@ const HITSPERPAGE = 20;
 
 const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
-        responsesCache: createInMemoryCache(),
-        requestsCache: createInMemoryCache({ serializable: false }),
-      })
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
-const listsIndex = client?.initIndex('lists');
 
 const AdminList = () => {
   const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
@@ -74,7 +69,7 @@ const AdminList = () => {
       }
       await deleteDoc(doc(firestore, 'lists', selectedList.id));
       setList((oldList) => oldList.filter((list) => list.id !== selectedList.id));
-    } catch (e) {
+    } catch (_e) {
       alert('Error deleting list');
     } finally {
       setIsDeleting(false);
@@ -83,17 +78,30 @@ const AdminList = () => {
 
   const searchLists = useCallback(
     async (query?: string) => {
-      const res = await listsIndex?.search<List>(query || searchQuery, {
-        hitsPerPage: HITSPERPAGE,
-        page: currentPage,
-        ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
-      });
-      if (res && res.hits.length > 0) {
-        setNoMoreResults(false);
-        setSearchResults(res.hits);
-      } else {
-        setSearchResults([]);
-        setNoMoreResults(true);
+      if (client) {
+        try {
+          const res: SearchResponse<List> = await client.searchSingleIndex({
+            indexName: 'lists',
+            searchParams: {
+              query: query || searchQuery,
+              hitsPerPage: HITSPERPAGE,
+              page: currentPage,
+              ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
+            }
+          });
+          if (res.hits.length > 0) {
+            setNoMoreResults(false);
+            setSearchResults(res.hits);
+          } else {
+            setSearchResults([]);
+            setNoMoreResults(true);
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error('Search error:', error);
+          setSearchResults([]);
+          setNoMoreResults(true);
+        }
       }
     },
     [currentPage, filter, searchQuery]

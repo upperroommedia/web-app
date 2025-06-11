@@ -1,4 +1,3 @@
-import '../mockCloudTasks';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 // import { GoogleAuth } from 'google-auth-library';

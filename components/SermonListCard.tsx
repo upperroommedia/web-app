@@ -1,7 +1,7 @@
 /**
  * SermonListCard: A component to display sermons in a list
  */
-import React, { FunctionComponent, memo, useEffect, useMemo, useState } from 'react';
+import React, { FunctionComponent, useEffect, useState } from 'react';
 import { GetUserInputType, GetUserOutputType } from '../functions/src/getUser';
 import ListItem from '@mui/material/ListItem';
 import Divider from '@mui/material/Divider';
@@ -36,7 +36,6 @@ interface Props {
   audioPlayerCurrentSermonId: string | undefined;
   audioPlayerSetCurrentSermon: (sermon: Sermon | undefined) => void;
   minimal?: boolean;
-  // handleSermonClick: (sermon: Sermon) => void;
 }
 
 const SermonListCard: FunctionComponent<Props> = ({
@@ -54,14 +53,11 @@ const SermonListCard: FunctionComponent<Props> = ({
   const [uploader, setUploader] = useState<User>();
   const [uploaderLoading, setUploaderLoading] = useState(false);
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
-  const uploaderName = useMemo(
-    () =>
-      (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
-      uploader?.email ??
-      'uploader',
-    [uploader]
-  );
-  const uploaderAvatarSize = useMemo(() => (mdMatches ? 40 : smMatches ? 30 : 20), [mdMatches, smMatches]);
+  
+  // ✅ Simple calculations - no need for useMemo
+  const uploaderName = (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
+    uploader?.email ?? 'uploader';
+  const uploaderAvatarSize = mdMatches ? 40 : smMatches ? 30 : 20;
 
   useEffect(() => {
     const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
@@ -81,12 +77,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   return (
     <ErrorBoundary fallback={<Box>Error Loading Card</Box>}>
       <Divider />
-      <ListItem
-      // onClick={(e) => {
-      //   e.preventDefault();
-      //   // handleSermonClick(sermon);
-      // }}
-      >
+      <ListItem>
         <Card
           sx={{
             width: 1,
@@ -145,7 +136,7 @@ const SermonListCard: FunctionComponent<Props> = ({
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               display: '-webkit-box',
-              WebkitLineClamp: 2 /* number of lines to show */,
+              WebkitLineClamp: 2,
               WebkitBoxOrient: 'vertical',
               marginTop: '5px',
               lineHeight: { xs: 1.1, sm: 1.25, md: 1.5 },
@@ -227,4 +218,6 @@ const SermonListCard: FunctionComponent<Props> = ({
     </ErrorBoundary>
   );
 };
-export default memo(SermonListCard);
+
+// ✅ Remove unnecessary memo wrapper - this component's props change frequently
+export default SermonListCard;

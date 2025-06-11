@@ -13,7 +13,7 @@ import {
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
 import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
-import { createFunction, createFunctionV2 } from '../utils/createFunction';
+import { createFunctionV2 } from '../utils/createFunction';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import PopUp from './PopUp';
 // import SeriesSelector from './SeriesSelector';
@@ -63,7 +63,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
   const uploadToSubsplash = async (listsToUploadTo: SermonList[]) => {
     try {
       const subsplashIdToListIdMap = new Map<string, string>();
-      const uploadToSubsplashCallable = createFunction<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
+      const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
       const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
@@ -148,7 +148,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
 
   const removeFromList = async (listsToRemoveFrom: SermonList[]) => {
     try {
-      const removeFromListCallable = createFunction<RemoveFromListInputType, RemoveFromListOutputType>(
+      const removeFromListCallable = createFunctionV2<RemoveFromListInputType, RemoveFromListOutputType>(
         'removefromlist'
       );
       const listsToRemoveFiltered = listsToRemoveFrom.filter(

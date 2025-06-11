@@ -1,9 +1,9 @@
-import { firestore } from 'firebase-functions';
+import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import handleError from '../../handleError';
 
-const listOnDelete = firestore.document('lists/{listId}').onDelete(async (_snapshot, context) => {
-  const { listId } = context.params;
+const listOnDelete = onDocumentDeleted('lists/{listId}', async (event) => {
+  const { listId } = event.params;
   const firestore = firebaseAdmin.firestore();
   try {
     return firestore.recursiveDelete(firestore.doc(`lists/${listId}`));

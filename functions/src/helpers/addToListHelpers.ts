@@ -198,7 +198,7 @@ export async function handleOverflow(
   mediaItem: MediaItem,
   maxListCount: number,
   token: string,
-  type: ListType
+  _type: ListType
 ) {
   logger.log(
     `handleOverflow(listId: ${listId}, itemsToAdd: ${JSON.stringify(mediaItem)}, maxListCount: ${maxListCount})`

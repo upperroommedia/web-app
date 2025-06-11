@@ -1,4 +1,5 @@
-import { logger, https } from 'firebase-functions';
+import { logger } from 'firebase-functions/v2';
+import { onCall, CallableRequest } from 'firebase-functions/v2/https';
 import axios, { AxiosResponse } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '../../types/Speaker';
@@ -41,14 +42,16 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
   return await axios(axiosConfig);
 };
 
-const uploadToSubsplash = https.onCall(async (data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA, context): Promise<unknown> => {
+const uploadToSubsplash = onCall(async (request: CallableRequest<UPLOAD_TO_SUBSPLASH_INCOMING_DATA>): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
-  if (!canUserRolePublish(context.auth?.token.role)) {
+  if (!canUserRolePublish(request.auth?.token.role)) {
     return { status: 'Not Authorized' };
   }
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
     return 'Email or Password are not set in .env file';
   }
+
+  const data = request.data;
   logger.log('data', data);
   try {
     const bearerToken = await authenticateSubsplash();

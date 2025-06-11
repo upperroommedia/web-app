@@ -1,14 +1,14 @@
-import { firestore } from 'firebase-functions';
+import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 // TODO: add on update listener
-const listItemOnCreate = firestore
-  .document('lists/{listId}/listItems/{sermonId}')
-  .onCreate(async (snapshot, context) => {
-    const { listId, sermonId } = context.params;
+const listItemOnCreate = onDocumentCreated(
+  'lists/{listId}/listItems/{sermonId}',
+  async (event) => {
+    const { listId, sermonId } = event.params;
     const firestore = firebaseAdmin.firestore();
     try {
       const list = (
@@ -37,6 +37,7 @@ const listItemOnCreate = firestore
     } catch (error) {
       throw handleError(error);
     }
-  });
+  }
+);
 
 export default listItemOnCreate;
