@@ -18,6 +18,7 @@ import { sermonConverter } from '../types/Sermon';
 import SermonCardAdminControlsComponent from './SermonCardAdminControlsComponent';
 import { getSquareImageStoragePath } from '../utils/utils';
 import { sermonListConverter } from '../types/SermonList';
+import { DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType } from '../functions/src/deleteFromSubsplash';
 
 export interface AdminControlsProps {
   sermon: Sermon;
@@ -84,10 +85,10 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   }, [sermon.id, sermon.status]);
 
   const deleteFromSubsplashErrorThrowable = useCallback(async () => {
-    const deleteFromSubsplashCall = createFunctionV2<string, void>('deletefromsubsplash');
+    const deleteFromSubsplashCall = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>('deletefromsubsplash');
     try {
       setIsUploadingToSubsplash(true);
-      await deleteFromSubsplashCall(sermon.subsplashId!);
+      await deleteFromSubsplashCall({ subsplashId: sermon.subsplashId! });
       await handleFirestoreDeleteFromSubsplash();
       setIsUploadingToSubsplash(false);
     } catch (error: any) {

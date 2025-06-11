@@ -5,7 +5,13 @@ import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 
-const deleteFromSubsplash = onCall(async (request: CallableRequest<string>): Promise<string | number> => {
+export interface DeleteFromSubsplashInputType {
+  subsplashId: string;
+}
+
+export type DeleteFromSubsplashReturnType = void;
+
+const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSubsplashInputType>): Promise<DeleteFromSubsplashReturnType> => {
   logger.log('deleteFromSubsplash', request);
 
   // Authentication check
@@ -14,7 +20,7 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<string>): Pro
   }
 
   // Input validation
-  if (!request.data || typeof request.data !== 'string' || request.data.trim() === '') {
+  if (!request.data || typeof request.data !== 'object' || !request.data.subsplashId || request.data.subsplashId.trim() === '') {
     throw new HttpsError('invalid-argument', 'The function must be called with a valid media item ID.');
   }
 
@@ -23,7 +29,8 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<string>): Pro
     throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
   }
 
-  const mediaItemId = request.data.trim();
+  const mediaItemId = request.data.subsplashId.trim();
+  console.log('Attempting to delete mediaItemId', mediaItemId);
   const url = `https://core.subsplash.com/media/v1/media-items/${mediaItemId}`;
   logger.log(`Attempting to delete media item: ${mediaItemId} from "${url}"`);
 
@@ -34,7 +41,7 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<string>): Pro
 
     const response = await axios(config);
     logger.log('Successfully deleted media item', { mediaItemId, status: response.status });
-    return 1;
+    return;
   } catch (error) {
     logger.error('Error deleting from Subsplash', { mediaItemId, error });
 
@@ -46,6 +53,7 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<string>): Pro
       if (subsplashError?.code === 'resource_not_found') {
         code = 'not-found';
         logger.warn(`Media item not found: ${mediaItemId}`);
+        return;
       } else if (subsplashError?.code === 'unauthorized') {
         code = 'unauthenticated';
       } else if (subsplashError?.code === 'forbidden') {
