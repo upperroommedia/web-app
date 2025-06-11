@@ -34,8 +34,14 @@ export async function serveBundleFromStorage<T>(
 
         // Get bundle metadata from storage
         const [storageMetadata] = await bundleFile.getMetadata();
-        const bundleTimestamp = parseInt(storageMetadata.metadata?.timestamp) || Date.now();
-        const bundleCount = parseInt(storageMetadata.metadata?.[`${config.bundleType}-count`]) || 0;
+
+        // Safely extract timestamp with type checking
+        const timestampValue = storageMetadata.metadata?.timestamp;
+        const bundleTimestamp = (typeof timestampValue === 'string' ? parseInt(timestampValue, 10) : null) || Date.now();
+
+        // Safely extract bundle count with type checking
+        const countValue = storageMetadata.metadata?.[`${config.bundleType}-count`];
+        const bundleCount = (typeof countValue === 'string' ? parseInt(countValue, 10) : null) || 0;
 
         // Check if metadata exists in Realtime Database
         const rtdbMetadataRef = database.ref(config.metadataDocPath);
