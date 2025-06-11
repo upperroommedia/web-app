@@ -191,6 +191,7 @@ const Uploader = (props: UploaderProps) => {
         const subtitlesFromBundle = await getSubtitlesFromBundle();
         setSubtitles(subtitlesFromBundle);
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error('Error loading subtitles from bundle, falling back to Firestore:', error);
         // Fallback to manual fetch
         const listQuery = query(

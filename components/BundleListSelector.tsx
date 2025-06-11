@@ -3,7 +3,7 @@ import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
 import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect, useMemo, memo } from 'react';
-import { sanitize } from 'dompurify';
+import DOMPurify from 'dompurify';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
@@ -82,14 +82,12 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
       if (props.listType === ListType.TOPIC_LIST) {
         setIsLoadingBundles(true);
         try {
-          console.log('Loading topics from bundle...');
           const bundleManager = BundleManager.getInstance<Topic>(TOPIC_BUNDLE_CONFIG);
           let topics = await bundleManager.getData();
           // update listId to id so that the list selector can use the listId
           topics = topics.filter((topic) => topic.listId !== undefined);
           topics = topics.map((topic) => ({ ...topic, id: topic.listId } as Topic));
          
-          console.log(`Loaded ${topics.length} topics from bundle`);
           
           // Convert topics to the format expected by ListSelector
           const topicLists = topics.map(topicToListWithHighlight);
@@ -102,6 +100,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           // Cache the topics data to avoid re-fetching when search is cleared
           setCachedTopics(topics);
         } catch (error) {
+          // eslint-disable-next-line no-console
           console.error('Error loading topics from bundle:', error);
         } finally {
           setIsLoadingBundles(false);
@@ -124,6 +123,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
       const searchResults = localTopicSearch.search(query);
       return searchResults.map(result => topicToListWithHighlight(result.item));
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('Error searching topics locally:', error);
       return [];
     }
@@ -225,7 +225,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
                 sx={{ marginRight: '15px' }}
               />
               {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
-                <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+                                  <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
               ) : (
                 <div>{option.name}</div>
               )}

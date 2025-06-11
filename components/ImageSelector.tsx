@@ -24,20 +24,15 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
-import { createInMemoryCache } from '@algolia/cache-in-memory';
-import algoliasearch from 'algoliasearch';
+import { algoliasearch, SearchResponse } from 'algoliasearch';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import InputAdornment from '@mui/material/InputAdornment';
 
 const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
-        responsesCache: createInMemoryCache(),
-        requestsCache: createInMemoryCache({ serializable: false }),
-      })
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
-const imagesIndex = client?.initIndex('images');
 
 const ImageSelector = (props: {
   selectedSpeaker?: ISpeaker;
@@ -72,15 +67,24 @@ const ImageSelector = (props: {
 
   const searchImages = async (query: string, hitsPerPage: number, page: number) => {
     const images: AlgoliaImage[] = [];
-    if (imagesIndex) {
-      const response = await imagesIndex.search<AlgoliaImage>(query, {
-        hitsPerPage,
-        page,
-        filters: `type:${props.selectedImageFromSpeakerDetails.type}`,
-      });
-      response.hits.forEach((hit) => {
-        images.push(hit);
-      });
+    if (client) {
+      try {
+        const response: SearchResponse<AlgoliaImage> = await client.searchSingleIndex({
+          indexName: 'images',
+          searchParams: {
+            query,
+            hitsPerPage,
+            page,
+            filters: `type:${props.selectedImageFromSpeakerDetails.type}`,
+          }
+        });
+        response.hits.forEach((hit) => {
+          images.push(hit);
+        });
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Search error:', error);
+      }
     }
     return images;
   };
