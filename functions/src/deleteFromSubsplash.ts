@@ -1,36 +1,76 @@
 import axios, { isAxiosError } from 'axios';
-import { logger, https } from 'firebase-functions';
-import { HttpsError, FunctionsErrorCode } from 'firebase-functions/v2/https';
+import { logger } from 'firebase-functions/v2';
+import { CallableRequest, HttpsError, FunctionsErrorCode, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
-const deleteFromSubsplash = https.onCall(async (data: string, context): Promise<HttpsError | string | number> => {
-  if (!canUserRolePublish(context.auth?.token.role)) {
-    return 'Not Authorized';
+import handleError from './handleError';
+
+export interface DeleteFromSubsplashInputType {
+  subsplashId: string;
+}
+
+export type DeleteFromSubsplashReturnType = void;
+
+const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSubsplashInputType>): Promise<DeleteFromSubsplashReturnType> => {
+  logger.log('deleteFromSubsplash', request);
+
+  // Authentication check
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
+
+  // Input validation
+  if (!request.data || typeof request.data !== 'object' || !request.data.subsplashId || request.data.subsplashId.trim() === '') {
+    throw new HttpsError('invalid-argument', 'The function must be called with a valid media item ID.');
+  }
+
+  // Environment validation
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-    return 'Email or Password are not set in .env file';
+    throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
   }
-  const url = `https://core.subsplash.com/media/v1/media-items/${data}`;
-  logger.log(`Calling delete on "${url}"`);
+
+  const mediaItemId = request.data.subsplashId.trim();
+  console.log('Attempting to delete mediaItemId', mediaItemId);
+  const url = `https://core.subsplash.com/media/v1/media-items/${mediaItemId}`;
+  logger.log(`Attempting to delete media item: ${mediaItemId} from "${url}"`);
+
   try {
     const bearerToken = await authenticateSubsplash();
     const config = createAxiosConfig(url, bearerToken, 'DELETE');
     logger.debug('config', config);
-    await axios(config);
-    return 1;
+
+    const response = await axios(config);
+    logger.log('Successfully deleted media item', { mediaItemId, status: response.status });
+    return;
   } catch (error) {
-    //TODO[1]: Handle errors better
-    let httpsError = new HttpsError('unknown', 'Unknown error');
-    if (isAxiosError(error)) {
-      const response = error.response?.data.errors[0];
-      let code: FunctionsErrorCode = 'unknown';
-      if (response.code === 'resource_not_found') {
+    logger.error('Error deleting from Subsplash', { mediaItemId, error });
+
+    // Handle specific Subsplash API errors
+    if (isAxiosError(error) && error.response?.data?.errors) {
+      const subsplashError = error.response.data.errors[0];
+      let code: FunctionsErrorCode = 'internal';
+
+      if (subsplashError?.code === 'resource_not_found') {
         code = 'not-found';
+        logger.warn(`Media item not found: ${mediaItemId}`);
+        return;
+      } else if (subsplashError?.code === 'unauthorized') {
+        code = 'unauthenticated';
+      } else if (subsplashError?.code === 'forbidden') {
+        code = 'permission-denied';
       }
-      httpsError = new HttpsError(code, error.message, response.detail);
+
+      const httpsError = new HttpsError(
+        code,
+        subsplashError?.detail || error.message || 'Failed to delete from Subsplash',
+        subsplashError
+      );
+      throw httpsError;
     }
-    logger.error(httpsError);
-    throw httpsError;
+
+    // Use the standard error handler for all other errors
+    throw handleError(error);
   }
 });
+
 export default deleteFromSubsplash;
