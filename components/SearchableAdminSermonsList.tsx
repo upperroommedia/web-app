@@ -1,7 +1,6 @@
-import { FunctionComponent, ReactNode, useEffect, useState } from 'react';
-import algoliasearch, { SearchClient } from 'algoliasearch';
+import { FunctionComponent, ReactNode, useEffect, useState, useMemo, type JSX } from 'react';
+import { algoliasearch, SearchClient } from 'algoliasearch';
 import { InstantSearch, useInstantSearch } from 'react-instantsearch';
-import { createInMemoryCache } from '@algolia/cache-in-memory';
 import Stack from '@mui/material/Stack';
 import CustomPagination from './algoliaComponents/CustomPagination';
 import SearchResultSermonList from './SearchResultSermonsList';
@@ -19,13 +18,14 @@ import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import FilterIcon from '@mui/icons-material/FilterAlt';
 import AnimateHeight from 'react-animate-height';
-import { StackProps } from '@mui/system/Stack';
+import { SxProps, Theme } from '@mui/system';
 interface SearchableAdminSermonListProps {}
 
 const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
   const { user } = useAuth();
-  const [searchClient, setSearchClient] = useState<SearchClient | null>(null);
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState<boolean>(false);
+  
   if (!user) {
     throw new Error('User not found');
   }
@@ -34,27 +34,33 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
   }
 
   useEffect(() => {
-    const init = async () => {
-      if (!searchClient) {
+    const initApiKey = async () => {
+      if (!apiKey) {
         if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
           throw new Error('Missing Algolia Credentials');
         }
-        const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
-          'generatesecuredapikey'
-        );
-        const publicKey = user.isAdmin()
-          ? process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-          : await generateSecuredApiKey({ userId: user.uid });
-        setSearchClient(
-          algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, publicKey, {
-            responsesCache: createInMemoryCache(),
-            requestsCache: createInMemoryCache({ serializable: false }),
-          })
-        );
+        
+        if (user.isAdmin()) {
+          setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
+        } else {
+          const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
+            'generatesecuredapikey'
+          );
+          const securedKey = await generateSecuredApiKey({ userId: user.uid });
+          setApiKey(securedKey);
+        }
       }
     };
-    init();
-  }, [searchClient, user, user.uid]);
+    initApiKey();
+  }, [apiKey, user]);
+
+  // Create search client with useMemo to prevent unnecessary recreations
+  const searchClient = useMemo((): SearchClient | null => {
+    if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
+      return null;
+    }
+    return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
+  }, [apiKey]);
 
   const FilterButton = () => (
     <IconButton onClick={() => setShowFilters((prev) => !prev)} sx={{ display: { xs: 'block', md: 'none' } }}>
@@ -62,8 +68,8 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
     </IconButton>
   );
 
-  const Filters = (props: StackProps) => (
-    <Stack flex={1} alignItems="center" overflow="auto" {...props}>
+  const Filters = ({ sx }: { sx?: SxProps<Theme> }) => (
+    <Stack sx={{ flex: 1, alignItems: 'center', overflow: 'auto', ...sx }}>
       <Stack gap={2} alignItems="start" border={{ xs: 1, md: 0 }} borderRadius={2} p={2} margin={2}>
         <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
         <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />

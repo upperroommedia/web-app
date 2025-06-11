@@ -1,6 +1,7 @@
-import { createContext, useReducer, useContext, useCallback } from 'react';
+import { createContext, useReducer, useContext, useCallback, useMemo } from 'react';
 import { Sermon } from '../../types/SermonTypes';
 import audioPlayerReducer, { AudioPlayerState, SermonWithMetadata } from '../../reducers/audioPlayerReducer';
+
 const initialState: AudioPlayerState = {
   currentSermon: undefined,
   currentSermonSecond: 0,
@@ -20,7 +21,7 @@ type AudioPlayerContextType = {
 
 const AudioPlayerContext = createContext<AudioPlayerContextType | null>(null);
 
-export const AudioPlayerProvider = ({ children }: any) => {
+export const AudioPlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const [state, dispatch] = useReducer(audioPlayerReducer, initialState);
 
   const updateCurrentSecond = useCallback((currentSecond: number) => {
@@ -29,10 +30,8 @@ export const AudioPlayerProvider = ({ children }: any) => {
 
   const togglePlaying = useCallback(
     (play?: boolean) => {
-      if (play === undefined) {
-        play = !state.playing;
-      }
-      dispatch({ type: 'TOGGLE_PLAYING', payload: play });
+      const shouldPlay = play === undefined ? !state.playing : play;
+      dispatch({ type: 'TOGGLE_PLAYING', payload: shouldPlay });
     },
     [state.playing]
   );
@@ -53,7 +52,6 @@ export const AudioPlayerProvider = ({ children }: any) => {
   const setCurrentSermonUrl = useCallback(
     (url: string) => {
       if (!state.currentSermon) {
-        // eslint-disable-next-line no-console
         console.error('No sermon found');
         return;
       }
@@ -66,19 +64,28 @@ export const AudioPlayerProvider = ({ children }: any) => {
     [state.currentSermon]
   );
 
+  // ✅ Memoize context value to prevent unnecessary re-renders
+  const contextValue = useMemo(() => ({
+    currentSermon: state.currentSermon,
+    currentSermonId: state.currentSermon?.id,
+    currentSecond: state.currentSermonSecond,
+    playing: state.playing,
+    setCurrentSermonUrl,
+    setCurrentSermon,
+    updateCurrentSecond,
+    togglePlaying,
+  }), [
+    state.currentSermon,
+    state.currentSermonSecond,
+    state.playing,
+    setCurrentSermonUrl,
+    setCurrentSermon,
+    updateCurrentSecond,
+    togglePlaying,
+  ]);
+
   return (
-    <AudioPlayerContext.Provider
-      value={{
-        currentSermon: state.currentSermon,
-        currentSermonId: state.currentSermon?.id,
-        currentSecond: state.currentSermonSecond,
-        playing: state.playing,
-        setCurrentSermonUrl,
-        setCurrentSermon,
-        updateCurrentSecond,
-        togglePlaying,
-      }}
-    >
+    <AudioPlayerContext.Provider value={contextValue}>
       {children}
     </AudioPlayerContext.Provider>
   );

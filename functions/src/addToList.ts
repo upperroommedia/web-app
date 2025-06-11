@@ -23,15 +23,15 @@ export interface AddtoListInputType {
 type status = 'success' | 'error';
 type OutputTypes =
   | {
-      listId: string;
-      status: 'success';
-      listItemId: string;
-    }
+    listId: string;
+    status: 'success';
+    listItemId: string;
+  }
   | {
-      listId: string;
-      status: 'error';
-      error: string;
-    };
+    listId: string;
+    status: 'error';
+    error: string;
+  };
 export type AddToListOutputType = OutputTypes[];
 
 const addToSingleList = async (
@@ -40,7 +40,7 @@ const addToSingleList = async (
   overflowBehavior: OverflowBehavior,
   maxListCount: number,
   token: string,
-  type: ListType
+  _type: ListType
 ): Promise<string> => {
   const currentListCount = await getListCount(listId, token);
   let newListCount = currentListCount + 1;

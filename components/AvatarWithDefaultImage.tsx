@@ -1,4 +1,3 @@
-import { sanitize } from 'dompurify';
 import { ImageType } from '../types/Image';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
@@ -47,7 +46,7 @@ function AvatarWithDefaultImage({
     >
       {image && (
         <Image
-          src={sanitize(image.downloadLink)}
+          src={image.downloadLink}
           alt={`Image of ${altName}`}
           width={width}
           height={height}

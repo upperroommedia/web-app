@@ -14,6 +14,7 @@ const RequestRoleChange = () => {
   const [role, setRole] = useState<UserRoleType>(defaultValue);
   const [reason, setReason] = useState('');
   return (
+    // TODO: Make form functional
     <FormControl sx={{ display: 'flex', gap: 2, width: 1, maxWidth: 600 }}>
       <InputLabel id="role-select-label">Role</InputLabel>
       <Select
@@ -60,7 +61,6 @@ const RequestRoleChange = () => {
         </Stack>
       </Tooltip>
     </FormControl>
-    // TODO: Make form functional
   );
 };
 

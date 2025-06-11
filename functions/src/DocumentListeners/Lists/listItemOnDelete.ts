@@ -1,12 +1,13 @@
-import { firestore, logger } from 'firebase-functions';
+import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
+import { logger } from 'firebase-functions/v2';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
 
-const listItemOnDelete = firestore
-  .document('lists/{listId}/listItems/{sermonId}')
-  .onDelete(async (snapshot, context) => {
-    const { listId, sermonId } = context.params;
+const listItemOnDelete = onDocumentDeleted(
+  'lists/{listId}/listItems/{sermonId}',
+  async (event) => {
+    const { listId, sermonId } = event.params;
     const firestoreDb = firebaseAdmin.firestore();
 
     // Remove list from sermon if sermon still exists
@@ -44,6 +45,7 @@ const listItemOnDelete = firestore
       );
       // Don't throw here as this is expected when the list is being deleted
     }
-  });
+  }
+);
 
 export default listItemOnDelete;

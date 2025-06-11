@@ -14,7 +14,7 @@ import AdminLayout from '../../layout/adminLayout';
 import { topicConverter } from '../../types/Topic';
 // import { adminProtected } from '../../utils/protectedRoutes';
 import Image from 'next/image';
-import { sanitize } from 'dompurify';
+
 import useAuth from '../../context/user/UserContext';
 
 const AdminTopics = () => {
@@ -80,7 +80,7 @@ const AdminTopics = () => {
                           >
                             {image && (
                               <Image
-                                src={sanitize(image.downloadLink)}
+                                src={image.downloadLink}
                                 alt={`Image of ${image.name}`}
                                 width={50}
                                 height={50}

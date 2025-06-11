@@ -1,12 +1,20 @@
-import { firestore, logger } from 'firebase-functions';
+import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { logger } from 'firebase-functions/v2';
 import { isEqual } from 'lodash';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { List } from '../../../../types/List';
 import { firestoreAdminSermonListConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
 
-const listOnUpdate = firestore.document('lists/{listId}').onUpdate(async (change, context) => {
-  const { listId } = context.params;
+const listOnUpdate = onDocumentUpdated('lists/{listId}', async (event) => {
+  const change = event.data;
+  const { listId } = event.params;
+
+  if (!change) {
+    logger.error('Change object is undefined');
+    return;
+  }
+
   logger.log('listOnUpdate triggered for: ', listId);
   const originalList = change.before.data() as List;
   const updatedList = change.after.data() as List;

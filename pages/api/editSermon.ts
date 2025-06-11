@@ -2,7 +2,7 @@ import firestore, { collectionGroup, doc, getDocs, query, setDoc, where, writeBa
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
-import { createFunction } from '../../utils/createFunction';
+import { createFunctionV2 } from '../../utils/createFunction';
 import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
 import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
 import { getSquareImageStoragePath } from '../../utils/utils';
@@ -11,7 +11,7 @@ import { List, listConverter } from '../../types/List';
 const editSermon = async (sermon: Sermon, sermonList: List[]) => {
   const promises: Promise<any>[] = [];
   if (sermon.subsplashId) {
-    const editSubsplashSermon = createFunction<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
+    const editSubsplashSermon = createFunctionV2<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
     const input: EDIT_SUBSPLASH_SERMON_INCOMING_DATA = {
       subsplashId: sermon.subsplashId,
       title: sermon.title,
@@ -26,7 +26,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[]) => {
   }
 
   if (sermon.soundCloudTrackId) {
-    const editSoundCloudSermon = createFunction<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>('editSoundCloudSermon');
+    const editSoundCloudSermon = createFunctionV2<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>('editSoundCloudSermon');
     const data: EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA = {
       trackId: sermon.soundCloudTrackId,
       title: sermon.title,

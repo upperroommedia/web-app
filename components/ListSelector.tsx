@@ -2,8 +2,8 @@ import TextField from '@mui/material/TextField';
 import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
-import { sanitize } from 'dompurify';
 import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect, useMemo, memo } from 'react';
+import DOMPurify from 'dompurify';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
@@ -11,8 +11,7 @@ import NewListPopup from './NewListPopup';
 import firestore, { query, collection, getDocs, where, limit, orderBy, QueryConstraint } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
-import { createInMemoryCache } from '@algolia/cache-in-memory';
-import algoliasearch from 'algoliasearch';
+import { algoliasearch, SearchResponse} from 'algoliasearch';
 
 interface ListSelectorProps {
   sermonList: List[];
@@ -23,12 +22,8 @@ interface ListSelectorProps {
 
 const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY, {
-        responsesCache: createInMemoryCache(),
-        requestsCache: createInMemoryCache({ serializable: false }),
-      })
+    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
-const listIndex = client?.initIndex('lists');
 
 const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorProps) => {
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
@@ -80,13 +75,23 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const queryAlgolia = async (query: string) => {
-    if (listIndex) {
-      const result = await listIndex.search<ListWithHighlight>(query, {
-        hitsPerPage: 5,
-        ...(props.listType && { facetFilters: `type:${props.listType}` }),
-      });
-      return result.hits;
+  const queryAlgolia = async (query: string): Promise<ListWithHighlight[]> => {
+    if (client) {
+      try {
+        const result: SearchResponse<ListWithHighlight> = await client.searchSingleIndex({
+          indexName: 'lists',
+          searchParams: {
+            query,
+            hitsPerPage: 5,
+            ...(props.listType && { facetFilters: `type:${props.listType}` }),
+          }
+        });
+        return result.hits.map((hit)=> hit);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Search error:', error);
+        return [];
+      }
     }
     return [];
   };
@@ -161,7 +166,7 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
                 sx={{ marginRight: '15px' }}
               />
               {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
-                <div dangerouslySetInnerHTML={{ __html: sanitize(option._highlightResult.name.value) }}></div>
+                                  <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
               ) : (
                 <div>{option.name}</div>
               )}

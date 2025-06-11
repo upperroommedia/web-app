@@ -1,5 +1,5 @@
 import { AspectRatio, ImageSizeType, ImageSizes, ImageType } from '../types/Image';
-import { sanitize } from 'dompurify';
+
 import ImageSelector from './ImageSelector';
 import { memo, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -52,7 +52,7 @@ const ImageViewer = (props: propsType) => {
                   }}
                 >
                   <Image
-                    src={`${sanitize(image.downloadLink)}`}
+                    src={image.downloadLink}
                     alt={image.name}
                     style={{
                       objectFit: 'contain',

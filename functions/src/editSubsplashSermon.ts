@@ -1,4 +1,5 @@
-import { logger, https } from 'firebase-functions';
+import { logger } from 'firebase-functions/v2';
+import { onCall, CallableRequest } from 'firebase-functions/v2/https';
 import axios from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from './uploadToSubsplash';
@@ -9,14 +10,16 @@ export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   subsplashId: string;
 }
 
-const editSubsplashSermon = https.onCall(
-  async (data: EDIT_SUBSPLASH_SERMON_INCOMING_DATA, context): Promise<unknown> => {
-    if (!canUserRolePublish(context.auth?.token.role)) {
+const editSubsplashSermon = onCall(
+  async (request: CallableRequest<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>): Promise<unknown> => {
+    if (!canUserRolePublish(request.auth?.token.role)) {
       return { status: 'Not Authorized' };
     }
     if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
       return 'Email or Password are not set in .env file';
     }
+
+    const data = request.data;
     logger.log('data', data);
     try {
       const bearerToken = await authenticateSubsplash();

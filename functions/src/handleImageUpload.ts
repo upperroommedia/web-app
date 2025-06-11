@@ -109,7 +109,7 @@ const handleImageUpload = onObjectFinalized(
     if (metadata.type && !ImageSizes.includes(metadata.type as ImageSizeType)) {
       return logger.log('File has no type');
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const imageName = object.name.split('/').pop();
     if (!imageName) {
       throw new HttpsError('invalid-argument', 'Image name is not valid');
