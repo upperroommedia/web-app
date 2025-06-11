@@ -1,4 +1,4 @@
-import { firestore } from 'firebase-functions';
+import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
@@ -6,10 +6,17 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { SermonList } from '../../../../types/SermonList';
 import { removeFromList } from '../../removeFromList';
 
-const sermonListOnDelete = firestore
-  .document('sermons/{sermonId}/sermonLists/{sermonListId}')
-  .onDelete(async (snapshot, context) => {
-    const { sermonId } = context.params;
+const sermonListOnDelete = onDocumentDeleted(
+  'sermons/{sermonId}/sermonLists/{sermonListId}',
+  async (event) => {
+    const snapshot = event.data;
+    const { sermonId } = event.params;
+
+    if (!snapshot) {
+      console.error('Snapshot is undefined in sermonListOnDelete');
+      return;
+    }
+
     const data = snapshot.data() as SermonList;
     const firestoreDb = firebaseAdmin.firestore();
 
@@ -47,6 +54,7 @@ const sermonListOnDelete = firestore
       console.error(`Error in sermonListOnDelete for sermon ${sermonId}:`, error);
       throw handleError(error);
     }
-  });
+  }
+);
 
 export default sermonListOnDelete;

@@ -1,4 +1,4 @@
-import { firestore } from 'firebase-functions';
+import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import {
@@ -7,8 +7,8 @@ import {
   UNPROCESSED_SERMONS_BUCKET,
 } from '../../../../constants/storage_constants';
 
-const sermonOnDelete = firestore.document('sermons/{sermonId}').onDelete(async (_snapshot, context) => {
-  const { sermonId } = context.params;
+const sermonOnDelete = onDocumentDeleted('sermons/{sermonId}', async (event) => {
+  const { sermonId } = event.params;
   const firestore = firebaseAdmin.firestore();
   try {
     await firestore.recursiveDelete(firestore.doc(`sermons/${sermonId}`));
