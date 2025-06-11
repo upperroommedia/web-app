@@ -21,7 +21,7 @@ import ImageUploader from './ImageUploader';
 import { imageStorage, ref, uploadBytes } from '../firebase/storage';
 import { CroppedImageData } from '../utils/cropImage';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { sanitize } from 'dompurify';
+
 import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
@@ -214,7 +214,7 @@ const ImageSelector = (props: {
                       }}
                     >
                       <Image
-                        src={sanitize(image.downloadLink)}
+                        src={image.downloadLink}
                         fill
                         alt={image.name}
                         style={{
@@ -280,7 +280,7 @@ const ImageSelector = (props: {
                     }}
                   >
                     <Image
-                      src={sanitize(image.downloadLink)}
+                      src={image.downloadLink}
                       fill
                       alt={image.name}
                       style={{

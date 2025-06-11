@@ -7,9 +7,9 @@ import { UploaderFieldError } from '../../context/types';
 import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
 import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
-import { sanitize } from 'dompurify';
 import { List, ListType, listConverter } from '../../types/List';
 import dynamic from 'next/dynamic';
+import { sanitize } from 'dompurify';
 import algoliasearch from 'algoliasearch';
 import { createInMemoryCache } from '@algolia/cache-in-memory';
 import { Sermon } from '../../types/SermonTypes';
@@ -207,7 +207,7 @@ function SpeakerSelector({
           ));
         }}
         renderOption={(props, option: AlgoliaSpeaker) => (
-          <ListItem key={option.id} {...props}>
+          <ListItem {...props}>
             <AvatarWithDefaultImage
               defaultImageURL="/props.user.png"
               altName={option.name}

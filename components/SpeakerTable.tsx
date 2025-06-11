@@ -21,7 +21,7 @@ import { visuallyHidden } from '@mui/utils';
 // import Button from '@mui/material/Button';
 // import Menu from '@mui/material/Menu';
 
-import { sanitize } from 'dompurify';
+
 import ImageViewer from './ImageViewer';
 import firestore, { doc, updateDoc } from '../firebase/firestore';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
@@ -415,7 +415,7 @@ const SpeakerTable = (props: {
                                 >
                                   {image && (
                                     <Image
-                                      src={sanitize(image.downloadLink)}
+                                      src={image.downloadLink}
                                       alt={`Image of ${image.name}`}
                                       width={50}
                                       height={50}
