@@ -1,7 +1,7 @@
 import firebaseAdmin from '../../firebase/firebaseAdmin';
-import { beforeUserCreated } from 'firebase-functions/v2/identity';
+import { beforeUserSignedIn } from 'firebase-functions/v2/identity';
 
-const setUserRoleOnCreate = beforeUserCreated(async (event) => {
+const setUserRoleOnCreate = beforeUserSignedIn(async (event) => {
   // Ensure user data exists
   if (!event.data) {
     throw new Error('User data is missing from the event');
@@ -11,14 +11,14 @@ const setUserRoleOnCreate = beforeUserCreated(async (event) => {
   // In production, default to 'user' role for security
   const defaultRole = process.env.FUNCTIONS_EMULATOR === 'true' ? 'admin' : 'user';
 
-  // Set custom claims using Admin SDK
-  // Note: This still needs to happen via Admin SDK as blocking functions 
-  // can modify user data but custom claims require separate Admin SDK call
-  await firebaseAdmin.auth().setCustomUserClaims(event.data.uid, { role: defaultRole });
+  // Check if custom claims are already set to avoid overwriting
+  const user = await firebaseAdmin.auth().getUser(event.data.uid);
+  if (!user.customClaims || !user.customClaims.role) {
+    // Set custom claims using Admin SDK
+    await firebaseAdmin.auth().setCustomUserClaims(event.data.uid, { role: defaultRole });
+  }
 
-  // Blocking functions can return modified user data, but for custom claims
-  // we rely on the Admin SDK call above. We could return custom data here
-  // if needed for other user properties.
+  // Return empty object to allow sign-in to proceed
   return {};
 });
 
