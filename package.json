@@ -1,13 +1,16 @@
 {
   "name": "web-app",
+  "description": "Upper Room Media Web App",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "build-functions": "cd functions && pnpm build",
     "build-functions-watch": "cd functions && pnpm build-watch",
-    "next-dev": " next dev --turbopack & pnpm run start-emulators",
+    "next-dev": "next dev --turbopack & pnpm run start-emulators",
     "start-emulators": "pnpm run build-functions-watch & firebase emulators:start --import=./dir",
     "dev": "pnpm kill-port 8081 9099 4000 3000 5001 9000 8123 && pnpm run next-dev",
     "analyze": "ANALYZE=true next build",
+    "kill-port": "kill-port",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -16,7 +19,8 @@
     "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
     "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
     "import-from-prod": "gsutil rm -r gs://urm-app.appspot.com/firestore_export && gcloud firestore export gs://urm-app.appspot.com/firestore_export && gsutil -m cp -r gs://urm-app.appspot.com/firestore_export ./dir",
-    "test": "jest --forceExit test/test.ts"
+    "test": "jest --forceExit test/test.ts",
+    "postinstall": "cd functions && pnpm install"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
