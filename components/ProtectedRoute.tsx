@@ -10,7 +10,7 @@ export default async function ProtectedRoute(context: GetServerSidePropsContext)
     return {
       props: { ...user },
     };
-  } catch (err) {
+  } catch (_err) {
     // User is not authenticated
     return {
       redirect: {

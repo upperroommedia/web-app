@@ -55,7 +55,7 @@ interface UploaderProps extends VerifiedUserUploaderProps {
   user: User;
 }
 
-const fieldsToValidate = [
+const _fieldsToValidate = [
   'title',
   'subtitle',
   'description',
@@ -68,7 +68,7 @@ const fieldsToValidate = [
 ] as const;
 
 type FormErrors = {
-  [K in (typeof fieldsToValidate)[number]]?: UploaderFieldError;
+  [K in (typeof _fieldsToValidate)[number]]?: UploaderFieldError;
 };
 
 const emptySermon = createEmptySermon();
@@ -255,7 +255,7 @@ const Uploader = (props: UploaderProps) => {
   // ======================== START OF ERROR HANDLING ========================
 
   const setFormErrorCallback = useCallback(
-    (key: (typeof fieldsToValidate)[number], errorStatus: boolean, message?: string, initialState: boolean = false) => {
+    (key: (typeof _fieldsToValidate)[number], errorStatus: boolean, message?: string, initialState: boolean = false) => {
       const newUploaderFieldError: UploaderFieldError = {
         error: errorStatus,
         message: message ?? '',
@@ -316,7 +316,7 @@ const Uploader = (props: UploaderProps) => {
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setFormErrorCallback(
-        event.target.name as (typeof fieldsToValidate)[number],
+        event.target.name as (typeof _fieldsToValidate)[number],
         !event.target.validity.valid,
         createFormErrorMessage(event.target.name)
       );
@@ -332,7 +332,7 @@ const Uploader = (props: UploaderProps) => {
 
   const handleBlur = useCallback(
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const key = event.target.name as (typeof fieldsToValidate)[number];
+      const key = event.target.name as (typeof _fieldsToValidate)[number];
       setFormErrorCallback(key, !event.target.validity.valid, createFormErrorMessage(key));
     },
     [setFormErrorCallback]

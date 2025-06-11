@@ -69,7 +69,7 @@ const AdminList = () => {
       }
       await deleteDoc(doc(firestore, 'lists', selectedList.id));
       setList((oldList) => oldList.filter((list) => list.id !== selectedList.id));
-    } catch (e) {
+    } catch (_e) {
       alert('Error deleting list');
     } finally {
       setIsDeleting(false);
