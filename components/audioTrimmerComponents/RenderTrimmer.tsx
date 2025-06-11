@@ -4,7 +4,7 @@ import { CLICK_TARGET } from './types';
 
 interface RenderTrimmerProps {
   MouseDown: (e: React.MouseEvent | React.TouchEvent, target: CLICK_TARGET) => void;
-  scrubberContainer: RefObject<HTMLDivElement>;
+  scrubberContainer: RefObject<HTMLDivElement | null>;
   children: React.ReactNode;
 }
 

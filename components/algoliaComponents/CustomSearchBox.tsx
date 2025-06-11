@@ -3,7 +3,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { useInstantSearch, useSearchBox, UseSearchBoxProps, useStats } from 'react-instantsearch';
 
-const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: React.ReactElement }) => {
+const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: React.ReactElement<any> }) => {
   const { refine } = useSearchBox(props);
   const { nbHits, processingTimeMS } = useStats();
   const { status } = useInstantSearch();

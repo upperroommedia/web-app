@@ -1,4 +1,4 @@
-import { FunctionComponent, ReactNode, useEffect, useState, useMemo } from 'react';
+import { FunctionComponent, ReactNode, useEffect, useState, useMemo, type JSX } from 'react';
 import { algoliasearch, SearchClient } from 'algoliasearch';
 import { InstantSearch, useInstantSearch } from 'react-instantsearch';
 import Stack from '@mui/material/Stack';

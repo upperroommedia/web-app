@@ -15,7 +15,7 @@ const Footer: FunctionComponent = () => (
             src="/coptic-devs-logo.webp"
             alt="Coptic Devs Logo"
             fill
-            sizes="36px, 36px"
+            sizes="36px"
             style={{ objectFit: 'cover' }}
           />
         </span>
