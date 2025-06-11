@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { logger } from 'firebase-functions/v2';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';

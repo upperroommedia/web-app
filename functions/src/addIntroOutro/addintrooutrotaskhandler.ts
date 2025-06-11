@@ -106,8 +106,8 @@ const mainFunction = async (
     const trimMessage = skipTranscode
       ? 'Trimming'
       : audioSource.type === 'StorageFilePath'
-      ? 'Trimming and Transcoding'
-      : 'Downloading YouTube Audio';
+        ? 'Trimming and Transcoding'
+        : 'Downloading YouTube Audio';
     await docRef.update({
       status: {
         ...sermonStatus,
@@ -326,7 +326,7 @@ const addintrooutrotaskhandler = onTaskDispatched(
             message: message,
           },
         });
-      } catch (_e) {
+      } catch {
         logger.error('Error Updating Document with docRef', docRef.path);
       }
       logger.error('Error', e);

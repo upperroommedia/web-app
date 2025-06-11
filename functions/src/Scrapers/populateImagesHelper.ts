@@ -31,7 +31,7 @@ const streamDataToStorage = async (stream: Stream, destinationFile: File): Promi
   });
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function populateImages(
   bucket: Bucket,
   imageIds: Set<string>,
