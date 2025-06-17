@@ -7,11 +7,11 @@ import useAuth from '../context/user/UserContext';
 import PopUp from './PopUp';
 // import Alert from '@mui/material/Alert';
 // import Collapse from '@mui/material/Collapse';
-import { GoogleLoginButton, AppleLoginButton, FacebookLoginButton } from 'react-social-login-buttons';
+import { GoogleLoginButton, AppleLoginButton, MicrosoftLoginButton } from 'react-social-login-buttons';
 
 const Login = () => {
   const router = useRouter();
-  const { loginWithGoogle, loginWithFacebook, loginWithApple } = useAuth();
+  const { loginWithGoogle,  loginWithApple, loginWithMicrosoft } = useAuth();
 
   // const [data, setData] = useState({
   //   email: '',
@@ -144,7 +144,7 @@ const Login = () => {
           </Button>
           <p style={{ textAlign: 'center' }}>or</p> */}
         <GoogleLoginButton onClick={() => handleLogin(loginWithGoogle)} />
-        <FacebookLoginButton onClick={() => handleLogin(loginWithFacebook)} />
+        <MicrosoftLoginButton onClick={() => handleLogin(loginWithMicrosoft)} />
         <AppleLoginButton onClick={() => handleLogin(loginWithApple)} />
       </div>
       {/* </form> */}

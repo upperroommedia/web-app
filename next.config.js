@@ -5,6 +5,7 @@ const nextConfig = {
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'graph.facebook.com' },
+      { protocol: 'https', hostname: 'account.microsoft.com' },
       { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
       { protocol: 'https', hostname: 'core.subsplash.com' },
       { protocol: 'https', hostname: 'localhost' },
