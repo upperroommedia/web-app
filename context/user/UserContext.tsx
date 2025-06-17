@@ -1,7 +1,7 @@
 import { useContext, createContext, useEffect, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
-  FacebookAuthProvider,
+  // FacebookAuthProvider,
   GoogleAuthProvider,
   OAuthProvider,
   sendPasswordResetEmail,
@@ -22,8 +22,9 @@ interface Context {
   loading: boolean;
   login: (loginForm: userCredentials) => Promise<any>;
   loginWithGoogle: () => Promise<any>;
-  loginWithFacebook: () => Promise<any>;
+  // loginWithFacebook: () => Promise<any>;
   loginWithApple: () => Promise<any>;
+  loginWithMicrosoft: () => Promise<any>;
   signup: (loginForm: SignupForm) => Promise<any>;
   logoutUser: () => Promise<void>;
   resetPassword: (email: string) => Promise<any>;
@@ -97,18 +98,27 @@ export const UserProvider = ({ children }: any) => {
     }
   };
 
-  const loginWithFacebook = async () => {
+  // const loginWithFacebook = async () => {
+  //   try {
+  //     const provider = new FacebookAuthProvider();
+  //     await signInWithPopup(auth, provider);
+  //   } catch (error: any) {
+  //     return error.code;
+  //   }
+  // };
+
+  const loginWithApple = async () => {
     try {
-      const provider = new FacebookAuthProvider();
+      const provider = new OAuthProvider('apple.com');
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       return error.code;
     }
   };
 
-  const loginWithApple = async () => {
+  const loginWithMicrosoft = async () => {
     try {
-      const provider = new OAuthProvider('apple.com');
+      const provider = new OAuthProvider('microsoft.com');
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       return error.code;
@@ -159,8 +169,9 @@ export const UserProvider = ({ children }: any) => {
         loading,
         login,
         loginWithGoogle,
-        loginWithFacebook,
+        // loginWithFacebook,
         loginWithApple,
+        loginWithMicrosoft,
         signup,
         logoutUser,
         resetPassword,
