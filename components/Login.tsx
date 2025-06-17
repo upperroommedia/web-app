@@ -7,11 +7,11 @@ import useAuth from '../context/user/UserContext';
 import PopUp from './PopUp';
 // import Alert from '@mui/material/Alert';
 // import Collapse from '@mui/material/Collapse';
-import { GoogleLoginButton, AppleLoginButton, FacebookLoginButton } from 'react-social-login-buttons';
+import { GoogleLoginButton, AppleLoginButton, MicrosoftLoginButton } from 'react-social-login-buttons';
 
 const Login = () => {
   const router = useRouter();
-  const { loginWithGoogle, loginWithFacebook, loginWithApple } = useAuth();
+  const { loginWithGoogle,  loginWithApple, loginWithMicrosoft } = useAuth();
 
   // const [data, setData] = useState({
   //   email: '',
@@ -60,7 +60,43 @@ const Login = () => {
 
   const handleLogin = async (loginFunction: () => Promise<any>) => {
     try {
-      await loginFunction();
+      const result = await loginFunction();
+      
+      // Handle specific error codes from our enhanced Microsoft login
+      if (typeof result === 'string') {
+        if (result === 'auth/account-exists-with-different-credential') {
+          setTitle('Account Exists With Different Credential');
+          setErrorMessage('This email is already associated with another sign-in method. Please sign in with your existing provider.');
+          setOpen(true);
+          return;
+        }
+        else if (result === 'auth/requires-existing-provider-signin') {
+          setTitle('Account Linking Required');
+          setErrorMessage('This email is already associated with another sign-in method. Please sign in with your existing provider first, then try linking Microsoft from your profile.');
+          setOpen(true);
+          return;
+        } else if (result === 'auth/linking-failed') {
+          setTitle('Account Linking Failed');
+          setErrorMessage('Failed to link your Microsoft account. Please try again or contact support.');
+          setOpen(true);
+          return;
+        } else if (result === 'auth/popup-closed-by-user') {
+          // Don't show error for user-cancelled popup
+          return;
+        } else if (result === 'auth/popup-blocked') {
+          setTitle('Popup Blocked');
+          setErrorMessage('Your browser blocked the authentication popup. Please allow popups for this site and try again.');
+          setOpen(true);
+          return;
+        } else if (result.startsWith('auth/')) {
+          setTitle('Authentication Error');
+          setErrorMessage('Authentication failed. Please try again.');
+          setOpen(true);
+          return;
+        }
+      }
+      
+      // Success - redirect user
       const { callbackurl: possibleCallback } = router.query;
       const callbackUrl = (possibleCallback as string) || '';
       if (callbackUrl === '/login') {
@@ -68,7 +104,8 @@ const Login = () => {
       } else {
         router.push(`/${callbackUrl}`);
       }
-    } catch {
+    } catch (error) {
+      console.error('Login error:', error);
       setTitle('Error');
       setErrorMessage('Something went wrong. Please try again.');
       setOpen(true);
@@ -144,7 +181,7 @@ const Login = () => {
           </Button>
           <p style={{ textAlign: 'center' }}>or</p> */}
         <GoogleLoginButton onClick={() => handleLogin(loginWithGoogle)} />
-        <FacebookLoginButton onClick={() => handleLogin(loginWithFacebook)} />
+        <MicrosoftLoginButton onClick={() => handleLogin(loginWithMicrosoft)} />
         <AppleLoginButton onClick={() => handleLogin(loginWithApple)} />
       </div>
       {/* </form> */}
