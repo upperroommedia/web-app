@@ -8,6 +8,7 @@ import PopUp from './PopUp';
 // import Alert from '@mui/material/Alert';
 // import Collapse from '@mui/material/Collapse';
 import { GoogleLoginButton, AppleLoginButton, MicrosoftLoginButton } from 'react-social-login-buttons';
+import { AuthErrorCodes, AuthError, UserCredential } from 'firebase/auth';
 
 const Login = () => {
   const router = useRouter();
@@ -57,44 +58,49 @@ const Login = () => {
   //   }
   //   router.push(authResult.dest);
   // };
+  // Type guard function
+function isAuthError(error: any): error is AuthError {
+  return error && 
+         typeof error.code === 'string' && 
+         error.code.startsWith('auth/') &&
+         typeof error.message === 'string';
+}
 
-  const handleLogin = async (loginFunction: () => Promise<any>) => {
+  const handleLogin = async (loginFunction: () => Promise<UserCredential>) => {
     try {
-      const result = await loginFunction();
-      
-      // Handle specific error codes from our enhanced Microsoft login
-      if (typeof result === 'string') {
-        if (result === 'auth/account-exists-with-different-credential') {
+      await loginFunction();
+    } catch (error) {
+      if (isAuthError(error)) {
+        if (error.code === AuthErrorCodes.CREDENTIAL_ALREADY_IN_USE || error.code === AuthErrorCodes.NEED_CONFIRMATION) {
           setTitle('Account Exists With Different Credential');
           setErrorMessage('This email is already associated with another sign-in method. Please sign in with your existing provider.');
           setOpen(true);
           return;
-        }
-        else if (result === 'auth/requires-existing-provider-signin') {
+        } else if (error.code === 'auth/requires-existing-provider-signin') {
           setTitle('Account Linking Required');
           setErrorMessage('This email is already associated with another sign-in method. Please sign in with your existing provider first, then try linking Microsoft from your profile.');
           setOpen(true);
           return;
-        } else if (result === 'auth/linking-failed') {
-          setTitle('Account Linking Failed');
-          setErrorMessage('Failed to link your Microsoft account. Please try again or contact support.');
-          setOpen(true);
+        } else if (error.code === AuthErrorCodes.POPUP_CLOSED_BY_USER || error.code === AuthErrorCodes.USER_CANCELLED || error.code === AuthErrorCodes.EXPIRED_POPUP_REQUEST) {
           return;
-        } else if (result === 'auth/popup-closed-by-user') {
-          // Don't show error for user-cancelled popup
-          return;
-        } else if (result === 'auth/popup-blocked') {
+        } else if (error.code === AuthErrorCodes.POPUP_BLOCKED) {
           setTitle('Popup Blocked');
           setErrorMessage('Your browser blocked the authentication popup. Please allow popups for this site and try again.');
           setOpen(true);
           return;
-        } else if (result.startsWith('auth/')) {
+        } else {
           setTitle('Authentication Error');
-          setErrorMessage('Authentication failed. Please try again.');
+          setErrorMessage(error.message);
           setOpen(true);
           return;
         }
+      } else {
+        setTitle('Authentication Error');
+        setErrorMessage('Something went wrong. Please try again or contact support.');
+        setOpen(true);
+        return;
       }
+    }
       
       // Success - redirect user
       const { callbackurl: possibleCallback } = router.query;
@@ -104,12 +110,6 @@ const Login = () => {
       } else {
         router.push(`/${callbackUrl}`);
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      setTitle('Error');
-      setErrorMessage('Something went wrong. Please try again.');
-      setOpen(true);
-    }
   };
 
   return (

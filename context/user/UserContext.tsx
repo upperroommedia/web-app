@@ -8,7 +8,8 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
-  //   IdTokenResult,
+  UserCredential,
+  browserPopupRedirectResolver,
 } from 'firebase/auth';
 import auth from '../../firebase/auth';
 import { SignupForm, userCredentials } from '../types';
@@ -21,10 +22,10 @@ interface Context {
   user: User | undefined;
   loading: boolean;
   login: (loginForm: userCredentials) => Promise<any>;
-  loginWithGoogle: () => Promise<any>;
+  loginWithGoogle: () => Promise<UserCredential>;
   // loginWithFacebook: () => Promise<any>;
-  loginWithApple: () => Promise<any>;
-  loginWithMicrosoft: () => Promise<any>;
+  loginWithApple: () => Promise<UserCredential>;
+  loginWithMicrosoft: () => Promise<UserCredential>;
   signup: (loginForm: SignupForm) => Promise<any>;
   logoutUser: () => Promise<void>;
   resetPassword: (email: string) => Promise<any>;
@@ -90,12 +91,8 @@ export const UserProvider = ({ children }: any) => {
   };
 
   const loginWithGoogle = async () => {
-    try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      return error.code;
-    }
+      return await signInWithPopup(auth, provider, browserPopupRedirectResolver);
   };
 
   // const loginWithFacebook = async () => {
@@ -108,21 +105,13 @@ export const UserProvider = ({ children }: any) => {
   // };
 
   const loginWithApple = async () => {
-    try {
       const provider = new OAuthProvider('apple.com');
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      return error.code;
-    }
+      return await signInWithPopup(auth, provider, browserPopupRedirectResolver);
   };
 
   const loginWithMicrosoft = async () => {
-    try {
       const provider = new OAuthProvider('microsoft.com');
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      return error.code;
-    }
+      return await signInWithPopup(auth, provider, browserPopupRedirectResolver);
   };
 
   const signup = async (loginForm: SignupForm) => {
