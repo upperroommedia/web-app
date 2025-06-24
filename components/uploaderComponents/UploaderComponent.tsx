@@ -47,7 +47,7 @@ import { useRouter } from 'next/router';
 import { AudioSource } from '../../pages/api/uploadFile';
 import DropZone from '../DropZone';
 import BundleListSelector from '../BundleListSelector';
-import { getSubtitlesFromBundle } from '../../utils/bundleHelpers';
+import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -211,12 +211,9 @@ const Uploader = (props: UploaderProps) => {
 
       // fetch latest list
       if (!props.existingSermon) {
-        const latestQuery = query(collection(firestore, 'lists'), where('type', '==', ListType.LATEST)).withConverter(
-          listConverter
-        );
-        const latestSnap = await getDocs(latestQuery);
-        if (latestSnap.docs.length > 0) {
-          const latestList = latestSnap.docs[0].data();
+        const latestListFromBundle = await getLatestListFromBundle();
+        if (latestListFromBundle.length > 0) {
+          const latestList = latestListFromBundle[0];
           setEmptyListWithLatest([latestList]);
           addList(latestList);
         }
@@ -255,7 +252,12 @@ const Uploader = (props: UploaderProps) => {
   // ======================== START OF ERROR HANDLING ========================
 
   const setFormErrorCallback = useCallback(
-    (key: (typeof _fieldsToValidate)[number], errorStatus: boolean, message?: string, initialState: boolean = false) => {
+    (
+      key: (typeof _fieldsToValidate)[number],
+      errorStatus: boolean,
+      message?: string,
+      initialState: boolean = false
+    ) => {
       const newUploaderFieldError: UploaderFieldError = {
         error: errorStatus,
         message: message ?? '',
@@ -378,10 +380,8 @@ const Uploader = (props: UploaderProps) => {
 
   // Convert selected topic lists to sermon.topics string array
   useEffect(() => {
-    const topicNames = sermonList
-      .filter((list) => list.type === ListType.TOPIC_LIST)
-      .map((list) => list.name);
-    
+    const topicNames = sermonList.filter((list) => list.type === ListType.TOPIC_LIST).map((list) => list.name);
+
     updateSermon('topics', topicNames);
   }, [sermonList, updateSermon]);
 
@@ -584,9 +584,9 @@ const Uploader = (props: UploaderProps) => {
             setSpeakerError={setSpeakerError}
           />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <BundleListSelector 
-              sermonList={sermonList} 
-              setSermonList={setSermonList} 
+            <BundleListSelector
+              sermonList={sermonList}
+              setSermonList={setSermonList}
               listType={ListType.TOPIC_LIST}
               error={formErrors?.topics}
               setError={setTopicsError}
