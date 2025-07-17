@@ -11,14 +11,18 @@ export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
     // Get the data from before and after
     const beforeData = event.data?.before?.data();
     const afterData = event.data?.after?.data();
+    const dataDiff = {
+      before: beforeData,
+      after: afterData,
+    };
 
     // Check if we should trigger bundle regeneration
     if (!config.shouldTrigger(beforeData, afterData)) {
+      logger.info(`No changes detected for ${config.displayName} bundle, skipping regeneration.`, dataDiff);
       return;
     }
 
-    logger.info(`Regenerating ${config.displayName} bundle.`);
-    logger.info('Data diff', { before: beforeData, after: afterData });
+    logger.info(`Regenerating ${config.displayName} bundle.`, dataDiff);
 
     try {
       // Regenerate bundle after changes
