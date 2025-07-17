@@ -7,37 +7,33 @@ import { generateAndStoreBundle } from './bundleCreationUtils';
 const database = firebaseAdmin.database();
 
 export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
-    return firestore.onDocumentWritten(
-        config.collectionPath,
-        async (event) => {
+  return firestore.onDocumentWritten(config.collectionPath, async (event) => {
+    // Get the data from before and after
+    const beforeData = event.data?.before?.data();
+    const afterData = event.data?.after?.data();
 
-            // Get the data from before and after
-            const beforeData = event.data?.before?.data();
-            const afterData = event.data?.after?.data();
+    // Check if we should trigger bundle regeneration
+    if (!config.shouldTrigger(beforeData, afterData)) {
+      return;
+    }
 
-            // Check if we should trigger bundle regeneration
-            if (!config.shouldTrigger(beforeData, afterData)) {
-                return;
-            }
+    logger.info(`Regenerating ${config.displayName} bundle.`);
+    logger.info('Data diff', { before: beforeData, after: afterData });
 
-            logger.info(`Regenerating ${config.displayName} bundle.`);
+    try {
+      // Regenerate bundle after changes
+      const count = await generateAndStoreBundle(config);
 
-            try {
-                // Regenerate bundle after changes
-                const count = await generateAndStoreBundle(config);
+      // Update metadata to track the regeneration
+      await database.ref(config.metadataDocPath).update({
+        lastUpdated: Date.now(),
+        [`${config.bundleType}-count`]: count,
+      });
 
-                // Update metadata to track the regeneration
-                await database.ref(config.metadataDocPath).update({
-                    lastUpdated: Date.now(),
-                    [`${config.bundleType}-count`]: count,
-                });
-
-                logger.info(`${config.displayName} bundle regenerated successfully`);
-
-            } catch (error) {
-                logger.error(`Error regenerating ${config.displayName} bundle after operation:`, error);
-                throw handleError(error);
-            }
-        }
-    );
-} 
+      logger.info(`${config.displayName} bundle regenerated successfully`);
+    } catch (error) {
+      logger.error(`Error regenerating ${config.displayName} bundle after operation:`, error);
+      throw handleError(error);
+    }
+  });
+}
