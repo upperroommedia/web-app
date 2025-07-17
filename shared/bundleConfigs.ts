@@ -69,9 +69,9 @@ export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleConfig<List> = {
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for bible chapter lists
     return (
-      (!isEqual(omit(beforeData, fieldsToOmit), omit(afterData, fieldsToOmit)) &&
-        beforeData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER) ||
-      afterData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER
+      !isEqual(omit(beforeData, fieldsToOmit), omit(afterData, fieldsToOmit)) &&
+      (beforeData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER ||
+        afterData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER)
     );
   },
   orderByField: 'listTagAndPosition.position',
