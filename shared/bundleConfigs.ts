@@ -19,6 +19,7 @@ export interface BundleConfig<T> {
   orderByField?: string;
   whereConditions?: Array<{ field: string; operator: any; value: any }>;
 }
+const fieldsToOmit = ['createdAtMillis', 'updatedAtMillis', 'count'];
 
 export const TOPIC_BUNDLE_CONFIG: BundleConfig<Topic> = {
   bundleType: 'topics',
@@ -53,7 +54,7 @@ export const SUBTITLE_BUNDLE_CONFIG: BundleConfig<List> = {
   orderByField: 'name',
   whereConditions: [{ field: 'type', operator: '==', value: ListType.CATEGORY_LIST }],
 };
-const fieldsToOmit = ['createdAtMillis', 'updatedAtMillis', 'count'];
+
 export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleConfig<List> = {
   bundleType: 'bible-chapters',
   functionName: 'createbiblechapterbundle',
@@ -68,10 +69,7 @@ export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleConfig<List> = {
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for bible chapter lists
     return (
-      (!isEqual(
-        omit(beforeData?.listTagAndPosition, fieldsToOmit),
-        omit(afterData?.listTagAndPosition, fieldsToOmit)
-      ) &&
+      (!isEqual(omit(beforeData, fieldsToOmit), omit(afterData, fieldsToOmit)) &&
         beforeData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER) ||
       afterData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER
     );
@@ -94,7 +92,7 @@ export const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleConfig<List> = {
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for sunday homily lists
     return (
-      !isEqual(omit(beforeData?.listTagAndPosition, fieldsToOmit), omit(afterData?.listTagAndPosition, fieldsToOmit)) &&
+      !isEqual(omit(beforeData, fieldsToOmit), omit(afterData, fieldsToOmit)) &&
       (beforeData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH ||
         afterData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH)
     );
