@@ -2,6 +2,7 @@ import { firestoreAdminListConverter, firestoreAdminTopicConverter } from '../fu
 import { FirestoreDataConverter } from 'firebase-admin/firestore';
 import { Topic } from '../types/Topic';
 import { List, ListTag, ListType } from '../types/List';
+import { isEqual, omit } from 'lodash';
 
 export interface BundleConfig<T> {
   bundleType: string;
@@ -52,7 +53,7 @@ export const SUBTITLE_BUNDLE_CONFIG: BundleConfig<List> = {
   orderByField: 'name',
   whereConditions: [{ field: 'type', operator: '==', value: ListType.CATEGORY_LIST }],
 };
-
+const fieldsToOmit = ['createdAtMillis', 'updatedAtMillis', 'count'];
 export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleConfig<List> = {
   bundleType: 'bible-chapters',
   functionName: 'createbiblechapterbundle',
@@ -67,7 +68,11 @@ export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleConfig<List> = {
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for bible chapter lists
     return (
-      beforeData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER ||
+      (!isEqual(
+        omit(beforeData?.listTagAndPosition, fieldsToOmit),
+        omit(afterData?.listTagAndPosition, fieldsToOmit)
+      ) &&
+        beforeData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER) ||
       afterData?.listTagAndPosition?.listTag === ListTag.BIBLE_CHAPTER
     );
   },
@@ -89,8 +94,9 @@ export const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleConfig<List> = {
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for sunday homily lists
     return (
-      beforeData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH ||
-      afterData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH
+      !isEqual(omit(beforeData?.listTagAndPosition, fieldsToOmit), omit(afterData?.listTagAndPosition, fieldsToOmit)) &&
+      (beforeData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH ||
+        afterData?.listTagAndPosition?.listTag === ListTag.SUNDAY_HOMILY_MONTH)
     );
   },
   orderByField: 'listTagAndPosition.position',
