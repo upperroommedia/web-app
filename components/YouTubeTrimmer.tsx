@@ -43,8 +43,6 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   const debouncedInput = useDebounce(inputText, 500); // wait 500ms after user stops typing
 
   useEffect(() => {
-    console.log('YouTube URL input changed:', debouncedInput);
-
     if (!mediaPlayerRef.current) return;
     mediaPlayerRef.current.startLoading();
     mediaPlayerRef.current.startLoadingPoster();

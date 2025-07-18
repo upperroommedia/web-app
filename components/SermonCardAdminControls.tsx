@@ -36,12 +36,19 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState<boolean>(false);
 
   const deleteFromSoundCloudErrorThrowable = useCallback(async () => {
+    setIsUploadingToSoundCloud(true);
+    const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
     if (sermon.soundCloudTrackId === undefined) {
+      // eslint-disable-next-line no-console
+      console.warn('No SoundCloud track ID to delete');
+      await updateDoc(sermonRef, {
+        soundCloudTrackId: deleteField(),
+        status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+      });
+      setIsUploadingToSoundCloud(false);
       return;
     }
-    setIsUploadingToSoundCloud(true);
     const deleteFromSoundCloud = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
-    const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
     try {
       await deleteFromSoundCloud({ soundCloudTrackId: sermon.soundCloudTrackId });
       await updateDoc(sermonRef, {
@@ -60,6 +67,8 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
           soundCloudTrackId: deleteField(),
           status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
         });
+      } else {
+        throw error;
       }
     } finally {
       setIsUploadingToSoundCloud(false);
@@ -85,7 +94,9 @@ const AdminControls: FunctionComponent<AdminControlsProps> = ({
   }, [sermon.id, sermon.status]);
 
   const deleteFromSubsplashErrorThrowable = useCallback(async () => {
-    const deleteFromSubsplashCall = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>('deletefromsubsplash');
+    const deleteFromSubsplashCall = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>(
+      'deletefromsubsplash'
+    );
     try {
       setIsUploadingToSubsplash(true);
       await deleteFromSubsplashCall({ subsplashId: sermon.subsplashId! });
