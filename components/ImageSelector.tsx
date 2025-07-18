@@ -160,6 +160,7 @@ const ImageSelector = (props: {
       ) : (
         <>
           <TextField
+            autoFocus
             value={imageSearchQuery}
             onChange={async (e) => {
               setImageQuery(e.target.value);
