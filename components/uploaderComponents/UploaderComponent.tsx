@@ -264,6 +264,13 @@ const Uploader = (props: UploaderProps) => {
         initialState,
       };
       setFormErrors((prevFormErrors): FormErrors => {
+        if (
+          prevFormErrors[key]?.error === errorStatus &&
+          prevFormErrors[key]?.message === (message ?? '') &&
+          prevFormErrors[key]?.initialState === initialState
+        ) {
+          return prevFormErrors;
+        }
         return {
           ...prevFormErrors,
           [key]: newUploaderFieldError,
@@ -373,7 +380,11 @@ const Uploader = (props: UploaderProps) => {
 
   const updateSermon = useCallback(
     <T extends keyof Sermon>(key: T, value: Sermon[T]) => {
-      setSermon((oldSermon) => ({ ...oldSermon, [key]: value }));
+      setSermon((oldSermon) => {
+        if (oldSermon[key] === value) return oldSermon; // no change
+
+        return { ...oldSermon, [key]: value };
+      });
     },
     [setSermon]
   );

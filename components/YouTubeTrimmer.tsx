@@ -1,12 +1,13 @@
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
-import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
+import { Dispatch, FunctionComponent, memo, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import {
   MediaPlayer,
   MediaProvider,
   MediaProviderAdapter,
   MediaProviderChangeEvent,
   isYouTubeProvider,
+  MediaPlayerInstance,
 } from '@vidstack/react';
 import styles from '../styles/AudioTrimmer.module.css';
 import { VideoLayout } from './vidstackComponents/VideoLayout';
@@ -15,6 +16,7 @@ import { AudioSource } from '../pages/api/uploadFile';
 import CircularProgress from '@mui/material/CircularProgress';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
+import useDebounce from '@/hooks/useDebounce';
 
 interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
@@ -36,8 +38,17 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   setAudioSourceError,
 }) => {
   const [inputText, setInputText] = useState('');
-  const [isLoading, _setIsLoading] = useState(false);
   const [isValidYouTubeUrl, setIsValidYouTubeUrl] = useState(false);
+  const mediaPlayerRef = useRef<MediaPlayerInstance>(null);
+  const debouncedInput = useDebounce(inputText, 500); // wait 500ms after user stops typing
+
+  useEffect(() => {
+    console.log('YouTube URL input changed:', debouncedInput);
+
+    if (!mediaPlayerRef.current) return;
+    mediaPlayerRef.current.startLoading();
+    mediaPlayerRef.current.startLoadingPoster();
+  }, [debouncedInput]);
 
   function onProviderChange(provider: MediaProviderAdapter | null, _nativeEvent: MediaProviderChangeEvent) {
     // We can configure provider's here.
@@ -70,6 +81,13 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
     }
   }, [trimStart, duration]);
 
+  const handleTextFieldChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setInputText(event.target.value);
+    },
+    [setInputText]
+  );
+
   return (
     <Box display="flex" width={1} flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
       <Box display="flex" width={1} justifyContent="center" alignItems="center" gap={1}>
@@ -87,32 +105,29 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
           error={showError(audioSourceError)}
           helperText={getErrorMessage(audioSourceError)}
           value={inputText}
-          disabled={isLoading}
-          onChange={(e) => {
-            setInputText(e.target.value);
-            setTrimStart(0);
-            setAudioSourceError(false, '');
-            // setShowMediaPlayer(false)
-            // if (error) {
-            //   setError(error);
-            // }
-          }}
+          onChange={handleTextFieldChange}
         />
       </Box>
       {!showError(audioSourceError) && !isValidYouTubeUrl && inputText.trim() && <CircularProgress />}
       <MediaPlayer
+        ref={mediaPlayerRef}
         className={`${styles.player} media-player`}
-        src={inputText}
-        load="eager"
+        src={debouncedInput}
+        load="custom"
+        posterLoad="custom"
         onProviderChange={onProviderChange}
         hideControlsOnMouseLeave={false}
         controlsDelay={10000000000000}
         crossOrigin
         playsInline
         viewType="video"
+        onError={() => {
+          setIsValidYouTubeUrl(false);
+          setAudioSourceError(true, 'Could not load YouTube video, please check the link');
+        }}
         style={{ display: isValidYouTubeUrl ? 'block' : 'none' }}
       >
-        <MediaProvider></MediaProvider>
+        <MediaProvider iframeProps={{ style: { height: '100%', width: '100%' } }}></MediaProvider>
         <VideoLayout startTime={trimStart} duration={duration} setStartTime={setTrimStart} setDuration={setDuration} />
       </MediaPlayer>
       <Box display="flex" width={1} justifyContent="space-around" gap={1}>
@@ -123,4 +138,4 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   );
 };
 
-export default YouTubeTrimmer;
+export default memo(YouTubeTrimmer);

@@ -33,7 +33,7 @@
     "@mui/system": "^7.1.1",
     "@mui/utils": "^7.1.1",
     "@mui/x-date-pickers": "^8.5.1",
-    "@vidstack/react": "^1.10.5",
+    "@vidstack/react": "^1.12.13",
     "algoliasearch": "^5.27.0",
     "classnames": "^2.5.1",
     "date-fns": "^4.1.0",
