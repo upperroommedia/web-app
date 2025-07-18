@@ -87,7 +87,7 @@ const AdminList = () => {
               hitsPerPage: HITSPERPAGE,
               page: currentPage,
               ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
-            }
+            },
           });
           if (res.hits.length > 0) {
             setNoMoreResults(false);
@@ -257,7 +257,7 @@ const AdminList = () => {
         )}
       </Box>
       <DeleteEntityPopup
-        entityBeingDeleten="list"
+        entityBeingDeleted="list"
         handleDelete={handleListDelete}
         deleteConfirmationPopup={deleteListPopup}
         setDeleteConfirmationPopup={setDeleteListPopup}
