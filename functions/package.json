@@ -19,7 +19,9 @@
     "@google-cloud/storage": "7.13.0",
     "algoliasearch": "^5.27.0",
     "axios": "^1.6.5",
+    "buffer-image-size": "^0.6.4",
     "dotenv": "^16.3.1",
+    "fast-average-color-node": "^3.1.0",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
     "firebase": "^9.23.0",
@@ -35,6 +37,8 @@
     "lodash": "^4.17.21",
     "mkdirp": "^2.1.6",
     "node-fetch": "3.3.0",
+    "node-vibrant": "^4.0.3",
+    "p-limit": "^6.2.0",
     "sharp": "0.33.5",
     "uuidv4": "^6.2.13",
     "ytdl-core": "^4.11.5"

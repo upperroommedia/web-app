@@ -45,6 +45,8 @@ import { createLatestListBundle } from './createLatestListBundle';
 import { bibleChapterListOnWrite, sundayHomilyListOnWrite } from './DocumentListeners/Lists/taggedListOnWrite';
 import { fixPhantomListItems } from './Scrapers/fixPhantomListItems';
 import { updateSubsplashTag } from './Scrapers/updateSubsplashTag';
+import { updateImageMetadata } from './helpers/updateImageMetadata';
+import imageOnDelete from './DocumentListeners/Images/imageOnDelete';
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -92,3 +94,5 @@ exports.biblechapterlistonwrite = bibleChapterListOnWrite;
 exports.sundayhomilylistonwrite = sundayHomilyListOnWrite;
 exports.fixphantomlistitems = fixPhantomListItems;
 exports.updatesubsplashtag = updateSubsplashTag;
+exports.updateimagemetadata = updateImageMetadata;
+exports.imageondelete = imageOnDelete;
