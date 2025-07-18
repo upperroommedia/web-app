@@ -109,7 +109,7 @@ const handleImageUpload = onObjectFinalized(
     if (metadata.type && !ImageSizes.includes(metadata.type as ImageSizeType)) {
       return logger.log('File has no type');
     }
-     
+
     const imageName = object.name.split('/').pop();
     if (!imageName) {
       throw new HttpsError('invalid-argument', 'Image name is not valid');
@@ -135,12 +135,14 @@ const handleImageUpload = onObjectFinalized(
       logger.log(`Downloaded image file: '${filePath}' to '${originalFile}'`);
 
       // uploading to subsplash
+      const publicUrl = bucket.file(object.name).publicUrl();
       logger.log('uploading to subsplash');
-      const subsplashImageId = await uploadImageToSubsplash(imageName, originalFile);
+      const [subsplashImageId, computedImageMetadata] = await Promise.all([
+        uploadImageToSubsplash(imageName, originalFile),
+        computeMetadataForImage(publicUrl),
+      ]);
 
       // uploading to firestore
-      const publicUrl = bucket.file(object.name).publicUrl();
-      const computedImageMetadata = await computeMetadataForImage(publicUrl);
       const image: ImageType = {
         ...computedImageMetadata,
         id: subsplashImageId,
