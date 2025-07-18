@@ -1,7 +1,7 @@
 import { AspectRatio, ImageSizeType, ImageSizes, ImageType } from '../types/Image';
 
 import ImageSelector from './ImageSelector';
-import { memo, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import styles from '../styles/ImageViewer.module.css';
@@ -22,6 +22,21 @@ const ImageViewer = (props: propsType) => {
   const [selectedImage, setSelectedImage] = useState<ImageType>();
   const [newSelectedImage, setNewSelectedImage] = useState<ImageType>();
   const [imageSelectorPopup, setImageSelectorPopup] = useState<boolean>(false);
+  const [popupTitle, setPopupTitle] = useState<string>('Select an Image');
+
+  const confirmSelectedImage = useCallback(
+    (image: ImageType) => {
+      props.newImageCallback(image);
+      setImageSelectorPopup(false);
+    },
+    [props.newImageCallback, setImageSelectorPopup]
+  );
+
+  const confirmSelectedImageWithSelection = useCallback(() => {
+    if (!newSelectedImage) return;
+    confirmSelectedImage(newSelectedImage);
+  }, [newSelectedImage, confirmSelectedImage]);
+
   return (
     <>
       <div
@@ -116,7 +131,7 @@ const ImageViewer = (props: propsType) => {
       </div>
       {selectedImage && (
         <DynamicPopUp
-          title="Select an Image"
+          title={popupTitle}
           open={imageSelectorPopup}
           setOpen={setImageSelectorPopup}
           dialogProps={{ fullWidth: true, maxWidth: 'lg' }}
@@ -125,10 +140,7 @@ const ImageViewer = (props: propsType) => {
               variant="contained"
               color="primary"
               disabled={selectedImage.id === newSelectedImage?.id}
-              onClick={() => {
-                newSelectedImage && props.newImageCallback(newSelectedImage);
-                setImageSelectorPopup(false);
-              }}
+              onClick={confirmSelectedImageWithSelection}
             >
               Confirm
             </Button>
@@ -139,6 +151,8 @@ const ImageViewer = (props: propsType) => {
             selectedImageFromSpeakerDetails={selectedImage}
             newSelectedImage={newSelectedImage}
             setNewSelectedImage={setNewSelectedImage}
+            confirmSelecedImage={confirmSelectedImage}
+            setPopupTitle={setPopupTitle}
           />
         </DynamicPopUp>
       )}

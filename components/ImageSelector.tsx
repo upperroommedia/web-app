@@ -39,6 +39,8 @@ const ImageSelector = (props: {
   selectedImageFromSpeakerDetails: ImageType;
   newSelectedImage: ImageType | undefined;
   setNewSelectedImage: (image: ImageType) => void;
+  confirmSelecedImage: (image: ImageType) => void;
+  setPopupTitle: (title: string) => void;
 }) => {
   const [images, setImages] = useState<ImageType[]>([]);
   const [imageSearchResults, setImageSearchResults] = useState<AlgoliaImage[]>();
@@ -76,7 +78,7 @@ const ImageSelector = (props: {
             hitsPerPage,
             page,
             filters: `type:${props.selectedImageFromSpeakerDetails.type}`,
-          }
+          },
         });
         response.hits.forEach((hit) => {
           images.push(hit);
@@ -112,10 +114,10 @@ const ImageSelector = (props: {
   const saveImage = async (croppedImageData: CroppedImageData, name: string) => {
     try {
       setImageUploading(true);
+      props.setPopupTitle(`Saving image ${name}`);
       const q = query(collection(firestore, 'images'), where('name', '==', name));
       const querySnapshot = await getDocs(q);
       if (querySnapshot.empty) {
-        // TODO make this work
         const imageRef = ref(imageStorage, `speaker-images/${name}`);
         await uploadBytes(imageRef, croppedImageData.blob, {
           contentType: croppedImageData.contentType,
@@ -128,7 +130,7 @@ const ImageSelector = (props: {
               const imageAddedToFirestore = change.doc.data() as ImageType;
               setImages((oldImages) => [imageAddedToFirestore, ...oldImages]);
               props.setNewSelectedImage(imageAddedToFirestore);
-              setImageUploading(false);
+              props.confirmSelecedImage(imageAddedToFirestore);
               unsubscribe();
             }
           });
