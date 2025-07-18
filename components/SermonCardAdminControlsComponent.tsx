@@ -134,7 +134,7 @@ const SermonCardAdminControlsComponent: FunctionComponent<SermonCardAdminControl
       )}
       {deleteConfirmationPopup && (
         <DeleteEntityPopup
-          entityBeingDeleten="sermon"
+          entityBeingDeleted="sermon"
           handleDelete={handleDelete}
           deleteConfirmationPopup={deleteConfirmationPopup}
           setDeleteConfirmationPopup={setDeleteConfirmationPopup}

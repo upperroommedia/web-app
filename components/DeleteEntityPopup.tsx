@@ -5,7 +5,7 @@ import { Dispatch, SetStateAction, useState } from 'react';
 import PopUp from './PopUp';
 
 interface DeleteEntityPopupProps {
-  entityBeingDeleten: string;
+  entityBeingDeleted: string;
   deleteConfirmationPopup: boolean;
   setDeleteConfirmationPopup: Dispatch<SetStateAction<boolean>>;
   handleDelete: () => Promise<void>;
@@ -16,12 +16,12 @@ const DeleteEntityPopup = (props: DeleteEntityPopupProps) => {
   const [deleteChecked, setDeleteChecked] = useState<boolean>(false);
   return (
     <PopUp
-      title={`Are you sure you want to permanently delete this ${props.entityBeingDeleten}?`}
+      title={`Are you sure you want to permanently delete this ${props.entityBeingDeleted}?`}
       open={props.deleteConfirmationPopup}
       setOpen={props.setDeleteConfirmationPopup}
       button={
         <Button
-          aria-label={`confirm delete ${props.entityBeingDeleten}`}
+          aria-label={`confirm delete ${props.entityBeingDeleted}`}
           onClick={async () => {
             await props.handleDelete();
             props.setDeleteConfirmationPopup(false);
