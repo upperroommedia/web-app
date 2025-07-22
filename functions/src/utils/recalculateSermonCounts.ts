@@ -9,8 +9,10 @@ import { SermonList } from '../../../types/SermonList';
  * This can be used to fix inconsistent count states.
  */
 export async function recalculateSermonCounts(
-  sermonId: string
-): Promise<{ numberOfLists: number; numberOfListsUploadedTo: number }> {
+  sermonId: string,
+  beforeNumberOfLists: number,
+  beforeNumberOfListsUploadedTo: number
+): Promise<{ wasInconsistent: boolean; after: { numberOfLists: number; numberOfListsUploadedTo: number } }> {
   const firestoreDb = firebaseAdmin.firestore();
 
   try {
@@ -29,16 +31,20 @@ export async function recalculateSermonCounts(
       }
     });
 
+    const wasInconsistent =
+      beforeNumberOfLists !== numberOfLists || beforeNumberOfListsUploadedTo !== numberOfListsUploadedTo;
+
     // Update the sermon document with the correct counts
-    const sermonRef = firestoreDb.doc(`sermons/${sermonId}`).withConverter(firestoreAdminSermonConverter);
-    await sermonRef.update({
-      numberOfLists,
-      numberOfListsUploadedTo,
-    });
+    if (wasInconsistent) {
+      const sermonRef = firestoreDb.doc(`sermons/${sermonId}`).withConverter(firestoreAdminSermonConverter);
+      await sermonRef.update({
+        numberOfLists,
+        numberOfListsUploadedTo,
+      });
 
-    console.log(`Recalculated counts for sermon ${sermonId}: ${numberOfListsUploadedTo}/${numberOfLists}`);
-
-    return { numberOfLists, numberOfListsUploadedTo };
+      console.log(`Recalculated counts for sermon ${sermonId}: ${numberOfListsUploadedTo}/${numberOfLists}`);
+    }
+    return { wasInconsistent, after: { numberOfLists, numberOfListsUploadedTo } };
   } catch (error) {
     console.error(`Error recalculating counts for sermon ${sermonId}:`, error);
     throw error;
@@ -65,18 +71,19 @@ export async function validateSermonCounts(sermonId: string): Promise<boolean> {
     const currentNumberOfListsUploadedTo = sermon.numberOfListsUploadedTo || 0;
 
     // Calculate actual counts
-    const { numberOfLists, numberOfListsUploadedTo } = await recalculateSermonCounts(sermonId);
+    const { wasInconsistent, after } = await recalculateSermonCounts(
+      sermonId,
+      currentNumberOfLists,
+      currentNumberOfListsUploadedTo
+    );
 
-    const isValid =
-      currentNumberOfLists === numberOfLists && currentNumberOfListsUploadedTo === numberOfListsUploadedTo;
-
-    if (!isValid) {
+    if (wasInconsistent) {
       console.warn(
-        `Sermon ${sermonId} has inconsistent counts. Current: ${currentNumberOfListsUploadedTo}/${currentNumberOfLists}, Actual: ${numberOfListsUploadedTo}/${numberOfLists}`
+        `Sermon ${sermonId} has inconsistent counts. Current: ${currentNumberOfListsUploadedTo}/${currentNumberOfLists}, Actual: ${after.numberOfListsUploadedTo}/${after.numberOfLists}`
       );
     }
 
-    return isValid;
+    return !wasInconsistent;
   } catch (error) {
     console.error(`Error validating counts for sermon ${sermonId}:`, error);
     return false;
