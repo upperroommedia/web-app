@@ -55,10 +55,11 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
           before,
         });
       } else {
-        const after = await recalculateSermonCounts(sermonId);
-        const wasInconsistent =
-          before.numberOfLists !== after.numberOfLists ||
-          before.numberOfListsUploadedTo !== after.numberOfListsUploadedTo;
+        const { wasInconsistent, after } = await recalculateSermonCounts(
+          sermonId,
+          before.numberOfLists,
+          before.numberOfListsUploadedTo
+        );
 
         results.push({
           sermonId,
@@ -72,44 +73,47 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
       const sermonsSnapshot = await firestoreDb.collection('sermons').get();
       logger.info(`Processing ${sermonsSnapshot.docs.length} sermons`);
 
-      for (const sermonDoc of sermonsSnapshot.docs) {
-        const sermon = sermonDoc.data();
-        const currentSermonId = sermonDoc.id;
-        const before = {
-          numberOfLists: sermon.numberOfLists || 0,
-          numberOfListsUploadedTo: sermon.numberOfListsUploadedTo || 0,
-        };
+      await Promise.all(
+        sermonsSnapshot.docs.map(async (sermonDoc) => {
+          const sermon = sermonDoc.data();
+          const currentSermonId = sermonDoc.id;
+          const before = {
+            numberOfLists: sermon.numberOfLists || 0,
+            numberOfListsUploadedTo: sermon.numberOfListsUploadedTo || 0,
+          };
 
-        try {
-          if (validateOnly) {
-            const isValid = await validateSermonCounts(currentSermonId);
+          try {
+            if (validateOnly) {
+              const isValid = await validateSermonCounts(currentSermonId);
+              results.push({
+                sermonId: currentSermonId,
+                wasInconsistent: !isValid,
+                before,
+              });
+            } else {
+              const { wasInconsistent, after } = await recalculateSermonCounts(
+                currentSermonId,
+                before.numberOfLists,
+                before.numberOfListsUploadedTo
+              );
+
+              results.push({
+                sermonId: currentSermonId,
+                wasInconsistent,
+                before,
+                after,
+              });
+            }
+          } catch (error) {
+            logger.error(`Error processing sermon ${currentSermonId}:`, error);
             results.push({
               sermonId: currentSermonId,
-              wasInconsistent: !isValid,
+              wasInconsistent: true,
               before,
-            });
-          } else {
-            const after = await recalculateSermonCounts(currentSermonId);
-            const wasInconsistent =
-              before.numberOfLists !== after.numberOfLists ||
-              before.numberOfListsUploadedTo !== after.numberOfListsUploadedTo;
-
-            results.push({
-              sermonId: currentSermonId,
-              wasInconsistent,
-              before,
-              after,
             });
           }
-        } catch (error) {
-          logger.error(`Error processing sermon ${currentSermonId}:`, error);
-          results.push({
-            sermonId: currentSermonId,
-            wasInconsistent: true,
-            before,
-          });
-        }
-      }
+        })
+      );
     }
 
     const inconsistentCount = results.filter((r) => r.wasInconsistent).length;
