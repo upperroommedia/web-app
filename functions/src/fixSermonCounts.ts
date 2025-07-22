@@ -49,24 +49,27 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
 
       if (validateOnly) {
         const isValid = await validateSermonCounts(sermonId);
-        results.push({
-          sermonId,
-          wasInconsistent: !isValid,
-          before,
-        });
+        if (!isValid) {
+          results.push({
+            sermonId,
+            wasInconsistent: !isValid,
+            before,
+          });
+        }
       } else {
         const { wasInconsistent, after } = await recalculateSermonCounts(
           sermonId,
           before.numberOfLists,
           before.numberOfListsUploadedTo
         );
-
-        results.push({
-          sermonId,
-          wasInconsistent,
-          before,
-          after,
-        });
+        if (wasInconsistent) {
+          results.push({
+            sermonId,
+            wasInconsistent,
+            before,
+            after,
+          });
+        }
       }
     } else {
       // Fix/validate all sermons
@@ -85,24 +88,27 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
           try {
             if (validateOnly) {
               const isValid = await validateSermonCounts(currentSermonId);
-              results.push({
-                sermonId: currentSermonId,
-                wasInconsistent: !isValid,
-                before,
-              });
+              if (!isValid) {
+                results.push({
+                  sermonId: currentSermonId,
+                  wasInconsistent: !isValid,
+                  before,
+                });
+              }
             } else {
               const { wasInconsistent, after } = await recalculateSermonCounts(
                 currentSermonId,
                 before.numberOfLists,
                 before.numberOfListsUploadedTo
               );
-
-              results.push({
-                sermonId: currentSermonId,
-                wasInconsistent,
-                before,
-                after,
-              });
+              if (wasInconsistent) {
+                results.push({
+                  sermonId: currentSermonId,
+                  wasInconsistent,
+                  before,
+                  after,
+                });
+              }
             }
           } catch (error) {
             logger.error(`Error processing sermon ${currentSermonId}:`, error);
