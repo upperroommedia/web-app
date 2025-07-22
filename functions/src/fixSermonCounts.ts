@@ -12,7 +12,6 @@ interface FixSermonCountsResponse {
   message: string;
   results?: Array<{
     sermonId: string;
-    wasInconsistent: boolean;
     before?: { numberOfLists: number; numberOfListsUploadedTo: number };
     after?: { numberOfLists: number; numberOfListsUploadedTo: number };
   }>;
@@ -23,7 +22,7 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
   async (request) => {
     const { sermonId, validateOnly = false } = request.data || {};
     const firestoreDb = firebaseAdmin.firestore();
-
+    let totalCount = 0;
     try {
       logger.info(
         `${validateOnly ? 'Validating' : 'Fixing'} sermon counts${
@@ -35,6 +34,7 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
 
       if (sermonId) {
         // Fix/validate single sermon
+        totalCount = 1;
         const sermonDoc = await firestoreDb.doc(`sermons/${sermonId}`).get();
         if (!sermonDoc.exists) {
           return {
@@ -54,7 +54,6 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
           if (!isValid) {
             results.push({
               sermonId,
-              wasInconsistent: !isValid,
               before,
             });
           }
@@ -67,7 +66,6 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
           if (wasInconsistent) {
             results.push({
               sermonId,
-              wasInconsistent,
               before,
               after,
             });
@@ -76,7 +74,8 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
       } else {
         // Fix/validate all sermons
         const sermonsSnapshot = await firestoreDb.collection('sermons').get();
-        logger.info(`Processing ${sermonsSnapshot.docs.length} sermons`);
+        totalCount = sermonsSnapshot.docs.length;
+        logger.info(`Processing ${totalCount} sermons`);
 
         await Promise.all(
           sermonsSnapshot.docs.map(async (sermonDoc) => {
@@ -93,7 +92,6 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
                 if (!isValid) {
                   results.push({
                     sermonId: currentSermonId,
-                    wasInconsistent: !isValid,
                     before,
                   });
                 }
@@ -106,7 +104,6 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
                 if (wasInconsistent) {
                   results.push({
                     sermonId: currentSermonId,
-                    wasInconsistent,
                     before,
                     after,
                   });
@@ -116,7 +113,6 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
               logger.error(`Error processing sermon ${currentSermonId}:`, error);
               results.push({
                 sermonId: currentSermonId,
-                wasInconsistent: true,
                 before,
               });
             }
@@ -124,14 +120,14 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
         );
       }
 
-      const inconsistentCount = results.filter((r) => r.wasInconsistent).length;
-      const totalCount = results.length;
+      const inconsistentCount = results.length;
 
       const message = validateOnly
         ? `Validation complete. ${inconsistentCount}/${totalCount} sermons have inconsistent counts.`
         : `Fix complete. ${inconsistentCount}/${totalCount} sermons had inconsistent counts and were fixed.`;
 
       logger.info(message);
+      logger.info('Results:', results);
 
       return {
         success: true,
