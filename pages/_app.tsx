@@ -43,6 +43,7 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
         />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/URM_icon.png" />
+        <link rel="apple-touch-icon" href="/URM_icon.png"></link>
         {/* ✅ Preload critical resources */}
         <link rel="preload" href="/URM_icon.png" as="image" />
       </Head>
