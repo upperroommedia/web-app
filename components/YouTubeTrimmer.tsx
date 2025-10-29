@@ -18,6 +18,67 @@ import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
 import useDebounce from '@/hooks/useDebounce';
 
+/**
+ * Normalize a YouTube URL or ID into a standard embed URL.
+ * Handles live, short, and other YouTube link variants.
+ */
+export function normalizeYouTubeUrl(input: string): string | null {
+  if (!input) return null;
+
+  // Trim whitespace
+  const value = input.trim();
+
+  // If it's already just an ID (11 characters typical)
+  if (/^[\w-]{11}$/.test(value)) {
+    return `https://www.youtube.com/embed/${value}`;
+  }
+
+  try {
+    const url = new URL(value);
+
+    // Match based on hostname patterns
+    const host = url.hostname.replace(/^www\./, '');
+
+    let videoId: string | null = null;
+
+    switch (host) {
+      case 'youtube.com':
+      case 'youtube-nocookie.com':
+        if (url.pathname === '/watch') {
+          videoId = url.searchParams.get('v');
+        } else if (url.pathname.startsWith('/embed/')) {
+          videoId = url.pathname.split('/embed/')[1];
+        } else if (url.pathname.startsWith('/live/')) {
+          videoId = url.pathname.split('/live/')[1];
+        } else if (url.pathname.startsWith('/shorts/')) {
+          videoId = url.pathname.split('/shorts/')[1];
+        }
+        break;
+
+      case 'youtu.be':
+        videoId = url.pathname.split('/')[1];
+        break;
+
+      default:
+        return null;
+    }
+
+    if (!videoId) return null;
+
+    // Clean up videoId (remove query params or fragments)
+    videoId = videoId.split('?')[0].split('&')[0].split('#')[0];
+
+    // Validate it looks like a proper YouTube video ID
+    if (!/^[\w-]{11}$/.test(videoId)) return null;
+
+    return `https://www.youtube.com/embed/${videoId}`;
+  } catch {
+    // If it's not a URL, maybe it's just a malformed ID string
+    const maybeId = value.match(/[\w-]{11}/)?.[0];
+    return maybeId ? `https://www.youtube.com/embed/${maybeId}` : null;
+  }
+}
+
 interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
   trimStart: number;
@@ -110,7 +171,7 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
       <MediaPlayer
         ref={mediaPlayerRef}
         className={`${styles.player} media-player`}
-        src={debouncedInput}
+        src={normalizeYouTubeUrl(debouncedInput) || undefined}
         load="custom"
         posterLoad="custom"
         onProviderChange={onProviderChange}
