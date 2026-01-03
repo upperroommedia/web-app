@@ -194,16 +194,20 @@ const Uploader = (props: UploaderProps) => {
         // eslint-disable-next-line no-console
         console.error('Error loading subtitles from bundle, falling back to Firestore:', error);
         // Fallback to manual fetch
+        // Note: We can't use != filter here because Firestore requires inequality fields to be first in orderBy
+        // Instead, we filter client-side after fetching
         const listQuery = query(
           collection(firestore, 'lists'),
           where('type', '==', ListType.CATEGORY_LIST)
         ).withConverter(listConverter);
         const listQuerySnapshot = await getDocs(listQuery);
         setSubtitles(
-          listQuerySnapshot.docs.map((doc) => {
-            const list = doc.data();
-            return list;
-          })
+          listQuerySnapshot.docs
+            .map((doc) => {
+              const list = doc.data();
+              return list;
+            })
+            .filter((list) => list.isMoreSermonsList !== true) // Exclude overflow lists (only filter if explicitly true)
         );
       } finally {
         setSubtitlesLoading(false);

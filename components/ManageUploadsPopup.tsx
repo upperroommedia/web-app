@@ -2,7 +2,7 @@ import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
-import firestore, { doc, updateDoc, collection, writeBatch } from '../firebase/firestore';
+import firestore, { doc, updateDoc, collection, writeBatch, getDoc } from '../firebase/firestore';
 import { Dispatch, FunctionComponent, SetStateAction, useEffect, useState } from 'react';
 import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
 import { RemoveFromListInputType, RemoveFromListOutputType } from '../functions/src/removeFromList';
@@ -112,7 +112,7 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
       );
 
       const addToListReturn = await addToList({
-        listsMetadata,
+        destinationListIds: listsMetadata.map(m => m.listId),
         mediaItem: { id, type: 'media-item' },
       });
 
@@ -154,23 +154,57 @@ const ManageUploadsPopup: FunctionComponent<ManageUploadsPopupProps> = ({
       const listsToRemoveFiltered = listsToRemoveFrom.filter(
         (list) => list.uploadStatus?.status === uploadStatus.UPLOADED && list.uploadStatus.listItemId
       );
+      
+      // Create a map from subsplash ID to Firestore document ID
+      const subsplashIdToFirestoreIdMap = new Map<string, string>();
+      listsToRemoveFiltered.forEach((list) => {
+        if (list.subsplashId) {
+          subsplashIdToFirestoreIdMap.set(list.subsplashId, list.id);
+        }
+      });
+      
       const removeFromListReturn = await removeFromListCallable({
         listIds: listsToRemoveFiltered.map((list) => list.subsplashId) as string[],
         listItemIds: listsToRemoveFiltered.map((list) =>
           list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : ''
         ) as string[],
+        itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
+        itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
       });
       const batch = writeBatch(firestore);
-      removeFromListReturn.forEach((r) => {
-        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${r.listId}`).withConverter(
+      
+      for (const r of removeFromListReturn) {
+        if (r.status === 'error') {
+          // Log error but don't throw - continue processing other items
+          // eslint-disable-next-line no-console
+          console.warn(`Error removing from list ${r.listId}:`, r.error);
+          continue;
+        }
+        
+        // Map subsplash ID back to Firestore document ID
+        const firestoreListId = subsplashIdToFirestoreIdMap.get(r.listId);
+        if (!firestoreListId) {
+          // eslint-disable-next-line no-console
+          console.warn(`Could not find Firestore document ID for subsplash list ${r.listId}`);
+          continue;
+        }
+        
+        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${firestoreListId}`).withConverter(
           sermonListConverter
         );
-        if (r.status === 'success') {
-          batch.update(docRef, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
-        } else {
-          throw new Error(r.error);
+        
+        // Check if document exists before trying to update
+        const docSnapshot = await getDoc(docRef);
+        if (!docSnapshot.exists()) {
+          // Document doesn't exist - this is fine, it means it was already removed
+          // eslint-disable-next-line no-console
+          console.warn(`Document ${firestoreListId} does not exist, skipping update`);
+          continue;
         }
-      });
+        
+        batch.update(docRef, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
+      }
+      
       await batch.commit();
     } catch (error) {
       // eslint-disable-next-line no-console

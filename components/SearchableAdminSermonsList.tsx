@@ -19,6 +19,8 @@ import IconButton from '@mui/material/IconButton';
 import FilterIcon from '@mui/icons-material/FilterAlt';
 import AnimateHeight from 'react-animate-height';
 import { SxProps, Theme } from '@mui/system';
+import { isDevelopment } from '../firebase/firebase';
+import { createMockAlgoliaSearchClient } from '../utils/mockAlgoliaSearchClient';
 interface SearchableAdminSermonListProps {}
 
 const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
@@ -36,6 +38,12 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
   useEffect(() => {
     const initApiKey = async () => {
       if (!apiKey) {
+        // In dev mode with emulator, we don't need Algolia credentials
+        if (isDevelopment) {
+          setApiKey('mock-key');
+          return;
+        }
+        
         if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
           throw new Error('Missing Algolia Credentials');
         }
@@ -56,6 +64,12 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
 
   // Create search client with useMemo to prevent unnecessary recreations
   const searchClient = useMemo((): SearchClient | null => {
+    // In dev mode, use mock client that queries Firestore
+    if (isDevelopment) {
+      return createMockAlgoliaSearchClient();
+    }
+    
+    // In production, use real Algolia client
     if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
       return null;
     }

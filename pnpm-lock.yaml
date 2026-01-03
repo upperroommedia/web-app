@@ -340,6 +340,9 @@ importers:
       '@types/imagemagick':
         specifier: ^0.0.31
         version: 0.0.31
+      '@types/jest':
+        specifier: ^29.5.14
+        version: 29.5.14
       '@types/lodash':
         specifier: ^4.17.17
         version: 4.17.20
@@ -373,6 +376,12 @@ importers:
       globals:
         specifier: ^16.2.0
         version: 16.3.0
+      jest:
+        specifier: ^29.7.0
+        version: 29.7.0(@types/node@18.19.119)(babel-plugin-macros@3.1.0)
+      ts-jest:
+        specifier: ^29.4.0
+        version: 29.4.0(@babel/core@7.28.0)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.28.0))(jest-util@29.7.0)(jest@29.7.0(@types/node@18.19.119)(babel-plugin-macros@3.1.0))(typescript@4.9.5)
       typescript:
         specifier: ^4.9.5
         version: 4.9.5
@@ -3656,6 +3665,7 @@ packages:
   form-data@2.5.4:
     resolution: {integrity: sha512-Y/3MmRiR8Nd+0CUtrbvcKtKzLWiUfpQ7DFVggH8PwmGt/0r7RSy32GuP4hpCJlQNEBusisSx1DLtD8uD386HJQ==}
     engines: {node: '>= 0.12'}
+    deprecated: This version has an incorrect dependency; please use v2.5.5
 
   form-data@4.0.3:
     resolution: {integrity: sha512-qsITQPfmvMOSAdeyZ+12I1c+CKSstAFAwu+97zrnWAbIr5u8wfsExUzCesVLC8NgHuRUqNN4Zy6UPWUTRGslcA==}
@@ -3865,6 +3875,7 @@ packages:
 
   has-own@1.0.1:
     resolution: {integrity: sha512-RDKhzgQTQfMaLvIFhjahU+2gGnRBK6dYOd5Gd9BzkmnBneOCRYjRC003RIMrdAbH52+l+CnMS4bBCXGer8tEhg==}
+    deprecated: This project is not maintained. Use Object.hasOwn() instead.
 
   has-property-descriptors@1.0.2:
     resolution: {integrity: sha512-55JNKuIW+vq4Ke1BjOTjM2YctQIvCT7GFzHwmfZPGo5wnrgkid0YQtnAleFSqumZm4az3n2BS+erby5ipJdgrg==}
@@ -4929,6 +4940,7 @@ packages:
   next@15.3.3:
     resolution: {integrity: sha512-JqNj29hHNmCLtNvd090SyRbXJiivQ+58XjCcrC50Crb5g5u2zi7Y2YivbsEfzk6AtVI80akdOQbaMZwWB1Hthw==}
     engines: {node: ^18.18.0 || ^19.8.0 || >= 20.0.0}
+    deprecated: This version has a security vulnerability. Please upgrade to a patched version. See https://nextjs.org/blog/CVE-2025-66478 for more details.
     hasBin: true
     peerDependencies:
       '@opentelemetry/api': ^1.1.0
@@ -7917,7 +7929,7 @@ snapshots:
       '@jest/test-result': 29.7.0
       '@jest/transform': 29.7.0
       '@jest/types': 29.6.3
-      '@jridgewell/trace-mapping': 0.3.25
+      '@jridgewell/trace-mapping': 0.3.29
       '@types/node': 18.19.119
       chalk: 4.1.2
       collect-v8-coverage: 1.0.2
@@ -7967,7 +7979,7 @@ snapshots:
     dependencies:
       '@babel/core': 7.28.0
       '@jest/types': 29.6.3
-      '@jridgewell/trace-mapping': 0.3.25
+      '@jridgewell/trace-mapping': 0.3.29
       babel-plugin-istanbul: 6.1.1
       chalk: 4.1.2
       convert-source-map: 2.0.0
@@ -13797,7 +13809,7 @@ snapshots:
 
   v8-to-istanbul@9.3.0:
     dependencies:
-      '@jridgewell/trace-mapping': 0.3.25
+      '@jridgewell/trace-mapping': 0.3.29
       '@types/istanbul-lib-coverage': 2.0.6
       convert-source-map: 2.0.0
 

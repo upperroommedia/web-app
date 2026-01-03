@@ -40,6 +40,9 @@ const client =
     : undefined;
 
 const AdminList = () => {
+  // Exclude overflow lists (isMoreSermonsList: true) from admin list view
+  // Note: Firestore doesn't support != with undefined, so we use a compound query
+  // We'll filter client-side for isMoreSermonsList !== true
   const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
   const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
@@ -87,11 +90,15 @@ const AdminList = () => {
               hitsPerPage: HITSPERPAGE,
               page: currentPage,
               ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
+              // Exclude overflow lists from search results
+              filters: 'NOT isMoreSermonsList:true',
             },
           });
-          if (res.hits.length > 0) {
+          // Also filter client-side as a safety measure
+          const filteredHits = res.hits.filter((list) => list.isMoreSermonsList !== true);
+          if (filteredHits.length > 0) {
             setNoMoreResults(false);
-            setSearchResults(res.hits);
+            setSearchResults(filteredHits);
           } else {
             setSearchResults([]);
             setNoMoreResults(true);
@@ -109,7 +116,8 @@ const AdminList = () => {
 
   useEffect(() => {
     if (firebaseList) {
-      setList(firebaseList);
+      // Filter out overflow lists (isMoreSermonsList: true) from admin view
+      setList(firebaseList.filter((list) => list.isMoreSermonsList !== true));
     }
   }, [firebaseList]);
 
