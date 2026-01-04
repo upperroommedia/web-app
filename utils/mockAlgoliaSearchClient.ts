@@ -1,7 +1,6 @@
-import { SearchClient, MultipleQueriesQuery, SearchResponse, SearchForFacetValuesResponse } from 'algoliasearch';
-import firestore, { collection, query, getDocs, where, orderBy, limit, QueryConstraint } from '../firebase/firestore';
-import { sermonConverter, Sermon } from '../types/Sermon';
-import { uploadStatus } from '../types/SermonTypes';
+import type { SearchClient, SearchQuery, SearchResponse, SearchForFacetValuesResponse, SearchMethodParams, LegacySearchMethodProps, SearchForFacetValuesProps, SearchResponses } from 'algoliasearch';
+import firestore, { collection, query, getDocs, where, orderBy, QueryConstraint } from '../firebase/firestore';
+import { sermonConverter } from '../types/Sermon';
 
 /**
  * Creates a mock Algolia SearchClient that queries Firestore instead of Algolia.
@@ -10,10 +9,28 @@ import { uploadStatus } from '../types/SermonTypes';
 export function createMockAlgoliaSearchClient(): SearchClient {
   return {
     search: async <T = Record<string, any>>(
-      queries: readonly MultipleQueriesQuery[]
-    ): Promise<{ results: Array<SearchResponse<T>> }> => {
+      searchMethodParams: SearchMethodParams | LegacySearchMethodProps
+    ): Promise<SearchResponses<T>> => {
+      // Handle both SearchMethodParams (has requests array) and LegacySearchMethodProps (is array of queries)
+      const queries: readonly SearchQuery[] = Array.isArray(searchMethodParams)
+        ? searchMethodParams
+        : searchMethodParams.requests;
+
       const results = await Promise.all(
         queries.map(async (queryRequest) => {
+          // In algoliasearch v5, SearchQuery properties are directly on the object
+          // Handle both SearchParamsObject (direct properties) and SearchParamsString (params string) formats
+          const queryObj = queryRequest as any;
+          const getParam = (key: string) => {
+            // Try direct property first (SearchParamsObject format)
+            if (queryObj[key] !== undefined) return queryObj[key];
+            // Fall back to params object if it exists (legacy format)
+            if (queryObj.params && typeof queryObj.params === 'object' && queryObj.params[key] !== undefined) {
+              return queryObj.params[key];
+            }
+            return undefined;
+          };
+
           if (queryRequest.indexName !== 'sermons') {
             // For non-sermons indices, return empty results
             return {
@@ -21,19 +38,19 @@ export function createMockAlgoliaSearchClient(): SearchClient {
               nbHits: 0,
               page: 0,
               nbPages: 0,
-              hitsPerPage: queryRequest.params?.hitsPerPage || 20,
+              hitsPerPage: getParam('hitsPerPage') || 20,
               processingTimeMS: 0,
-              query: queryRequest.params?.query || '',
+              query: getParam('query') || '',
               params: '',
             } as SearchResponse<T>;
           }
 
           try {
-            const searchQuery = queryRequest.params?.query || '';
-            const hitsPerPage = queryRequest.params?.hitsPerPage || 20;
-            const page = queryRequest.params?.page || 0;
-            const filters = queryRequest.params?.filters || '';
-            const facetFilters = queryRequest.params?.facetFilters || [];
+            const searchQuery = getParam('query') || '';
+            const hitsPerPage = getParam('hitsPerPage') || 20;
+            const page = getParam('page') || 0;
+            const filters = getParam('filters') || '';
+            const facetFilters = getParam('facetFilters') || [];
 
             // Build Firestore query constraints
             const constraints: QueryConstraint[] = [];
@@ -54,7 +71,7 @@ export function createMockAlgoliaSearchClient(): SearchClient {
 
             // Track speaker filters to apply in memory (Firestore can't query nested object arrays easily)
             const speakerFilters: string[] = [];
-            
+
             // Apply facet filters (array of arrays)
             if (Array.isArray(facetFilters) && facetFilters.length > 0) {
               for (const facetFilterGroup of facetFilters) {
@@ -168,9 +185,9 @@ export function createMockAlgoliaSearchClient(): SearchClient {
               nbHits: 0,
               page: 0,
               nbPages: 0,
-              hitsPerPage: queryRequest.params?.hitsPerPage || 20,
+              hitsPerPage: getParam('hitsPerPage') || 20,
               processingTimeMS: 0,
-              query: queryRequest.params?.query || '',
+              query: getParam('query') || '',
               params: '',
             } as SearchResponse<T>;
           }
@@ -180,82 +197,75 @@ export function createMockAlgoliaSearchClient(): SearchClient {
       return { results };
     },
     searchForFacetValues: async (
-      requests: Array<{
-        indexName: string;
-        params: {
-          facetName: string;
-          facetQuery?: string;
-          maxFacetHits?: number;
-        };
-      }>
-    ): Promise<Array<SearchForFacetValuesResponse>> => {
-      return Promise.all(
-        requests.map(async (request) => {
-          if (request.indexName !== 'sermons') {
-            return {
-              facetHits: [],
-            } as SearchForFacetValuesResponse;
-          }
+      { indexName, facetName, searchForFacetValuesRequest }: SearchForFacetValuesProps
+    ): Promise<SearchForFacetValuesResponse> => {
+      if (indexName !== 'sermons') {
+        return {
+          facetHits: [],
+          exhaustiveFacetsCount: true,
+        } as SearchForFacetValuesResponse;
+      }
 
-          try {
-            const { facetName, facetQuery = '', maxFacetHits = 10 } = request.params;
+      try {
+        const facetQuery = searchForFacetValuesRequest?.facetQuery || '';
+        const maxFacetHits = searchForFacetValuesRequest?.maxFacetHits || 10;
 
-            // Get all sermons to calculate facets
-            const sermonsRef = collection(firestore, 'sermons');
-            const sermonsQuery = query(sermonsRef.withConverter(sermonConverter), orderBy('createdAtMillis', 'desc'));
-            const sermonsSnapshot = await getDocs(sermonsQuery);
-            const allSermons = sermonsSnapshot.docs.map((doc) => doc.data());
+        // Get all sermons to calculate facets
+        const sermonsRef = collection(firestore, 'sermons');
+        const sermonsQuery = query(sermonsRef.withConverter(sermonConverter), orderBy('createdAtMillis', 'desc'));
+        const sermonsSnapshot = await getDocs(sermonsQuery);
+        const allSermons = sermonsSnapshot.docs.map((doc) => doc.data());
 
-            // Calculate facet values based on attribute
-            const facetMap = new Map<string, number>();
+        // Calculate facet values based on attribute
+        const facetMap = new Map<string, number>();
 
-            if (facetName === 'status.subsplash') {
-              allSermons.forEach((sermon) => {
-                const value = sermon.status?.subsplash || 'NOT_UPLOADED';
-                facetMap.set(value, (facetMap.get(value) || 0) + 1);
-              });
-            } else if (facetName === 'status.soundCloud') {
-              allSermons.forEach((sermon) => {
-                const value = sermon.status?.soundCloud || 'NOT_UPLOADED';
-                facetMap.set(value, (facetMap.get(value) || 0) + 1);
-              });
-            } else if (facetName === 'speakers.name') {
-              // For speakers, we need to extract all unique speaker names
-              allSermons.forEach((sermon) => {
-                sermon.speakers?.forEach((speaker) => {
-                  if (speaker.name) {
-                    facetMap.set(speaker.name, (facetMap.get(speaker.name) || 0) + 1);
-                  }
-                });
-              });
-            }
+        if (facetName === 'status.subsplash') {
+          allSermons.forEach((sermon) => {
+            const value = sermon.status?.subsplash || 'NOT_UPLOADED';
+            facetMap.set(value, (facetMap.get(value) || 0) + 1);
+          });
+        } else if (facetName === 'status.soundCloud') {
+          allSermons.forEach((sermon) => {
+            const value = sermon.status?.soundCloud || 'NOT_UPLOADED';
+            facetMap.set(value, (facetMap.get(value) || 0) + 1);
+          });
+        } else if (facetName === 'speakers.name') {
+          // For speakers, we need to extract all unique speaker names
+          allSermons.forEach((sermon) => {
+            sermon.speakers?.forEach((speaker) => {
+              if (speaker.name) {
+                facetMap.set(speaker.name, (facetMap.get(speaker.name) || 0) + 1);
+              }
+            });
+          });
+        }
 
-            // Filter by facetQuery if provided
-            let facetHits = Array.from(facetMap.entries())
-              .map(([value, count]) => ({
-                value,
-                highlighted: value,
-                count,
-              }))
-              .filter((hit) => {
-                if (!facetQuery) return true;
-                return hit.value.toLowerCase().includes(facetQuery.toLowerCase());
-              })
-              .sort((a, b) => b.count - a.count) // Sort by count descending
-              .slice(0, maxFacetHits);
+        // Filter by facetQuery if provided
+        let facetHits = Array.from(facetMap.entries())
+          .map(([value, count]) => ({
+            value,
+            highlighted: value,
+            count,
+          }))
+          .filter((hit) => {
+            if (!facetQuery) return true;
+            return hit.value.toLowerCase().includes(facetQuery.toLowerCase());
+          })
+          .sort((a, b) => b.count - a.count) // Sort by count descending
+          .slice(0, maxFacetHits);
 
-            return {
-              facetHits,
-            } as SearchForFacetValuesResponse;
-          } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Mock Algolia searchForFacetValues error:', error);
-            return {
-              facetHits: [],
-            } as SearchForFacetValuesResponse;
-          }
-        })
-      );
+        return {
+          facetHits,
+          exhaustiveFacetsCount: true,
+        } as SearchForFacetValuesResponse;
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Mock Algolia searchForFacetValues error:', error);
+        return {
+          facetHits: [],
+          exhaustiveFacetsCount: true,
+        } as SearchForFacetValuesResponse;
+      }
     },
   } as SearchClient;
 }

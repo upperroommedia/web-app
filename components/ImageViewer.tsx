@@ -19,6 +19,7 @@ interface propsType {
 }
 
 const ImageViewer = (props: propsType) => {
+  const { newImageCallback } = props;
   const [selectedImage, setSelectedImage] = useState<ImageType>();
   const [newSelectedImage, setNewSelectedImage] = useState<ImageType>();
   const [imageSelectorPopup, setImageSelectorPopup] = useState<boolean>(false);
@@ -26,10 +27,10 @@ const ImageViewer = (props: propsType) => {
 
   const confirmSelectedImage = useCallback(
     (image: ImageType) => {
-      props.newImageCallback(image);
+      newImageCallback(image);
       setImageSelectorPopup(false);
     },
-    [props.newImageCallback, setImageSelectorPopup]
+    [newImageCallback, setImageSelectorPopup]
   );
 
   const confirmSelectedImageWithSelection = useCallback(() => {
@@ -82,7 +83,7 @@ const ImageViewer = (props: propsType) => {
                     <Cancel
                       sx={{ color: 'red' }}
                       onClick={() => {
-                        props.newImageCallback(image.type);
+                        newImageCallback(image.type);
                         setSelectedImage(undefined);
                         setNewSelectedImage(undefined);
                       }}
