@@ -48,6 +48,13 @@ import { updateSubsplashTag } from './Scrapers/updateSubsplashTag';
 import { updateImageMetadata } from './helpers/updateImageMetadata';
 import imageOnDelete from './DocumentListeners/Images/imageOnDelete';
 
+// Series functions
+import createseries from './createSeries';
+import deleteseries from './deleteSeries';
+import addtoseries from './addToSeries';
+import removefromseries from './removeFromSeries';
+import reorderseriesitems from './reorderSeriesItems';
+
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
 exports.editSoundCloudSermon = editSoundCloudSermon;
@@ -96,3 +103,10 @@ exports.fixphantomlistitems = fixPhantomListItems;
 exports.updatesubsplashtag = updateSubsplashTag;
 exports.updateimagemetadata = updateImageMetadata;
 exports.imageondelete = imageOnDelete;
+
+// Series exports
+exports.createseries = createseries;
+exports.deleteseries = deleteseries;
+exports.addtoseries = addtoseries;
+exports.removefromseries = removefromseries;
+exports.reorderseriesitems = reorderseriesitems;

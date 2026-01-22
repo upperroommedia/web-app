@@ -8,6 +8,7 @@ import { emptyList, List } from '../../types/List';
 import { emptySermonList, SermonList } from '../../types/SermonList';
 import { emptyTopic, Topic } from '../../types/Topic';
 import { emptyListItem, ListItem, ListItemType } from '../../types/ListItem';
+import { emptySeries, Series } from '../../types/Series';
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
@@ -59,6 +60,15 @@ export const firestoreAdminListConverter: FirestoreDataConverter<List> = {
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<List>): List => {
     return { ...emptyList, ...snapshot.data(), id: snapshot.id };
+  },
+};
+
+export const firestoreAdminSeriesConverter: FirestoreDataConverter<Series> = {
+  toFirestore: (series: Series): Series => {
+    return series;
+  },
+  fromFirestore: (snapshot: QueryDocumentSnapshot<Series>): Series => {
+    return { ...emptySeries, ...snapshot.data(), id: snapshot.id };
   },
 };
 export const firestoreAdminSermonListConverter: FirestoreDataConverter<SermonList> = {
