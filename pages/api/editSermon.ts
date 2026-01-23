@@ -1,4 +1,4 @@
-import firestore, { collectionGroup, doc, getDocs, query, setDoc, where, writeBatch } from '../../firebase/firestore';
+import firestore, { collectionGroup, doc, getDocs, query, setDoc, where, writeBatch, runTransaction, increment } from '../../firebase/firestore';
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
@@ -8,7 +8,11 @@ import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSo
 import { getSquareImageStoragePath } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
 
-const editSermon = async (sermon: Sermon, sermonList: List[]) => {
+interface EditSermonOptions {
+  originalSeriesId?: string;
+}
+
+const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSermonOptions) => {
   const promises: Promise<any>[] = [];
   if (sermon.subsplashId) {
     const editSubsplashSermon = createFunctionV2<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
@@ -79,5 +83,62 @@ const editSermon = async (sermon: Sermon, sermonList: List[]) => {
     }
   });
   await batch.commit();
+
+  // Handle series (media series) changes - this is separate from lists
+  // Uses a transaction to ensure atomicity of all series-related operations
+  const originalSeriesId = options?.originalSeriesId;
+  const newSeriesId = sermon.seriesId;
+  
+  // Only process if series has changed
+  if (originalSeriesId !== newSeriesId) {
+    try {
+      await runTransaction(firestore, async (transaction) => {
+        // Prepare document references
+        const oldSeriesRef = originalSeriesId ? doc(firestore, 'series', originalSeriesId) : null;
+        const oldSeriesItemRef = originalSeriesId 
+          ? doc(firestore, 'series', originalSeriesId, 'seriesItems', sermon.id) 
+          : null;
+        const newSeriesRef = newSeriesId ? doc(firestore, 'series', newSeriesId) : null;
+        const newSeriesItemRef = newSeriesId 
+          ? doc(firestore, 'series', newSeriesId, 'seriesItems', sermon.id) 
+          : null;
+
+        // Read phase: get all documents we need to update
+        const oldSeriesDoc = oldSeriesRef ? await transaction.get(oldSeriesRef) : null;
+        const newSeriesDoc = newSeriesRef ? await transaction.get(newSeriesRef) : null;
+
+        // Write phase: perform all updates atomically
+        
+        // Remove from old series if it existed
+        if (oldSeriesItemRef) {
+          transaction.delete(oldSeriesItemRef);
+        }
+        if (oldSeriesDoc?.exists()) {
+          transaction.update(oldSeriesRef!, {
+            itemCount: increment(-1),
+            updatedAt: new Date(),
+          });
+        }
+
+        // Add to new series if one is selected
+        if (newSeriesItemRef && newSeriesDoc?.exists()) {
+          transaction.set(newSeriesItemRef, {
+            id: sermon.id,
+            position: 1, // Default position, can be reordered later
+            publishedToSubsplash: false,
+            sermonSubsplashId: sermon.subsplashId || null,
+            addedAt: new Date(),
+          });
+          transaction.update(newSeriesRef!, {
+            itemCount: increment(1),
+            updatedAt: new Date(),
+          });
+        }
+      });
+    } catch (err) {
+      console.error('Error updating series membership:', err);
+      throw err; // Re-throw to let caller handle the error
+    }
+  }
 };
 export default editSermon;

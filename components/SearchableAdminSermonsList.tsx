@@ -66,7 +66,10 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
   const searchClient = useMemo((): SearchClient | null => {
     // In dev mode, use mock client that queries Firestore
     if (isDevelopment) {
-      return createMockAlgoliaSearchClient();
+      return createMockAlgoliaSearchClient({
+        userId: user.uid,
+        isAdmin: user.isAdmin(),
+      });
     }
     
     // In production, use real Algolia client
@@ -74,7 +77,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
       return null;
     }
     return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
-  }, [apiKey]);
+  }, [apiKey, user]);
 
   const FilterButton = () => (
     <IconButton onClick={() => setShowFilters((prev) => !prev)} sx={{ display: { xs: 'block', md: 'none' } }}>

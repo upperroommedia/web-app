@@ -7,7 +7,7 @@ import { firestoreAdminSeriesConverter } from '../../firestoreDataConverter';
 import { Series } from '../../../../types/Series';
 
 const firestoreDB = firebaseAdmin.firestore();
-// Use FieldValue from the same firebaseAdmin instance to ensure proper serialization
+// Use FieldValue from the same firebaseAdmin instance to ensure proper serialization in tests
 const FieldValue = firebaseAdmin.firestore.FieldValue;
 
 export interface SeriesDocumentData {

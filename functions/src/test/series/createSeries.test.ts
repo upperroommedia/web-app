@@ -11,6 +11,8 @@ import createSeries, { CreateSeriesInputType, CreateSeriesOutputType } from '../
 type CreateSeriesHandler = (request: TestRequest<CreateSeriesInputType>) => Promise<CreateSeriesOutputType>;
 const createSeriesHandler = createSeries as unknown as CreateSeriesHandler;
 
+const TEST_USER_ID = 'test-user-123';
+
 describe('createSeries - Basic Functionality', () => {
   beforeEach(async () => {
     await clearFirestore();
@@ -23,6 +25,7 @@ describe('createSeries - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: 'My Test Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -37,6 +40,7 @@ describe('createSeries - Basic Functionality', () => {
     expect(firestoreSeries).not.toBeNull();
     expect(firestoreSeries?.name).toBe('My Test Series');
     expect(firestoreSeries?.subsplashId).toBe(result.subsplashId);
+    expect(firestoreSeries?.ownerId).toBe(TEST_USER_ID);
   });
 
   it('should create a series with title, subtitle, and summary', async () => {
@@ -46,6 +50,7 @@ describe('createSeries - Basic Functionality', () => {
         title: 'Complete Series',
         subtitle: 'A subtitle for the series',
         summary: '<p>This is the summary</p>',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -64,6 +69,7 @@ describe('createSeries - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: 'Metadata Test Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -79,6 +85,7 @@ describe('createSeries - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: 'Empty Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -96,6 +103,7 @@ describe('createSeries - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: 'Draft Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -120,17 +128,19 @@ describe('createSeries - Authentication', () => {
       auth: undefined,
       data: {
         title: 'Unauthorized Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
     await expect(createSeriesHandler(request)).rejects.toThrow();
   });
 
-  it('should reject requests from users without publish role', async () => {
+  it('should reject requests from users without publish role when syncing to Subsplash', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
       auth: { token: { role: 'viewer' } },
       data: {
         title: 'Viewer Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -142,6 +152,7 @@ describe('createSeries - Authentication', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: 'Admin Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -154,11 +165,27 @@ describe('createSeries - Authentication', () => {
       auth: { token: { role: 'publisher' } },
       data: {
         title: 'Publisher Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
     const result = await createSeriesHandler(request);
     expect(result.status).toBe('success');
+  });
+
+  it('should allow uploader role to create local-only series with skipSubsplash', async () => {
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'uploader' } },
+      data: {
+        title: 'Uploader Series',
+        ownerId: TEST_USER_ID,
+        skipSubsplash: true,
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+    expect(result.status).toBe('success');
+    expect(result.subsplashId).toBe('');  // Not synced to Subsplash
   });
 });
 
@@ -174,6 +201,7 @@ describe('createSeries - Validation', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: '',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -185,6 +213,19 @@ describe('createSeries - Validation', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: '   ',
+        ownerId: TEST_USER_ID,
+      },
+    };
+
+    await expect(createSeriesHandler(request)).rejects.toThrow();
+  });
+
+  it('should reject requests without ownerId', async () => {
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Missing Owner Series',
+        ownerId: '',
       },
     };
 
@@ -207,6 +248,7 @@ describe('createSeries - Error Handling', () => {
       auth: { token: { role: 'admin' } },
       data: {
         title: 'Failing Series',
+        ownerId: TEST_USER_ID,
       },
     };
 
@@ -215,5 +257,103 @@ describe('createSeries - Error Handling', () => {
     // Verify no Firestore document was created
     const allSeries = await getAllSeries();
     expect(allSeries).toHaveLength(0);
+  });
+});
+
+describe('createSeries - Local Only (skipSubsplash)', () => {
+  beforeEach(async () => {
+    await clearFirestore();
+    subsplashSeriesMock.reset();
+    networkFailureInjector.clear();
+  });
+
+  it('should create a local-only series without calling Subsplash', async () => {
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Local Only Series',
+        ownerId: TEST_USER_ID,
+        skipSubsplash: true,
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+
+    expect(result.status).toBe('success');
+    expect(result.firestoreId).toBeDefined();
+    expect(result.subsplashId).toBe('');
+
+    // Verify Firestore document was created with empty subsplashId
+    const allSeries = await getAllSeries();
+    expect(allSeries).toHaveLength(1);
+    expect(allSeries[0].name).toBe('Local Only Series');
+    expect(allSeries[0].subsplashId).toBe('');
+    expect(allSeries[0].ownerId).toBe(TEST_USER_ID);
+  });
+
+  it('should create local-only series with subtitle and summary', async () => {
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'uploader' } },
+      data: {
+        title: 'Full Local Series',
+        subtitle: 'A local subtitle',
+        summary: 'A local summary',
+        ownerId: TEST_USER_ID,
+        skipSubsplash: true,
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+
+    expect(result.status).toBe('success');
+    
+    const allSeries = await getAllSeries();
+    expect(allSeries[0].subtitle).toBe('A local subtitle');
+    expect(allSeries[0].summary).toBe('A local summary');
+  });
+
+  it('should create local-only series with images', async () => {
+    const testImages = [
+      { id: 'img-1', type: 'square', downloadLink: 'https://example.com/square.jpg', name: 'square' },
+      { id: 'img-2', type: 'wide', downloadLink: 'https://example.com/wide.jpg', name: 'wide' },
+    ];
+
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'uploader' } },
+      data: {
+        title: 'Series With Images',
+        ownerId: TEST_USER_ID,
+        skipSubsplash: true,
+        images: testImages,
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+
+    expect(result.status).toBe('success');
+    
+    const allSeries = await getAllSeries();
+    expect(allSeries).toHaveLength(1);
+    expect(allSeries[0].images).toHaveLength(2);
+    expect(allSeries[0].images[0].type).toBe('square');
+    expect(allSeries[0].images[1].type).toBe('wide');
+  });
+
+  it('should create local-only series with empty images array when not provided', async () => {
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'uploader' } },
+      data: {
+        title: 'Series Without Images',
+        ownerId: TEST_USER_ID,
+        skipSubsplash: true,
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+
+    expect(result.status).toBe('success');
+    
+    const allSeries = await getAllSeries();
+    expect(allSeries[0].images).toEqual([]);
   });
 });

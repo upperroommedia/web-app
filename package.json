@@ -13,6 +13,7 @@
     "next-dev": "next dev --turbopack & pnpm run start-emulators",
     "start-emulators": "pnpm run build-functions-watch & firebase emulators:start --import=./dir",
     "dev": "pnpm kill-port 8081 9099 4000 3000 5001 9000 8123 && pnpm run next-dev",
+    "create-dev-admin": "npx ts-node --skip-project scripts/create-dev-admin.ts",
     "analyze": "ANALYZE=true next build",
     "kill-port": "kill-port",
     "build": "next build",

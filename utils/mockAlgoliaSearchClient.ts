@@ -2,11 +2,19 @@ import type { SearchClient, SearchQuery, SearchResponse, SearchForFacetValuesRes
 import firestore, { collection, query, getDocs, where, orderBy, QueryConstraint } from '../firebase/firestore';
 import { sermonConverter } from '../types/Sermon';
 
+interface MockAlgoliaClientOptions {
+  userId: string;
+  isAdmin: boolean;
+}
+
 /**
  * Creates a mock Algolia SearchClient that queries Firestore instead of Algolia.
  * This is used in development mode when the emulator is running.
+ * @param options.userId - The current user's ID
+ * @param options.isAdmin - Whether the current user is an admin
  */
-export function createMockAlgoliaSearchClient(): SearchClient {
+export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions): SearchClient {
+  const { userId, isAdmin } = options;
   return {
     search: async <T = Record<string, any>>(
       searchMethodParams: SearchMethodParams | LegacySearchMethodProps
@@ -54,6 +62,11 @@ export function createMockAlgoliaSearchClient(): SearchClient {
 
             // Build Firestore query constraints
             const constraints: QueryConstraint[] = [];
+
+            // For non-admin users, filter by uploaderId to show only their own sermons
+            if (!isAdmin) {
+              constraints.push(where('uploaderId', '==', userId));
+            }
 
             // Apply filters
             if (filters) {
@@ -210,9 +223,18 @@ export function createMockAlgoliaSearchClient(): SearchClient {
         const facetQuery = searchForFacetValuesRequest?.facetQuery || '';
         const maxFacetHits = searchForFacetValuesRequest?.maxFacetHits || 10;
 
-        // Get all sermons to calculate facets
+        // Build query constraints for facet values
+        const facetConstraints: QueryConstraint[] = [];
+        
+        // For non-admin users, filter by uploaderId to show only their own sermons
+        if (!isAdmin) {
+          facetConstraints.push(where('uploaderId', '==', userId));
+        }
+        facetConstraints.push(orderBy('createdAtMillis', 'desc'));
+
+        // Get sermons to calculate facets
         const sermonsRef = collection(firestore, 'sermons');
-        const sermonsQuery = query(sermonsRef.withConverter(sermonConverter), orderBy('createdAtMillis', 'desc'));
+        const sermonsQuery = query(sermonsRef.withConverter(sermonConverter), ...facetConstraints);
         const sermonsSnapshot = await getDocs(sermonsQuery);
         const allSermons = sermonsSnapshot.docs.map((doc) => doc.data());
 

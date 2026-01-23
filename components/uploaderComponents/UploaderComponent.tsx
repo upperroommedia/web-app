@@ -7,7 +7,7 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 
-import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
+import firestore, { collection, getDocs, query, where, doc, getDoc } from '../../firebase/firestore';
 import { createEmptySermon } from '../../types/Sermon';
 import { Sermon, sermonStatusType } from '../../types/SermonTypes';
 
@@ -17,6 +17,7 @@ import Button from '@mui/material/Button';
 import ImageViewer from '../ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../../types/Image';
 import ListSelector from '../ListSelector';
+import SeriesSelector from '../SeriesSelector';
 import FormControl from '@mui/material/FormControl';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -24,6 +25,7 @@ import YouTubeTrimmer from '../YouTubeTrimmer';
 import Typography from '@mui/material/Typography';
 import Head from 'next/head';
 import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from '../../types/List';
+import { Series, seriesConverter } from '../../types/Series';
 import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -136,6 +138,33 @@ const Uploader = (props: UploaderProps) => {
   });
   const [hasTrimmed, setHasTrimmed] = useState(false);
 
+  // Series selection (sermon can only be in one series)
+  const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
+
+  // Fetch series when editing existing sermon with seriesId
+  useEffect(() => {
+    const fetchSeriesForExistingSermon = async () => {
+      if (!props.existingSermon?.seriesId) return;
+      
+      try {
+        const seriesDoc = await getDoc(doc(firestore, 'series', props.existingSermon.seriesId).withConverter(seriesConverter));
+        
+        if (seriesDoc.exists()) {
+          setSelectedSeries(seriesDoc.data());
+        } else {
+          // Series was deleted - silently ignore, sermon's seriesId will be cleaned up on next save
+          console.warn(`Series ${props.existingSermon.seriesId} no longer exists`);
+        }
+      } catch (error) {
+        // Permission error or series doesn't exist - silently ignore
+        // The sermon's stale seriesId will be cleaned up when user saves
+        console.warn('Could not fetch series for sermon:', error);
+      }
+    };
+
+    fetchSeriesForExistingSermon();
+  }, [props.existingSermon?.seriesId]);
+
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(() =>
     props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date()
@@ -152,6 +181,7 @@ const Uploader = (props: UploaderProps) => {
         sermon1.title === sermon2.title &&
         sermon1.subtitle === sermon2.subtitle &&
         sermon1.description === sermon2.description &&
+        sermon1.seriesId === sermon2.seriesId &&
         sermon1Date.getDate() === date?.getDate() &&
         sermon1Date.getMonth() === date?.getMonth() &&
         sermon1Date.getFullYear() === date?.getFullYear() &&
@@ -400,6 +430,11 @@ const Uploader = (props: UploaderProps) => {
     updateSermon('topics', topicNames);
   }, [sermonList, updateSermon]);
 
+  // Update sermon.seriesId when selectedSeries changes
+  useEffect(() => {
+    updateSermon('seriesId', selectedSeries?.id);
+  }, [selectedSeries, updateSermon]);
+
   const handleDateChange = useCallback(
     (newValue: Date) => {
       setDate(newValue);
@@ -444,6 +479,7 @@ const Uploader = (props: UploaderProps) => {
     setSermon(createEmptySermon(props.user.uid));
     setEmptyListWithLatest([]);
     setSermonList([]);
+    setSelectedSeries(null);
     setDate(new Date());
     clearAudioTrimmer();
     setFormErrors(getFormErrorInitialState());
@@ -579,7 +615,7 @@ const Uploader = (props: UploaderProps) => {
             helperText={getErrorMessage(formErrors.description)}
             required
           />
-          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+          {/* <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector
               sermonList={sermonList}
               setSermonList={setSermonList}
@@ -587,6 +623,13 @@ const Uploader = (props: UploaderProps) => {
               subtitle={
                 sermon.subtitle !== '' ? subtitles.find((subtitle) => subtitle.name === sermon.subtitle) : undefined
               }
+            />
+          </div> */}
+          {/* Media Series selector (distinct from list series - sermon can only be in one) */}
+          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+            <SeriesSelector
+              selectedSeries={selectedSeries}
+              setSelectedSeries={setSelectedSeries}
             />
           </div>
           <SpeakerSelector
@@ -687,10 +730,10 @@ const Uploader = (props: UploaderProps) => {
                         outroUrl: outroRef,
                       };
                       promises.push(generateAddIntroOutroTask(data));
-                      promises.push(editSermon(pendingSermon, sermonList));
+                      promises.push(editSermon(pendingSermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
                       await Promise.all(promises);
                     }
-                    promises.push(editSermon(sermon, sermonList));
+                    promises.push(editSermon(sermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
                     setIsEditing(false);
                     props.setEditFormOpen?.(false);
                   }}

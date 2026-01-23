@@ -9,10 +9,13 @@ import PopUp from './PopUp';
 // import Collapse from '@mui/material/Collapse';
 import { GoogleLoginButton, AppleLoginButton, MicrosoftLoginButton } from 'react-social-login-buttons';
 import { AuthErrorCodes, AuthError, UserCredential } from 'firebase/auth';
+import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD, isDevelopment } from '../context/user/devAuth';
+import Button from '@mui/material/Button';
 
 const Login = () => {
   const router = useRouter();
-  const { loginWithGoogle,  loginWithApple, loginWithMicrosoft } = useAuth();
+  const { loginWithGoogle, loginWithApple, loginWithMicrosoft, login } = useAuth();
+  const [devLoginLoading, setDevLoginLoading] = useState(false);
 
   // const [data, setData] = useState({
   //   email: '',
@@ -183,6 +186,56 @@ function isAuthError(error: any): error is AuthError {
         <GoogleLoginButton onClick={() => handleLogin(loginWithGoogle)} />
         <MicrosoftLoginButton onClick={() => handleLogin(loginWithMicrosoft)} />
         <AppleLoginButton onClick={() => handleLogin(loginWithApple)} />
+        
+        {isDevelopment && (
+          <>
+            <div style={{ 
+              borderTop: '1px solid #ccc', 
+              margin: '20px 0', 
+              paddingTop: '20px',
+              textAlign: 'center'
+            }}>
+              <p style={{ color: '#666', fontSize: '12px', marginBottom: '10px' }}>
+                Development Mode Only
+              </p>
+              <Button
+                variant="contained"
+                color="warning"
+                fullWidth
+                disabled={devLoginLoading}
+                onClick={async () => {
+                  setDevLoginLoading(true);
+                  try {
+                    const result = await login({ email: DEV_ADMIN_EMAIL, password: DEV_ADMIN_PASSWORD });
+                    if (result) {
+                      // Error code returned
+                      setTitle('Dev Login Error');
+                      setErrorMessage(`Error: ${result}. Make sure to run: npx ts-node --skip-project scripts/create-dev-admin.ts`);
+                      setOpen(true);
+                    } else {
+                      // Success - redirect
+                      const { callbackurl: possibleCallback } = router.query;
+                      const callbackUrl = (possibleCallback as string) || '';
+                      if (callbackUrl === '/login') {
+                        router.push('/');
+                      } else {
+                        router.push(`/${callbackUrl}`);
+                      }
+                    }
+                  } catch (e: any) {
+                    setTitle('Dev Login Error');
+                    setErrorMessage(e.message || 'Unknown error');
+                    setOpen(true);
+                  } finally {
+                    setDevLoginLoading(false);
+                  }
+                }}
+              >
+                {devLoginLoading ? 'Logging in...' : '🔧 Dev Login (Admin)'}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
       {/* </form> */}
       {/* <PopUp open={forgotPasswordPopup} title="Forgot Password" setOpen={setForgotPasswordPopup}>

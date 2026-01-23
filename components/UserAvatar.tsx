@@ -26,7 +26,7 @@ function stringToColor(string: string) {
   return color;
 }
 
-export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar) {
+export default function UserAvatar({ user, children, sx, loading, ...props }: IUserAvatar) {
   const displayName = user?.displayName || user?.email || '';
   const initials = displayName
     .split(' ')
@@ -34,7 +34,7 @@ export default function UserAvatar({ user, children, sx, ...props }: IUserAvatar
     .join('');
   const size = (sx as any)?.width || (sx as any)?.height || 40;
   const fontSize = Math.min(16, size * 0.4); // Scale font dynamically
-  if (props.loading) {
+  if (loading) {
     return (
       <Skeleton
         variant="circular"

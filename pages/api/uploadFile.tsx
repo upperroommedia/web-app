@@ -35,15 +35,46 @@ const addFirestoreDocument = async (
   sermonList: List[],
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>
 ) => {
-  // add sermon to series
-  // note a firestore function document listener will take care of updating the series subcollection for the sermon
   const batch = writeBatch(firestore);
   batch.set(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), sermon);
+  
+  // Add sermon to list subcollections
   sermonList.forEach((list) => {
-    const seriesSermonRef = doc(firestore, 'lists', list.id, 'listItems', sermon.id);
-    batch.set(seriesSermonRef, sermon);
+    const listItemRef = doc(firestore, 'lists', list.id, 'listItems', sermon.id);
+    batch.set(listItemRef, sermon);
   });
+  
+  // Add sermon to series subcollection if seriesId is set
+  if (sermon.seriesId) {
+    const seriesItemRef = doc(firestore, 'series', sermon.seriesId, 'seriesItems', sermon.id);
+    batch.set(seriesItemRef, {
+      id: sermon.id,
+      position: 1, // Default position, can be reordered later
+      publishedToSubsplash: false,
+      sermonSubsplashId: sermon.subsplashId || null,
+      addedAt: new Date(),
+    });
+  }
+  
   await batch.commit();
+  
+  // Update series item count after batch commit if sermon has seriesId
+  if (sermon.seriesId) {
+    try {
+      const { getDoc, updateDoc, increment } = await import('../../firebase/firestore');
+      const seriesRef = doc(firestore, 'series', sermon.seriesId);
+      const seriesDoc = await getDoc(seriesRef);
+      if (seriesDoc.exists()) {
+        await updateDoc(seriesRef, {
+          itemCount: increment(1),
+          updatedAt: new Date(),
+        });
+      }
+    } catch (err) {
+      console.error('Error updating series item count:', err);
+    }
+  }
+  
   setUploadProgress({ error: false, message: 'Uploading...', percent: 99 });
 };
 

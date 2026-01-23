@@ -50,17 +50,37 @@ const deleteSeries = onCall(
       const seriesData = seriesDoc.data()!;
       const subsplashId = seriesData.subsplashId;
 
-      // Authenticate with Subsplash
-      const token = await authenticateSubsplash();
+      // If published to Subsplash, delete from there first
+      if (subsplashId) {
+        // Authenticate with Subsplash
+        const token = await authenticateSubsplash();
 
-      // Delete from Subsplash (this also unassigns items from the series)
-      // The helper handles 404 gracefully (series already deleted)
-      await deleteSubsplashSeries(subsplashId, token);
+        // Delete from Subsplash (this also unassigns items from the series)
+        // The helper handles 404 gracefully (series already deleted)
+        await deleteSubsplashSeries(subsplashId, token);
+      }
 
-      // Delete Firestore document
-      await seriesRef.delete();
+      // Clean up: Get all seriesItems and clear seriesId from associated sermons
+      const seriesItemsRef = firestoreDB.collection('series').doc(firestoreId).collection('seriesItems');
+      const seriesItemsSnapshot = await seriesItemsRef.get();
+      
+      const batch = firestoreDB.batch();
+      
+      // Clear seriesId from all sermons that were in this series
+      for (const itemDoc of seriesItemsSnapshot.docs) {
+        const sermonId = itemDoc.id;
+        const sermonRef = firestoreDB.collection('sermons').doc(sermonId);
+        batch.update(sermonRef, { seriesId: firebaseAdmin.firestore.FieldValue.delete() });
+        // Delete the seriesItem document
+        batch.delete(itemDoc.ref);
+      }
+      
+      // Delete the series document
+      batch.delete(seriesRef);
+      
+      await batch.commit();
 
-      logger.log(`Deleted series: Firestore ID=${firestoreId}, Subsplash ID=${subsplashId}`);
+      logger.log(`Deleted series: Firestore ID=${firestoreId}, Subsplash ID=${subsplashId}, cleaned up ${seriesItemsSnapshot.size} sermon references`);
 
       return {
         status: 'success',
