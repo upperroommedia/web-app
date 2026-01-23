@@ -74,7 +74,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   const { theme: currentTheme, setTheme } = useTheme();
   const router = useRouter();
   const { user, logoutUser } = useAuth();
-  const isMobile = useMediaQuery(muiTheme.breakpoints.down('lg'));
+  const isMobile = useMediaQuery(muiTheme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = user?.isAdmin() ?? false;

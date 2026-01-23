@@ -44,6 +44,7 @@ interface SeekButtonProps extends MediaButtonProps {
 
 // Time Slider Component
 function Slider() {
+  const theme = useTheme();
   return (
     <TimeSlider.Root className="vds-time-slider vds-slider">
       <TimeSlider.Chapters className="vds-slider-chapters">
@@ -58,9 +59,8 @@ function Slider() {
         }
       </TimeSlider.Chapters>
       <TimeSlider.Thumb className="vds-slider-thumb" />
-      <TimeSlider.Preview className="vds-slider-preview">
-        <TimeSlider.ChapterTitle className="vds-slider-chapter-title" />
-        <TimeSlider.Value className="vds-slider-value" />
+      <TimeSlider.Preview className="vds-slider-preview" noClamp style={{ backgroundColor: 'transparent' }}>
+        <TimeSlider.Value style={{ color: theme.palette.text.primary, fontSize: '12px', backgroundColor: 'transparent' }} />
       </TimeSlider.Preview>
     </TimeSlider.Root>
   );
@@ -104,10 +104,11 @@ function Mute({ tooltipPlacement }: MediaButtonProps) {
 // Play/Pause Button Component
 function Play({ tooltipPlacement }: MediaButtonProps) {
   const isPaused = useMediaState('paused');
+  const theme = useTheme();
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <PlayButton className="vds-button floating-player-play-btn">
+        <PlayButton className="vds-button floating-player-play-btn" style={{ backgroundColor: theme.palette.primary.main }}>
           {isPaused ? <PlayIcon /> : <PauseIcon />}
         </PlayButton>
       </Tooltip.Trigger>
@@ -130,12 +131,13 @@ function DurationTime() {
 
 // Volume Slider Component
 function Volume() {
+  const theme = useTheme();
   return (
     <VolumeSlider.Root className="vds-volume-slider vds-slider floating-player-volume">
       <VolumeSlider.Track className="vds-slider-track" />
       <VolumeSlider.TrackFill className="vds-slider-track-fill vds-slider-track" />
-      <VolumeSlider.Preview className="vds-slider-preview" noClamp>
-        <VolumeSlider.Value className="vds-slider-value" />
+      <VolumeSlider.Preview className="vds-slider-preview" noClamp style={{ backgroundColor: 'transparent' }}>
+        <VolumeSlider.Value style={{ color: theme.palette.text.primary, fontSize: '12px', backgroundColor: 'transparent' }} />
       </VolumeSlider.Preview>
       <VolumeSlider.Thumb className="vds-slider-thumb" />
     </VolumeSlider.Root>
@@ -145,14 +147,15 @@ function Volume() {
 const BottomAudioBar: FunctionComponent = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isCompact = useMediaQuery(theme.breakpoints.down('lg'));
+  const downLG = useMediaQuery(theme.breakpoints.down('lg'));
+  const sidebarHidden = useMediaQuery(theme.breakpoints.down('md'));
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
 
   // Get the sermon image
   const sermonImage = currentSermon?.images?.find((image) => image.type === 'square');
 
   // Sidebar width for desktop positioning (260px sidebar + some margin)
-  const sidebarOffset = isCompact ? 0 : 130; // Half of 260px to offset center
+  const sidebarOffset = sidebarHidden ? 0 : 130; // Half of 260px to offset center
 
   return (
     <Box
@@ -166,13 +169,11 @@ const BottomAudioBar: FunctionComponent = () => {
         width: { xs: 'calc(100% - 16px)', sm: 'calc(100% - 32px)', md: 'calc(100% - 300px)' },
         maxWidth: 1200,
         zIndex: 1200, // Below navbar (typically 1300) but above content
-        borderRadius: isCompact ? 3 : 100, // Slightly rounded when compact/multiline, pill shape when single-line
+        borderRadius: downLG ? 3 : 100, // Slightly rounded when compact/multiline, pill shape when single-line
         overflow: 'hidden',
-        // Glassmorphism effect with orange tint - more blur
-        background: `linear-gradient(135deg, 
-          ${alpha(theme.palette.primary.main, 0.1)} 0%, 
-          ${alpha(theme.palette.primary.dark || '#c2410c', 0.15)} 100%)`,
-        backdropFilter: 'blur(28px) saturate(180%)',
+        // Glassmorphism effect
+        background: alpha(theme.palette.background.paper, 0.1),
+        backdropFilter: 'blur(50px) saturate(180%)',
         WebkitBackdropFilter: 'blur(28px) saturate(180%)',
         boxShadow: `0 8px 32px ${alpha(theme.palette.common.black, 0.2)}, 
                     0 0 40px ${alpha(theme.palette.primary.main, 0.1)}`,
@@ -260,8 +261,8 @@ const BottomAudioBar: FunctionComponent = () => {
               <Typography
                 variant="caption"
                 sx={{
-                  color: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.common.white, 0.75) 
+                  color: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.common.white, 0.75)
                     : theme.palette.grey[700],
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -274,14 +275,13 @@ const BottomAudioBar: FunctionComponent = () => {
             </Box>
 
             {/* Desktop: Progress Slider with time on either side */}
-            {!isCompact && (
+            {!downLG && (
               <Box
                 sx={{
                   flex: { md: 2, lg: 3 },
                   display: 'flex',
                   alignItems: 'center',
                   gap: { md: 1, lg: 2 },
-                  mx: { md: 1.5, lg: 3 },
                   '& .floating-time-current, & .floating-time-duration': {
                     fontFamily: '"SF Mono", "Roboto Mono", "Fira Code", monospace',
                     fontSize: '0.8125rem',
@@ -289,8 +289,8 @@ const BottomAudioBar: FunctionComponent = () => {
                     letterSpacing: '0.02em',
                     minWidth: 48,
                     lineHeight: 1,
-                    color: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.common.white, 0.85) 
+                    color: theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.85)
                       : theme.palette.grey[700],
                   },
                   '& .floating-time-current': {
@@ -298,16 +298,16 @@ const BottomAudioBar: FunctionComponent = () => {
                   },
                   '& .floating-time-duration': {
                     textAlign: 'left',
-                    color: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.common.white, 0.5) 
+                    color: theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.5)
                       : theme.palette.grey[500],
                   },
                 }}
               >
                 <CurrentTime />
-                <Box 
-                  sx={{ 
-                    flex: 1, 
+                <Box
+                  sx={{
+                    flex: 1,
                     minWidth: 120,
                     display: 'flex',
                     alignItems: 'center',
@@ -343,8 +343,8 @@ const BottomAudioBar: FunctionComponent = () => {
                       transform: 'translateY(-50%)',
                       height: 'var(--media-slider-track-height)',
                       borderRadius: 'var(--media-slider-track-height)',
-                      backgroundColor: theme.palette.mode === 'dark' 
-                        ? alpha(theme.palette.common.white, 0.2) 
+                      backgroundColor: theme.palette.mode === 'dark'
+                        ? alpha(theme.palette.common.white, 0.2)
                         : alpha(theme.palette.grey[900], 0.12),
                     },
                     '& .vds-slider-track-fill': {
@@ -354,8 +354,8 @@ const BottomAudioBar: FunctionComponent = () => {
                       transform: 'translateY(-50%)',
                       height: 'var(--media-slider-track-height)',
                       borderRadius: 'var(--media-slider-track-height)',
-                      backgroundColor: theme.palette.mode === 'dark' 
-                        ? theme.palette.common.white 
+                      backgroundColor: theme.palette.mode === 'dark'
+                        ? theme.palette.common.white
                         : theme.palette.grey[800],
                     },
                     '& .vds-slider-thumb': {
@@ -365,10 +365,10 @@ const BottomAudioBar: FunctionComponent = () => {
                       width: 'var(--media-slider-thumb-size)',
                       height: 'var(--media-slider-thumb-size)',
                       borderRadius: '50%',
-                      backgroundColor: theme.palette.mode === 'dark' 
-                        ? theme.palette.common.white 
+                      backgroundColor: theme.palette.mode === 'dark'
+                        ? theme.palette.common.white
                         : theme.palette.grey[900],
-                      boxShadow: `0 0 10px ${alpha(theme.palette.primary.main, 0.4)}`,
+                      // boxShadow: `0 0 10px ${alpha(theme.palette.primary.main, 0.4)}`,
                     },
                   }}
                 >
@@ -387,13 +387,13 @@ const BottomAudioBar: FunctionComponent = () => {
                 '& .floating-player-btn': {
                   width: { xs: 36, sm: 40 },
                   height: { xs: 36, sm: 40 },
-                  color: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.common.white, 0.9) 
+                  color: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.common.white, 0.9)
                     : theme.palette.grey[700],
                   transition: 'all 0.2s ease',
                   '&:hover': {
-                    color: theme.palette.mode === 'dark' 
-                      ? theme.palette.common.white 
+                    color: theme.palette.mode === 'dark'
+                      ? theme.palette.common.white
                       : theme.palette.grey[900],
                     transform: 'scale(1.1)',
                   },
@@ -405,11 +405,11 @@ const BottomAudioBar: FunctionComponent = () => {
                 '& .floating-player-play-btn': {
                   width: { xs: 44, sm: 48 },
                   height: { xs: 44, sm: 48 },
-                  backgroundColor: theme.palette.mode === 'dark' 
-                    ? theme.palette.common.white 
+                  backgroundColor: theme.palette.mode === 'dark'
+                    ? theme.palette.common.white
                     : theme.palette.grey[900],
-                  color: theme.palette.mode === 'dark' 
-                    ? theme.palette.primary.main 
+                  color: theme.palette.mode === 'dark'
+                    ? theme.palette.primary.main
                     : theme.palette.common.white,
                   borderRadius: '50%',
                   transition: 'all 0.2s ease',
@@ -431,24 +431,23 @@ const BottomAudioBar: FunctionComponent = () => {
             </Box>
 
             {/* Volume Control - Desktop only */}
-            {!isCompact && (
+            {!downLG && (
               <Box
                 sx={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 0.5,
-                  ml: 1,
                   '--media-slider-height': '32px',
                   '--media-slider-width': '80px',
                   '& .floating-player-btn': {
                     width: 36,
                     height: 36,
-                    color: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.common.white, 0.8) 
+                    color: theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.8)
                       : theme.palette.grey[600],
                     '&:hover': {
-                      color: theme.palette.mode === 'dark' 
-                        ? theme.palette.common.white 
+                      color: theme.palette.mode === 'dark'
+                        ? theme.palette.common.white
                         : theme.palette.grey[900],
                     },
                     '& svg': {
@@ -457,18 +456,18 @@ const BottomAudioBar: FunctionComponent = () => {
                     },
                   },
                   '& .vds-slider-track': {
-                    backgroundColor: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.common.white, 0.2) 
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.2)
                       : alpha(theme.palette.grey[900], 0.15),
                   },
                   '& .vds-slider-track-fill': {
-                    backgroundColor: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.common.white, 0.8) 
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.8)
                       : theme.palette.grey[700],
                   },
                   '& .vds-slider-thumb': {
-                    backgroundColor: theme.palette.mode === 'dark' 
-                      ? theme.palette.common.white 
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? theme.palette.common.white
                       : theme.palette.grey[800],
                   },
                 }}
@@ -483,16 +482,15 @@ const BottomAudioBar: FunctionComponent = () => {
               onClick={() => setCurrentSermon(undefined)}
               size="small"
               sx={{
-                ml: 0.5,
-                color: theme.palette.mode === 'dark' 
-                  ? alpha(theme.palette.common.white, 0.7) 
+                color: theme.palette.mode === 'dark'
+                  ? alpha(theme.palette.common.white, 0.7)
                   : theme.palette.grey[600],
                 '&:hover': {
-                  color: theme.palette.mode === 'dark' 
-                    ? theme.palette.common.white 
+                  color: theme.palette.mode === 'dark'
+                    ? theme.palette.common.white
                     : theme.palette.grey[900],
-                  backgroundColor: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.common.white, 0.1) 
+                  backgroundColor: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.common.white, 0.1)
                     : alpha(theme.palette.grey[900], 0.1),
                 },
               }}
@@ -503,7 +501,7 @@ const BottomAudioBar: FunctionComponent = () => {
         </Controls.Group>
 
         {/* Mobile/Tablet: Progress slider at bottom */}
-        {isCompact && (
+        {downLG && (
           <Controls.Group>
             <Box
               sx={{
@@ -521,8 +519,8 @@ const BottomAudioBar: FunctionComponent = () => {
                   fontSize: '0.75rem',
                   fontWeight: 500,
                   minWidth: 40,
-                  color: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.common.white, 0.8) 
+                  color: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.common.white, 0.8)
                     : theme.palette.grey[600],
                 },
                 '& .floating-time-current': {
@@ -530,15 +528,15 @@ const BottomAudioBar: FunctionComponent = () => {
                 },
                 '& .floating-time-duration': {
                   textAlign: 'left',
-                  color: theme.palette.mode === 'dark' 
-                    ? alpha(theme.palette.common.white, 0.5) 
+                  color: theme.palette.mode === 'dark'
+                    ? alpha(theme.palette.common.white, 0.5)
                     : theme.palette.grey[500],
                 },
               }}
             >
               <CurrentTime />
-              <Box 
-                sx={{ 
+              <Box
+                sx={{
                   flex: 1,
                   '& .vds-time-slider': {
                     display: 'flex',
@@ -569,8 +567,8 @@ const BottomAudioBar: FunctionComponent = () => {
                     transform: 'translateY(-50%)',
                     height: 'var(--media-slider-track-height)',
                     borderRadius: 'var(--media-slider-track-height)',
-                    backgroundColor: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.common.white, 0.2) 
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? alpha(theme.palette.common.white, 0.2)
                       : alpha(theme.palette.grey[900], 0.12),
                   },
                   '& .vds-slider-track-fill': {
@@ -580,8 +578,8 @@ const BottomAudioBar: FunctionComponent = () => {
                     transform: 'translateY(-50%)',
                     height: 'var(--media-slider-track-height)',
                     borderRadius: 'var(--media-slider-track-height)',
-                    backgroundColor: theme.palette.mode === 'dark' 
-                      ? theme.palette.common.white 
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? theme.palette.common.white
                       : theme.palette.grey[800],
                   },
                   '& .vds-slider-thumb': {
@@ -591,8 +589,8 @@ const BottomAudioBar: FunctionComponent = () => {
                     width: 'var(--media-slider-thumb-size)',
                     height: 'var(--media-slider-thumb-size)',
                     borderRadius: '50%',
-                    backgroundColor: theme.palette.mode === 'dark' 
-                      ? theme.palette.common.white 
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? theme.palette.common.white
                       : theme.palette.grey[900],
                   },
                 }}

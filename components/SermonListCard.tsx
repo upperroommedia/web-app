@@ -35,6 +35,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 
 import { useObject } from 'react-firebase-hooks/database';
+import { useDocument } from 'react-firebase-hooks/firestore';
 import database, { ref } from '../firebase/database';
 import firestore, { doc, getDoc } from '../firebase/firestore';
 import Tooltip from '@mui/material/Tooltip';
@@ -43,6 +44,7 @@ import { createFunctionV2 } from '../utils/createFunction';
 import UserAvatar from './UserAvatar';
 import useAuth from '../context/user/UserContext';
 import LinearProgress from '@mui/material/LinearProgress';
+import { sermonConverter } from '../types/Sermon';
 
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
@@ -72,7 +74,19 @@ const SermonListCard: FunctionComponent<Props> = ({
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
   const isTablet = useMediaQuery(theme.breakpoints.up('sm'));
-  const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${sermon.id}`));
+  
+  // Real-time sermon document listener - updates automatically when Firestore document changes
+  const [sermonSnapshot, _sermonLoading, _sermonError] = useDocument(
+    doc(firestore, `sermons/${sermon.id}`).withConverter(sermonConverter),
+    {
+      snapshotListenOptions: { includeMetadataChanges: true },
+    }
+  );
+  // Use real-time data if available, otherwise fall back to prop
+  const realTimeSermon = sermonSnapshot?.data();
+  const currentSermon = realTimeSermon || sermon;
+  
+  const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${currentSermon.id}`));
   const [uploader, setUploader] = useState<User>();
   const [uploaderLoading, setUploaderLoading] = useState(false);
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
@@ -83,23 +97,23 @@ const SermonListCard: FunctionComponent<Props> = ({
     uploader?.email ?? 'uploader';
 
   const canPublish = user?.canPublish() ?? false;
-  const isProcessed = sermon.status.audioStatus === sermonStatusType.PROCESSED;
-  const isProcessing = sermon.status.audioStatus === sermonStatusType.PROCESSING;
-  const isError = sermon.status.audioStatus === sermonStatusType.ERROR;
-  const isSoundCloudUploaded = sermon.status.soundCloud === uploadStatus.UPLOADED;
-  const subsplashUploaded = sermon.numberOfListsUploadedTo ?? 0;
-  const subsplashTotal = sermon.numberOfLists ?? 0;
+  const isProcessed = currentSermon.status.audioStatus === sermonStatusType.PROCESSED;
+  const isProcessing = currentSermon.status.audioStatus === sermonStatusType.PROCESSING;
+  const isError = currentSermon.status.audioStatus === sermonStatusType.ERROR;
+  const isSoundCloudUploaded = currentSermon.status.soundCloud === uploadStatus.UPLOADED;
+  const subsplashUploaded = currentSermon.numberOfListsUploadedTo ?? 0;
+  const subsplashTotal = currentSermon.numberOfLists ?? 0;
   const isSubsplashPartial = subsplashUploaded > 0 && subsplashUploaded < subsplashTotal;
   const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
-  const isCurrentlyPlaying = audioPlayerCurrentSermonId === sermon.id && playing;
+  const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
 
   // Fetch uploader
   useEffect(() => {
     const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
     const fetchUser = async () => {
       setUploaderLoading(true);
-      if (sermon.uploaderId) {
-        const result = await getUser({ uid: sermon.uploaderId });
+      if (currentSermon.uploaderId) {
+        const result = await getUser({ uid: currentSermon.uploaderId });
         if (result.status === 'success') {
           setUploader(result.data);
         }
@@ -107,17 +121,17 @@ const SermonListCard: FunctionComponent<Props> = ({
       setUploaderLoading(false);
     };
     fetchUser();
-  }, [sermon.uploaderId]);
+  }, [currentSermon.uploaderId]);
 
   // Fetch series if sermon has seriesId
   useEffect(() => {
     const fetchSeries = async () => {
-      if (!sermon.seriesId) {
+      if (!currentSermon.seriesId) {
         setSeries(null);
         return;
       }
       try {
-        const seriesDoc = await getDoc(doc(firestore, 'series', sermon.seriesId).withConverter(seriesConverter));
+        const seriesDoc = await getDoc(doc(firestore, 'series', currentSermon.seriesId).withConverter(seriesConverter));
         if (seriesDoc.exists()) {
           setSeries(seriesDoc.data());
         }
@@ -126,14 +140,14 @@ const SermonListCard: FunctionComponent<Props> = ({
       }
     };
     fetchSeries();
-  }, [sermon.seriesId]);
+  }, [currentSermon.seriesId]);
 
   const handleCardClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('[role="button"]') || target.closest('a')) {
       return;
     }
-    router.push(`/admin/sermons/${sermon.id}`);
+    router.push(`/admin/sermons/${currentSermon.id}`);
   };
 
   const handlePublishClick = (e: React.MouseEvent) => {
@@ -145,8 +159,8 @@ const SermonListCard: FunctionComponent<Props> = ({
 
   const handlePlayPause = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (audioPlayerCurrentSermonId !== sermon.id) {
-      audioPlayerSetCurrentSermon(sermon);
+    if (audioPlayerCurrentSermonId !== currentSermon.id) {
+      audioPlayerSetCurrentSermon(currentSermon);
     } else {
       audioPlayerSetCurrentSermon(undefined);
     }
@@ -168,7 +182,7 @@ const SermonListCard: FunctionComponent<Props> = ({
 
   const processingProgress = snapshot?.val() ? Number(snapshot.val()) : 0;
   const imageSize = isDesktop ? 150 : isTablet ? 90 : 64;
-  const sermonImage = sermon.images?.find((image) => image.type === 'square');
+  const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
   const seriesImage = series?.images?.find((img) => img.type === 'square');
 
   const UploaderAvatar = () => (
@@ -372,11 +386,11 @@ const SermonListCard: FunctionComponent<Props> = ({
                     width: '100%',
                   }}
                 >
-                  {sermon.title}
+                  {currentSermon.title}
                 </Typography>
 
                 {/* Speaker */}
-                {sermon.speakers?.length > 0 && (
+                {currentSermon.speakers?.length > 0 && (
                   <Typography
                     color="text.secondary"
                     noWrap
@@ -390,7 +404,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                       width: '100%',
                     }}
                   >
-                    {sermon.speakers.map(s => s.name).join(', ')}
+                    {currentSermon.speakers.map(s => s.name).join(', ')}
                   </Typography>
                 )}
               </Stack>
@@ -411,7 +425,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                   textOverflow: 'ellipsis',
                 }}
               >
-                {sermon.description}
+                {currentSermon.description}
               </Typography>
             )}
 
@@ -425,11 +439,11 @@ const SermonListCard: FunctionComponent<Props> = ({
                   color="text.secondary"
                   sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' }, whiteSpace: 'nowrap' }}
                 >
-                  {formatDate(sermon.dateMillis)}
+                  {formatDate(currentSermon.dateMillis)}
                 </Typography>
-                {sermon.durationSeconds > 0 && (
+                {currentSermon.durationSeconds > 0 && (
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' } }}>
-                    • {formatDuration(sermon.durationSeconds)}
+                    • {formatDuration(currentSermon.durationSeconds)}
                   </Typography>
                 )}
 
@@ -493,7 +507,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                 )}
 
                 {isError && (
-                  <Tooltip title={sermon.status.message || 'Error'}>
+                  <Tooltip title={currentSermon.status.message || 'Error'}>
                     <ErrorIcon sx={{ fontSize: 12, color: 'error.main' }} />
                   </Tooltip>
                 )}
@@ -528,7 +542,7 @@ const SermonListCard: FunctionComponent<Props> = ({
 
       {publishPopup && (
         <ManagePublishingPopup
-          sermon={sermon}
+          sermon={currentSermon}
           open={publishPopup}
           onClose={() => setPublishPopup(false)}
           onUpdate={onRefresh}

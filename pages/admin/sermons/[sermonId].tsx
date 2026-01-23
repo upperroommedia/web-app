@@ -43,7 +43,7 @@ import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import firestore, { doc, getDoc, getDocs, deleteDoc, collection, writeBatch, deleteField, updateDoc } from '../../../firebase/firestore';
 import storage, { getDownloadURL, ref } from '../../../firebase/storage';
-import { Sermon, sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
+import { sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
 import { sermonConverter } from '../../../types/Sermon';
 import { Series, seriesConverter } from '../../../types/Series';
 import { SermonList, sermonListConverter } from '../../../types/SermonList';
@@ -62,7 +62,7 @@ import { User } from '../../../types/User';
 import { GetUserInputType, GetUserOutputType } from '../../../functions/src/getUser';
 import { getSquareImageStoragePath } from '../../../utils/utils';
 import { isDevelopment } from '../../../firebase/firebase';
-import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { useCollectionData, useDocument } from 'react-firebase-hooks/firestore';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref as dbRef } from '../../../firebase/database';
 import UploadStatusList from '../../../components/UploadStatusList';
@@ -77,10 +77,8 @@ const SermonDetailsPage = () => {
   const remote = useMediaRemote();
   const playing = useMediaState('playing');
 
-  const [sermon, setSermon] = useState<Sermon | null>(null);
   const [series, setSeries] = useState<Series | null>(null);
   const [uploader, setUploader] = useState<User | undefined>(undefined);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletePopup, setDeletePopup] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -88,6 +86,15 @@ const SermonDetailsPage = () => {
   // Publishing state
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
   const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
+  
+  // Real-time sermon document listener
+  const [sermonSnapshot, sermonLoading, sermonError] = useDocument(
+    sermonId ? doc(firestore, 'sermons', sermonId).withConverter(sermonConverter) : null,
+    {
+      snapshotListenOptions: { includeMetadataChanges: true },
+    }
+  );
+  const sermon = sermonSnapshot?.data();
   
   // Sermon lists
   const [sermonLists, listsLoading, _listsError] = useCollectionData(
@@ -106,77 +113,62 @@ const SermonDetailsPage = () => {
   const listItemsUploaded = sermonLists?.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED) || [];
   const listItemsNotUploaded = sermonLists?.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED) || [];
 
-  // Fetch sermon data
-  const fetchSermonData = useCallback(async () => {
-    if (!sermonId) return;
+  // Fetch series and uploader data when sermon changes
+  useEffect(() => {
+    if (!sermon) return;
 
-    setLoading(true);
-    setError(null);
+    // Check permissions
+    if (!isAdmin && !canPublish && sermon.uploaderId !== user?.uid) {
+      setError('You do not have permission to view this sermon');
+      return;
+    } else {
+      setError(null);
+    }
 
-    try {
-      const sermonDoc = await getDoc(doc(firestore, 'sermons', sermonId).withConverter(sermonConverter));
-      if (!sermonDoc.exists()) {
-        setError('Sermon not found');
-        setLoading(false);
-        return;
-      }
-
-      const sermonData = sermonDoc.data();
-      
-      if (!isAdmin && !canPublish && sermonData.uploaderId !== user?.uid) {
-        setError('You do not have permission to view this sermon');
-        setLoading(false);
-        return;
-      }
-
-      setSermon(sermonData);
-
-      if (sermonData.seriesId) {
-        try {
-          const seriesDoc = await getDoc(doc(firestore, 'series', sermonData.seriesId).withConverter(seriesConverter));
+    // Fetch series
+    if (sermon.seriesId) {
+      getDoc(doc(firestore, 'series', sermon.seriesId).withConverter(seriesConverter))
+        .then((seriesDoc) => {
           if (seriesDoc.exists()) {
             setSeries(seriesDoc.data());
           }
-        } catch (err) {
+        })
+        .catch((err) => {
           console.error('Error fetching series:', err);
-        }
-      }
+        });
+    } else {
+      setSeries(null);
+    }
 
-      if (sermonData.uploaderId) {
-        try {
-          const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
-          const result = await getUser({ uid: sermonData.uploaderId });
+    // Fetch uploader
+    if (sermon.uploaderId) {
+      const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
+      getUser({ uid: sermon.uploaderId })
+        .then((result) => {
           if (result.status === 'success') {
             setUploader(result.data);
           }
-        } catch (err) {
+        })
+        .catch((err) => {
           console.error('Error fetching uploader:', err);
-        }
-      }
-    } catch (err: any) {
-      console.error('Error fetching sermon:', err);
-      setError(err.message || 'Failed to fetch sermon');
+        });
     }
+  }, [sermon, isAdmin, canPublish, user?.uid]);
 
-    setLoading(false);
-  }, [sermonId, user?.uid, isAdmin, canPublish]);
-
+  // Handle errors from real-time listener
   useEffect(() => {
-    fetchSermonData();
-  }, [fetchSermonData]);
+    if (sermonError) {
+      console.error('Error fetching sermon:', sermonError);
+      setError(sermonError.message || 'Failed to fetch sermon');
+    }
+  }, [sermonError]);
 
-  // Refetch data when returning to this page (e.g., after editing)
+  // Check if sermon exists
   useEffect(() => {
-    const handleRouteChangeComplete = () => {
-      fetchSermonData();
-    };
-    
-    router.events.on('routeChangeComplete', handleRouteChangeComplete);
-    
-    return () => {
-      router.events.off('routeChangeComplete', handleRouteChangeComplete);
-    };
-  }, [router.events, fetchSermonData]);
+    if (!sermonLoading && sermonId && sermonSnapshot && !sermonSnapshot.exists()) {
+      setError('Sermon not found');
+    }
+  }, [sermonLoading, sermonId, sermonSnapshot]);
 
   // Handle delete
   const handleDelete = useCallback(async () => {
@@ -233,14 +225,13 @@ const SermonDetailsPage = () => {
         soundCloudTrackId: result.soundCloudTrackId,
         status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
       });
-      fetchSermonData();
     } catch (error: any) {
       console.error('Error uploading to SoundCloud:', error);
       alert(error.message || 'Failed to upload to SoundCloud');
     } finally {
       setIsUploadingToSoundCloud(false);
     }
-  }, [sermon, fetchSermonData]);
+  }, [sermon]);
 
   const deleteFromSoundCloud = useCallback(async () => {
     if (!sermon) return;
@@ -254,7 +245,6 @@ const SermonDetailsPage = () => {
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
       setIsUploadingToSoundCloud(false);
-      fetchSermonData();
       return;
     }
     
@@ -266,14 +256,12 @@ const SermonDetailsPage = () => {
         soundCloudTrackId: deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
-      fetchSermonData();
     } catch (error: any) {
       if (error.details?.includes('Invalid track id')) {
         await updateDoc(sermonRef, {
           soundCloudTrackId: deleteField(),
           status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
         });
-        fetchSermonData();
       } else {
         console.error('Error deleting from SoundCloud:', error);
         alert(error.message || 'Failed to remove from SoundCloud');
@@ -281,7 +269,7 @@ const SermonDetailsPage = () => {
     } finally {
       setIsUploadingToSoundCloud(false);
     }
-  }, [sermon, fetchSermonData]);
+  }, [sermon]);
 
   // Subsplash functions
   const uploadToSubsplash = async (listsToUploadTo: SermonList[]) => {
@@ -347,7 +335,6 @@ const SermonDetailsPage = () => {
       });
       batch.update(sermonRef, { status: { ...sermon.status, subsplash: uploadStatus.UPLOADED }, approverId: user?.uid });
       await batch.commit();
-      fetchSermonData();
     } catch (error) {
       console.error('Error uploading to Subsplash:', error);
       alert(error);
@@ -386,7 +373,6 @@ const SermonDetailsPage = () => {
         batch.update(docRef, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
       }
       await batch.commit();
-      fetchSermonData();
     } catch (error) {
       console.error('Error removing from list:', error);
       alert(error);
@@ -413,7 +399,6 @@ const SermonDetailsPage = () => {
         status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
       });
       await batch.commit();
-      fetchSermonData();
     } catch (error: any) {
       if (error.code === 'functions/not-found') {
         const batch = writeBatch(firestore);
@@ -422,7 +407,6 @@ const SermonDetailsPage = () => {
           status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
         });
         await batch.commit();
-        fetchSermonData();
       } else {
         console.error('Error deleting from Subsplash:', error);
         alert(error.message || 'Failed to delete from Subsplash');
@@ -430,7 +414,7 @@ const SermonDetailsPage = () => {
     } finally {
       setIsUploadingToSubsplash(false);
     }
-  }, [sermon, fetchSermonData]);
+  }, [sermon, user?.uid]);
 
   // Play/pause toggle
   const handlePlayPause = () => {
@@ -481,7 +465,7 @@ const SermonDetailsPage = () => {
     (user?.canUpload() && sermon.status.subsplash !== uploadStatus.UPLOADED && sermon.status.soundCloud !== uploadStatus.UPLOADED && sermon.status.audioStatus !== sermonStatusType.PENDING)
   );
 
-  if (loading) {
+  if (sermonLoading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <CircularProgress />
