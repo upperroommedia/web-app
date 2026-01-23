@@ -5,7 +5,7 @@
  * - Click to navigate to series details page
  */
 import Box from '@mui/material/Box';
-import AdminLayout from '../../layout/adminLayout';
+import AppLayout from '../../layout/AppLayout';
 import Button from '@mui/material/Button';
 import firestore, { collection, deleteDoc, doc, limit, orderBy, query, where, getDocs, QueryConstraint } from '../../firebase/firestore';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
@@ -453,6 +453,6 @@ const ProtectedAdminSeriesPage = () => {
   return <AdminSeriesPage />;
 };
 
-ProtectedAdminSeriesPage.PageLayout = AdminLayout;
+ProtectedAdminSeriesPage.PageLayout = AppLayout;
 
 export default ProtectedAdminSeriesPage;

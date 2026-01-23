@@ -1,11 +1,11 @@
 /**
  * Uploader Page - Main entry point for uploading sermons
- * Uses the AdminSidebarLayout for consistent navigation
+ * Uses AppLayout with sidebar for consistent navigation
  */
 import type { NextPage } from 'next';
 import Head from 'next/head';
 import VerifiedUserUploader from '../components/uploaderComponents/VerifiedUserUploaderComponent';
-import AdminLayout from '../layout/adminLayout';
+import AppLayout from '../layout/AppLayout';
 
 const Home: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
   return (
@@ -20,7 +20,7 @@ const Home: NextPage & { PageLayout?: React.ComponentType<{ children: React.Reac
   );
 };
 
-// Use AdminLayout for the sidebar navigation
-Home.PageLayout = AdminLayout;
+// Use AppLayout for the sidebar navigation
+Home.PageLayout = AppLayout;
 
 export default Home;

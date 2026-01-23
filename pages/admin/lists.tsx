@@ -1,5 +1,5 @@
 import Box from '@mui/material/Box';
-import AdminLayout from '../../layout/adminLayout';
+import AppLayout from '../../layout/AppLayout';
 import Button from '@mui/material/Button';
 import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../firebase/firestore';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
@@ -419,6 +419,6 @@ const ProtectedAdminList = () => {
   }
 };
 
-ProtectedAdminList.PageLayout = AdminLayout;
+ProtectedAdminList.PageLayout = AppLayout;
 
 export default ProtectedAdminList;

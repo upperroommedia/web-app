@@ -2,7 +2,6 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import editSermon from '../../pages/api/editSermon';
-import styles from '../../styles/Uploader.module.css';
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
@@ -111,6 +110,7 @@ const Uploader = (props: UploaderProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
+  const [uploadedSermon, setUploadedSermon] = useState<Sermon | null>(null);
   const [subtitles, setSubtitles] = useState<List[]>([]);
   const [subtitlesLoading, setSubtitlesLoading] = useState(true);
   const [formErrors, setFormErrors] = useState<FormErrors>(getFormErrorInitialState());
@@ -490,6 +490,41 @@ const Uploader = (props: UploaderProps) => {
     setFormErrors(getFormErrorInitialState());
   };
 
+  // Handle successful upload - store sermon for the success modal
+  const handleUploadSuccess = useCallback(
+    (_sermonId: string) => {
+      // Store the sermon data for the success modal
+      setUploadedSermon({ ...sermon });
+    },
+    [sermon]
+  );
+
+  // Navigate to sermon details when user clicks "View Sermon"
+  const navigateToSermon = useCallback(() => {
+    if (!uploadedSermon) return;
+
+    const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
+
+    // Mark navigation as intentional to skip unsaved changes warning
+    isIntentionalNavigation.current = true;
+
+    // Navigate to sermon details
+    router.push(targetUrl);
+
+    // Clean up
+    setIsUploading(false);
+    setUploadedSermon(null);
+    clearForm();
+  }, [uploadedSermon, router, clearForm]);
+
+  // Dismiss the upload modal and stay on page
+  const dismissUploadModal = useCallback(() => {
+    setIsUploading(false);
+    setUploadedSermon(null);
+    setUploadProgress({ error: false, percent: 0, message: '' });
+    clearForm();
+  }, [clearForm]);
+
   const handleNewImage = useCallback(
     (image: ImageType | ImageSizeType) => {
       setSermon((oldSermon) => {
@@ -551,6 +586,7 @@ const Uploader = (props: UploaderProps) => {
             margin: 'auto',
             alignItems: 'center',
             justifyContent: 'center',
+            width: 1,
           }}
         >
           <TextField
@@ -831,7 +867,7 @@ const Uploader = (props: UploaderProps) => {
                     setUploadProgress={setUploadProgress}
                     setInvalidFormMessage={setInvalidFormMessage}
                     setIsUploading={setIsUploading}
-                    clearForm={clearForm}
+                    onUploadSuccess={handleUploadSuccess}
                   />
                   <Button variant="outlined" color="secondary" onClick={() => clearForm()}>
                     Clear Form
@@ -844,6 +880,9 @@ const Uploader = (props: UploaderProps) => {
                   audioSource={audioSource}
                   isUploading={isUploading}
                   uploadProgress={uploadProgress}
+                  sermon={uploadedSermon || undefined}
+                  onNavigateToSermon={navigateToSermon}
+                  onDismiss={dismissUploadModal}
                 />
               </Box>
             </>

@@ -4,7 +4,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
 import { useRouter } from 'next/router';
-import AdminLayout from '../../layout/adminLayout';
+import AppLayout from '../../layout/AppLayout';
 import SearchableAdminSermonList from '../../components/SearchableAdminSermonsList';
 
 const AdminSermons = () => {
@@ -43,6 +43,6 @@ const AdminSermons = () => {
   );
 };
 
-AdminSermons.PageLayout = AdminLayout;
+AdminSermons.PageLayout = AppLayout;
 
 export default AdminSermons;

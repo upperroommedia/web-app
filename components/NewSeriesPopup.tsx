@@ -17,6 +17,8 @@ import useAuth from '../context/user/UserContext';
 import { createFunctionV2 } from '../utils/createFunction';
 import { CreateSeriesInputType, CreateSeriesOutputType } from '../functions/src/createSeries';
 import { Series, emptySeries } from '../types/Series';
+import firestore, { doc, updateDoc } from '../firebase/firestore';
+import { serverTimestamp } from 'firebase/firestore';
 
 interface NewSeriesPopupProps {
   open: boolean;
@@ -103,44 +105,68 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     setError(null);
 
     try {
-      const result = await createSeriesFunction({
-        title: formData.name.trim(),
-        subtitle: formData.subtitle.trim() || undefined,
-        summary: formData.summary.trim() || undefined,
-        ownerId: user.uid,
-        skipSubsplash: true,  // Only create in Firestore at upload time
-        images: formData.images,
-      });
+      // If editing existing series, update it directly in Firestore
+      if (props.existingSeries) {
+        await updateDoc(doc(firestore, 'series', props.existingSeries.id), {
+          name: formData.name.trim(),
+          subtitle: formData.subtitle.trim() || null,
+          summary: formData.summary.trim() || null,
+          images: formData.images,
+          updatedAt: serverTimestamp(),
+        });
 
-      if (result.status === 'success' && result.firestoreId) {
-        // Create a Series object to pass back
-        const newSeries: Series = {
-          ...emptySeries,
-          id: result.firestoreId,
+        // Create updated series object to pass back
+        const updatedSeries: Series = {
+          ...props.existingSeries,
           name: formData.name.trim(),
           subtitle: formData.subtitle.trim() || undefined,
           summary: formData.summary.trim() || undefined,
           images: formData.images,
-          ownerId: user.uid,
-          subsplashId: '',  // Not yet published
-          status: 'draft',
         };
 
-        props.onSeriesCreated?.(newSeries);
+        props.onSeriesCreated?.(updatedSeries);
         props.setOpen(false);
-        
-        // Reset form
-        setFormData({
-          name: '',
-          subtitle: '',
-          summary: '',
-          images: [],
-        });
       } else {
-        setError(result.error || 'Failed to create series');
+        // Creating new series
+        const result = await createSeriesFunction({
+          title: formData.name.trim(),
+          subtitle: formData.subtitle.trim() || undefined,
+          summary: formData.summary.trim() || undefined,
+          ownerId: user.uid,
+          skipSubsplash: true,  // Only create in Firestore at upload time
+          images: formData.images,
+        });
+
+        if (result.status === 'success' && result.firestoreId) {
+          // Create a Series object to pass back
+          const newSeries: Series = {
+            ...emptySeries,
+            id: result.firestoreId,
+            name: formData.name.trim(),
+            subtitle: formData.subtitle.trim() || undefined,
+            summary: formData.summary.trim() || undefined,
+            images: formData.images,
+            ownerId: user.uid,
+            subsplashId: '',  // Not yet published
+            status: 'draft',
+          };
+
+          props.onSeriesCreated?.(newSeries);
+          props.setOpen(false);
+          
+          // Reset form
+          setFormData({
+            name: '',
+            subtitle: '',
+            summary: '',
+            images: [],
+          });
+        } else {
+          setError(result.error || 'Failed to create series');
+        }
       }
     } catch (err: any) {
-      console.error('Error creating series:', err);
+      console.error('Error saving series:', err);
       setError(err.message || 'An unexpected error occurred');
     }
 
@@ -148,12 +174,22 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   };
 
   const handleClose = () => {
-    setFormData({
-      name: '',
-      subtitle: '',
-      summary: '',
-      images: [],
-    });
+    // Reset to existing series data if editing, otherwise clear form
+    if (props.existingSeries) {
+      setFormData({
+        name: props.existingSeries.name,
+        subtitle: props.existingSeries.subtitle ?? '',
+        summary: props.existingSeries.summary ?? '',
+        images: props.existingSeries.images,
+      });
+    } else {
+      setFormData({
+        name: '',
+        subtitle: '',
+        summary: '',
+        images: [],
+      });
+    }
     setError(null);
     setNameError(null);
   };
@@ -172,7 +208,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
           disabled={!isValid || submitting}
           onClick={handleSubmit}
         >
-          {submitting ? <CircularProgress size={24} /> : 'Create Series'}
+          {submitting ? <CircularProgress size={24} /> : props.existingSeries ? 'Save Changes' : 'Create Series'}
         </Button>
       }
     >

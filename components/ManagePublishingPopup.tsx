@@ -23,7 +23,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CollectionsIcon from '@mui/icons-material/Collections';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
-import firestore, { doc, updateDoc, collection, writeBatch, getDoc, deleteField } from '../firebase/firestore';
+import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField } from '../firebase/firestore';
 import { FunctionComponent, useCallback, useEffect, useState } from 'react';
 import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
 import { RemoveFromListInputType, RemoveFromListOutputType } from '../functions/src/removeFromList';
@@ -75,7 +75,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   const [soundCloudError, setSoundCloudError] = useState<string | null>(null);
 
   // Subsplash state
-  const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
+  const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
 
   // Series state
   const [series, setSeries] = useState<Series | null>(null);
@@ -207,7 +207,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       
       const batch = writeBatch(firestore);
       const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
-      const sermonSeriesListSnapshot = await getDocs(firestore, sermonSeriesList);
+      const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
       sermonSeriesListSnapshot.forEach((docSnap: any) => {
         batch.update(docSnap.ref, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
       });
@@ -424,7 +424,6 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   const isSoundCloudUploaded = sermon.status.soundCloud === uploadStatus.UPLOADED;
-  const isSubsplashUploaded = sermon.status.subsplash === uploadStatus.UPLOADED;
   const uploadedListsCount = listArrayFirestore?.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED).length || 0;
   const totalListsCount = listArrayFirestore?.length || 0;
 

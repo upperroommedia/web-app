@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import UserTable from '../../components/UserTable';
-import AdminLayout from '../../layout/adminLayout';
+import AppLayout from '../../layout/AppLayout';
 import { createFunctionV2 } from '../../utils/createFunction';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
@@ -134,6 +134,6 @@ const ProtectedAdminUsers = () => {
   }
 };
 
-ProtectedAdminUsers.PageLayout = AdminLayout;
+ProtectedAdminUsers.PageLayout = AppLayout;
 
 export default ProtectedAdminUsers;

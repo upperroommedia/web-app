@@ -1,7 +1,5 @@
 import '../styles/globals.css';
 import type { AppProps } from 'next/app';
-import Navbar from '../components/Navbar';
-import Footer from '../components/Footer';
 import { UserProvider } from '../context/user/UserContext';
 import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -11,7 +9,6 @@ import Box from '@mui/material/Box';
 import React, { useMemo } from 'react';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/router';
 import { ThemeProvider as NextThemesProvider, useTheme } from 'next-themes';
 import { darkTheme, lightTheme } from '../styles/theme';
 
@@ -28,9 +25,7 @@ type ComponentWithPageLayout = AppProps & {
 
 // Inner component that uses the theme
 function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'router'>) {
-  const router = useRouter();
   const { resolvedTheme } = useTheme();
-  const isAdminPage = router.pathname.startsWith('/admin') || router.pathname === '/';
 
   // Select theme based on next-themes
   const muiTheme = useMemo(() => {
@@ -50,11 +45,9 @@ function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'rou
               overflowY: 'auto',
               flexGrow: 1,
               minHeight: '100vh',
-              bgcolor: isAdminPage ? 'background.default' : 'inherit',
+              bgcolor: 'background.default',
             }}
           >
-            {/* Hide main Navbar on admin pages since sidebar has navigation */}
-            {!isAdminPage && <Navbar />}
             {Component.PageLayout ? (
               <Component.PageLayout>
                 <Component {...pageProps} />
@@ -62,8 +55,6 @@ function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'rou
             ) : (
               <Component {...pageProps} />
             )}
-            {/* Hide Footer on admin pages for cleaner look */}
-            {!isAdminPage && <Footer />}
           </Box>
         </MediaPlayerComponent>
       </AudioPlayerProvider>

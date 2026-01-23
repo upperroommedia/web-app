@@ -7,7 +7,7 @@ import { useInstantSearch, useSearchBox, UseSearchBoxProps, useStats } from 'rea
 
 const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: React.ReactElement<any> }) => {
   const { refine } = useSearchBox(props);
-  const { nbHits, processingTimeMS } = useStats();
+  const { nbHits } = useStats();
   const { status } = useInstantSearch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));

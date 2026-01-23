@@ -1,13 +1,18 @@
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Card from '@mui/material/Card';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
 import { alpha, useTheme, keyframes } from '@mui/material/styles';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
+import CloseIcon from '@mui/icons-material/Close';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import Portal from '@mui/material/Portal';
 import { UploadProgress } from '../../context/types';
 import { AudioSource } from '../../pages/api/uploadFile';
+import { Sermon } from '../../types/SermonTypes';
+import AvatarWithDefaultImage from '../AvatarWithDefaultImage';
 
 // Animations
 const pulse = keyframes`
@@ -32,10 +37,19 @@ const shimmer = keyframes`
   100% { background-position: 200% 0; }
 `;
 
+const successPop = keyframes`
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+`;
+
 interface UploadProgressComponentProps {
   audioSource: AudioSource | undefined;
   isUploading: boolean;
   uploadProgress: UploadProgress;
+  sermon?: Sermon;
+  onNavigateToSermon?: () => void;
+  onDismiss?: () => void;
 }
 
 // Inspirational messages during upload stages
@@ -52,202 +66,361 @@ export default function UploadProgressComponent({
   audioSource,
   isUploading,
   uploadProgress,
+  sermon,
+  onNavigateToSermon,
+  onDismiss,
 }: UploadProgressComponentProps) {
   const theme = useTheme();
   const isIndeterminate = audioSource?.type === 'YoutubeUrl';
   const isComplete = uploadProgress.percent >= 100 && !uploadProgress.error;
   const isError = uploadProgress.error;
 
-  // Don't show anything if not uploading and no message
-  if (!isUploading && !uploadProgress.message) {
+  // Modal is open when uploading or when complete/error with a message
+  const isOpen = isUploading || (uploadProgress.message !== '' && (isComplete || isError));
+
+  // Can dismiss when complete or error (not while actively uploading)
+  const canDismiss = isComplete || isError;
+
+  if (!isOpen) {
     return null;
   }
 
+  const sermonImage = sermon?.images?.find((img) => img.type === 'square');
+
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    // Only dismiss if clicking the backdrop itself, not the modal content
+    if (e.target === e.currentTarget && canDismiss && onDismiss) {
+      onDismiss();
+    }
+  };
+
   return (
-    <Card
-      sx={{
-        mt: 3,
-        p: 3,
-        position: 'relative',
-        overflow: 'hidden',
-        bgcolor: isError 
-          ? alpha(theme.palette.error.main, 0.05)
-          : isComplete 
-            ? alpha(theme.palette.success.main, 0.05)
-            : alpha(theme.palette.primary.main, 0.03),
-        border: '1px solid',
-        borderColor: isError 
-          ? alpha(theme.palette.error.main, 0.2)
-          : isComplete
-            ? alpha(theme.palette.success.main, 0.2)
-            : alpha(theme.palette.primary.main, 0.15),
-        transition: 'all 0.3s ease',
-      }}
-    >
-      {/* Background glow effect */}
-      {isUploading && !isError && (
+    <Portal>
+      {/* Backdrop - fixed position, full screen, centered content */}
+      <Box
+        onClick={handleBackdropClick}
+        sx={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 1300,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: alpha(theme.palette.background.default, 0.6),
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          cursor: canDismiss ? 'pointer' : 'default',
+        }}
+      >
+        {/* Modal content */}
         <Box
+          onClick={(e) => e.stopPropagation()} // Prevent backdrop click when clicking modal
           sx={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: 200,
-            height: 200,
-            borderRadius: '50%',
-            background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.15)} 0%, transparent 70%)`,
-            animation: `${pulse} 2s ease-in-out infinite`,
-            pointerEvents: 'none',
+            width: 420,
+            maxWidth: 'calc(100vw - 48px)',
+            minHeight: 320,
+            bgcolor: 'background.paper',
+            borderRadius: 4,
+            boxShadow: `0 24px 80px ${alpha(theme.palette.common.black, 0.25)}, 0 0 1px ${alpha(theme.palette.common.black, 0.1)}`,
+            p: 4,
+            outline: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            position: 'relative',
+            cursor: 'default',
           }}
-        />
-      )}
-
-      <Box sx={{ position: 'relative', zIndex: 1 }}>
-        {/* Icon and Status */}
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 2 }}>
-          {/* Animated Icon */}
-          <Box
-            sx={{
-              position: 'relative',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 64,
-              height: 64,
-              mb: 2,
-            }}
-          >
-            {isError ? (
-              <ErrorOutlineIcon
-                sx={{
-                  fontSize: 48,
-                  color: 'error.main',
-                  animation: `${pulse} 1s ease-in-out`,
-                }}
-              />
-            ) : isComplete ? (
-              <CheckCircleIcon
-                sx={{
-                  fontSize: 48,
-                  color: 'success.main',
-                  animation: `${pulse} 0.5s ease-out`,
-                }}
-              />
-            ) : (
-              <>
-                {/* Flame particles rising */}
-                {[...Array(3)].map((_, i) => (
-                  <LocalFireDepartmentIcon
-                    key={i}
-                    sx={{
-                      position: 'absolute',
-                      fontSize: 16,
-                      color: alpha(theme.palette.primary.main, 0.6),
-                      animation: `${rise} ${1.5 + i * 0.3}s ease-out infinite`,
-                      animationDelay: `${i * 0.4}s`,
-                      left: `${30 + i * 15}%`,
-                    }}
-                  />
-                ))}
-                {/* Main flame icon */}
-                <LocalFireDepartmentIcon
-                  sx={{
-                    fontSize: 48,
-                    color: 'primary.main',
-                    animation: `${flicker} 1.5s ease-in-out infinite`,
-                    filter: `drop-shadow(0 0 8px ${alpha(theme.palette.primary.main, 0.5)})`,
-                  }}
-                />
-              </>
-            )}
-          </Box>
-
-          {/* Status Text */}
-          <Typography
-            variant="h6"
-            fontWeight={600}
-            sx={{
-              color: isError ? 'error.main' : isComplete ? 'success.main' : 'text.primary',
-              textAlign: 'center',
-            }}
-          >
-            {isError
-              ? 'Upload Failed'
-              : isComplete
-                ? 'Upload Complete!'
-                : isIndeterminate
-                  ? 'Processing YouTube Video...'
-                  : getUploadMessage(uploadProgress.percent)}
-          </Typography>
-
-          {/* Subtext / Message */}
-          {uploadProgress.message && (
-            <Typography
-              variant="body2"
+        >
+          {/* Close button - only show when dismissable */}
+          {canDismiss && onDismiss && (
+            <IconButton
+              onClick={onDismiss}
               sx={{
-                color: isError ? 'error.dark' : 'text.secondary',
-                textAlign: 'center',
-                mt: 0.5,
-                maxWidth: 400,
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                color: 'text.secondary',
+                '&:hover': {
+                  color: 'text.primary',
+                  bgcolor: alpha(theme.palette.text.primary, 0.08),
+                },
               }}
+              size="small"
             >
-              {uploadProgress.message}
-            </Typography>
+              <CloseIcon fontSize="small" />
+            </IconButton>
           )}
-        </Box>
 
-        {/* Progress Bar */}
-        {isUploading && !isComplete && (
-          <Box sx={{ mt: 2 }}>
-            {/* Progress track */}
+          {/* Background glow effect */}
+          {isUploading && !isError && !isComplete && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: '30%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: 200,
+                height: 200,
+                borderRadius: '50%',
+                background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.15)} 0%, transparent 70%)`,
+                animation: `${pulse} 2s ease-in-out infinite`,
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+
+          {/* Success glow */}
+          {isComplete && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: 300,
+                height: 300,
+                borderRadius: '50%',
+                background: `radial-gradient(circle, ${alpha(theme.palette.success.main, 0.12)} 0%, transparent 60%)`,
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+
+          <Box sx={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            {/* Icon Container - Fixed size to prevent layout shift */}
             <Box
               sx={{
                 position: 'relative',
-                height: 8,
-                borderRadius: 4,
-                bgcolor: alpha(theme.palette.primary.main, 0.1),
-                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 100,
+                height: 100,
+                mb: 3,
               }}
             >
-              {/* Progress fill */}
-              <Box
-                sx={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  height: '100%',
-                  width: isIndeterminate ? '100%' : `${uploadProgress.percent}%`,
-                  borderRadius: 4,
-                  background: isIndeterminate
-                    ? `linear-gradient(90deg, transparent, ${theme.palette.primary.main}, transparent)`
-                    : `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.primary.light})`,
-                  backgroundSize: isIndeterminate ? '200% 100%' : '100% 100%',
-                  animation: isIndeterminate ? `${shimmer} 1.5s ease-in-out infinite` : 'none',
-                  transition: 'width 0.3s ease-out',
-                  boxShadow: `0 0 10px ${alpha(theme.palette.primary.main, 0.5)}`,
-                }}
-              />
+              {isError ? (
+                <ErrorOutlineIcon
+                  sx={{
+                    fontSize: 72,
+                    color: 'error.main',
+                    animation: `${pulse} 1s ease-in-out`,
+                  }}
+                />
+              ) : isComplete ? (
+                <Box
+                  sx={{
+                    animation: `${successPop} 0.5s ease-out`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'relative',
+                  }}
+                >
+                  {/* Sermon thumbnail */}
+                  {sermonImage ? (
+                    <Box sx={{ position: 'relative' }}>
+                      <AvatarWithDefaultImage
+                        width={100}
+                        height={100}
+                        borderRadius={16}
+                        altName={sermon?.title || 'Sermon'}
+                        image={sermonImage}
+                      />
+                      <CheckCircleIcon
+                        sx={{
+                          position: 'absolute',
+                          bottom: -6,
+                          right: -6,
+                          fontSize: 32,
+                          color: 'success.main',
+                          bgcolor: 'background.paper',
+                          borderRadius: '50%',
+                        }}
+                      />
+                    </Box>
+                  ) : (
+                    <CheckCircleIcon
+                      sx={{
+                        fontSize: 72,
+                        color: 'success.main',
+                      }}
+                    />
+                  )}
+                </Box>
+              ) : (
+                <>
+                  {/* Flame particles rising */}
+                  {[...Array(3)].map((_, i) => (
+                    <LocalFireDepartmentIcon
+                      key={i}
+                      sx={{
+                        position: 'absolute',
+                        fontSize: 20,
+                        color: alpha(theme.palette.primary.main, 0.6),
+                        animation: `${rise} ${1.5 + i * 0.3}s ease-out infinite`,
+                        animationDelay: `${i * 0.4}s`,
+                        left: `${25 + i * 20}%`,
+                        top: 0,
+                      }}
+                    />
+                  ))}
+                  {/* Main flame icon */}
+                  <LocalFireDepartmentIcon
+                    sx={{
+                      fontSize: 72,
+                      color: 'primary.main',
+                      animation: `${flicker} 1.5s ease-in-out infinite`,
+                      filter: `drop-shadow(0 0 12px ${alpha(theme.palette.primary.main, 0.5)})`,
+                    }}
+                  />
+                </>
+              )}
             </Box>
 
-            {/* Percentage */}
-            {!isIndeterminate && (
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Uploading sermon...
-                </Typography>
+            {/* Status Text - Fixed height container */}
+            <Box sx={{ minHeight: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
+              <Typography
+                variant="h5"
+                fontWeight={700}
+                sx={{
+                  color: isError ? 'error.main' : isComplete ? 'success.main' : 'text.primary',
+                  textAlign: 'center',
+                }}
+              >
+                {isError
+                  ? 'Upload Failed'
+                  : isComplete
+                    ? 'Upload Complete!'
+                    : isIndeterminate
+                      ? 'Processing YouTube...'
+                      : getUploadMessage(uploadProgress.percent)}
+              </Typography>
+
+              {/* Sermon title when complete */}
+              {isComplete && sermon && (
                 <Typography
-                  variant="caption"
-                  fontWeight={600}
-                  sx={{ color: 'primary.main' }}
+                  variant="body1"
+                  sx={{
+                    color: 'text.secondary',
+                    textAlign: 'center',
+                    mt: 1,
+                    fontWeight: 500,
+                  }}
                 >
-                  {uploadProgress.percent}%
+                  {sermon.title}
                 </Typography>
+              )}
+
+              {/* Error message */}
+              {isError && uploadProgress.message && (
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: 'error.dark',
+                    textAlign: 'center',
+                    mt: 1,
+                    maxWidth: 350,
+                  }}
+                >
+                  {uploadProgress.message}
+                </Typography>
+              )}
+            </Box>
+
+            {/* Progress Bar - Fixed width */}
+            {isUploading && !isComplete && !isError && (
+              <Box sx={{ width: '100%', maxWidth: 320 }}>
+                {/* Progress track */}
+                <Box
+                  sx={{
+                    position: 'relative',
+                    height: 10,
+                    borderRadius: 5,
+                    bgcolor: alpha(theme.palette.primary.main, 0.1),
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Progress fill */}
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      height: '100%',
+                      width: isIndeterminate ? '100%' : `${uploadProgress.percent}%`,
+                      borderRadius: 5,
+                      background: isIndeterminate
+                        ? `linear-gradient(90deg, transparent, ${theme.palette.primary.main}, transparent)`
+                        : `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.primary.light})`,
+                      backgroundSize: isIndeterminate ? '200% 100%' : '100% 100%',
+                      animation: isIndeterminate ? `${shimmer} 1.5s ease-in-out infinite` : 'none',
+                      transition: 'width 0.3s ease-out',
+                      boxShadow: `0 0 12px ${alpha(theme.palette.primary.main, 0.5)}`,
+                    }}
+                  />
+                </Box>
+
+                {/* Percentage */}
+                {!isIndeterminate && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                    <Typography
+                      variant="h6"
+                      fontWeight={700}
+                      sx={{ color: 'primary.main', fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {uploadProgress.percent}%
+                    </Typography>
+                  </Box>
+                )}
               </Box>
             )}
-          </Box>
-        )}
 
+            {/* Action buttons when complete */}
+            {isComplete && onNavigateToSermon && (
+              <Button
+                variant="contained"
+                size="large"
+                endIcon={<ArrowForwardIcon />}
+                onClick={onNavigateToSermon}
+                sx={{
+                  mt: 3,
+                  px: 4,
+                  py: 1.5,
+                  borderRadius: 3,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  fontSize: '1rem',
+                  boxShadow: `0 4px 20px ${alpha(theme.palette.primary.main, 0.35)}`,
+                  '&:hover': {
+                    boxShadow: `0 6px 24px ${alpha(theme.palette.primary.main, 0.45)}`,
+                  },
+                }}
+              >
+                View Sermon
+              </Button>
+            )}
+
+            {/* Dismiss hint for errors */}
+            {isError && (
+              <Typography
+                variant="caption"
+                sx={{
+                  color: 'text.secondary',
+                  mt: 2,
+                }}
+              >
+                Click anywhere to dismiss
+              </Typography>
+            )}
+          </Box>
+        </Box>
       </Box>
-    </Card>
+    </Portal>
   );
 }

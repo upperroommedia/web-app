@@ -15,7 +15,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import SearchIcon from '@mui/icons-material/Search';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import firestore, { collection, orderBy, query } from '../../firebase/firestore';
-import AdminLayout from '../../layout/adminLayout';
+import AppLayout from '../../layout/AppLayout';
 import { topicConverter } from '../../types/Topic';
 import Image from 'next/image';
 
@@ -169,6 +169,6 @@ const ProtectedAdminTopics = () => {
   }
 };
 
-ProtectedAdminTopics.PageLayout = AdminLayout;
+ProtectedAdminTopics.PageLayout = AppLayout;
 
 export default ProtectedAdminTopics;

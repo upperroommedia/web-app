@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { useDocumentData } from 'react-firebase-hooks/firestore';
 import AdminSermonsList from '../../../components/AdminSermonsList';
 import firestore, { doc } from '../../../firebase/firestore';
-import AdminLayout from '../../../layout/adminLayout';
+import AppLayout from '../../../layout/AppLayout';
 import { listConverter } from '../../../types/List';
 import useAuth from '../../../context/user/UserContext';
 // import { adminProtected } from '../../../utils/protectedRoutes';
@@ -44,7 +44,7 @@ const ProtectedSeriesSermon = () => {
   }
 };
 
-ProtectedSeriesSermon.PageLayout = AdminLayout;
+ProtectedSeriesSermon.PageLayout = AppLayout;
 
 export default ProtectedSeriesSermon;
 //  <Box>

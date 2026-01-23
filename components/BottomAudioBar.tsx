@@ -5,7 +5,6 @@
 import { FunctionComponent } from 'react';
 import { MediaProvider } from '@vidstack/react';
 import {
-  ChapterTitle,
   VolumeSlider,
   TimeSlider,
   Time,
@@ -45,7 +44,6 @@ interface SeekButtonProps extends MediaButtonProps {
 
 // Time Slider Component
 function Slider() {
-  const theme = useTheme();
   return (
     <TimeSlider.Root className="vds-time-slider vds-slider">
       <TimeSlider.Chapters className="vds-slider-chapters">

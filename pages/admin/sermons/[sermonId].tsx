@@ -6,9 +6,9 @@
  * - Inline publishing status (no popup)
  * - Edit and Delete actions
  */
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { useCallback, useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -37,9 +37,8 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import UploadIcon from '@mui/icons-material/Upload';
 import Link from 'next/link';
 import { alpha, useTheme } from '@mui/material/styles';
-import dynamic from 'next/dynamic';
 
-import AdminLayout from '../../../layout/adminLayout';
+import AppLayout from '../../../layout/AppLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import firestore, { doc, getDoc, getDocs, deleteDoc, collection, writeBatch, deleteField, updateDoc } from '../../../firebase/firestore';
@@ -64,7 +63,10 @@ import { GetUserInputType, GetUserOutputType } from '../../../functions/src/getU
 import { getSquareImageStoragePath } from '../../../utils/utils';
 import { isDevelopment } from '../../../firebase/firebase';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { useObject } from 'react-firebase-hooks/database';
+import database, { ref as dbRef } from '../../../firebase/database';
 import UploadStatusList from '../../../components/UploadStatusList';
+import LinearProgress from '@mui/material/LinearProgress';
 
 const SermonDetailsPage = () => {
   const router = useRouter();
@@ -85,12 +87,16 @@ const SermonDetailsPage = () => {
   
   // Publishing state
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
-  const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
+  const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
   
   // Sermon lists
-  const [sermonLists, listsLoading, listsError] = useCollectionData(
+  const [sermonLists, listsLoading, _listsError] = useCollectionData(
     sermonId ? collection(firestore, `sermons/${sermonId}/sermonLists`).withConverter(sermonListConverter) : null
   );
+
+  // Real-time processing progress from Firebase Realtime Database
+  const [progressSnapshot] = useObject(sermonId ? dbRef(database, `addIntroOutro/${sermonId}`) : null);
+  const processingProgress = progressSnapshot?.val() ? Number(progressSnapshot.val()) : 0;
 
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
@@ -158,6 +164,19 @@ const SermonDetailsPage = () => {
   useEffect(() => {
     fetchSermonData();
   }, [fetchSermonData]);
+
+  // Refetch data when returning to this page (e.g., after editing)
+  useEffect(() => {
+    const handleRouteChangeComplete = () => {
+      fetchSermonData();
+    };
+    
+    router.events.on('routeChangeComplete', handleRouteChangeComplete);
+    
+    return () => {
+      router.events.off('routeChangeComplete', handleRouteChangeComplete);
+    };
+  }, [router.events, fetchSermonData]);
 
   // Handle delete
   const handleDelete = useCallback(async () => {
@@ -518,7 +537,14 @@ const SermonDetailsPage = () => {
             >
               {/* Info Section - First so it's on the left */}
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="h4" fontWeight={700} gutterBottom sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem', md: '2rem' } }}>
+                <Typography 
+                  variant="h4" 
+                  fontWeight={700} 
+                  gutterBottom 
+                  sx={{ 
+                    fontSize: { xs: '1.25rem', sm: '1.5rem', md: '2rem' },
+                  }}
+                >
                   {sermon.title}
                 </Typography>
                 
@@ -558,14 +584,34 @@ const SermonDetailsPage = () => {
 
                 {/* Status chip */}
                 {statusInfo && sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
-                  <Chip
-                    icon={statusInfo.icon}
-                    label={statusInfo.label}
-                    size="small"
-                    color={statusInfo.color}
-                    variant="outlined"
-                    sx={{ mb: 2 }}
-                  />
+                  <Box sx={{ mb: 2 }}>
+                    <Chip
+                      icon={statusInfo.icon}
+                      label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0 
+                        ? `${statusInfo.label} (${processingProgress}%)`
+                        : statusInfo.label}
+                      size="small"
+                      color={statusInfo.color}
+                      variant="outlined"
+                    />
+                    {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0 && (
+                      <LinearProgress
+                        variant="determinate"
+                        value={processingProgress}
+                        sx={{
+                          mt: 1,
+                          height: 6,
+                          borderRadius: 3,
+                          maxWidth: 200,
+                          bgcolor: alpha(theme.palette.warning.main, 0.15),
+                          '& .MuiLinearProgress-bar': { 
+                            bgcolor: 'warning.main',
+                            borderRadius: 3,
+                          }
+                        }}
+                      />
+                    )}
+                  </Box>
                 )}
 
                 {/* Play Button */}
@@ -583,7 +629,7 @@ const SermonDetailsPage = () => {
 
                 {/* Uploader Info */}
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 28 }, height: { xs: 20, sm: 28 } }} />
+                  <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 40 }, height: { xs: 20, sm: 40 } }} />
                   <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
                     Uploaded by {uploaderName}
                   </Typography>
@@ -821,6 +867,6 @@ const ProtectedSermonDetailsPage = () => {
   return <SermonDetailsPage />;
 };
 
-ProtectedSermonDetailsPage.PageLayout = AdminLayout;
+ProtectedSermonDetailsPage.PageLayout = AppLayout;
 
 export default ProtectedSermonDetailsPage;

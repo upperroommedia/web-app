@@ -6,7 +6,7 @@
  */
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -28,28 +28,46 @@ import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Stack from '@mui/material/Stack';
 import SearchIcon from '@mui/icons-material/Search';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
 import SaveIcon from '@mui/icons-material/Save';
+import UndoIcon from '@mui/icons-material/Undo';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import CollectionsIcon from '@mui/icons-material/Collections';
 import Link from 'next/link';
 import { alpha, useTheme } from '@mui/material/styles';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import type { Modifier } from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
-import AdminLayout from '../../../layout/adminLayout';
+import AppLayout from '../../../layout/AppLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import NewSeriesPopup from '../../../components/NewSeriesPopup';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import firestore, { doc, getDoc, collection, getDocs, query, orderBy, where, limit, deleteDoc, setDoc, updateDoc } from '../../../firebase/firestore';
 import { Series, seriesConverter } from '../../../types/Series';
 import { SeriesItem, seriesItemConverter } from '../../../types/SeriesItem';
-import { Sermon, sermonStatusType } from '../../../types/SermonTypes';
-import { uploadStatus } from '../../../types/SermonTypes';
+import { Sermon } from '../../../types/SermonTypes';
 import useAuth from '../../../context/user/UserContext';
 import { createFunctionV2 } from '../../../utils/createFunction';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
@@ -58,6 +76,143 @@ import { serverTimestamp } from 'firebase/firestore';
 interface SeriesItemWithSermon extends SeriesItem {
   sermon?: Sermon;
 }
+
+interface SortableItemProps {
+  item: SeriesItemWithSermon;
+  index: number;
+  onRemove: (id: string) => void;
+}
+
+const SortableItem = ({ item, index, onRemove }: SortableItemProps) => {
+  const theme = useTheme();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : 0,
+    position: 'relative' as const,
+  };
+
+  return (
+    <Box
+      ref={setNodeRef}
+      style={style}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: { xs: 1.5, sm: 2 },
+        p: { xs: 2, sm: 2.5 },
+        bgcolor: isDragging ? 'action.selected' : 'background.paper',
+        boxShadow: isDragging ? 4 : 0,
+        transition: 'background-color 0.15s ease',
+        '&:hover': { bgcolor: isDragging ? 'action.selected' : 'action.hover' },
+      }}
+    >
+      {/* Drag Handle */}
+      <Box
+        {...attributes}
+        {...listeners}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          color: 'text.disabled',
+          touchAction: 'none',
+          '&:hover': { color: 'text.secondary' },
+        }}
+      >
+        <DragIndicatorIcon />
+      </Box>
+
+      <Typography
+        variant="body2"
+        sx={{
+          width: { xs: 24, sm: 32 },
+          textAlign: 'center',
+          color: 'text.tertiary',
+          fontWeight: 600,
+          fontSize: '0.75rem',
+        }}
+      >
+        {index + 1}
+      </Typography>
+
+      <AvatarWithDefaultImage
+        image={item.sermon?.images?.find((img) => img.type === 'square')}
+        altName={item.sermon?.title || 'Sermon'}
+        width={56}
+        height={56}
+        borderRadius={8}
+        sx={{ flexShrink: 0 }}
+      />
+
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography
+          variant="subtitle2"
+          sx={{
+            fontWeight: 600,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {item.sermon?.title || `Sermon ${item.id}`}
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+          {item.sermon?.dateString && (
+            <Typography variant="caption" color="text.secondary">
+              {item.sermon.dateString}
+            </Typography>
+          )}
+          {item.publishedToSubsplash ? (
+            <Chip
+              icon={<CheckCircleIcon />}
+              label="Published"
+              size="small"
+              color="success"
+              variant="outlined"
+              sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
+            />
+          ) : (
+            <Chip
+              icon={<PendingIcon />}
+              label="Draft (Not Published)"
+              size="small"
+              color="warning"
+              variant="outlined"
+              sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
+            />
+          )}
+        </Box>
+      </Box>
+
+      <Tooltip title="Remove from series">
+        <IconButton
+          size="small"
+          onClick={() => onRemove(item.id)}
+          sx={{
+            color: 'error.main',
+            flexShrink: 0,
+            '&:hover': {
+              bgcolor: alpha(theme.palette.error.main, 0.15),
+              color: 'error.main',
+            },
+          }}
+        >
+          <DeleteIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  );
+};
 
 const SeriesDetailsPage = () => {
   const router = useRouter();
@@ -73,8 +228,13 @@ const SeriesDetailsPage = () => {
   const [deletePopup, setDeletePopup] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [hasOrderChanges, setHasOrderChanges] = useState(false);
   const [addItemPopup, setAddItemPopup] = useState(false);
+  
+  // Store original item order for revert functionality
+  const originalItemsRef = useRef<SeriesItemWithSermon[]>([]);
+  
+  // Ref for the sortable container to restrict drag bounds
+  const containerRef = useRef<HTMLDivElement>(null);
   const [availableSermons, setAvailableSermons] = useState<Sermon[]>([]);
   const [loadingSermons, setLoadingSermons] = useState(false);
   const [sermonSearchQuery, setSermonSearchQuery] = useState('');
@@ -133,6 +293,8 @@ const SeriesDetailsPage = () => {
       );
 
       setItems(itemsWithSermons);
+      // Store original order for revert functionality
+      originalItemsRef.current = itemsWithSermons;
     } catch (err: any) {
       console.error('Error fetching series:', err);
       setError(err.message || 'Failed to fetch series');
@@ -177,30 +339,62 @@ const SeriesDetailsPage = () => {
     setLoadingSermons(false);
   }, [user, seriesId, isAdmin]);
 
-  // Move item up in the list
-  const moveItemUp = (index: number) => {
-    if (index === 0) return;
-    const newItems = [...items];
-    [newItems[index - 1], newItems[index]] = [newItems[index], newItems[index - 1]];
-    // Update positions
-    newItems.forEach((item, i) => {
-      item.position = i + 1;
-    });
-    setItems(newItems);
-    setHasOrderChanges(true);
+  // Custom modifier to restrict drag to container bounds
+  const restrictToContainer: Modifier = ({ transform, draggingNodeRect, containerNodeRect: _containerNodeRect }) => {
+    if (!containerRef.current || !draggingNodeRect) {
+      return transform;
+    }
+
+    const containerRect = containerRef.current.getBoundingClientRect();
+    
+    // Calculate the bounds
+    const minY = containerRect.top - draggingNodeRect.top;
+    const maxY = containerRect.bottom - draggingNodeRect.bottom;
+
+    return {
+      ...transform,
+      y: Math.min(Math.max(transform.y, minY), maxY),
+    };
   };
 
-  // Move item down in the list
-  const moveItemDown = (index: number) => {
-    if (index === items.length - 1) return;
-    const newItems = [...items];
-    [newItems[index], newItems[index + 1]] = [newItems[index + 1], newItems[index]];
-    // Update positions
-    newItems.forEach((item, i) => {
-      item.position = i + 1;
-    });
-    setItems(newItems);
-    setHasOrderChanges(true);
+  // DnD sensors for drag-and-drop sorting
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Check if order has changed from original
+  const hasOrderChanges = items.length !== originalItemsRef.current.length ||
+    items.some((item, index) => item.id !== originalItemsRef.current[index]?.id);
+
+  // Handle drag end to reorder items
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setItems((prevItems) => {
+        const oldIndex = prevItems.findIndex((item) => item.id === active.id);
+        const newIndex = prevItems.findIndex((item) => item.id === over.id);
+
+        const newItems = arrayMove(prevItems, oldIndex, newIndex);
+        // Update positions
+        newItems.forEach((item, i) => {
+          item.position = i + 1;
+        });
+        return newItems;
+      });
+    }
+  };
+
+  // Revert to original order
+  const revertOrder = () => {
+    setItems([...originalItemsRef.current]);
   };
 
   // Save order changes
@@ -239,7 +433,8 @@ const SeriesDetailsPage = () => {
           })
         );
       }
-      setHasOrderChanges(false);
+      // Update original order reference after successful save
+      originalItemsRef.current = [...items];
     } catch (err: any) {
       console.error('Error saving order:', err);
       alert(`Error saving order: ${err.message || 'Unknown error'}`);
@@ -270,8 +465,9 @@ const SeriesDetailsPage = () => {
         }
       }
 
-      // Update local state
+      // Update local state and original reference
       setItems((prev) => prev.filter((item) => item.id !== itemId));
+      originalItemsRef.current = originalItemsRef.current.filter((item) => item.id !== itemId);
       
       // Update series item count
       if (series) {
@@ -340,7 +536,7 @@ const SeriesDetailsPage = () => {
         setSeries((prev) => prev ? { ...prev, itemCount: (prev.itemCount || 0) + 1 } : prev);
       }
 
-      // Update local state
+      // Update local state and original reference
       const newItem: SeriesItemWithSermon = {
         id: sermon.id,
         position: newPosition,
@@ -350,6 +546,7 @@ const SeriesDetailsPage = () => {
         sermon,
       };
       setItems((prev) => [...prev, newItem]);
+      originalItemsRef.current = [...originalItemsRef.current, newItem];
       setAddItemPopup(false);
     } catch (err: any) {
       console.error('Error adding item:', err);
@@ -610,15 +807,26 @@ const SeriesDetailsPage = () => {
           </Typography>
           <Stack direction="row" spacing={1.5}>
             {hasOrderChanges && (
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={isSaving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
-                onClick={saveOrderChanges}
-                disabled={isSaving}
-              >
-                Save Order
-              </Button>
+              <>
+                <Button
+                  variant="outlined"
+                  color="inherit"
+                  startIcon={<UndoIcon />}
+                  onClick={revertOrder}
+                  disabled={isSaving}
+                >
+                  Revert
+                </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={isSaving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+                  onClick={saveOrderChanges}
+                  disabled={isSaving}
+                >
+                  Save Order
+                </Button>
+              </>
             )}
             <Button
               variant="outlined"
@@ -664,126 +872,29 @@ const SeriesDetailsPage = () => {
             </Button>
           </Card>
         ) : (
-          <Card>
-            {items.map((item, index) => (
-              <Box key={item.id}>
-                <Box
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: { xs: 1.5, sm: 2 },
-                    p: { xs: 2, sm: 2.5 },
-                    transition: 'background-color 0.15s ease',
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      width: { xs: 24, sm: 32 },
-                      textAlign: 'center',
-                      color: 'text.tertiary',
-                      fontWeight: 600,
-                      fontSize: '0.75rem',
-                    }}
-                  >
-                    {index + 1}
-                  </Typography>
-
-                  <AvatarWithDefaultImage
-                    image={item.sermon?.images?.find((img) => img.type === 'square')}
-                    altName={item.sermon?.title || 'Sermon'}
-                    width={56}
-                    height={56}
-                    borderRadius={8}
-                    sx={{ flexShrink: 0 }}
-                  />
-
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography
-                      variant="subtitle2"
-                      sx={{
-                        fontWeight: 600,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {item.sermon?.title || `Sermon ${item.id}`}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
-                      {item.sermon?.dateString && (
-                        <Typography variant="caption" color="text.secondary">
-                          {item.sermon.dateString}
-                        </Typography>
-                      )}
-                      {item.publishedToSubsplash ? (
-                        <Chip
-                          icon={<CheckCircleIcon />}
-                          label="Published"
-                          size="small"
-                          color="success"
-                          variant="outlined"
-                          sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
-                        />
-                      ) : (
-                        <Chip
-                          icon={<PendingIcon />}
-                          label="Pending"
-                          size="small"
-                          color="warning"
-                          variant="outlined"
-                          sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
-                        />
-                      )}
-                    </Box>
+          <Card ref={containerRef} sx={{ overflow: 'hidden' }}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+              modifiers={[restrictToVerticalAxis, restrictToContainer]}
+            >
+              <SortableContext
+                items={items.map((item) => item.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {items.map((item, index) => (
+                  <Box key={item.id}>
+                    <SortableItem
+                      item={item}
+                      index={index}
+                      onRemove={removeItem}
+                    />
+                    {index < items.length - 1 && <Divider />}
                   </Box>
-
-                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                    <Tooltip title="Move up">
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => moveItemUp(index)}
-                          disabled={index === 0}
-                          sx={{ opacity: index === 0 ? 0.3 : 1 }}
-                        >
-                          <ArrowUpwardIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Move down">
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => moveItemDown(index)}
-                          disabled={index === items.length - 1}
-                          sx={{ opacity: index === items.length - 1 ? 0.3 : 1 }}
-                        >
-                          <ArrowDownwardIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Remove from series">
-                      <IconButton
-                        size="small"
-                        onClick={() => removeItem(item.id)}
-                        sx={{
-                          color: 'error.main',
-                          '&:hover': {
-                            bgcolor: alpha(theme.palette.error.main, 0.15),
-                            color: 'error.main',
-                          },
-                        }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Stack>
-                </Box>
-                {index < items.length - 1 && <Divider />}
-              </Box>
-            ))}
+                ))}
+              </SortableContext>
+            </DndContext>
           </Card>
         )}
       </Box>
@@ -793,6 +904,9 @@ const SeriesDetailsPage = () => {
         open={editPopup}
         setOpen={setEditPopup}
         existingSeries={series}
+        onSeriesCreated={(updatedSeries) => {
+          setSeries(updatedSeries);
+        }}
       />
 
       {/* Delete Confirmation Popup */}
@@ -952,6 +1066,6 @@ const ProtectedSeriesDetailsPage = () => {
   return <SeriesDetailsPage />;
 };
 
-ProtectedSeriesDetailsPage.PageLayout = AdminLayout;
+ProtectedSeriesDetailsPage.PageLayout = AppLayout;
 
 export default ProtectedSeriesDetailsPage;

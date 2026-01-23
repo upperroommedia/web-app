@@ -28,7 +28,6 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { alpha, useTheme } from '@mui/material/styles';
 import { ErrorBoundary } from 'react-error-boundary';
 import ErrorIcon from '@mui/icons-material/Error';
-import PendingIcon from '@mui/icons-material/Pending';
 import CloudIcon from '@mui/icons-material/Cloud';
 import CollectionsIcon from '@mui/icons-material/Collections';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -61,11 +60,11 @@ interface Props {
 const SermonListCard: FunctionComponent<Props> = ({
   sermon,
   playing,
-  remainingTimeComponent,
-  trackProgressComponent,
+  remainingTimeComponent: _remainingTimeComponent,
+  trackProgressComponent: _trackProgressComponent,
   audioPlayerCurrentSermonId,
   audioPlayerSetCurrentSermon,
-  minimal,
+  minimal: _minimal,
   onRefresh,
 }: Props) => {
   const router = useRouter();
@@ -205,7 +204,6 @@ const SermonListCard: FunctionComponent<Props> = ({
       >
         {isCurrentlyPlaying ? <PauseIcon sx={{ fontSize: { xs: 14, md: 18 } }} /> : <PlayArrowIcon sx={{ fontSize: { xs: 14, md: 18 } }} />}
       </IconButton>
-      {audioPlayerCurrentSermonId === sermon.id && !minimal && remainingTimeComponent}
     </Box>
   );
 
@@ -439,18 +437,42 @@ const SermonListCard: FunctionComponent<Props> = ({
                 {series && isTablet && (
                   <Link href={`/admin/series/${series.id}`} onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none' }}>
                     <Chip
-                      avatar={<Avatar src={seriesImage?.downloadLink || '/URM_Icon.png'} alt={series.name} sx={{ width: 14, height: 14 }} />}
+                      avatar={
+                        <Avatar 
+                          src={seriesImage?.downloadLink || '/URM_Icon.png'} 
+                          alt={series.name} 
+                          sx={{ 
+                            width: { sm: 18, md: 22 }, 
+                            height: { sm: 18, md: 22 },
+                          }} 
+                        />
+                      }
                       label={series.name}
                       size="small"
-                      variant="outlined"
-                      color="primary"
+                      variant="filled"
                       sx={{
-                        height: 18,
+                        height: { sm: 22, md: 26 },
                         cursor: 'pointer',
-                        maxWidth: 100,
-                        '& .MuiChip-label': { fontSize: '0.55rem', px: 0.5, overflow: 'hidden', textOverflow: 'ellipsis' },
-                        '& .MuiChip-avatar': { ml: 0.5 },
-                        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) }
+                        maxWidth: { sm: 140, md: 180 },
+                        bgcolor: alpha(theme.palette.primary.main, 0.1),
+                        border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
+                        '& .MuiChip-label': { 
+                          fontSize: { sm: '0.65rem', md: '0.75rem' }, 
+                          px: { sm: 0.75, md: 1 }, 
+                          fontWeight: 500,
+                          overflow: 'hidden', 
+                          textOverflow: 'ellipsis',
+                          color: theme.palette.primary.main,
+                        },
+                        '& .MuiChip-avatar': { 
+                          ml: 0.5,
+                          width: { sm: 18, md: 22 },
+                          height: { sm: 18, md: 22 },
+                        },
+                        '&:hover': { 
+                          bgcolor: alpha(theme.palette.primary.main, 0.2),
+                          borderColor: theme.palette.primary.main,
+                        }
                       }}
                     />
                   </Link>
@@ -486,8 +508,7 @@ const SermonListCard: FunctionComponent<Props> = ({
             {isProcessing && processingProgress > 0 && (
               <LinearProgress
                 variant="determinate"
-                // value={processingProgress}
-                value={50}
+                value={processingProgress}
                 sx={{
                   height: 2,
                   borderRadius: 1,

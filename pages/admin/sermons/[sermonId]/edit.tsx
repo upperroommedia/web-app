@@ -16,7 +16,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import Link from 'next/link';
 
-import AdminLayout from '../../../../layout/adminLayout';
+import AppLayout from '../../../../layout/AppLayout';
 import firestore, { doc, getDoc, collection } from '../../../../firebase/firestore';
 import { Sermon, uploadStatus } from '../../../../types/SermonTypes';
 import { sermonConverter } from '../../../../types/Sermon';
@@ -199,6 +199,6 @@ const EditSermonPage = () => {
   );
 };
 
-EditSermonPage.PageLayout = AdminLayout;
+EditSermonPage.PageLayout = AppLayout;
 
 export default EditSermonPage;

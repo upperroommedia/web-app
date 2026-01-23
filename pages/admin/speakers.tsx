@@ -14,7 +14,7 @@ import firestore, {
   QueryDocumentSnapshot,
   startAfter,
 } from '../../firebase/firestore';
-import AdminLayout from '../../layout/adminLayout';
+import AppLayout from '../../layout/AppLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
 import useAuth from '../../context/user/UserContext';
 import { fetchSpeakerResults } from '../../components/uploaderComponents/SpeakerSelector';
@@ -201,6 +201,6 @@ const ProtectedAdminSpeakers = () => {
   }
 };
 
-ProtectedAdminSpeakers.PageLayout = AdminLayout;
+ProtectedAdminSpeakers.PageLayout = AppLayout;
 
 export default ProtectedAdminSpeakers;

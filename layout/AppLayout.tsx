@@ -1,6 +1,6 @@
 /**
- * Admin Layout - Wrapper for all admin pages
- * Uses the new sidebar navigation layout
+ * AppLayout - Main wrapper for authenticated pages
+ * Handles auth checks and uses the sidebar navigation layout
  */
 import Box from '@mui/material/Box';
 import { useRouter } from 'next/router';
@@ -10,9 +10,9 @@ import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import RequestRoleChange from '../components/RequestUploadPrivalige';
-import AdminSidebarLayout from './AdminSidebarLayout';
+import SidebarLayout from './SidebarLayout';
 
-const AdminLayout = ({ children }: { children: React.ReactNode }) => {
+const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
   const router = useRouter();
 
@@ -68,10 +68,10 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   return (
     <>
       <Head>
-        <title>Admin | Upper Room Media</title>
-        <meta property="og:title" content="Admin | Upper Room Media" key="title" />
+        <title>Upper Room Media</title>
+        <meta property="og:title" content="Upper Room Media" key="title" />
       </Head>
-      <AdminSidebarLayout>
+      <SidebarLayout>
         <Box
           sx={{
             flex: 1,
@@ -82,9 +82,9 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         >
           {children}
         </Box>
-      </AdminSidebarLayout>
+      </SidebarLayout>
     </>
   );
 };
 
-export default AdminLayout;
+export default AppLayout;
