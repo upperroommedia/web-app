@@ -42,7 +42,7 @@ import dynamic from 'next/dynamic';
 import AdminLayout from '../../../layout/adminLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
-import firestore, { doc, getDoc, deleteDoc, collection, writeBatch, deleteField, updateDoc } from '../../../firebase/firestore';
+import firestore, { doc, getDoc, getDocs, deleteDoc, collection, writeBatch, deleteField, updateDoc } from '../../../firebase/firestore';
 import storage, { getDownloadURL, ref } from '../../../firebase/storage';
 import { Sermon, sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
 import { sermonConverter } from '../../../types/Sermon';
@@ -77,7 +77,7 @@ const SermonDetailsPage = () => {
 
   const [sermon, setSermon] = useState<Sermon | null>(null);
   const [series, setSeries] = useState<Series | null>(null);
-  const [uploader, setUploader] = useState<User | null>(null);
+  const [uploader, setUploader] = useState<User | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletePopup, setDeletePopup] = useState(false);
@@ -385,8 +385,8 @@ const SermonDetailsPage = () => {
       
       const batch = writeBatch(firestore);
       const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
-      const sermonSeriesListSnapshot = await getDocs(firestore, sermonSeriesList);
-      sermonSeriesListSnapshot.forEach((docSnap: any) => {
+      const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
+      sermonSeriesListSnapshot.forEach((docSnap) => {
         batch.update(docSnap.ref, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
       });
       batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {

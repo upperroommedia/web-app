@@ -40,3 +40,4 @@ sa.json
 firestore-coverage.html
 *.har
 tsconfig.tsbuildinfo
+.vscode
