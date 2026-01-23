@@ -31,8 +31,6 @@ const SeriesSermon = () => {
   );
 };
 
-SeriesSermon.PageLayout = AdminLayout;
-
 // export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
 //   return adminProtected(ctx);
 // };
@@ -45,6 +43,8 @@ const ProtectedSeriesSermon = () => {
     return <SeriesSermon />;
   }
 };
+
+ProtectedSeriesSermon.PageLayout = AdminLayout;
 
 export default ProtectedSeriesSermon;
 //  <Box>

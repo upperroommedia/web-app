@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
-import Paper from '@mui/material/Paper';
+import Card from '@mui/material/Card';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -8,11 +9,14 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
+import Toolbar from '@mui/material/Toolbar';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import SearchIcon from '@mui/icons-material/Search';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import firestore, { collection, orderBy, query } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';
 import { topicConverter } from '../../types/Topic';
-// import { adminProtected } from '../../utils/protectedRoutes';
 import Image from 'next/image';
 
 import useAuth from '../../context/user/UserContext';
@@ -20,6 +24,12 @@ import useAuth from '../../context/user/UserContext';
 const AdminTopics = () => {
   const q = query(collection(firestore, 'topics').withConverter(topicConverter), orderBy('title'));
   const [topics, loading, error] = useCollectionData(q);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Filter topics based on search query
+  const filteredTopics = topics?.filter((topic) =>
+    !searchQuery || topic.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const formatDateTime = (millis: number) => {
     const date = new Date(millis);
@@ -27,84 +37,128 @@ const AdminTopics = () => {
   };
 
   return (
-    <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" padding={3} width={1}>
-      <Typography variant="h4">Manage Topics</Typography>
-
+    <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
       {error ? (
-        <Typography color="red">{`Error: ${error.message}`}</Typography>
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <Typography color="error">{`Error: ${error.message}`}</Typography>
+        </Box>
       ) : loading ? (
-        <CircularProgress />
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <CircularProgress />
+        </Box>
       ) : (
-        <TableContainer component={Paper}>
-          <Table sx={{ minWidth: 650 }} aria-label="simple table">
-            <TableHead>
-              <TableRow>
-                <TableCell align="center">Title</TableCell>
-                <TableCell align="center">Items&nbsp;Count</TableCell>
-                <TableCell align="center">Updated&nbsp;At</TableCell>
-                <TableCell align="center">Created&nbsp;At</TableCell>
-                <TableCell align="center">List</TableCell>
-                <TableCell align="center">Images</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {topics?.map((topic) => (
-                <TableRow key={topic.id} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                  <TableCell align="center" component="th" scope="row">
-                    {topic.title}
-                  </TableCell>
-                  <TableCell align="center">{topic.itemsCount}</TableCell>
-                  <TableCell align="center">{formatDateTime(topic.updatedAtMillis)}</TableCell>
-                  <TableCell align="center">{formatDateTime(topic.createdAtMillis)}</TableCell>
-                  <TableCell align="center">{topic.listId || 'No list'}</TableCell>
-                  <TableCell style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
-                    <Box
-                      display="flex"
-                      justifyContent="center"
-                      gap={1}
-                      sx={{ marginLeft: 'auto', marginRight: 'auto' }}
-                    >
-                      {['square', 'wide', 'banner'].map((type, i) => {
-                        const image = topic.images?.find((image) => image.type === type);
-                        return (
-                          <div
-                            key={image?.id || i}
-                            style={{
-                              borderRadius: '2px',
-                              overflow: 'hidden',
-                              position: 'relative',
-                              width: 50,
-                              height: 50,
-                              backgroundColor: image?.averageColorHex || '#f3f1f1',
-                            }}
-                          >
-                            {image && (
-                              <Image
-                                src={image.downloadLink}
-                                alt={`Image of ${image.name}`}
-                                width={50}
-                                height={50}
-                                style={{ objectFit: 'contain' }}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </Box>
-                  </TableCell>
+        <Card>
+          <Toolbar sx={{ pl: { sm: 2 }, pr: { xs: 1, sm: 2 }, gap: 2, flexWrap: 'wrap' }}>
+            <Typography variant="h6" id="tableTitle" component="div" sx={{ flexShrink: 0 }}>
+              Topics
+            </Typography>
+            <TextField
+              placeholder="Search topics by title..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              size="small"
+              sx={{ flex: 1, minWidth: 200, maxWidth: 350 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon color="action" />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Toolbar>
+          <TableContainer>
+            <Table sx={{ minWidth: 650 }} aria-label="topics table">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Title</TableCell>
+                  <TableCell align="center">Items&nbsp;Count</TableCell>
+                  <TableCell align="center">Updated&nbsp;At</TableCell>
+                  <TableCell align="center">Created&nbsp;At</TableCell>
+                  <TableCell align="center">List</TableCell>
+                  <TableCell align="center">Images</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+              </TableHead>
+              <TableBody>
+                {filteredTopics?.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center">
+                      <Typography color="text.secondary" py={4}>
+                        {searchQuery ? `No topics found matching "${searchQuery}"` : 'No topics found'}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredTopics?.map((topic) => (
+                    <TableRow key={topic.id} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                      <TableCell component="th" scope="row">
+                        <Typography variant="body2" fontWeight={500}>
+                          {topic.title}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          {topic.itemsCount}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          {formatDateTime(topic.updatedAtMillis)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          {formatDateTime(topic.createdAtMillis)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          {topic.listId || 'No list'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Box display="flex" justifyContent="center" gap={1}>
+                          {['square', 'wide', 'banner'].map((type, i) => {
+                            const image = topic.images?.find((image) => image.type === type);
+                            return (
+                              <Box
+                                key={image?.id || i}
+                                sx={{
+                                  borderRadius: 1,
+                                  overflow: 'hidden',
+                                  position: 'relative',
+                                  width: 44,
+                                  height: 44,
+                                  bgcolor: image?.averageColorHex || 'background.default',
+                                  border: '1px solid',
+                                  borderColor: 'divider',
+                                }}
+                              >
+                                {image && (
+                                  <Image
+                                    src={image.downloadLink}
+                                    alt={`Image of ${image.name}`}
+                                    width={44}
+                                    height={44}
+                                    style={{ objectFit: 'contain' }}
+                                  />
+                                )}
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Card>
       )}
     </Box>
   );
 };
-
-// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-//   return adminProtected(ctx);
-// };
 
 const ProtectedAdminTopics = () => {
   const { user } = useAuth();

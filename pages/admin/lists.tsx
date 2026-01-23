@@ -2,12 +2,8 @@ import Box from '@mui/material/Box';
 import AdminLayout from '../../layout/adminLayout';
 import Button from '@mui/material/Button';
 import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../firebase/firestore';
-// import { useCollection } from 'react-firebase-hooks/firestore';
-// import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { useCallback, useEffect, useState } from 'react';
-// import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-// import { adminProtected } from '../../utils/protectedRoutes';
 import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
@@ -16,13 +12,18 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '../../functions/src/deleteSubsplashList';
 import Link from 'next/link';
-import MaterialList from '@mui/material/List';
+import Card from '@mui/material/Card';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import ListItemButton from '@mui/material/ListItemButton';
+import AddIcon from '@mui/icons-material/Add';
+import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
+import SearchIcon from '@mui/icons-material/Search';
+import Stack from '@mui/material/Stack';
+import Chip from '@mui/material/Chip';
+import InputAdornment from '@mui/material/InputAdornment';
 import { listConverter, List, ListType } from '../../types/List';
 import { algoliasearch, SearchResponse } from 'algoliasearch';
 import TextField from '@mui/material/TextField';
@@ -31,6 +32,7 @@ import MenuItem from '@mui/material/MenuItem';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 import useAuth from '../../context/user/UserContext';
+import { alpha, useTheme } from '@mui/material/styles';
 
 const HITSPERPAGE = 20;
 
@@ -128,31 +130,56 @@ const AdminList = () => {
     fetchData();
   }, [currentPage, filter, searchLists]);
 
+  const theme = useTheme();
+
   return (
     <>
-      <Box display="flex" justifyContent="center" padding={3} width={1}>
+      <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
         {error ? (
-          <Typography color="red">{`Error: ${error.message}`}</Typography>
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography color="error">{`Error: ${error.message}`}</Typography>
+          </Box>
         ) : loading ? (
-          <CircularProgress />
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+            <CircularProgress />
+          </Box>
         ) : (
-          <Box display="flex" flexDirection="column" gap={1} width={1}>
-            <Box display="flex" justifyContent="center" gap={1}>
-              <Typography variant="h4">Manage List</Typography>
+          <>
+            {/* Header */}
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                justifyContent: 'space-between',
+                alignItems: { xs: 'flex-start', sm: 'center' },
+                gap: 2,
+                mb: 4,
+              }}
+            >
+              <Typography variant="h4" fontWeight={700}>
+                Manage Lists
+              </Typography>
               <Button
-                color="info"
                 variant="contained"
-                size="small"
-                onClick={() => {
-                  setNewListPopup(true);
-                }}
+                startIcon={<AddIcon />}
+                onClick={() => setNewListPopup(true)}
               >
                 Add List
               </Button>
             </Box>
-            <Box display="flex" width="100%" justifyContent="space-between">
+
+            {/* Filters */}
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                gap: 2,
+                mb: 3,
+              }}
+            >
               <TextField
-                placeholder="Search a for a list"
+                placeholder="Search lists by name..."
+                value={searchQuery}
                 onChange={async (e) => {
                   setSearchQuery(e.target.value);
                   setCurrentPage(0);
@@ -162,106 +189,197 @@ const AdminList = () => {
                     await searchLists(e.target.value);
                   }
                 }}
-                sx={{ width: '65%' }}
+                size="small"
+                sx={{ flex: 2 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="action" />
+                    </InputAdornment>
+                  ),
+                }}
               />
-              <Box sx={{ width: '34%' }}>
-                <FormControl fullWidth>
-                  <InputLabel id="list-type-select-label">Filter by list type</InputLabel>
-                  <Select
-                    value={filter}
-                    label="Filter by list type"
-                    labelId="list-type-select-label"
-                    id="list-type-select"
-                    onChange={(e) => {
-                      setCurrentPage(0);
-                      setFilter(e.target.value as ListType);
-                    }}
+              <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
+                <InputLabel id="list-type-select-label">Type</InputLabel>
+                <Select
+                  value={filter}
+                  label="Type"
+                  labelId="list-type-select-label"
+                  onChange={(e) => {
+                    setCurrentPage(0);
+                    setFilter(e.target.value as ListType);
+                  }}
+                >
+                  <MenuItem value="">All Types</MenuItem>
+                  {(Object.values(ListType) as Array<ListType>).map((listType) => {
+                    if (listType !== ListType.LATEST) {
+                      return (
+                        <MenuItem key={listType} value={listType}>
+                          {listTypeOptions[listType]}
+                        </MenuItem>
+                      );
+                    }
+                    return null;
+                  })}
+                </Select>
+              </FormControl>
+            </Box>
+
+            {/* Lists */}
+            {(searchResults || list).length === 0 ? (
+              <Card
+                sx={{
+                  textAlign: 'center',
+                  py: 6,
+                  px: 3,
+                  border: '2px dashed',
+                  borderColor: 'divider',
+                  bgcolor: 'transparent',
+                }}
+              >
+                <PlaylistPlayIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  {searchQuery || filter ? 'No lists found matching your filters' : 'No lists yet'}
+                </Typography>
+                <Typography variant="body2" color="text.disabled" sx={{ mb: 3 }}>
+                  {searchQuery || filter
+                    ? 'Try adjusting your search or filter'
+                    : 'Create your first list to organize your content'}
+                </Typography>
+                {!searchQuery && !filter && (
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setNewListPopup(true)}
                   >
-                    <MenuItem value={''}>None</MenuItem>
-                    {/* eslint-disable-next-line array-callback-return */}
-                    {(Object.values(ListType) as Array<ListType>).map((listType) => {
-                      if (listType !== ListType.LATEST) {
-                        return (
-                          <MenuItem key={listType} value={listType}>
-                            {listTypeOptions[listType]}
-                          </MenuItem>
-                        );
-                      }
-                    })}
-                  </Select>
-                </FormControl>
+                    Create Your First List
+                  </Button>
+                )}
+              </Card>
+            ) : (
+              <Card>
+                {(searchResults || list).map((l, index) => (
+                  <Box key={l.id}>
+                    <Link href={`/admin/lists/${l.id}?count=${l.count || 20}`} style={{ textDecoration: 'none' }}>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          p: { xs: 2, sm: 2.5 },
+                          gap: 2,
+                          cursor: 'pointer',
+                          transition: 'background-color 0.15s ease',
+                          '&:hover': { bgcolor: 'action.hover' },
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+                          <AvatarWithDefaultImage
+                            image={l.images?.find((image) => image.type === 'square')}
+                            altName={`Image of List: ${l.name}`}
+                            width={64}
+                            height={64}
+                            borderRadius={10}
+                            sx={{ flexShrink: 0 }}
+                          />
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography
+                              variant="subtitle1"
+                              fontWeight={600}
+                              sx={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {l.name}
+                            </Typography>
+                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+                              {l.count !== undefined && (
+                                <Typography variant="body2" color="text.secondary">
+                                  {l.count} items
+                                </Typography>
+                              )}
+                              <Chip
+                                label={listTypeOptions[l.type] || l.type}
+                                size="small"
+                                variant="outlined"
+                                sx={{ height: 22 }}
+                              />
+                            </Box>
+                          </Box>
+                        </Box>
+
+                        <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                          <Tooltip title="Edit List">
+                            <span>
+                              <IconButton
+                                disabled={disableButtons}
+                                aria-label="edit list"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setSelectedList(l);
+                                  setEditListPopup(true);
+                                }}
+                                sx={{
+                                  '&:hover': {
+                                    bgcolor: alpha(theme.palette.primary.main, 0.15),
+                                    color: 'primary.main',
+                                  },
+                                }}
+                              >
+                                <EditIcon />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Delete List">
+                            <span>
+                              <IconButton
+                                disabled={disableButtons}
+                                aria-label="delete list"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setSelectedList(l);
+                                  setDeleteListPopup(true);
+                                }}
+                                sx={{
+                                  color: 'error.main',
+                                  '&:hover': {
+                                    bgcolor: alpha(theme.palette.error.main, 0.15),
+                                  },
+                                }}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Stack>
+                      </Box>
+                    </Link>
+                    {index < (searchResults || list).length - 1 && <Divider />}
+                  </Box>
+                ))}
+              </Card>
+            )}
+
+            {/* Pagination */}
+            {((searchResults || list).length > 0 || currentPage > 0) && (
+              <Box display="flex" gap={2} justifyContent="center" mt={3}>
+                {currentPage > 0 && (
+                  <Button variant="outlined" onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>
+                    Previous Page
+                  </Button>
+                )}
+                {!noMoreResults && !(searchResults && searchResults.length < HITSPERPAGE) && (
+                  <Button variant="outlined" onClick={() => setCurrentPage((oldPage) => oldPage + 1)}>
+                    Next Page
+                  </Button>
+                )}
               </Box>
-            </Box>
-            <MaterialList>
-              {(searchResults || list).map((l) => {
-                return (
-                  <Link href={`/admin/lists/${l.id}?count=${l.count || 20}`} key={l.id}>
-                    <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <AvatarWithDefaultImage
-                          image={l.images?.find((image) => image.type === 'square')}
-                          altName={`Image of List: ${l.name}`}
-                          width={50}
-                          height={50}
-                          borderRadius={5}
-                        />
-                        <Typography>{l.name}</Typography>
-                        {l.count !== undefined && <Typography>{`Count: ${l.count}`}</Typography>}
-                        <Typography>{`Type: ${l.type}`}</Typography>
-                      </Box>
-                      <Box>
-                        <Tooltip title="Edit List">
-                          <span>
-                            <IconButton
-                              disabled={disableButtons}
-                              aria-label="edit list"
-                              style={{ color: 'lightblue' }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setSelectedList(l);
-                                setEditListPopup(true);
-                              }}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                        <Tooltip title="Delete List From All Systems">
-                          <span>
-                            <IconButton
-                              disabled={disableButtons}
-                              aria-label="delete list"
-                              style={{ color: 'red' }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setSelectedList(l);
-                                setDeleteListPopup(true);
-                              }}
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </Box>
-                    </ListItemButton>
-                    <Divider />
-                  </Link>
-                );
-              })}
-            </MaterialList>
-            <Box display="flex" gap={2} justifyContent="center" width={'100%'}>
-              {currentPage > 0 && (
-                <Button onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>Previous Page</Button>
-              )}
-              {!noMoreResults && !(searchResults && searchResults.length < HITSPERPAGE) && (
-                <Button onClick={() => setCurrentPage((oldPage) => oldPage + 1)}>Next Page</Button>
-              )}
-              {!noMoreResults && searchResults && searchResults.length < HITSPERPAGE && (
-                <Typography alignSelf="center">{'No more results'}</Typography>
-              )}
-              {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
-            </Box>
-          </Box>
+            )}
+          </>
         )}
       </Box>
       <DeleteEntityPopup

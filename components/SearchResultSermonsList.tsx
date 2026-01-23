@@ -24,11 +24,14 @@ const SearchResultSermonList = (props: BoxProps) => {
   const playing = useMediaState('playing');
 
   return (
-    <Box display="flex" justifyContent={'start'} flex={3} {...props}>
+    <Box display="flex" justifyContent={'start'} flex={3} overflow="hidden" {...props}>
       <List
         sx={{
           maxWidth: '1200px',
-          width: 1,
+          width: '100%',
+          overflow: 'hidden',
+          px: { xs: 0, sm: 1 },
+          py: { xs: 0.5, sm: 1 },
         }}
       >
         {status === 'error' && (

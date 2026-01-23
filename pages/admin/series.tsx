@@ -17,7 +17,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { DeleteSeriesInputType, DeleteSeriesOutputType } from '../../functions/src/deleteSeries';
 import Link from 'next/link';
-import MaterialList from '@mui/material/List';
+import Card from '@mui/material/Card';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -25,7 +25,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
-import ListItemButton from '@mui/material/ListItemButton';
+import AddIcon from '@mui/icons-material/Add';
+import CollectionsIcon from '@mui/icons-material/Collections';
 import { Series, seriesConverter } from '../../types/Series';
 import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
@@ -33,7 +34,11 @@ import MenuItem from '@mui/material/MenuItem';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 import Chip from '@mui/material/Chip';
+import Stack from '@mui/material/Stack';
+import InputAdornment from '@mui/material/InputAdornment';
+import SearchIcon from '@mui/icons-material/Search';
 import useAuth from '../../context/user/UserContext';
+import { alpha, useTheme } from '@mui/material/styles';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -41,6 +46,7 @@ type FilterType = 'all' | 'published' | 'draft';
 
 const AdminSeriesPage = () => {
   const { user } = useAuth();
+  const theme = useTheme();
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +147,14 @@ const AdminSeriesPage = () => {
 
   if (!user) {
     return (
-      <Box display="flex" justifyContent="center" padding={3}>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '50vh',
+        }}
+      >
         <CircularProgress />
       </Box>
     );
@@ -149,33 +162,71 @@ const AdminSeriesPage = () => {
 
   return (
     <>
-      <Box display="flex" justifyContent="center" padding={3} width={1}>
+      <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
         {error ? (
-          <Typography color="error">{`Error: ${error}`}</Typography>
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography color="error">{`Error: ${error}`}</Typography>
+          </Box>
         ) : loading ? (
-          <CircularProgress />
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              minHeight: '50vh',
+            }}
+          >
+            <CircularProgress />
+          </Box>
         ) : (
-          <Box display="flex" flexDirection="column" gap={2} width={1}>
-            <Box display="flex" justifyContent="center" gap={2} alignItems="center">
-              <Typography variant="h4">Manage Series</Typography>
+          <>
+            {/* Header */}
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                justifyContent: 'space-between',
+                alignItems: { xs: 'flex-start', sm: 'center' },
+                gap: 2,
+                mb: 4,
+              }}
+            >
+              <Typography variant="h4" fontWeight={700}>
+                Manage Series
+              </Typography>
               <Button
-                color="primary"
                 variant="contained"
-                size="small"
+                startIcon={<AddIcon />}
                 onClick={() => setNewSeriesPopup(true)}
               >
                 Add Series
               </Button>
             </Box>
 
-            <Box display="flex" width="100%" gap={2}>
+            {/* Filters */}
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                gap: 2,
+                mb: 3,
+              }}
+            >
               <TextField
                 placeholder="Search series by name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                size="small"
                 sx={{ flex: 2 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="action" />
+                    </InputAdornment>
+                  ),
+                }}
               />
-              <FormControl sx={{ flex: 1, minWidth: 150 }}>
+              <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
                 <InputLabel id="status-filter-label">Status</InputLabel>
                 <Select
                   value={filter}
@@ -190,92 +241,129 @@ const AdminSeriesPage = () => {
               </FormControl>
             </Box>
 
+            {/* Series List */}
             {filteredSeries.length === 0 ? (
-              <Box display="flex" flexDirection="column" alignItems="center" gap={2} py={4}>
-                <Typography color="text.secondary">
+              <Card
+                sx={{
+                  textAlign: 'center',
+                  py: 6,
+                  px: 3,
+                  border: '2px dashed',
+                  borderColor: 'divider',
+                  bgcolor: 'transparent',
+                }}
+              >
+                <CollectionsIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary" gutterBottom>
                   {searchQuery || filter !== 'all'
                     ? 'No series found matching your filters'
-                    : 'No series yet. Create one to get started!'}
+                    : 'No series yet'}
+                </Typography>
+                <Typography variant="body2" color="text.disabled" sx={{ mb: 3 }}>
+                  {searchQuery || filter !== 'all'
+                    ? 'Try adjusting your search or filter'
+                    : 'Create your first series to organize your content'}
                 </Typography>
                 {!searchQuery && filter === 'all' && (
-                  <Button variant="outlined" onClick={() => setNewSeriesPopup(true)}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setNewSeriesPopup(true)}
+                  >
                     Create Your First Series
                   </Button>
                 )}
-              </Box>
+              </Card>
             ) : (
-              <MaterialList>
-                {filteredSeries.map((series) => (
+              <Card>
+                {filteredSeries.map((series, index) => (
                   <Box key={series.id}>
-                    <Link href={`/admin/series/${series.id}`}>
-                      <ListItemButton
+                    <Link href={`/admin/series/${series.id}`} style={{ textDecoration: 'none' }}>
+                      <Box
                         sx={{
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
-                          py: 2,
+                          p: { xs: 2, sm: 2.5 },
+                          gap: 2,
+                          cursor: 'pointer',
+                          transition: 'background-color 0.15s ease',
+                          '&:hover': { bgcolor: 'action.hover' },
                         }}
                       >
-                        <Box display="flex" alignItems="center" gap={2}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
                           <AvatarWithDefaultImage
                             image={series.images?.find((image) => image.type === 'square')}
                             altName={`Image of Series: ${series.name}`}
-                            width={60}
-                            height={60}
-                            borderRadius={8}
+                            width={64}
+                            height={64}
+                            borderRadius={10}
+                            sx={{ flexShrink: 0 }}
                           />
-                          <Box display="flex" flexDirection="column" gap={0.5}>
-                            <Typography variant="subtitle1" fontWeight="medium">
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography
+                              variant="subtitle1"
+                              fontWeight={600}
+                              sx={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
                               {series.name}
                             </Typography>
-                            <Box display="flex" gap={1} alignItems="center">
+                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
                               <Typography variant="body2" color="text.secondary">
-                                {series.itemCount} items
+                                {series.itemCount || 0} items
                               </Typography>
                               {series.subsplashId ? (
-                                <Tooltip title="Published to Subsplash">
-                                  <Chip
-                                    icon={<CheckCircleIcon />}
-                                    label="Published"
-                                    size="small"
-                                    color="success"
-                                    variant="outlined"
-                                  />
-                                </Tooltip>
+                                <Chip
+                                  icon={<CheckCircleIcon />}
+                                  label="Published"
+                                  size="small"
+                                  color="success"
+                                  variant="outlined"
+                                  sx={{ height: 22 }}
+                                />
                               ) : (
-                                <Tooltip title="Not yet published to Subsplash">
-                                  <Chip
-                                    icon={<PendingIcon />}
-                                    label="Draft"
-                                    size="small"
-                                    color="warning"
-                                    variant="outlined"
-                                  />
-                                </Tooltip>
+                                <Chip
+                                  icon={<PendingIcon />}
+                                  label="Draft"
+                                  size="small"
+                                  color="warning"
+                                  variant="outlined"
+                                  sx={{ height: 22 }}
+                                />
                               )}
                               {isAdmin && series.ownerId !== user.uid && (
                                 <Chip
                                   label={`Owner: ${series.ownerId.slice(0, 8)}...`}
                                   size="small"
                                   variant="outlined"
+                                  sx={{ height: 22 }}
                                 />
                               )}
                             </Box>
                           </Box>
                         </Box>
 
-                        <Box display="flex" gap={1}>
+                        <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
                           <Tooltip title="Edit Series">
                             <span>
                               <IconButton
                                 disabled={disableButtons}
                                 aria-label="edit series"
-                                color="info"
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
                                   setSelectedSeries(series);
                                   setEditSeriesPopup(true);
+                                }}
+                                sx={{
+                                  '&:hover': {
+                                    bgcolor: alpha(theme.palette.primary.main, 0.15),
+                                    color: 'primary.main',
+                                  },
                                 }}
                               >
                                 <EditIcon />
@@ -287,27 +375,32 @@ const AdminSeriesPage = () => {
                               <IconButton
                                 disabled={disableButtons}
                                 aria-label="delete series"
-                                color="error"
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
                                   setSelectedSeries(series);
                                   setDeleteSeriesPopup(true);
                                 }}
+                                sx={{
+                                  color: 'error.main',
+                                  '&:hover': {
+                                    bgcolor: alpha(theme.palette.error.main, 0.15),
+                                  },
+                                }}
                               >
                                 <DeleteIcon />
                               </IconButton>
                             </span>
                           </Tooltip>
-                        </Box>
-                      </ListItemButton>
+                        </Stack>
+                      </Box>
                     </Link>
-                    <Divider />
+                    {index < filteredSeries.length - 1 && <Divider />}
                   </Box>
                 ))}
-              </MaterialList>
+              </Card>
             )}
-          </Box>
+          </>
         )}
       </Box>
 
@@ -342,8 +435,17 @@ const ProtectedAdminSeriesPage = () => {
   // Allow both admins and publishers to see this page
   if (!user?.canPublish()) {
     return (
-      <Box display="flex" justifyContent="center" padding={3}>
-        <Typography>You don&apos;t have permission to view this page.</Typography>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '50vh',
+        }}
+      >
+        <Typography color="text.secondary">
+          You don&apos;t have permission to view this page.
+        </Typography>
       </Box>
     );
   }

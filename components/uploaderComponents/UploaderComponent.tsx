@@ -3,7 +3,7 @@
  */
 import editSermon from '../../pages/api/editSermon';
 import styles from '../../styles/Uploader.module.css';
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 
@@ -96,6 +96,8 @@ const Uploader = (props: UploaderProps) => {
   );
   // ======================== START OF STATE ========================
   const router = useRouter();
+  // Track intentional navigation (after successful save) to bypass unsaved changes warning
+  const isIntentionalNavigation = useRef(false);
   const [sermon, setSermon] = useState<Sermon>(() => {
     if (props.existingSermon) {
       return props.existingSermon;
@@ -266,10 +268,13 @@ const Uploader = (props: UploaderProps) => {
     const warningText = 'You have unsaved changes - are you sure you wish to leave this page?';
     const handleWindowClose = (e: BeforeUnloadEvent) => {
       if (!sermonEdited && !isUploading) return;
+      if (isIntentionalNavigation.current) return;
       e.preventDefault();
       return (e.returnValue = warningText);
     };
     const handleBrowseAway = () => {
+      // Skip warning if this is an intentional navigation (after successful save)
+      if (isIntentionalNavigation.current) return;
       if (!sermonEdited && !isUploading) return;
       if (window.confirm(warningText)) return;
       router.events.emit('routeChangeError');
@@ -735,6 +740,8 @@ const Uploader = (props: UploaderProps) => {
                     }
                     promises.push(editSermon(sermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
                     setIsEditing(false);
+                    // Mark as intentional navigation to bypass unsaved changes warning
+                    isIntentionalNavigation.current = true;
                     props.setEditFormOpen?.(false);
                   }}
                   disabled={
@@ -812,7 +819,7 @@ const Uploader = (props: UploaderProps) => {
                 >
                   {getErrorMessage(formErrors.durationSeconds)}
                 </Typography>
-                <Box display="flex">
+                <Box display="flex" gap={2}>
                   <UploadButton
                     user={props.user}
                     sermon={sermon}
@@ -826,9 +833,9 @@ const Uploader = (props: UploaderProps) => {
                     setIsUploading={setIsUploading}
                     clearForm={clearForm}
                   />
-                  <button type="button" className={styles.button} onClick={() => clearForm()}>
+                  <Button variant="outlined" color="secondary" onClick={() => clearForm()}>
                     Clear Form
-                  </button>
+                  </Button>
                 </Box>
                 {invalidFormMessage && (
                   <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>

@@ -11,7 +11,10 @@ import TableRow from '@mui/material/TableRow';
 import TableSortLabel from '@mui/material/TableSortLabel';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import Paper from '@mui/material/Paper';
+import Card from '@mui/material/Card';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import SearchIcon from '@mui/icons-material/Search';
 import { visuallyHidden } from '@mui/utils';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
@@ -132,17 +135,38 @@ const UserTableHead = (props: UserTableProps) => {
   );
 };
 
-const UserTableToolbar = () => {
+interface UserTableToolbarProps {
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+}
+
+const UserTableToolbar = ({ searchValue, onSearchChange }: UserTableToolbarProps) => {
   return (
     <Toolbar
       sx={{
         pl: { sm: 2 },
-        pr: { xs: 1, sm: 1 },
+        pr: { xs: 1, sm: 2 },
+        gap: 2,
+        flexWrap: 'wrap',
       }}
     >
-      <Typography sx={{ flex: '1 1 100%' }} variant="h6" id="tableTitle" component="div">
+      <Typography variant="h6" id="tableTitle" component="div" sx={{ flexShrink: 0 }}>
         Users
       </Typography>
+      <TextField
+        placeholder="Search users by email..."
+        value={searchValue}
+        onChange={(e) => onSearchChange(e.target.value)}
+        size="small"
+        sx={{ flex: 1, minWidth: 200, maxWidth: 350 }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon color="action" />
+            </InputAdornment>
+          ),
+        }}
+      />
     </Toolbar>
   );
 };
@@ -155,9 +179,17 @@ const UserTable = (props: {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof User>('email');
   const { user: currentUser } = useAuth();
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  // Filter users based on search query
+  const filteredUsers = props.usersWithLoading.filter((user) =>
+    !searchQuery || 
+    user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.displayName?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const handleRequestSort = (_: any, property: keyof User) => {
     const isAsc = order === 'asc';
@@ -175,36 +207,38 @@ const UserTable = (props: {
   };
 
   // Avoid a layout jump when reaching the last page with empty rows.
-  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - props.usersWithLoading.length) : 0;
+  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - filteredUsers.length) : 0;
   return (
-    <Box width={1} maxWidth={800} display="flex" padding="30px" justifyContent="center">
-      <Paper
-        sx={{
-          width: 1,
-        }}
-      >
-        <UserTableToolbar />
+    <Box width={1} display="flex" justifyContent="center">
+      <Card sx={{ width: 1 }}>
+        <UserTableToolbar searchValue={searchQuery} onSearchChange={setSearchQuery} />
         <TableContainer>
           <Table aria-labelledby="tableTitle" size={'medium'}>
             <UserTableHead
               order={order}
               orderBy={orderBy}
               onRequestSort={handleRequestSort}
-              rowCount={props.usersWithLoading.length}
+              rowCount={filteredUsers.length}
             />
             <TableBody>
-              {/* if you don't need to support IE11, you can replace the `stableSort` call with:
-                rows.sort(getComparator(order, orderBy)).slice() */}
               {props.loading ? (
                 <TableRow>
                   <TableCell rowSpan={3} colSpan={3}>
-                    <Box display="flex" justifyContent="center" alignContent="center">
+                    <Box display="flex" justifyContent="center" alignContent="center" py={4}>
                       <CircularProgress />
                     </Box>
                   </TableCell>
                 </TableRow>
+              ) : filteredUsers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} align="center">
+                    <Typography color="text.secondary" py={4}>
+                      {searchQuery ? `No users found matching "${searchQuery}"` : 'No users found'}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
               ) : (
-                stableSort(props.usersWithLoading, order, orderBy)
+                stableSort(filteredUsers, order, orderBy)
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((user) => {
                     const displayName = user.displayName || user.email;
@@ -215,10 +249,8 @@ const UserTable = (props: {
                           {currentUser?.uid === user.uid ? (
                             <Typography>{user.role}</Typography>
                           ) : (
-                            <FormControl disabled={user.loading}>
+                            <FormControl disabled={user.loading} size="small">
                               <Select
-                                labelId="demo-simple-select-label"
-                                id="demo-simple-select"
                                 value={user.role}
                                 onChange={async (e) => {
                                   await props.handleRoleChange(user.uid, e.target.value);
@@ -231,11 +263,11 @@ const UserTable = (props: {
                                         display: 'flex',
                                         justifyContent: 'center',
                                         alignItems: 'center',
-                                        gap: '16px',
-                                        minWidth: '75px',
+                                        gap: 2,
+                                        minWidth: 75,
                                       }}
                                     >
-                                      {user.loading ? <CircularProgress size={24} color="inherit" /> : role}
+                                      {user.loading ? <CircularProgress size={20} color="inherit" /> : role}
                                     </Box>
                                   </MenuItem>
                                 ))}
@@ -244,32 +276,33 @@ const UserTable = (props: {
                           )}
                         </TableCell>
                         <TableCell align="center">
-                          <div
-                            style={{
-                              margin: 'auto',
-                              borderRadius: '2px',
+                          <Box
+                            sx={{
+                              mx: 'auto',
+                              borderRadius: 1,
                               overflow: 'hidden',
                               position: 'relative',
-                              width: 50,
-                              height: 50,
-                              backgroundImage: `url(${'/user.png'})`,
-                              backgroundPosition: 'center center',
-                              backgroundSize: 'cover',
+                              width: 44,
+                              height: 44,
+                              bgcolor: 'background.default',
+                              border: '1px solid',
+                              borderColor: 'divider',
                             }}
                           >
-                            {user.photoURL && <Image src={user.photoURL} alt={`Image of ${displayName}`} fill />}
-                          </div>
+                            <Image
+                              src={user.photoURL || '/user.png'}
+                              alt={`Image of ${displayName}`}
+                              fill
+                              style={{ objectFit: 'cover' }}
+                            />
+                          </Box>
                         </TableCell>
                       </TableRow>
                     );
                   })
               )}
               {emptyRows > 0 && (
-                <TableRow
-                  style={{
-                    height: 53 * emptyRows,
-                  }}
-                >
+                <TableRow style={{ height: 53 * emptyRows }}>
                   <TableCell colSpan={6} />
                 </TableRow>
               )}
@@ -279,13 +312,13 @@ const UserTable = (props: {
         <TablePagination
           rowsPerPageOptions={[25, 50, 100]}
           component="div"
-          count={props.usersWithLoading.length}
+          count={filteredUsers.length}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
         />
-      </Paper>
+      </Card>
     </Box>
   );
 };

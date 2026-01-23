@@ -59,7 +59,7 @@ const ImageViewer = (props: propsType) => {
                   className={styles.imageContainer}
                   style={{
                     aspectRatio: AspectRatio[type],
-                    backgroundColor: image.averageColorHex || '#f3f1f1',
+                    backgroundColor: image.averageColorHex || 'var(--placeholder-bg, #2d323b)',
                   }}
                   onClick={() => {
                     setImageSelectorPopup(true);
@@ -110,21 +110,24 @@ const ImageViewer = (props: propsType) => {
               <div
                 style={{
                   display: 'flex',
-                  borderRadius: '5px',
+                  borderRadius: '8px',
                   overflow: 'hidden',
                   position: 'relative',
                   width: '100%',
                   justifyContent: 'center',
                   alignItems: 'center',
-                  backgroundColor: '#f3f1f1',
+                  backgroundColor: 'var(--placeholder-bg, #2d323b)',
                   aspectRatio: AspectRatio[type],
+                  border: '2px dashed var(--border-color, rgba(255,255,255,0.2))',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease-in-out',
                 }}
                 onClick={() => {
                   setImageSelectorPopup(true);
                   setSelectedImage({ type } as ImageType);
                 }}
               >
-                <span>Add image +</span>
+                <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '0.875rem' }}>Add image +</span>
               </div>
             </div>
           );

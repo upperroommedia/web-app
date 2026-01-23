@@ -87,7 +87,15 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
 
   const Filters = ({ sx }: { sx?: SxProps<Theme> }) => (
     <Stack sx={{ flex: 1, alignItems: 'center', overflow: 'auto', ...sx }}>
-      <Stack gap={2} alignItems="start" border={{ xs: 1, md: 0 }} borderRadius={2} p={2} margin={2}>
+      <Stack 
+        gap={{ xs: 1.5, md: 2 }} 
+        alignItems="start" 
+        border={{ xs: 1, md: 0 }} 
+        borderRadius={2} 
+        p={{ xs: 1.5, md: 2 }} 
+        margin={{ xs: 1, md: 2 }}
+        width={{ xs: '100%', md: 'auto' }}
+      >
         <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
         <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
         <CustomRefinementList
@@ -106,7 +114,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
     <>
       {searchClient ? (
         <InstantSearch searchClient={searchClient} indexName="sermons" future={{ preserveSharedStateOnUnmount: true }}>
-          <Stack justifyContent="center" alignItems="center" gap={2}>
+          <Stack justifyContent="center" alignItems="center" gap={{ xs: 0.5, sm: 1 }}>
             <CustomSearchBox TextFieldEndAdornment={<FilterButton />} />
             <NoResultsBoundary fallback={<NoResults />}>
               <Box

@@ -216,8 +216,8 @@ const ImageSelector = (props: {
                       style={{
                         height: '164px',
                         aspectRatio: AspectRatio[image.type],
-                        backgroundColor: image.averageColorHex || '#f3f1f1',
-                        boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
+                        backgroundColor: image.averageColorHex || 'var(--placeholder-bg, #f1f5f9)',
+                        boxShadow: props.newSelectedImage?.id === image.id ? '0 0 0 4px var(--accent-primary, #f97316)' : 'none',
                       }}
                     >
                       <Image

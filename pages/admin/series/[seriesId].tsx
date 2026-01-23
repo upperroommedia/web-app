@@ -20,6 +20,12 @@ import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import Breadcrumbs from '@mui/material/Breadcrumbs';
+import Stack from '@mui/material/Stack';
 import SearchIcon from '@mui/icons-material/Search';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
@@ -30,7 +36,10 @@ import EditIcon from '@mui/icons-material/Edit';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
 import SaveIcon from '@mui/icons-material/Save';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import CollectionsIcon from '@mui/icons-material/Collections';
 import Link from 'next/link';
+import { alpha, useTheme } from '@mui/material/styles';
 
 import AdminLayout from '../../../layout/adminLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
@@ -53,6 +62,7 @@ interface SeriesItemWithSermon extends SeriesItem {
 const SeriesDetailsPage = () => {
   const router = useRouter();
   const { user } = useAuth();
+  const theme = useTheme();
   const seriesId = router.query.seriesId as string;
 
   const [series, setSeries] = useState<Series | null>(null);
@@ -365,7 +375,14 @@ const SeriesDetailsPage = () => {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '50vh',
+        }}
+      >
         <CircularProgress />
       </Box>
     );
@@ -373,8 +390,17 @@ const SeriesDetailsPage = () => {
 
   if (error) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-        <Alert severity="error">{error}</Alert>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '50vh',
+        }}
+      >
+        <Alert severity="error" sx={{ maxWidth: 400 }}>
+          {error}
+        </Alert>
       </Box>
     );
   }
@@ -392,22 +418,67 @@ const SeriesDetailsPage = () => {
         <meta property="og:title" content={title} key="title" />
       </Head>
 
-      <Box p={3} maxWidth="1200px" mx="auto">
-        {/* Header */}
-        <Box display="flex" alignItems="center" gap={2} mb={3}>
-          <Link href="/admin/series">
-            <IconButton>
-              <ArrowBackIcon />
-            </IconButton>
+      <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
+        {/* Breadcrumbs */}
+        <Breadcrumbs
+          separator={<NavigateNextIcon fontSize="small" />}
+          sx={{ mb: 3 }}
+        >
+          <Link href="/admin/series" passHref>
+            <Typography
+              component="span"
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                color: 'text.secondary',
+                cursor: 'pointer',
+                '&:hover': { color: 'primary.main' },
+              }}
+            >
+              <CollectionsIcon fontSize="small" />
+              Series
+            </Typography>
           </Link>
-          <Typography variant="h4" flex={1}>
+          <Typography color="text.primary" fontWeight={500}>
             {series.name}
           </Typography>
-          <Box display="flex" gap={1}>
+        </Breadcrumbs>
+
+        {/* Header */}
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            alignItems: { xs: 'flex-start', sm: 'center' },
+            justifyContent: 'space-between',
+            gap: 2,
+            mb: 4,
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Link href="/admin/series">
+              <IconButton
+                sx={{
+                  bgcolor: 'background.paper',
+                  border: 1,
+                  borderColor: 'divider',
+                  '&:hover': { borderColor: 'primary.main' },
+                }}
+              >
+                <ArrowBackIcon />
+              </IconButton>
+            </Link>
+            <Typography variant="h4" fontWeight={700}>
+              {series.name}
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1}>
             <Button
               variant="outlined"
               startIcon={<EditIcon />}
               onClick={() => setEditPopup(true)}
+              size="medium"
             >
               Edit
             </Button>
@@ -416,25 +487,56 @@ const SeriesDetailsPage = () => {
               color="error"
               startIcon={<DeleteIcon />}
               onClick={() => setDeletePopup(true)}
+              size="medium"
             >
               Delete
             </Button>
-          </Box>
+          </Stack>
         </Box>
 
         {/* Series Info Card */}
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Box display="flex" gap={3}>
+        <Card
+          sx={{
+            mb: 4,
+            bgcolor: 'background.paper',
+            border: 1,
+            borderColor: 'divider',
+            position: 'relative',
+            overflow: 'visible',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 4,
+              background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.light} 100%)`,
+              borderRadius: '12px 12px 0 0',
+            },
+          }}
+        >
+          <CardContent sx={{ p: { xs: 2, sm: 3, md: 4 } }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                gap: { xs: 2, sm: 3, md: 4 },
+              }}
+            >
               <AvatarWithDefaultImage
                 image={series.images?.find((img) => img.type === 'square')}
                 altName={series.name}
-                width={120}
-                height={120}
+                width={140}
+                height={140}
                 borderRadius={12}
+                sx={{
+                  flexShrink: 0,
+                  boxShadow: 3,
+                  alignSelf: { xs: 'center', sm: 'flex-start' },
+                }}
               />
-              <Box flex={1}>
-                <Box display="flex" gap={1} mb={1}>
+              <Box sx={{ flex: 1 }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
                   {series.subsplashId ? (
                     <Chip
                       icon={<CheckCircleIcon />}
@@ -452,37 +554,66 @@ const SeriesDetailsPage = () => {
                   )}
                 </Box>
                 {series.subtitle && (
-                  <Typography variant="subtitle1" color="text.secondary" mb={1}>
+                  <Typography variant="h6" color="text.secondary" sx={{ mb: 1, fontWeight: 400 }}>
                     {series.subtitle}
                   </Typography>
                 )}
                 {series.summary && (
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.7 }}>
                     {series.summary}
                   </Typography>
                 )}
-                <Box display="flex" gap={3} mt={2}>
-                  <Typography variant="body2">
-                    <strong>{items.length}</strong> items
-                  </Typography>
-                  <Typography variant="body2">
-                    <strong>{items.filter((i) => i.publishedToSubsplash).length}</strong> published
-                  </Typography>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    gap: 4,
+                    pt: 2,
+                    borderTop: 1,
+                    borderColor: 'divider',
+                  }}
+                >
+                  <Box>
+                    <Typography variant="h5" fontWeight={700} color="primary.main">
+                      {items.length}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Total Items
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="h5" fontWeight={700} color="success.main">
+                      {items.filter((i) => i.publishedToSubsplash).length}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Published
+                    </Typography>
+                  </Box>
                 </Box>
               </Box>
             </Box>
           </CardContent>
         </Card>
 
-        {/* Items Section */}
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-          <Typography variant="h6">Series Items</Typography>
-          <Box display="flex" gap={1}>
+        {/* Items Section Header */}
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            justifyContent: 'space-between',
+            alignItems: { xs: 'flex-start', sm: 'center' },
+            gap: 2,
+            mb: 3,
+          }}
+        >
+          <Typography variant="h5" fontWeight={600}>
+            Series Items
+          </Typography>
+          <Stack direction="row" spacing={1.5}>
             {hasOrderChanges && (
               <Button
                 variant="contained"
                 color="primary"
-                startIcon={isSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+                startIcon={isSaving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
                 onClick={saveOrderChanges}
                 disabled={isSaving}
               >
@@ -499,46 +630,62 @@ const SeriesDetailsPage = () => {
             >
               Add Item
             </Button>
-          </Box>
+          </Stack>
         </Box>
 
+        {/* Items List */}
         {items.length === 0 ? (
-          <Card>
-            <CardContent>
-              <Box display="flex" flexDirection="column" alignItems="center" py={4}>
-                <Typography color="text.secondary" mb={2}>
-                  No items in this series yet
-                </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => {
-                    fetchAvailableSermons();
-                    setAddItemPopup(true);
-                  }}
-                >
-                  Add Your First Item
-                </Button>
-              </Box>
-            </CardContent>
+          <Card
+            sx={{
+              textAlign: 'center',
+              py: 6,
+              px: 3,
+              border: '2px dashed',
+              borderColor: 'divider',
+              bgcolor: 'transparent',
+            }}
+          >
+            <CollectionsIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              No items in this series yet
+            </Typography>
+            <Typography variant="body2" color="text.disabled" sx={{ mb: 3 }}>
+              Add sermons to this series to organize your content
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => {
+                fetchAvailableSermons();
+                setAddItemPopup(true);
+              }}
+            >
+              Add Your First Item
+            </Button>
           </Card>
         ) : (
           <Card>
             {items.map((item, index) => (
               <Box key={item.id}>
                 <Box
-                  display="flex"
-                  alignItems="center"
-                  gap={2}
-                  p={2}
                   sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: { xs: 1.5, sm: 2 },
+                    p: { xs: 2, sm: 2.5 },
+                    transition: 'background-color 0.15s ease',
                     '&:hover': { bgcolor: 'action.hover' },
                   }}
                 >
                   <Typography
                     variant="body2"
-                    color="text.secondary"
-                    sx={{ width: 30, textAlign: 'center' }}
+                    sx={{
+                      width: { xs: 24, sm: 32 },
+                      textAlign: 'center',
+                      color: 'text.tertiary',
+                      fontWeight: 600,
+                      fontSize: '0.75rem',
+                    }}
                   >
                     {index + 1}
                   </Typography>
@@ -546,16 +693,25 @@ const SeriesDetailsPage = () => {
                   <AvatarWithDefaultImage
                     image={item.sermon?.images?.find((img) => img.type === 'square')}
                     altName={item.sermon?.title || 'Sermon'}
-                    width={50}
-                    height={50}
-                    borderRadius={6}
+                    width={56}
+                    height={56}
+                    borderRadius={8}
+                    sx={{ flexShrink: 0 }}
                   />
 
-                  <Box flex={1}>
-                    <Typography variant="subtitle2">
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography
+                      variant="subtitle2"
+                      sx={{
+                        fontWeight: 600,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
                       {item.sermon?.title || `Sermon ${item.id}`}
                     </Typography>
-                    <Box display="flex" gap={1} alignItems="center">
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
                       {item.sermon?.dateString && (
                         <Typography variant="caption" color="text.secondary">
                           {item.sermon.dateString}
@@ -568,7 +724,7 @@ const SeriesDetailsPage = () => {
                           size="small"
                           color="success"
                           variant="outlined"
-                          sx={{ height: 20, '& .MuiChip-label': { px: 1, py: 0 } }}
+                          sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
                         />
                       ) : (
                         <Chip
@@ -577,19 +733,20 @@ const SeriesDetailsPage = () => {
                           size="small"
                           color="warning"
                           variant="outlined"
-                          sx={{ height: 20, '& .MuiChip-label': { px: 1, py: 0 } }}
+                          sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
                         />
                       )}
                     </Box>
                   </Box>
 
-                  <Box display="flex" gap={0.5}>
+                  <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
                     <Tooltip title="Move up">
                       <span>
                         <IconButton
                           size="small"
                           onClick={() => moveItemUp(index)}
                           disabled={index === 0}
+                          sx={{ opacity: index === 0 ? 0.3 : 1 }}
                         >
                           <ArrowUpwardIcon fontSize="small" />
                         </IconButton>
@@ -601,6 +758,7 @@ const SeriesDetailsPage = () => {
                           size="small"
                           onClick={() => moveItemDown(index)}
                           disabled={index === items.length - 1}
+                          sx={{ opacity: index === items.length - 1 ? 0.3 : 1 }}
                         >
                           <ArrowDownwardIcon fontSize="small" />
                         </IconButton>
@@ -609,13 +767,19 @@ const SeriesDetailsPage = () => {
                     <Tooltip title="Remove from series">
                       <IconButton
                         size="small"
-                        color="error"
                         onClick={() => removeItem(item.id)}
+                        sx={{
+                          color: 'error.main',
+                          '&:hover': {
+                            bgcolor: alpha(theme.palette.error.main, 0.15),
+                            color: 'error.main',
+                          },
+                        }}
                       >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                  </Box>
+                  </Stack>
                 </Box>
                 {index < items.length - 1 && <Divider />}
               </Box>
@@ -641,136 +805,153 @@ const SeriesDetailsPage = () => {
       />
 
       {/* Add Item Dialog */}
-      {addItemPopup && (
-        <Box
-          sx={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            bgcolor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1300,
-          }}
-          onClick={() => {
-            setSermonSearchQuery('');
-            setAddItemPopup(false);
-          }}
-        >
-          <Card
-            sx={{ maxWidth: 600, maxHeight: '80vh', overflow: 'auto', m: 2 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <CardContent>
-              <Typography variant="h6" mb={2}>
-                Add Item to Series
+      <Dialog
+        open={addItemPopup}
+        onClose={() => {
+          setSermonSearchQuery('');
+          setAddItemPopup(false);
+        }}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            maxHeight: '80vh',
+          },
+        }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          Add Item to Series
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Search sermons by title..."
+            value={sermonSearchQuery}
+            onChange={(e) => setSermonSearchQuery(e.target.value)}
+            sx={{ mt: 1, mb: 2 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" />
+                </InputAdornment>
+              ),
+            }}
+          />
+          {loadingSermons ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : availableSermons.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography color="text.secondary">
+                No available sermons to add. Upload some sermons first!
               </Typography>
-              <TextField
-                fullWidth
-                size="small"
-                placeholder="Search sermons by title..."
-                value={sermonSearchQuery}
-                onChange={(e) => setSermonSearchQuery(e.target.value)}
-                sx={{ mb: 2 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              {loadingSermons ? (
-                <Box display="flex" justifyContent="center" p={3}>
-                  <CircularProgress />
-                </Box>
-              ) : availableSermons.length === 0 ? (
-                <Typography color="text.secondary">
-                  No available sermons to add. Upload some sermons first!
-                </Typography>
-              ) : (
-                <Box display="flex" flexDirection="column" gap={1} sx={{ maxHeight: 400, overflow: 'auto' }}>
-                  {availableSermons
-                    .filter((sermon) => !items.some((item) => item.id === sermon.id))
-                    .filter((sermon) => 
-                      !sermonSearchQuery || 
-                      sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase())
-                    )
-                    .map((sermon) => (
-                      <Box
-                        key={sermon.id}
-                        display="flex"
-                        alignItems="center"
-                        gap={2}
-                        p={1}
+            </Box>
+          ) : (
+            <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
+              {availableSermons
+                .filter((sermon) => !items.some((item) => item.id === sermon.id))
+                .filter((sermon) => 
+                  !sermonSearchQuery || 
+                  sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase())
+                )
+                .map((sermon) => (
+                  <Box
+                    key={sermon.id}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      p: 1.5,
+                      borderRadius: 2,
+                      cursor: 'pointer',
+                      transition: 'background-color 0.15s ease',
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                    onClick={() => addItemToSeries(sermon)}
+                  >
+                    <AvatarWithDefaultImage
+                      image={sermon.images?.find((img) => img.type === 'square')}
+                      altName={sermon.title}
+                      width={48}
+                      height={48}
+                      borderRadius={6}
+                    />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography
+                        variant="body2"
+                        fontWeight={500}
                         sx={{
-                          borderRadius: 1,
-                          cursor: 'pointer',
-                          '&:hover': { bgcolor: 'action.hover' },
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                         }}
-                        onClick={() => addItemToSeries(sermon)}
                       >
-                        <AvatarWithDefaultImage
-                          image={sermon.images?.find((img) => img.type === 'square')}
-                          altName={sermon.title}
-                          width={40}
-                          height={40}
-                          borderRadius={4}
-                        />
-                        <Box flex={1}>
-                          <Typography variant="body2">{sermon.title}</Typography>
-                          {sermon.dateString && (
-                            <Typography variant="caption" color="text.secondary">
-                              {sermon.dateString}
-                            </Typography>
-                          )}
-                        </Box>
-                        <IconButton size="small" color="primary">
-                          <AddIcon />
-                        </IconButton>
-                      </Box>
-                    ))}
-                  {sermonSearchQuery && availableSermons
-                    .filter((sermon) => !items.some((item) => item.id === sermon.id))
-                    .filter((sermon) => sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase()))
-                    .length === 0 && (
-                    <Typography color="text.secondary" textAlign="center" py={2}>
-                      No sermons found matching &quot;{sermonSearchQuery}&quot;
-                    </Typography>
-                  )}
+                        {sermon.title}
+                      </Typography>
+                      {sermon.dateString && (
+                        <Typography variant="caption" color="text.secondary">
+                          {sermon.dateString}
+                        </Typography>
+                      )}
+                    </Box>
+                    <IconButton size="small" color="primary">
+                      <AddIcon />
+                    </IconButton>
+                  </Box>
+                ))}
+              {sermonSearchQuery && availableSermons
+                .filter((sermon) => !items.some((item) => item.id === sermon.id))
+                .filter((sermon) => sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase()))
+                .length === 0 && (
+                <Box sx={{ textAlign: 'center', py: 3 }}>
+                  <Typography color="text.secondary">
+                    No sermons found matching &quot;{sermonSearchQuery}&quot;
+                  </Typography>
                 </Box>
               )}
-              <Box display="flex" justifyContent="flex-end" mt={2}>
-                <Button onClick={() => {
-                  setSermonSearchQuery('');
-                  setAddItemPopup(false);
-                }}>Close</Button>
-              </Box>
-            </CardContent>
-          </Card>
-        </Box>
-      )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => {
+              setSermonSearchQuery('');
+              setAddItemPopup(false);
+            }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 };
-
-SeriesDetailsPage.PageLayout = AdminLayout;
 
 const ProtectedSeriesDetailsPage = () => {
   const { user } = useAuth();
   
   if (!user?.canPublish()) {
     return (
-      <Box display="flex" justifyContent="center" padding={3}>
-        <Typography>You don&apos;t have permission to view this page.</Typography>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '50vh',
+        }}
+      >
+        <Typography color="text.secondary">
+          You don&apos;t have permission to view this page.
+        </Typography>
       </Box>
     );
   }
   
   return <SeriesDetailsPage />;
 };
+
+ProtectedSeriesDetailsPage.PageLayout = AdminLayout;
 
 export default ProtectedSeriesDetailsPage;

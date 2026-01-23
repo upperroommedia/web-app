@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Box from '@mui/material/Box';
 import UserTable from '../../components/UserTable';
 import AdminLayout from '../../layout/adminLayout';
 import { createFunctionV2 } from '../../utils/createFunction';
@@ -97,7 +98,7 @@ const AdminUsers = () => {
   }, []);
 
   return (
-    <div style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+    <Box sx={{ width: '100%', maxWidth: 1200, mx: 'auto' }}>
       <UserTable usersWithLoading={usersWithLoading} handleRoleChange={handleRoleChange} loading={loadingUsers} />
       <Snackbar
         key={message.id}
@@ -116,7 +117,7 @@ const AdminUsers = () => {
           {message.message}
         </Alert>
       </Snackbar>
-    </div>
+    </Box>
   );
 };
 

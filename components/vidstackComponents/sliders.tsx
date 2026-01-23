@@ -3,6 +3,7 @@ import { TimeSlider, VolumeSlider, useMediaRemote, useMediaState } from '@vidsta
 import { SyntheticEvent, useCallback, useEffect, useRef } from 'react';
 import { useStateRef } from '../audioTrimmerComponents/utils';
 import { formatTime } from '../../utils/audioUtils';
+import { alpha, useTheme } from '@mui/material/styles';
 
 export function Volume() {
   return (
@@ -65,6 +66,7 @@ export function CustomSlider({ startTime, setStartTime, setDuration }: CustomSli
   const mediaStateDuration = useMediaState('duration');
   const seeking = useMediaState('seeking');
   const remote = useMediaRemote();
+  const theme = useTheme();
   const [value, setValue, valueRef] = useStateRef([startTime, time, startTime + mediaStateDuration]);
   const activeIndexRef = useRef(0);
   const changeCommited = useRef(true);
@@ -163,21 +165,18 @@ export function CustomSlider({ startTime, setStartTime, setDuration }: CustomSli
       valueLabelFormat={formatTime}
       valueLabelDisplay="on"
       sx={{
-        color: 'rgb(254, 148, 26)',
+        color: 'primary.main',
         height: 4,
         '& .MuiSlider-thumb': {
-          color: '#fff',
+          bgcolor: 'common.white',
           width: 8,
           height: 8,
           transition: '0.3s cubic-bezier(.47,1.64,.41,.8)',
           '&::before': {
-            boxShadow: '0 2px 12px 0 rgba(0,0,0,0.4)',
+            boxShadow: theme.shadows[3],
           },
           '&:hover, &.Mui-focusVisible': {
-            boxShadow: `0px 0px 0px 8px ${
-              'rgb(255 255 255 / 16%)'
-              // : 'rgb(0 0 0 / 16%)'
-            }`,
+            boxShadow: `0px 0px 0px 8px ${alpha(theme.palette.common.white, 0.16)}`,
           },
           '&.Mui-active': {
             width: 20,

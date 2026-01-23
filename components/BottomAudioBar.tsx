@@ -1,19 +1,9 @@
 /**
- * BottomAudioBar is a component that displays the audio player similar to Spotify's bottom play bar
+ * BottomAudioBar - A floating audio player with glassmorphism effect
+ * Inspired by modern music players like Spotify
  */
-// import Image from 'next/image';
-import styles from '../styles/BottomAudioBar.module.css';
 import { FunctionComponent } from 'react';
-// import { formatTime } from '../utils/audioUtils';
-// import Replay30Icon from '@mui/icons-material/Replay30';
-// import Forward30Icon from '@mui/icons-material/Forward30';
-// import PauseCircleIcon from '@mui/icons-material/PauseCircle';
-// import PlayCircleIcon from '@mui/icons-material/PlayCircle';
-// import { getDownloadURL, getStorage, ref } from 'firebase/storage';
-// import firebase from '../firebase/firebase';
-// import { sanitize } from 'dompurify';
 import { MediaProvider } from '@vidstack/react';
-
 import {
   ChapterTitle,
   VolumeSlider,
@@ -27,7 +17,6 @@ import {
   useMediaState,
   type TooltipPlacement,
 } from '@vidstack/react';
-
 import {
   MuteIcon,
   PauseIcon,
@@ -38,8 +27,13 @@ import {
   VolumeLowIcon,
 } from '@vidstack/react/icons';
 import Box from '@mui/material/Box';
-// import MarqueeComponent from './MarqueeComponent';
-// import BufferingIndicator from './BufferingIndicator';
+import Typography from '@mui/material/Typography';
+import IconButton from '@mui/material/IconButton';
+import CloseIcon from '@mui/icons-material/Close';
+import { useTheme, alpha } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import useAudioPlayer from '../context/audio/audioPlayerContext';
+import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 
 interface MediaButtonProps {
   tooltipPlacement: TooltipPlacement;
@@ -49,16 +43,9 @@ interface SeekButtonProps extends MediaButtonProps {
   seconds: number;
 }
 
-//  interface SettingsProps {
-//   placement: MenuPlacement;
-//   tooltipPlacement: TooltipPlacement;
-// }
-
-interface TimeSliderProps {
-  thumbnails?: string;
-}
-
-function Slider({ thumbnails }: TimeSliderProps) {
+// Time Slider Component
+function Slider() {
+  const theme = useTheme();
   return (
     <TimeSlider.Root className="vds-time-slider vds-slider">
       <TimeSlider.Chapters className="vds-slider-chapters">
@@ -72,30 +59,22 @@ function Slider({ thumbnails }: TimeSliderProps) {
           ))
         }
       </TimeSlider.Chapters>
-
       <TimeSlider.Thumb className="vds-slider-thumb" />
-
       <TimeSlider.Preview className="vds-slider-preview">
-        {thumbnails ? (
-          <TimeSlider.Thumbnail.Root src={thumbnails} className="vds-slider-thumbnail vds-thumbnail">
-            <TimeSlider.Thumbnail.Img />
-          </TimeSlider.Thumbnail.Root>
-        ) : null}
-
         <TimeSlider.ChapterTitle className="vds-slider-chapter-title" />
-
         <TimeSlider.Value className="vds-slider-value" />
       </TimeSlider.Preview>
     </TimeSlider.Root>
   );
 }
 
+// Seek Button Component
 export function Seek({ seconds, tooltipPlacement }: SeekButtonProps) {
   const isBackward = seconds < 0;
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <SeekButton className="vds-button" seconds={seconds}>
+        <SeekButton className="vds-button floating-player-btn" seconds={seconds}>
           {isBackward ? <SeekBackward10Icon /> : <SeekForward10Icon />}
         </SeekButton>
       </Tooltip.Trigger>
@@ -106,13 +85,14 @@ export function Seek({ seconds, tooltipPlacement }: SeekButtonProps) {
   );
 }
 
+// Mute Button Component
 function Mute({ tooltipPlacement }: MediaButtonProps) {
   const volume = useMediaState('volume');
   const isMuted = useMediaState('muted');
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <MuteButton className="vds-button">
+        <MuteButton className="vds-button floating-player-btn">
           {isMuted || volume === 0 ? <MuteIcon /> : volume < 0.5 ? <VolumeLowIcon /> : <VolumeHighIcon />}
         </MuteButton>
       </Tooltip.Trigger>
@@ -123,12 +103,15 @@ function Mute({ tooltipPlacement }: MediaButtonProps) {
   );
 }
 
+// Play/Pause Button Component
 function Play({ tooltipPlacement }: MediaButtonProps) {
   const isPaused = useMediaState('paused');
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <PlayButton className="vds-button">{isPaused ? <PlayIcon /> : <PauseIcon />}</PlayButton>
+        <PlayButton className="vds-button floating-player-play-btn">
+          {isPaused ? <PlayIcon /> : <PauseIcon />}
+        </PlayButton>
       </Tooltip.Trigger>
       <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
         {isPaused ? 'Play' : 'Pause'}
@@ -137,19 +120,20 @@ function Play({ tooltipPlacement }: MediaButtonProps) {
   );
 }
 
-export function TimeGroup() {
-  return (
-    <div className="vds-time-group">
-      <Time className="vds-time" type="current" />
-      <div className="vds-time-divider">/</div>
-      <Time className="vds-time" type="duration" />
-    </div>
-  );
+// Current Time Display
+function CurrentTime() {
+  return <Time className="vds-time floating-time-current" type="current" />;
 }
 
+// Duration Time Display  
+function DurationTime() {
+  return <Time className="vds-time floating-time-duration" type="duration" />;
+}
+
+// Volume Slider Component
 function Volume() {
   return (
-    <VolumeSlider.Root className="vds-volume-slider vds-slider">
+    <VolumeSlider.Root className="vds-volume-slider vds-slider floating-player-volume">
       <VolumeSlider.Track className="vds-slider-track" />
       <VolumeSlider.TrackFill className="vds-slider-track-fill vds-slider-track" />
       <VolumeSlider.Preview className="vds-slider-preview" noClamp>
@@ -160,144 +144,470 @@ function Volume() {
   );
 }
 
-//  function Settings({ placement, tooltipPlacement }: SettingsProps) {
-//   return (
-//     <Menu.Root className="vds-menu">
-//       <Tooltip.Root>
-//         <Tooltip.Trigger asChild>
-//           <Menu.Button className="vds-menu-button vds-button">
-//             <SettingsIcon className="vds-rotate-icon" />
-//           </Menu.Button>
-//         </Tooltip.Trigger>
-//         <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
-//           Settings
-//         </Tooltip.Content>
-//       </Tooltip.Root>
-//       <Menu.Content className="vds-menu-items" placement={placement}>
-//         <CaptionSubmenu />
-//       </Menu.Content>
-//     </Menu.Root>
-//   );
-// }
-
 const BottomAudioBar: FunctionComponent = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isCompact = useMediaQuery(theme.breakpoints.down('lg'));
+  const { currentSermon, setCurrentSermon } = useAudioPlayer();
+
+  // Get the sermon image
+  const sermonImage = currentSermon?.images?.find((image) => image.type === 'square');
+
+  // Sidebar width for desktop positioning (260px sidebar + some margin)
+  const sidebarOffset = isCompact ? 0 : 130; // Half of 260px to offset center
+
   return (
-    <Box className={`${styles.player} media-player`}>
+    <Box
+      className="media-player"
+      sx={{
+        position: 'fixed',
+        bottom: 20,
+        // Center in the main content area (account for sidebar on desktop)
+        left: { xs: '50%', md: `calc(50% + ${sidebarOffset}px)` },
+        transform: 'translateX(-50%)',
+        width: { xs: 'calc(100% - 16px)', sm: 'calc(100% - 32px)', md: 'calc(100% - 300px)' },
+        maxWidth: 1200,
+        zIndex: 1200, // Below navbar (typically 1300) but above content
+        borderRadius: isCompact ? 3 : 100, // Slightly rounded when compact/multiline, pill shape when single-line
+        overflow: 'hidden',
+        // Glassmorphism effect with orange tint - more blur
+        background: `linear-gradient(135deg, 
+          ${alpha(theme.palette.primary.main, 0.1)} 0%, 
+          ${alpha(theme.palette.primary.dark || '#c2410c', 0.15)} 100%)`,
+        backdropFilter: 'blur(28px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+        boxShadow: `0 8px 32px ${alpha(theme.palette.common.black, 0.2)}, 
+                    0 0 40px ${alpha(theme.palette.primary.main, 0.1)}`,
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `linear-gradient(180deg, 
+            ${alpha(theme.palette.common.white, 0.06)} 0%, 
+            transparent 60%)`,
+          pointerEvents: 'none',
+          borderRadius: 'inherit',
+        },
+      }}
+    >
       <MediaProvider />
-      <Controls.Root className={`${styles.controls} vds-controls`}>
-        <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
-          <Slider />
+      <Controls.Root className="vds-controls">
+        {/* Main Player Content */}
+        <Controls.Group>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              gap: { xs: 1.5, sm: 2 },
+              p: { xs: 1.5, sm: 2 },
+              position: 'relative',
+            }}
+          >
+            {/* Album Art */}
+            <Box
+              sx={{
+                position: 'relative',
+                flexShrink: 0,
+                borderRadius: 2,
+                overflow: 'hidden',
+                boxShadow: `0 4px 12px ${alpha(theme.palette.common.black, 0.3)}`,
+              }}
+            >
+              <AvatarWithDefaultImage
+                width={isMobile ? 48 : 56}
+                height={isMobile ? 48 : 56}
+                altName={currentSermon?.title || 'Sermon'}
+                image={sermonImage}
+                borderRadius={8}
+              />
+              {/* Subtle glow effect on album art */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: -4,
+                  background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.3)} 0%, transparent 70%)`,
+                  pointerEvents: 'none',
+                  zIndex: -1,
+                }}
+              />
+            </Box>
+
+            {/* Song Info */}
+            <Box
+              sx={{
+                flex: 1,
+                minWidth: { xs: 0, md: 120, lg: 150 },
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 0.25,
+              }}
+            >
+              <Typography
+                variant="body2"
+                sx={{
+                  fontWeight: 600,
+                  color: theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.grey[900],
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: { xs: '0.875rem', sm: '0.9375rem' },
+                }}
+              >
+                {currentSermon?.title || 'Now Playing'}
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: theme.palette.mode === 'dark' 
+                    ? alpha(theme.palette.common.white, 0.75) 
+                    : theme.palette.grey[700],
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: { xs: '0.75rem', sm: '0.8125rem' },
+                }}
+              >
+                {currentSermon?.speakers?.map((s) => s.name).join(', ') || 'Unknown Speaker'}
+              </Typography>
+            </Box>
+
+            {/* Desktop: Progress Slider with time on either side */}
+            {!isCompact && (
+              <Box
+                sx={{
+                  flex: { md: 2, lg: 3 },
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: { md: 1, lg: 2 },
+                  mx: { md: 1.5, lg: 3 },
+                  '& .floating-time-current, & .floating-time-duration': {
+                    fontFamily: '"SF Mono", "Roboto Mono", "Fira Code", monospace',
+                    fontSize: '0.8125rem',
+                    fontWeight: 500,
+                    letterSpacing: '0.02em',
+                    minWidth: 48,
+                    lineHeight: 1,
+                    color: theme.palette.mode === 'dark' 
+                      ? alpha(theme.palette.common.white, 0.85) 
+                      : theme.palette.grey[700],
+                  },
+                  '& .floating-time-current': {
+                    textAlign: 'right',
+                  },
+                  '& .floating-time-duration': {
+                    textAlign: 'left',
+                    color: theme.palette.mode === 'dark' 
+                      ? alpha(theme.palette.common.white, 0.5) 
+                      : theme.palette.grey[500],
+                  },
+                }}
+              >
+                <CurrentTime />
+                <Box 
+                  sx={{ 
+                    flex: 1, 
+                    minWidth: 120,
+                    display: 'flex',
+                    alignItems: 'center',
+                    '--media-slider-height': '20px',
+                    '--media-slider-track-height': '4px',
+                    '--media-slider-thumb-size': '14px',
+                    '& .vds-time-slider': {
+                      display: 'flex',
+                      alignItems: 'center',
+                      width: '100%',
+                      height: 'var(--media-slider-height)',
+                      position: 'relative',
+                    },
+                    '& .vds-slider-chapters': {
+                      display: 'flex',
+                      alignItems: 'center',
+                      width: '100%',
+                      height: '100%',
+                      position: 'relative',
+                    },
+                    '& .vds-slider-chapter': {
+                      display: 'flex',
+                      alignItems: 'center',
+                      flex: 1,
+                      height: '100%',
+                      position: 'relative',
+                    },
+                    '& .vds-slider-track': {
+                      position: 'absolute',
+                      top: '50%',
+                      left: 0,
+                      right: 0,
+                      transform: 'translateY(-50%)',
+                      height: 'var(--media-slider-track-height)',
+                      borderRadius: 'var(--media-slider-track-height)',
+                      backgroundColor: theme.palette.mode === 'dark' 
+                        ? alpha(theme.palette.common.white, 0.2) 
+                        : alpha(theme.palette.grey[900], 0.12),
+                    },
+                    '& .vds-slider-track-fill': {
+                      position: 'absolute',
+                      top: '50%',
+                      left: 0,
+                      transform: 'translateY(-50%)',
+                      height: 'var(--media-slider-track-height)',
+                      borderRadius: 'var(--media-slider-track-height)',
+                      backgroundColor: theme.palette.mode === 'dark' 
+                        ? theme.palette.common.white 
+                        : theme.palette.grey[800],
+                    },
+                    '& .vds-slider-thumb': {
+                      position: 'absolute',
+                      top: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      width: 'var(--media-slider-thumb-size)',
+                      height: 'var(--media-slider-thumb-size)',
+                      borderRadius: '50%',
+                      backgroundColor: theme.palette.mode === 'dark' 
+                        ? theme.palette.common.white 
+                        : theme.palette.grey[900],
+                      boxShadow: `0 0 10px ${alpha(theme.palette.primary.main, 0.4)}`,
+                    },
+                  }}
+                >
+                  <Slider />
+                </Box>
+                <DurationTime />
+              </Box>
+            )}
+
+            {/* Playback Controls */}
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: { xs: 0.5, sm: 1 },
+                '& .floating-player-btn': {
+                  width: { xs: 36, sm: 40 },
+                  height: { xs: 36, sm: 40 },
+                  color: theme.palette.mode === 'dark' 
+                    ? alpha(theme.palette.common.white, 0.9) 
+                    : theme.palette.grey[700],
+                  transition: 'all 0.2s ease',
+                  '&:hover': {
+                    color: theme.palette.mode === 'dark' 
+                      ? theme.palette.common.white 
+                      : theme.palette.grey[900],
+                    transform: 'scale(1.1)',
+                  },
+                  '& svg': {
+                    width: { xs: 20, sm: 24 },
+                    height: { xs: 20, sm: 24 },
+                  },
+                },
+                '& .floating-player-play-btn': {
+                  width: { xs: 44, sm: 48 },
+                  height: { xs: 44, sm: 48 },
+                  backgroundColor: theme.palette.mode === 'dark' 
+                    ? theme.palette.common.white 
+                    : theme.palette.grey[900],
+                  color: theme.palette.mode === 'dark' 
+                    ? theme.palette.primary.main 
+                    : theme.palette.common.white,
+                  borderRadius: '50%',
+                  transition: 'all 0.2s ease',
+                  boxShadow: `0 4px 12px ${alpha(theme.palette.common.black, 0.3)}`,
+                  '&:hover': {
+                    transform: 'scale(1.08)',
+                    boxShadow: `0 6px 16px ${alpha(theme.palette.common.black, 0.4)}`,
+                  },
+                  '& svg': {
+                    width: { xs: 24, sm: 28 },
+                    height: { xs: 24, sm: 28 },
+                  },
+                },
+              }}
+            >
+              {!isMobile && <Seek seconds={-10} tooltipPlacement="top" />}
+              <Play tooltipPlacement="top" />
+              {!isMobile && <Seek seconds={10} tooltipPlacement="top" />}
+            </Box>
+
+            {/* Volume Control - Desktop only */}
+            {!isCompact && (
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  ml: 1,
+                  '--media-slider-height': '32px',
+                  '--media-slider-width': '80px',
+                  '& .floating-player-btn': {
+                    width: 36,
+                    height: 36,
+                    color: theme.palette.mode === 'dark' 
+                      ? alpha(theme.palette.common.white, 0.8) 
+                      : theme.palette.grey[600],
+                    '&:hover': {
+                      color: theme.palette.mode === 'dark' 
+                        ? theme.palette.common.white 
+                        : theme.palette.grey[900],
+                    },
+                    '& svg': {
+                      width: 20,
+                      height: 20,
+                    },
+                  },
+                  '& .vds-slider-track': {
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? alpha(theme.palette.common.white, 0.2) 
+                      : alpha(theme.palette.grey[900], 0.15),
+                  },
+                  '& .vds-slider-track-fill': {
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? alpha(theme.palette.common.white, 0.8) 
+                      : theme.palette.grey[700],
+                  },
+                  '& .vds-slider-thumb': {
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? theme.palette.common.white 
+                      : theme.palette.grey[800],
+                  },
+                }}
+              >
+                <Mute tooltipPlacement="top" />
+                <Volume />
+              </Box>
+            )}
+
+            {/* Close Button */}
+            <IconButton
+              onClick={() => setCurrentSermon(undefined)}
+              size="small"
+              sx={{
+                ml: 0.5,
+                color: theme.palette.mode === 'dark' 
+                  ? alpha(theme.palette.common.white, 0.7) 
+                  : theme.palette.grey[600],
+                '&:hover': {
+                  color: theme.palette.mode === 'dark' 
+                    ? theme.palette.common.white 
+                    : theme.palette.grey[900],
+                  backgroundColor: theme.palette.mode === 'dark' 
+                    ? alpha(theme.palette.common.white, 0.1) 
+                    : alpha(theme.palette.grey[900], 0.1),
+                },
+              }}
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Box>
         </Controls.Group>
-        <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
-          <Seek seconds={-10} tooltipPlacement="top start" />
-          <Play tooltipPlacement="top" />
-          {/* <BufferingIndicator/> */}
-          <Seek seconds={10} tooltipPlacement="top" />
-          <TimeGroup />
-          {/* <MarqueeComponent> */}
-          <ChapterTitle className="vds-chapter-title" />
-          {/* </MarqueeComponent> */}
-          <Mute tooltipPlacement="top" />
-          <Volume />
-          {/* <Settings placement="top end" tooltipPlacement="top end" /> */}
-        </Controls.Group>
+
+        {/* Mobile/Tablet: Progress slider at bottom */}
+        {isCompact && (
+          <Controls.Group>
+            <Box
+              sx={{
+                width: '100%',
+                px: 2.5,
+                pb: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                '--media-slider-height': '24px',
+                '--media-slider-track-height': '3px',
+                '--media-slider-thumb-size': '12px',
+                '& .floating-time-current, & .floating-time-duration': {
+                  fontFamily: '"SF Mono", "Roboto Mono", monospace',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  minWidth: 40,
+                  color: theme.palette.mode === 'dark' 
+                    ? alpha(theme.palette.common.white, 0.8) 
+                    : theme.palette.grey[600],
+                },
+                '& .floating-time-current': {
+                  textAlign: 'right',
+                },
+                '& .floating-time-duration': {
+                  textAlign: 'left',
+                  color: theme.palette.mode === 'dark' 
+                    ? alpha(theme.palette.common.white, 0.5) 
+                    : theme.palette.grey[500],
+                },
+              }}
+            >
+              <CurrentTime />
+              <Box 
+                sx={{ 
+                  flex: 1,
+                  '& .vds-time-slider': {
+                    display: 'flex',
+                    alignItems: 'center',
+                    width: '100%',
+                    height: 'var(--media-slider-height)',
+                    position: 'relative',
+                  },
+                  '& .vds-slider-chapters': {
+                    display: 'flex',
+                    alignItems: 'center',
+                    width: '100%',
+                    height: '100%',
+                    position: 'relative',
+                  },
+                  '& .vds-slider-chapter': {
+                    display: 'flex',
+                    alignItems: 'center',
+                    flex: 1,
+                    height: '100%',
+                    position: 'relative',
+                  },
+                  '& .vds-slider-track': {
+                    position: 'absolute',
+                    top: '50%',
+                    left: 0,
+                    right: 0,
+                    transform: 'translateY(-50%)',
+                    height: 'var(--media-slider-track-height)',
+                    borderRadius: 'var(--media-slider-track-height)',
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? alpha(theme.palette.common.white, 0.2) 
+                      : alpha(theme.palette.grey[900], 0.12),
+                  },
+                  '& .vds-slider-track-fill': {
+                    position: 'absolute',
+                    top: '50%',
+                    left: 0,
+                    transform: 'translateY(-50%)',
+                    height: 'var(--media-slider-track-height)',
+                    borderRadius: 'var(--media-slider-track-height)',
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? theme.palette.common.white 
+                      : theme.palette.grey[800],
+                  },
+                  '& .vds-slider-thumb': {
+                    position: 'absolute',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: 'var(--media-slider-thumb-size)',
+                    height: 'var(--media-slider-thumb-size)',
+                    borderRadius: '50%',
+                    backgroundColor: theme.palette.mode === 'dark' 
+                      ? theme.palette.common.white 
+                      : theme.palette.grey[900],
+                  },
+                }}
+              >
+                <Slider />
+              </Box>
+              <DurationTime />
+            </Box>
+          </Controls.Group>
+        )}
       </Controls.Root>
     </Box>
   );
 };
 
 export default BottomAudioBar;
-
-// const storage = getStorage(firebase);
-// // const path = useRouter().asPath;
-// const BottomAudioBar: FunctionComponent<{ currentSermon: SermonWithMetadata }> = ({ currentSermon }) => {
-//   const { playing, togglePlaying, currentSecond, updateCurrentSecond, setCurrentSermonUrl } = useAudioPlayer();
-//   const audioPlayer = useRef<HTMLAudioElement>(new Audio());
-//   const [seekTime, setSeekTime] = useState(-1);
-
-//   // will fire when global play state changes
-//   useEffect(() => {
-//     if (currentSermon.url == null) {
-//       getDownloadURL(ref(storage, `intro-outro-sermons/${currentSermon.id}`))
-//         .then((url) => {
-//           setCurrentSermonUrl(url);
-//         })
-//         .catch((error) => {
-//           // eslint-disable-next-line no-console
-//           console.log(error);
-//         });
-//     }
-//     if (playing && currentSermon.url) {
-//       audioPlayer.current.play();
-//     } else if (!playing && audioPlayer.current) {
-//       audioPlayer.current.pause();
-//     }
-//   }, [currentSecond, currentSermon.id, currentSermon.url, playing, setCurrentSermonUrl]);
-
-//   const onPlaying = () => {
-//     const newSecond = Math.floor(audioPlayer.current.currentTime);
-//     if (audioPlayer.current.src === currentSermon.url && newSecond !== currentSecond) {
-//       updateCurrentSecond(newSecond);
-//     }
-//   };
-
-//   const rewind30Seconds = () => {
-//     audioPlayer.current.currentTime = Math.max(audioPlayer.current.currentTime - 30, 0);
-//   };
-
-//   const forward30Seconds = () => {
-//     audioPlayer.current.currentTime = Math.min(audioPlayer.current.currentTime + 30, currentSermon.durationSeconds);
-//   };
-
-//   function handleSliderScrub(event: ChangeEvent<HTMLInputElement>): void {
-//     const value = parseFloat(event.target.value);
-//     setSeekTime(value);
-//   }
-//   const handleMouseUp = (event: MouseEvent<HTMLInputElement>) => {
-//     setSeekTime(-1);
-//     const value = parseFloat(event.currentTarget.value);
-//     updateCurrentSecond(value);
-//     audioPlayer.current.currentTime = value;
-//   };
-
-//   return (
-//     <div className={styles.container}>
-//       <h1 className={styles.title}>{currentSermon.title}</h1>
-//       <div className={styles['vertical-container']}>
-//         <div className={styles['controls-container']}>
-//           <Replay30Icon onClick={rewind30Seconds} />
-//           {playing ? (
-//             <PauseCircleIcon onClick={() => togglePlaying()} />
-//           ) : (
-//             <PlayCircleIcon onClick={() => togglePlaying()} />
-//           )}
-//           <Forward30Icon onClick={forward30Seconds} />
-//         </div>
-//         <div className={styles['progress-container']}>
-//           {/* TODO: Scroll overflow text */}
-//           <span className={styles['current-time']}>{formatTime(seekTime >= 0 ? seekTime : currentSecond)}</span>
-//           <label htmlFor="audio-slider" className={styles['audio-slider-label']}>
-//             <input
-//               className={styles.slider}
-//               type="range"
-//               min="1"
-//               step={1}
-//               max={currentSermon.durationSeconds}
-//               value={seekTime >= 0 ? seekTime : currentSecond}
-//               id="myRange"
-//               onInput={handleSliderScrub}
-//               onMouseUp={handleMouseUp}
-//             ></input>
-//           </label>
-//           <audio
-//             ref={audioPlayer}
-//             src={currentSermon.url ? sanitize(currentSermon.url) : undefined}
-//             onTimeUpdate={onPlaying}
-//             onEnded={() => togglePlaying(false)}
-//           ></audio>
-//           <span className={styles.duration}>{formatTime(currentSermon.durationSeconds)}</span>
-//         </div>
-//       </div>
-//     </div>
-//   );
-// };

@@ -1,6 +1,4 @@
 import Box from '@mui/material/Box';
-import TextField from '@mui/material/TextField';
-// import { GetServerSideProps, GetServerSidePropsContext } from 'next';
 import { ChangeEvent, useEffect, useState } from 'react';
 import SpeakerTable from '../../components/SpeakerTable';
 import { Order } from '../../context/types';
@@ -18,7 +16,6 @@ import firestore, {
 } from '../../firebase/firestore';
 import AdminLayout from '../../layout/adminLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
-// import { adminProtected } from '../../utils/protectedRoutes';
 import useAuth from '../../context/user/UserContext';
 import { fetchSpeakerResults } from '../../components/uploaderComponents/SpeakerSelector';
 
@@ -79,7 +76,6 @@ const AdminSpeakers = () => {
 
   const getSpeakersAlgolia = async (query: string, newPage?: number) => {
     const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
-    // TODO: fix this
     if (result[0] && result[0].nbHits) {
       setTotalSpeakers(result[0].nbHits);
     }
@@ -160,52 +156,40 @@ const AdminSpeakers = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleSearchChange = (value: string) => {
+    setSpeakerInput(value);
+    setSpeakersLoading(true);
+    clearTimeout(timer);
+    const newTimer = setTimeout(async () => {
+      setSpeakers(await getSpeakersAlgolia(value));
+    }, 300);
+    setTimer(newTimer);
+  };
+
   return (
-    <Box style={{ display: 'flex', width: '100%', flexDirection: 'column', alignItems: 'center' }}>
-      <p>Manage Speakers</p>
-      <TextField
-        placeholder="Search for a speaker"
-        value={speakerInput}
-        onChange={(e) => {
-          setSpeakerInput(e.target.value);
-          setSpeakersLoading(true);
-          clearTimeout(timer);
-          const newTimer = setTimeout(async () => {
-            setSpeakers(await getSpeakersAlgolia(e.target.value));
-          }, 300);
-          setTimer(newTimer);
-        }}
-        style={{ paddingBottom: '1em', width: '100%' }}
+    <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
+      <SpeakerTable
+        speakers={speakers}
+        setSpeakers={setSpeakers}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        setPage={setPage}
+        totalSpeakers={totalSpeakers}
+        setTotalSpeakers={setTotalSpeakers}
+        handlePageChange={handlePageChange}
+        handleChangeRowsPerPage={handleChangeRowsPerPage}
+        handleSort={handleSort}
+        sortOrder={sortOrder}
+        setSortOrder={setSortOrder}
+        sortProperty={sortProperty}
+        setSortProperty={setSortProperty}
+        searchValue={speakerInput}
+        onSearchChange={handleSearchChange}
+        loading={speakersLoading}
       />
-      {speakersLoading ? (
-        <h2>loading...</h2>
-      ) : speakers.length === 0 ? (
-        <h2>No results</h2>
-      ) : (
-        <SpeakerTable
-          speakers={speakers}
-          setSpeakers={setSpeakers}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          setPage={setPage}
-          totalSpeakers={totalSpeakers}
-          setTotalSpeakers={setTotalSpeakers}
-          handlePageChange={handlePageChange}
-          handleChangeRowsPerPage={handleChangeRowsPerPage}
-          handleSort={handleSort}
-          sortOrder={sortOrder}
-          setSortOrder={setSortOrder}
-          sortProperty={sortProperty}
-          setSortProperty={setSortProperty}
-        />
-      )}
     </Box>
   );
 };
-
-// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-//   return adminProtected(ctx);
-// };
 
 const ProtectedAdminSpeakers = () => {
   const { user } = useAuth();

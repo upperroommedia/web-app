@@ -61,8 +61,8 @@ const Navbar: FunctionComponent = () => {
     <AppBar
       position="static"
       elevation={3}
-      style={{
-        backgroundColor: 'rgb(31 41 55)',
+      sx={{
+        bgcolor: 'grey.800',
       }}
     >
       <Container maxWidth="xl">

@@ -1,96 +1,87 @@
-// 'use client';
-
-import Divider from '@mui/material/Divider';
+/**
+ * Skeleton for SermonListCard - matches the actual card layout
+ */
 import Card from '@mui/material/Card';
 import Skeleton from '@mui/material/Skeleton';
-import ListItem from '@mui/material/ListItem';
 import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 
 interface SermonListCardSkelotenProps {
   minimal?: boolean;
 }
 
 export default function SermonListCardSkeloten({ minimal = false }: SermonListCardSkelotenProps) {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
+  const isTablet = useMediaQuery(theme.breakpoints.up('sm'));
+  
+  const imageSize = isDesktop ? 100 : isTablet ? 90 : 64;
+
   return (
-    <>
-      <Divider />
-      <ListItem>
-        <Card
-          sx={{
-            width: 1,
-            display: 'grid',
-            gridTemplateAreas: {
-              xs: `"image title title"
-                   "description description description"
-                   "playStatus playStatus playStatus"
-                   "actionItems actionItems playPause"`,
-              sm: `"image title title title"
-                   "image description description description"
-                   "image playPause playStatus actionItems "`,
-            },
-            gridTemplateColumns: { xs: 'min-content auto min-content', sm: 'min-content min-content auto min-content' },
-            gridColumnGap: '10px',
-            padding: 0,
-          }}
-          elevation={0}
-        >
-          <Skeleton
-            variant="rectangular"
-            sx={{
-              gridArea: 'image',
-              width: { xs: 50, sm: 100, md: 150 },
-              height: { xs: 50, sm: 100, md: 150 },
-              borderRadius: '5px',
-            }}
-          />
-          <Skeleton
-            variant="text"
-            sx={{
-              gridArea: 'title',
-              width: { xs: 200, sm: 250, md: 300 },
-              height: { xs: '2rem', sm: '2.25rem', md: '2.5rem' },
-            }}
-          />
-          <Box sx={{ gridArea: 'description' }}>
-            <Skeleton
-              variant="text"
-              sx={{
-                marginTop: '5px',
-                lineHeight: { xs: 1.1, sm: 1.25, md: 1.5 },
-                fontSize: { xs: '0.7rem', sm: '0.9rem', md: '1rem' },
-              }}
-            />
-            <Skeleton
-              variant="text"
-              sx={{
-                lineHeight: { xs: 1.1, sm: 1.25, md: 1.5 },
-                fontSize: { xs: '0.7rem', sm: '0.9rem', md: '1rem' },
-              }}
-            />
-          </Box>
-          <Box
-            display={minimal ? 'none' : 'flex'}
-            alignItems="center"
-            sx={{ gridArea: 'playStatus', paddingTop: { xs: 1, sm: 0 } }}
-          >
-            <Skeleton
-              variant="text"
-              sx={{
-                height: { xs: '1rem', sm: '1.25', md: '1.5rem' },
-                width: { xs: 100, sm: 125, md: 150 },
-              }}
-            />
-          </Box>
-          <Skeleton
-            variant="rectangular"
-            sx={{ gridArea: 'actionItems', width: 150, height: 30, margin: 1, display: minimal ? 'none' : 'unset' }}
-          />
-          <Skeleton
-            variant="circular"
-            sx={{ gridArea: 'playPause', width: 35, height: 35, margin: 1, display: minimal ? 'none' : 'unset' }}
-          />
-        </Card>
-      </ListItem>
-    </>
+    <Card
+      sx={{
+        display: 'flex',
+        flexDirection: 'row',
+        overflow: 'hidden',
+        mb: { xs: 1, sm: 1.5 },
+        height: imageSize,
+        width: '100%',
+      }}
+    >
+      {/* Square Image */}
+      <Skeleton variant="rectangular" sx={{ flexShrink: 0, width: imageSize, height: imageSize }} />
+
+      {/* Content Area */}
+      <Box 
+        sx={{ 
+          flex: 1, 
+          minWidth: 0,
+          display: 'flex', 
+          flexDirection: 'row',
+          p: { xs: 0.5, sm: 1, md: 1.5 }, 
+          overflow: 'hidden',
+        }}
+      >
+        {/* Text Content */}
+        <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          {/* Title */}
+          <Skeleton variant="text" sx={{ width: '70%', height: { xs: 14, sm: 18 } }} />
+          {/* Speaker */}
+          <Skeleton variant="text" sx={{ width: '40%', height: { xs: 10, sm: 14 } }} />
+          {/* Meta */}
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.25 }}>
+            <Skeleton variant="text" sx={{ width: 50, height: { xs: 10, sm: 12 } }} />
+            <Skeleton variant="text" sx={{ width: 30, height: { xs: 10, sm: 12 } }} />
+          </Stack>
+
+          {/* Desktop: Actions at bottom */}
+          {isTablet && !minimal && (
+            <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="space-between" sx={{ mt: 0.5 }}>
+              <Skeleton variant="circular" sx={{ width: 30, height: 30 }} />
+              <Stack direction="row" spacing={0.5}>
+                <Skeleton variant="rounded" sx={{ width: 50, height: 22, borderRadius: 2 }} />
+                <Skeleton variant="rounded" sx={{ width: 50, height: 22, borderRadius: 2 }} />
+              </Stack>
+            </Stack>
+          )}
+        </Box>
+
+        {/* Mobile: Actions on right side */}
+        {!isTablet && !minimal && (
+          <Stack direction="column" spacing={0.5} alignItems="center" sx={{ flexShrink: 0, ml: 0.5 }}>
+            <Skeleton variant="circular" sx={{ width: 24, height: 24 }} />
+            <Skeleton variant="circular" sx={{ width: 20, height: 20 }} />
+            <Skeleton variant="rounded" sx={{ width: 24, height: 20, borderRadius: 10 }} />
+          </Stack>
+        )}
+
+        {/* Uploader Avatar - tablet+ */}
+        {isTablet && (
+          <Skeleton variant="circular" sx={{ width: 24, height: 24, flexShrink: 0, ml: 1 }} />
+        )}
+      </Box>
+    </Card>
   );
 }

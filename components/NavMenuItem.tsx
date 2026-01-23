@@ -14,10 +14,10 @@ export default function NavMenuItem({ path, children, sx, ...props }: INavMenuIt
       disableRipple
       sx={{
         '&:hover': {
-          bgcolor: 'rgb(55,65,81)',
+          bgcolor: 'grey.700',
         },
-        bgcolor: active ? 'rgb(17 24 39)' : 'rgb(31 41 55)',
-        color: active ? 'rgb(209 213 219)' : 'rgb(156 163 175)',
+        bgcolor: active ? 'grey.900' : 'grey.800',
+        color: active ? 'grey.300' : 'grey.400',
         padding: '0.5rem',
         margin: '0.5rem',
         borderRadius: '0.375rem',

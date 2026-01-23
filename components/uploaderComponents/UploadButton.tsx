@@ -1,10 +1,11 @@
 import React, { Dispatch, SetStateAction } from 'react';
-import styles from '../../styles/Uploader.module.css';
 import uploadFile, { AudioSource } from '../../pages/api/uploadFile';
 import { User } from '../../types/User';
 import { UploadProgress } from '../../context/types';
 import { List } from '../../types/List';
 import { Sermon } from '../../types/SermonTypes';
+import Button from '@mui/material/Button';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 
 interface UploadButtonProps {
   user: User;
@@ -33,10 +34,10 @@ export default function UploadButton({
   clearForm,
 }: UploadButtonProps) {
   return (
-    <input
-      className={styles.button}
-      type="button"
-      value="Upload"
+    <Button
+      variant="contained"
+      color="primary"
+      startIcon={<CloudUploadIcon />}
       onClick={async () => {
         // if (audioSource !== undefined && date != null && user.canUpload()) {
         if (validateForm() && audioSource != null) {
@@ -61,6 +62,9 @@ export default function UploadButton({
           setInvalidFormMessage('Please make sure all required fields are filled out');
         }
       }}
-    />
+      sx={{ minWidth: 120 }}
+    >
+      Upload
+    </Button>
   );
 }
