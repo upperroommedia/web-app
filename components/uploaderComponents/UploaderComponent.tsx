@@ -79,17 +79,17 @@ const Uploader = (props: UploaderProps) => {
     (): FormErrors =>
       !props.existingSermon
         ? {
-            title: { error: true, message: createFormErrorMessage('title'), initialState: true },
-            description: { error: true, message: createFormErrorMessage('description'), initialState: true },
-            subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
-            speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
-            audioSource: {
-              error: true,
-              message: 'You must select an audio source before uploading',
-              initialState: true,
-            },
-            topics: { error: true, message: 'You must select at least one topic', initialState: true },
-          }
+          title: { error: true, message: createFormErrorMessage('title'), initialState: true },
+          description: { error: true, message: createFormErrorMessage('description'), initialState: true },
+          subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
+          speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
+          audioSource: {
+            error: true,
+            message: 'You must select an audio source before uploading',
+            initialState: true,
+          },
+          topics: { error: true, message: 'You must select at least one topic', initialState: true },
+        }
         : {},
     [props.existingSermon]
   );
@@ -147,10 +147,10 @@ const Uploader = (props: UploaderProps) => {
   useEffect(() => {
     const fetchSeriesForExistingSermon = async () => {
       if (!props.existingSermon?.seriesId) return;
-      
+
       try {
         const seriesDoc = await getDoc(doc(firestore, 'series', props.existingSermon.seriesId).withConverter(seriesConverter));
-        
+
         if (seriesDoc.exists()) {
           setSelectedSeries(seriesDoc.data());
         } else {
@@ -451,7 +451,7 @@ const Uploader = (props: UploaderProps) => {
   const setTrimDuration = useCallback(
     (durationSeconds: number) => {
       updateSermon('durationSeconds', durationSeconds);
-      if (durationSeconds <= 0) {
+      if (durationSeconds <= 0 && audioSource) {
         setFormErrorCallback('durationSeconds', true, 'Sermon audio duration must be longer than 0 seconds');
       } else if (durationSeconds > MAX_DURATION_SECONDS) {
         setFormErrorCallback(
@@ -463,7 +463,7 @@ const Uploader = (props: UploaderProps) => {
         setFormErrorCallback('durationSeconds', false, '');
       }
     },
-    [updateSermon, setFormErrorCallback]
+    [updateSermon, setFormErrorCallback, audioSource]
   );
 
   const setTrimStartTime = useCallback(
@@ -589,24 +589,30 @@ const Uploader = (props: UploaderProps) => {
             width: 1,
           }}
         >
-          <TextField
-            sx={{
-              display: 'block',
-              width: 1,
-            }}
-            fullWidth
-            id="title-input"
-            label="Title"
-            name="title"
-            variant="outlined"
-            value={sermon.title}
-            error={showError(formErrors.title)}
-            helperText={getErrorMessage(formErrors.title)}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            required
-          />
-          <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
+          <Box sx={{ display: 'flex', gap: '1ch', width: 1, flexDirection: { xs: 'column', xl: 'row' } }}>
+            <TextField
+              sx={{
+                display: 'block',
+                width: 1,
+                flexGrow: 2,
+              }}
+              fullWidth
+              id="title-input"
+              label="Title"
+              name="title"
+              variant="outlined"
+              value={sermon.title}
+              error={showError(formErrors.title)}
+              helperText={getErrorMessage(formErrors.title)}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              required
+            />
+            <Box sx={{ flex: 1 }}>
+              <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
+            </Box>
+          </Box>
+          <Box sx={{ display: 'flex', gap: '1ch', width: 1, flexDirection: { xs: 'column', xl: 'row' } }}>
             <SubtitleSelector
               subtitle={sermon.subtitle}
               sermonList={sermonList}
@@ -617,27 +623,26 @@ const Uploader = (props: UploaderProps) => {
               setSubtitleError={setSubtitleError}
               isLoading={subtitlesLoading}
             />
-            <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
+            <BibleChapterSelector
+              sermonSubtitle={sermon.subtitle}
+              setSermonList={setSermonList}
+              selectedChapter={selectedChapter}
+              setSelectedChapter={setSelectedChapter}
+              bibleChapterError={formErrors?.bibleChapter}
+              setBibleChapterError={setBibleChapterError}
+            />
+            <SundayHomilyMonthSelector
+              sermonSubtitle={sermon.subtitle}
+              date={date}
+              setSermonList={setSermonList}
+              selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
+              setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
+              sundayHomiliesYear={sundayHomiliesYear}
+              setSundayHomiliesYear={setSundayHomiliesYear}
+              sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
+              setSundayHomiliesMonthError={setSundayHomiliesMonthError}
+            />
           </Box>
-          <BibleChapterSelector
-            sermonSubtitle={sermon.subtitle}
-            setSermonList={setSermonList}
-            selectedChapter={selectedChapter}
-            setSelectedChapter={setSelectedChapter}
-            bibleChapterError={formErrors?.bibleChapter}
-            setBibleChapterError={setBibleChapterError}
-          />
-          <SundayHomilyMonthSelector
-            sermonSubtitle={sermon.subtitle}
-            date={date}
-            setSermonList={setSermonList}
-            selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
-            setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
-            sundayHomiliesYear={sundayHomiliesYear}
-            setSundayHomiliesYear={setSundayHomiliesYear}
-            sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
-            setSundayHomiliesMonthError={setSundayHomiliesMonthError}
-          />
           <TextField
             sx={{
               display: 'block',

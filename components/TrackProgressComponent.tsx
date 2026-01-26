@@ -2,7 +2,7 @@ import Box from '@mui/material/Box';
 import LinearProgress from '@mui/material/LinearProgress';
 import { useMediaPlayer } from '@vidstack/react';
 import React, { useEffect } from 'react';
-import { useStateRef } from './audioTrimmerComponents/utils';
+import { useStateRef } from '../hooks/useStateRef';
 
 interface TrackProgressComponentProps {
   playing: boolean;

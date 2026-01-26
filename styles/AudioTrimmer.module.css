@@ -181,8 +181,9 @@
   aspect-ratio: 16 /9;
   background-color: #212121;
   border-radius: var(--media-border-radius);
-  contain: strict;
+  contain: layout;
   overflow: hidden;
+  position: relative;
 }
 
 .player video,
@@ -197,4 +198,66 @@
   margin-top: 40px;
   margin-inline: auto;
   max-width: 300px;
+}
+
+/*************************************************************************************************
+ * Custom YouTube Controls
+ *************************************************************************************************/
+
+.gestureLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+
+.controlsRoot {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-end !important;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.controlsSliderGroup {
+  pointer-events: auto;
+  width: 100%;
+  padding: 0 10px; /* Keep trim handles inside the video frame */
+  box-sizing: border-box;
+}
+
+.controlsBottomBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  pointer-events: auto;
+  width: 100%;
+}
+
+.controlButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  cursor: pointer;
+  color: white;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.controlButton:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.controlButton:active {
+  transform: scale(0.95);
 }

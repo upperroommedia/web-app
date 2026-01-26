@@ -2,7 +2,7 @@ import Typography from '@mui/material/Typography';
 import React, { useEffect } from 'react';
 import { convertToHMS, formatRemainingTime } from '../utils/audioUtils';
 import { useMediaPlayer } from '@vidstack/react';
-import { useStateRef } from './audioTrimmerComponents/utils';
+import { useStateRef } from '../hooks/useStateRef';
 
 interface RemainingTimeComponentProps {
   playing: boolean;

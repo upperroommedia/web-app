@@ -4,18 +4,17 @@ import { Captions, ChapterTitle, Controls, Gesture } from '@vidstack/react';
 
 import * as Buttons from './buttons';
 import * as Menus from './menus';
-import * as Sliders from './sliders';
 import { TimeGroup } from './time-group';
 
 export interface VideoLayoutProps {
-  startTime: number;
-  duration: number;
-  setStartTime: (trimStartTime: number) => void;
-  setDuration: (duration: number) => void;
   thumbnails?: string;
 }
 
-export function VideoLayout({ startTime, duration, setStartTime, setDuration }: VideoLayoutProps) {
+/**
+ * Video layout for the Vidstack player.
+ * Note: Trimming UI is now handled by the TrimmerTimeline component outside the player.
+ */
+export function VideoLayout({ thumbnails }: VideoLayoutProps) {
   return (
     <>
       <Gestures />
@@ -24,24 +23,7 @@ export function VideoLayout({ startTime, duration, setStartTime, setDuration }: 
         <div className="vds-controls-spacer" />
         <div style={{ background: 'linear-gradient(0deg, black, transparent)' }}>
           <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
-            <Sliders.CustomSlider startTime={startTime} setDuration={setDuration} setStartTime={setStartTime} />
-          </Controls.Group>
-          <Controls.Group className={`${styles.controlsGroup} vds-controls-group`}>
-            <Buttons.CustomSeek
-              startTime={startTime}
-              duration={duration}
-              forward={false}
-              tooltipPlacement="top"
-            ></Buttons.CustomSeek>
             <Buttons.Play tooltipPlacement="top start" />
-            <Buttons.CustomSeek
-              startTime={startTime}
-              duration={duration}
-              forward
-              tooltipPlacement="top"
-            ></Buttons.CustomSeek>
-            {/* <Buttons.Mute tooltipPlacement="top" />
-          <Sliders.Volume /> */}
             <TimeGroup />
             <ChapterTitle className="vds-chapter-title" />
             <div className="vds-controls-spacer" />

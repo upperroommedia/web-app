@@ -68,7 +68,8 @@
     "react-social-login-buttons": "^4.1.1",
     "sharp": "^0.33.5",
     "tmp": "^0.2.1",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "zustand": "^5.0.10"
   },
   "devDependencies": {
     "@babel/core": "^7.23.7",
