@@ -23,20 +23,21 @@ export function useAudioTrimmerSync(
 ) {
   const { autoPauseAtEnd = true, loopWithinTrim = false } = options;
 
+  // Only subscribe to state the caller needs for rendering. currentTime/lastChangeSource
+  // are used for store→audio sync via subscribe() below so the hook (and parent) don't
+  // re-render on every timeupdate.
   const trimStart = useTrimmerStore((state) => state.trimStart);
   const trimEnd = useTrimmerStore((state) => state.trimEnd);
-  const currentTime = useTrimmerStore((state) => state.currentTime);
   const isScrubbing = useTrimmerStore((state) => state.isScrubbing);
-  const lastChangeSource = useTrimmerStore((state) => state.lastChangeSource);
   const setCurrentTime = useTrimmerStore((state) => state.setCurrentTime);
   const setIsPlaying = useTrimmerStore((state) => state.setIsPlaying);
-  const setDuration = useTrimmerStore((state) => state.setDuration);
   const initialize = useTrimmerStore((state) => state.initialize);
 
   // Track if we initiated the seek to prevent feedback loop
   const seekingRef = useRef(false);
   const lastSyncedTimeRef = useRef(0);
   const initializedRef = useRef(false);
+  const wasPlayingBeforeScrubRef = useRef(false);
 
   // Handle metadata loaded - initialize store (only once)
   const handleLoadedMetadata = useCallback(() => {
@@ -52,10 +53,10 @@ export function useAudioTrimmerSync(
 
   // Handle time updates from audio element
   const handleTimeUpdate = useCallback(() => {
-    if (!audioRef.current || isScrubbing || seekingRef.current) return;
+    if (!audioRef.current) return;
+    if (isScrubbing || seekingRef.current) return;
 
     const audioTime = audioRef.current.currentTime;
-
     // Only update if significantly different (avoid micro-updates)
     if (Math.abs(audioTime - lastSyncedTimeRef.current) > 0.05) {
       lastSyncedTimeRef.current = audioTime;
@@ -81,24 +82,40 @@ export function useAudioTrimmerSync(
     setIsPlaying(false);
   }, [setIsPlaying]);
 
-  // Sync store time changes to audio element (when initiated by user input)
+  // Pause playback during scrubbing to avoid drift/jumps.
   useEffect(() => {
-    if (!audioRef.current || isScrubbing) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isScrubbing) {
+      if (!audio.paused) {
+        wasPlayingBeforeScrubRef.current = true;
+        audio.pause();
+      }
+    } else if (wasPlayingBeforeScrubRef.current) {
+      wasPlayingBeforeScrubRef.current = false;
+      audio.play().catch(() => {});
+    }
+  }, [audioRef, isScrubbing]);
 
-    // Only sync if the change came from user input (not from media playback)
-    if (lastChangeSource === 'input' || lastChangeSource === 'timeline') {
+  // Sync store time changes to audio element (when initiated by user input).
+  // Use store.subscribe so we don't subscribe to currentTime/lastChangeSource in React
+  // and the caller (AudioTrimmer) doesn't re-render on every timeupdate.
+  useEffect(() => {
+    return useTrimmerStore.subscribe(() => {
+      const state = useTrimmerStore.getState();
+      if (!audioRef.current || state.isScrubbing) return;
+      if (state.lastChangeSource !== 'input' && state.lastChangeSource !== 'timeline') return;
       const audio = audioRef.current;
-      if (Math.abs(audio.currentTime - currentTime) > 0.1) {
+      if (Math.abs(audio.currentTime - state.currentTime) > 0.1) {
         seekingRef.current = true;
-        audio.currentTime = currentTime;
-        lastSyncedTimeRef.current = currentTime;
-        // Reset seeking flag after a short delay
+        audio.currentTime = state.currentTime;
+        lastSyncedTimeRef.current = state.currentTime;
         setTimeout(() => {
           seekingRef.current = false;
         }, 100);
       }
-    }
-  }, [audioRef, currentTime, lastChangeSource, isScrubbing]);
+    });
+  }, [audioRef]);
 
   // Track current audio element to detect when it changes
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -162,13 +179,14 @@ export function useAudioTrimmerSync(
     audioRef.current?.pause();
   }, [audioRef]);
 
+  // ref is stable; omitted from deps per React convention (react-hooks/exhaustive-deps doesn't recognize ref params)
   const togglePlayPause = useCallback(() => {
     if (audioRef.current?.paused) {
       play();
     } else {
       pause();
     }
-  }, [play, pause]);
+  }, [play, pause]); // eslint-disable-line react-hooks/exhaustive-deps -- audioRef is a ref (stable)
 
   return {
     seek,
@@ -188,11 +206,12 @@ export function useVidstackTrimmerSync(
 ) {
   const { autoPauseAtEnd = true } = options;
 
+  // Only subscribe to state the caller needs. currentTime/lastChangeSource are used
+  // for store→player sync via subscribe() below so the hook (and YouTubeTrimmer)
+  // don't re-render on every timeupdate.
   const trimStart = useTrimmerStore((state) => state.trimStart);
   const trimEnd = useTrimmerStore((state) => state.trimEnd);
-  const currentTime = useTrimmerStore((state) => state.currentTime);
   const isScrubbing = useTrimmerStore((state) => state.isScrubbing);
-  const lastChangeSource = useTrimmerStore((state) => state.lastChangeSource);
   const setCurrentTime = useTrimmerStore((state) => state.setCurrentTime);
   const setIsPlaying = useTrimmerStore((state) => state.setIsPlaying);
   const setDuration = useTrimmerStore((state) => state.setDuration);
@@ -200,23 +219,27 @@ export function useVidstackTrimmerSync(
 
   const seekingRef = useRef(false);
   const lastSyncedTimeRef = useRef(0);
+  const lastInitializedDurationRef = useRef<number | null>(null);
 
-  // Sync store time changes to player (when initiated by user input)
+  // Sync store time changes to player (when initiated by user input).
+  // Use store.subscribe so we don't subscribe to currentTime/lastChangeSource in React
+  // and the caller (YouTubeTrimmer) doesn't re-render on every timeupdate.
   useEffect(() => {
-    const player = playerRef.current;
-    if (!player || isScrubbing) return;
-
-    if (lastChangeSource === 'input' || lastChangeSource === 'timeline') {
-      if (Math.abs(player.currentTime - currentTime) > 0.1) {
+    return useTrimmerStore.subscribe(() => {
+      const state = useTrimmerStore.getState();
+      const player = playerRef.current;
+      if (!player || state.isScrubbing) return;
+      if (state.lastChangeSource !== 'input' && state.lastChangeSource !== 'timeline') return;
+      if (Math.abs(player.currentTime - state.currentTime) > 0.1) {
         seekingRef.current = true;
-        player.currentTime = currentTime;
-        lastSyncedTimeRef.current = currentTime;
+        player.currentTime = state.currentTime;
+        lastSyncedTimeRef.current = state.currentTime;
         setTimeout(() => {
           seekingRef.current = false;
         }, 100);
       }
-    }
-  }, [playerRef, currentTime, lastChangeSource, isScrubbing]);
+    });
+  }, [playerRef]);
 
   // Create subscription for time updates
   const subscribeToPlayer = useCallback(
@@ -285,6 +308,7 @@ export function useVidstackTrimmerSync(
     playerRef.current?.pause();
   }, [playerRef]);
 
+  // ref is stable; omitted from deps per React convention (react-hooks/exhaustive-deps doesn't recognize ref params)
   const togglePlayPause = useCallback(() => {
     const player = playerRef.current;
     if (player?.paused) {
@@ -292,12 +316,13 @@ export function useVidstackTrimmerSync(
     } else {
       pause();
     }
-  }, [play, pause]);
+  }, [play, pause]); // eslint-disable-line react-hooks/exhaustive-deps -- playerRef is a ref (stable)
 
   // Initialize with duration when available
   const handleDurationChange = useCallback(
     (duration: number) => {
-      if (duration > 0) {
+      if (duration > 0 && duration !== lastInitializedDurationRef.current) {
+        lastInitializedDurationRef.current = duration;
         initialize({
           duration,
           trimStart: 0,

@@ -524,7 +524,7 @@ const SeriesDetailsPage = () => {
 
       // Update sermon with seriesId
       await updateDoc(doc(firestore, 'sermons', sermon.id), {
-        seriesId: seriesId,
+        seriesId,
       });
 
       // Update series item count

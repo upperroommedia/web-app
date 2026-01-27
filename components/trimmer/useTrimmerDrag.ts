@@ -70,9 +70,6 @@ export function useTrimmerDrag(
       e.preventDefault();
       e.stopPropagation();
       const state = useTrimmerStore.getState();
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useTrimmerDrag.ts:startDrag',message:'Drag started',data:{target,trimStart:state.trimStart,trimEnd:state.trimEnd},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
-      // #endregion
       setDragTarget(target);
       state.setIsScrubbing(true);
     },
@@ -119,17 +116,10 @@ export function useTrimmerDrag(
       const percent = (clientX - rect.left) / rect.width;
       const time = Math.max(0, Math.min(percent * currentDuration, currentDuration));
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useTrimmerDrag.ts:handleMove',message:'Mouse move during drag',data:{dragTarget,time:time.toFixed(2),clientX},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2-H4'})}).catch(()=>{});
-      // #endregion
-
       if (dragTarget === 'start') {
         // Ensure start doesn't exceed end - 0.1s
         const maxStart = currentTrimEnd - 0.1;
         const newStart = Math.max(0, Math.min(time, maxStart));
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useTrimmerDrag.ts:handleMove:start',message:'Updating trim start + seek',data:{newStart:newStart.toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-        // #endregion
         state.setTrimStart(newStart, 'timeline');
         state.setCurrentTime(newStart, 'timeline');
         trimTargetTimeRef.current = newStart;
@@ -141,9 +131,6 @@ export function useTrimmerDrag(
         const newEnd = Math.max(minEnd, Math.min(time, currentDuration));
         // Preview position near the end
         const previewTime = Math.max(currentTrimStart, newEnd - 3);
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useTrimmerDrag.ts:handleMove:end',message:'Updating trim end + seek',data:{newEnd:newEnd.toFixed(2),previewTime:previewTime.toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-        // #endregion
         state.setTrimEnd(newEnd, 'timeline');
         state.setCurrentTime(previewTime, 'timeline');
         trimTargetTimeRef.current = previewTime;
@@ -152,19 +139,12 @@ export function useTrimmerDrag(
       } else if (dragTarget === 'playhead') {
         // Constrain playhead within trim range
         const newTime = Math.max(currentTrimStart, Math.min(time, currentTrimEnd));
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useTrimmerDrag.ts:handleMove:playhead',message:'Updating playhead + calling seek',data:{newTime:newTime.toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H4'})}).catch(()=>{});
-        // #endregion
         state.setCurrentTime(newTime, 'timeline');
         onSeekRef.current?.(newTime);
       }
     };
 
     const handleUp = () => {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useTrimmerDrag.ts:handleUp',message:'Drag ended',data:{dragTarget,trimTargetTime:trimTargetTimeRef.current?.toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-      // #endregion
-      
       // For trim handles, call onTrimDragEnd with the saved target time
       if ((dragTarget === 'start' || dragTarget === 'end') && trimTargetTimeRef.current !== null) {
         onTrimDragEndRef.current?.(trimTargetTimeRef.current);

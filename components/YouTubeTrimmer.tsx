@@ -1,7 +1,8 @@
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
-import { Dispatch, FunctionComponent, memo, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import CircularProgress from '@mui/material/CircularProgress';
+import { Dispatch, FunctionComponent, memo, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MediaPlayer,
   MediaProvider,
@@ -12,26 +13,15 @@ import {
   useMediaState,
   useMediaRemote,
   Controls,
-  PlayButton,
-  MuteButton,
-  FullscreenButton,
-  Time,
   Gesture,
 } from '@vidstack/react';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import PauseIcon from '@mui/icons-material/Pause';
-import VolumeUpIcon from '@mui/icons-material/VolumeUp';
-import VolumeOffIcon from '@mui/icons-material/VolumeOff';
-import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import styles from '../styles/AudioTrimmer.module.css';
+import YouTubeTrimmerControls from './YouTubeTrimmerControls';
 import { AudioSource } from '../pages/api/uploadFile';
-import CircularProgress from '@mui/material/CircularProgress';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
 import useDebounce from '@/hooks/useDebounce';
-import { EditableTimeInput, TrimSlider, useTrimmerStore } from './trimmer';
-import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
-import SkipNextIcon from '@mui/icons-material/SkipNext';
+import { EditableTimeInput, TrimSlider, useTrimmerStore, useVidstackTrimmerSync } from './trimmer';
 
 /**
  * Extract YouTube video ID from various URL formats.
@@ -116,6 +106,82 @@ export function normalizeYouTubeUrl(input: string): string | null {
   return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`;
 }
 
+function getBufferedEnd(buffered: TimeRanges | null | undefined): number {
+  if (!buffered || buffered.length === 0) return 0;
+  let maxEnd = 0;
+  for (let i = 0; i < buffered.length; i += 1) {
+    const end = buffered.end(i);
+    if (end > maxEnd) maxEnd = end;
+  }
+  return maxEnd;
+}
+
+interface YouTubePlayerStateSyncProps {
+  debouncedInput: string;
+  normalizedUrl: string | null;
+  remoteRef: React.MutableRefObject<ReturnType<typeof useMediaRemote> | null>;
+  handleDurationChange: (duration: number) => void;
+  setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
+  setAudioSourceError: (error: boolean, message: string) => void;
+  setIsLoading: (isLoading: boolean) => void;
+  setIsReady: (isReady: boolean) => void;
+  setBufferedEnd: (bufferedEnd: number) => void;
+}
+
+function YouTubePlayerStateSync({
+  debouncedInput,
+  normalizedUrl,
+  remoteRef,
+  handleDurationChange,
+  setAudioSource,
+  setAudioSourceError,
+  setIsLoading,
+  setIsReady,
+  setBufferedEnd,
+}: YouTubePlayerStateSyncProps) {
+  const mediaDuration = useMediaState('duration');
+  const canPlay = useMediaState('canPlay');
+  const buffered = useMediaState('buffered');
+  const waiting = useMediaState('waiting');
+  const remote = useMediaRemote();
+  const lastBufferedRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    remoteRef.current = remote;
+  }, [remote, remoteRef]);
+
+  useEffect(() => {
+    if (mediaDuration > 0) {
+      handleDurationChange(mediaDuration);
+    }
+  }, [canPlay, handleDurationChange, mediaDuration, remote, waiting]);
+
+  useEffect(() => {
+    setIsLoading(waiting);
+  }, [setIsLoading, waiting]);
+
+  useEffect(() => {
+    const bufferedEnd = getBufferedEnd(buffered);
+    const nextBuffered = bufferedEnd === 0 && canPlay && mediaDuration > 0 ? mediaDuration : bufferedEnd;
+    if (lastBufferedRef.current === nextBuffered) {
+      return;
+    }
+    lastBufferedRef.current = nextBuffered;
+    setBufferedEnd(nextBuffered);
+  }, [buffered, canPlay, mediaDuration, setBufferedEnd]);
+
+  useEffect(() => {
+    if (normalizedUrl && mediaDuration > 0 && canPlay) {
+      setIsReady(true);
+      setIsLoading(false);
+      setAudioSource({ source: debouncedInput, type: 'YoutubeUrl' });
+      setAudioSourceError(false, '');
+    }
+  }, [canPlay, debouncedInput, mediaDuration, normalizedUrl, setAudioSource, setAudioSourceError, setIsLoading, setIsReady]);
+
+  return null;
+}
+
 interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
   trimStart: number;
@@ -128,33 +194,36 @@ interface YouTubeTrimmerProps {
 
 const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   setAudioSource,
-  trimStart,
-  duration,
+  trimStart: _trimStart,
+  duration: _duration,
   setTrimStart,
   setDuration,
   audioSourceError,
   setAudioSourceError,
 }) => {
   const [inputText, setInputText] = useState('');
-  const [isValidYouTubeUrl, setIsValidYouTubeUrl] = useState(false);
+  const [hasProviderError, setHasProviderError] = useState(false);
   const mediaPlayerRef = useRef<MediaPlayerInstance>(null);
   const remoteRef = useRef<ReturnType<typeof useMediaRemote> | null>(null);
-  const hasLoadedRef = useRef(false);
   const lastSeekTimeRef = useRef(0);
-  const pendingSeekTimeRef = useRef<number | null>(null); // Track the target seek time during scrubbing
+  const pendingSeekTimeRef = useRef<number | null>(null);
+  const lastFinalSeekRef = useRef<number | null>(null);
   const debouncedInput = useDebounce(inputText, 500);
+  const normalizedUrl = useMemo(() => normalizeYouTubeUrl(debouncedInput), [debouncedInput]);
 
   // Trimmer store state and actions
   const storeTrimStart = useTrimmerStore((state) => state.trimStart);
   const storeTrimEnd = useTrimmerStore((state) => state.trimEnd);
   const isScrubbing = useTrimmerStore((state) => state.isScrubbing);
-  const storeSetTrimStart = useTrimmerStore((state) => state.setTrimStart);
-  const storeSetTrimEnd = useTrimmerStore((state) => state.setTrimEnd);
-  const setCurrentTime = useTrimmerStore((state) => state.setCurrentTime);
-  const storeSetDuration = useTrimmerStore((state) => state.setDuration);
-  const initialize = useTrimmerStore((state) => state.initialize);
+  const isReady = useTrimmerStore((state) => state.isReady);
+  const isLoading = useTrimmerStore((state) => state.isLoading);
+  const setBufferedEnd = useTrimmerStore((state) => state.setBufferedEnd);
+  const setIsLoading = useTrimmerStore((state) => state.setIsLoading);
+  const setIsReady = useTrimmerStore((state) => state.setIsReady);
   const reset = useTrimmerStore((state) => state.reset);
-  const setIsPlaying = useTrimmerStore((state) => state.setIsPlaying);
+  const { togglePlayPause, subscribeToPlayer, handleDurationChange } = useVidstackTrimmerSync(mediaPlayerRef, {
+    autoPauseAtEnd: true,
+  });
 
   // Sync store changes to parent props
   useEffect(() => {
@@ -169,266 +238,130 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   }, [storeTrimStart, storeTrimEnd, setDuration]);
 
   useEffect(() => {
-    if (!mediaPlayerRef.current) return;
-    mediaPlayerRef.current.startLoading();
-    mediaPlayerRef.current.startLoadingPoster();
-  }, [debouncedInput]);
+    const player = mediaPlayerRef.current;
+    if (!player || !normalizedUrl) return;
+    player.startLoading();
+    player.startLoadingPoster();
+  }, [normalizedUrl]);
 
-  // Clear audio source and valid state when URL is cleared
+  // Subscribe to player state once it's mounted.
   useEffect(() => {
-    if (!debouncedInput.trim() || !normalizeYouTubeUrl(debouncedInput)) {
+    const player = mediaPlayerRef.current;
+    if (!player) return;
+    return subscribeToPlayer(player);
+  }, [subscribeToPlayer]);
+
+  // Reset state when URL is cleared or invalid.
+  useEffect(() => {
+    if (!debouncedInput.trim() || !normalizedUrl) {
       setAudioSource(undefined);
-      setIsValidYouTubeUrl(false);
-      hasLoadedRef.current = false;
+      setHasProviderError(false);
+      setIsReady(false);
+      setIsLoading(false);
+      setBufferedEnd(0);
+      pendingSeekTimeRef.current = null;
+      lastFinalSeekRef.current = null;
       reset();
     } else {
-      hasLoadedRef.current = false;
+      setHasProviderError(false);
+      setIsReady(false);
+      setIsLoading(true);
     }
-  }, [debouncedInput, setAudioSource, reset]);
+  }, [debouncedInput, normalizedUrl, reset, setAudioSource, setBufferedEnd, setIsLoading, setIsReady]);
 
-  function onProviderChange(provider: MediaProviderAdapter | null, _nativeEvent: MediaProviderChangeEvent) {
-    if (isYouTubeProvider(provider)) {
-      // Provider is set, wait for metadata
-    } else if (provider === null) {
-      setAudioSource(undefined);
-      setIsValidYouTubeUrl(false);
-    }
-  }
-
-  // Custom player controls component
-  const PlayerControls = () => {
-    const isPaused = useMediaState('paused');
-    const isMuted = useMediaState('muted');
-
-    return (
-      <>
-        {/* Skip to Start Button */}
-        <button
-          className={styles.controlButton}
-          onClick={handleSkipToStart}
-          title="Skip to trim start"
-        >
-          <SkipPreviousIcon sx={{ fontSize: 20 }} />
-        </button>
-
-        {/* Play/Pause Button */}
-        <PlayButton className={styles.controlButton}>
-          {isPaused ? (
-            <PlayArrowIcon sx={{ fontSize: 20 }} />
-          ) : (
-            <PauseIcon sx={{ fontSize: 20 }} />
-          )}
-        </PlayButton>
-
-        {/* Skip to End Button */}
-        <button
-          className={styles.controlButton}
-          onClick={handleSkipToEnd}
-          title="Skip to trim end"
-        >
-          <SkipNextIcon sx={{ fontSize: 20 }} />
-        </button>
-
-        {/* Mute Button */}
-        <MuteButton className={styles.controlButton}>
-          {isMuted ? (
-            <VolumeOffIcon sx={{ fontSize: 20 }} />
-          ) : (
-            <VolumeUpIcon sx={{ fontSize: 20 }} />
-          )}
-        </MuteButton>
-
-        {/* Current Time / Duration */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'white', fontSize: '0.8rem', fontFamily: 'monospace', ml: 1 }}>
-          <Time type="current" />
-          <span>/</span>
-          <Time type="duration" />
-        </Box>
-
-        {/* Spacer */}
-        <Box sx={{ flex: 1 }} />
-
-        {/* Fullscreen Button */}
-        <FullscreenButton className={styles.controlButton}>
-          <FullscreenIcon sx={{ fontSize: 20 }} />
-        </FullscreenButton>
-      </>
-    );
-  };
-
-  // Inner component to track media state and detect when video is loaded
-  const VideoLoadDetector = () => {
-    const mediaDuration = useMediaState('duration');
-    const canPlay = useMediaState('canPlay');
-    const currentTime = useMediaState('currentTime');
-    const paused = useMediaState('paused');
-    const remote = useMediaRemote();
-
-    // Store remote ref for external use
-    useEffect(() => {
-      remoteRef.current = remote;
-    }, [remote]);
-
-    // Initialize store when duration is available
-    useEffect(() => {
-      if (mediaDuration > 0 && debouncedInput.trim() && normalizeYouTubeUrl(debouncedInput) && !hasLoadedRef.current) {
-        setIsValidYouTubeUrl(true);
-        setAudioSource({ source: debouncedInput, type: 'YoutubeUrl' });
-        setAudioSourceError(false, '');
-        hasLoadedRef.current = true;
-
-        // Initialize trimmer store with video duration
-        initialize({
-          duration: mediaDuration,
-          trimStart: 0,
-          trimEnd: mediaDuration,
-        });
-      }
-    }, [mediaDuration, canPlay]);
-
-    // Sync current time from player to store (only when not scrubbing)
-    useEffect(() => {
-      if (hasLoadedRef.current && !isScrubbing) {
-        // If there's a pending seek, use that time instead of stale player time
-        // Clear the pending ref only when player time matches (seek completed)
-        const pending = pendingSeekTimeRef.current;
-        let timeToSync: number;
-        
-        if (pending !== null) {
-          // Player hasn't caught up yet - use pending time
-          timeToSync = pending;
-          // Clear pending only when player is close to target (seek completed)
-          if (Math.abs(currentTime - pending) < 1) {
-            pendingSeekTimeRef.current = null;
-          }
-        } else {
-          timeToSync = currentTime;
-        }
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'YouTubeTrimmer.tsx:VideoLoadDetector:timeSync',message:'Player time update -> store',data:{currentTime:currentTime.toFixed(2),timeToSync:timeToSync.toFixed(2),pending:pending?.toFixed(2),isScrubbing},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H3'})}).catch(()=>{});
-        // #endregion
-        setCurrentTime(timeToSync, 'media');
-      }
-    }, [currentTime, isScrubbing]);
-
-    // Sync play state
-    useEffect(() => {
-      if (hasLoadedRef.current) {
-        setIsPlaying(!paused);
-      }
-    }, [paused]);
-
-    // Auto-pause at trim end boundary
-    useEffect(() => {
-      if (hasLoadedRef.current && !paused && currentTime >= storeTrimEnd) {
-        mediaPlayerRef.current?.pause();
-      }
-    }, [currentTime, paused]);
-
-    return null;
-  };
-
-  // Skip to trim start
-  const handleSkipToStart = useCallback(() => {
-    if (remoteRef.current) {
-      remoteRef.current.seek(storeTrimStart);
-    } else if (mediaPlayerRef.current) {
-      mediaPlayerRef.current.currentTime = storeTrimStart;
-    }
-  }, [storeTrimStart]);
-
-  // Skip to trim end (minus a small offset to preview the end)
-  const handleSkipToEnd = useCallback(() => {
-    // Go to 3 seconds before trim end, or trim start if shorter
-    const endPreview = Math.max(storeTrimStart, storeTrimEnd - 3);
-    if (remoteRef.current) {
-      remoteRef.current.seek(endPreview);
-    } else if (mediaPlayerRef.current) {
-      mediaPlayerRef.current.currentTime = endPreview;
-    }
-  }, [storeTrimStart, storeTrimEnd]);
-
-  // Error timeout
+  // Surface invalid URL errors after a short delay.
   useEffect(() => {
-    if (isValidYouTubeUrl || !inputText.trim()) return;
+    if (!debouncedInput.trim()) {
+      setAudioSourceError(false, '');
+      return;
+    }
+
+    if (normalizedUrl) {
+      setAudioSourceError(false, '');
+      return;
+    }
+
     const timeoutId = setTimeout(() => {
-      if (!isValidYouTubeUrl) {
-        setAudioSourceError(true, 'Could not find YouTube video, please make sure the link is valid');
-      }
+      setAudioSourceError(true, 'Could not find YouTube video, please make sure the link is valid');
     }, 5000);
 
     return () => {
-      setAudioSourceError(false, '');
       clearTimeout(timeoutId);
     };
-  }, [inputText, isValidYouTubeUrl, setAudioSourceError]);
+  }, [debouncedInput, normalizedUrl, setAudioSourceError]);
 
-  const handleTextFieldChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      setInputText(event.target.value);
-    },
-    [setInputText]
-  );
-
-  // Handle seeking during drag - uses remote.seeking() to notify UI without actually seeking
-  // Following VidStack TimeSlider pattern: seeking() during drag, seek() on release
-  const handleSeeking = useCallback((time: number) => {
-    // Always save the pending seek time during scrubbing
-    if (isScrubbing) {
-      pendingSeekTimeRef.current = time;
+  function onProviderChange(provider: MediaProviderAdapter | null, _nativeEvent: MediaProviderChangeEvent) {
+    if (isYouTubeProvider(provider)) {
+      setHasProviderError(false);
+    } else if (provider === null) {
+      setAudioSource(undefined);
+      setHasProviderError(true);
+      setIsReady(false);
+      setIsLoading(false);
     }
+  }
 
-    const now = Date.now();
-    // Throttle seeking requests to 100ms (matching VidStack's seekingRequestThrottle)
-    if (isScrubbing && now - lastSeekTimeRef.current < 100) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'YouTubeTrimmer.tsx:handleSeeking',message:'Seeking throttled (saved pending)',data:{time:time.toFixed(2),pendingTime:pendingSeekTimeRef.current?.toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-      return;
-    }
-    
-    lastSeekTimeRef.current = now;
-
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'YouTubeTrimmer.tsx:handleSeeking',message:'Dispatching remote.seeking()',data:{time:time.toFixed(2),isScrubbing,hasRemote:!!remoteRef.current},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H5'})}).catch(()=>{});
-    // #endregion
-
-    if (remoteRef.current) {
-      // Use remote.seeking() during drag - notifies player of seeking intent
-      // This updates the preview but doesn't perform the actual seek
-      remoteRef.current.seeking(time);
-    }
-  }, [isScrubbing]);
-
-  // Finalize seek when playhead scrubbing ends - call remote.seek() to actually perform seek
-  // Following VidStack TimeSlider pattern: seeking() during drag, seek() on release
-  // NOTE: Don't clear pendingSeekTimeRef here - VideoLoadDetector clears it when player catches up
-  useEffect(() => {
-    if (!isScrubbing && pendingSeekTimeRef.current !== null && remoteRef.current) {
-      const targetTime = pendingSeekTimeRef.current;
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'YouTubeTrimmer.tsx:scrubEnd',message:'Finalizing seek with remote.seek()',data:{targetTime:targetTime.toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-      // #endregion
-      // remote.seek() actually performs the seek (after series of seeking() calls)
-      remoteRef.current.seek(targetTime);
-      // pendingSeekTimeRef cleared by VideoLoadDetector when player catches up
-    }
-  }, [isScrubbing]);
-
-  // Handle trim handle drag end - seek to the target time directly
-  const handleTrimDragEnd = useCallback((time: number) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'YouTubeTrimmer.tsx:handleTrimDragEnd',message:'Seeking after trim handle release',data:{time:time.toFixed(2)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6'})}).catch(()=>{});
-    // #endregion
-    // Clear pending seek to prevent double-seek from scrubEnd effect
-    pendingSeekTimeRef.current = null;
+  const commitSeek = useCallback((time: number) => {
+    pendingSeekTimeRef.current = time;
+    lastFinalSeekRef.current = time;
     if (remoteRef.current) {
       remoteRef.current.seek(time);
     } else if (mediaPlayerRef.current) {
       mediaPlayerRef.current.currentTime = time;
     }
   }, []);
+
+  const requestSeeking = useCallback((time: number) => {
+    pendingSeekTimeRef.current = time;
+    lastFinalSeekRef.current = null;
+    const now = Date.now();
+    if (now - lastSeekTimeRef.current < 100) return;
+    lastSeekTimeRef.current = now;
+
+    if (remoteRef.current) {
+      remoteRef.current.seeking(time);
+    } else if (mediaPlayerRef.current) {
+      mediaPlayerRef.current.currentTime = time;
+    }
+  }, []);
+
+  // Skip to trim start/end: read from store in handler so callbacks stay stable
+  // and YouTubeTrimmerControls doesn't re-render when trim bounds change.
+  const handleSkipToStart = useCallback(() => {
+    const start = useTrimmerStore.getState().trimStart;
+    commitSeek(start);
+  }, [commitSeek]);
+
+  const handleSkipToEnd = useCallback(() => {
+    const { trimStart, trimEnd } = useTrimmerStore.getState();
+    const endPreview = Math.max(trimStart, trimEnd - 3);
+    commitSeek(endPreview);
+  }, [commitSeek]);
+
+  const handleTextFieldChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(event.target.value);
+  }, []);
+
+  // Finalize seek when playhead scrubbing ends.
+  useEffect(() => {
+    if (!isScrubbing && pendingSeekTimeRef.current !== null) {
+      const target = pendingSeekTimeRef.current;
+      if (target !== lastFinalSeekRef.current) {
+        commitSeek(target);
+      }
+    }
+  }, [commitSeek, isScrubbing]);
+
+  // Handle trim handle drag end - seek to the target time directly.
+  const handleTrimDragEnd = useCallback(
+    (time: number) => {
+      commitSeek(time);
+    },
+    [commitSeek]
+  );
+
+  const showPlayer = Boolean(normalizedUrl) && !hasProviderError;
+  const showLoading = showPlayer && (isLoading || !isReady);
 
   return (
     <Box display="flex" width={1} flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
@@ -450,13 +383,13 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
           onChange={handleTextFieldChange}
         />
       </Box>
-      {!showError(audioSourceError) && !isValidYouTubeUrl && inputText.trim() && <CircularProgress />}
+      {!showError(audioSourceError) && !normalizedUrl && inputText.trim() && <CircularProgress />}
       {/* Video Player with custom controls */}
-      <Box sx={{ position: 'relative', width: '100%', display: isValidYouTubeUrl ? 'block' : 'none' }}>
+      <Box sx={{ position: 'relative', width: '100%', display: showPlayer ? 'block' : 'none' }}>
         <MediaPlayer
           ref={mediaPlayerRef}
           className={`${styles.player} media-player`}
-          src={normalizeYouTubeUrl(debouncedInput) || undefined}
+          src={normalizedUrl || undefined}
           load="custom"
           posterLoad="custom"
           onProviderChange={onProviderChange}
@@ -464,13 +397,25 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
           playsInline
           viewType="video"
           onError={() => {
-            setIsValidYouTubeUrl(false);
+            setHasProviderError(true);
             setAudioSource(undefined);
+            setIsLoading(false);
+            setIsReady(false);
             setAudioSourceError(true, 'Could not load YouTube video, please check the link');
           }}
         >
           <MediaProvider iframeProps={{ style: { height: '100%', width: '100%' } }} />
-          <VideoLoadDetector />
+          <YouTubePlayerStateSync
+            debouncedInput={debouncedInput}
+            normalizedUrl={normalizedUrl}
+            remoteRef={remoteRef}
+            handleDurationChange={handleDurationChange}
+            setAudioSource={setAudioSource}
+            setAudioSourceError={setAudioSourceError}
+            setIsLoading={setIsLoading}
+            setIsReady={setIsReady}
+            setBufferedEnd={setBufferedEnd}
+          />
 
           {/* Click to play/pause */}
           <Gesture
@@ -487,19 +432,39 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
           >
             {/* Trim Slider - our custom timeline */}
             <Controls.Group className={styles.controlsSliderGroup}>
-              <TrimSlider onSeek={handleSeeking} onTrimDragEnd={handleTrimDragEnd} height={14} />
+              <TrimSlider onSeek={requestSeeking} onTrimDragEnd={handleTrimDragEnd} height={14} />
             </Controls.Group>
 
             {/* Bottom control bar */}
             <Controls.Group className={styles.controlsBottomBar}>
-              <PlayerControls />
+              <YouTubeTrimmerControls
+                onSkipToStart={handleSkipToStart}
+                onSkipToEnd={handleSkipToEnd}
+                onPlayPause={togglePlayPause}
+              />
             </Controls.Group>
           </Controls.Root>
         </MediaPlayer>
+        {showLoading && (
+          <Box
+            data-testid="player-loading-overlay"
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'rgba(0, 0, 0, 0.3)',
+              zIndex: 5,
+            }}
+          >
+            <CircularProgress />
+          </Box>
+        )}
       </Box>
 
       {/* Time inputs - only show when video is loaded */}
-      {isValidYouTubeUrl && (
+      {isReady && (
         <Stack
           direction="row"
           spacing={2}

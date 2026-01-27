@@ -414,7 +414,7 @@ const SermonDetailsPage = () => {
     } finally {
       setIsUploadingToSubsplash(false);
     }
-  }, [sermon, user?.uid]);
+  }, [sermon]);
 
   // Play/pause toggle
   const handlePlayPause = () => {

@@ -1,6 +1,6 @@
 // An audio trimmer component that allows the user to trim audio files.
 // Uses the shared trimmer components for consistent UI and state management.
-import { FunctionComponent, SetStateAction, useEffect, useRef, Dispatch, useCallback } from 'react';
+import { FunctionComponent, SetStateAction, useEffect, useMemo, useRef, Dispatch, useCallback } from 'react';
 import Stack from '@mui/material/Stack';
 import {
   EditableTimeInput,
@@ -21,7 +21,7 @@ interface AudioTrimmerProps {
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   url,
-  trimStart: propTrimStart,
+  trimStart: _propTrimStart,
   setTrimStart,
   setTrimDuration,
   setHasTrimmed,
@@ -85,13 +85,18 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
     [seek]
   );
 
+  const waveformElement = useMemo(
+    () => <AudioWaveform url={url} height={80} />,
+    [url]
+  );
+
   return (
     <Stack spacing={2} sx={{ width: '100%', py: 2 }}>
       {/* Timeline with waveform */}
       <TrimmerTimeline
         onSeek={handleSeek}
         height={80}
-        backgroundElement={<AudioWaveform url={url} height={80} />}
+        backgroundElement={waveformElement}
       />
 
       {/* Controls and Time Inputs */}

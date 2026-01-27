@@ -181,7 +181,7 @@
   aspect-ratio: 16 /9;
   background-color: #212121;
   border-radius: var(--media-border-radius);
-  contain: layout;
+  contain: strict;
   overflow: hidden;
   position: relative;
 }

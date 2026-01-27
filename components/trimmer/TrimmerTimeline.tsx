@@ -1,4 +1,4 @@
-import { useRef, memo } from 'react';
+import { useRef, memo, useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import { useTrimmerStore, formatTimeWithSubseconds } from '../../context/trimmerStore';
 import { alpha, useTheme } from '@mui/material/styles';
@@ -23,17 +23,13 @@ interface TrimmerTimelineProps {
 function TrimmerTimeline({ onSeek, height = 80, showTimeMarkers = true, backgroundElement }: TrimmerTimelineProps) {
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
+  const [timelineWidth, setTimelineWidth] = useState(0);
 
   // Store state for rendering
   const trimStart = useTrimmerStore((state) => state.trimStart);
   const trimEnd = useTrimmerStore((state) => state.trimEnd);
   const currentTime = useTrimmerStore((state) => state.currentTime);
   const duration = useTrimmerStore((state) => state.duration);
-  const isScrubbing = useTrimmerStore((state) => state.isScrubbing);
-  
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrimmerTimeline.tsx:render',message:'Rendering playhead',data:{currentTime:currentTime.toFixed(2),playheadPercent:duration>0?(currentTime/duration*100).toFixed(2):'N/A',isScrubbing},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H7'})}).catch(()=>{});
-  // #endregion
 
   // Use shared drag hook
   const { startDrag, handleBackgroundMouseDown } = useTrimmerDrag(containerRef, { onSeek });
@@ -43,20 +39,77 @@ function TrimmerTimeline({ onSeek, height = 80, showTimeMarkers = true, backgrou
   const trimEndPercent = duration > 0 ? (trimEnd / duration) * 100 : 100;
   const playheadPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  // Generate time markers
-  const timeMarkers = [];
-  if (showTimeMarkers && duration > 0) {
-    // Calculate appropriate interval based on duration
-    let interval = 10; // seconds
-    if (duration > 600) interval = 60;
-    else if (duration > 300) interval = 30;
-    else if (duration < 60) interval = 5;
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
+    const updateWidth = () => {
+      setTimelineWidth(container.clientWidth);
+    };
+
+    updateWidth();
+
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  const timeMarkers = useMemo(() => {
+    if (!showTimeMarkers || duration <= 0 || timelineWidth <= 0) return [];
+
+    const labelSample = formatTimeDisplay(duration);
+    const approxCharWidth = 7; // monospace approx at 0.7rem
+    const labelWidth = Math.max(32, labelSample.length * approxCharWidth);
+    const minSpacing = labelWidth + 12;
+    const maxLabels = Math.max(2, Math.floor(timelineWidth / minSpacing));
+    const rawInterval = duration / (maxLabels - 1);
+
+    const niceIntervals = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+    const interval =
+      niceIntervals.find((candidate) => candidate >= rawInterval) ||
+      niceIntervals[niceIntervals.length - 1];
+
+    const markers: { time: number; percent: number }[] = [];
     for (let t = 0; t <= duration; t += interval) {
       const percent = (t / duration) * 100;
-      timeMarkers.push({ time: t, percent });
+      markers.push({ time: t, percent });
     }
-  }
+
+    // Ensure end marker is included
+    if (markers.length === 0 || markers[markers.length - 1].time < duration) {
+      markers.push({ time: duration, percent: 100 });
+    }
+
+    // Enforce minimum spacing to avoid overlap
+    const minPercentSpacing = (minSpacing / timelineWidth) * 100;
+    const filtered: { time: number; percent: number }[] = [];
+
+    markers.forEach((marker) => {
+      if (filtered.length === 0) {
+        filtered.push(marker);
+        return;
+      }
+
+      const last = filtered[filtered.length - 1];
+      if (marker.percent - last.percent >= minPercentSpacing) {
+        filtered.push(marker);
+      }
+    });
+
+    // Always keep the end marker; replace last if too close
+    const endMarker = { time: duration, percent: 100 };
+    const last = filtered[filtered.length - 1];
+    if (!last || endMarker.percent - last.percent >= minPercentSpacing) {
+      filtered.push(endMarker);
+    } else if (last.time !== endMarker.time) {
+      filtered[filtered.length - 1] = endMarker;
+    }
+
+    return filtered;
+  }, [duration, showTimeMarkers, timelineWidth]);
 
   // Use theme accent colors (orange/flame)
   const handleColor = colors.accent.primary;
@@ -77,6 +130,7 @@ function TrimmerTimeline({ onSeek, height = 80, showTimeMarkers = true, backgrou
     >
       {/* Timeline container */}
       <Box
+        data-testid="audio-trim-timeline"
         ref={containerRef}
         onMouseDown={handleBackgroundMouseDown}
         onTouchStart={handleBackgroundMouseDown}
@@ -155,6 +209,8 @@ function TrimmerTimeline({ onSeek, height = 80, showTimeMarkers = true, backgrou
 
         {/* Start trim handle */}
         <Box
+          data-testid="audio-trim-handle-start"
+          data-trim-start-percent={trimStartPercent.toFixed(2)}
           onMouseDown={(e) => startDrag(e, 'start')}
           onTouchStart={(e) => startDrag(e, 'start')}
           sx={{
@@ -190,6 +246,8 @@ function TrimmerTimeline({ onSeek, height = 80, showTimeMarkers = true, backgrou
 
         {/* End trim handle */}
         <Box
+          data-testid="audio-trim-handle-end"
+          data-trim-end-percent={trimEndPercent.toFixed(2)}
           onMouseDown={(e) => startDrag(e, 'end')}
           onTouchStart={(e) => startDrag(e, 'end')}
           sx={{
@@ -224,6 +282,8 @@ function TrimmerTimeline({ onSeek, height = 80, showTimeMarkers = true, backgrou
 
         {/* Playhead */}
         <Box
+          data-testid="audio-trim-playhead"
+          data-playhead-percent={playheadPercent.toFixed(2)}
           onMouseDown={(e) => startDrag(e, 'playhead')}
           onTouchStart={(e) => startDrag(e, 'playhead')}
           sx={{
@@ -270,8 +330,8 @@ function TrimmerTimeline({ onSeek, height = 80, showTimeMarkers = true, backgrou
             fontWeight: 500,
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
-            boxShadow: theme.palette.mode === 'dark' 
-              ? '0 2px 8px rgba(0,0,0,0.4)' 
+            boxShadow: theme.palette.mode === 'dark'
+              ? '0 2px 8px rgba(0,0,0,0.4)'
               : '0 2px 8px rgba(0,0,0,0.1)',
           }}
         >

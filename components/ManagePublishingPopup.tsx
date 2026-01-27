@@ -396,7 +396,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
 
       const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
       const addResult = await addToSeriesFunction({
-        seriesSubsplashId: seriesSubsplashId,
+        seriesSubsplashId,
         mediaItemId: sermon.subsplashId,
       });
 

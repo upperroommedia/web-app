@@ -27,6 +27,7 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
   const trimEnd = useTrimmerStore((state) => state.trimEnd);
   const currentTime = useTrimmerStore((state) => state.currentTime);
   const duration = useTrimmerStore((state) => state.duration);
+  const bufferedEnd = useTrimmerStore((state) => state.bufferedEnd);
 
   // Hover state for time preview
   const [hoverState, setHoverState] = useState<{ percent: number; time: number } | null>(null);
@@ -57,6 +58,7 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
   const trimStartPercent = duration > 0 ? (trimStart / duration) * 100 : 0;
   const trimEndPercent = duration > 0 ? (trimEnd / duration) * 100 : 100;
   const playheadPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const bufferedPercent = duration > 0 ? Math.min(100, (bufferedEnd / duration) * 100) : 0;
 
   // Use theme accent colors (orange/flame)
   const handleColor = colors.accent.primary;
@@ -67,6 +69,7 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
   return (
     <Box
       ref={containerRef}
+      data-testid="trim-slider"
       onMouseDown={handleBackgroundMouseDown}
       onTouchStart={handleBackgroundMouseDown}
       onMouseMove={handleMouseMove}
@@ -88,6 +91,20 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
             position: 'absolute',
             inset: 0,
             bgcolor: alpha(theme.palette.common.white, 0.15),
+          }}
+        />
+
+        {/* Buffered region */}
+        <Box
+          data-testid="trim-buffered"
+          data-buffered-percent={bufferedPercent.toFixed(2)}
+          sx={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: `${bufferedPercent}%`,
+            bgcolor: alpha(theme.palette.common.white, 0.35),
           }}
         />
 
@@ -131,6 +148,8 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
 
         {/* Start trim handle */}
         <Box
+          data-testid="trim-handle-start"
+          data-trim-start-percent={trimStartPercent.toFixed(2)}
           onMouseDown={(e) => startDrag(e, 'start')}
           onTouchStart={(e) => startDrag(e, 'start')}
           sx={{
@@ -167,6 +186,8 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
 
         {/* End trim handle */}
         <Box
+          data-testid="trim-handle-end"
+          data-trim-end-percent={trimEndPercent.toFixed(2)}
           onMouseDown={(e) => startDrag(e, 'end')}
           onTouchStart={(e) => startDrag(e, 'end')}
           sx={{
@@ -202,6 +223,8 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
 
         {/* Playhead */}
         <Box
+          data-testid="trim-playhead"
+          data-playhead-percent={playheadPercent.toFixed(2)}
           onMouseDown={(e) => startDrag(e, 'playhead')}
           onTouchStart={(e) => startDrag(e, 'playhead')}
           sx={{

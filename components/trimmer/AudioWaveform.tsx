@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, memo, useCallback } from 'react';
+import { useEffect, useRef, useState, memo, useCallback, useMemo } from 'react';
 import Box from '@mui/material/Box';
-import { alpha, useTheme } from '@mui/material/styles';
+import { alpha } from '@mui/material/styles';
 import { colors } from '../../styles/theme';
 import { keyframes } from '@mui/system';
 
@@ -11,22 +11,20 @@ interface AudioWaveformProps {
   height?: number;
   /** Color of the waveform bars */
   color?: string;
-  /** Number of bars/peaks to display */
-  barCount?: number;
 }
 
 /**
  * Audio waveform visualization using Web Audio API and Canvas.
  * Decodes audio and renders a visual waveform representation.
  */
-function AudioWaveform({ url, height = 80, color, barCount = 200 }: AudioWaveformProps) {
-  const theme = useTheme();
+function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [peaks, setPeaks] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const peaksComputedForUrl = useRef<string | null>(null);
+  const [barCount, setBarCount] = useState(0);
 
   // Use theme accent color if not provided
   const waveformColor = color || colors.accent.primary;
@@ -35,6 +33,8 @@ function AudioWaveform({ url, height = 80, color, barCount = 200 }: AudioWavefor
   const computePeaks = useCallback(
     async (audioBuffer: AudioBuffer): Promise<number[]> => {
       const channelData = audioBuffer.getChannelData(0); // Use first channel
+      if (barCount <= 0) return [];
+
       const samplesPerBar = Math.floor(channelData.length / barCount);
       const computedPeaks: number[] = [];
 
@@ -58,10 +58,32 @@ function AudioWaveform({ url, height = 80, color, barCount = 200 }: AudioWavefor
     [barCount]
   );
 
+  // Derive bar count from the visible width
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateBarCount = () => {
+      const width = container.clientWidth;
+      const targetBarWidth = 3; // px per bar including gap
+      const nextBarCount = Math.max(30, Math.floor(width / targetBarWidth));
+      setBarCount((prev) => (prev === nextBarCount ? prev : nextBarCount));
+    };
+
+    updateBarCount();
+
+    const resizeObserver = new ResizeObserver(updateBarCount);
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   // Fetch and decode audio
   useEffect(() => {
     // Skip if we've already computed peaks for this URL
-    if (peaksComputedForUrl.current === url) {
+    if (!barCount || peaksComputedForUrl.current === `${url}|${barCount}`) {
       return;
     }
 
@@ -91,7 +113,7 @@ function AudioWaveform({ url, height = 80, color, barCount = 200 }: AudioWavefor
         if (cancelled) return;
 
         setPeaks(computedPeaks);
-        peaksComputedForUrl.current = url;
+        peaksComputedForUrl.current = `${url}|${barCount}`;
 
         // Clean up audio context
         await audioContext.close();
@@ -112,7 +134,7 @@ function AudioWaveform({ url, height = 80, color, barCount = 200 }: AudioWavefor
     return () => {
       cancelled = true;
     };
-  }, [url, computePeaks]);
+  }, [url, computePeaks, barCount]);
 
   // Draw waveform on canvas
   useEffect(() => {
@@ -208,27 +230,6 @@ function AudioWaveform({ url, height = 80, color, barCount = 200 }: AudioWavefor
     };
   }, [peaks, height, waveformColor]);
 
-  if (isLoading) {
-    return <WaveformLoadingAnimation color={waveformColor} height={height} />;
-  }
-
-  if (error) {
-    // Show placeholder pattern on error
-    return (
-      <Box
-        sx={{
-          position: 'absolute',
-          inset: 0,
-          backgroundImage: 'url(/audio-wave.svg)',
-          backgroundSize: 'auto 60%',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'repeat-x',
-          opacity: 0.3,
-        }}
-      />
-    );
-  }
-
   return (
     <Box
       ref={containerRef}
@@ -238,15 +239,31 @@ function AudioWaveform({ url, height = 80, color, barCount = 200 }: AudioWavefor
         overflow: 'hidden',
       }}
     >
-      <canvas
-        ref={canvasRef}
-        style={{
-          display: 'block',
-          width: '100%',
-          height: '100%',
-          opacity: 0.5,
-        }}
-      />
+      {isLoading ? (
+        <WaveformLoadingAnimation color={waveformColor} height={height} barCount={barCount / 2} />
+      ) : error ? (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            backgroundImage: 'url(/audio-wave.svg)',
+            backgroundSize: 'auto 60%',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'repeat-x',
+            opacity: 0.3,
+          }}
+        />
+      ) : (
+        <canvas
+          ref={canvasRef}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            opacity: 0.5,
+          }}
+        />
+      )}
     </Box>
   );
 }
@@ -261,15 +278,29 @@ const waveAnimation = keyframes`
   }
 `;
 
-function WaveformLoadingAnimation({ color, height }: { color: string; height: number }) {
-  // Generate more bars to fill the width
-  const barCount = 100;
-  const bars = Array.from({ length: barCount }, (_, i) => {
-    // Create a wave pattern with delays
-    const delay = (i % 10) * 0.08; // Repeating wave pattern
-    const baseHeight = 0.25 + Math.sin((i / barCount) * Math.PI * 2) * 0.35 + Math.random() * 0.2; // Vary base heights with some randomness
-    return { delay, baseHeight };
-  });
+function WaveformLoadingAnimation({
+  color,
+  height,
+  barCount,
+}: {
+  color: string;
+  height: number;
+  barCount: number;
+}) {
+  const safeBarCount = Math.max(30, barCount);
+  const bars = useMemo(() => {
+    return Array.from({ length: safeBarCount }, (_, i) => {
+      // Create a wave pattern with deterministic "noise" to avoid re-randomizing every render
+      const t = safeBarCount > 1 ? i / (safeBarCount - 1) : 0;
+      const envelope = Math.sin(Math.PI * t); // Taller in the middle, tapered edges
+      const ripple = 0.6 + 0.4 * Math.sin(t * Math.PI * 4 + i * 0.35);
+      const noise = 0.85 + 0.15 * Math.sin(i * 12.9898);
+      const baseHeight = (0.2 + 0.8 * envelope) * ripple * noise;
+      const duration = 1.05 + (i % 10) * 0.04;
+      const opacity = 0.2 + envelope * 0.6;
+      return { baseHeight, duration, opacity };
+    });
+  }, [safeBarCount]);
 
   return (
     <Box
@@ -287,12 +318,10 @@ function WaveformLoadingAnimation({ color, height }: { color: string; height: nu
           sx={{
             flex: 1,
             mx: '1px',
-            height: `${bar.baseHeight * height * 0.7}px`,
-            bgcolor: color,
-            opacity: 0.35,
-            borderRadius: '1px',
-            animation: `${waveAnimation} 1.2s ease-in-out infinite`,
-            animationDelay: `${bar.delay}s`,
+            height: `${bar.baseHeight * height * 0.8}px`,
+            bgcolor: alpha(color, bar.opacity),
+            borderRadius: '2px',
+            animation: `${waveAnimation} ${bar.duration}s ease-in-out infinite`,
             transformOrigin: 'center',
           }}
         />

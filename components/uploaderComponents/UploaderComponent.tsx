@@ -480,7 +480,7 @@ const Uploader = (props: UploaderProps) => {
     setTrimStartTime(0);
   }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
-  const clearForm = () => {
+  const clearForm = useCallback(() => {
     setSermon(createEmptySermon(props.user.uid));
     setEmptyListWithLatest([]);
     setSermonList([]);
@@ -488,7 +488,7 @@ const Uploader = (props: UploaderProps) => {
     setDate(new Date());
     clearAudioTrimmer();
     setFormErrors(getFormErrorInitialState());
-  };
+  }, [props.user.uid, clearAudioTrimmer, getFormErrorInitialState]);
 
   // Handle successful upload - store sermon for the success modal
   const handleUploadSuccess = useCallback(

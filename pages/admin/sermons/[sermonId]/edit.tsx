@@ -53,7 +53,7 @@ const EditSermonPage = () => {
   const showAudioTrimmer = useMemo(() => {
     if (!sermon) return false;
     return showAudioTrimmerBoolean(sermon.status.soundCloud, sermon.status.subsplash);
-  }, [sermon?.status.soundCloud, sermon?.status.subsplash]);
+  }, [sermon]);
 
   // Fetch sermon data
   const fetchSermonData = useCallback(async () => {
@@ -107,7 +107,7 @@ const EditSermonPage = () => {
         setSermonUrl({ url: undefined, status: 'error' });
         console.error('Error fetching audio URL:', err);
       });
-  }, [sermon?.id, showAudioTrimmer]);
+  }, [sermon, showAudioTrimmer]);
 
   useEffect(() => {
     if (!authLoading && user) {

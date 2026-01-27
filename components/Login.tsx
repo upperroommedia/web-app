@@ -3,7 +3,6 @@
 import { useRouter } from 'next/router';
 import { useState } from 'react';
 import useAuth from '../context/user/UserContext';
-// import AuthErrors from './AuthErrors';
 import PopUp from './PopUp';
 // import Alert from '@mui/material/Alert';
 // import Collapse from '@mui/material/Collapse';
@@ -107,11 +106,13 @@ function isAuthError(error: any): error is AuthError {
       
       // Success - redirect user
       const { callbackurl: possibleCallback } = router.query;
-      const callbackUrl = (possibleCallback as string) || '';
-      if (callbackUrl === '/login') {
+      const rawCallback = (possibleCallback as string) || '';
+      if (rawCallback === '/login') {
         router.push('/');
+      } else if (rawCallback.startsWith('/')) {
+        router.push(rawCallback);
       } else {
-        router.push(`/${callbackUrl}`);
+        router.push(`/${rawCallback}`);
       }
   };
 
@@ -215,11 +216,13 @@ function isAuthError(error: any): error is AuthError {
                     } else {
                       // Success - redirect
                       const { callbackurl: possibleCallback } = router.query;
-                      const callbackUrl = (possibleCallback as string) || '';
-                      if (callbackUrl === '/login') {
+                      const rawCallback = (possibleCallback as string) || '';
+                      if (rawCallback === '/login') {
                         router.push('/');
+                      } else if (rawCallback.startsWith('/')) {
+                        router.push(rawCallback);
                       } else {
-                        router.push(`/${callbackUrl}`);
+                        router.push(`/${rawCallback}`);
                       }
                     }
                   } catch (e: any) {

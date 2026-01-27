@@ -6,9 +6,12 @@ export interface TrimmerState {
   trimEnd: number; // seconds
   currentTime: number; // seconds
   duration: number; // total media duration in seconds
+  bufferedEnd: number; // seconds (max buffered end)
 
   // Playback state
   isPlaying: boolean;
+  isLoading: boolean;
+  isReady: boolean;
 
   // Interaction state - prevents feedback loops
   isScrubbing: boolean;
@@ -22,8 +25,11 @@ export interface TrimmerActions {
   setTrimEnd: (time: number, source?: TrimmerState['lastChangeSource']) => void;
   setCurrentTime: (time: number, source?: TrimmerState['lastChangeSource']) => void;
   setDuration: (duration: number) => void;
+  setBufferedEnd: (bufferedEnd: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setIsScrubbing: (isScrubbing: boolean) => void;
+  setIsLoading: (isLoading: boolean) => void;
+  setIsReady: (isReady: boolean) => void;
   reset: () => void;
 
   // Batch update for initial setup
@@ -36,6 +42,7 @@ export interface TrimmerSelectors {
   getTrimStartPercent: () => number;
   getTrimEndPercent: () => number;
   getCurrentTimePercent: () => number;
+  getBufferedPercent: () => number;
   isValidTrimRange: () => boolean;
 }
 
@@ -46,7 +53,10 @@ const initialState: TrimmerState = {
   trimEnd: 0,
   currentTime: 0,
   duration: 0,
+  bufferedEnd: 0,
   isPlaying: false,
+  isLoading: false,
+  isReady: false,
   isScrubbing: false,
   lastChangeSource: null,
 };
@@ -71,28 +81,45 @@ export const useTrimmerStore = create<TrimmerStore>((set, get) => ({
   },
 
   setCurrentTime: (time, source = 'external') => {
-    const { duration, isScrubbing, currentTime: prevTime } = get();
+    const { duration, isScrubbing } = get();
     // Don't update from media source while scrubbing
     if (source === 'media' && isScrubbing) return;
 
     const clampedTime = Math.max(0, Math.min(time, duration));
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/1facfdfd-3568-4e23-b8ca-4f6abb249e0b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'trimmerStore.ts:setCurrentTime',message:'Store currentTime update',data:{from:prevTime.toFixed(2),to:clampedTime.toFixed(2),source,isScrubbing},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H8'})}).catch(()=>{});
-    // #endregion
     set({ currentTime: clampedTime, lastChangeSource: source });
   },
 
   setDuration: (duration) => {
-    set((state) => ({
-      duration,
-      // If trimEnd is not set or exceeds new duration, set it to duration
-      trimEnd: state.trimEnd === 0 || state.trimEnd > duration ? duration : state.trimEnd,
-    }));
+    set((state) => {
+      const nextTrimEnd = state.trimEnd === 0 || state.trimEnd > duration ? duration : state.trimEnd;
+      if (state.duration === duration && state.trimEnd === nextTrimEnd) {
+        return state;
+      }
+      return {
+        duration,
+        // If trimEnd is not set or exceeds new duration, set it to duration
+        trimEnd: nextTrimEnd,
+      };
+    });
+  },
+
+  setBufferedEnd: (bufferedEnd) => {
+    set((state) => {
+      const next = Math.max(0, Math.min(bufferedEnd, state.duration || bufferedEnd));
+      if (Math.abs(next - state.bufferedEnd) < 0.05) {
+        return state;
+      }
+      return { bufferedEnd: next };
+    });
   },
 
   setIsPlaying: (isPlaying) => set({ isPlaying }),
 
   setIsScrubbing: (isScrubbing) => set({ isScrubbing }),
+
+  setIsLoading: (isLoading) => set({ isLoading }),
+
+  setIsReady: (isReady) => set({ isReady }),
 
   reset: () => set(initialState),
 
@@ -103,6 +130,8 @@ export const useTrimmerStore = create<TrimmerStore>((set, get) => ({
       trimEnd: trimEnd ?? duration,
       currentTime: trimStart,
       isPlaying: false,
+      isLoading: false,
+      isReady: true,
       isScrubbing: false,
       lastChangeSource: null,
     });
@@ -130,6 +159,12 @@ export const useTrimmerStore = create<TrimmerStore>((set, get) => ({
     const { currentTime, duration } = get();
     if (duration === 0) return 0;
     return (currentTime / duration) * 100;
+  },
+
+  getBufferedPercent: () => {
+    const { bufferedEnd, duration } = get();
+    if (duration === 0) return 0;
+    return (bufferedEnd / duration) * 100;
   },
 
   isValidTrimRange: () => {

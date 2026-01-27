@@ -41,3 +41,7 @@ firestore-coverage.html
 *.har
 tsconfig.tsbuildinfo
 .vscode
+.cursor
+.turbo
+
+test-results/

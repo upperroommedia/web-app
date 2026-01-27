@@ -23,7 +23,9 @@
     "style:lint": "eslint '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
     "style:prettier": "prettier --check '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
     "make-pretty": "prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path .gitignore",
-    "import-from-prod": "gsutil rm -r gs://urm-app.appspot.com/firestore_export && gcloud firestore export gs://urm-app.appspot.com/firestore_export && gsutil -m cp -r gs://urm-app.appspot.com/firestore_export ./dir"
+    "import-from-prod": "gsutil rm -r gs://urm-app.appspot.com/firestore_export && gcloud firestore export gs://urm-app.appspot.com/firestore_export && gsutil -m cp -r gs://urm-app.appspot.com/firestore_export ./dir",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -79,6 +81,7 @@
     "@mui/types": "^7.2.13",
     "@next/bundle-analyzer": "15.3.8",
     "@next/eslint-plugin-next": "15.3.8",
+    "@playwright/test": "^1.58.0",
     "@types/jest": "^29.5.11",
     "@types/node": "^18.19.7",
     "@types/react": "19.1.8",

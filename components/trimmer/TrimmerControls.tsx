@@ -28,21 +28,20 @@ function TrimmerControls({
   disabled = false,
 }: TrimmerControlsProps) {
   const isPlaying = useTrimmerStore((state) => state.isPlaying);
-  const trimStart = useTrimmerStore((state) => state.trimStart);
-  const trimEnd = useTrimmerStore((state) => state.trimEnd);
   const setCurrentTime = useTrimmerStore((state) => state.setCurrentTime);
 
   const handleRewindToStart = useCallback(() => {
+    const trimStart = useTrimmerStore.getState().trimStart;
     setCurrentTime(trimStart, 'timeline');
     onSeek?.(trimStart);
-  }, [trimStart, setCurrentTime, onSeek]);
+  }, [setCurrentTime, onSeek]);
 
   const handleForwardToEnd = useCallback(() => {
-    // Go to 5 seconds before end, or start if trim region is shorter than 5 seconds
+    const { trimStart, trimEnd } = useTrimmerStore.getState();
     const targetTime = Math.max(trimStart, trimEnd - 5);
     setCurrentTime(targetTime, 'timeline');
     onSeek?.(targetTime);
-  }, [trimStart, trimEnd, setCurrentTime, onSeek]);
+  }, [setCurrentTime, onSeek]);
 
   const handlePlayPause = useCallback(() => {
     onPlayPause?.();

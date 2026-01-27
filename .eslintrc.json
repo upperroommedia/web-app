@@ -32,7 +32,7 @@
     ],
     "react/no-danger": "off", // it's self explainatory that no-danger should be used sparingly
     "react/react-in-jsx-scope": "off", // next.js does not require react in most components
-    "no-console": "warn", // no console statements allowed
+    "no-console": ["warn", { "allow": ["warn", "error"] }], // allow console.warn/error
     "prettier/prettier": "off", // don't show prettier errors as it will be fixed when saved anyway
     "no-unused-vars": "off",
     "@typescript-eslint/no-unused-vars": [

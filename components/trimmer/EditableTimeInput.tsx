@@ -100,15 +100,14 @@ function prevDigitPosition(pos: number): number {
 function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Get store values
-  const trimStart = useTrimmerStore((state) => state.trimStart);
-  const trimEnd = useTrimmerStore((state) => state.trimEnd);
+  // Subscribe only to this input's value and duration so the other bound doesn't trigger re-renders.
+  // Use getState() for the other bound in validation/handlers.
+  const storeValue = useTrimmerStore((state) => (type === 'start' ? state.trimStart : state.trimEnd));
   const duration = useTrimmerStore((state) => state.duration);
   const setTrimStart = useTrimmerStore((state) => state.setTrimStart);
   const setTrimEnd = useTrimmerStore((state) => state.setTrimEnd);
   const setCurrentTime = useTrimmerStore((state) => state.setCurrentTime);
 
-  const storeValue = type === 'start' ? trimStart : trimEnd;
   const setStoreValue = type === 'start' ? setTrimStart : setTrimEnd;
 
   // Local state for input
@@ -122,18 +121,16 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
   // Track cursor position to restore after re-render
   const pendingCursorRef = useRef<number | null>(null);
 
-  // Check if a time value is valid
+  // Check if a time value is valid. Read "other" bound from store to avoid subscribing.
   const checkValidity = useCallback(
     (parsedTime: number): boolean => {
+      const state = useTrimmerStore.getState();
       if (type === 'start') {
-        // Start time must be: 0 <= value < trimEnd and <= duration
-        return parsedTime >= 0 && parsedTime < trimEnd && parsedTime <= duration;
-      } else {
-        // End time must be: trimStart < value <= duration
-        return parsedTime > trimStart && parsedTime <= duration;
+        return parsedTime >= 0 && parsedTime < state.trimEnd && parsedTime <= duration;
       }
+      return parsedTime > state.trimStart && parsedTime <= duration;
     },
-    [type, trimStart, trimEnd, duration]
+    [type, duration]
   );
 
   // Original value: 0 for start, duration for end
@@ -142,13 +139,16 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
   // Check if current value differs from original (with small tolerance for floating point)
   const hasChanged = Math.abs(storeValue - originalValue) > 0.05;
 
-  // Reset handler
+  // Reset handler. Read trimStart for end-type from store to avoid subscribing.
   const handleReset = useCallback(() => {
+    const trimStart = type === 'end' ? useTrimmerStore.getState().trimStart : 0;
+    const previewTime =
+      type === 'end' ? Math.max(trimStart, originalValue - 5) : originalValue;
     setStoreValue(originalValue, 'input');
-    setCurrentTime(originalValue, 'input');
+    setCurrentTime(previewTime, 'input');
     setInputValue(secondsToFixedFormat(originalValue));
     setIsInvalid(false);
-  }, [originalValue, setStoreValue, setCurrentTime]);
+  }, [originalValue, setStoreValue, setCurrentTime, type]);
 
   // Sync input from store when not focused/editing
   useEffect(() => {
@@ -181,36 +181,26 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
   const handleBlur = useCallback(() => {
     setIsFocused(false);
     isEditingRef.current = false;
-    setIsInvalid(false); // Reset invalid state on blur (value will be clamped)
+    setIsInvalid(false);
 
-    // Parse and validate the input on blur
     const parsedTime = fixedFormatToSeconds(inputValue);
-
-    // Clamp to valid range
-    let clampedTime = parsedTime;
+    const { trimStart: ts, trimEnd: te } = useTrimmerStore.getState();
+    let clampedTime: number;
 
     if (type === 'start') {
-      // Start time: 0 <= value < trimEnd
-      clampedTime = Math.max(0, Math.min(parsedTime, trimEnd - 0.1, duration));
+      clampedTime = Math.max(0, Math.min(parsedTime, te - 0.1, duration));
     } else {
-      // End time: trimStart < value <= duration
-      clampedTime = Math.max(trimStart + 0.1, Math.min(parsedTime, duration));
+      clampedTime = Math.max(ts + 0.1, Math.min(parsedTime, duration));
     }
 
     setStoreValue(clampedTime, 'input');
-
-    // Move playhead to the new position
     if (type === 'start') {
       setCurrentTime(clampedTime, 'input');
     } else {
-      // For end time, preview near the end
-      const previewTime = Math.max(trimStart, clampedTime - 5);
-      setCurrentTime(previewTime, 'input');
+      setCurrentTime(Math.max(ts, clampedTime - 5), 'input');
     }
-
-    // Reset to formatted store value (will be updated by effect)
     setInputValue(secondsToFixedFormat(clampedTime));
-  }, [inputValue, type, trimStart, trimEnd, duration, setStoreValue, setCurrentTime]);
+  }, [inputValue, type, duration, setStoreValue, setCurrentTime]);
 
   // Helper to update value and store
   const updateValue = useCallback(
@@ -233,27 +223,18 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
       const isValid = checkValidity(parsedTime);
       setIsInvalid(!isValid);
 
-      // Always move playhead on keystroke (clamped to valid range)
+      const { trimStart: ts, trimEnd: te } = useTrimmerStore.getState();
       if (type === 'start') {
-        // Clamp to valid range for preview
-        const previewTime = Math.max(0, Math.min(parsedTime, trimEnd - 0.1, duration));
+        const previewTime = Math.max(0, Math.min(parsedTime, te - 0.1, duration));
         setCurrentTime(previewTime, 'input');
-        // Only update store if within valid range
-        if (isValid) {
-          setStoreValue(parsedTime, 'input');
-        }
+        if (isValid) setStoreValue(parsedTime, 'input');
       } else {
-        // End time - move playhead to preview near the end
-        const clampedEnd = Math.max(trimStart + 0.1, Math.min(parsedTime, duration));
-        const previewTime = Math.max(trimStart, clampedEnd - 5);
-        setCurrentTime(previewTime, 'input');
-        // Only update store if within valid range
-        if (isValid) {
-          setStoreValue(parsedTime, 'input');
-        }
+        const clampedEnd = Math.max(ts + 0.1, Math.min(parsedTime, duration));
+        setCurrentTime(Math.max(ts, clampedEnd - 5), 'input');
+        if (isValid) setStoreValue(parsedTime, 'input');
       }
     },
-    [duration, trimStart, trimEnd, type, setStoreValue, setCurrentTime, inputValue, checkValidity]
+    [duration, type, setStoreValue, setCurrentTime, inputValue, checkValidity]
   );
 
   const handleKeyDown = useCallback(
