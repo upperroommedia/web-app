@@ -27,12 +27,13 @@ const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardPr
   audioPlayerSetCurrentSermon,
   minimal,
 }) => {
-  const [sermonSnapshot, loading, error] = useDocument(
-    doc(firestore, `sermons/${sermonId}`).withConverter(sermonConverter),
-    {
-      snapshotListenOptions: { includeMetadataChanges: true },
-    }
+  const docRef = useMemo(
+    () => (sermonId ? doc(firestore, 'sermons', sermonId).withConverter(sermonConverter) : null),
+    [sermonId]
   );
+  const [sermonSnapshot, loading, error] = useDocument(docRef, {
+    snapshotListenOptions: { includeMetadataChanges: true },
+  });
 
   const sermonData = useMemo(() => sermonSnapshot?.data(), [sermonSnapshot]);
 
@@ -62,6 +63,7 @@ const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardPr
           audioPlayerCurrentSermonId={audioPlayerCurrentSermonId}
           audioPlayerSetCurrentSermon={audioPlayerSetCurrentSermon}
           minimal={minimal}
+          subscriptionOwnedByParent
         />
       )}
     </>

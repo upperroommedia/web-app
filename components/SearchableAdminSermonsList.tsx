@@ -1,4 +1,4 @@
-import { FunctionComponent, ReactNode, useEffect, useState, useMemo, type JSX } from 'react';
+import { FunctionComponent, ReactNode, useCallback, useEffect, useState, useMemo, type JSX } from 'react';
 import { algoliasearch, SearchClient } from 'algoliasearch';
 import { InstantSearch, useInstantSearch } from 'react-instantsearch';
 import Stack from '@mui/material/Stack';
@@ -21,78 +21,26 @@ import AnimateHeight from 'react-animate-height';
 import { SxProps, Theme } from '@mui/system';
 import { isDevelopment } from '../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../utils/mockAlgoliaSearchClient';
+
 interface SearchableAdminSermonListProps {}
 
-const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
-  const { user } = useAuth();
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState<boolean>(false);
-  
-  if (!user) {
-    throw new Error('User not found');
-  }
-  if (!user.role || user.role === 'user') {
-    throw new Error('User is not an admin or uploader');
-  }
-
-  useEffect(() => {
-    const initApiKey = async () => {
-      if (!apiKey) {
-        // In dev mode with emulator, we don't need Algolia credentials
-        if (isDevelopment) {
-          setApiKey('mock-key');
-          return;
-        }
-        
-        if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
-          throw new Error('Missing Algolia Credentials');
-        }
-        
-        if (user.isAdmin()) {
-          setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
-        } else {
-          const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
-            'generatesecuredapikey'
-          );
-          const securedKey = await generateSecuredApiKey({ userId: user.uid });
-          setApiKey(securedKey);
-        }
-      }
-    };
-    initApiKey();
-  }, [apiKey, user]);
-
-  // Create search client with useMemo to prevent unnecessary recreations
-  const searchClient = useMemo((): SearchClient | null => {
-    // In dev mode, use mock client that queries Firestore
-    if (isDevelopment) {
-      return createMockAlgoliaSearchClient({
-        userId: user.uid,
-        isAdmin: user.isAdmin(),
-      });
-    }
-    
-    // In production, use real Algolia client
-    if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
-      return null;
-    }
-    return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
-  }, [apiKey, user]);
-
-  const FilterButton = () => (
-    <IconButton onClick={() => setShowFilters((prev) => !prev)} sx={{ display: { xs: 'block', md: 'none' } }}>
+function FilterButton({ onToggle }: { onToggle: () => void }) {
+  return (
+    <IconButton onClick={onToggle} sx={{ display: { xs: 'block', md: 'none' } }} aria-label="Toggle filters">
       <FilterIcon />
     </IconButton>
   );
+}
 
-  const Filters = ({ sx }: { sx?: SxProps<Theme> }) => (
+function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
+  return (
     <Stack sx={{ flex: 1, alignItems: 'center', overflow: 'auto', ...sx }}>
-      <Stack 
-        gap={{ xs: 1.5, md: 2 }} 
-        alignItems="start" 
-        border={{ xs: 1, md: 0 }} 
-        borderRadius={2} 
-        p={{ xs: 1.5, md: 2 }} 
+      <Stack
+        gap={{ xs: 1.5, md: 2 }}
+        alignItems="start"
+        border={{ xs: 1, md: 0 }}
+        borderRadius={2}
+        p={{ xs: 1.5, md: 2 }}
         margin={{ xs: 1, md: 2 }}
         width={{ xs: '100%', md: 'auto' }}
       >
@@ -109,28 +57,89 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
       </Stack>
     </Stack>
   );
+}
+
+function MobileFilterSection({ onToggle }: { onToggle: () => void }) {
+  return <CustomSearchBox TextFieldEndAdornment={<FilterButton onToggle={onToggle} />} />;
+}
+
+function MobileFilterDrawer({ show }: { show: boolean }) {
+  return (
+    <Stack sx={{ display: { xs: 'block', md: 'none' } }} style={{ gridArea: 'filters' }}>
+      <AnimateHeight duration={250} height={show ? 'auto' : 0}>
+        <AdminSermonFilters />
+      </AnimateHeight>
+    </Stack>
+  );
+}
+
+const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
+  const { user } = useAuth();
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState<boolean>(false);
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+  if (!user.role || user.role === 'user') {
+    throw new Error('User is not an admin or uploader');
+  }
+
+  useEffect(() => {
+    const initApiKey = async () => {
+      if (!apiKey) {
+        if (isDevelopment) {
+          setApiKey('mock-key');
+          return;
+        }
+        if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
+          throw new Error('Missing Algolia Credentials');
+        }
+        if (user.isAdmin()) {
+          setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
+        } else {
+          const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
+            'generatesecuredapikey'
+          );
+          const securedKey = await generateSecuredApiKey({ userId: user.uid });
+          setApiKey(securedKey);
+        }
+      }
+    };
+    initApiKey();
+  }, [apiKey, user]);
+
+  const searchClient = useMemo((): SearchClient | null => {
+    if (isDevelopment) {
+      return createMockAlgoliaSearchClient({
+        userId: user.uid,
+        isAdmin: user.isAdmin(),
+      });
+    }
+    if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
+      return null;
+    }
+    return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
+  }, [apiKey, user]);
+
+  const handleFilterToggle = useCallback(() => setShowFilters((prev) => !prev), []);
 
   return (
     <>
       {searchClient ? (
         <InstantSearch searchClient={searchClient} indexName="sermons" future={{ preserveSharedStateOnUnmount: true }}>
           <Stack justifyContent="center" alignItems="center" gap={{ xs: 0.5, sm: 1 }}>
-            <CustomSearchBox TextFieldEndAdornment={<FilterButton />} />
+            <MobileFilterSection onToggle={handleFilterToggle} />
             <NoResultsBoundary fallback={<NoResults />}>
               <Box
                 display="grid"
                 gridTemplateAreas={{ xs: `"filters" "results"`, md: `"results filters"` }}
                 gridTemplateColumns={{ xs: '1fr', md: '1fr 300px' }}
                 width={1}
-                // sx={{ flexDirection: { xs: 'column' } }}
               >
                 <SearchResultSermonList gridArea="results" />
-                <Filters sx={{ display: { xs: 'none', md: 'block' } }} />
-                <Stack sx={{ display: { xs: 'block', md: 'none' } }}>
-                  <AnimateHeight duration={250} height={showFilters ? 'auto' : 0} style={{ gridArea: 'filters' }}>
-                    <Filters />
-                  </AnimateHeight>
-                </Stack>
+                <AdminSermonFilters sx={{ display: { xs: 'none', md: 'block' } }} />
+                <MobileFilterDrawer show={showFilters} />
               </Box>
               <CustomPagination />
             </NoResultsBoundary>

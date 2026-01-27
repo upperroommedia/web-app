@@ -113,19 +113,16 @@ const SermonDetailsPage = () => {
   const listItemsUploaded = sermonLists?.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED) || [];
   const listItemsNotUploaded = sermonLists?.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED) || [];
 
-  // Fetch series and uploader data when sermon changes
+  // Fetch series and uploader when relevant ids change (narrow deps to avoid refetch on every sermon snapshot)
   useEffect(() => {
     if (!sermon) return;
 
-    // Check permissions
     if (!isAdmin && !canPublish && sermon.uploaderId !== user?.uid) {
       setError('You do not have permission to view this sermon');
       return;
-    } else {
-      setError(null);
     }
+    setError(null);
 
-    // Fetch series
     if (sermon.seriesId) {
       getDoc(doc(firestore, 'series', sermon.seriesId).withConverter(seriesConverter))
         .then((seriesDoc) => {
@@ -140,7 +137,6 @@ const SermonDetailsPage = () => {
       setSeries(null);
     }
 
-    // Fetch uploader
     if (sermon.uploaderId) {
       const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
       getUser({ uid: sermon.uploaderId })
@@ -152,8 +148,12 @@ const SermonDetailsPage = () => {
         .catch((err) => {
           console.error('Error fetching uploader:', err);
         });
+    } else {
+      setUploader(undefined);
     }
-  }, [sermon, isAdmin, canPublish, user?.uid]);
+  // Intentionally depend on ids only to avoid refetch on every sermon snapshot (e.g. metadata-only updates)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sermon read for permission/seriesId/uploaderId; ids are sufficient
+  }, [sermon?.id, sermon?.seriesId, sermon?.uploaderId, isAdmin, canPublish, user?.uid]);
 
   // Handle errors from real-time listener
   useEffect(() => {

@@ -8,7 +8,7 @@
  * - Series tag with image and name
  * - Click to navigate to details page
  */
-import React, { FunctionComponent, useEffect, useState } from 'react';
+import React, { FunctionComponent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -48,6 +48,8 @@ import { sermonConverter } from '../types/Sermon';
 
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
+const uploaderCache = new Map<string, User>();
+
 interface Props {
   sermon: Sermon;
   playing: boolean;
@@ -57,6 +59,8 @@ interface Props {
   audioPlayerSetCurrentSermon: (sermon: Sermon | undefined) => void;
   minimal?: boolean;
   onRefresh?: () => void;
+  /** When true, parent already subscribes to sermon doc; skip internal useDocument to avoid duplicate listeners. */
+  subscriptionOwnedByParent?: boolean;
 }
 
 const SermonListCard: FunctionComponent<Props> = ({
@@ -68,23 +72,24 @@ const SermonListCard: FunctionComponent<Props> = ({
   audioPlayerSetCurrentSermon,
   minimal: _minimal,
   onRefresh,
+  subscriptionOwnedByParent = false,
 }: Props) => {
   const router = useRouter();
   const { user } = useAuth();
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
   const isTablet = useMediaQuery(theme.breakpoints.up('sm'));
-  
-  // Real-time sermon document listener - updates automatically when Firestore document changes
-  const [sermonSnapshot, _sermonLoading, _sermonError] = useDocument(
-    doc(firestore, `sermons/${sermon.id}`).withConverter(sermonConverter),
-    {
-      snapshotListenOptions: { includeMetadataChanges: true },
-    }
+
+  const docRef = useMemo(
+    () => (sermon.id ? doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter) : null),
+    [sermon.id]
   );
-  // Use real-time data if available, otherwise fall back to prop
+  const [sermonSnapshot, _sermonLoading, _sermonError] = useDocument(
+    subscriptionOwnedByParent ? null : docRef,
+    { snapshotListenOptions: { includeMetadataChanges: true } }
+  );
   const realTimeSermon = sermonSnapshot?.data();
-  const currentSermon = realTimeSermon || sermon;
+  const currentSermon = subscriptionOwnedByParent ? sermon : (realTimeSermon || sermon);
   
   const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${currentSermon.id}`));
   const [uploader, setUploader] = useState<User>();
@@ -107,20 +112,30 @@ const SermonListCard: FunctionComponent<Props> = ({
   const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
   const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
 
-  // Fetch uploader
+  // Fetch uploader (with cache to avoid repeated calls for same uid across cards)
   useEffect(() => {
+    const uid = currentSermon.uploaderId;
+    if (!uid) {
+      setUploader(undefined);
+      setUploaderLoading(false);
+      return;
+    }
+    const cached = uploaderCache.get(uid);
+    if (cached) {
+      setUploader(cached);
+      setUploaderLoading(false);
+      return;
+    }
+    setUploaderLoading(true);
     const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
-    const fetchUser = async () => {
-      setUploaderLoading(true);
-      if (currentSermon.uploaderId) {
-        const result = await getUser({ uid: currentSermon.uploaderId });
+    getUser({ uid })
+      .then((result) => {
         if (result.status === 'success') {
+          uploaderCache.set(uid, result.data);
           setUploader(result.data);
         }
-      }
-      setUploaderLoading(false);
-    };
-    fetchUser();
+      })
+      .finally(() => setUploaderLoading(false));
   }, [currentSermon.uploaderId]);
 
   // Fetch series if sermon has seriesId

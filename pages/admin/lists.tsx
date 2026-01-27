@@ -3,7 +3,7 @@ import AppLayout from '../../layout/AppLayout';
 import Button from '@mui/material/Button';
 import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../firebase/firestore';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
@@ -40,6 +40,123 @@ const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
     ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
+
+interface ListListItemRowProps {
+  list: List;
+  disableButtons: boolean;
+  onEdit: (list: List) => void;
+  onDelete: (list: List) => void;
+}
+
+const ListListItemRow = memo(function ListListItemRow({
+  list,
+  disableButtons,
+  onEdit,
+  onDelete,
+}: ListListItemRowProps) {
+  const theme = useTheme();
+  const listImage = list.images?.find((image) => image.type === 'square');
+  return (
+    <Box>
+      <Link href={`/admin/lists/${list.id}?count=${list.count || 20}`} style={{ textDecoration: 'none' }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            p: { xs: 2, sm: 2.5 },
+            gap: 2,
+            cursor: 'pointer',
+            transition: 'background-color 0.15s ease',
+            '&:hover': { bgcolor: 'action.hover' },
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+            <AvatarWithDefaultImage
+              image={listImage}
+              altName={`Image of List: ${list.name}`}
+              width={64}
+              height={64}
+              borderRadius={10}
+              sx={{ flexShrink: 0 }}
+            />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                variant="subtitle1"
+                fontWeight={600}
+                sx={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {list.name}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+                {list.count !== undefined && (
+                  <Typography variant="body2" color="text.secondary">
+                    {list.count} items
+                  </Typography>
+                )}
+                <Chip
+                  label={listTypeOptions[list.type] || list.type}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 22 }}
+                />
+              </Box>
+            </Box>
+          </Box>
+
+          <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+            <Tooltip title="Edit List">
+              <span>
+                <IconButton
+                  disabled={disableButtons}
+                  aria-label="edit list"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onEdit(list);
+                  }}
+                  sx={{
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.primary.main, 0.15),
+                      color: 'primary.main',
+                    },
+                  }}
+                >
+                  <EditIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Delete List">
+              <span>
+                <IconButton
+                  disabled={disableButtons}
+                  aria-label="delete list"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDelete(list);
+                  }}
+                  sx={{
+                    color: 'error.main',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.error.main, 0.15),
+                    },
+                  }}
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+        </Box>
+      </Link>
+    </Box>
+  );
+});
 
 const AdminList = () => {
   // Exclude overflow lists (isMoreSermonsList: true) from admin list view
@@ -124,13 +241,25 @@ const AdminList = () => {
   }, [firebaseList]);
 
   useEffect(() => {
+    if (searchQuery === '' && filter === '') {
+      setSearchResults(undefined);
+      return;
+    }
     const fetchData = async () => {
       await searchLists();
     };
     fetchData();
-  }, [currentPage, filter, searchLists]);
+  }, [currentPage, filter, searchLists, searchQuery]);
 
-  const theme = useTheme();
+  const handleEditList = useCallback((l: List) => {
+    setSelectedList(l);
+    setEditListPopup(true);
+  }, []);
+
+  const handleDeleteListClick = useCallback((l: List) => {
+    setSelectedList(l);
+    setDeleteListPopup(true);
+  }, []);
 
   return (
     <>
@@ -260,104 +389,12 @@ const AdminList = () => {
               <Card>
                 {(searchResults || list).map((l, index) => (
                   <Box key={l.id}>
-                    <Link href={`/admin/lists/${l.id}?count=${l.count || 20}`} style={{ textDecoration: 'none' }}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          p: { xs: 2, sm: 2.5 },
-                          gap: 2,
-                          cursor: 'pointer',
-                          transition: 'background-color 0.15s ease',
-                          '&:hover': { bgcolor: 'action.hover' },
-                        }}
-                      >
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
-                          <AvatarWithDefaultImage
-                            image={l.images?.find((image) => image.type === 'square')}
-                            altName={`Image of List: ${l.name}`}
-                            width={64}
-                            height={64}
-                            borderRadius={10}
-                            sx={{ flexShrink: 0 }}
-                          />
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography
-                              variant="subtitle1"
-                              fontWeight={600}
-                              sx={{
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {l.name}
-                            </Typography>
-                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
-                              {l.count !== undefined && (
-                                <Typography variant="body2" color="text.secondary">
-                                  {l.count} items
-                                </Typography>
-                              )}
-                              <Chip
-                                label={listTypeOptions[l.type] || l.type}
-                                size="small"
-                                variant="outlined"
-                                sx={{ height: 22 }}
-                              />
-                            </Box>
-                          </Box>
-                        </Box>
-
-                        <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                          <Tooltip title="Edit List">
-                            <span>
-                              <IconButton
-                                disabled={disableButtons}
-                                aria-label="edit list"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setSelectedList(l);
-                                  setEditListPopup(true);
-                                }}
-                                sx={{
-                                  '&:hover': {
-                                    bgcolor: alpha(theme.palette.primary.main, 0.15),
-                                    color: 'primary.main',
-                                  },
-                                }}
-                              >
-                                <EditIcon />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                          <Tooltip title="Delete List">
-                            <span>
-                              <IconButton
-                                disabled={disableButtons}
-                                aria-label="delete list"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setSelectedList(l);
-                                  setDeleteListPopup(true);
-                                }}
-                                sx={{
-                                  color: 'error.main',
-                                  '&:hover': {
-                                    bgcolor: alpha(theme.palette.error.main, 0.15),
-                                  },
-                                }}
-                              >
-                                <DeleteIcon />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </Stack>
-                      </Box>
-                    </Link>
+                    <ListListItemRow
+                      list={l}
+                      disableButtons={disableButtons}
+                      onEdit={handleEditList}
+                      onDelete={handleDeleteListClick}
+                    />
                     {index < (searchResults || list).length - 1 && <Divider />}
                   </Box>
                 ))}

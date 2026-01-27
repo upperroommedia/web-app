@@ -9,7 +9,7 @@ import AppLayout from '../../layout/AppLayout';
 import Button from '@mui/material/Button';
 import firestore, { collection, deleteDoc, doc, limit, orderBy, query, where, getDocs, QueryConstraint } from '../../firebase/firestore';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import NewSeriesPopup from '../../components/NewSeriesPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
@@ -44,9 +44,148 @@ const ITEMS_PER_PAGE = 20;
 
 type FilterType = 'all' | 'published' | 'draft';
 
+interface SeriesListItemRowProps {
+  series: Series;
+  isAdmin: boolean;
+  currentUserId: string | undefined;
+  disableButtons: boolean;
+  onEdit: (series: Series) => void;
+  onDelete: (series: Series) => void;
+}
+
+const SeriesListItemRow = memo(function SeriesListItemRow({
+  series,
+  isAdmin,
+  currentUserId,
+  disableButtons,
+  onEdit,
+  onDelete,
+}: SeriesListItemRowProps) {
+  const theme = useTheme();
+  const seriesImage = series.images?.find((image) => image.type === 'square');
+  return (
+    <Box>
+      <Link href={`/admin/series/${series.id}`} style={{ textDecoration: 'none' }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            p: { xs: 2, sm: 2.5 },
+            gap: 2,
+            cursor: 'pointer',
+            transition: 'background-color 0.15s ease',
+            '&:hover': { bgcolor: 'action.hover' },
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+            <AvatarWithDefaultImage
+              image={seriesImage}
+              altName={`Image of Series: ${series.name}`}
+              width={64}
+              height={64}
+              borderRadius={10}
+              sx={{ flexShrink: 0 }}
+            />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                variant="subtitle1"
+                fontWeight={600}
+                sx={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {series.name}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+                <Typography variant="body2" color="text.secondary">
+                  {series.itemCount || 0} items
+                </Typography>
+                {series.subsplashId ? (
+                  <Chip
+                    icon={<CheckCircleIcon />}
+                    label="Published"
+                    size="small"
+                    color="success"
+                    variant="outlined"
+                    sx={{ height: 22 }}
+                  />
+                ) : (
+                  <Chip
+                    icon={<PendingIcon />}
+                    label="Draft"
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    sx={{ height: 22 }}
+                  />
+                )}
+                {isAdmin && series.ownerId !== currentUserId && (
+                  <Chip
+                    label={`Owner: ${series.ownerId.slice(0, 8)}...`}
+                    size="small"
+                    variant="outlined"
+                    sx={{ height: 22 }}
+                  />
+                )}
+              </Box>
+            </Box>
+          </Box>
+
+          <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+            <Tooltip title="Edit Series">
+              <span>
+                <IconButton
+                  disabled={disableButtons}
+                  aria-label="edit series"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onEdit(series);
+                  }}
+                  sx={{
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.primary.main, 0.15),
+                      color: 'primary.main',
+                    },
+                  }}
+                >
+                  <EditIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Delete Series">
+              <span>
+                <IconButton
+                  disabled={disableButtons}
+                  aria-label="delete series"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDelete(series);
+                  }}
+                  sx={{
+                    color: 'error.main',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.error.main, 0.15),
+                    },
+                  }}
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+        </Box>
+      </Link>
+    </Box>
+  );
+});
+
 const AdminSeriesPage = () => {
   const { user } = useAuth();
-  const theme = useTheme();
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +265,16 @@ const AdminSeriesPage = () => {
   const handleSeriesCreated = (newSeries: Series) => {
     setSeriesList((prev) => [newSeries, ...prev]);
   };
+
+  const handleEditSeries = useCallback((s: Series) => {
+    setSelectedSeries(s);
+    setEditSeriesPopup(true);
+  }, []);
+
+  const handleDeleteSeriesClick = useCallback((s: Series) => {
+    setSelectedSeries(s);
+    setDeleteSeriesPopup(true);
+  }, []);
 
   // Filter series based on search query and filter type
   const filteredSeries = seriesList.filter((series) => {
@@ -278,123 +427,14 @@ const AdminSeriesPage = () => {
               <Card>
                 {filteredSeries.map((series, index) => (
                   <Box key={series.id}>
-                    <Link href={`/admin/series/${series.id}`} style={{ textDecoration: 'none' }}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          p: { xs: 2, sm: 2.5 },
-                          gap: 2,
-                          cursor: 'pointer',
-                          transition: 'background-color 0.15s ease',
-                          '&:hover': { bgcolor: 'action.hover' },
-                        }}
-                      >
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
-                          <AvatarWithDefaultImage
-                            image={series.images?.find((image) => image.type === 'square')}
-                            altName={`Image of Series: ${series.name}`}
-                            width={64}
-                            height={64}
-                            borderRadius={10}
-                            sx={{ flexShrink: 0 }}
-                          />
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography
-                              variant="subtitle1"
-                              fontWeight={600}
-                              sx={{
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {series.name}
-                            </Typography>
-                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
-                              <Typography variant="body2" color="text.secondary">
-                                {series.itemCount || 0} items
-                              </Typography>
-                              {series.subsplashId ? (
-                                <Chip
-                                  icon={<CheckCircleIcon />}
-                                  label="Published"
-                                  size="small"
-                                  color="success"
-                                  variant="outlined"
-                                  sx={{ height: 22 }}
-                                />
-                              ) : (
-                                <Chip
-                                  icon={<PendingIcon />}
-                                  label="Draft"
-                                  size="small"
-                                  color="warning"
-                                  variant="outlined"
-                                  sx={{ height: 22 }}
-                                />
-                              )}
-                              {isAdmin && series.ownerId !== user.uid && (
-                                <Chip
-                                  label={`Owner: ${series.ownerId.slice(0, 8)}...`}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ height: 22 }}
-                                />
-                              )}
-                            </Box>
-                          </Box>
-                        </Box>
-
-                        <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-                          <Tooltip title="Edit Series">
-                            <span>
-                              <IconButton
-                                disabled={disableButtons}
-                                aria-label="edit series"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setSelectedSeries(series);
-                                  setEditSeriesPopup(true);
-                                }}
-                                sx={{
-                                  '&:hover': {
-                                    bgcolor: alpha(theme.palette.primary.main, 0.15),
-                                    color: 'primary.main',
-                                  },
-                                }}
-                              >
-                                <EditIcon />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                          <Tooltip title="Delete Series">
-                            <span>
-                              <IconButton
-                                disabled={disableButtons}
-                                aria-label="delete series"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setSelectedSeries(series);
-                                  setDeleteSeriesPopup(true);
-                                }}
-                                sx={{
-                                  color: 'error.main',
-                                  '&:hover': {
-                                    bgcolor: alpha(theme.palette.error.main, 0.15),
-                                  },
-                                }}
-                              >
-                                <DeleteIcon />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </Stack>
-                      </Box>
-                    </Link>
+                    <SeriesListItemRow
+                      series={series}
+                      isAdmin={isAdmin}
+                      currentUserId={user?.uid}
+                      disableButtons={disableButtons}
+                      onEdit={handleEditSeries}
+                      onDelete={handleDeleteSeriesClick}
+                    />
                     {index < filteredSeries.length - 1 && <Divider />}
                   </Box>
                 ))}

@@ -5,7 +5,7 @@
  * - Role-based navigation (Publishers vs Admins)
  * - Light/Dark mode toggle
  */
-import { useState, ReactNode, useMemo } from 'react';
+import { useState, ReactNode, useMemo, useCallback, memo } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -69,6 +69,30 @@ interface SidebarLayoutProps {
   children: ReactNode;
 }
 
+const MainContentSlot = memo(function MainContentSlot({
+  children,
+  isMobile,
+}: {
+  children: ReactNode;
+  isMobile: boolean;
+}) {
+  return (
+    <Box
+      component="main"
+      sx={{
+        flexGrow: 1,
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        bgcolor: 'background.default',
+        pt: isMobile ? '64px' : 0,
+      }}
+    >
+      {children}
+    </Box>
+  );
+});
+
 const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   const muiTheme = useMuiTheme();
   const { theme: currentTheme, setTheme } = useTheme();
@@ -84,32 +108,35 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
     return user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase();
   }, [user?.role]);
 
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
+  const handleDrawerToggle = useCallback(() => {
+    setMobileOpen((prev) => !prev);
+  }, []);
 
-  const toggleTheme = () => {
+  const toggleTheme = useCallback(() => {
     setTheme(currentTheme === 'dark' ? 'light' : 'dark');
-  };
+  }, [currentTheme, setTheme]);
 
-  const isActivePath = (path: string) => {
-    // Upload page is special - it's the homepage (/)
-    if (path === '/') {
-      return router.pathname === '/';
-    }
-    if (path === '/admin/sermons') {
-      return router.pathname === '/admin/sermons' || router.pathname === '/admin';
-    }
-    return router.pathname.startsWith(path);
-  };
+  const isActivePath = useCallback(
+    (path: string) => {
+      if (path === '/') return router.pathname === '/';
+      if (path === '/admin/sermons') return router.pathname === '/admin/sermons' || router.pathname === '/admin';
+      return router.pathname.startsWith(path);
+    },
+    [router.pathname]
+  );
 
-  const renderNavItem = (item: NavItem) => (
-    <ListItem key={item.path} disablePadding>
-      <Link href={item.path} passHref style={{ width: '100%', textDecoration: 'none' }}>
-        <ListItemButton
-          selected={isActivePath(item.path)}
-          onClick={() => isMobile && setMobileOpen(false)}
-          sx={{
+  const closeDrawerIfMobile = useCallback(() => {
+    if (isMobile) setMobileOpen(false);
+  }, [isMobile]);
+
+  const renderNavItem = useCallback(
+    (item: NavItem) => (
+      <ListItem key={item.path} disablePadding>
+        <Link href={item.path} passHref style={{ width: '100%', textDecoration: 'none' }}>
+          <ListItemButton
+            selected={isActivePath(item.path)}
+            onClick={closeDrawerIfMobile}
+            sx={{
             py: 0.5,
             minHeight: 36,
             '&.Mui-selected': {
@@ -134,9 +161,11 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
         </ListItemButton>
       </Link>
     </ListItem>
+  ),
+    [isActivePath, closeDrawerIfMobile]
   );
 
-  const drawerContent = (
+  const drawerContent = useMemo(() => (
     <Box
       sx={{
         height: '100%',
@@ -388,7 +417,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
         </Box>
       </Box>
     </Box>
-  );
+  ), [user, isAdmin, currentTheme, formattedRole, muiTheme, toggleTheme, logoutUser, renderNavItem]);
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -487,20 +516,8 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
         </Drawer>
       )}
 
-      {/* Main Content Area */}
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          bgcolor: 'background.default',
-          pt: isMobile ? '64px' : 0,
-        }}
-      >
-        {children}
-      </Box>
+      {/* Main Content Area - memoized so layout state (e.g. mobileOpen) doesn't force page re-render */}
+      <MainContentSlot isMobile={isMobile}>{children}</MainContentSlot>
     </Box>
   );
 };
