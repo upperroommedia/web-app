@@ -182,7 +182,10 @@ export function formatTimeWithSubseconds(seconds: number): string {
   const secs = Math.floor(seconds % 60);
   const tenths = Math.floor((seconds % 1) * 10);
 
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${tenths}`;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(
+    2,
+    '0'
+  )}.${tenths}`;
 }
 
 export function parseTimeInput(input: string): number | null {
@@ -251,5 +254,7 @@ export function formatTimeInputDisplay(input: string): string {
   }
   // 5+ digits
   const hoursEnd = mainDigits.length - 4;
-  return `${mainDigits.slice(0, hoursEnd)}:${mainDigits.slice(hoursEnd, hoursEnd + 2)}:${mainDigits.slice(-2)}${decimal}`;
+  return `${mainDigits.slice(0, hoursEnd)}:${mainDigits.slice(hoursEnd, hoursEnd + 2)}:${mainDigits.slice(
+    -2
+  )}${decimal}`;
 }

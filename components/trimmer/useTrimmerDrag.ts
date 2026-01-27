@@ -26,7 +26,7 @@ interface UseTrimmerDragReturn {
 /**
  * Shared drag handling logic for trimmer components.
  * Handles mouse/touch events for dragging trim handles and playhead.
- * 
+ *
  * IMPORTANT: Uses refs for store values during drag to prevent useEffect
  * from re-running and causing jitter (React best practice for event handlers).
  */
@@ -42,16 +42,20 @@ export function useTrimmerDrag(
 
   // Local drag state
   const [dragTarget, setDragTarget] = useState<DragTarget>(null);
-  
+
   // Use refs for values accessed in event handlers to avoid stale closures
   // and prevent useEffect from re-running during drag (React best practice)
   const trimTargetTimeRef = useRef<number | null>(null);
   const onSeekRef = useRef(onSeek);
   const onTrimDragEndRef = useRef(onTrimDragEnd);
-  
+
   // Keep refs updated with latest values
-  useEffect(() => { onSeekRef.current = onSeek; }, [onSeek]);
-  useEffect(() => { onTrimDragEndRef.current = onTrimDragEnd; }, [onTrimDragEnd]);
+  useEffect(() => {
+    onSeekRef.current = onSeek;
+  }, [onSeek]);
+  useEffect(() => {
+    onTrimDragEndRef.current = onTrimDragEnd;
+  }, [onTrimDragEnd]);
 
   // Convert pixel position to time
   const positionToTime = useCallback(
@@ -65,16 +69,13 @@ export function useTrimmerDrag(
   );
 
   // Start dragging a specific target
-  const startDrag = useCallback(
-    (e: React.MouseEvent | React.TouchEvent, target: DragTarget) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const state = useTrimmerStore.getState();
-      setDragTarget(target);
-      state.setIsScrubbing(true);
-    },
-    []
-  );
+  const startDrag = useCallback((e: React.MouseEvent | React.TouchEvent, target: DragTarget) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const state = useTrimmerStore.getState();
+    setDragTarget(target);
+    state.setIsScrubbing(true);
+  }, []);
 
   // Handle click on background to scrub
   const handleBackgroundMouseDown = useCallback(
@@ -104,13 +105,13 @@ export function useTrimmerDrag(
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
       if (!containerRef.current) return;
-      
+
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      
+
       // Get latest values from store (not stale closure values)
       const state = useTrimmerStore.getState();
       const { trimStart: currentTrimStart, trimEnd: currentTrimEnd, duration: currentDuration } = state;
-      
+
       // Calculate time from position
       const rect = containerRef.current.getBoundingClientRect();
       const percent = (clientX - rect.left) / rect.width;
@@ -150,7 +151,7 @@ export function useTrimmerDrag(
         onTrimDragEndRef.current?.(trimTargetTimeRef.current);
         trimTargetTimeRef.current = null;
       }
-      
+
       setDragTarget(null);
       useTrimmerStore.getState().setIsScrubbing(false);
     };

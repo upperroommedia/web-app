@@ -85,175 +85,175 @@ function TrimSlider({ onSeek, onTrimDragEnd, height = 14 }: TrimSliderProps) {
         overflow: 'visible', // Allow handles to extend
       }}
     >
-        {/* Track background - full width */}
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            bgcolor: alpha(theme.palette.common.white, 0.15),
-          }}
-        />
+      {/* Track background - full width */}
+      <Box
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          bgcolor: alpha(theme.palette.common.white, 0.15),
+        }}
+      />
 
-        {/* Buffered region */}
-        <Box
-          data-testid="trim-buffered"
-          data-buffered-percent={bufferedPercent.toFixed(2)}
-          sx={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: `${bufferedPercent}%`,
-            bgcolor: alpha(theme.palette.common.white, 0.35),
-          }}
-        />
+      {/* Buffered region */}
+      <Box
+        data-testid="trim-buffered"
+        data-buffered-percent={bufferedPercent.toFixed(2)}
+        sx={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: `${bufferedPercent}%`,
+          bgcolor: alpha(theme.palette.common.white, 0.35),
+        }}
+      />
 
-        {/* Left grayed-out region (before trim start) */}
-        <Box
-          sx={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: `${trimStartPercent}%`,
-            bgcolor: alpha(theme.palette.common.black, 0.6),
-          }}
-        />
+      {/* Left grayed-out region (before trim start) */}
+      <Box
+        sx={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: `${trimStartPercent}%`,
+          bgcolor: alpha(theme.palette.common.black, 0.6),
+        }}
+      />
 
-        {/* Right grayed-out region (after trim end) */}
-        <Box
-          sx={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: `${100 - trimEndPercent}%`,
-            bgcolor: alpha(theme.palette.common.black, 0.6),
-          }}
-        />
+      {/* Right grayed-out region (after trim end) */}
+      <Box
+        sx={{
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: `${100 - trimEndPercent}%`,
+          bgcolor: alpha(theme.palette.common.black, 0.6),
+        }}
+      />
 
-        {/* Active trim region highlight */}
-        <Box
-          sx={{
-            position: 'absolute',
-            left: `${trimStartPercent}%`,
-            right: `${100 - trimEndPercent}%`,
-            top: 0,
-            bottom: 0,
-            bgcolor: alpha(handleColor, 0.25),
-            borderTop: `2px solid ${handleColor}`,
-            borderBottom: `2px solid ${handleColor}`,
-          }}
-        />
+      {/* Active trim region highlight */}
+      <Box
+        sx={{
+          position: 'absolute',
+          left: `${trimStartPercent}%`,
+          right: `${100 - trimEndPercent}%`,
+          top: 0,
+          bottom: 0,
+          bgcolor: alpha(handleColor, 0.25),
+          borderTop: `2px solid ${handleColor}`,
+          borderBottom: `2px solid ${handleColor}`,
+        }}
+      />
 
-        {/* Start trim handle */}
-        <Box
-          data-testid="trim-handle-start"
-          data-trim-start-percent={trimStartPercent.toFixed(2)}
-          onMouseDown={(e) => startDrag(e, 'start')}
-          onTouchStart={(e) => startDrag(e, 'start')}
-          sx={{
-            position: 'absolute',
-            left: `${trimStartPercent}%`,
-            top: 0,
-            bottom: 0,
-            width: `${handleWidth}px`,
-            transform: 'translateX(-100%)',
-            bgcolor: handleColor,
-            borderRadius: '3px 0 0 3px',
-            cursor: 'ew-resize',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'background-color 0.15s ease',
-            zIndex: 5,
-            '&:hover': {
-              bgcolor: handleHoverColor,
-            },
-            '&:active': {
-              bgcolor: handleActiveColor,
-            },
-            // Handle grip lines
-            '&::after': {
-              content: '""',
-              width: '2px',
-              height: '8px',
-              bgcolor: alpha(theme.palette.common.white, 0.6),
-              borderRadius: '1px',
-            },
-          }}
-        />
-
-        {/* End trim handle */}
-        <Box
-          data-testid="trim-handle-end"
-          data-trim-end-percent={trimEndPercent.toFixed(2)}
-          onMouseDown={(e) => startDrag(e, 'end')}
-          onTouchStart={(e) => startDrag(e, 'end')}
-          sx={{
-            position: 'absolute',
-            left: `${trimEndPercent}%`,
-            top: 0,
-            bottom: 0,
-            width: `${handleWidth}px`,
-            bgcolor: handleColor,
-            borderRadius: '0 3px 3px 0',
-            cursor: 'ew-resize',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'background-color 0.15s ease',
-            zIndex: 5,
-            '&:hover': {
-              bgcolor: handleHoverColor,
-            },
-            '&:active': {
-              bgcolor: handleActiveColor,
-            },
-            // Handle grip lines
-            '&::after': {
-              content: '""',
-              width: '2px',
-              height: '8px',
-              bgcolor: alpha(theme.palette.common.white, 0.6),
-              borderRadius: '1px',
-            },
-          }}
-        />
-
-        {/* Playhead */}
-        <Box
-          data-testid="trim-playhead"
-          data-playhead-percent={playheadPercent.toFixed(2)}
-          onMouseDown={(e) => startDrag(e, 'playhead')}
-          onTouchStart={(e) => startDrag(e, 'playhead')}
-          sx={{
-            position: 'absolute',
-            left: `${playheadPercent}%`,
-            top: '-4px',
-            bottom: '-4px',
-            width: '3px',
-            bgcolor: theme.palette.common.white,
-            transform: 'translateX(-50%)',
-            cursor: 'ew-resize',
-            zIndex: 10,
-            boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+      {/* Start trim handle */}
+      <Box
+        data-testid="trim-handle-start"
+        data-trim-start-percent={trimStartPercent.toFixed(2)}
+        onMouseDown={(e) => startDrag(e, 'start')}
+        onTouchStart={(e) => startDrag(e, 'start')}
+        sx={{
+          position: 'absolute',
+          left: `${trimStartPercent}%`,
+          top: 0,
+          bottom: 0,
+          width: `${handleWidth}px`,
+          transform: 'translateX(-100%)',
+          bgcolor: handleColor,
+          borderRadius: '3px 0 0 3px',
+          cursor: 'ew-resize',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background-color 0.15s ease',
+          zIndex: 5,
+          '&:hover': {
+            bgcolor: handleHoverColor,
+          },
+          '&:active': {
+            bgcolor: handleActiveColor,
+          },
+          // Handle grip lines
+          '&::after': {
+            content: '""',
+            width: '2px',
+            height: '8px',
+            bgcolor: alpha(theme.palette.common.white, 0.6),
             borderRadius: '1px',
-            // Triangle indicator at top
-            '&::before': {
-              content: '""',
-              position: 'absolute',
-              top: '-4px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 0,
-              height: 0,
-              borderLeft: '4px solid transparent',
-              borderRight: '4px solid transparent',
-              borderTop: `4px solid ${theme.palette.common.white}`,
-            },
-          }}
-        />
+          },
+        }}
+      />
+
+      {/* End trim handle */}
+      <Box
+        data-testid="trim-handle-end"
+        data-trim-end-percent={trimEndPercent.toFixed(2)}
+        onMouseDown={(e) => startDrag(e, 'end')}
+        onTouchStart={(e) => startDrag(e, 'end')}
+        sx={{
+          position: 'absolute',
+          left: `${trimEndPercent}%`,
+          top: 0,
+          bottom: 0,
+          width: `${handleWidth}px`,
+          bgcolor: handleColor,
+          borderRadius: '0 3px 3px 0',
+          cursor: 'ew-resize',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background-color 0.15s ease',
+          zIndex: 5,
+          '&:hover': {
+            bgcolor: handleHoverColor,
+          },
+          '&:active': {
+            bgcolor: handleActiveColor,
+          },
+          // Handle grip lines
+          '&::after': {
+            content: '""',
+            width: '2px',
+            height: '8px',
+            bgcolor: alpha(theme.palette.common.white, 0.6),
+            borderRadius: '1px',
+          },
+        }}
+      />
+
+      {/* Playhead */}
+      <Box
+        data-testid="trim-playhead"
+        data-playhead-percent={playheadPercent.toFixed(2)}
+        onMouseDown={(e) => startDrag(e, 'playhead')}
+        onTouchStart={(e) => startDrag(e, 'playhead')}
+        sx={{
+          position: 'absolute',
+          left: `${playheadPercent}%`,
+          top: '-4px',
+          bottom: '-4px',
+          width: '3px',
+          bgcolor: theme.palette.common.white,
+          transform: 'translateX(-50%)',
+          cursor: 'ew-resize',
+          zIndex: 10,
+          boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+          borderRadius: '1px',
+          // Triangle indicator at top
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: '-4px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 0,
+            height: 0,
+            borderLeft: '4px solid transparent',
+            borderRight: '4px solid transparent',
+            borderTop: `4px solid ${theme.palette.common.white}`,
+          },
+        }}
+      />
 
       {/* Hover indicator line */}
       {hoverState && !isDragging && (
