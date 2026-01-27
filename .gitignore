@@ -43,5 +43,7 @@ tsconfig.tsbuildinfo
 .vscode
 .cursor
 .turbo
+.agents
+.github
 
 test-results/
