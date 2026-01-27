@@ -252,14 +252,10 @@ const addintrooutrotaskhandler = onTaskDispatched(
     cpu: 1,
     concurrency: 1,
     retryConfig: {
-      maxAttempts: 2,
+      maxAttempts: 1,
     },
   },
   async (request: Request<AddIntroOutroInputType>): Promise<void> => {
-    // Setting the `keepAlive` option to `true` keeps
-    // connections open between function invocations
-    // new http.Agent({ keepAlive: false });
-
     const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
     // set timeout to 30 seconds less than timeoutSeconds then throw error if it takes longer than that
     const data = request.data;

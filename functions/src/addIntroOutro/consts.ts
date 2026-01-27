@@ -1,1 +1,1 @@
-export const TIMEOUT_SECONDS = 1800; // 30 minutes
+export const TIMEOUT_SECONDS = 3600; // 60 minutes; must be >= Cloud Run executeWithTimeout
