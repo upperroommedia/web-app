@@ -113,7 +113,8 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
   }, [currentTheme, setTheme]);
 
   const isActivePath = useCallback(
