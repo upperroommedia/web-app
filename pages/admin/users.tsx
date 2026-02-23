@@ -12,6 +12,35 @@ import { GetUserInputType, GetUserOutputType } from '../../functions/src/getUser
 import { SetUserRoleInputType, SetUserRoleOutputType } from '../../functions/src/setUserRole';
 import { UserWithLoading } from '../../types/User';
 
+let cachedUsers: UserWithLoading[] | null = null;
+let listUsersInFlight: Promise<UserWithLoading[]> | null = null;
+
+const fetchUsersWithDedupe = async (): Promise<UserWithLoading[]> => {
+  if (cachedUsers) {
+    return cachedUsers;
+  }
+
+  if (listUsersInFlight) {
+    return listUsersInFlight;
+  }
+
+  const listUsers = createFunctionV2<ListUsersInputType, ListUsersOutputType>('listusers');
+  listUsersInFlight = listUsers({})
+    .then((listUsersOutput) => {
+      if (listUsersOutput.status === 'error') {
+        throw new Error(listUsersOutput.error);
+      }
+      const mappedUsers = listUsersOutput.data.map((listUserOutput) => ({ ...listUserOutput, loading: false }));
+      cachedUsers = mappedUsers;
+      return mappedUsers;
+    })
+    .finally(() => {
+      listUsersInFlight = null;
+    });
+
+  return listUsersInFlight;
+};
+
 const AdminUsers = () => {
   const [usersWithLoading, setUsersWithLoading] = useState<UserWithLoading[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -24,16 +53,16 @@ const AdminUsers = () => {
 
   const fetchUsers = async () => {
     setLoadingUsers(true);
-    const listUsers = createFunctionV2<ListUsersInputType, ListUsersOutputType>('listusers');
-
-    const listUsersOutput = await listUsers({});
-    if (listUsersOutput.status === 'error') {
-      setMessage({ status: 'error', message: listUsersOutput.error, id: new Date().getTime() });
+    try {
+      const users = await fetchUsersWithDedupe();
+      setUsersWithLoading(users);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load users';
+      setMessage({ status: 'error', message, id: new Date().getTime() });
       setSnackBarOpen(true);
-      return;
+    } finally {
+      setLoadingUsers(false);
     }
-    setUsersWithLoading(listUsersOutput.data.map((listUserOutput) => ({ ...listUserOutput, loading: false })));
-    setLoadingUsers(false);
   };
 
   const setUserLoading = (uid: string, loading: boolean) => {
@@ -62,14 +91,16 @@ const AdminUsers = () => {
       if (getUserResponse.status === 'error') {
         throw new Error(getUserResponse.error);
       }
-      setUsersWithLoading((previousUsersWithLoading) =>
-        previousUsersWithLoading.map((previousUserWithLoading) => {
+      setUsersWithLoading((previousUsersWithLoading) => {
+        const updatedUsers = previousUsersWithLoading.map((previousUserWithLoading) => {
           if (previousUserWithLoading.uid === uid) {
             return { ...getUserResponse.data, loading: false };
           }
           return previousUserWithLoading;
-        })
-      );
+        });
+        cachedUsers = updatedUsers;
+        return updatedUsers;
+      });
       setMessage({ status: 'success', message: setUserRoleResult.status, id: new Date().getTime() });
     } catch (error) {
       let message = '';
