@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { seedPlayableSermon } from './helpers/seedPlayableSermon';
 
 async function loginAsDevAdmin(page: import('@playwright/test').Page, callbackPath = '/') {
   await page.goto(`/login?callbackurl=${encodeURIComponent(callbackPath)}`);
@@ -6,6 +7,17 @@ async function loginAsDevAdmin(page: import('@playwright/test').Page, callbackPa
   await expect(devLoginButton).toBeVisible();
   await devLoginButton.click();
   await page.waitForURL(/^(?!.*\/login)/);
+}
+
+async function playSermonFromSearch(page: import('@playwright/test').Page, sermonTitle: string) {
+  const searchBox = page.getByRole('searchbox').first();
+  await expect(searchBox).toBeVisible();
+  await searchBox.fill(sermonTitle);
+  await expect(page.getByText(sermonTitle)).toBeVisible({ timeout: 10_000 });
+
+  const playButton = page.locator('button:has([data-testid="PlayArrowIcon"])').first();
+  await expect(playButton).toBeVisible();
+  await playButton.click();
 }
 
 test.describe('Player clear on upload / edit routes', () => {
@@ -16,21 +28,21 @@ test.describe('Player clear on upload / edit routes', () => {
   });
 
   test('navigating to upload clears player when a sermon was playing', async ({ page }) => {
-    await loginAsDevAdmin(page, '/admin/sermons');
-    await page.waitForURL(/\/admin\/sermons$/);
+    const seededSermon = await seedPlayableSermon();
+    try {
+      await loginAsDevAdmin(page, '/admin/sermons');
+      await page.waitForURL(/\/admin\/sermons$/);
 
-    const playButton = page.getByRole('button', { name: /toggle play\/pause/i }).first();
-    if ((await playButton.count()) === 0) {
-      test.skip();
-      return;
+      await playSermonFromSearch(page, seededSermon.title);
+
+      await expect(page.getByTestId('floating-audio-bar')).toBeVisible({ timeout: 6000 });
+
+      await page.goto('/');
+      await page.waitForURL(/\/(\?|$)/);
+
+      await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
+    } finally {
+      await seededSermon.cleanup();
     }
-    await playButton.click();
-
-    await expect(page.getByTestId('floating-audio-bar')).toBeVisible({ timeout: 6000 });
-
-    await page.goto('/');
-    await page.waitForURL(/\/(\?|$)/);
-
-    await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
   });
 });
