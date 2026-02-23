@@ -82,11 +82,11 @@ const SermonDetailsPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [deletePopup, setDeletePopup] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  
+
   // Publishing state
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
   const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
-  
+
   // Real-time sermon document listener
   const [sermonSnapshot, sermonLoading, sermonError] = useDocument(
     sermonId ? doc(firestore, 'sermons', sermonId).withConverter(sermonConverter) : null,
@@ -95,7 +95,7 @@ const SermonDetailsPage = () => {
     }
   );
   const sermon = sermonSnapshot?.data();
-  
+
   // Sermon lists
   const [sermonLists, listsLoading, _listsError] = useCollectionData(
     sermonId ? collection(firestore, `sermons/${sermonId}/sermonLists`).withConverter(sermonListConverter) : null
@@ -109,7 +109,7 @@ const SermonDetailsPage = () => {
   const canPublish = user?.canPublish() ?? false;
   const isCurrentlyPlaying = currentSermon?.id === sermonId && playing;
   const isSoundCloudUploaded = sermon?.status.soundCloud === uploadStatus.UPLOADED;
-  
+
   const listItemsUploaded = sermonLists?.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED) || [];
   const listItemsNotUploaded = sermonLists?.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED) || [];
 
@@ -151,8 +151,8 @@ const SermonDetailsPage = () => {
     } else {
       setUploader(undefined);
     }
-  // Intentionally depend on ids only to avoid refetch on every sermon snapshot (e.g. metadata-only updates)
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- sermon read for permission/seriesId/uploaderId; ids are sufficient
+    // Intentionally depend on ids only to avoid refetch on every sermon snapshot (e.g. metadata-only updates)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sermon read for permission/seriesId/uploaderId; ids are sufficient
   }, [sermon?.id, sermon?.seriesId, sermon?.uploaderId, isAdmin, canPublish, user?.uid]);
 
   // Handle errors from real-time listener
@@ -173,28 +173,28 @@ const SermonDetailsPage = () => {
   // Handle delete
   const handleDelete = useCallback(async () => {
     if (!sermon) return;
-    
+
     setIsDeleting(true);
     try {
       const promises: Promise<any>[] = [];
-      
+
       if (sermon.subsplashId) {
         const deleteFromSubsplash = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>('deletefromsubsplash');
         promises.push(deleteFromSubsplash({ subsplashId: sermon.subsplashId }));
       }
-      
+
       if (sermon.soundCloudTrackId) {
         const deleteFromSoundCloud = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
         promises.push(deleteFromSoundCloud({ soundCloudTrackId: sermon.soundCloudTrackId }));
       }
-      
+
       await Promise.allSettled(promises);
       await deleteDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter));
-      
+
       if (currentSermon?.id === sermon.id) {
         setCurrentSermon(undefined);
       }
-      
+
       router.push('/admin/sermons');
     } catch (err: any) {
       console.error('Error deleting sermon:', err);
@@ -207,7 +207,7 @@ const SermonDetailsPage = () => {
   const uploadToSoundCloud = useCallback(async () => {
     if (!sermon) return;
     setIsUploadingToSoundCloud(true);
-    
+
     const uploadToSoundCloudFn = createFunctionV2<UploadToSoundCloudInputType, UploadToSoundCloudReturnType>('uploadtosoundcloud');
     const data: UploadToSoundCloudInputType = {
       title: sermon.title,
@@ -217,7 +217,7 @@ const SermonDetailsPage = () => {
       audioStoragePath: `intro-outro-sermons/${sermon.id}`,
       imageStoragePath: getSquareImageStoragePath(sermon),
     };
-    
+
     try {
       const result = await uploadToSoundCloudFn(data);
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
@@ -236,9 +236,9 @@ const SermonDetailsPage = () => {
   const deleteFromSoundCloud = useCallback(async () => {
     if (!sermon) return;
     setIsUploadingToSoundCloud(true);
-    
+
     const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-    
+
     if (!sermon.soundCloudTrackId) {
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
@@ -247,9 +247,9 @@ const SermonDetailsPage = () => {
       setIsUploadingToSoundCloud(false);
       return;
     }
-    
+
     const deleteFromSoundCloudFn = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
-    
+
     try {
       await deleteFromSoundCloudFn({ soundCloudTrackId: sermon.soundCloudTrackId });
       await updateDoc(sermonRef, {
@@ -279,7 +279,7 @@ const SermonDetailsPage = () => {
       const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
-      
+
       const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
         title: sermon.title,
         subtitle: sermon.subtitle,
@@ -292,9 +292,9 @@ const SermonDetailsPage = () => {
         images: sermon.images,
         date: new Date(sermon.dateMillis),
       };
-      
+
       setIsUploadingToSubsplash(true);
-      
+
       let id = sermon.subsplashId;
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       if (!id) {
@@ -302,7 +302,7 @@ const SermonDetailsPage = () => {
         id = response.id;
         await updateDoc(sermonRef, { subsplashId: id });
       }
-      
+
       const listsMetadata = await Promise.all(
         listsToUploadTo.map(async (list) => {
           if (list.subsplashId) {
@@ -349,19 +349,19 @@ const SermonDetailsPage = () => {
       const listsToRemoveFiltered = listsToRemoveFrom.filter(
         (list) => list.uploadStatus?.status === uploadStatus.UPLOADED && list.uploadStatus.listItemId
       );
-      
+
       const subsplashIdToFirestoreIdMap = new Map<string, string>();
       listsToRemoveFiltered.forEach((list) => {
         if (list.subsplashId) subsplashIdToFirestoreIdMap.set(list.subsplashId, list.id);
       });
-      
+
       const removeFromListReturn = await removeFromListCallable({
         listIds: listsToRemoveFiltered.map((list) => list.subsplashId) as string[],
         listItemIds: listsToRemoveFiltered.map((list) => list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : '') as string[],
         itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
         itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
       });
-      
+
       const batch = writeBatch(firestore);
       for (const r of removeFromListReturn) {
         if (r.status === 'error') continue;
@@ -387,7 +387,7 @@ const SermonDetailsPage = () => {
       if (sermon.subsplashId) {
         await deleteFromSubsplashCall({ subsplashId: sermon.subsplashId });
       }
-      
+
       const batch = writeBatch(firestore);
       const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
       const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
@@ -450,7 +450,7 @@ const SermonDetailsPage = () => {
   };
 
   const statusInfo = getStatusInfo();
-  const uploaderName = uploader 
+  const uploaderName = uploader
     ? (`${uploader.firstName ?? ''} ${uploader.lastName ?? ''}`.trim() || uploader.displayName || uploader.email)
     : 'Unknown';
 
@@ -459,7 +459,7 @@ const SermonDetailsPage = () => {
     canPublish ||
     (user?.canUpload() && sermon.status.subsplash !== uploadStatus.UPLOADED && sermon.status.soundCloud !== uploadStatus.UPLOADED)
   );
-  
+
   const canDelete = sermon && (
     canPublish ||
     (user?.canUpload() && sermon.status.subsplash !== uploadStatus.UPLOADED && sermon.status.soundCloud !== uploadStatus.UPLOADED && sermon.status.audioStatus !== sermonStatusType.PENDING)
@@ -494,7 +494,7 @@ const SermonDetailsPage = () => {
         <title>{sermon.title} | Admin | Upper Room Media</title>
       </Head>
 
-      <Box sx={{ maxWidth: 'lg', mx: 'auto', py: { xs: 1, sm: 2, md: 4 }, px: { xs: 1, sm: 2, md: 3 } }}>
+      <Box>
         {/* Breadcrumbs */}
         <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: { xs: 1, sm: 2 } }}>
           <Link href="/admin/sermons" style={{ textDecoration: 'none' }}>
@@ -508,7 +508,7 @@ const SermonDetailsPage = () => {
         </Breadcrumbs>
 
         {/* Main Card */}
-        <Card sx={{ mb: { xs: 2, sm: 3 }, overflow: 'visible' }}>
+        <Card sx={{ overflow: 'visible' }}>
           <CardContent sx={{ p: { xs: 1.5, sm: 2, md: 3 } }}>
             {/* Header with Image and Info - Image always on right */}
             <Box
@@ -521,17 +521,17 @@ const SermonDetailsPage = () => {
             >
               {/* Info Section - First so it's on the left */}
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography 
-                  variant="h4" 
-                  fontWeight={700} 
-                  gutterBottom 
-                  sx={{ 
+                <Typography
+                  variant="h4"
+                  fontWeight={700}
+                  gutterBottom
+                  sx={{
                     fontSize: { xs: '1.25rem', sm: '1.5rem', md: '2rem' },
                   }}
                 >
                   {sermon.title}
                 </Typography>
-                
+
                 {sermon.subtitle && (
                   <Typography variant="h6" color="text.secondary" gutterBottom sx={{ fontSize: { xs: '0.9rem', sm: '1rem', md: '1.25rem' } }}>
                     {sermon.subtitle}
@@ -571,7 +571,7 @@ const SermonDetailsPage = () => {
                   <Box sx={{ mb: 2 }}>
                     <Chip
                       icon={statusInfo.icon}
-                      label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0 
+                      label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0
                         ? `${statusInfo.label} (${processingProgress}%)`
                         : statusInfo.label}
                       size="small"
@@ -588,7 +588,7 @@ const SermonDetailsPage = () => {
                           borderRadius: 3,
                           maxWidth: 200,
                           bgcolor: alpha(theme.palette.warning.main, 0.15),
-                          '& .MuiLinearProgress-bar': { 
+                          '& .MuiLinearProgress-bar': {
                             bgcolor: 'warning.main',
                             borderRadius: 3,
                           }
@@ -630,7 +630,7 @@ const SermonDetailsPage = () => {
                     overflow: 'hidden',
                     boxShadow: 2,
                     bgcolor: sermon.images?.find((img) => img.type === 'square')?.averageColorHex || 'action.hover',
-                    backgroundImage: sermon.images?.find((img) => img.type === 'square')?.downloadLink 
+                    backgroundImage: sermon.images?.find((img) => img.type === 'square')?.downloadLink
                       ? `url(${sermon.images.find((img) => img.type === 'square')?.downloadLink})`
                       : 'url(/URM_Icon.png)',
                     backgroundSize: 'cover',
@@ -701,12 +701,12 @@ const SermonDetailsPage = () => {
                     Series
                   </Typography>
                   <Link href={`/admin/series/${series.id}`} style={{ textDecoration: 'none' }}>
-                    <Card 
-                      variant="outlined" 
-                      sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: { xs: 1, sm: 2 }, 
+                    <Card
+                      variant="outlined"
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: { xs: 1, sm: 2 },
                         p: { xs: 1, sm: 2 },
                         cursor: 'pointer',
                         transition: 'all 0.15s',
@@ -747,7 +747,7 @@ const SermonDetailsPage = () => {
                   <Typography variant="subtitle1" fontWeight={600} gutterBottom>
                     Publishing Status
                   </Typography>
-                  
+
                   {/* SoundCloud */}
                   <Card variant="outlined" sx={{ p: 2, mb: 2 }}>
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -785,7 +785,7 @@ const SermonDetailsPage = () => {
                         </Typography>
                       </Box>
                     </Stack>
-                    
+
                     {listsLoading ? (
                       <CircularProgress size={20} />
                     ) : (
