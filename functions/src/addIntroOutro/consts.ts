@@ -1,1 +1,1 @@
-export const TIMEOUT_SECONDS = 3600; // 60 minutes; must be >= Cloud Run executeWithTimeout
+export const TIMEOUT_SECONDS = 1800; // 30 minutes; max allowed for Cloud Tasks dispatch
