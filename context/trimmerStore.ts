@@ -68,24 +68,27 @@ export const useTrimmerStore = create<TrimmerStore>((set, get) => ({
   // Actions
   setTrimStart: (time, source = 'external') => {
     const { trimEnd, duration } = get();
+    const maxDuration = duration > 0 ? duration : Number.POSITIVE_INFINITY;
     // Clamp to valid range: 0 <= trimStart < trimEnd
-    const clampedTime = Math.max(0, Math.min(time, trimEnd - 0.1, duration));
+    const clampedTime = Math.max(0, Math.min(time, trimEnd - 0.1, maxDuration));
     set({ trimStart: clampedTime, lastChangeSource: source });
   },
 
   setTrimEnd: (time, source = 'external') => {
     const { trimStart, duration } = get();
+    const maxDuration = duration > 0 ? duration : Number.POSITIVE_INFINITY;
     // Clamp to valid range: trimStart < trimEnd <= duration
-    const clampedTime = Math.max(trimStart + 0.1, Math.min(time, duration));
+    const clampedTime = Math.max(trimStart + 0.1, Math.min(time, maxDuration));
     set({ trimEnd: clampedTime, lastChangeSource: source });
   },
 
   setCurrentTime: (time, source = 'external') => {
     const { duration, isScrubbing } = get();
+    const maxDuration = duration > 0 ? duration : Number.POSITIVE_INFINITY;
     // Don't update from media source while scrubbing
     if (source === 'media' && isScrubbing) return;
 
-    const clampedTime = Math.max(0, Math.min(time, duration));
+    const clampedTime = Math.max(0, Math.min(time, maxDuration));
     set({ currentTime: clampedTime, lastChangeSource: source });
   },
 

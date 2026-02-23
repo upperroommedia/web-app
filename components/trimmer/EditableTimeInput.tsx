@@ -5,6 +5,7 @@ import Tooltip from '@mui/material/Tooltip';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useCallback, useEffect, useRef, useState, memo, useLayoutEffect } from 'react';
 import { useTrimmerStore } from '../../context/trimmerStore';
+import { logTrimmerDebug } from '@/utils/trimmerDebug';
 
 interface EditableTimeInputProps {
   /** Which time value this input controls */
@@ -15,6 +16,8 @@ interface EditableTimeInputProps {
   sx?: object;
   /** Disabled state */
   disabled?: boolean;
+  /** Optional callback to commit a media seek on reset/blur using a single external seek path. */
+  onCommitSeek?: (time: number) => void;
 }
 
 // Fixed format: HH:MM:SS.m (always 10 characters)
@@ -97,7 +100,7 @@ function prevDigitPosition(pos: number): number {
  * - Delete/Backspace replace digits with 0 instead of removing
  * - Typing overwrites the digit at cursor position
  */
-function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps) {
+function EditableTimeInput({ type, label, sx, disabled, onCommitSeek }: EditableTimeInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Subscribe only to this input's value and duration so the other bound doesn't trigger re-renders.
@@ -135,20 +138,30 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
 
   // Original value: 0 for start, duration for end
   const originalValue = type === 'start' ? 0 : duration;
-  
-  // Check if current value differs from original (with small tolerance for floating point)
-  const hasChanged = Math.abs(storeValue - originalValue) > 0.05;
+
+  // Keep reset affordance visible while actively editing even if store commit is pending.
+  const hasChanged = isFocused
+    ? inputValue !== secondsToFixedFormat(originalValue)
+    : Math.abs(storeValue - originalValue) > 0.05;
 
   // Reset handler. Read trimStart for end-type from store to avoid subscribing.
   const handleReset = useCallback(() => {
     const trimStart = type === 'end' ? useTrimmerStore.getState().trimStart : 0;
     const previewTime =
       type === 'end' ? Math.max(trimStart, originalValue - 5) : originalValue;
-    setStoreValue(originalValue, 'input');
-    setCurrentTime(previewTime, 'input');
+    logTrimmerDebug('time-input-reset', {
+      type,
+      originalValue,
+      previewTime,
+      currentStoreValue: storeValue,
+    });
+    const source = onCommitSeek ? 'external' : 'input';
+    setCurrentTime(previewTime, source);
+    setStoreValue(originalValue, source);
+    onCommitSeek?.(previewTime);
     setInputValue(secondsToFixedFormat(originalValue));
     setIsInvalid(false);
-  }, [originalValue, setStoreValue, setCurrentTime, type]);
+  }, [onCommitSeek, originalValue, setStoreValue, setCurrentTime, storeValue, type]);
 
   // Sync input from store when not focused/editing
   useEffect(() => {
@@ -193,14 +206,13 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
       clampedTime = Math.max(ts + 0.1, Math.min(parsedTime, duration));
     }
 
-    setStoreValue(clampedTime, 'input');
-    if (type === 'start') {
-      setCurrentTime(clampedTime, 'input');
-    } else {
-      setCurrentTime(Math.max(ts, clampedTime - 5), 'input');
-    }
+    const commitTime = type === 'start' ? clampedTime : Math.max(ts, clampedTime - 5);
+    const source = onCommitSeek ? 'external' : 'input';
+    setStoreValue(clampedTime, source);
+    setCurrentTime(commitTime, source);
+    onCommitSeek?.(commitTime);
     setInputValue(secondsToFixedFormat(clampedTime));
-  }, [inputValue, type, duration, setStoreValue, setCurrentTime]);
+  }, [inputValue, onCommitSeek, type, duration, setStoreValue, setCurrentTime]);
 
   // Helper to update value and store
   const updateValue = useCallback(
@@ -218,6 +230,11 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
 
       // Parse the time
       const parsedTime = fixedFormatToSeconds(newValue);
+      logTrimmerDebug('time-input-update', {
+        type,
+        rawValue: newValue,
+        parsedTime,
+      });
 
       // Check validity and update indicator
       const isValid = checkValidity(parsedTime);
@@ -226,12 +243,12 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
       const { trimStart: ts, trimEnd: te } = useTrimmerStore.getState();
       if (type === 'start') {
         const previewTime = Math.max(0, Math.min(parsedTime, te - 0.1, duration));
-        setCurrentTime(previewTime, 'input');
-        if (isValid) setStoreValue(parsedTime, 'input');
+        setCurrentTime(previewTime, 'external');
+        if (isValid) setStoreValue(parsedTime, 'external');
       } else {
         const clampedEnd = Math.max(ts + 0.1, Math.min(parsedTime, duration));
-        setCurrentTime(Math.max(ts, clampedEnd - 5), 'input');
-        if (isValid) setStoreValue(parsedTime, 'input');
+        setCurrentTime(Math.max(ts, clampedEnd - 5), 'external');
+        if (isValid) setStoreValue(parsedTime, 'external');
       }
     },
     [duration, type, setStoreValue, setCurrentTime, inputValue, checkValidity]
@@ -468,6 +485,8 @@ function EditableTimeInput({ type, label, sx, disabled }: EditableTimeInputProps
         <IconButton
           size="small"
           onClick={handleReset}
+          aria-label={hasChanged ? `Reset to ${type === 'start' ? 'start' : 'end'}` : undefined}
+          aria-hidden={!hasChanged}
           tabIndex={hasChanged ? 0 : -1}
           sx={{
             position: 'absolute',

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useRef, RefObject } from 'react';
 import { useTrimmerStore } from '../../context/trimmerStore';
+import { logTrimmerDebug } from '@/utils/trimmerDebug';
 
 export type DragTarget = 'start' | 'end' | 'playhead' | null;
 
@@ -48,6 +49,8 @@ export function useTrimmerDrag(
   const trimTargetTimeRef = useRef<number | null>(null);
   const onSeekRef = useRef(onSeek);
   const onTrimDragEndRef = useRef(onTrimDragEnd);
+  const dragStartPointRef = useRef<{ x: number; y: number } | null>(null);
+  const hasDraggedRef = useRef(false);
 
   // Keep refs updated with latest values
   useEffect(() => {
@@ -73,6 +76,20 @@ export function useTrimmerDrag(
     e.preventDefault();
     e.stopPropagation();
     const state = useTrimmerStore.getState();
+    const point =
+      'touches' in e
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        : { x: e.clientX, y: e.clientY };
+    dragStartPointRef.current = point;
+    hasDraggedRef.current = false;
+    logTrimmerDebug('timeline.start-drag', {
+      target,
+      x: point.x,
+      y: point.y,
+      trimStart: state.trimStart,
+      trimEnd: state.trimEnd,
+      currentTime: state.currentTime,
+    });
     setDragTarget(target);
     state.setIsScrubbing(true);
   }, []);
@@ -81,18 +98,36 @@ export function useTrimmerDrag(
   const handleBackgroundMouseDown = useCallback(
     (e: React.MouseEvent | React.TouchEvent) => {
       e.preventDefault();
+      e.stopPropagation();
+      const point =
+        'touches' in e
+          ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+          : { x: e.clientX, y: e.clientY };
+      dragStartPointRef.current = point;
+      hasDraggedRef.current = false;
+
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
       const time = positionToTime(clientX);
       const state = useTrimmerStore.getState();
 
       // Move playhead to clicked position and start dragging
       const clampedTime = Math.max(state.trimStart, Math.min(time, state.trimEnd));
+      logTrimmerDebug('timeline.background-seek', {
+        time,
+        clampedTime,
+        x: point.x,
+        y: point.y,
+        trimStart: state.trimStart,
+        trimEnd: state.trimEnd,
+      });
+      // Enter scrubbing mode first so timeline-origin store updates don't
+      // immediately dispatch a hard seek (this can race with remote.seeking).
+      state.setIsScrubbing(true);
       state.setCurrentTime(clampedTime, 'timeline');
-      onSeekRef.current?.(clampedTime);
+      trimTargetTimeRef.current = clampedTime;
 
       // Start dragging the playhead
       setDragTarget('playhead');
-      state.setIsScrubbing(true);
     },
     [positionToTime]
   );
@@ -106,7 +141,16 @@ export function useTrimmerDrag(
     const handleMove = (e: MouseEvent | TouchEvent) => {
       if (!containerRef.current) return;
 
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const point = 'touches' in e ? e.touches[0] : e;
+      const clientX = point.clientX;
+
+      if (dragStartPointRef.current && !hasDraggedRef.current) {
+        const dx = Math.abs(point.clientX - dragStartPointRef.current.x);
+        const dy = Math.abs(point.clientY - dragStartPointRef.current.y);
+        if (dx > 3 || dy > 3) {
+          hasDraggedRef.current = true;
+        }
+      }
 
       // Get latest values from store (not stale closure values)
       const state = useTrimmerStore.getState();
@@ -124,8 +168,6 @@ export function useTrimmerDrag(
         state.setTrimStart(newStart, 'timeline');
         state.setCurrentTime(newStart, 'timeline');
         trimTargetTimeRef.current = newStart;
-        // Seek during drag (throttled by parent) - same as playhead
-        onSeekRef.current?.(newStart);
       } else if (dragTarget === 'end') {
         // Ensure end doesn't go below start + 0.1s
         const minEnd = currentTrimStart + 0.1;
@@ -135,37 +177,78 @@ export function useTrimmerDrag(
         state.setTrimEnd(newEnd, 'timeline');
         state.setCurrentTime(previewTime, 'timeline');
         trimTargetTimeRef.current = previewTime;
-        // Seek during drag (throttled by parent) - same as playhead
-        onSeekRef.current?.(previewTime);
       } else if (dragTarget === 'playhead') {
+        // For click-to-seek interactions, avoid preview seek requests:
+        // background mousedown already set the target time and mouseup will commit once.
+        if (!hasDraggedRef.current) {
+          return;
+        }
         // Constrain playhead within trim range
         const newTime = Math.max(currentTrimStart, Math.min(time, currentTrimEnd));
         state.setCurrentTime(newTime, 'timeline');
+        trimTargetTimeRef.current = newTime;
         onSeekRef.current?.(newTime);
       }
     };
 
-    const handleUp = () => {
-      // For trim handles, call onTrimDragEnd with the saved target time
-      if ((dragTarget === 'start' || dragTarget === 'end') && trimTargetTimeRef.current !== null) {
+    const handleUp = (event?: Event) => {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if ('stopImmediatePropagation' in event) {
+          event.stopImmediatePropagation();
+        }
+      }
+
+      if (hasDraggedRef.current) {
+        // Prevent accidental control activation from the synthetic click
+        // fired at the pointerup target after a drag operation.
+        const suppressNextClick = (event: MouseEvent) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          window.removeEventListener('click', suppressNextClick, true);
+        };
+        window.addEventListener('click', suppressNextClick, true);
+        setTimeout(() => {
+          window.removeEventListener('click', suppressNextClick, true);
+        }, 0);
+      }
+
+      // Commit the final target time when any draggable target is released.
+      if (dragTarget !== null && trimTargetTimeRef.current !== null) {
+        logTrimmerDebug('timeline.end-drag', {
+          dragTarget,
+          finalTime: trimTargetTimeRef.current,
+          hasDragged: hasDraggedRef.current,
+        });
         onTrimDragEndRef.current?.(trimTargetTimeRef.current);
         trimTargetTimeRef.current = null;
       }
 
+      dragStartPointRef.current = null;
+      hasDraggedRef.current = false;
       setDragTarget(null);
       useTrimmerStore.getState().setIsScrubbing(false);
     };
 
+    const handleMouseUp = (e: MouseEvent) => handleUp(e);
+    const handleTouchEnd = (e: TouchEvent) => handleUp(e);
+    const handlePointerUp = (e: PointerEvent) => handleUp(e);
+
     window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleMove);
-    window.addEventListener('touchend', handleUp);
+    // Capture release events before control buttons can handle them.
+    window.addEventListener('mouseup', handleMouseUp, true);
+    window.addEventListener('touchend', handleTouchEnd, true);
+    window.addEventListener('pointerup', handlePointerUp, true);
 
     return () => {
       window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
       window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleUp);
+      window.removeEventListener('mouseup', handleMouseUp, true);
+      window.removeEventListener('touchend', handleTouchEnd, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
     };
   }, [dragTarget, containerRef]); // Minimal dependencies - store values accessed via getState()
 
