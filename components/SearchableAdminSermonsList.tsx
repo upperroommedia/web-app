@@ -75,8 +75,11 @@ function MobileFilterDrawer({ show }: { show: boolean }) {
 
 const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
   const { user } = useAuth();
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState<string | null>(() => (isDevelopment ? 'mock-key' : null));
   const [showFilters, setShowFilters] = useState<boolean>(false);
+  const userId = user?.uid ?? null;
+  const isAdminUser = user?.isAdmin() ?? false;
+  const userRole = user?.role;
 
   if (!user) {
     throw new Error('User not found');
@@ -87,40 +90,37 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
 
   useEffect(() => {
     const initApiKey = async () => {
-      if (!apiKey) {
-        if (isDevelopment) {
-          setApiKey('mock-key');
-          return;
-        }
-        if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
-          throw new Error('Missing Algolia Credentials');
-        }
-        if (user.isAdmin()) {
-          setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
-        } else {
-          const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
-            'generatesecuredapikey'
-          );
-          const securedKey = await generateSecuredApiKey({ userId: user.uid });
-          setApiKey(securedKey);
-        }
+      if (isDevelopment || apiKey) {
+        return;
+      }
+      if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
+        throw new Error('Missing Algolia Credentials');
+      }
+      if (isAdminUser) {
+        setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
+      } else if (userId) {
+        const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
+          'generatesecuredapikey'
+        );
+        const securedKey = await generateSecuredApiKey({ userId });
+        setApiKey(securedKey);
       }
     };
     initApiKey();
-  }, [apiKey, user]);
+  }, [apiKey, userId, isAdminUser]);
 
   const searchClient = useMemo((): SearchClient | null => {
     if (isDevelopment) {
       return createMockAlgoliaSearchClient({
-        userId: user.uid,
-        isAdmin: user.isAdmin(),
+        userId: userId ?? '',
+        isAdmin: isAdminUser,
       });
     }
     if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
       return null;
     }
     return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
-  }, [apiKey, user]);
+  }, [apiKey, userId, isAdminUser, userRole]);
 
   const handleFilterToggle = useCallback(() => setShowFilters((prev) => !prev), []);
 
