@@ -103,7 +103,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         spacing={2}
-        alignItems="center"
+        alignItems={{ xs: 'stretch', sm: 'center' }}
         justifyContent="space-between"
       >
         <EditableTimeInput type="start" label="Trim Start" />

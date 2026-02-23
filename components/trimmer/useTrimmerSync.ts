@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useTrimmerStore } from '../../context/trimmerStore';
-import type { MediaPlayerInstance } from '@vidstack/react';
+import { useMediaRemote, type MediaPlayerInstance } from '@vidstack/react';
+import { logTrimmerDebug } from '@/utils/trimmerDebug';
 
 interface UseTrimmerSyncOptions {
   /** Called when seeking is needed */
@@ -36,8 +37,9 @@ export function useAudioTrimmerSync(
   // Track if we initiated the seek to prevent feedback loop
   const seekingRef = useRef(false);
   const lastSyncedTimeRef = useRef(0);
-  const initializedRef = useRef(false);
+  const lastRequestedStoreTimeRef = useRef<number | null>(null);
   const wasPlayingBeforeScrubRef = useRef(false);
+  const initializedRef = useRef(false);
 
   // Handle metadata loaded - initialize store (only once)
   const handleLoadedMetadata = useCallback(() => {
@@ -105,6 +107,10 @@ export function useAudioTrimmerSync(
       const state = useTrimmerStore.getState();
       if (!audioRef.current || state.isScrubbing) return;
       if (state.lastChangeSource !== 'input' && state.lastChangeSource !== 'timeline') return;
+      if (lastRequestedStoreTimeRef.current !== null && Math.abs(state.currentTime - lastRequestedStoreTimeRef.current) < 0.001) {
+        return;
+      }
+      lastRequestedStoreTimeRef.current = state.currentTime;
       const audio = audioRef.current;
       if (Math.abs(audio.currentTime - state.currentTime) > 0.1) {
         seekingRef.current = true;
@@ -205,6 +211,7 @@ export function useVidstackTrimmerSync(
   options: UseTrimmerSyncOptions = {}
 ) {
   const { autoPauseAtEnd = true } = options;
+  const remote = useMediaRemote(playerRef);
 
   // Only subscribe to state the caller needs. currentTime/lastChangeSource are used
   // for store→player sync via subscribe() below so the hook (and YouTubeTrimmer)
@@ -219,7 +226,8 @@ export function useVidstackTrimmerSync(
 
   const seekingRef = useRef(false);
   const lastSyncedTimeRef = useRef(0);
-  const lastInitializedDurationRef = useRef<number | null>(null);
+  const lastRequestedStoreTimeRef = useRef<number | null>(null);
+  const ignoreMediaUntilRef = useRef(0);
 
   // Sync store time changes to player (when initiated by user input).
   // Use store.subscribe so we don't subscribe to currentTime/lastChangeSource in React
@@ -229,23 +237,39 @@ export function useVidstackTrimmerSync(
       const state = useTrimmerStore.getState();
       const player = playerRef.current;
       if (!player || state.isScrubbing) return;
-      if (state.lastChangeSource !== 'input' && state.lastChangeSource !== 'timeline') return;
+      // For Vidstack, timeline seeks are driven explicitly by remote.seeking/remote.seek
+      // from the trimmer UI interaction handlers. Keep this subscription input-only to
+      // avoid duplicate seek request paths and request ordering races.
+      if (state.lastChangeSource !== 'input') return;
+      if (lastRequestedStoreTimeRef.current !== null && Math.abs(state.currentTime - lastRequestedStoreTimeRef.current) < 0.001) {
+        return;
+      }
+      lastRequestedStoreTimeRef.current = state.currentTime;
       if (Math.abs(player.currentTime - state.currentTime) > 0.1) {
+        // Ignore media echo updates for a short window after programmatic seeks.
+        ignoreMediaUntilRef.current = Date.now() + 1500;
+        logTrimmerDebug('vidstack.store-seek', {
+          fromTime: player.currentTime,
+          toTime: state.currentTime,
+          source: state.lastChangeSource,
+          isScrubbing: state.isScrubbing,
+        });
         seekingRef.current = true;
-        player.currentTime = state.currentTime;
+        remote.seek(state.currentTime);
         lastSyncedTimeRef.current = state.currentTime;
         setTimeout(() => {
           seekingRef.current = false;
         }, 100);
       }
     });
-  }, [playerRef]);
+  }, [playerRef, remote]);
 
   // Create subscription for time updates
   const subscribeToPlayer = useCallback(
     (player: MediaPlayerInstance) => {
       const unsubscribeTime = player.subscribe(({ currentTime: playerTime }) => {
         if (isScrubbing || seekingRef.current) return;
+        if (Date.now() < ignoreMediaUntilRef.current) return;
 
         if (Math.abs(playerTime - lastSyncedTimeRef.current) > 0.05) {
           lastSyncedTimeRef.current = playerTime;
@@ -254,6 +278,10 @@ export function useVidstackTrimmerSync(
 
         // Check if we've reached the end of trim region
         if (autoPauseAtEnd && playerTime >= trimEnd) {
+          logTrimmerDebug('vidstack.auto-pause-at-end', {
+            playerTime,
+            trimEnd,
+          });
           player.pause();
         }
       });
@@ -282,31 +310,43 @@ export function useVidstackTrimmerSync(
     (time: number) => {
       const player = playerRef.current;
       if (player) {
+        logTrimmerDebug('vidstack.seek-command', {
+          targetTime: time,
+          currentTime: player.currentTime,
+        });
         seekingRef.current = true;
-        player.currentTime = time;
+        remote.seek(time);
         lastSyncedTimeRef.current = time;
         setTimeout(() => {
           seekingRef.current = false;
         }, 100);
       }
     },
-    [playerRef]
+    [playerRef, remote]
   );
 
   // Play controls
   const play = useCallback(() => {
     const player = playerRef.current;
     if (player) {
+      logTrimmerDebug('vidstack.play-command', {
+        playerTime: player.currentTime,
+        trimStart,
+        trimEnd,
+      });
       if (player.currentTime < trimStart || player.currentTime >= trimEnd) {
-        player.currentTime = trimStart;
+        remote.seek(trimStart);
       }
-      player.play();
+      remote.play();
     }
-  }, [playerRef, trimStart, trimEnd]);
+  }, [playerRef, remote, trimStart, trimEnd]);
 
   const pause = useCallback(() => {
-    playerRef.current?.pause();
-  }, [playerRef]);
+    if (playerRef.current) {
+      logTrimmerDebug('vidstack.pause-command');
+      remote.pause();
+    }
+  }, [playerRef, remote]);
 
   // ref is stable; omitted from deps per React convention (react-hooks/exhaustive-deps doesn't recognize ref params)
   const togglePlayPause = useCallback(() => {
@@ -321,16 +361,23 @@ export function useVidstackTrimmerSync(
   // Initialize with duration when available
   const handleDurationChange = useCallback(
     (duration: number) => {
-      if (duration > 0 && duration !== lastInitializedDurationRef.current) {
-        lastInitializedDurationRef.current = duration;
+      if (duration <= 0) return;
+
+      const state = useTrimmerStore.getState();
+      // Only run full initialization once per source/reset.
+      // Subsequent duration updates should not reset user trim selections.
+      if (state.duration === 0 || state.trimEnd === 0) {
         initialize({
           duration,
           trimStart: 0,
           trimEnd: duration,
         });
+        return;
       }
+
+      setDuration(duration);
     },
-    [initialize]
+    [initialize, setDuration]
   );
 
   return {

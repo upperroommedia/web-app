@@ -122,4 +122,44 @@ test.describe('Audio trimmer', () => {
     const playheadAfter = parseFloat((await playhead.getAttribute('data-playhead-percent')) || '0');
     expect(playheadAfter).toBeGreaterThan(10);
   });
+
+  test('trim Start/End inputs visible and actionable on mobile viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 640 });
+    await loginAsDevAdmin(page);
+
+    const toggle = page.getByLabel('Upload from Youtube Url toggle');
+    if (await toggle.isChecked()) {
+      await toggle.click();
+    }
+
+    const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
+    const fileInput = dropzone.locator('input');
+    await fileInput.setInputFiles({
+      name: 'sample.wav',
+      mimeType: 'audio/wav',
+      buffer: createSilentWav(),
+    });
+
+    const trimStartInput = page.getByRole('textbox', { name: 'Trim Start' });
+    const trimEndInput = page.getByRole('textbox', { name: 'Trim End' });
+    await expect(trimStartInput).toBeVisible({ timeout: 10000 });
+    await expect(trimEndInput).toBeVisible({ timeout: 10000 });
+
+    const viewportSize = page.viewportSize();
+    const startBox = await trimStartInput.boundingBox();
+    const endBox = await trimEndInput.boundingBox();
+    if (viewportSize && startBox) {
+      expect(startBox.x).toBeGreaterThanOrEqual(0);
+      expect(startBox.x + startBox.width).toBeLessThanOrEqual(viewportSize.width);
+    }
+    if (viewportSize && endBox) {
+      expect(endBox.x).toBeGreaterThanOrEqual(0);
+      expect(endBox.x + endBox.width).toBeLessThanOrEqual(viewportSize.width);
+    }
+
+    await trimStartInput.click({ force: true });
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('0000100');
+    await expect(trimStartInput).toHaveValue(/00:00:10/);
+  });
 });

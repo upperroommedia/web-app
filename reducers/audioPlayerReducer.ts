@@ -23,6 +23,7 @@ export default function audioPlayerReducer(
         ...state,
         currentSermon: payload,
         currentSermonSecond: 0,
+        ...(payload === undefined && { playing: false }),
       };
     }
 
