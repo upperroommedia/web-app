@@ -12,7 +12,7 @@ import React, { FunctionComponent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { GetUserInputType, GetUserOutputType } from '../functions/src/getUser';
+import type { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '../functions/src/getUsersByIds';
 import Card from '@mui/material/Card';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
@@ -49,6 +49,96 @@ import { sermonConverter } from '../types/Sermon';
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
 const uploaderCache = new Map<string, User>();
+const pendingUploaderIds = new Set<string>();
+const pendingUploaderResolvers = new Map<string, Array<(user: User | undefined) => void>>();
+let uploaderBatchScheduled = false;
+let uploaderBatchInFlight = false;
+
+const resolvePendingUploader = (uid: string, user: User | undefined) => {
+  const resolvers = pendingUploaderResolvers.get(uid);
+  if (!resolvers) {
+    return;
+  }
+  for (const resolve of resolvers) {
+    resolve(user);
+  }
+  pendingUploaderResolvers.delete(uid);
+};
+
+const flushUploaderBatch = async () => {
+  if (uploaderBatchInFlight || pendingUploaderIds.size === 0) {
+    return;
+  }
+
+  uploaderBatchInFlight = true;
+  const requestedUids = Array.from(pendingUploaderIds);
+  pendingUploaderIds.clear();
+
+  try {
+    const getUsersByIds = createFunctionV2<GetUsersByIdsInputType, GetUsersByIdsOutputType>('getusersbyids');
+    const result = await getUsersByIds({ uids: requestedUids });
+
+    if (result.status === 'success') {
+      const returnedUsers = new Map(result.data.map((lookupUser) => [lookupUser.uid, lookupUser]));
+
+      for (const uid of requestedUids) {
+        const matchedUser = returnedUsers.get(uid);
+        if (matchedUser) {
+          uploaderCache.set(uid, matchedUser);
+        }
+        resolvePendingUploader(uid, matchedUser);
+      }
+      return;
+    }
+
+    for (const uid of requestedUids) {
+      resolvePendingUploader(uid, undefined);
+    }
+  } catch (error) {
+    console.error('Failed batch uploader lookup:', error);
+    for (const uid of requestedUids) {
+      resolvePendingUploader(uid, undefined);
+    }
+  } finally {
+    uploaderBatchInFlight = false;
+    if (pendingUploaderIds.size > 0) {
+      uploaderBatchScheduled = true;
+      setTimeout(() => {
+        uploaderBatchScheduled = false;
+        flushUploaderBatch().catch((error) => {
+          console.error('Failed to flush queued uploader lookup:', error);
+        });
+      }, 0);
+    }
+  }
+};
+
+const requestUploaderInBatch = (uid: string): Promise<User | undefined> => {
+  const cachedUser = uploaderCache.get(uid);
+  if (cachedUser) {
+    return Promise.resolve(cachedUser);
+  }
+
+  return new Promise((resolve) => {
+    const existingResolvers = pendingUploaderResolvers.get(uid);
+    if (existingResolvers) {
+      existingResolvers.push(resolve);
+    } else {
+      pendingUploaderResolvers.set(uid, [resolve]);
+    }
+    pendingUploaderIds.add(uid);
+
+    if (!uploaderBatchScheduled) {
+      uploaderBatchScheduled = true;
+      setTimeout(() => {
+        uploaderBatchScheduled = false;
+        flushUploaderBatch().catch((error) => {
+          console.error('Failed to flush uploader lookup batch:', error);
+        });
+      }, 0);
+    }
+  });
+};
 
 interface Props {
   sermon: Sermon;
@@ -112,7 +202,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
   const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
 
-  // Fetch uploader (with cache to avoid repeated calls for same uid across cards)
+  // Resolve uploader details using cache + batched backend lookup (avoids one network call per card).
   useEffect(() => {
     const uid = currentSermon.uploaderId;
     if (!uid) {
@@ -120,35 +210,55 @@ const SermonListCard: FunctionComponent<Props> = ({
       setUploaderLoading(false);
       return;
     }
-    const cached = uploaderCache.get(uid);
-    if (cached) {
-      setUploader(cached);
+
+    const cachedUser = uploaderCache.get(uid);
+    if (cachedUser) {
+      setUploader(cachedUser);
       setUploaderLoading(false);
       return;
     }
-    setUploaderLoading(true);
-    const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
-    getUser({ uid })
-      .then((result) => {
-        if (result.status === 'success') {
-          uploaderCache.set(uid, result.data);
-          setUploader(result.data);
-        }
-      })
-      .finally(() => setUploaderLoading(false));
-  }, [currentSermon.uploaderId]);
 
-  // Fetch series if sermon has seriesId
+    // Non-admin uploader view only shows their own sermons; avoid backend lookup when it is the signed-in user.
+    if (user?.uid === uid) {
+      uploaderCache.set(uid, user);
+      setUploader(user);
+      setUploaderLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setUploaderLoading(true);
+    requestUploaderInBatch(uid)
+      .then((lookupUser) => {
+        if (cancelled) {
+          return;
+        }
+        setUploader(lookupUser);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setUploaderLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSermon.uploaderId, user]);
+
   useEffect(() => {
+    const seriesId = currentSermon.seriesId;
+    if (!seriesId) {
+      setSeries(null);
+      return;
+    }
     const fetchSeries = async () => {
-      if (!currentSermon.seriesId) {
-        setSeries(null);
-        return;
-      }
       try {
-        const seriesDoc = await getDoc(doc(firestore, 'series', currentSermon.seriesId).withConverter(seriesConverter));
+        const seriesDoc = await getDoc(doc(firestore, 'series', seriesId).withConverter(seriesConverter));
         if (seriesDoc.exists()) {
           setSeries(seriesDoc.data());
+        } else {
+          setSeries(null);
         }
       } catch (err) {
         console.error('Error fetching series:', err);
@@ -206,10 +316,13 @@ const SermonListCard: FunctionComponent<Props> = ({
       onOpen={() => setShowUploaderTooltip(true)}
       onClose={() => setShowUploaderTooltip(false)}
       placement="top"
-      title={uploader ? `Uploaded by: ${uploaderName}` : 'No Uploader Found'}
+      title={uploader ? `Uploaded by: ${uploaderName}` : currentSermon.uploaderId ? `Uploader ID: ${currentSermon.uploaderId}` : 'No Uploader Found'}
     >
       <Box
-        onClick={(e) => { e.stopPropagation(); setShowUploaderTooltip((prev) => !prev); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowUploaderTooltip((previousOpen) => !previousOpen);
+        }}
         sx={{ flexShrink: 0 }}
       >
         <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 24, md: 40 }, height: { xs: 20, sm: 24, md: 40 } }} loading={uploaderLoading} />
