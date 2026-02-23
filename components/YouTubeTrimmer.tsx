@@ -112,7 +112,6 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   setAudioSourceError,
 }) => {
   const [inputText, setInputText] = useState('');
-  const [hasProviderError, setHasProviderError] = useState(false);
   const [hasUserTappedToLoad, setHasUserTappedToLoad] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isIframeVisible, setIsIframeVisible] = useState(false);
@@ -311,7 +310,6 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   useEffect(() => {
     if (!debouncedInput.trim() || !videoId) {
       setAudioSource(undefined);
-      setHasProviderError(false);
       setHasUserTappedToLoad(false);
       setIsMuted(false);
       setPlayheadTime(0);
@@ -329,7 +327,6 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
       adapterRef.current?.destroy();
       reset();
     } else {
-      setHasProviderError(false);
       setStoreIsReady(false);
       setStoreIsLoading(shouldLoad);
     }
@@ -359,7 +356,9 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
     setAudioSource({ source: debouncedInputRef.current, type: 'YoutubeUrl' });
     setAudioSourceError(false, '');
 
-    void adapter.load(videoId);
+    adapter.load(videoId).catch(() => {
+      // Adapter-level errors are surfaced via `onError`.
+    });
   }, [setAudioSource, setAudioSourceError, setStoreIsLoading, setStoreIsReady, shouldLoad, videoId]);
 
   useEffect(() => {
@@ -485,11 +484,13 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
     if (!shell) return;
 
     if (document.fullscreenElement === shell) {
-      void document.exitFullscreen();
+      document.exitFullscreen().catch(() => {
+        // Non-blocking best effort.
+      });
       return;
     }
 
-    void shell.requestFullscreen().catch(() => {
+    shell.requestFullscreen().catch(() => {
       // Non-blocking best effort.
     });
   }, []);
