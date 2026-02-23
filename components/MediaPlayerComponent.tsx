@@ -13,20 +13,46 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   const { currentSermon } = useAudioPlayer();
   const [src, setSrc] = useState('');
   const router = useRouter();
+  const sermonId = currentSermon?.id;
+  const sermonUrl = currentSermon?.url;
 
   useEffect(() => {
-    if (!currentSermon) return;
-    if (currentSermon.url !== src) {
-      getDownloadURL(ref(storage, `intro-outro-sermons/${currentSermon.id}`))
-        .then((url) => {
-          setSrc(url);
-        })
-        .catch((error) => {
-          // eslint-disable-next-line no-console
-          console.log(error);
-        });
+    let cancelled = false;
+
+    if (!sermonId && !sermonUrl) {
+      setSrc('');
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [currentSermon, src]);
+
+    if (sermonUrl) {
+      setSrc((prevSrc) => (prevSrc === sermonUrl ? prevSrc : sermonUrl));
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (!sermonId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getDownloadURL(ref(storage, `intro-outro-sermons/${sermonId}`))
+      .then((url) => {
+        if (!cancelled) {
+          setSrc((prevSrc) => (prevSrc === url ? prevSrc : url));
+        }
+      })
+      .catch((error) => {
+        // eslint-disable-next-line no-console
+        console.log(error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sermonId, sermonUrl]);
 
   return (
     <MediaPlayer
@@ -34,7 +60,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
       autoplay
       title={currentSermon?.title}
       style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}
-      src={{ src, type: 'audio/mpeg' }}
+      src={src ? { src, type: 'audio/mpeg' } : undefined}
     >
       {children}
       {router.pathname.startsWith('/admin') && currentSermon && <DynamicBottomAudioBar />}
