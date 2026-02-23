@@ -2,7 +2,7 @@
  * BottomAudioBar - A floating audio player with glassmorphism effect
  * Inspired by modern music players like Spotify
  */
-import { FunctionComponent } from 'react';
+import { FunctionComponent, useEffect, useRef } from 'react';
 import { MediaProvider } from '@vidstack/react';
 import {
   VolumeSlider,
@@ -33,6 +33,9 @@ import { useTheme, alpha } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import useAudioPlayer from '../context/audio/audioPlayerContext';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
+
+const ROOT_PLAYER_OFFSET_CSS_VAR = '--floating-player-offset';
+const PLAYER_BOTTOM_GAP_PX = 20;
 
 interface MediaButtonProps {
   tooltipPlacement: TooltipPlacement;
@@ -104,11 +107,10 @@ function Mute({ tooltipPlacement }: MediaButtonProps) {
 // Play/Pause Button Component
 function Play({ tooltipPlacement }: MediaButtonProps) {
   const isPaused = useMediaState('paused');
-  const theme = useTheme();
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <PlayButton className="vds-button floating-player-play-btn" style={{ backgroundColor: theme.palette.primary.main }}>
+        <PlayButton className="vds-button floating-player-play-btn">
           {isPaused ? <PlayIcon /> : <PauseIcon />}
         </PlayButton>
       </Tooltip.Trigger>
@@ -150,6 +152,32 @@ const BottomAudioBar: FunctionComponent = () => {
   const downLG = useMediaQuery(theme.breakpoints.down('lg'));
   const sidebarHidden = useMediaQuery(theme.breakpoints.down('md'));
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const docEl = document.documentElement;
+    const el = rootRef.current;
+    if (!el || !docEl) return;
+
+    const updateOffset = () => {
+      const measuredHeight = el.getBoundingClientRect().height;
+      const totalOffset = Math.ceil(measuredHeight + PLAYER_BOTTOM_GAP_PX);
+      docEl.style.setProperty(ROOT_PLAYER_OFFSET_CSS_VAR, `${totalOffset}px`);
+    };
+
+    const clearOffset = () => {
+      docEl.style.setProperty(ROOT_PLAYER_OFFSET_CSS_VAR, '0px');
+    };
+
+    const ro = new ResizeObserver(updateOffset);
+    ro.observe(el);
+    updateOffset();
+
+    return () => {
+      ro.disconnect();
+      clearOffset();
+    };
+  }, []);
 
   // Get the sermon image
   const sermonImage = currentSermon?.images?.find((image) => image.type === 'square');
@@ -159,10 +187,12 @@ const BottomAudioBar: FunctionComponent = () => {
 
   return (
     <Box
+      ref={rootRef}
       className="media-player"
+      data-testid="floating-audio-bar"
       sx={{
         position: 'fixed',
-        bottom: 20,
+        bottom: `${PLAYER_BOTTOM_GAP_PX}px`,
         // Center in the main content area (account for sidebar on desktop)
         left: { xs: '50%', md: `calc(50% + ${sidebarOffset}px)` },
         transform: 'translateX(-50%)',

@@ -12,6 +12,9 @@ import Typography from '@mui/material/Typography';
 import RequestRoleChange from '../components/RequestUploadPrivalige';
 import SidebarLayout from './SidebarLayout';
 
+const MAIN_SCROLL_BOTTOM_INSET =
+  'calc(var(--floating-player-offset, 0px) + env(safe-area-inset-bottom, 0px))';
+
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
   const router = useRouter();
@@ -73,11 +76,20 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
       </Head>
       <SidebarLayout>
         <Box
+          data-testid="main-content-scroll"
           sx={{
             flex: 1,
-            p: { xs: 2, sm: 3, md: 4 },
+            px: { xs: 2, sm: 3, md: 4 },
+            pt: { xs: 2, sm: 3, md: 4 },
+            pb: {
+              xs: `calc(16px + ${MAIN_SCROLL_BOTTOM_INSET})`,
+              sm: `calc(24px + ${MAIN_SCROLL_BOTTOM_INSET})`,
+              md: `calc(32px + ${MAIN_SCROLL_BOTTOM_INSET})`,
+            },
             maxWidth: '100%',
             overflow: 'auto',
+            // Keep all trailing content reachable above the fixed floating player.
+            scrollPaddingBottom: MAIN_SCROLL_BOTTOM_INSET,
           }}
         >
           {children}

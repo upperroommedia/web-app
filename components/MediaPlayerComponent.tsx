@@ -8,6 +8,7 @@ import { useRouter } from 'next/router';
 const DynamicBottomAudioBar = dynamic(() => import('./BottomAudioBar'));
 
 const storage = getStorage();
+
 function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   const { currentSermon } = useAudioPlayer();
   const [src, setSrc] = useState('');
