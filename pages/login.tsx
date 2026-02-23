@@ -52,7 +52,7 @@ export default function LoginPage() {
                   position: 'relative',
                 }}
               >
-                <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="48px" />
+                <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="48px" priority />
               </Avatar>
               <Box>
                 <Typography
