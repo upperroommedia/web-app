@@ -71,10 +71,10 @@ interface SidebarLayoutProps {
 
 const MainContentSlot = memo(function MainContentSlot({
   children,
-  isMobile,
+  sidebarCollapsed,
 }: {
   children: ReactNode;
-  isMobile: boolean;
+  sidebarCollapsed: boolean;
 }) {
   return (
     <Box
@@ -85,7 +85,7 @@ const MainContentSlot = memo(function MainContentSlot({
         display: 'flex',
         flexDirection: 'column',
         bgcolor: 'background.default',
-        pt: isMobile ? '64px' : 0,
+        pt: sidebarCollapsed ? '64px' : 0,
       }}
     >
       {children}
@@ -98,7 +98,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   const { theme: currentTheme, setTheme } = useTheme();
   const router = useRouter();
   const { user, logoutUser } = useAuth();
-  const isMobile = useMediaQuery(muiTheme.breakpoints.down('md'));
+  const sidebarCollapsed = useMediaQuery(muiTheme.breakpoints.down('lg'));
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = user?.isAdmin() ?? false;
@@ -127,8 +127,8 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   );
 
   const closeDrawerIfMobile = useCallback(() => {
-    if (isMobile) setMobileOpen(false);
-  }, [isMobile]);
+    if (sidebarCollapsed) setMobileOpen(false);
+  }, [sidebarCollapsed]);
 
   const renderNavItem = useCallback(
     (item: NavItem) => (
@@ -138,31 +138,31 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
             selected={isActivePath(item.path)}
             onClick={closeDrawerIfMobile}
             sx={{
-            py: 0.5,
-            minHeight: 36,
-            '&.Mui-selected': {
-              '& .MuiListItemIcon-root': {
-                color: 'primary.main',
+              py: 0.5,
+              minHeight: 36,
+              '&.Mui-selected': {
+                '& .MuiListItemIcon-root': {
+                  color: 'primary.main',
+                },
+                '& .MuiListItemText-primary': {
+                  color: 'text.primary',
+                  fontWeight: 600,
+                },
               },
-              '& .MuiListItemText-primary': {
-                color: 'text.primary',
-                fontWeight: 600,
-              },
-            },
-          }}
-        >
-          <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
-          <ListItemText
-            primary={item.label}
-            primaryTypographyProps={{
-              fontSize: '0.85rem',
-              fontWeight: 500,
             }}
-          />
-        </ListItemButton>
-      </Link>
-    </ListItem>
-  ),
+          >
+            <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
+            <ListItemText
+              primary={item.label}
+              primaryTypographyProps={{
+                fontSize: '0.85rem',
+                fontWeight: 500,
+              }}
+            />
+          </ListItemButton>
+        </Link>
+      </ListItem>
+    ),
     [isActivePath, closeDrawerIfMobile]
   );
 
@@ -238,7 +238,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
         <Link href="/" passHref style={{ width: '100%', textDecoration: 'none' }}>
           <ListItemButton
             selected={isActivePath('/')}
-            onClick={() => isMobile && setMobileOpen(false)}
+            onClick={() => sidebarCollapsed && setMobileOpen(false)}
             sx={{
               background: isActivePath('/')
                 ? `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(muiTheme.palette.primary.light, 0.15)} 100%)`
@@ -303,7 +303,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
       {isAdmin && (
         <>
           <Divider sx={{ mx: 1.5, my: 1 }} />
-          
+
           <Typography
             variant="overline"
             sx={{
@@ -423,7 +423,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* Mobile App Bar */}
-      {isMobile && (
+      {sidebarCollapsed && (
         <AppBar
           position="fixed"
           sx={{
@@ -479,7 +479,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
       )}
 
       {/* Desktop Drawer (Permanent) */}
-      {!isMobile && (
+      {!sidebarCollapsed && (
         <Drawer
           variant="permanent"
           sx={{
@@ -498,7 +498,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
       )}
 
       {/* Mobile Drawer (Temporary) */}
-      {isMobile && (
+      {sidebarCollapsed && (
         <Drawer
           variant="temporary"
           open={mobileOpen}
@@ -518,7 +518,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
       )}
 
       {/* Main Content Area - memoized so layout state (e.g. mobileOpen) doesn't force page re-render */}
-      <MainContentSlot isMobile={isMobile}>{children}</MainContentSlot>
+      <MainContentSlot sidebarCollapsed={sidebarCollapsed}>{children}</MainContentSlot>
     </Box>
   );
 };

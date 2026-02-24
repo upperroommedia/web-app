@@ -150,7 +150,7 @@ const BottomAudioBar: FunctionComponent = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const downLG = useMediaQuery(theme.breakpoints.down('lg'));
-  const sidebarHidden = useMediaQuery(theme.breakpoints.down('md'));
+  const sidebarHidden = useMediaQuery(theme.breakpoints.down('lg'));
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
   const rootRef = useRef<HTMLDivElement>(null);
 
