@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -9,9 +10,18 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
   const { TextFieldEndAdornment, ...searchBoxProps } = props;
   const { refine } = useSearchBox(searchBoxProps);
   const { nbHits } = useStats();
-  const { status } = useInstantSearch();
+  const { status, results } = useInstantSearch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [hasSettledResults, setHasSettledResults] = useState(false);
+
+  useEffect(() => {
+    if (!results.__isArtificial && status === 'idle') {
+      setHasSettledResults(true);
+    }
+  }, [results.__isArtificial, status]);
+
+  const isLoadingState = !hasSettledResults && (results.__isArtificial || status === 'stalled' || status === 'loading');
   
   const placeholder = isMobile 
     ? 'Search sermons...' 
@@ -44,9 +54,9 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
           color: status === 'error' ? 'error.dark' : 'text.secondary',
         }}
       >
-        {status === 'error' 
+        {status === 'error'
           ? 'Error'
-          : status === 'stalled' || status === 'loading'
+          : isLoadingState
             ? 'Loading...'
             : `${nbHits} ${nbHits === 1 ? 'result' : 'results'} found`}
       </Typography>

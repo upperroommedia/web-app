@@ -53,6 +53,8 @@ const pendingUploaderIds = new Set<string>();
 const pendingUploaderResolvers = new Map<string, Array<(user: User | undefined) => void>>();
 let uploaderBatchScheduled = false;
 let uploaderBatchInFlight = false;
+const seriesCache = new Map<string, Series | null>();
+const pendingSeriesRequests = new Map<string, Promise<Series | null>>();
 
 const resolvePendingUploader = (uid: string, user: User | undefined) => {
   const resolvers = pendingUploaderResolvers.get(uid);
@@ -140,6 +142,35 @@ const requestUploaderInBatch = (uid: string): Promise<User | undefined> => {
   });
 };
 
+const fetchSeriesWithCache = async (seriesId: string): Promise<Series | null> => {
+  const cachedSeries = seriesCache.get(seriesId);
+  if (cachedSeries !== undefined) {
+    return cachedSeries;
+  }
+
+  const inFlightRequest = pendingSeriesRequests.get(seriesId);
+  if (inFlightRequest) {
+    return inFlightRequest;
+  }
+
+  const request = getDoc(doc(firestore, 'series', seriesId).withConverter(seriesConverter))
+    .then((seriesDoc) => {
+      const resolvedSeries = seriesDoc.exists() ? seriesDoc.data() : null;
+      seriesCache.set(seriesId, resolvedSeries);
+      return resolvedSeries;
+    })
+    .catch((error) => {
+      console.error('Error fetching series:', error);
+      return null;
+    })
+    .finally(() => {
+      pendingSeriesRequests.delete(seriesId);
+    });
+
+  pendingSeriesRequests.set(seriesId, request);
+  return request;
+};
+
 interface Props {
   sermon: Sermon;
   playing: boolean;
@@ -176,12 +207,28 @@ const SermonListCard: FunctionComponent<Props> = ({
   );
   const [sermonSnapshot, _sermonLoading, _sermonError] = useDocument(
     subscriptionOwnedByParent ? null : docRef,
-    { snapshotListenOptions: { includeMetadataChanges: true } }
+    { snapshotListenOptions: { includeMetadataChanges: false } }
   );
   const realTimeSermon = sermonSnapshot?.data();
   const currentSermon = subscriptionOwnedByParent ? sermon : (realTimeSermon || sermon);
-  
-  const [snapshot, _loading, _error] = useObject(ref(database, `addIntroOutro/${currentSermon.id}`));
+
+  const audioStatus = currentSermon.status.audioStatus;
+  const canPublish = user?.canPublish() ?? false;
+  const isProcessed = audioStatus === sermonStatusType.PROCESSED;
+  const isProcessing = audioStatus === sermonStatusType.PROCESSING;
+  const isError = audioStatus === sermonStatusType.ERROR;
+  const isSoundCloudUploaded = currentSermon.status.soundCloud === uploadStatus.UPLOADED;
+  const subsplashUploaded = currentSermon.numberOfListsUploadedTo ?? 0;
+  const subsplashTotal = currentSermon.numberOfLists ?? 0;
+  const isSubsplashPartial = subsplashUploaded > 0 && subsplashUploaded < subsplashTotal;
+  const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
+  const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
+  const processingProgressRef = useMemo(
+    () => (isProcessing ? ref(database, `addIntroOutro/${currentSermon.id}`) : null),
+    [isProcessing, currentSermon.id]
+  );
+
+  const [snapshot, _loading, _error] = useObject(processingProgressRef);
   const [uploader, setUploader] = useState<User>();
   const [uploaderLoading, setUploaderLoading] = useState(false);
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
@@ -190,17 +237,6 @@ const SermonListCard: FunctionComponent<Props> = ({
 
   const uploaderName = (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
     uploader?.email ?? 'uploader';
-
-  const canPublish = user?.canPublish() ?? false;
-  const isProcessed = currentSermon.status.audioStatus === sermonStatusType.PROCESSED;
-  const isProcessing = currentSermon.status.audioStatus === sermonStatusType.PROCESSING;
-  const isError = currentSermon.status.audioStatus === sermonStatusType.ERROR;
-  const isSoundCloudUploaded = currentSermon.status.soundCloud === uploadStatus.UPLOADED;
-  const subsplashUploaded = currentSermon.numberOfListsUploadedTo ?? 0;
-  const subsplashTotal = currentSermon.numberOfLists ?? 0;
-  const isSubsplashPartial = subsplashUploaded > 0 && subsplashUploaded < subsplashTotal;
-  const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
-  const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
 
   // Resolve uploader details using cache + batched backend lookup (avoids one network call per card).
   useEffect(() => {
@@ -247,24 +283,28 @@ const SermonListCard: FunctionComponent<Props> = ({
   }, [currentSermon.uploaderId, user]);
 
   useEffect(() => {
+    let cancelled = false;
     const seriesId = currentSermon.seriesId;
     if (!seriesId) {
       setSeries(null);
       return;
     }
-    const fetchSeries = async () => {
-      try {
-        const seriesDoc = await getDoc(doc(firestore, 'series', seriesId).withConverter(seriesConverter));
-        if (seriesDoc.exists()) {
-          setSeries(seriesDoc.data());
-        } else {
-          setSeries(null);
-        }
-      } catch (err) {
-        console.error('Error fetching series:', err);
+
+    const cachedSeries = seriesCache.get(seriesId);
+    if (cachedSeries !== undefined) {
+      setSeries(cachedSeries);
+      return;
+    }
+
+    fetchSeriesWithCache(seriesId).then((resolvedSeries) => {
+      if (!cancelled) {
+        setSeries(resolvedSeries);
       }
+    });
+
+    return () => {
+      cancelled = true;
     };
-    fetchSeries();
   }, [currentSermon.seriesId]);
 
   const handleCardClick = (e: React.MouseEvent) => {
@@ -447,6 +487,8 @@ const SermonListCard: FunctionComponent<Props> = ({
           height: imageSize,
           width: '100%',
           position: 'relative',
+          contentVisibility: 'auto',
+          containIntrinsicSize: `${imageSize}px`,
           '&::before': {
             content: '""',
             position: 'absolute',

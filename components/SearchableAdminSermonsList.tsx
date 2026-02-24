@@ -19,10 +19,12 @@ import IconButton from '@mui/material/IconButton';
 import FilterIcon from '@mui/icons-material/FilterAlt';
 import AnimateHeight from 'react-animate-height';
 import { SxProps, Theme } from '@mui/system';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { isDevelopment } from '../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../utils/mockAlgoliaSearchClient';
 
-interface SearchableAdminSermonListProps {}
+interface SearchableAdminSermonListProps { }
 
 function FilterButton({ onToggle }: { onToggle: () => void }) {
   return (
@@ -42,7 +44,7 @@ function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
         borderRadius={2}
         p={{ xs: 1.5, md: 2 }}
         margin={{ xs: 1, md: 2 }}
-        width={{ xs: '100%', md: 'auto' }}
+        width="100%"
       >
         <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
         <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
@@ -75,11 +77,12 @@ function MobileFilterDrawer({ show }: { show: boolean }) {
 
 const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
   const { user } = useAuth();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [apiKey, setApiKey] = useState<string | null>(() => (isDevelopment ? 'mock-key' : null));
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const userId = user?.uid ?? null;
   const isAdminUser = user?.isAdmin() ?? false;
-  const userRole = user?.role;
 
   if (!user) {
     throw new Error('User not found');
@@ -120,7 +123,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
       return null;
     }
     return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
-  }, [apiKey, userId, isAdminUser, userRole]);
+  }, [apiKey, userId, isAdminUser]);
 
   const handleFilterToggle = useCallback(() => setShowFilters((prev) => !prev), []);
 
@@ -138,8 +141,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
                 width={1}
               >
                 <SearchResultSermonList gridArea="results" />
-                <AdminSermonFilters sx={{ display: { xs: 'none', md: 'block' } }} />
-                <MobileFilterDrawer show={showFilters} />
+                {isMobile ? <MobileFilterDrawer show={showFilters} /> : <AdminSermonFilters />}
               </Box>
               <CustomPagination />
             </NoResultsBoundary>

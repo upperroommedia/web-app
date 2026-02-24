@@ -4,6 +4,7 @@
 
 import SearchResultSermonListCard from './SearchResultSermonListCard';
 import { useHits, useInstantSearch } from 'react-instantsearch';
+import { useEffect, useState } from 'react';
 
 // import { Sermon } from '../types/SermonTypes';
 
@@ -19,9 +20,19 @@ import Typography from '@mui/material/Typography';
 
 const SearchResultSermonList = (props: BoxProps) => {
   const { hits } = useHits();
-  const { status } = useInstantSearch();
+  const { status, results } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
   const playing = useMediaState('playing');
+  const [hasSettledResults, setHasSettledResults] = useState(false);
+
+  useEffect(() => {
+    if (!results.__isArtificial && status === 'idle') {
+      setHasSettledResults(true);
+    }
+  }, [results.__isArtificial, status]);
+
+  const isLoadingState = !hasSettledResults && (results.__isArtificial || status === 'loading' || status === 'stalled');
+  const shouldRenderHits = hasSettledResults || (!results.__isArtificial && status === 'idle');
 
   return (
     <Box display="flex" justifyContent={'start'} flex={3} overflow="hidden" {...props}>
@@ -41,9 +52,9 @@ const SearchResultSermonList = (props: BoxProps) => {
             </Box>
           </Typography>
         )}
-        {(status === 'loading' || status === 'stalled') &&
+        {isLoadingState &&
           [...Array(20)].map((_, i) => <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />)}
-        {status === 'idle' &&
+        {shouldRenderHits &&
           hits.map((hit) => (
             <SearchResultSermonListCard
               key={hit.objectID}

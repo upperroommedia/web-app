@@ -32,7 +32,7 @@ const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardPr
     [sermonId]
   );
   const [sermonSnapshot, loading, error] = useDocument(docRef, {
-    snapshotListenOptions: { includeMetadataChanges: true },
+    snapshotListenOptions: { includeMetadataChanges: false },
   });
 
   const sermonData = useMemo(() => sermonSnapshot?.data(), [sermonSnapshot]);
