@@ -76,6 +76,7 @@ const SermonDetailsPage = () => {
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
   const remote = useMediaRemote();
   const playing = useMediaState('playing');
+  const pageContainerSx = { maxWidth: 1400, mx: 'auto', width: '100%', px: { xs: 0.5, sm: 2, md: 3 } };
 
   const [series, setSeries] = useState<Series | null>(null);
   const [uploader, setUploader] = useState<User | undefined>(undefined);
@@ -467,7 +468,7 @@ const SermonDetailsPage = () => {
 
   if (sermonLoading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+      <Box sx={{ ...pageContainerSx, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <CircularProgress />
       </Box>
     );
@@ -475,7 +476,7 @@ const SermonDetailsPage = () => {
 
   if (error || !sermon) {
     return (
-      <Box sx={{ p: 3 }}>
+      <Box sx={{ ...pageContainerSx, py: 2 }}>
         <Alert severity="error">{error || 'Sermon not found'}</Alert>
         <Button
           startIcon={<ArrowBackIcon />}
@@ -494,7 +495,7 @@ const SermonDetailsPage = () => {
         <title>{sermon.title} | Admin | Upper Room Media</title>
       </Head>
 
-      <Box>
+      <Box sx={pageContainerSx}>
         {/* Breadcrumbs */}
         <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: { xs: 1, sm: 2 } }}>
           <Link href="/admin/sermons" style={{ textDecoration: 'none' }}>
