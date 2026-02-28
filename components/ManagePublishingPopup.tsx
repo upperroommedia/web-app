@@ -57,6 +57,17 @@ interface ManagePublishingPopupProps {
   onUpdate?: () => void;
 }
 
+interface ListPublishResult {
+  status: 'success' | 'error';
+  mediaItemId?: string;
+  error?: string;
+}
+
+interface SeriesPublishResult {
+  status: 'success' | 'error';
+  error?: string;
+}
+
 const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   sermon,
   open,
@@ -75,13 +86,14 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   const [soundCloudError, setSoundCloudError] = useState<string | null>(null);
 
   // Subsplash state
-  const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
+  const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
 
   // Series state
   const [series, setSeries] = useState<Series | null>(null);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [seriesPublished, setSeriesPublished] = useState(false);
   const [isPublishingToSeries, setIsPublishingToSeries] = useState(false);
+  const [isPublishingEverywhere, setIsPublishingEverywhere] = useState(false);
 
   useEffect(() => {
     if (listArrayFirestore) {
@@ -275,7 +287,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
     }
   }, [sermon, onUpdate]);
 
-  const uploadToSubsplash = async (listsToUploadTo: SermonList[]) => {
+  const uploadToSubsplash = async (
+    listsToUploadTo: SermonList[],
+    options?: { suppressAlert?: boolean }
+  ): Promise<ListPublishResult> => {
+    setIsUploadingToSubsplash(true);
     try {
       const subsplashIdToListIdMap = new Map<string, string>();
       const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
@@ -293,7 +309,6 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         images: sermon.images,
         date: new Date(sermon.dateMillis),
       };
-      setIsUploadingToSubsplash(true);
       
       let id = sermon.subsplashId;
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
@@ -350,11 +365,23 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
 
       await batch.commit();
       onUpdate?.();
-    } catch (error) {
+      return {
+        status: 'success',
+        mediaItemId: id,
+      };
+    } catch (error: any) {
       console.error('Error uploading to Subsplash:', error);
-      alert(error);
+      const errorMessage = error?.message || 'Unknown error';
+      if (!options?.suppressAlert) {
+        alert(errorMessage);
+      }
+      return {
+        status: 'error',
+        error: errorMessage,
+      };
+    } finally {
+      setIsUploadingToSubsplash(false);
     }
-    setIsUploadingToSubsplash(false);
   };
 
   const removeFromList = async (listsToRemoveFrom: SermonList[]) => {
@@ -401,10 +428,17 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   // ==================== Series Functions ====================
-  const publishToSeries = async () => {
-    if (!series || !sermon.subsplashId) {
-      alert('Sermon must be uploaded to Subsplash first before adding to series');
-      return;
+  const publishToSeries = async (options?: { mediaItemId?: string; suppressAlert?: boolean }): Promise<SeriesPublishResult> => {
+    const mediaItemId = options?.mediaItemId || sermon.subsplashId;
+    if (!series || !mediaItemId) {
+      const message = 'Sermon must be uploaded to Subsplash first before adding to series';
+      if (!options?.suppressAlert) {
+        alert(message);
+      }
+      return {
+        status: 'error',
+        error: message,
+      };
     }
 
     setIsPublishingToSeries(true);
@@ -435,7 +469,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
       const addResult = await addToSeriesFunction({
         seriesSubsplashId,
-        mediaItemId: sermon.subsplashId,
+        mediaItemId,
       });
 
       if (addResult.status !== 'success') {
@@ -447,18 +481,85 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         seriesItemRef,
         {
           publishedToSubsplash: true,
-          sermonSubsplashId: sermon.subsplashId,
+          sermonSubsplashId: mediaItemId,
         },
         { merge: true }
       );
 
       setSeriesPublished(true);
       onUpdate?.();
+      return {
+        status: 'success',
+      };
     } catch (err: any) {
       console.error('Error publishing to series:', err);
-      alert(`Error publishing to series: ${err.message || 'Unknown error'}`);
+      const errorMessage = err.message || 'Unknown error';
+      if (!options?.suppressAlert) {
+        alert(`Error publishing to series: ${errorMessage}`);
+      }
+      return {
+        status: 'error',
+        error: errorMessage,
+      };
+    } finally {
+      setIsPublishingToSeries(false);
     }
-    setIsPublishingToSeries(false);
+  };
+
+  const publishEverywhere = async (listsToUploadTo: SermonList[]) => {
+    if (isPublishingEverywhere) return;
+
+    setIsPublishingEverywhere(true);
+    let mediaItemId = sermon.subsplashId;
+    let listsPublished = listsToUploadTo.length === 0;
+    let seriesWasPublished = seriesPublished;
+    const errors: string[] = [];
+
+    try {
+      if (listsToUploadTo.length > 0) {
+        const listResult = await uploadToSubsplash(listsToUploadTo, { suppressAlert: true });
+        if (listResult.status === 'success') {
+          listsPublished = true;
+          mediaItemId = listResult.mediaItemId || mediaItemId;
+        } else {
+          errors.push(`Lists: ${listResult.error || 'Unknown error'}`);
+        }
+      }
+
+      if (!seriesPublished) {
+        const seriesResult = await publishToSeries({
+          mediaItemId,
+          suppressAlert: true,
+        });
+        if (seriesResult.status === 'success') {
+          seriesWasPublished = true;
+        } else {
+          errors.push(`Series: ${seriesResult.error || 'Unknown error'}`);
+        }
+      }
+
+      if (errors.length === 0) {
+        alert('Publish Everywhere completed successfully.');
+        return;
+      }
+
+      if (listsPublished || seriesWasPublished) {
+        alert(`Publish Everywhere partially succeeded:\n${errors.join('\n')}`);
+        return;
+      }
+
+      alert(`Publish Everywhere failed:\n${errors.join('\n')}`);
+    } finally {
+      setIsPublishingEverywhere(false);
+    }
+  };
+
+  const handlePublishToSubsplash = async (listsToUploadTo: SermonList[]) => {
+    await uploadToSubsplash(listsToUploadTo);
+  };
+
+  const handlePublishToSeries = async () => {
+    await publishToSeries();
   };
 
   const isSoundCloudUploaded = sermon.status.soundCloud === uploadStatus.UPLOADED;
@@ -621,8 +722,8 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                           <Button
                             size="small"
                             variant="contained"
-                            onClick={publishToSeries}
-                            disabled={isPublishingToSeries}
+                            onClick={handlePublishToSeries}
+                            disabled={isPublishingToSeries || isPublishingEverywhere || isUploadingToSubsplash}
                           >
                             {isPublishingToSeries ? <CircularProgress size={20} /> : 'Publish to Series'}
                           </Button>
@@ -655,8 +756,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                   key={listItemsNotUploaded.map((list) => list.id).join('') + 'NotUploaded'}
                   sectionTitle="Not Published"
                   sermonListItems={listItemsNotUploaded}
-                  buttonAction={uploadToSubsplash}
+                  buttonAction={handlePublishToSubsplash}
                   buttonLabel="Publish to Subsplash"
+                  secondaryButtonAction={sermon.seriesId && !seriesPublished ? publishEverywhere : undefined}
+                  secondaryButtonLabel={sermon.seriesId && !seriesPublished ? 'Publish Everywhere' : undefined}
+                  secondaryButtonColorVariant="secondary"
                 />
               </Stack>
             )}
