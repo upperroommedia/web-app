@@ -12,7 +12,7 @@ This roadmap tracks active GSD-managed work on top of an already substantial bro
 
 ## Phases
 
-- [ ] **Phase 1: Series Subtitle Automation** - Finalize canonical series publish metadata and publish UX behavior.
+- [x] **Phase 1: Series Subtitle Automation** - Finalize canonical series publish metadata and publish UX behavior.
 - [ ] **Phase 2: Dev External API Mocking** - Enforce fail-closed local external API policy with deterministic mocks.
 
 ## 🚧 v1.0 Publishing Reliability + Dev Safety
@@ -32,7 +32,7 @@ This roadmap tracks active GSD-managed work on top of an already substantial bro
 
 Plans:
 - [x] 01-01: Remove manual subtitle input and add canonical metadata recalculation path
-- [ ] 01-02: Decouple publish gating, add combined flow, and backfill strict publish flags
+- [x] 01-02: Decouple publish gating, add combined flow, and backfill strict publish flags
 
 ### Phase 2: Dev External API Mocking
 **Goal:** Guarantee local dev and emulator flows do not call production Subsplash/SoundCloud endpoints.
@@ -60,5 +60,5 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Series Subtitle Automation | 1/2 | In progress | - |
+| 1. Series Subtitle Automation | 2/2 | Complete | 2026-02-28 |
 | 2. Dev External API Mocking | 0/1 | In progress | - |

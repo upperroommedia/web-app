@@ -16,10 +16,10 @@
 
 ### Publishing Reliability (Current Milestone)
 
-- [ ] **SERIES-01**: Series subtitle is always derived as `<publishedCount> part series` from explicit published series-item state.
-- [ ] **SERIES-02**: Publishing to series does not require prior list publishing state.
-- [ ] **SERIES-03**: Users retain a clear one-click combined publish flow while keeping independent actions.
-- [ ] **SERIES-04**: Legacy series-item publish flags can be reconciled without fallback semantics in runtime logic.
+- [x] **SERIES-01**: Series subtitle is always derived as `<publishedCount> part series` from explicit published series-item state.
+- [x] **SERIES-02**: Publishing to series does not require prior list publishing state.
+- [x] **SERIES-03**: Users retain a clear one-click combined publish flow while keeping independent actions.
+- [x] **SERIES-04**: Legacy series-item publish flags can be reconciled without fallback semantics in runtime logic.
 
 ### Dev External API Safety (Current Milestone)
 
@@ -56,10 +56,10 @@
 | CORE-04 | Pre-GSD baseline | Complete |
 | CORE-05 | Pre-GSD baseline | Complete |
 | CORE-06 | Pre-GSD baseline | Complete |
-| SERIES-01 | Phase 1 | In Progress |
-| SERIES-02 | Phase 1 | In Progress |
-| SERIES-03 | Phase 1 | In Progress |
-| SERIES-04 | Phase 1 | In Progress |
+| SERIES-01 | Phase 1 | Complete |
+| SERIES-02 | Phase 1 | Complete |
+| SERIES-03 | Phase 1 | Complete |
+| SERIES-04 | Phase 1 | Complete |
 | DEVSAFE-01 | Phase 2 | In Progress |
 | DEVSAFE-02 | Phase 2 | In Progress |
 | DEVSAFE-03 | Phase 2 | In Progress |
