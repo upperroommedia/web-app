@@ -66,7 +66,7 @@ import NewSeriesPopup from '../../../components/NewSeriesPopup';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import firestore, { doc, getDoc, collection, getDocs, query, orderBy, where, limit, deleteDoc, setDoc, updateDoc } from '../../../firebase/firestore';
 import { Series, seriesConverter } from '../../../types/Series';
-import { SeriesItem, seriesItemConverter } from '../../../types/SeriesItem';
+import { SeriesItem } from '../../../types/SeriesItem';
 import { Sermon } from '../../../types/SermonTypes';
 import useAuth from '../../../context/user/UserContext';
 import { createFunctionV2 } from '../../../utils/createFunction';
@@ -272,10 +272,20 @@ const SeriesDetailsPage = () => {
       const itemsQuery = query(
         collection(firestore, `series/${seriesId}/seriesItems`),
         orderBy('position', 'asc')
-      ).withConverter(seriesItemConverter);
+      );
 
       const itemsSnapshot = await getDocs(itemsQuery);
-      const itemsData = itemsSnapshot.docs.map((doc) => doc.data());
+      const itemsData = itemsSnapshot.docs.map((itemDoc) => {
+        const rawItem = itemDoc.data() as Partial<SeriesItem> & { sermonSubsplashId?: string | null };
+
+        return {
+          id: itemDoc.id,
+          position: typeof rawItem.position === 'number' ? rawItem.position : 0,
+          addedAt: rawItem.addedAt ?? null,
+          sermonSubsplashId: rawItem.sermonSubsplashId ?? undefined,
+          publishedToSubsplash: rawItem.publishedToSubsplash === true,
+        } as SeriesItem;
+      });
 
       // Fetch sermon data for each item
       const itemsWithSermons: SeriesItemWithSermon[] = await Promise.all(

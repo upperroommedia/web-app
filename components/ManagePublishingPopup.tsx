@@ -118,20 +118,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
           
           const seriesItemDoc = await getDoc(doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id));
           if (seriesItemDoc.exists()) {
-            const seriesItemData = seriesItemDoc.data() as {
-              publishedToSubsplash?: boolean | null;
-              sermonSubsplashId?: string | null;
-            };
-            const hasExplicitPublishedState = typeof seriesItemData?.publishedToSubsplash === 'boolean';
-            const resolvedPublishedToSubsplash = hasExplicitPublishedState
-              ? seriesItemData.publishedToSubsplash === true
-              : Boolean(seriesItemData?.sermonSubsplashId);
-
-            setSeriesPublished(resolvedPublishedToSubsplash);
-
-            if (!hasExplicitPublishedState && resolvedPublishedToSubsplash) {
-              await setDoc(seriesItemDoc.ref, { publishedToSubsplash: true }, { merge: true });
-            }
+            setSeriesPublished(seriesItemDoc.data()?.publishedToSubsplash === true);
           } else {
             setSeriesPublished(false);
           }
