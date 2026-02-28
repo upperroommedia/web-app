@@ -49,6 +49,26 @@ describe('addToSeries - Basic Functionality', () => {
     expect(updatedItem?._embedded?.['media-series']?.id).toBe(subsplashSeries.id);
   });
 
+  it('should add to series without requiring list publication state or local series metadata', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Series Without Local Gating');
+    const mediaItem = subsplashSeriesMock.createMediaItem('Ungated Sermon');
+
+    const request: TestRequest<AddToSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        seriesSubsplashId: subsplashSeries.id,
+        mediaItemId: mediaItem.id,
+      },
+    };
+
+    const result = await addToSeriesHandler(request);
+
+    expect(result.status).toBe('success');
+    expect(subsplashSeriesMock.getMediaItem(mediaItem.id)?._embedded?.['media-series']?.id).toBe(
+      subsplashSeries.id
+    );
+  });
+
   it('should add a media item to a series with existing items', async () => {
     const subsplashSeries = subsplashSeriesMock.createSeries('Test Series');
     await createSeriesDocument({

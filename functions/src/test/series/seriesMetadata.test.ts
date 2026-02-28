@@ -96,4 +96,29 @@ describe('deriveSeriesMetadata', () => {
       subtitle: '5 part series',
     });
   });
+
+  it('does not treat legacy series items as published when publishedToSubsplash is missing', () => {
+    const metadata = deriveSeriesMetadata([
+      {},
+      { publishedToSubsplash: false },
+    ]);
+
+    expect(metadata).toEqual({
+      itemCount: 2,
+      publishedItemCount: 0,
+      subtitle: '0 part series',
+    });
+  });
+
+  it('respects explicit false values', () => {
+    const metadata = deriveSeriesMetadata([
+      { publishedToSubsplash: false },
+    ]);
+
+    expect(metadata).toEqual({
+      itemCount: 1,
+      publishedItemCount: 0,
+      subtitle: '0 part series',
+    });
+  });
 });
