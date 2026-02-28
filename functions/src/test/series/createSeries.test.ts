@@ -43,12 +43,11 @@ describe('createSeries - Basic Functionality', () => {
     expect(firestoreSeries?.ownerId).toBe(TEST_USER_ID);
   });
 
-  it('should create a series with title, subtitle, and summary', async () => {
+  it('should create a series with derived subtitle and summary', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
       auth: { token: { role: 'admin' } },
       data: {
         title: 'Complete Series',
-        subtitle: 'A subtitle for the series',
         summary: '<p>This is the summary</p>',
         ownerId: TEST_USER_ID,
       },
@@ -60,7 +59,7 @@ describe('createSeries - Basic Functionality', () => {
 
     const firestoreSeries = await getSeriesBySubsplashId(result.subsplashId!);
     expect(firestoreSeries?.name).toBe('Complete Series');
-    expect(firestoreSeries?.subtitle).toBe('A subtitle for the series');
+    expect(firestoreSeries?.subtitle).toBe('0 part series');
     expect(firestoreSeries?.summary).toBe('<p>This is the summary</p>');
   });
 
@@ -96,6 +95,7 @@ describe('createSeries - Basic Functionality', () => {
     const firestoreSeries = await getSeriesBySubsplashId(result.subsplashId!);
     expect(firestoreSeries?.itemCount).toBe(0);
     expect(firestoreSeries?.publishedItemCount).toBe(0);
+    expect(firestoreSeries?.subtitle).toBe('0 part series');
   });
 
   it('should set status to draft by default', async () => {
@@ -291,12 +291,11 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
     expect(allSeries[0].ownerId).toBe(TEST_USER_ID);
   });
 
-  it('should create local-only series with subtitle and summary', async () => {
+  it('should create local-only series with derived subtitle and summary', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
       auth: { token: { role: 'uploader' } },
       data: {
         title: 'Full Local Series',
-        subtitle: 'A local subtitle',
         summary: 'A local summary',
         ownerId: TEST_USER_ID,
         skipSubsplash: true,
@@ -308,7 +307,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
     expect(result.status).toBe('success');
     
     const allSeries = await getAllSeries();
-    expect(allSeries[0].subtitle).toBe('A local subtitle');
+    expect(allSeries[0].subtitle).toBe('0 part series');
     expect(allSeries[0].summary).toBe('A local summary');
   });
 
