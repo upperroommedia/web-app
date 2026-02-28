@@ -71,6 +71,7 @@ import { Sermon } from '../../../types/SermonTypes';
 import useAuth from '../../../context/user/UserContext';
 import { createFunctionV2 } from '../../../utils/createFunction';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
+import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../../../functions/src/removeFromSeries';
 import { serverTimestamp } from 'firebase/firestore';
 
 interface SeriesItemWithSermon extends SeriesItem {
@@ -457,6 +458,21 @@ const SeriesDetailsPage = () => {
     if (!confirm('Are you sure you want to remove this item from the series?')) return;
 
     try {
+      const itemToRemove = items.find((item) => item.id === itemId);
+      const mediaItemId = itemToRemove?.sermonSubsplashId || itemToRemove?.sermon?.subsplashId;
+
+      if (series?.subsplashId && mediaItemId) {
+        const removeFromSeriesCallable = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+        try {
+          await removeFromSeriesCallable({ mediaItemId });
+        } catch (removeErr: any) {
+          // If media item is already missing from Subsplash, continue local cleanup.
+          if (removeErr?.code !== 'functions/not-found') {
+            throw removeErr;
+          }
+        }
+      }
+
       // Delete from Firestore seriesItems subcollection
       await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, itemId));
 

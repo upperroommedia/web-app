@@ -35,6 +35,7 @@ import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubs
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { CreateSeriesInputType, CreateSeriesOutputType } from '../functions/src/createSeries';
 import { AddToSeriesInputType, AddToSeriesOutputType } from '../functions/src/addToSeries';
+import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../functions/src/removeFromSeries';
 import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { Series, seriesConverter } from '../types/Series';
@@ -93,6 +94,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [seriesPublished, setSeriesPublished] = useState(false);
   const [isPublishingToSeries, setIsPublishingToSeries] = useState(false);
+  const [isUnpublishingFromSeries, setIsUnpublishingFromSeries] = useState(false);
   const [isPublishingEverywhere, setIsPublishingEverywhere] = useState(false);
 
   useEffect(() => {
@@ -493,6 +495,55 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
     }
   };
 
+  const unpublishFromSeries = async (options?: { suppressAlert?: boolean }): Promise<SeriesPublishResult> => {
+    if (!series) {
+      return {
+        status: 'error',
+        error: 'Series not found',
+      };
+    }
+
+    setIsUnpublishingFromSeries(true);
+    try {
+      const seriesItemRef = doc(firestore, `series/${series.id}/seriesItems`, sermon.id);
+      const seriesItemSnapshot = await getDoc(seriesItemRef);
+      const seriesItemData = seriesItemSnapshot.exists()
+        ? (seriesItemSnapshot.data() as { sermonSubsplashId?: string })
+        : null;
+      const mediaItemId = seriesItemData?.sermonSubsplashId || sermon.subsplashId;
+
+      if (mediaItemId) {
+        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+        await removeFromSeriesFunction({ mediaItemId });
+      }
+
+      if (seriesItemSnapshot.exists()) {
+        await updateDoc(seriesItemRef, {
+          publishedToSubsplash: false,
+          sermonSubsplashId: deleteField(),
+        });
+      }
+
+      setSeriesPublished(false);
+      onUpdate?.();
+      return {
+        status: 'success',
+      };
+    } catch (err: any) {
+      console.error('Error unpublishing from series:', err);
+      const errorMessage = err.message || 'Unknown error';
+      if (!options?.suppressAlert) {
+        alert(`Error unpublishing from series: ${errorMessage}`);
+      }
+      return {
+        status: 'error',
+        error: errorMessage,
+      };
+    } finally {
+      setIsUnpublishingFromSeries(false);
+    }
+  };
+
   const publishEverywhere = async (listsToUploadTo: SermonList[]) => {
     if (isPublishingEverywhere) return;
 
@@ -729,7 +780,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                             size="small"
                             variant="contained"
                             onClick={handlePublishToSeries}
-                            disabled={isPublishingToSeries || isPublishingEverywhere || isUploadingToSubsplash}
+                            disabled={isPublishingToSeries || isUnpublishingFromSeries || isPublishingEverywhere || isUploadingToSubsplash}
                           >
                             {isPublishingToSeries ? (
                               <CircularProgress size={20} />
@@ -738,6 +789,17 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                             ) : (
                               'Upload & Publish to Series'
                             )}
+                          </Button>
+                        )}
+                        {seriesPublished && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            onClick={() => unpublishFromSeries()}
+                            disabled={isPublishingToSeries || isUnpublishingFromSeries || isPublishingEverywhere || isUploadingToSubsplash}
+                          >
+                            {isUnpublishingFromSeries ? <CircularProgress size={20} /> : 'Unpublish from Series'}
                           </Button>
                         )}
                       </Stack>
