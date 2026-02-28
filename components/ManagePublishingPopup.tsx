@@ -513,6 +513,15 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         }
       }
 
+      if (!mediaItemId && !seriesPublished) {
+        const uploadResult = await uploadToSubsplash([], { suppressAlert: true });
+        if (uploadResult.status === 'success') {
+          mediaItemId = uploadResult.mediaItemId || mediaItemId;
+        } else {
+          errors.push(`Series setup: ${uploadResult.error || 'Unknown error'}`);
+        }
+      }
+
       if (!seriesPublished) {
         const seriesResult = await publishToSeries({
           mediaItemId,
@@ -546,7 +555,17 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   const handlePublishToSeries = async () => {
-    await publishToSeries();
+    let mediaItemId = sermon.subsplashId;
+    if (!mediaItemId) {
+      const uploadResult = await uploadToSubsplash([], { suppressAlert: true });
+      if (uploadResult.status !== 'success') {
+        alert(`Error preparing sermon for series publish: ${uploadResult.error || 'Unknown error'}`);
+        return;
+      }
+      mediaItemId = uploadResult.mediaItemId;
+    }
+
+    await publishToSeries({ mediaItemId });
   };
 
   const isSoundCloudUploaded = sermon.status.soundCloud === uploadStatus.UPLOADED;
@@ -705,20 +724,21 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                             sx={{ height: 22, mt: 0.5 }}
                           />
                         </Box>
-                        {!seriesPublished && sermon.subsplashId && (
+                        {!seriesPublished && (
                           <Button
                             size="small"
                             variant="contained"
                             onClick={handlePublishToSeries}
                             disabled={isPublishingToSeries || isPublishingEverywhere || isUploadingToSubsplash}
                           >
-                            {isPublishingToSeries ? <CircularProgress size={20} /> : 'Publish to Series'}
+                            {isPublishingToSeries ? (
+                              <CircularProgress size={20} />
+                            ) : sermon.subsplashId ? (
+                              'Publish to Series'
+                            ) : (
+                              'Upload & Publish to Series'
+                            )}
                           </Button>
-                        )}
-                        {!sermon.subsplashId && !seriesPublished && (
-                          <Typography variant="caption" color="text.secondary">
-                            Upload to Subsplash first
-                          </Typography>
                         )}
                       </Stack>
                     ) : (
