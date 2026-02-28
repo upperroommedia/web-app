@@ -468,15 +468,6 @@ const SeriesDetailsPage = () => {
       // Update local state and original reference
       setItems((prev) => prev.filter((item) => item.id !== itemId));
       originalItemsRef.current = originalItemsRef.current.filter((item) => item.id !== itemId);
-      
-      // Update series item count
-      if (series) {
-        await updateDoc(doc(firestore, 'series', seriesId), {
-          itemCount: (series.itemCount || 1) - 1,
-          updatedAt: serverTimestamp(),
-        });
-        setSeries((prev) => prev ? { ...prev, itemCount: (prev.itemCount || 1) - 1 } : prev);
-      }
     } catch (err: any) {
       console.error('Error removing item:', err);
       alert(`Error removing item: ${err.message || 'Unknown error'}`);
@@ -526,15 +517,6 @@ const SeriesDetailsPage = () => {
       await updateDoc(doc(firestore, 'sermons', sermon.id), {
         seriesId,
       });
-
-      // Update series item count
-      if (series) {
-        await updateDoc(doc(firestore, 'series', seriesId), {
-          itemCount: (series.itemCount || 0) + 1,
-          updatedAt: serverTimestamp(),
-        });
-        setSeries((prev) => prev ? { ...prev, itemCount: (prev.itemCount || 0) + 1 } : prev);
-      }
 
       // Update local state and original reference
       const newItem: SeriesItemWithSermon = {
@@ -607,6 +589,8 @@ const SeriesDetailsPage = () => {
   }
 
   const title = series.name || 'Series Details';
+  const publishedItemsCount = items.filter((item) => item.publishedToSubsplash).length;
+  const derivedSeriesSubtitle = `${publishedItemsCount} part series`;
 
   return (
     <>
@@ -750,11 +734,9 @@ const SeriesDetailsPage = () => {
                     />
                   )}
                 </Box>
-                {series.subtitle && (
-                  <Typography variant="h6" color="text.secondary" sx={{ mb: 1, fontWeight: 400 }}>
-                    {series.subtitle}
-                  </Typography>
-                )}
+                <Typography variant="h6" color="text.secondary" sx={{ mb: 1, fontWeight: 400 }}>
+                  {derivedSeriesSubtitle}
+                </Typography>
                 {series.summary && (
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.7 }}>
                     {series.summary}
@@ -779,7 +761,7 @@ const SeriesDetailsPage = () => {
                   </Box>
                   <Box>
                     <Typography variant="h5" fontWeight={700} color="success.main">
-                      {items.filter((i) => i.publishedToSubsplash).length}
+                      {publishedItemsCount}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       Published

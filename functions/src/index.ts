@@ -48,6 +48,7 @@ import { fixPhantomListItems } from './Scrapers/fixPhantomListItems';
 import { updateSubsplashTag } from './Scrapers/updateSubsplashTag';
 import { updateImageMetadata } from './helpers/updateImageMetadata';
 import imageOnDelete from './DocumentListeners/Images/imageOnDelete';
+import seriesItemOnWrite from './DocumentListeners/Series/seriesItemOnWrite';
 
 // Series functions
 import createseries from './createSeries';
@@ -105,6 +106,7 @@ exports.fixphantomlistitems = fixPhantomListItems;
 exports.updatesubsplashtag = updateSubsplashTag;
 exports.updateimagemetadata = updateImageMetadata;
 exports.imageondelete = imageOnDelete;
+exports.seriesitemonwrite = seriesItemOnWrite;
 
 // Series exports
 exports.createseries = createseries;

@@ -395,6 +395,16 @@ const SermonDetailsPage = () => {
       sermonSeriesListSnapshot.forEach((docSnap) => {
         batch.update(docSnap.ref, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
       });
+      if (sermon.seriesId) {
+        const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
+        const seriesItemSnapshot = await getDoc(seriesItemRef);
+        if (seriesItemSnapshot.exists()) {
+          batch.update(seriesItemRef, {
+            publishedToSubsplash: false,
+            sermonSubsplashId: deleteField(),
+          });
+        }
+      }
       batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
         subsplashId: deleteField(),
         status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
@@ -403,6 +413,16 @@ const SermonDetailsPage = () => {
     } catch (error: any) {
       if (error.code === 'functions/not-found') {
         const batch = writeBatch(firestore);
+        if (sermon.seriesId) {
+          const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
+          const seriesItemSnapshot = await getDoc(seriesItemRef);
+          if (seriesItemSnapshot.exists()) {
+            batch.update(seriesItemRef, {
+              publishedToSubsplash: false,
+              sermonSubsplashId: deleteField(),
+            });
+          }
+        }
         batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
           subsplashId: deleteField(),
           status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
@@ -454,6 +474,7 @@ const SermonDetailsPage = () => {
   const uploaderName = uploader
     ? (`${uploader.firstName ?? ''} ${uploader.lastName ?? ''}`.trim() || uploader.displayName || uploader.email)
     : 'Unknown';
+  const derivedSeriesSubtitle = series ? `${series.publishedItemCount || 0} part series` : null;
 
   // Check if user can edit/delete
   const canEdit = sermon && (
@@ -725,11 +746,9 @@ const SermonDetailsPage = () => {
                         <Typography variant="subtitle1" fontWeight={600} sx={{ fontSize: { xs: '0.85rem', sm: '1rem' } }}>
                           {series.name}
                         </Typography>
-                        {series.subtitle && (
-                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.85rem' } }}>
-                            {series.subtitle}
-                          </Typography>
-                        )}
+                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.85rem' } }}>
+                          {derivedSeriesSubtitle}
+                        </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.75rem' } }}>
                           {series.itemCount} items
                         </Typography>
