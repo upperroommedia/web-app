@@ -1,123 +1,107 @@
-# External Integrations
+# Integrations Mapping (Tech Focus)
 
-**Analysis Date:** 2026-02-24
+## Core Platform Providers
 
-## APIs & External Services
+### Firebase (Primary Backend)
+- Client SDK bootstraps in `firebase/firebase.ts` with project `urm-app` and hardcoded config values.
+- Firestore client connection lives in `firebase/firestore.ts` with emulator switching for development.
+- Auth client lives in `firebase/auth.ts` (Google/Apple/Microsoft sign-in consumed in `context/user/UserContext.tsx`).
+- Functions client and emulator routing are in `firebase/functions.ts` and `utils/createFunction.ts`.
+- Realtime Database client is wired in `firebase/database.ts` and used by bundle metadata + task progress reads.
+- Storage clients are in `firebase/storage.ts` (`storage` and secondary bucket `imageStorage`).
 
-**Content publishing APIs:**
-- Subsplash (`core.subsplash.com`) - publish/edit/delete media items, lists, and series
-  - Key implementation: `functions/src/subsplashUtils.ts`, `functions/src/uploadToSubsplash.ts`, `functions/src/helpers/seriesHelpers.ts`
-  - Auth: OAuth password grant via `EMAIL`/`PASSWORD` env vars
-  - Main domains: `/accounts/v1/oauth/token`, `/media/v1/*`, `/builder/v1/*`, `/transcoder/v1/jobs`
+### Firebase Admin / Server Access
+- Admin SDK bootstrap is in `firebase/firebaseAdmin.ts` for functions and SSR token checks.
+- SSR protected route token verification uses admin auth in `components/ProtectedRoute.tsx`.
+- User role management and admin listing flows use callable functions in `functions/src/setUserRole.ts`, `functions/src/listUsers.ts`, `functions/src/getUser.ts`.
 
-**Audio distribution:**
-- SoundCloud API (`api.soundcloud.com`) - upload/update/delete tracks
-  - Key implementation: `functions/src/soundcloudClient.ts`, `functions/src/uploadToSoundCloud.ts`, `functions/src/editSoundCloudSermon.ts`
-  - Auth: OAuth token from Firebase Secret Manager (`SOUNDCLOUD_ACCESS_TOKEN`)
+## External APIs and Services
 
-**Media processing external API:**
-- Dolby API (`api.dolby.io`) - token and transcode support paths
-  - Key implementation: `functions/src/Dolby/getDolbyToken.ts`, `functions/src/Dolby/transcodeAudio.ts`
-  - Auth: `DOLBY_API_KEY` + `DOLBY_API_SECRET`
+### Subsplash API (Content and Publishing Backbone)
+- Authentication uses OAuth password grant against `https://core.subsplash.com/accounts/v1/oauth/token` in `functions/src/subsplashUtils.ts`.
+- Media publish/edit/delete calls are in:
+- `functions/src/uploadToSubsplash.ts`
+- `functions/src/editSubsplashSermon.ts`
+- `functions/src/deleteFromSubsplash.ts`
+- List management is integrated via:
+- `functions/src/createNewSubsplashList.ts`
+- `functions/src/editSubsplashList.ts`
+- `functions/src/deleteSubsplashList.ts`
+- Series lifecycle integrates with Subsplash Media Series APIs in `functions/src/helpers/seriesHelpers.ts` and callers (`createSeries.ts`, `addToSeries.ts`, `removeFromSeries.ts`, `reorderSeriesItems.ts`, `deleteSeries.ts`).
+- Image upload pipeline requests Subsplash file slots then uploads via presigned URL in `functions/src/handleImageUpload.ts`.
 
-**Search service:**
-- Algolia - admin search/filter UX
-  - Key implementation: `components/SearchableAdminSermonsList.tsx`, `utils/mockAlgoliaSearchClient.ts`
-  - Auth: `NEXT_PUBLIC_ALGOLIA_APP_ID`, `NEXT_PUBLIC_ALGOLIA_API_KEY` (client), plus secure key flow via function `generatesecuredapikey`
+### SoundCloud API
+- Upload/update/delete helpers are centralized in `functions/src/soundcloudClient.ts` (`https://api.soundcloud.com`).
+- Callable wrappers with role checks and secret usage are in:
+- `functions/src/uploadToSoundCloud.ts`
+- `functions/src/editSoundCloudSermon.ts`
+- `functions/src/deleteFromSoundCloud.ts`
+- Secret is managed via Functions param `defineSecret('SOUNDCLOUD_ACCESS_TOKEN')` in `functions/src/soundcloudSecrets.ts`.
 
-**Media source input:**
-- YouTube URLs for trimming/upload generation
-  - Key implementation: `components/YouTubeTrimmer.tsx`, `functions/src/addIntroOutro/*`, `functions/src/addIntroOutro/trimAndTranscode.ts`
+### Algolia Search
+- Client-side direct search is used for indices `sermons`, `speakers`, `lists`, and `images` in:
+- `components/SearchableAdminSermonsList.tsx`
+- `components/uploaderComponents/SpeakerSelector.tsx`
+- `components/ListSelector.tsx`
+- `components/ImageSelector.tsx`
+- `pages/admin/lists.tsx`
+- Secure API key generation for uploader scoping is exposed by callable `generatesecuredapikey` in `functions/src/generateAlgoliaSecureApiKey.ts`.
+- Development can bypass Algolia with a Firestore-backed mock client in `utils/mockAlgoliaSearchClient.ts`.
 
-## Data Storage
+### Dolby API
+- OAuth client credential token call uses `https://api.dolby.io/v1/auth/token` in `functions/src/Dolby/getDolbyToken.ts`.
+- Transcode API call uses `https://api.dolby.com/media/transcode` in `functions/src/Dolby/transcodeAudio.ts`.
+- Env deps are `DOLBY_API_KEY` and `DOLBY_API_SECRET` (from code usage).
 
-**Primary database:**
-- Cloud Firestore (Firebase)
-  - Client access wrappers: `firebase/firestore.ts`
-  - Admin access: `firebase/firebaseAdmin.ts`
-  - Heavy usage across `pages/admin/*`, `pages/api/*`, and `functions/src/*`
+### YouTube Integration
+- Browser playback/editing uses YouTube IFrame API in `components/trimmer/youtubeIframeAdapter.ts`.
+- Upload pipeline can accept YouTube URLs and queue server-side processing in `pages/api/uploadFile.tsx` + `functions/src/addIntroOutro/*`.
+- A separate Cloud Run service for YouTube-to-MP3 exists in `youtube-to-mp3-cloud-run/index.js`.
 
-**Secondary database:**
-- Firebase Realtime Database
-  - Used for bundle metadata and listener coordination (`shared/bundleConfigs.ts`, `functions/src/utils/bundleListenerUtils.ts`)
+### Google Cloud Run / Tasks
+- Function URL routing for v2 callable-by-URL pattern uses `*.a.run.app` hosts in `utils/createFunction.ts`.
+- Audio processing dispatches to Cloud Tasks queue `addintrooutrotaskhandler` in `functions/src/addIntroOutro/addintrooutrotaskgenerator.ts`.
+- Generator targets `https://process-audio-yshbijirxq-uc.a.run.app/process-audio` in production and local `http://127.0.0.1:8080/process-audio` in emulator mode.
 
-**File/object storage:**
-- Firebase Storage / GCS bucket `urm-app.appspot.com`
-  - Sermon files, intro/outro assets, images, generated bundles
-  - Client wrapper: `firebase/storage.ts`
-  - Backend signed URL + bucket operations in `functions/src/getOutputUrl.ts` and media functions
+## Storage, Media, and Bundle Integrations
 
-**Caching/bundle layer:**
-- Firebase Firestore Bundles served from Cloud Storage, with metadata tracked in RTDB
-  - Core docs + code: `docs/BUNDLE_SYSTEM.md`, `functions/src/utils/bundleCreationUtils.ts`, `shared/bundleConfigs.ts`
+### Cloud Storage
+- Primary bucket usage via Admin SDK default bucket (`urm-app.appspot.com`) appears in upload and media processing functions.
+- Secondary bucket `urm-app-images` is explicitly used for image ingestion in `firebase/storage.ts` and `functions/src/handleImageUpload.ts`.
+- Audio path conventions are in `constants/storage_constants.ts` (`sermons`, `processed-sermons`, `intro-outro-sermons`).
 
-## Authentication & Identity
+### Firestore Bundles + Realtime Metadata
+- Bundle definitions and metadata paths are in `shared/bundleConfigs.ts`.
+- Bundle binaries are written to Cloud Storage paths like `bundles/topics-bundle.bin` by `functions/src/utils/bundleCreationUtils.ts`.
+- Metadata update paths in Realtime DB include `bundle-metadata/*` and are consumed by `utils/bundleManager.ts`.
+- Bundle endpoints are served by HTTP functions (`createTopicBundle`, `createSubtitleBundle`, etc.) in `functions/src/create*Bundle.ts`.
 
-**Auth provider:**
-- Firebase Authentication
-  - Client auth flows (email/password + OAuth providers): `context/user/UserContext.tsx`
-  - Providers observed: Google, Apple, Microsoft
+## Auth/Data Provider Flow Summary
+- Authentication provider methods: Google, Apple, Microsoft OAuth via Firebase Auth (`context/user/UserContext.tsx`).
+- Authorization model is custom-claim role based (`admin`, `publisher`, `uploader`, `user`) defined in `types/User.ts`.
+- Role bootstrap for new accounts is done by `beforeUserCreated` trigger in `functions/src/setUserRoleOnCreate.ts`.
+- Firestore rules in `firestore.rules` enforce role-gated write access and owner-based series/sermon controls.
 
-**Authorization model:**
-- Role-based access via custom claims (`admin`, `publisher`, `uploader`, `user`)
-  - Role helpers in `types/User.ts`
-  - Used in callable functions and UI guards
+## Config Surface (Observed in Code)
+- Frontend/runtime flags: `NODE_ENV`, `NEXT_PUBLIC_NODE_ENV`, `PLAYWRIGHT_BASE_URL`, `TRIMMER_DEBUG_API`, `NEXT_PUBLIC_TRIMMER_DEBUG`, `NEXT_PUBLIC_TRIMMER_DEBUG_API`.
+- Search config: `NEXT_PUBLIC_ALGOLIA_APP_ID`, `NEXT_PUBLIC_ALGOLIA_API_KEY`.
+- Functions URL override: `NEXT_PUBLIC_FIREBASE_FUNCTIONS_URL` (`utils/bundleManager.ts`).
+- Subsplash credentials: `EMAIL`, `PASSWORD` (`functions/src/subsplashUtils.ts`, subsplash callable handlers).
+- SoundCloud secret: `SOUNDCLOUD_ACCESS_TOKEN` (Functions Secret Manager via `defineSecret`).
+- Dolby credentials: `DOLBY_API_KEY`, `DOLBY_API_SECRET`.
+- Emulator plumbing: `FUNCTIONS_EMULATOR`, `FIRESTORE_EMULATOR_HOST`, `FIREBASE_AUTH_EMULATOR_HOST`, `GCLOUD_PROJECT`.
 
-**Server-side route protection:**
-- Cookie token verification with Admin SDK in `components/ProtectedRoute.tsx` and `utils/protectedRoutes.ts`
+## Risk Notes (Current State)
+- Subsplash auth uses static env email/password (`EMAIL`/`PASSWORD`) in multiple functions; rotation and blast radius risk are high compared to short-lived secrets.
+- Algolia admin key is referenced as `NEXT_PUBLIC_ALGOLIA_API_KEY` in both client and server contexts (`components/*`, `functions/src/generateAlgoliaSecureApiKey.ts`), creating accidental client exposure risk.
+- Dolby token helper logs key/secret and bearer token (`functions/src/Dolby/getDolbyToken.ts`, `transcodeAudio.ts`), which is a sensitive logging risk.
+- Hybrid callable invocation patterns exist (`httpsCallable` name-based and `httpsCallableFromURL` direct Cloud Run URL in `utils/createFunction.ts`), increasing deployment coupling risk.
+- Audio task generator hardcodes production Cloud Run URI (`functions/src/addIntroOutro/addintrooutrotaskgenerator.ts`), so environment portability depends on manual code edits.
+- Firestore rules expose public reads for `/metadata/*` in `firestore.rules`; intended for bundle timestamps, but still expands anonymous read surface.
+- `firebase/firebase.ts` embeds full Firebase web config inline; normal for client apps, but it reinforces need for strict backend rules.
+- `.env` includes keys (for example Clerk-related names) that are not reflected in active package deps, indicating possible stale config surface and operator confusion risk.
 
-## Monitoring & Observability
-
-**Backend logging:**
-- `firebase-functions` logger in Cloud Functions
-- Local/emulator logs and debug files: `firestore-debug.log`, `firebase-debug.log`, `database-debug.log`
-
-**Client debug instrumentation:**
-- Trimmer debug client logger posting to `pages/api/debug/trimmer.ts` when enabled by env flags
-
-**Error tracking/analytics:**
-- No dedicated Sentry-style service discovered in repo
-- Google Analytics capability present via Firebase analytics initialization in `firebase/firebase.ts`
-
-## CI/CD & Deployment
-
-**Hosting/deployment:**
-- Web: Next.js app with Vercel-oriented config (`vercel.json`)
-- Backend: Firebase Functions deployment (`functions/package.json` script `deploy`)
-
-**Build/deploy configs:**
-- Firebase config and predeploy hooks in `firebase.json`
-- Functions compile from TypeScript before deploy (`npm --prefix "$RESOURCE_DIR" run build`)
-
-**CI workflows:**
-- No active GitHub Actions workflow files found under `.github/workflows/` in this repo snapshot
-
-## Environment Configuration
-
-**Development:**
-- `pnpm dev` starts Next.js + emulator stack (`start-emulators`)
-- Local callable URL routing in `utils/createFunction.ts` to emulator endpoints
-
-**Staging/Production differences:**
-- `createFunctionV2` switches callable endpoint between emulator and Cloud Run-style URL
-- Auth/storage/firestore wrappers switch emulator connections in dev only
-
-**Critical env vars and secrets:**
-- External API credentials (Subsplash email/password, Dolby keys, SoundCloud token)
-- Search keys and trimmer debug toggles
-
-## Webhooks & Callbacks
-
-**Incoming webhooks:**
-- No third-party webhook endpoint pattern identified
-
-**Event-driven callbacks:**
-- Firestore document listeners in `functions/src/DocumentListeners/*` trigger bundle updates, list/sermon maintenance, and metadata sync
-
-**Outgoing callbacks/API pushes:**
-- Subsplash/SoundCloud update operations from callable functions and admin flows
-
----
-
-*Integration audit: 2026-02-24*
-*Update when adding/removing external services or secrets strategy*
+## Secondary/Tooling Integrations
+- Python helper scripts under `scrapers/` integrate with Subsplash REST APIs for tag/list synchronization and backfill operations.
+- Playwright E2E integration is configured in `playwright.config.ts` and test files under `tests/`.
+- Firebase emulator import/export workflows rely on local artifact directories under `dir/` and scripts in root `package.json`.

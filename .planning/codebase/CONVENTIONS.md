@@ -1,101 +1,61 @@
-# Coding Conventions
+# Coding Conventions (Quality Focus)
 
-**Analysis Date:** 2026-02-24
+**Analysis date:** 2026-02-28
 
-## Naming Patterns
+## Repository-wide style and tooling
 
-**Files:**
-- `PascalCase.tsx` for React UI components (e.g., `ManagePublishingPopup.tsx`)
-- `camelCase.ts` for helpers/utilities and backend modules (e.g., `createFunction.ts`, `uploadToSubsplash.ts`)
-- Tests:
-  - Functions: `*.test.ts` under `functions/src/test/`
-  - E2E: `*.spec.ts` under `tests/`
+- TypeScript strict mode is enabled in both app and functions (`tsconfig.json`, `functions/tsconfig.json`).
+- Formatting is driven by Prettier with 120-column width, semicolons, and single quotes (`.prettierrc.json`).
+- Frontend linting uses Next + React + Standard + TS plugins (`.eslintrc.json`); backend linting uses flat ESLint config (`functions/eslint.config.js`).
+- Unused variables are enforced via `@typescript-eslint/no-unused-vars` with `_` ignore prefix in both roots (`.eslintrc.json`, `functions/eslint.config.js`).
 
-**Functions:**
-- `camelCase` for most function names/locals
-- Backend callables often named as action verbs (`addToList`, `uploadToSoundCloud`, `removeFromList`)
-- Event handlers typically reflect trigger source (`topicOnWrite`, `sermonListOnCreate`)
+## Naming and file patterns
 
-**Variables:**
-- `camelCase` for local vars and state
-- Constants usually `UPPER_SNAKE_CASE` (e.g., `DRAWER_WIDTH`, `DEFAULT_EMULATOR_HOST`)
+- React components/pages follow PascalCase file names in `components/` and route-based names in `pages/` (examples: `components/EditSermonForm.tsx`, `pages/admin/sermons.tsx`).
+- Utility and backend modules are mostly camelCase files (examples: `utils/createFunction.ts`, `functions/src/removeFromList.ts`).
+- Cloud Function exports in `functions/src/index.ts` are lower-case keys even when the source file is camelCase (example: `exports.createseries = createseries;`).
+- Domain types live in `types/` and are shared by frontend + backend imports (examples: `types/User.ts`, `types/List.ts`, `types/SermonTypes.ts`).
 
-**Types:**
-- `PascalCase` interfaces/types (e.g., `UploadToSoundCloudInputType`, `AudioPlayerState`)
-- Role and enum-like constants in `types/` with helper predicates
+## Runtime boundaries and composition
 
-## Code Style
+- Frontend calls callable functions through typed wrappers in `utils/createFunction.ts` (`createFunction`, `createFunctionV2`).
+- Root app composition is centralized in `pages/_app.tsx`: `UserProvider` -> `NextThemesProvider` -> MUI theme -> `AudioPlayerProvider`.
+- Heavy UI pieces are lazily loaded with `next/dynamic` where needed (examples: `pages/_app.tsx`, `components/uploaderComponents/UploaderComponent.tsx`).
+- Firestore converters are consistently attached via `.withConverter(...)` for typed collections/documents (examples: `components/EditSermonForm.tsx`, `functions/src/addToList.ts`).
 
-**Formatting:**
-- Prettier config in `.prettierrc.json`
-- 120 print width, 2 spaces, semicolons enabled, single quotes
+## Typing and data-shape conventions
 
-**Linting:**
-- Root ESLint extends: `standard`, `plugin:react/recommended`, `plugin:@next/next/recommended`, `plugin:react-hooks/recommended`
-- `@typescript-eslint/no-unused-vars` enforced with `_` ignore patterns
-- Console usage allowed with warnings (warn/error explicitly allowed)
+- The codebase prefers explicit domain interfaces/enums over ad-hoc maps (examples: `types/SermonTypes.ts`, `types/List.ts`).
+- Empty/default object factories are used to stabilize optional Firestore payloads (examples: `types/Sermon.ts:createEmptySermon`, `types/List.ts:emptyList`).
+- Converters merge defaults with snapshot data to tolerate partial/legacy documents (examples: `types/Sermon.ts`, `functions/src/firestoreDataConverter.ts`).
+- Discriminated unions are used for mixed media list items (`types/ListItem.ts` with `type: 'sermon' | 'list'`).
+- Firestore undefined-field handling is explicit in some converters (example: `types/Sermon.ts` filters `undefined` before write).
 
-## Import Organization
+## Error handling and guard patterns
 
-**Observed order (common pattern):**
-1. External packages
-2. Project-local imports (`../`, `../../`, absolute alias `@/*` when used)
-3. Type imports intermixed (not strictly separated everywhere)
+- Backend callable functions gate auth/role early using helpers from `types/User.ts` (`canUserRolePublish`, `canUserRoleUpload`, `isUserRoleAdmin`).
+- `HttpsError` is the standard boundary error for Cloud Functions (`functions/src/createSeries.ts`, `functions/src/removeFromList.ts`, `functions/src/uploadToSoundCloud.ts`).
+- Shared error normalization is centralized in `functions/src/handleError.ts` (passes through `HttpsError`, maps Axios and generic errors to `internal`).
+- Document listeners typically wrap function bodies and rethrow normalized errors (`functions/src/DocumentListeners/**`).
+- Frontend still has mixed error surfaces (`console.error`, `console.warn`, and dialog state), e.g. `components/uploaderComponents/UploaderComponent.tsx` and `components/Login.tsx`.
 
-**Path aliases:**
-- TS path alias `@/*` exists in `tsconfig.json`, though many files still use relative imports
+## State-management conventions
 
-## Error Handling
+- Reducer-based global state is used for audio player control (`context/audio/audioPlayerContext.tsx`, `reducers/audioPlayerReducer.ts`).
+- Zustand is used for high-frequency trimmer state and selector logic (`context/trimmerStore.ts`).
+- Hooks memoize callbacks/selectors in performance-sensitive contexts (`context/audio/audioPlayerContext.tsx`, trimmer hooks under `components/trimmer/`).
 
-**Backend patterns:**
-- Callable functions validate auth/role early and throw `HttpsError` for permission issues
-- Integration errors wrapped/mapped (e.g., `handleError`) and logged with context
+## Operational conventions that affect quality
 
-**Frontend patterns:**
-- Async actions typically wrapped in `try/catch`
-- Some legacy flows still use `alert`/`console.error` directly for surfaced failures
-- Guard clauses used for auth/undefined state conditions
+- Local dev is expected to run with Firebase emulators via `pnpm dev` (`package.json`) and emulator wiring in `firebase/*.ts`.
+- Dev auth flow depends on a seeded emulator admin user (`scripts/create-dev-admin.ts`) and a dev-only login button (`components/Login.tsx`).
+- Bundle-backed list/topic/subtitle loading relies on cache + timestamp checks (`utils/bundleManager.ts`, `utils/bundleHelpers.ts`, `shared/bundleConfigs.ts`).
+- Functions tests intentionally use separate emulator ports from app-dev (`firebase.test.json` vs `firebase.json`).
 
-## Logging
+## Quality-specific inconsistencies to watch
 
-**Framework:**
-- Backend: `firebase-functions` logger
-- Frontend: `console.*` and targeted debug utility (`utils/trimmerDebug.ts`)
-
-**Patterns:**
-- Integration functions log request phase/status details
-- Debug logging can be gated via env flags (`TRIMMER_DEBUG_API`, `NEXT_PUBLIC_TRIMMER_DEBUG`)
-
-## Comments
-
-**When comments are used:**
-- Clarifying intent for layout/perf behavior
-- TODO markers for incomplete features or deferred cleanup
-- Inline notes for emulator/dev-only behavior
-
-**TODO usage:**
-- TODOs exist across uploader, trimmer, and function legacy paths
-- Not all TODOs are linked to issue IDs in code
-
-## Function Design
-
-**Common style:**
-- Mix of large orchestrator functions (notably in admin pages and add-to-list flows) and focused helpers
-- Guard clauses and early returns are common
-- Async/await style used consistently over promise chains in most files
-
-## Module Design
-
-**Exports:**
-- React components often default export
-- Functions modules commonly default-export handler and are re-exported in `functions/src/index.ts`
-- Shared types/helpers use named exports
-
-**Composition patterns:**
-- State management split by domain (User/Auth context, Audio context, Trimmer store)
-- Reusable typed config-driven systems (bundle configs + generic bundle utilities)
-
----
-
-*Convention analysis: 2026-02-24*
-*Update when lint/format rules or naming patterns materially change*
+- Some APIs still use loose `any` defaults (`utils/createFunction.ts`) and broad `Record<string, unknown>` writes (`functions/src/createSeries.ts`).
+- Naming consistency is imperfect in functions exports (mix of camelCase source and lowercase export aliases in `functions/src/index.ts`).
+- Legacy code remains in active tree (`functions/src/old_addToList.ts`, `functions/src/handleImageUploadOld.ts`).
+- TODO markers highlight unfinished behavior in production paths (`components/uploaderComponents/UploaderComponent.tsx`, `functions/src/DocumentListeners/Lists/listItemOnCreate.ts`, `pages/api/uploadFile.tsx`).
+- `ListItemConverter` and admin converter mutate `listItem.mediaItem` during conversion (`types/ListItem.ts`, `functions/src/firestoreDataConverter.ts`), which can surprise callers reusing object references.

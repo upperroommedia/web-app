@@ -1,130 +1,71 @@
-# Architecture
+# Architecture Map (focus: arch)
 
-**Analysis Date:** 2026-02-24
+## Architectural Pattern
+- The app is a **Pages Router Next.js frontend** plus a **Firebase Cloud Functions backend** in the same workspace (`package.json` workspaces: `.` and `functions`).
+- UI requests are handled in `pages/*` and composed via a global app shell in `pages/_app.tsx`.
+- Domain mutations and external system sync are delegated to callable/HTTP functions exposed from `functions/src/index.ts`.
+- Firestore document listeners in `functions/src/DocumentListeners/**` enforce denormalized consistency and side effects after writes.
+- This is effectively a layered serverless architecture: browser UI -> Firebase SDK/functions -> Firestore/Storage/RTDB -> external APIs (Subsplash, SoundCloud, Algolia).
 
-## Pattern Overview
+## Runtime Layers
+- **Presentation layer**: route files in `pages/*.tsx`, `pages/admin/**/*.tsx`, shared layouts in `layout/AppLayout.tsx` and `layout/SidebarLayout.tsx`, and view components under `components/**`.
+- **Client state/auth layer**: `context/user/UserContext.tsx` (identity + role capabilities), `context/audio/audioPlayerContext.tsx` (global player), and `context/trimmerStore.ts` (Zustand trimmer state).
+- **Client data-access layer**: Firebase client modules in `firebase/*.ts`, callable wrappers in `utils/createFunction.ts`, bundle cache access via `utils/bundleManager.ts` and `utils/bundleHelpers.ts`.
+- **Domain contract layer**: shared model definitions and converters in `types/*.ts` (e.g., `types/Sermon.ts`, `types/List.ts`, `types/Series.ts`) and mirrored admin converters in `functions/src/firestoreDataConverter.ts`.
+- **Backend function layer**: callable functions, HTTP bundle handlers, and task handlers under `functions/src/**`.
+- **Persistence layer**: Firestore (`sermons`, `lists`, `series` + nested subcollections), Realtime Database (bundle metadata and add-intro/outro progress), and Storage buckets.
 
-**Overall:** Full-stack TypeScript monorepo with a Next.js admin/web frontend plus Firebase Functions v2 backend.
+## Primary Entry Points
+- Frontend app bootstrap: `pages/_app.tsx`.
+- Main upload screen: `pages/index.tsx` -> `components/uploaderComponents/VerifiedUserUploaderComponent.tsx` -> `components/uploaderComponents/UploaderComponent.tsx`.
+- Admin surfaces: `pages/admin/sermons.tsx`, `pages/admin/sermons/[sermonId].tsx`, `pages/admin/series.tsx`, `pages/admin/series/[seriesId].tsx`, `pages/admin/lists.tsx`, `pages/admin/users.tsx`.
+- Login/auth route: `pages/login.tsx` with providers in `components/Login.tsx`.
+- Cloud function export hub: `functions/src/index.ts`.
+- Background audio processing pipeline: `functions/src/addIntroOutro/addintrooutrotaskgenerator.ts` and `functions/src/addIntroOutro/addintrooutrotaskhandler.ts`.
 
-**Key Characteristics:**
-- UI-first admin tool in `pages/` + `components/`
-- Firebase-centric data and identity model (Auth, Firestore, Storage, RTDB)
-- Serverless integration layer for external publishing/media systems (Subsplash, SoundCloud, Dolby)
-- Mixed real-time and batch style flows (Firestore listeners + callable functions + bundle generation)
+## Key Flow: Authentication + Authorization
+- Client sign-in providers are executed from `components/Login.tsx` via `context/user/UserContext.tsx`.
+- `UserContext` writes Firebase ID token to `nookies` cookie (`token`) for SSR-compatible checks.
+- SSR guard helper in `components/ProtectedRoute.tsx` verifies cookie token with `firebase/firebaseAdmin.ts`.
+- UI authorization is role-capability based (`types/User.ts`: `isAdmin`, `canUpload`, `canPublish`) and enforced in `layout/AppLayout.tsx`, page wrappers, and action buttons.
+- Functions enforce server-side authorization again using custom claims (`canUserRolePublish` checks in `functions/src/*`).
 
-## Layers
+## Key Flow: Upload, Trim, Process, Publish
+- Upload form state is orchestrated in `components/uploaderComponents/UploaderComponent.tsx`.
+- Client-side upload orchestration lives in `pages/api/uploadFile.tsx` (called directly as a module, not via HTTP).
+- Initial sermon + list/series membership docs are created in Firestore before/alongside media upload.
+- Processing is kicked off through callable `addintrooutrotaskgenerator` using `createFunctionV2` URL invocations (`utils/createFunction.ts`).
+- Task handler `functions/src/addIntroOutro/addintrooutrotaskhandler.ts` trims/transcodes/merges intro/outro, updates sermon `status.audioStatus`, and writes progress to RTDB path `addIntroOutro/{sermonId}`.
+- Processed audio lands in storage path `intro-outro-sermons/{sermonId}` and is consumed by the player (`components/MediaPlayerComponent.tsx`).
+- Publishing to external platforms is handled by callable functions (`functions/src/uploadToSubsplash.ts`, `functions/src/uploadToSoundCloud.ts`).
 
-**Presentation Layer (Next.js pages + React components):**
-- Purpose: Render uploader/admin experiences and collect user actions
-- Contains: route pages (`pages/admin/*`, `pages/index.tsx`, `pages/login.tsx`) and feature components (`components/*`)
-- Depends on: contexts, utilities, Firebase client wrappers
-- Used by: browser clients
+## Key Flow: List and Series Consistency
+- Denormalized links are intentionally maintained both ways:
+- `lists/{listId}/listItems/{sermonId}` and `sermons/{sermonId}/sermonLists/{listId}` are synced by listeners `functions/src/DocumentListeners/Lists/listItemOnCreate.ts`, `listItemOnDelete.ts`, `listOnUpdate.ts`, and `functions/src/DocumentListeners/SermonLists/*`.
+- Sermon counters (`numberOfLists`, `numberOfListsUploadedTo`) are transactionally updated in `functions/src/DocumentListeners/SermonLists/sermonListOnCreate.ts`, `sermonListOnUpdate.ts`, and `sermonListOnDelete.ts`.
+- Overflow behavior for Subsplash lists is encapsulated in callable `functions/src/addToList.ts` and helper `functions/src/helpers/addToListHelpers.ts`.
+- Media series domain is separate from generic lists: `series/{seriesId}` + `seriesItems` managed via `functions/src/createSeries.ts`, `addToSeries.ts`, `removeFromSeries.ts`, `reorderSeriesItems.ts`, and `deleteSeries.ts`.
+- Series aggregate metadata (`itemCount`, `publishedItemCount`, `subtitle`) is recalculated in listener `functions/src/DocumentListeners/Series/seriesItemOnWrite.ts`.
 
-**Client State & Access Layer:**
-- Purpose: Centralize auth/player/trimmer state and data access helpers
-- Contains: `context/user/UserContext.tsx`, `context/audio/audioPlayerContext.tsx`, `context/trimmerStore.ts`, `utils/createFunction.ts`
-- Depends on: Firebase SDK wrappers in `firebase/*`
-- Used by: page and component layer
+## Key Flow: Bundle-Based Read Optimization
+- Bundle definitions are centralized in `shared/bundleConfigs.ts`.
+- HTTP bundle endpoints (`functions/src/createTopicBundle.ts`, `createSubtitleBundle.ts`, `createBibleChapterBundle.ts`, `createSundayHomilyBundle.ts`, `createLatestListBundle.ts`) serve from storage cache or regenerate via `functions/src/utils/bundleCreationUtils.ts`.
+- Change triggers for bundle refresh are generated with `createBundleDocumentListener` in `functions/src/utils/bundleListenerUtils.ts` and wired in `functions/src/DocumentListeners/Topics/topicOnWrite.ts`, `Lists/subtitleListOnWrite.ts`, and `Lists/taggedListOnWrite.ts`.
+- Client consumption path is `utils/bundleManager.ts` + `utils/bundleHelpers.ts`; uploader selectors fall back to live Firestore if bundle fetch fails.
 
-**Application Service Layer (Cloud Functions):**
-- Purpose: privileged operations and external system orchestration
-- Contains: callable functions in `functions/src/*` (upload, edit, list/series management, media tasks)
-- Depends on: Firebase Admin SDK, external APIs, helper modules
-- Used by: client callable invocations and event triggers
+## Cross-Cutting Abstractions
+- **Converter pattern**: model defaults + Firestore conversion in `types/*` and admin converters in `functions/src/firestoreDataConverter.ts`.
+- **Function invocation adapters**: callable by name (`createFunction`) vs direct URL Cloud Run-style (`createFunctionV2`) in `utils/createFunction.ts`.
+- **Role capability API**: centralized permission helpers in `types/User.ts` used by both frontend and backend.
+- **Layout extension point**: per-page static `PageLayout` in `pages/*` consumed by `pages/_app.tsx`.
+- **Media player shell**: singleton player context + floating UI in `context/audio/audioPlayerContext.tsx` and `components/BottomAudioBar.tsx`.
 
-**Data/Event Layer:**
-- Purpose: persistence and derived-data maintenance
-- Contains: Firestore collections/subcollections, RTDB metadata docs, Storage objects, document listeners in `functions/src/DocumentListeners/*`
-- Depends on: Firebase platform
-- Used by: both frontend and functions
+## External Integrations
+- Subsplash OAuth and API calls in `functions/src/subsplashUtils.ts` and associated helpers/callables.
+- SoundCloud upload/update/delete via `functions/src/soundcloudClient.ts` and secrets in `functions/src/soundcloudSecrets.ts`.
+- Algolia secure search key generation in `functions/src/generateAlgoliaSecureApiKey.ts`; frontend search in `components/SearchableAdminSermonsList.tsx` and fallback emulator mock in `utils/mockAlgoliaSearchClient.ts`.
 
-## Data Flow
-
-**Upload + processing flow:**
-1. User uploads file/YouTube URL from `pages/index.tsx` uploader stack
-2. Client writes sermon/list/series references to Firestore via `pages/api/uploadFile.tsx`
-3. Client triggers callable `addintrooutrotaskgenerator`
-4. Functions process media (`functions/src/addIntroOutro/*`) and store output in Firebase Storage
-5. UI and player consume generated assets
-
-**Publish flow (Subsplash/SoundCloud):**
-1. Admin page actions (`pages/admin/sermons/[sermonId].tsx`, `components/ManagePublishingPopup.tsx`)
-2. Client calls backend via `createFunctionV2`
-3. Function validates role claims and performs API calls
-4. Function updates Firestore records and returns integration IDs/status
-
-**Bundle generation flow:**
-1. Firestore writes trigger listeners (`functions/src/DocumentListeners/*`)
-2. Bundle utilities regenerate typed Firestore bundles
-3. Bundles are stored in GCS and metadata updated in RTDB
-4. Clients load/cached bundle content via `utils/bundleManager.ts`
-
-**State Management:**
-- Auth/session: React context + Firebase auth state
-- Audio player: reducer/context (`reducers/audioPlayerReducer.ts`)
-- Trimmer: Zustand store (`context/trimmerStore.ts`)
-- Data subscription: Firestore hooks and explicit function/API calls
-
-## Key Abstractions
-
-**Role & permission helpers:**
-- Purpose: consistent authorization semantics
-- Examples: `types/User.ts` (`canUserRoleUpload`, `canUserRolePublish`, `isUserRoleAdmin`)
-- Pattern: shared pure functions used in frontend and backend
-
-**Callable function factory:**
-- Purpose: normalize local emulator vs deployed callable endpoints
-- Examples: `utils/createFunction.ts`
-- Pattern: small transport abstraction returning typed async functions
-
-**Bundle configuration + generic builders:**
-- Purpose: avoid duplicated logic for topics/subtitles/bible/sunday/latest bundles
-- Examples: `shared/bundleConfigs.ts`, `functions/src/utils/bundleCreationUtils.ts`
-- Pattern: config-driven generic utilities
-
-## Entry Points
-
-**Web app bootstrap:**
-- Location: `pages/_app.tsx`
-- Triggers: all page navigations
-- Responsibilities: global providers, theming, media player wiring, page layout handoff
-
-**Web routes:**
-- Location: `pages/*`
-- Triggers: browser HTTP requests and client navigation
-- Responsibilities: render uploader/admin/detail workflows
-
-**Functions export hub:**
-- Location: `functions/src/index.ts`
-- Triggers: Firebase callable/HTTP/document event wiring
-- Responsibilities: export and register all function handlers
-
-## Error Handling
-
-**Strategy:**
-- Backend callables throw `HttpsError` for auth/validation failures
-- Integration failures handled via helper wrappers (e.g., `handleError`) and logged with `firebase-functions` logger
-- Client paths use a mix of `try/catch`, alert/console logging, and optimistic UI updates
-
-**Patterns:**
-- Role checks near function entry points
-- Batch/transaction use for Firestore consistency in list/series mutation paths
-- Best-effort cleanup after upload failures in `pages/api/uploadFile.tsx`
-
-## Cross-Cutting Concerns
-
-**Authentication/authorization:**
-- Firebase auth tokens + custom role claims in both UI guards and backend function guards
-
-**Logging/debugging:**
-- Functions logger for backend
-- Client trimmer debug instrumentation (opt-in env toggles)
-
-**Media handling:**
-- Shared intro/outro and trimming paths across UI and functions
-- Storage object lifecycle managed in upload and cleanup code paths
-
----
-
-*Architecture analysis: 2026-02-24*
-*Update when major data flow or layer boundaries change*
+## Deployment/Execution Boundaries
+- Frontend build/runtime is Next.js (`next.config.js`, scripts in root `package.json`).
+- Functions compile/deploy independently from `functions/package.json` and are configured in `firebase.json`.
+- Local development couples Next dev server with Firebase emulators (`package.json` scripts `dev`, `next-dev`, `start-emulators`).

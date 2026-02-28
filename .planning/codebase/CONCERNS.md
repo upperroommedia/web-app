@@ -1,132 +1,103 @@
-# Codebase Concerns
+# Codebase Concerns (Focused Map)
 
-**Analysis Date:** 2026-02-24
+## Priority Legend
+- P0: security or data-integrity risk with immediate blast radius
+- P1: high reliability/performance risk that can cause incidents or chronic regressions
+- P2: maintainability/operational debt with medium-term delivery drag
+- P3: lower-severity quality issues
 
-## Tech Debt
+## P0 Concerns
+1. Unauthenticated mutation-capable Cloud Functions are exposed.
+   - Evidence: `functions/src/Scrapers/fixPhantomListItems.ts` (`onRequest` + `cors: true`), `functions/src/Scrapers/updateSubsplashTag.ts` (`onRequest` + `cors: true`), `functions/src/helpers/updateImageMetadata.ts` (`onRequest`), `functions/src/Scrapers/tagItemsInList.ts` (`onCall` with no `request.auth` guard), `functions/src/updateCreatedAndEditedAtMillis.ts` (`onCall` with no auth), `functions/src/addIntroOutro/addintrooutrotaskgenerator.ts` (`onCall` with no auth), `functions/src/generateAlgoliaSecureApiKey.ts` (no auth guard).
+   - Risk: internet callers can trigger expensive jobs, mutate Firestore state, enqueue audio processing work, and generate API keys for arbitrary users.
+   - Why fragile: auth checks are inconsistent across functions; some endpoints enforce role, others do not.
 
-**Large, multi-responsibility UI files:**
-- Issue: Several admin pages/components are very large and blend data loading, state logic, and rendering.
-- Evidence: `pages/admin/series/[seriesId].tsx` (~1071 lines), `pages/admin/sermons/[sermonId].tsx` (~857), `components/uploaderComponents/UploaderComponent.tsx` (~901).
-- Impact: Higher regression risk and harder reasoning/refactoring.
-- Fix approach: Split by feature hooks and presentational subcomponents; extract data orchestration into composable hooks.
+2. Authorization surface is overly permissive in rules.
+   - Evidence: `firestore.rules` allows any authenticated user to read/write `users/{userId}`; `/{path=**}/listItems/{listItemId}` and `/{path=**}/sermonLists/{sermonListId}` allow broad write for any upload-capable role.
+   - Evidence: `storage.rules` allows global `read` on all objects.
+   - Evidence: `database.rules.json` sets `".read": true` globally.
+   - Risk: cross-user data tampering and broad data visibility beyond least-privilege assumptions.
 
-**Legacy function retained alongside current logic:**
-- Issue: `functions/src/old_addToList.ts` still exists while `functions/src/addToList.ts` is active.
-- Impact: Confusion during maintenance and risk of stale behavior assumptions.
-- Fix approach: Confirm no runtime references, archive/remove legacy implementation, keep migration notes in docs.
+3. Dev/prod safety bug in emulator wiring for Realtime Database.
+   - Evidence: `firebase/database.ts` checks `process.env.FIRESTORE_EMULATOR_STARTED` before `connectDatabaseEmulator`; `firebase/firestore.ts` sets that flag first.
+   - Risk: local dev may silently read prod RTDB while Firestore/Auth are on emulator, creating high-risk mixed-environment behavior.
 
-**Outstanding TODOs in operational paths:**
-- Issue: TODO markers in upload/publish flows (e.g., image subsplash requirements and role request form behavior).
-- Evidence: `pages/api/uploadFile.tsx`, `components/RequestUploadPrivalige.tsx`, `components/uploaderComponents/UploaderComponent.tsx`.
-- Impact: Incomplete UX and potential runtime hard-fail paths.
-- Fix approach: Convert TODOs into tracked tasks with acceptance criteria and remove dead branches.
+## P1 Concerns
+4. Batch write reliability bugs (unawaited commits / incorrect batch lifecycle).
+   - Evidence: `functions/src/helpers/updateImageMetadata.ts` calls final `batch.commit()` without `await`.
+   - Evidence: `functions/src/updateCreatedAndEditedAtMillis.ts` calls `batch.commit()` inside `forEach` without `await` and keeps reusing same batch.
+   - Evidence: `functions/src/Scrapers/tagItemsInList.ts` calls `batch.commit()` without `await` (both loop and final commit).
+   - Risk: partial writes, silent data drift, and difficult postmortem analysis.
 
-## Known Bugs
+5. High fan-out listeners with full scans on hot paths.
+   - Evidence: `functions/src/DocumentListeners/Sermons/sermonWriteTrigger.ts` updates every matching `listItems` doc on sermon edits.
+   - Evidence: `functions/src/DocumentListeners/Lists/listOnUpdate.ts` propagates list updates to all `sermonLists` references.
+   - Evidence: `functions/src/DocumentListeners/Series/seriesItemOnWrite.ts` re-reads entire `series/{seriesId}/seriesItems` collection on each write.
+   - Risk: high write amplification, function timeout/cost spikes as data grows.
 
-**Trimmer/debug noise and possible production leakage risk:**
-- Symptoms: Debug logging and debug route writes can remain active depending on env flags.
-- Evidence: `utils/trimmerDebug.ts`, `pages/api/debug/trimmer.ts`, plus performance note in `docs/PERFORMANCE_SWEEP_2026-02-23.md`.
-- Workaround: Disable debug env flags in production.
-- Root cause: Mixed debug toggles and permissive non-production gating.
+6. Bundle regeneration is too eager for topics.
+   - Evidence: `shared/bundleConfigs.ts` sets `TOPIC_BUNDLE_CONFIG.shouldTrigger: () => true`.
+   - Evidence: `functions/src/utils/bundleListenerUtils.ts` regenerates full bundles via `generateAndStoreBundle` on each trigger.
+   - Risk: unnecessary full collection scans + bundle rebuilds for low-signal updates (cost and latency pressure).
 
-**Performance bottlenecks on admin sermons route:**
-- Symptoms: High render-delay dominated LCP and CLS spikes.
-- Evidence: `docs/PERFORMANCE_SWEEP_2026-02-23.md` (open high-priority findings).
-- Impact: Slower admin workflow and reduced perceived responsiveness.
-- Fix approach: Virtualize list rendering, reduce initial work, stabilize layout shifts.
+7. Admin route protection is primarily client-side and inconsistent.
+   - Evidence: `utils/protectedRoutes.ts` + `components/ProtectedRoute.tsx` exist, but admin pages rely on client checks (`useAuth`) and commented SSR guards (`pages/admin/users.tsx`, `pages/admin/lists/[listId].tsx`).
+   - Evidence: `layout/AppLayout.tsx` performs `router.push` during render instead of an effect.
+   - Risk: fragile auth UX, blank-page behavior, and avoidable route flicker/access ambiguity.
 
-## Security Considerations
+8. Current measured UI hotspots remain unresolved in production-like flows.
+   - Evidence: `docs/PERFORMANCE_SWEEP_2026-02-23.md` still reports high render-delay LCP/CLS on `/admin/sermons`.
+   - Evidence: `components/SearchableAdminSermonsList.tsx` and related admin list views still execute large client rendering paths.
+   - Risk: persistent slow admin workflows and operator friction.
 
-**Credential style for Subsplash auth:**
-- Risk: Username/password env auth (`EMAIL`/`PASSWORD`) is higher-risk operationally than scoped service credentials.
-- Current mitigation: Environment-based secrets (not hardcoded in source).
-- Recommendations: Move to managed secrets and scoped credentials with rotation policy; avoid plain credential naming in broad env usage.
+## P2 Concerns
+9. Repository contains very large tracked fixture/export payloads.
+   - Evidence: tracked exports in `dir/` (Firestore/Auth/Storage emulator imports) and large scraper payloads in `scrapers/` (multi-MB to tens-of-MB JSON).
+   - Evidence: `package.json` includes `import-from-prod` workflow writing into `./dir`.
+   - Risk: slow clone/CI, accidental sensitive dataset churn, difficult review diffs.
 
-**Potential token/cookie handling fragility:**
-- Risk: Auth depends on cookie token verification in server-side route helpers (`components/ProtectedRoute.tsx`).
-- Current mitigation: Firebase Admin token verification + role checks.
-- Recommendations: Add explicit token expiry/refresh behavior tests and centralize auth guard usage.
+10. Monolithic files are accumulating orchestration logic.
+   - Evidence: `pages/admin/series/[seriesId].tsx` (~1088 LOC), `components/uploaderComponents/UploaderComponent.tsx` (~901 LOC), `pages/admin/sermons/[sermonId].tsx` (~876 LOC), `components/ManagePublishingPopup.tsx` (~670 LOC).
+   - Risk: regression-prone edits, weak component boundaries, and high review burden.
 
-## Performance Bottlenecks
+11. Cross-layer coupling via `pages/api` utility imports is confusing and brittle.
+   - Evidence: client components import local app logic from `pages/api/*` (`components/uploaderComponents/UploadButton.tsx`, `components/NewListPopup.tsx`, `components/uploaderComponents/UploaderComponent.tsx`).
+   - Evidence: files in `pages/api` (`pages/api/uploadFile.tsx`, `pages/api/editSermon.ts`, `pages/api/addNewList.ts`) are not conventional Next API handlers.
+   - Risk: unclear route surface, accidental runtime exposure, and maintenance confusion.
 
-**Admin sermons list rendering:**
-- Problem: Largest observed route bottleneck.
-- Measurement: Recent documented traces show ~4.4s-4.8s LCP with high render delay and CLS ~0.19.
-- Cause: Heavy initial render workload and expensive page composition.
-- Improvement path: Virtualization, deferred secondary panels, strict memoization and request batching.
+12. External integration configuration is hard-coded in multiple places.
+   - Evidence: `utils/createFunction.ts` hard-codes Cloud Run host pattern (`https://${name}-yshbijirxq-uc.a.run.app`).
+   - Evidence: `functions/src/addIntroOutro/addintrooutrotaskgenerator.ts` hard-codes `https://process-audio-yshbijirxq-uc.a.run.app/process-audio`.
+   - Risk: environment drift and brittle deploy portability.
 
-**Forced reflow hotspots in player/trimmer UI:**
-- Problem: Resize/reflow cost around media interactions.
-- Evidence: `docs/PERFORMANCE_SWEEP_2026-02-23.md` + trimmer/player complexity in `components/trimmer/*`, `components/BottomAudioBar.tsx`.
-- Improvement path: throttle resize logic and reduce layout-read-after-write behavior.
+13. Subsplash integration uses direct credential flow from env vars.
+   - Evidence: `functions/src/subsplashUtils.ts` reads `process.env.EMAIL` / `process.env.PASSWORD` and performs password grant.
+   - Risk: secrets lifecycle and rotation posture weaker than Secret Manager-based patterns.
 
-## Fragile Areas
+14. `listUsers` strategy is unbounded and non-paginated in UI path.
+   - Evidence: `functions/src/listUsers.ts` recursively reads all users; `pages/admin/users.tsx` fetches full set at load.
+   - Risk: scale ceiling and long-latency admin page initialization.
 
-**Add-to-list overflow and ordering semantics:**
-- Why fragile: Complex transaction and external API coordination across Firestore + Subsplash list rows.
-- Files: `functions/src/addToList.ts`, `functions/src/helpers/addToListHelpers.ts`.
-- Common failures: duplicates, ordering drift, overflow link chain issues under retries/concurrency.
-- Safe modification: maintain emulator-backed concurrency tests before and after changes.
+## P3 Concerns
+15. Test/verification pipeline coverage is uneven.
+   - Evidence: no CI workflow file under `.github/workflows`; root scripts emphasize e2e but no broad unit/integration command.
+   - Evidence: exposed function auth behaviors above have no visible dedicated tests.
+   - Risk: regressions in auth/perf areas are likely to reach manual QA.
 
-**Trimmer synchronization stack:**
-- Why fragile: Multiple synchronization points (player adapter, Zustand store, drag/input timelines).
-- Files: `components/YouTubeTrimmer.tsx`, `components/trimmer/useTrimmerSync.ts`, `context/trimmerStore.ts`.
-- Common failures: loading state hangs, scrub/playhead desync, mobile interaction edge cases.
-- Safe modification: preserve E2E coverage and add focused regression tests for touched interactions.
+16. Docs and legacy artifacts show drift.
+   - Evidence: root `README.md` is mostly default Next starter text and does not reflect actual workflows.
+   - Evidence: legacy/stale subtree `youtube-to-mp3-cloud-run/` (template-style README, older runtime assumptions) coexists with current add-intro/outro pipeline.
+   - Risk: onboarding confusion and duplicated mental models.
 
-## Scaling Limits
+17. Minor routing/UX consistency issues remain.
+   - Evidence: `pages/profile.tsx` uses `callbackUrl` while login logic expects `callbackurl`.
+   - Evidence: `components/RequestUploadPrivalige.tsx` is explicitly TODO/non-functional.
+   - Risk: inconsistent navigation behavior and incomplete admin access workflow.
 
-**Function/API fanout during admin flows:**
-- Current capacity risk: per-item or repeated callable patterns can increase latency/cost on large datasets.
-- Symptoms at limit: slower admin interactions, elevated function invocation volume.
-- Scaling path: batch endpoints and denormalized read models for heavy admin lists.
-
-**Firestore/list complexity growth:**
-- Risk: nested list and series mutation complexity scales with content volume.
-- Symptoms: transaction contention and slower consistency updates.
-- Scaling path: stronger bounded contexts and asynchronous reconciliation jobs for non-critical updates.
-
-## Dependencies at Risk
-
-**Media toolchain complexity:**
-- Risk: ffmpeg/imagemagick/sharp stack is operationally heavy and environment-sensitive.
-- Impact: local/prod parity issues and deployment constraints.
-- Migration plan: standardize processing pipeline and add health checks around external binaries.
-
-**Legacy mixed integration patterns:**
-- Risk: coexistence of older and newer endpoints/helpers increases maintenance burden.
-- Impact: accidental use of stale logic during feature work.
-- Migration plan: formal deprecation pass with removal checklist.
-
-## Missing Critical Features
-
-**Unified CI quality gate for full stack:**
-- Problem: no repository-level CI workflow files were detected for mandatory lint/test/build gates.
-- Current workaround: manual local command execution.
-- Blocks: consistent pre-merge quality guarantees.
-- Implementation complexity: medium.
-
-**Client unit/component test layer:**
-- Problem: strong functions tests + E2E exist, but React component-level automated tests are sparse.
-- Current workaround: E2E coverage for critical paths.
-- Blocks: fast feedback for UI regressions.
-- Implementation complexity: medium.
-
-## Test Coverage Gaps
-
-**High-complexity UI pages/components:**
-- What's not tested enough: granular behavior in largest admin pages/components.
-- Risk: regressions hidden until manual QA or E2E failures.
-- Priority: High.
-- Difficulty: Medium-high due to current component size and side effects.
-
-**Security/error handling edge paths for integrations:**
-- What's not tested enough: credential failure, token rotation, partial external API outage behavior.
-- Risk: operational incidents and incomplete rollback behavior.
-- Priority: Medium.
-- Difficulty: Medium.
-
----
-
-*Concerns audit: 2026-02-24*
-*Update as performance/security/tech-debt items are resolved or discovered*
+## Suggested Order of Remediation
+1. Lock down unauthenticated function surfaces and tighten rules (`firestore.rules`, `storage.rules`, `database.rules.json`).
+2. Fix batch-commit correctness bugs and add regression tests around write completion semantics.
+3. Repair emulator wiring (`firebase/database.ts`) to eliminate mixed dev/prod access risk.
+4. Reduce fan-out and bundle regeneration pressure (delta-based triggers + throttling).
+5. Break monolith files into smaller modules and remove `pages/api` utility misplacement.
+6. Rationalize operational assets (`dir/`, `scrapers/`, stale subsystems) and document canonical workflows.

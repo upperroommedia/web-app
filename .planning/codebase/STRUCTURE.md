@@ -1,140 +1,69 @@
-# Codebase Structure
+# Codebase Structure Map (focus: arch)
 
-**Analysis Date:** 2026-02-24
+## Top-Level Layout
+- `pages/`: Next.js Pages Router routes (public, admin, and local API helper modules).
+- `components/`: reusable UI and feature components (uploader, trimmer, search, admin tables, player).
+- `layout/`: app-level wrappers (`AppLayout`, `SidebarLayout`).
+- `context/`: React context + Zustand store for auth, audio player, and trimmer state.
+- `firebase/`: client/admin Firebase initialization and per-service adapters.
+- `functions/`: independent Cloud Functions package (callables, HTTP handlers, listeners, tasks, tests).
+- `types/`: shared domain types and Firestore converters used by frontend and backend.
+- `utils/`: client-side helper utilities (function invocation, search, bundle access, media helpers).
+- `shared/`: cross-workspace shared configuration (`shared/bundleConfigs.ts`).
+- `tests/`: Playwright end-to-end tests.
+- `scripts/`: dev tooling scripts (e.g., emulator admin account bootstrap).
+- `constants/`, `reducers/`, `hooks/`, `styles/`: focused supporting modules.
 
-## Directory Layout
+## Route Organization (`pages/`)
+- Root app bootstrap: `pages/_app.tsx` and document customization in `pages/_document.tsx`.
+- Public/auth routes: `pages/index.tsx`, `pages/login.tsx`, `pages/profile.tsx`.
+- Admin namespace uses nested routing: `pages/admin/sermons.tsx`, `pages/admin/sermons/[sermonId].tsx`, `pages/admin/sermons/[sermonId]/edit.tsx`, `pages/admin/series.tsx`, `pages/admin/series/[seriesId].tsx`, `pages/admin/lists.tsx`, `pages/admin/lists/[listId].tsx`, `pages/admin/users.tsx`, `pages/admin/topics.tsx`, `pages/admin/speakers.tsx`.
+- `pages/api/*` currently contains **imported client-side service modules** (`pages/api/uploadFile.tsx`, `pages/api/editSermon.ts`, `pages/api/addNewList.ts`) plus one true API endpoint `pages/api/debug/trimmer.ts`.
 
-```text
-web-app/
-├── pages/                    # Next.js pages routes (admin + api + public pages)
-├── components/               # Reusable UI and feature components
-├── context/                  # React contexts and Zustand trimmer store
-├── layout/                   # Shared page layout wrappers
-├── utils/                    # Client/shared utility functions
-├── types/                    # Shared domain types and converters
-├── firebase/                 # Firebase client/admin wrappers
-├── functions/                # Firebase Functions TypeScript workspace
-│   └── src/                  # Callable functions, listeners, integrations, tests
-├── shared/                   # Cross-workspace shared config (bundle configs)
-├── tests/                    # Playwright E2E tests
-├── test/                     # Additional test helpers/scripts
-├── docs/                     # Architecture/perf/product docs
-├── scripts/                  # Local tooling scripts (e.g. create dev admin)
-├── public/                   # Static assets
-├── styles/                   # Global and theme styling
-└── .planning/codebase/       # Generated GSD codebase maps
-```
+## Component Organization (`components/`)
+- Generic/shared widgets at root (`components/PopUp.tsx`, `components/UserTable.tsx`, `components/DeleteEntityPopup.tsx`).
+- Uploader feature cluster in `components/uploaderComponents/*` (selectors, upload button, validation utilities, progress UI).
+- Trimmer feature split between `components/audioTrimmerComponents/*` and low-level primitives in `components/trimmer/*`.
+- Algolia-specific widgets grouped in `components/algoliaComponents/*`.
+- Skeleton loading components isolated in `components/skeletons/*`.
+- Player UI split into host and chrome: `components/MediaPlayerComponent.tsx` and `components/BottomAudioBar.tsx`.
 
-## Directory Purposes
+## State and Data Access
+- Auth/session state: `context/user/UserContext.tsx` with dev constants in `context/user/devAuth.ts`.
+- Audio playback state: `context/audio/audioPlayerContext.tsx` using reducer `reducers/audioPlayerReducer.ts`.
+- Trimmer interaction state: `context/trimmerStore.ts` (Zustand).
+- Firebase client service modules are one-file-per-service: `firebase/auth.ts`, `firebase/firestore.ts`, `firebase/storage.ts`, `firebase/functions.ts`, `firebase/database.ts`, with shared app init in `firebase/firebase.ts` and admin SDK in `firebase/firebaseAdmin.ts`.
 
-**`pages/`:**
-- Purpose: route entry points and page-level orchestration
-- Contains: `pages/admin/*`, `pages/api/*`, auth/upload/profile pages
-- Key files: `pages/_app.tsx`, `pages/index.tsx`, `pages/admin/sermons.tsx`, `pages/api/uploadFile.tsx`
+## Shared Domain Contracts (`types/` + `shared/`)
+- Core entities: `types/Sermon.ts`, `types/SermonTypes.ts`, `types/List.ts`, `types/Series.ts`, `types/SermonList.ts`, `types/Topic.ts`, `types/Speaker.ts`, `types/User.ts`, `types/Image.ts`.
+- Frontend Firestore converter pattern is colocated with each model (e.g., `sermonConverter`, `listConverter`, `seriesConverter`).
+- Backend admin converters are centralized in `functions/src/firestoreDataConverter.ts`.
+- Bundle generation/trigger configuration is shared via `shared/bundleConfigs.ts`.
 
-**`components/`:**
-- Purpose: feature UI blocks and controls
-- Contains: uploaders, sermon cards, publishing dialogs, trimmer/player components
-- Key subdirs: `components/uploaderComponents`, `components/trimmer`, `components/algoliaComponents`
+## Backend Package Structure (`functions/src/`)
+- Export surface: `functions/src/index.ts`.
+- Callables grouped by domain/action at top level (e.g., `uploadToSubsplash.ts`, `uploadToSoundCloud.ts`, `addToList.ts`, `createSeries.ts`).
+- Firestore listeners grouped by collection domain in `functions/src/DocumentListeners/Lists/*`, `Sermons/*`, `SermonLists/*`, `Series/*`, `Topics/*`, `Images/*`.
+- Audio processing pipeline isolated in `functions/src/addIntroOutro/*` (task generator, task handler, ffmpeg helpers).
+- External integration helpers in `functions/src/helpers/*`, `functions/src/subsplashUtils.ts`, `functions/src/soundcloudClient.ts`.
+- Bundle infrastructure in `functions/src/utils/bundleCreationUtils.ts` and `functions/src/utils/bundleListenerUtils.ts` with HTTP handlers in `functions/src/create*Bundle.ts`.
+- Function unit/integration tests in `functions/src/test/**` by domain (`addToList`, `removeFromList`, `series`, `soundcloud`).
 
-**`functions/src/`:**
-- Purpose: backend callable + event handlers
-- Contains: integrations (`uploadToSubsplash`, `uploadToSoundCloud`), listeners, helper modules, tests
-- Key subdirs: `DocumentListeners/`, `addIntroOutro/`, `Scrapers/`, `utils/`, `test/`
+## Testing and Tooling Layout
+- Browser E2E tests: `tests/*.spec.ts` with helpers in `tests/helpers/*` and config in `playwright.config.ts`.
+- Legacy/simple tests in `test/test.ts` and `test/utils.ts`.
+- Dev bootstrap script: `scripts/create-dev-admin.ts` for emulator auth user setup.
+- Scraping/one-off data scripts in `scrapers/**` and `extract_subsplash_ids.py`.
 
-**`firebase/`:**
-- Purpose: runtime wrappers for auth/firestore/database/functions/storage
-- Contains: emulator connection logic and SDK exports
-- Key files: `firebase/firebase.ts`, `firebase/firestore.ts`, `firebase/functions.ts`, `firebase/firebaseAdmin.ts`
+## Naming and File Conventions
+- React components and pages use `PascalCase` filenames (`MediaPlayerComponent.tsx`, `SearchableAdminSermonsList.tsx`) except route-required filenames in `pages/`.
+- Dynamic route params follow Next.js bracket syntax (`[sermonId].tsx`, `[seriesId].tsx`, `[listId].tsx`).
+- Cloud Function source files are typically lower camel/lowercase action names (`addToList.ts`, `removeFromSeries.ts`), then exported in lowercase aliases in `functions/src/index.ts` (e.g., `exports.addtolist`).
+- Feature-specific folders are used when behavior is complex (`components/uploaderComponents`, `functions/src/addIntroOutro`, `functions/src/DocumentListeners`).
+- Relative imports dominate across the repo; there is no broad path-alias convention in current source.
+- Status/role logic is centralized into enums/constants (`types/SermonTypes.ts`, `types/User.ts`, `types/List.ts`) rather than hardcoded per component.
 
-**`shared/`:**
-- Purpose: shared typed bundle configuration for frontend + functions
-- Key file: `shared/bundleConfigs.ts`
-
-## Key File Locations
-
-**Entry Points:**
-- `pages/_app.tsx` - global provider wiring and layout handling
-- `pages/index.tsx` - upload flow entry
-- `functions/src/index.ts` - Firebase functions export registry
-
-**Configuration:**
-- `package.json` - root scripts/workspace/dependencies
-- `functions/package.json` - backend workspace scripts/deps
-- `next.config.js` - Next runtime/image/i18n config
-- `firebase.json` - firebase project config + emulator/deploy settings
-- `tsconfig.json` - root TS config
-
-**Core Logic:**
-- `components/ManagePublishingPopup.tsx` - central publish/unpublish orchestration UI
-- `pages/admin/sermons/[sermonId].tsx` - sermon detail workflow
-- `functions/src/addToList.ts` - list item overflow/consistency logic
-- `functions/src/helpers/seriesHelpers.ts` - series API integration operations
-- `utils/bundleManager.ts` - bundle lifecycle/caching behavior
-
-**Testing:**
-- `functions/src/test/*` - Jest tests for functions logic and emulator scenarios
-- `tests/*.spec.ts` - Playwright E2E tests for upload/player/trimmer behavior
-- `tests/helpers/seedPlayableSermon.ts` - deterministic test data seeding
-
-**Documentation:**
-- `docs/BUNDLE_SYSTEM.md` - bundle architecture doc
-- `docs/PERFORMANCE_SWEEP_2026-02-23.md` - current performance audit and priorities
-
-## Naming Conventions
-
-**Files:**
-- React component files use `PascalCase.tsx` (e.g., `SermonListCard.tsx`)
-- Utility/helper files mostly use `camelCase.ts` (e.g., `createFunction.ts`, `bundleManager.ts`)
-- Test files use `*.test.ts` (functions) and `*.spec.ts` (Playwright)
-
-**Directories:**
-- Feature-oriented groupings (e.g., `components/trimmer`, `functions/src/DocumentListeners`)
-- Mixed casing exists in legacy folders (`Scrapers`, `Dolby`, `addIntroOutro`)
-
-**Special Patterns:**
-- `pages/admin/...` for protected admin routes
-- `pages/api/...` for server-side page-adjacent handlers
-- Functions exported centrally via `functions/src/index.ts`
-
-## Where to Add New Code
-
-**New admin feature:**
-- Page route: `pages/admin/...`
-- UI components: `components/...`
-- Shared state/context: `context/...` (if needed)
-- Backend callable: `functions/src/...` + export in `functions/src/index.ts`
-- Tests: `functions/src/test/...` and/or `tests/...`
-
-**New external integration:**
-- Transport client/helper: `functions/src/...` (or `functions/src/helpers/...`)
-- Callable façade: dedicated function file + index export
-- Frontend invocation: `utils/createFunction.ts` callers
-
-**New bundle type:**
-- Config in `shared/bundleConfigs.ts`
-- HTTP creator in `functions/src/create*Bundle.ts`
-- Listener in `functions/src/DocumentListeners/...`
-- Client loader in `utils/bundleHelpers.ts`/`utils/bundleManager.ts`
-
-## Special Directories
-
-**`.next/`:**
-- Purpose: Next.js build artifacts
-- Source: generated by Next build/dev
-- Committed: no
-
-**`functions/lib/` and `functions/dist/`:**
-- Purpose: built function output artifacts
-- Source: TypeScript build in functions workspace
-- Committed: typically no (build output)
-
-**`dir/`:**
-- Purpose: local emulator import/export dataset
-- Source: Firebase emulator import/export
-- Committed: present in repo snapshot and used for local state seeding
-
----
-
-*Structure analysis: 2026-02-24*
-*Update when directory layout or ownership boundaries change*
+## Operational Files
+- Firebase project/runtime config in `firebase.json`, `firestore.rules`, `firestore.indexes.json`, `database.rules.json`, `storage.rules`.
+- Next runtime config in `next.config.js`.
+- Monorepo dependency/workspace config in root `package.json` and `pnpm-workspace.yaml`.
