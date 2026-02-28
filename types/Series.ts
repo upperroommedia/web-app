@@ -10,7 +10,7 @@ import { ImageType } from './Image';
 export interface Series {
   id: string;
   name: string;
-  subtitle?: string;
+  subtitle: string;
   summary?: string;
   images: ImageType[];
   itemCount: number;
@@ -28,6 +28,7 @@ export interface Series {
 export const emptySeries: Series = {
   id: '',
   name: '',
+  subtitle: '0 part series',
   images: [],
   itemCount: 0,
   publishedItemCount: 0,

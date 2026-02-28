@@ -2,7 +2,7 @@
  * NewSeriesPopup: Modal for creating a new media series
  * - Creates series in Firestore only (no Subsplash until publish)
  * - Sets ownerId to current user
- * - Supports name, subtitle, summary, and images
+ * - Supports name, summary, and images
  */
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
@@ -28,17 +28,16 @@ interface NewSeriesPopupProps {
 }
 
 const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
+const getDerivedSubtitle = (publishedItemCount: number): string => `${publishedItemCount} part series`;
 
 const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   const { user } = useAuth();
   const [formData, setFormData] = useState<{
     name: string;
-    subtitle: string;
     summary: string;
     images: ImageType[];
   }>({
     name: props.existingSeries?.name ?? '',
-    subtitle: props.existingSeries?.subtitle ?? '',
     summary: props.existingSeries?.summary ?? '',
     images: props.existingSeries?.images ?? [],
   });
@@ -51,7 +50,6 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     if (props.existingSeries) {
       setFormData({
         name: props.existingSeries.name,
-        subtitle: props.existingSeries.subtitle ?? '',
         summary: props.existingSeries.summary ?? '',
         images: props.existingSeries.images,
       });
@@ -109,7 +107,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
       if (props.existingSeries) {
         await updateDoc(doc(firestore, 'series', props.existingSeries.id), {
           name: formData.name.trim(),
-          subtitle: formData.subtitle.trim() || null,
+          subtitle: getDerivedSubtitle(props.existingSeries.publishedItemCount || 0),
           summary: formData.summary.trim() || null,
           images: formData.images,
           updatedAt: serverTimestamp(),
@@ -119,7 +117,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         const updatedSeries: Series = {
           ...props.existingSeries,
           name: formData.name.trim(),
-          subtitle: formData.subtitle.trim() || undefined,
+          subtitle: getDerivedSubtitle(props.existingSeries.publishedItemCount || 0),
           summary: formData.summary.trim() || undefined,
           images: formData.images,
         };
@@ -130,7 +128,6 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         // Creating new series
         const result = await createSeriesFunction({
           title: formData.name.trim(),
-          subtitle: formData.subtitle.trim() || undefined,
           summary: formData.summary.trim() || undefined,
           ownerId: user.uid,
           skipSubsplash: true,  // Only create in Firestore at upload time
@@ -143,7 +140,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
             ...emptySeries,
             id: result.firestoreId,
             name: formData.name.trim(),
-            subtitle: formData.subtitle.trim() || undefined,
+            subtitle: getDerivedSubtitle(0),
             summary: formData.summary.trim() || undefined,
             images: formData.images,
             ownerId: user.uid,
@@ -157,7 +154,6 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
           // Reset form
           setFormData({
             name: '',
-            subtitle: '',
             summary: '',
             images: [],
           });
@@ -178,14 +174,12 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     if (props.existingSeries) {
       setFormData({
         name: props.existingSeries.name,
-        subtitle: props.existingSeries.subtitle ?? '',
         summary: props.existingSeries.summary ?? '',
         images: props.existingSeries.images,
       });
     } else {
       setFormData({
         name: '',
-        subtitle: '',
         summary: '',
         images: [],
       });
@@ -226,13 +220,6 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
           label="Name"
           required
           helperText={nameError && formData.name !== '' ? nameError : 'The series title'}
-        />
-
-        <TextField
-          value={formData.subtitle}
-          onChange={(e) => setFormData((prev) => ({ ...prev, subtitle: e.target.value }))}
-          label="Subtitle"
-          helperText="Optional subtitle for the series"
         />
 
         <TextField

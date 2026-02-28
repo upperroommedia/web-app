@@ -16,6 +16,32 @@ import {
 
 const APP_KEY = '9XTSHD';
 
+export interface DerivedSeriesMetadata {
+  itemCount: number;
+  publishedItemCount: number;
+  subtitle: string;
+}
+
+export function getSeriesSubtitleFromPublishedCount(publishedItemCount: number): string {
+  const safePublishedCount = Math.max(0, publishedItemCount);
+  return `${safePublishedCount} part series`;
+}
+
+export function deriveSeriesMetadata(
+  seriesItems: Array<{ publishedToSubsplash?: boolean | null }>
+): DerivedSeriesMetadata {
+  const itemCount = seriesItems.length;
+  const publishedItemCount = seriesItems.reduce((count, item) => {
+    return item.publishedToSubsplash === true ? count + 1 : count;
+  }, 0);
+
+  return {
+    itemCount,
+    publishedItemCount,
+    subtitle: getSeriesSubtitleFromPublishedCount(publishedItemCount),
+  };
+}
+
 /**
  * Create a new Subsplash media series
  */

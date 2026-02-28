@@ -23,7 +23,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CollectionsIcon from '@mui/icons-material/Collections';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
-import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField } from '../firebase/firestore';
+import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField, setDoc } from '../firebase/firestore';
 import { FunctionComponent, useCallback, useEffect, useState } from 'react';
 import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
 import { RemoveFromListInputType, RemoveFromListOutputType } from '../functions/src/removeFromList';
@@ -211,21 +211,43 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       sermonSeriesListSnapshot.forEach((docSnap: any) => {
         batch.update(docSnap.ref, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
       });
+      if (sermon.seriesId) {
+        const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
+        const seriesItemSnapshot = await getDoc(seriesItemRef);
+        if (seriesItemSnapshot.exists()) {
+          batch.update(seriesItemRef, {
+            publishedToSubsplash: false,
+            sermonSubsplashId: deleteField(),
+          });
+        }
+      }
       batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
         subsplashId: deleteField(),
         status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
       });
       await batch.commit();
+      setSeriesPublished(false);
       onUpdate?.();
     } catch (error: any) {
       if (error.code === 'functions/not-found') {
         // Item already deleted from Subsplash
         const batch = writeBatch(firestore);
+        if (sermon.seriesId) {
+          const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
+          const seriesItemSnapshot = await getDoc(seriesItemRef);
+          if (seriesItemSnapshot.exists()) {
+            batch.update(seriesItemRef, {
+              publishedToSubsplash: false,
+              sermonSubsplashId: deleteField(),
+            });
+          }
+        }
         batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
           subsplashId: deleteField(),
           status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
         });
         await batch.commit();
+        setSeriesPublished(false);
         onUpdate?.();
       } else {
         console.error('Error deleting from Subsplash:', error);
@@ -376,7 +398,6 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
         const createResult = await createSeriesFunction({
           title: series.name,
-          subtitle: series.subtitle,
           summary: series.summary,
           ownerId: series.ownerId,
           skipSubsplash: false,
@@ -405,14 +426,14 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       }
 
       const seriesItemRef = doc(firestore, `series/${series.id}/seriesItems`, sermon.id);
-      const seriesItemDoc = await getDoc(seriesItemRef);
-      
-      if (seriesItemDoc.exists()) {
-        await updateDoc(seriesItemRef, {
+      await setDoc(
+        seriesItemRef,
+        {
           publishedToSubsplash: true,
           sermonSubsplashId: sermon.subsplashId,
-        });
-      }
+        },
+        { merge: true }
+      );
 
       setSeriesPublished(true);
       onUpdate?.();

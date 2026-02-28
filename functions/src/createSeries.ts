@@ -6,7 +6,7 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { FieldValue } from 'firebase-admin/firestore';
 import { authenticateSubsplash } from './subsplashUtils';
-import { createSubsplashSeries } from './helpers/seriesHelpers';
+import { createSubsplashSeries, getSeriesSubtitleFromPublishedCount } from './helpers/seriesHelpers';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
@@ -15,7 +15,6 @@ const firestoreDB = firebaseAdmin.firestore();
 
 export interface CreateSeriesInputType {
   title: string;
-  subtitle?: string;
   summary?: string;
   ownerId: string;              // User ID who owns the series
   skipSubsplash?: boolean;      // If true, only create in Firestore (for upload time)
@@ -45,7 +44,8 @@ const createSeries = onCall(
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
 
-    const { title, subtitle, summary, ownerId, skipSubsplash, images } = request.data;
+    const { title, summary, ownerId, skipSubsplash, images } = request.data;
+    const initialSubtitle = getSeriesSubtitleFromPublishedCount(0);
 
     // Validation
     if (!title || !title.trim()) {
@@ -63,6 +63,7 @@ const createSeries = onCall(
         const firestoreData: Record<string, unknown> = {
           id: seriesRef.id,
           name: title.trim(),
+          subtitle: initialSubtitle,
           images: images || [],
           itemCount: 0,
           publishedItemCount: 0,
@@ -74,9 +75,6 @@ const createSeries = onCall(
         };
 
         // Only add optional fields if they have values
-        if (subtitle?.trim()) {
-          firestoreData.subtitle = subtitle.trim();
-        }
         if (summary?.trim()) {
           firestoreData.summary = summary.trim();
         }
@@ -102,7 +100,7 @@ const createSeries = onCall(
 
       // Create series in Subsplash
       const subsplashSeries = await createSubsplashSeries(title.trim(), token, {
-        subtitle: subtitle?.trim(),
+        subtitle: initialSubtitle,
         summary: summary?.trim(),
       });
 
@@ -110,6 +108,7 @@ const createSeries = onCall(
       const firestoreData: Record<string, unknown> = {
         id: seriesRef.id,
         name: subsplashSeries.title,
+        subtitle: subsplashSeries.subtitle || initialSubtitle,
         images: [],
         itemCount: subsplashSeries.media_items_count,
         publishedItemCount: subsplashSeries.published_media_items_count,
@@ -124,9 +123,6 @@ const createSeries = onCall(
       };
 
       // Only add optional fields if they have values (Firestore doesn't allow undefined)
-      if (subsplashSeries.subtitle) {
-        firestoreData.subtitle = subsplashSeries.subtitle;
-      }
       if (subsplashSeries.summary) {
         firestoreData.summary = subsplashSeries.summary;
       }
