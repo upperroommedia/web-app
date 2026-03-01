@@ -39,7 +39,7 @@ sa.json
 .firebase/
 firestore-coverage.html
 *.har
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 .vscode
 .cursor
 .turbo
