@@ -78,6 +78,12 @@ interface SeriesItemWithSermon extends SeriesItem {
   sermon?: Sermon;
 }
 
+const cloneSeriesItems = (source: SeriesItemWithSermon[]): SeriesItemWithSermon[] =>
+  source.map((item) => ({
+    ...item,
+    sermon: item.sermon ? { ...item.sermon } : undefined,
+  }));
+
 interface SortableItemProps {
   item: SeriesItemWithSermon;
   index: number;
@@ -185,7 +191,7 @@ const SortableItem = ({ item, index, onRemove }: SortableItemProps) => {
           ) : (
             <Chip
               icon={<PendingIcon />}
-              label="Draft (Not Published)"
+              label="Not Published"
               size="small"
               color="warning"
               variant="outlined"
@@ -230,10 +236,10 @@ const SeriesDetailsPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [addItemPopup, setAddItemPopup] = useState(false);
-  
+
   // Store original item order for revert functionality
   const originalItemsRef = useRef<SeriesItemWithSermon[]>([]);
-  
+
   // Ref for the sortable container to restrict drag bounds
   const containerRef = useRef<HTMLDivElement>(null);
   const [availableSermons, setAvailableSermons] = useState<Sermon[]>([]);
@@ -259,7 +265,7 @@ const SeriesDetailsPage = () => {
       }
 
       const seriesData = seriesDoc.data();
-      
+
       // Check ownership (non-admins can only view their own series)
       if (!isAdmin && seriesData.ownerId !== user?.uid) {
         setError('You do not have permission to view this series');
@@ -305,7 +311,7 @@ const SeriesDetailsPage = () => {
 
       setItems(itemsWithSermons);
       // Store original order for revert functionality
-      originalItemsRef.current = itemsWithSermons;
+      originalItemsRef.current = cloneSeriesItems(itemsWithSermons);
     } catch (err: any) {
       console.error('Error fetching series:', err);
       setError(err.message || 'Failed to fetch series');
@@ -327,16 +333,16 @@ const SeriesDetailsPage = () => {
       // Admins can see all sermons, non-admins only see their own
       const sermonsQuery = isAdmin
         ? query(
-            collection(firestore, 'sermons'),
-            orderBy('createdAtMillis', 'desc'),
-            limit(100)
-          )
+          collection(firestore, 'sermons'),
+          orderBy('createdAtMillis', 'desc'),
+          limit(100)
+        )
         : query(
-            collection(firestore, 'sermons'),
-            where('uploaderId', '==', user.uid),
-            orderBy('createdAtMillis', 'desc'),
-            limit(50)
-          );
+          collection(firestore, 'sermons'),
+          where('uploaderId', '==', user.uid),
+          orderBy('createdAtMillis', 'desc'),
+          limit(50)
+        );
 
       const sermonsSnapshot = await getDocs(sermonsQuery);
       const sermons = sermonsSnapshot.docs
@@ -357,7 +363,7 @@ const SeriesDetailsPage = () => {
     }
 
     const containerRect = containerRef.current.getBoundingClientRect();
-    
+
     // Calculate the bounds
     const minY = containerRect.top - draggingNodeRect.top;
     const maxY = containerRect.bottom - draggingNodeRect.bottom;
@@ -405,7 +411,7 @@ const SeriesDetailsPage = () => {
 
   // Revert to original order
   const revertOrder = () => {
-    setItems([...originalItemsRef.current]);
+    setItems(cloneSeriesItems(originalItemsRef.current));
   };
 
   // Save order changes
@@ -413,44 +419,59 @@ const SeriesDetailsPage = () => {
     if (!series || !hasOrderChanges) return;
 
     setIsSaving(true);
+    const previousItems = cloneSeriesItems(originalItemsRef.current);
     try {
       // If series is published to Subsplash, use the reorder function
       if (series.subsplashId) {
         const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>(
           'reorderseriesitems'
         );
-        await reorderFunction({
+        const publishedItems = items.filter((item) => item.publishedToSubsplash);
+        const publishedItemsMissingIds = publishedItems.filter(
+          (item) => !item.sermonSubsplashId && !item.sermon?.subsplashId
+        );
+        if (publishedItemsMissingIds.length > 0) {
+          throw new Error('One or more published items are missing Subsplash IDs. Refresh and try again.');
+        }
+
+        const reorderResult = await reorderFunction({
           firestoreSeriesId: seriesId,
-          itemOrder: items.map((item, index) => ({
-            mediaItemId: item.sermonSubsplashId || item.id,
+          itemOrder: publishedItems.map((item, index) => ({
+            mediaItemId: item.sermonSubsplashId || item.sermon?.subsplashId || '',
             position: index + 1,
           })),
         });
-      } else {
-        // Just update Firestore positions (gracefully handle missing items)
-        await Promise.all(
-          items.map(async (item, index) => {
-            const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.id);
-            try {
-              await updateDoc(itemRef, { position: index + 1 });
-            } catch (err: any) {
-              // Item might have been deleted by another user - skip it
-              if (err?.code === 'not-found' || err?.message?.includes('NOT_FOUND')) {
-                console.warn(`SeriesItem ${item.id} not found - may have been removed`);
-              } else {
-                throw err;
-              }
-            }
-          })
-        );
+        if (reorderResult.status !== 'success') {
+          throw new Error(reorderResult.message || 'Subsplash reorder failed.');
+        }
       }
+
+      // Persist order in Firestore only after Subsplash succeeds.
+      await Promise.all(
+        items.map(async (item, index) => {
+          const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.id);
+          try {
+            await updateDoc(itemRef, { position: index + 1 });
+          } catch (err: any) {
+            // Item might have been deleted by another user - skip it
+            if (err?.code === 'not-found' || err?.message?.includes('NOT_FOUND')) {
+              console.warn(`SeriesItem ${item.id} not found - may have been removed`);
+            } else {
+              throw err;
+            }
+          }
+        })
+      );
+
       // Update original order reference after successful save
-      originalItemsRef.current = [...items];
+      originalItemsRef.current = cloneSeriesItems(items);
     } catch (err: any) {
       console.error('Error saving order:', err);
-      alert(`Error saving order: ${err.message || 'Unknown error'}`);
+      setItems(previousItems);
+      alert(`Error saving order. Reverted to last synced state.\n${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
   };
 
   // Remove item from series
@@ -504,7 +525,7 @@ const SeriesDetailsPage = () => {
   const addItemToSeries = async (sermon: Sermon) => {
     try {
       const newPosition = items.length + 1;
-      
+
       // Verify sermon still exists before adding
       const sermonDoc = await getDoc(doc(firestore, 'sermons', sermon.id));
       if (!sermonDoc.exists()) {
@@ -754,7 +775,7 @@ const SeriesDetailsPage = () => {
                   ) : (
                     <Chip
                       icon={<PendingIcon />}
-                      label="Draft (Not Published)"
+                      label="Not Published"
                       color="warning"
                       size="small"
                     />
@@ -974,8 +995,8 @@ const SeriesDetailsPage = () => {
             <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
               {availableSermons
                 .filter((sermon) => !items.some((item) => item.id === sermon.id))
-                .filter((sermon) => 
-                  !sermonSearchQuery || 
+                .filter((sermon) =>
+                  !sermonSearchQuery ||
                   sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase())
                 )
                 .map((sermon) => (
@@ -1027,12 +1048,12 @@ const SeriesDetailsPage = () => {
                 .filter((sermon) => !items.some((item) => item.id === sermon.id))
                 .filter((sermon) => sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase()))
                 .length === 0 && (
-                <Box sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography color="text.secondary">
-                    No sermons found matching &quot;{sermonSearchQuery}&quot;
-                  </Typography>
-                </Box>
-              )}
+                  <Box sx={{ textAlign: 'center', py: 3 }}>
+                    <Typography color="text.secondary">
+                      No sermons found matching &quot;{sermonSearchQuery}&quot;
+                    </Typography>
+                  </Box>
+                )}
             </Box>
           )}
         </DialogContent>
@@ -1053,7 +1074,7 @@ const SeriesDetailsPage = () => {
 
 const ProtectedSeriesDetailsPage = () => {
   const { user } = useAuth();
-  
+
   if (!user?.canPublish()) {
     return (
       <Box
@@ -1070,7 +1091,7 @@ const ProtectedSeriesDetailsPage = () => {
       </Box>
     );
   }
-  
+
   return <SeriesDetailsPage />;
 };
 

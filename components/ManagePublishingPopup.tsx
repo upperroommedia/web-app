@@ -461,7 +461,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         mediaItemId,
       });
 
-      if (addResult.status !== 'success') {
+      if (!addResult || addResult.status !== 'success') {
         throw new Error(addResult.error || 'Failed to add sermon to series');
       }
 
@@ -475,6 +475,14 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         { merge: true }
       );
 
+      const verificationSnapshot = await getDoc(seriesItemRef);
+      if (
+        !verificationSnapshot.exists() ||
+        verificationSnapshot.data()?.publishedToSubsplash !== true
+      ) {
+        throw new Error('Series publish did not persist locally. Please refresh and retry.');
+      }
+
       setSeriesPublished(true);
       onUpdate?.();
       return {
@@ -482,6 +490,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       };
     } catch (err: any) {
       console.error('Error publishing to series:', err);
+      setSeriesPublished(false);
       const errorMessage = err.message || 'Unknown error';
       if (!options?.suppressAlert) {
         alert(`Error publishing to series: ${errorMessage}`);
