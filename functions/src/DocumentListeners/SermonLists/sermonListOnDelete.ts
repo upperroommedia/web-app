@@ -6,6 +6,7 @@ import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
 import { SermonList } from '../../../../types/SermonList';
 import { removeFromList } from '../../removeFromList';
+import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
 
 const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{sermonListId}', async (event) => {
   const snapshot = event.data;
@@ -21,6 +22,7 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
 
   try {
     const sermonRef = firestoreDb.doc(`sermons/${sermonId}`).withConverter(firestoreAdminSermonConverter);
+    let didMutate = false;
 
     // First, try to remove from Subsplash if it was uploaded
     // CRITICAL FIX: Set decrementListUploadedToValue based on uploadStatus, not Subsplash removal success
@@ -63,6 +65,7 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
           numberOfLists: FieldValue.increment(-1),
           numberOfListsUploadedTo: FieldValue.increment(decrementListUploadedToValue),
         });
+        didMutate = true;
         logger.info(`Successfully decremented numberOfLists for sermon ${sermonId}`, {
           oldValues: {
             numberOfLists: sermonDoc.data()?.numberOfLists,
@@ -74,6 +77,10 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
         console.warn(`Sermon ${sermonId} does not exist, skipping counter updates`);
       }
     });
+
+    if (didMutate) {
+      await ensureSermonCountInvariant(sermonId);
+    }
   } catch (error) {
     console.error(`Error in sermonListOnDelete for sermon ${sermonId}:`, error);
     throw handleError(error);
