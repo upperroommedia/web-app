@@ -6,12 +6,20 @@ import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 import { getFullListRows } from './helpers/addToListHelpers';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { withIdempotency } from './locks/withIdempotency';
+import {
+  DEFAULT_LOCK_RETRY_AFTER_MS,
+  DEFAULT_LOCK_WAIT_TIMEOUT_MS,
+  SUBSPLASH_LOCK_BUSY_CODE,
+} from './locks/lockTypes';
 
 export interface RemoveFromListInputType {
   listIds: string[];
   listItemIds: string[];
   itemIds: string[]; // The actual item IDs (sermon/media item IDs) for searching overflow lists
   itemTypes: string[]; // The item types (e.g., 'media-item', 'media-series') corresponding to itemIds
+  operationKey?: string;
 }
 
 type status = 'success' | 'error';
@@ -26,15 +34,52 @@ type OutputTypes =
       listId: string;
       status: 'error';
       error: string;
+      errorCode?: string;
+      errorDetails?: unknown;
     };
 export type RemoveFromListOutputType = OutputTypes[];
+
+const getOperationKey = (operationKey?: string): string | undefined => {
+  const normalizedKey = operationKey?.trim();
+  return normalizedKey ? normalizedKey : undefined;
+};
+
+const getErrorPayload = (
+  error: unknown
+): { error: string; errorCode?: string; errorDetails?: unknown } => {
+  if (error && typeof error === 'object') {
+    const maybeError = error as {
+      message?: unknown;
+      code?: unknown;
+      details?: unknown;
+    };
+
+    return {
+      error: typeof maybeError.message === 'string' ? maybeError.message : JSON.stringify(error),
+      ...(typeof maybeError.code === 'string' ? { errorCode: maybeError.code } : {}),
+      ...(maybeError.details !== undefined ? { errorDetails: maybeError.details } : {}),
+    };
+  }
+
+  if (error instanceof Error) {
+    return { error: error.message };
+  }
+
+  if (typeof error === 'string') {
+    return { error };
+  }
+
+  return { error: JSON.stringify(error) };
+};
 
 export const removeFromList = async (
   listIds: string[],
   listItemIds: string[],
   itemIds: string[],
-  itemTypes: string[]
+  itemTypes: string[],
+  operationKey?: string
 ) => {
+  const normalizedOperationKey = getOperationKey(operationKey);
   const token = await authenticateSubsplash();
   const firestoreDB = firebaseAdmin.firestore();
   // Validate input arrays have the same length
@@ -42,8 +87,16 @@ export const removeFromList = async (
     throw new Error('All input arrays must have the same length');
   }
 
-  const result = await Promise.allSettled(
-    listItemIds.map(async (listItemId, index) => {
+  const lockKeys = listIds.map((listId) => `list:${listId}`);
+  itemIds.forEach((itemId, index) => {
+    if (itemTypes[index] === 'media-item') {
+      lockKeys.push(`media-item:${itemId}`);
+    }
+  });
+
+  const runRemoval = async (): Promise<RemoveFromListOutputType> => {
+    const result = await Promise.allSettled(
+      listItemIds.map(async (listItemId, index) => {
       const listId = listIds[index];
       const itemId = itemIds[index];
       const itemType = itemTypes[index];
@@ -154,12 +207,12 @@ export const removeFromList = async (
           return { listId, listItemId, foundInOriginalList: false, itemNotFound: true };
         }
       }
-    })
-  );
+      })
+    );
   
-  logger.log(result);
-  const returnResult = result.map((r, index) => {
-    if (r.status === 'fulfilled') {
+    logger.log(result);
+    const returnResult = result.map((r, index): OutputTypes => {
+      if (r.status === 'fulfilled') {
       const status: status = 'success';
       const result: OutputTypes = { listId: listIds[index], status, listItemId: r.value.listItemId };
       // Include itemNotFound flag if the item wasn't found but was treated as success
@@ -167,19 +220,47 @@ export const removeFromList = async (
         return { ...result, itemNotFound: true };
       }
       return result;
-    } else {
+      }
+
       logger.log('error', r.reason);
       const status: status = 'error';
-      let message = '';
-      if ('message' in r.reason) {
-        message = r.reason.message;
-      } else {
-        message = JSON.stringify(r.reason);
-      }
-      return { listId: listIds[index], status, error: message };
+      const errorPayload = getErrorPayload(r.reason);
+      return { listId: listIds[index], status, ...errorPayload };
+    });
+    return returnResult;
+  };
+
+  try {
+    const executeLockedRemoval = async (): Promise<RemoveFromListOutputType> => {
+      return withSubsplashLocks(lockKeys, runRemoval, {
+        ...(normalizedOperationKey ? { operationKey: normalizedOperationKey } : {}),
+      });
+    };
+
+    if (normalizedOperationKey) {
+      return await withIdempotency(normalizedOperationKey, executeLockedRemoval);
     }
-  });
-  return returnResult;
+
+    return await executeLockedRemoval();
+  } catch (error) {
+    const errorPayload = getErrorPayload(error);
+    if (errorPayload.errorCode === 'aborted') {
+      const busyDetails = errorPayload.errorDetails ?? {
+        code: SUBSPLASH_LOCK_BUSY_CODE,
+        locked_keys: lockKeys.length > 0 ? [lockKeys[0]] : [],
+        wait_ms: DEFAULT_LOCK_WAIT_TIMEOUT_MS,
+        retry_after_ms: DEFAULT_LOCK_RETRY_AFTER_MS,
+      };
+
+      return listIds.map((listId): OutputTypes => ({
+        listId,
+        status: 'error',
+        ...errorPayload,
+        errorDetails: busyDetails,
+      }));
+    }
+    throw error;
+  }
 };
 const removeFromListCallable = onCall(
   async (request: CallableRequest<RemoveFromListInputType>): Promise<RemoveFromListOutputType> => {
@@ -199,7 +280,7 @@ const removeFromListCallable = onCall(
       );
     }
     try {
-      return await removeFromList(data.listIds, data.listItemIds, data.itemIds, data.itemTypes);
+      return await removeFromList(data.listIds, data.listItemIds, data.itemIds, data.itemTypes, data.operationKey);
     } catch (err) {
       throw handleError(err);
     }

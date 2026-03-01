@@ -10,6 +10,8 @@ import { canUserRolePublish } from '../../types/User';
 import { OverflowBehavior } from '../../types/List';
 import handleError from './handleError';
 import axios from 'axios';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { withIdempotency } from './locks/withIdempotency';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -17,15 +19,55 @@ export interface AddtoListInputType {
   destinationListIds: string[];
   mediaItem: SubsplashMediaItem;
   maxListSize?: number;
+  operationKey?: string;
 }
 
 type OutputTypes =
   | { listId: string; status: 'success'; listItemId?: string }
-  | { listId: string; status: 'error'; error: string };
+  | {
+      listId: string;
+      status: 'error';
+      error: string;
+      errorCode?: string;
+      errorDetails?: unknown;
+    };
 
 export type AddToListOutputType = OutputTypes[];
 
 const DEFAULT_MAX_LIST_SIZE = 200;
+
+const getOperationKey = (operationKey?: string): string | undefined => {
+  const normalizedKey = operationKey?.trim();
+  return normalizedKey ? normalizedKey : undefined;
+};
+
+const getErrorPayload = (
+  error: unknown
+): { error: string; errorCode?: string; errorDetails?: unknown } => {
+  if (error && typeof error === 'object') {
+    const maybeError = error as {
+      message?: unknown;
+      code?: unknown;
+      details?: unknown;
+    };
+
+    return {
+      error: typeof maybeError.message === 'string' ? maybeError.message : JSON.stringify(error),
+      ...(typeof maybeError.code === 'string' ? { errorCode: maybeError.code } : {}),
+      ...(maybeError.details !== undefined ? { errorDetails: maybeError.details } : {}),
+    };
+  }
+
+  if (error instanceof Error) {
+    return { error: error.message };
+  }
+
+  if (typeof error === 'string') {
+    return { error };
+  }
+
+  return { error: JSON.stringify(error) };
+};
 
 // Helper to handle a single list processing step recursively
 // Returns listItemId if item was added, undefined if item already existed
@@ -364,37 +406,63 @@ const addToList = onCall(async (request: CallableRequest<AddtoListInputType>): P
     throw new HttpsError('invalid-argument', 'Missing destinationListIds or mediaItem.');
   }
 
+  const operationKey = getOperationKey(request.data.operationKey);
+
   try {
     const token = await authenticateSubsplash();
-
-    // Process lists in parallel
     const maxListSize = request.data.maxListSize ?? DEFAULT_MAX_LIST_SIZE;
-    const results = await Promise.allSettled(
-      destinationListIds.map(async (listId) => {
-        const result = await processListStep(listId, mediaItem, token, maxListSize);
-        return { listId, listItemId: result.listItemId };
-      })
-    );
+    const lockKeys = [...destinationListIds.map((listId) => `list:${listId}`), `media-item:${mediaItem.id}`];
 
-    return results.map((r, index) => {
-      if (r.status === 'fulfilled') {
-        return { 
-          listId: destinationListIds[index], 
-          status: 'success',
-          listItemId: r.value.listItemId 
-        };
-      } else {
-        const errorMsg = r.reason instanceof Error ? r.reason.message : JSON.stringify(r.reason);
-        logger.error(`Error adding to list ${destinationListIds[index]}:`, errorMsg);
-        return { 
-          listId: destinationListIds[index], 
-          status: 'error', 
-          error: errorMsg 
-        };
-      }
-    });
+    const runMutation = async (): Promise<AddToListOutputType> => {
+      const results = await Promise.allSettled(
+        destinationListIds.map(async (listId) => {
+          const result = await processListStep(listId, mediaItem, token, maxListSize);
+          return { listId, listItemId: result.listItemId };
+        })
+      );
 
-  } catch (err) {
+      return results.map((result, index): OutputTypes => {
+        if (result.status === 'fulfilled') {
+          return {
+            listId: destinationListIds[index],
+            status: 'success',
+            listItemId: result.value.listItemId,
+          };
+        }
+
+        const errorPayload = getErrorPayload(result.reason);
+        logger.error(`Error adding to list ${destinationListIds[index]}:`, errorPayload);
+        return {
+          listId: destinationListIds[index],
+          status: 'error',
+          ...errorPayload,
+        };
+      });
+    };
+
+    const executeLockedMutation = async (): Promise<AddToListOutputType> => {
+      return withSubsplashLocks(lockKeys, runMutation, {
+        ...(operationKey ? { operationKey } : {}),
+      });
+    };
+
+    if (operationKey) {
+      return await withIdempotency(operationKey, executeLockedMutation);
+    }
+
+    return await executeLockedMutation();
+  } catch (error) {
+    const errorPayload = getErrorPayload(error);
+    if (errorPayload.errorCode === 'aborted') {
+      return destinationListIds.map((listId): OutputTypes => ({
+        listId,
+        status: 'error',
+        ...errorPayload,
+      }));
+    }
+
+    const err = error as unknown;
+    logger.error('addToList failed', errorPayload);
     throw handleError(err);
   }
 });
