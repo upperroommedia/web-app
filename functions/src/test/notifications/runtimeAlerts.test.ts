@@ -8,10 +8,19 @@ import deleteFromSubsplash from '../../deleteFromSubsplash';
 import uploadToSoundCloud from '../../uploadToSoundCloud';
 import editSoundCloudSermon from '../../editSoundCloudSermon';
 import deleteFromSoundCloud from '../../deleteFromSoundCloud';
+import addintrooutrotaskgenerator from '../../addIntroOutro/addintrooutrotaskgenerator';
+import addintrooutrotaskhandler from '../../addIntroOutro/addintrooutrotaskhandler';
 
 const mockUploadTrack = jest.fn();
 const mockUpdateTrack = jest.fn();
 const mockDeleteTrack = jest.fn();
+const mockSermonDocUpdate = jest.fn();
+const mockStorageFileExists = jest.fn();
+const mockTaskQueueEnqueue = jest.fn();
+const mockExecuteWithTimout = jest.fn();
+const mockValidateAddIntroOutroData = jest.fn();
+const mockGetAudioSource = jest.fn();
+const mockLogMemoryUsage = jest.fn();
 
 jest.mock('../../locks/withIdempotency', () => ({
   withIdempotency: jest.fn(async (_operationKey: string, run: () => Promise<unknown>) => run()),
@@ -48,21 +57,53 @@ jest.mock('../../soundcloudSecrets', () => ({
     value: () => 'fake-soundcloud-token',
   },
 }));
+jest.mock('../../addIntroOutro/utils', () => ({
+  logMemoryUsage: (...args: unknown[]) => mockLogMemoryUsage(...args),
+  secondsToTimeFormat: jest.fn(() => '00:00:00.000'),
+  loadStaticFFMPEG: jest.fn(() => ({})),
+  downloadFiles: jest.fn(async () => ({})),
+  getDurationSeconds: jest.fn(async () => 1),
+  executeWithTimout: (...args: unknown[]) => mockExecuteWithTimout(...args),
+  createTempFile: jest.fn((fileName: string) => `/tmp/${fileName}`),
+  validateAddIntroOutroData: (...args: unknown[]) => mockValidateAddIntroOutroData(...args),
+  getAudioSource: (...args: unknown[]) => mockGetAudioSource(...args),
+}));
+jest.mock('firebase-admin/functions', () => ({
+  getFunctions: () => ({
+    taskQueue: () => ({
+      enqueue: (...args: unknown[]) => mockTaskQueueEnqueue(...args),
+    }),
+  }),
+}));
 jest.mock('../../../../firebase/firebaseAdmin', () => ({
   __esModule: true,
   default: {
     storage: () => ({
       bucket: () => ({
         file: () => ({
+          exists: (...args: unknown[]) => mockStorageFileExists(...args),
           download: () => Promise.resolve([Buffer.alloc(0)]),
+          delete: jest.fn(),
+          setMetadata: jest.fn(),
         }),
       }),
     }),
     firestore: () => ({
       collection: () => ({
         doc: () => ({
-          update: jest.fn(),
+          update: (...args: unknown[]) => mockSermonDocUpdate(...args),
         }),
+        withConverter: () => ({
+          doc: () => ({
+            update: (...args: unknown[]) => mockSermonDocUpdate(...args),
+          }),
+        }),
+      }),
+    }),
+    database: () => ({
+      ref: () => ({
+        set: jest.fn(),
+        remove: jest.fn(),
       }),
     }),
   },
@@ -73,6 +114,15 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
+      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+    ),
+  };
+});
+jest.mock('firebase-functions/v2/tasks', () => {
+  const actual = jest.requireActual('firebase-functions/v2/tasks');
+  return {
+    ...actual,
+    onTaskDispatched: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
       (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
     ),
   };
@@ -155,6 +205,12 @@ const editSoundCloudSermonHandler = editSoundCloudSermon as unknown as (
 const deleteFromSoundCloudHandler = deleteFromSoundCloud as unknown as (
   request: CallableRequestShape<Record<string, unknown>>
 ) => Promise<unknown>;
+const addIntroOutroTaskGeneratorHandler = addintrooutrotaskgenerator as unknown as (
+  request: CallableRequestShape<Record<string, unknown>>
+) => Promise<unknown>;
+const addIntroOutroTaskHandler = addintrooutrotaskhandler as unknown as (request: {
+  data: Record<string, unknown>;
+}) => Promise<unknown>;
 
 const mockAxios = axios as jest.MockedFunction<typeof axios>;
 const mockWithIdempotency = withIdempotency as jest.MockedFunction<typeof withIdempotency>;
@@ -178,6 +234,15 @@ const buildUploadToSubsplashPayload = () => ({
   date: new Date(),
 });
 
+const buildAddIntroOutroPayload = () => ({
+  id: 'sermon-audio-123',
+  startTime: 0,
+  duration: 180,
+  storageFilePath: 'raw-sermons/sermon-audio-123.mp3',
+  introUrl: 'https://example.com/intro.mp3',
+  outroUrl: 'https://example.com/outro.mp3',
+});
+
 describe('runtime alert taxonomy contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -189,6 +254,26 @@ describe('runtime alert taxonomy contract', () => {
     mockUploadTrack.mockResolvedValue('sc-track-1');
     mockUpdateTrack.mockResolvedValue(undefined);
     mockDeleteTrack.mockResolvedValue(undefined);
+    mockSermonDocUpdate.mockResolvedValue(undefined);
+    mockStorageFileExists.mockResolvedValue([true]);
+    mockTaskQueueEnqueue.mockResolvedValue(undefined);
+    mockExecuteWithTimout.mockResolvedValue(undefined);
+    mockValidateAddIntroOutroData.mockReturnValue(true);
+    mockGetAudioSource.mockImplementation((data: Record<string, unknown>) => {
+      if (typeof data.youtubeUrl === 'string') {
+        return {
+          id: data.id,
+          source: data.youtubeUrl,
+          type: 'YouTubeUrl',
+        };
+      }
+      return {
+        id: data.id,
+        source: data.storageFilePath,
+        type: 'StorageFilePath',
+      };
+    });
+    mockLogMemoryUsage.mockResolvedValue(undefined);
   });
 
   it('declares deterministic alert codes and context requirements for each targeted catch path', () => {
@@ -374,6 +459,70 @@ describe('runtime alert taxonomy contract', () => {
       code: 'internal',
       message: 'normalized:soundcloud upload repeated failure',
     });
+
+    expect(mockEmitOperationalAlert).toHaveBeenCalledTimes(2);
+  });
+
+  it('emits audio alert for addintrooutrotaskgenerator catch path with task input context', async () => {
+    mockTaskQueueEnqueue.mockRejectedValueOnce(new Error('task enqueue failed'));
+
+    await expect(
+      addIntroOutroTaskGeneratorHandler({
+        auth: adminAuth,
+        data: buildAddIntroOutroPayload(),
+      })
+    ).rejects.toMatchObject({ code: 'internal', message: 'normalized:task enqueue failed' });
+
+    expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alertCode: 'AUDIO_TASK_GENERATOR_RUNTIME_FAILURE',
+        context: expect.objectContaining({
+          functionName: 'addintrooutrotaskgenerator',
+          sermonId: 'sermon-audio-123',
+          audioSourceType: 'StorageFilePath',
+          audioSource: 'raw-sermons/sermon-audio-123.mp3',
+          taskRoute: 'addintrooutrotaskhandler',
+        }),
+      })
+    );
+  });
+
+  it('emits audio alert for addintrooutrotaskhandler catch path while preserving status update behavior', async () => {
+    mockExecuteWithTimout.mockRejectedValueOnce(new Error('task processing failed'));
+
+    await expect(
+      addIntroOutroTaskHandler({
+        data: buildAddIntroOutroPayload(),
+      })
+    ).resolves.toBeUndefined();
+
+    expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alertCode: 'AUDIO_TASK_HANDLER_RUNTIME_FAILURE',
+        context: expect.objectContaining({
+          functionName: 'addintrooutrotaskhandler',
+          sermonId: 'sermon-audio-123',
+          audioSourceType: 'StorageFilePath',
+          audioSource: 'raw-sermons/sermon-audio-123.mp3',
+          taskRoute: 'process-audio',
+        }),
+      })
+    );
+
+    expect(mockSermonDocUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: expect.objectContaining({
+          message: 'task processing failed',
+        }),
+      })
+    );
+  });
+
+  it('does not dedupe repeated addintro/outro handler failures', async () => {
+    mockExecuteWithTimout.mockRejectedValue(new Error('task processing failed repeatedly'));
+
+    await expect(addIntroOutroTaskHandler({ data: buildAddIntroOutroPayload() })).resolves.toBeUndefined();
+    await expect(addIntroOutroTaskHandler({ data: buildAddIntroOutroPayload() })).resolves.toBeUndefined();
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledTimes(2);
   });
