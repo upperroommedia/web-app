@@ -15,7 +15,7 @@ const firestoreDB = firebaseAdmin.firestore();
 
 export interface ItemOrderEntry {
   mediaItemId: string;
-  position: number | null;
+  position: number;
 }
 
 export interface ReorderSeriesItemsInputType {
@@ -36,7 +36,10 @@ const reorderSeriesItems = onCall(
 
     // Authentication check
     if (!canUserRolePublish(request.auth?.token.role)) {
-      throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
+      throw new HttpsError(
+        'unauthenticated',
+        'The function must be called while authenticated with publish permissions.'
+      );
     }
 
     const { firestoreSeriesId, itemOrder } = request.data;

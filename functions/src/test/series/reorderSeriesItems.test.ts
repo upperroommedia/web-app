@@ -126,40 +126,6 @@ describe('reorderSeriesItems - Basic Functionality', () => {
     expect(result.status).toBe('success');
   });
 
-  it('should support null positions for non-published items', async () => {
-    const subsplashSeries = subsplashSeriesMock.createSeries('Mixed Status Series');
-    const publishedItem = subsplashSeriesMock.createMediaItem('Published Item', {
-      seriesId: subsplashSeries.id,
-      position: 1,
-    });
-    const draftItem = subsplashSeriesMock.createMediaItem('Draft Item', {
-      seriesId: subsplashSeries.id,
-      position: 2,
-    });
-
-    const firestoreId = await createSeriesDocument({
-      subsplashId: subsplashSeries.id,
-      name: 'Mixed Status Series',
-      itemCount: 2,
-    });
-
-    const request: TestRequest<ReorderSeriesItemsInputType> = {
-      auth: { token: { role: 'admin' } },
-      data: {
-        firestoreSeriesId: firestoreId,
-        itemOrder: [
-          { mediaItemId: draftItem.id, position: null },
-          { mediaItemId: publishedItem.id, position: 1 },
-        ],
-      },
-    };
-
-    const result = await reorderSeriesItemsHandler(request);
-
-    expect(result.status).toBe('success');
-    expect(subsplashSeriesMock.getMediaItem(draftItem.id)?.position).toBeNull();
-    expect(subsplashSeriesMock.getMediaItem(publishedItem.id)?.position).toBe(1);
-  });
 });
 
 describe('reorderSeriesItems - Authentication', () => {
