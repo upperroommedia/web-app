@@ -128,6 +128,32 @@ export async function getSeriesItems(
 }
 
 /**
+ * Get all media items belonging to a series across supported statuses.
+ * Deduplicates by media item ID.
+ */
+export async function getAllSeriesItemsAcrossStatuses(
+  seriesId: string,
+  token: string,
+  options?: { pageSize?: number }
+): Promise<SubsplashSeriesMediaItem[]> {
+  const statuses: Array<'published' | 'draft' | 'scheduled'> = ['published', 'draft', 'scheduled'];
+  const allResults = await Promise.all(
+    statuses.map((status) => getSeriesItems(seriesId, token, { status, pageSize: options?.pageSize }))
+  );
+
+  const dedupedItems = new Map<string, SubsplashSeriesMediaItem>();
+  allResults.flat().forEach((item) => {
+    dedupedItems.set(item.id, item);
+  });
+
+  return Array.from(dedupedItems.values());
+}
+
+export function isMediaItemUnlinkedFromSeries(item: SubsplashSeriesMediaItem): boolean {
+  return (item._embedded?.['media-series'] ?? null) === null;
+}
+
+/**
  * Assign or unassign a media item to/from a series
  * To assign: pass seriesId
  * To unassign: pass null
@@ -136,14 +162,22 @@ export async function patchMediaItemSeries(
   mediaItemId: string,
   seriesId: string | null,
   token: string,
-  options?: { position?: number }
+  options?: {
+    position?: number;
+    audio?: { id: string };
+    images?: Array<{ id: string; type: string }>;
+  }
 ): Promise<SubsplashSeriesMediaItem> {
+  const embeddedPayload: PatchMediaItemSeriesPayload['_embedded'] = {
+    'media-series': seriesId ? { id: seriesId } : null,
+    ...(options?.audio && { audio: options.audio }),
+    ...(options?.images && options.images.length > 0 && { images: options.images }),
+  };
+
   const payload: PatchMediaItemSeriesPayload = {
     id: mediaItemId,
     ...(options?.position !== undefined && { position: options.position }),
-    _embedded: {
-      'media-series': seriesId ? { id: seriesId } : null,
-    },
+    _embedded: embeddedPayload,
   };
 
   const config = createAxiosConfig(
@@ -158,11 +192,61 @@ export async function patchMediaItemSeries(
     logger.log(`Successfully ${seriesId ? 'assigned' : 'unassigned'} media item ${mediaItemId} ${seriesId ? `to series ${seriesId}` : 'from series'}`);
     return response.data;
   } catch (error: unknown) {
+    const axiosStatus = error && typeof error === 'object' && 'response' in error
+      ? (error as { response?: { status?: number } }).response?.status
+      : undefined;
+    if (axiosStatus === 404) {
+      throw new HttpsError('not-found', `Media item ${mediaItemId} was not found in Subsplash.`);
+    }
+
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
       : error;
     logger.error(`Failed to patch media item ${mediaItemId}`, errorMessage);
     throw new HttpsError('internal', `Failed to update media item series: ${JSON.stringify(errorMessage)}`);
+  }
+}
+
+export interface UnlinkMediaItemFromSeriesResult {
+  status: 'success' | 'not-found';
+  mediaItemId: string;
+  item?: SubsplashSeriesMediaItem;
+}
+
+export async function unlinkMediaItemFromSeries(
+  mediaItemId: string,
+  token: string,
+  options?: {
+    audio?: { id: string };
+    images?: Array<{ id: string; type: string }>;
+  }
+): Promise<UnlinkMediaItemFromSeriesResult> {
+  try {
+    const patchedItem = await patchMediaItemSeries(mediaItemId, null, token, {
+      audio: options?.audio,
+      images: options?.images,
+    });
+
+    if (!isMediaItemUnlinkedFromSeries(patchedItem)) {
+      throw new HttpsError(
+        'failed-precondition',
+        `Subsplash did not confirm unlink for media item ${mediaItemId}.`
+      );
+    }
+
+    return {
+      status: 'success',
+      mediaItemId,
+      item: patchedItem,
+    };
+  } catch (error) {
+    if (error instanceof HttpsError && error.code === 'not-found') {
+      return {
+        status: 'not-found',
+        mediaItemId,
+      };
+    }
+    throw error;
   }
 }
 

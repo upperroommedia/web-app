@@ -43,6 +43,7 @@ jest.mock('firebase-functions/v2/https', () => ({
 export class SubsplashSeriesMock {
   series: Map<string, SubsplashSeries> = new Map();
   mediaItems: Map<string, SubsplashSeriesMediaItem> = new Map();
+  operations: Array<{ type: 'unlink' | 'deleteSeries'; mediaItemId?: string; seriesId?: string }> = [];
   private idCounter = 0;
 
   constructor() {
@@ -52,6 +53,7 @@ export class SubsplashSeriesMock {
   reset() {
     this.series.clear();
     this.mediaItems.clear();
+    this.operations = [];
     this.idCounter = 0;
   }
 
@@ -106,6 +108,7 @@ export class SubsplashSeriesMock {
    * Delete a series
    */
   deleteSeries(id: string): boolean {
+    this.operations.push({ type: 'deleteSeries', seriesId: id });
     // Remove series association from all media items
     for (const [itemId, item] of this.mediaItems.entries()) {
       if (item._embedded?.['media-series']?.id === id) {
@@ -200,6 +203,9 @@ export class SubsplashSeriesMock {
       ...item._embedded,
       'media-series': seriesId ? { id: seriesId } : null,
     };
+    if (seriesId === null) {
+      this.operations.push({ type: 'unlink', mediaItemId: itemId });
+    }
     if (position !== undefined) {
       item.position = position;
     }
@@ -231,6 +237,10 @@ export class SubsplashSeriesMock {
         this.mediaItems.set(id, item);
       }
     }
+  }
+
+  getOperationLog(): Array<{ type: 'unlink' | 'deleteSeries'; mediaItemId?: string; seriesId?: string }> {
+    return [...this.operations];
   }
 }
 
@@ -352,6 +362,10 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
     const patchItemMatch = url.match(/media\/v1\/media-items\/([a-zA-Z0-9-]+)$/);
     if (method === 'PATCH' && patchItemMatch) {
       const itemId = patchItemMatch[1];
+      const notFoundKey = `patchMediaItemNotFound:${itemId}`;
+      if (networkFailureInjector.shouldFail(notFoundKey)) {
+        return Promise.reject({ response: { status: 404, data: { error: 'Media item not found' } } });
+      }
       const failureKey = `patchMediaItem:${itemId}`;
       if (networkFailureInjector.shouldFail(failureKey)) {
         return Promise.reject(new Error(`Network error: Failed to patch media item ${itemId}`));

@@ -7,7 +7,7 @@
 import Box from '@mui/material/Box';
 import AppLayout from '../../layout/AppLayout';
 import Button from '@mui/material/Button';
-import firestore, { collection, deleteDoc, doc, limit, orderBy, query, where, getDocs, QueryConstraint } from '../../firebase/firestore';
+import firestore, { collection, limit, orderBy, query, where, getDocs, QueryConstraint } from '../../firebase/firestore';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
 import { memo, useCallback, useEffect, useState } from 'react';
 import NewSeriesPopup from '../../components/NewSeriesPopup';
@@ -243,14 +243,9 @@ const AdminSeriesPage = () => {
     try {
       setIsDeleting(true);
 
-      // If the series has a subsplashId, delete from Subsplash first
-      if (selectedSeries.subsplashId) {
-        const deleteSeries = createFunctionV2<DeleteSeriesInputType, DeleteSeriesOutputType>('deleteseries');
-        await deleteSeries({ firestoreId: selectedSeries.id });
-      } else {
-        // Only delete from Firestore
-        await deleteDoc(doc(firestore, 'series', selectedSeries.id));
-      }
+      // Always route through callable to enforce consistent remote/local deletion semantics.
+      const deleteSeries = createFunctionV2<DeleteSeriesInputType, DeleteSeriesOutputType>('deleteseries');
+      await deleteSeries({ firestoreId: selectedSeries.id });
 
       setSeriesList((prev) => prev.filter((s) => s.id !== selectedSeries.id));
       setDeleteSeriesPopup(false);
