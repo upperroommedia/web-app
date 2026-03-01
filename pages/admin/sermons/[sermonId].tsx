@@ -78,7 +78,6 @@ import { useCollectionData, useDocument } from 'react-firebase-hooks/firestore';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref as dbRef } from '../../../firebase/database';
 import UploadStatusList from '../../../components/UploadStatusList';
-import { deleteSermonWithExternalCleanup } from '../../../utils/deleteSermonWithExternalCleanup';
 import LinearProgress from '@mui/material/LinearProgress';
 
 const SermonDetailsPage = () => {
@@ -204,29 +203,37 @@ const SermonDetailsPage = () => {
 
   // Handle delete
   const handleDelete = useCallback(async () => {
-    if (!sermon) return;
+    if (!sermon || isDeleting) return;
 
     setIsDeleting(true);
     try {
-      await deleteSermonWithExternalCleanup({
-        sermonId: sermon.id,
-        subsplashId: sermon.subsplashId,
-        soundCloudTrackId: sermon.soundCloudTrackId,
-      });
-
       if (currentSermon?.id === sermon.id) {
         setCurrentSermon(undefined);
       }
 
-      await router.replace('/admin/sermons');
+      const deleteIntentQuery: Record<string, string> = {
+        deleteIntent: 'sermon',
+        deleteSermonId: sermon.id,
+      };
+
+      if (sermon.subsplashId) {
+        deleteIntentQuery.deleteSubsplashId = sermon.subsplashId;
+      }
+      if (sermon.soundCloudTrackId) {
+        deleteIntentQuery.deleteSoundCloudTrackId = sermon.soundCloudTrackId;
+      }
+
+      await router.replace({
+        pathname: '/admin/sermons',
+        query: deleteIntentQuery,
+      });
     } catch (err) {
       console.error('Error deleting sermon:', err);
-      const message = err instanceof Error ? err.message : 'Failed to delete sermon';
+      const message = err instanceof Error ? err.message : 'Failed to start delete';
       alert(message);
-    } finally {
       setIsDeleting(false);
     }
-  }, [sermon, currentSermon, setCurrentSermon, router]);
+  }, [sermon, currentSermon, isDeleting, setCurrentSermon, router]);
 
   // SoundCloud upload/delete
   const uploadToSoundCloud = useCallback(async () => {
