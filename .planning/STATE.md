@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 03-subsplash-alpha-lock-concurrency-control
-status: In Progress
-last_updated: "2026-03-01T08:00:35.000Z"
-last_activity: "2026-03-01 - Completed phase 03 plan 04 sermon/media mutation lock contract"
+status: executing
+last_updated: "2026-03-01T08:03:01.507Z"
+last_activity: 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
 progress:
-  total_phases: 4
+  total_phases: 3
   completed_phases: 1
   total_plans: 12
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Session State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** In Progress (03-01 and 03-04 complete; remaining phase 03 plans still in flight)
-**Last activity:** 2026-03-01 - Completed phase 03 plan 04 sermon/media mutation lock contract
+**Status:** In Progress (03-01, 03-03, and 03-04 complete; remaining phase 03 plans still in flight)
+**Last activity:** 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
 
 ## Decisions
 
@@ -43,6 +43,11 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: Required operationKey on upload/edit/delete and lockKey on upload before remote mutations.
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: Wrapped sermon media mutations with withIdempotency outside withSubsplashLocks to replay duplicate operations without rerunning side effects.
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: Updated shared firebase https test mocks to support both onCall signatures and HttpsError.details for deterministic lock-suite assertions.
+- [Phase 03]: addToList/removeFromList now return per-list lock contention metadata while preserving partial-success array semantics.
+- [Phase 03]: createNewSubsplashList now serializes duplicate title-based creates with deterministic list:create-<slug> lock keys and optional operation-key replay.
+- [Phase 03]: Series callables now use idempotency as an outer wrapper and lock scopes as inner execution guards.
+- [Phase 03]: Series mutation input interfaces keep operationKey optional with generated fallback keys for backwards-compatible callers.
+- [Phase 03]: Busy contention contract validation combines deterministic operation-key in-progress claims with explicit lock-timeout assertions.
 
 ## Accumulated Context
 
@@ -72,3 +77,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed quick task 2 (immediate details-page redirect to `/admin/sermons`, one-shot delete execution, progress/success/error toasts).
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-01 with lock/idempotency primitives and emulator lock-layer tests.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-04 with sermon/media mutation lock wrappers and regression coverage.
+- 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-03 with list mutation lock/idempotency wrappers and replay regression coverage.

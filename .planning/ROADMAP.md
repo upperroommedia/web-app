@@ -63,7 +63,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Series Subtitle Automation | 2/2 | Complete | 2026-02-28 |
 | 2. Dev External API Mocking | 0/1 | In progress | - |
-| 3. Subsplash alpha-lock concurrency control | 1/5 | In progress | - |
+| 3. Subsplash alpha-lock concurrency control | 4/5 | In progress | - |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 
@@ -80,9 +80,9 @@ Plans:
 
 Plans:
 - [x] 03-01: Build shared RTDB lock/idempotency primitives with contention contract and lock-layer tests
-- [ ] 03-02: Migrate series mutation callables to lock + idempotency wrappers
-- [ ] 03-03: Migrate list mutation callables to lock + idempotency wrappers
-- [ ] 03-04: Migrate sermon/media mutation callables to lock + idempotency wrappers
+- [x] 03-02: Migrate series mutation callables to lock + idempotency wrappers
+- [x] 03-03: Migrate list mutation callables to lock + idempotency wrappers
+- [x] 03-04: Migrate sermon/media mutation callables to lock + idempotency wrappers
 - [ ] 03-05: Wire admin callers to operation keys and lock-busy retry handling
 
 ### Phase 4: Role-based invite onboarding and operational notification routing
