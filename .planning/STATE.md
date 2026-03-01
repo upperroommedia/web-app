@@ -35,6 +35,12 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 01-series-subtitle-automation]: Backfill runs dry-run by default and requires explicit --apply for writes.
 - [Phase 01-series-subtitle-automation]: Series verification used direct emulator+jest commands because pnpm test argument forwarding remained unreliable.
 
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 3 added: Subsplash alpha-lock concurrency control
+
 ## Blockers
 
 - None recorded in state file.
