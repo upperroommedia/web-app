@@ -16,6 +16,9 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
 if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
   process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9100';
 }
+if (!process.env.FIREBASE_DATABASE_EMULATOR_HOST) {
+  process.env.FIREBASE_DATABASE_EMULATOR_HOST = '127.0.0.1:9000';
+}
 if (!process.env.GCLOUD_PROJECT) {
   process.env.GCLOUD_PROJECT = 'urm-app';
 }
@@ -37,6 +40,7 @@ if (!firebaseAdmin.apps.length) {
       console.log('✓ Firebase Admin SDK initialized for tests');
       console.log('  Firestore Emulator:', process.env.FIRESTORE_EMULATOR_HOST);
       console.log('  Auth Emulator:', process.env.FIREBASE_AUTH_EMULATOR_HOST);
+      console.log('  RTDB Emulator:', process.env.FIREBASE_DATABASE_EMULATOR_HOST);
     }
   } catch (error) {
     // Always log warnings/errors even in non-verbose mode
@@ -45,4 +49,3 @@ if (!firebaseAdmin.apps.length) {
 }
 
 export {};
-
