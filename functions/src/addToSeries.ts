@@ -19,6 +19,9 @@ export interface AddToSeriesInputType {
 
 export interface AddToSeriesOutputType {
   status: 'success' | 'error';
+  mediaItemId?: string;
+  confirmedSeriesId?: string | null;
+  position?: number | null;
   error?: string;
 }
 
@@ -48,14 +51,24 @@ const addToSeries = onCall(
 
       // Patch the media item to assign it to the series
       // This will automatically remove it from any existing series
-      await patchMediaItemSeries(mediaItemId.trim(), seriesSubsplashId.trim(), token, {
+      const patchedItem = await patchMediaItemSeries(mediaItemId.trim(), seriesSubsplashId.trim(), token, {
         position,
       });
+      const confirmedSeriesId = patchedItem._embedded?.['media-series']?.id ?? null;
+      if (confirmedSeriesId !== seriesSubsplashId.trim()) {
+        throw new HttpsError(
+          'failed-precondition',
+          `Subsplash did not confirm series assignment. Expected ${seriesSubsplashId}, got ${confirmedSeriesId ?? 'null'}.`
+        );
+      }
 
       logger.log(`Added media item ${mediaItemId} to series ${seriesSubsplashId}`);
 
       return {
         status: 'success',
+        mediaItemId: patchedItem.id,
+        confirmedSeriesId,
+        position: patchedItem.position ?? null,
       };
     } catch (err) {
       throw handleError(err);

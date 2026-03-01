@@ -137,7 +137,7 @@ export async function patchMediaItemSeries(
   seriesId: string | null,
   token: string,
   options?: { position?: number }
-): Promise<void> {
+): Promise<SubsplashSeriesMediaItem> {
   const payload: PatchMediaItemSeriesPayload = {
     id: mediaItemId,
     ...(options?.position !== undefined && { position: options.position }),
@@ -154,8 +154,9 @@ export async function patchMediaItemSeries(
   );
 
   try {
-    await axios(config);
+    const response = await axios(config);
     logger.log(`Successfully ${seriesId ? 'assigned' : 'unassigned'} media item ${mediaItemId} ${seriesId ? `to series ${seriesId}` : 'from series'}`);
+    return response.data;
   } catch (error: unknown) {
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data

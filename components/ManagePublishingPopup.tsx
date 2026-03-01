@@ -35,6 +35,7 @@ import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubs
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
 import { CreateSeriesInputType, CreateSeriesOutputType } from '../functions/src/createSeries';
 import { AddToSeriesInputType, AddToSeriesOutputType } from '../functions/src/addToSeries';
+import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../functions/src/reorderSeriesItems';
 import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../functions/src/removeFromSeries';
 import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
@@ -417,38 +418,60 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   // ==================== Series Functions ====================
-  const getSeriesPublishPosition = async (seriesId: string, sermonId: string): Promise<number | undefined> => {
-    try {
-      const orderedItemsSnapshot = await getDocs(
-        query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'asc'))
-      );
+  const reorderSeriesFromFirebaseOrder = async (
+    seriesId: string,
+    newlyPublishedSermonId: string,
+    newlyPublishedMediaItemId: string
+  ): Promise<void> => {
+    const orderedItemsSnapshot = await getDocs(
+      query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'asc'))
+    );
 
-      if (orderedItemsSnapshot.empty) {
-        return undefined;
-      }
+    const orderedItems = orderedItemsSnapshot.docs.map((seriesItemDoc) => {
+      const data = seriesItemDoc.data() as {
+        publishedToSubsplash?: boolean;
+        sermonSubsplashId?: string;
+      };
 
-      const orderedItems = orderedItemsSnapshot.docs.map((seriesItemDoc) => {
-        const data = seriesItemDoc.data() as { publishedToSubsplash?: boolean };
-        return {
-          id: seriesItemDoc.id,
-          publishedToSubsplash: data.publishedToSubsplash === true,
-        };
-      });
+      const isPublished = seriesItemDoc.id === newlyPublishedSermonId
+        ? true
+        : data.publishedToSubsplash === true;
+      const mediaItemId = seriesItemDoc.id === newlyPublishedSermonId
+        ? newlyPublishedMediaItemId
+        : data.sermonSubsplashId;
 
-      const targetIndex = orderedItems.findIndex((item) => item.id === sermonId);
-      if (targetIndex < 0) {
-        return undefined;
-      }
+      return {
+        sermonId: seriesItemDoc.id,
+        isPublished,
+        mediaItemId,
+      };
+    });
 
-      const publishedAboveCount = orderedItems.slice(0, targetIndex).filter((item) => item.publishedToSubsplash).length;
-      const totalPublishedBeforeInsert = orderedItems.filter((item) => item.publishedToSubsplash).length;
-      const totalPublishedAfterInsert = totalPublishedBeforeInsert + 1;
+    const targetExists = orderedItems.some((item) => item.sermonId === newlyPublishedSermonId);
+    if (!targetExists) {
+      throw new Error('Series item is missing from Firestore order. Refresh and try again.');
+    }
 
-      // Subsplash positions are inverted: 1 = bottom.
-      return totalPublishedAfterInsert - publishedAboveCount;
-    } catch (err) {
-      console.warn('Failed to derive series publish position; falling back to default Subsplash ordering.', err);
-      return undefined;
+    const publishedItems = orderedItems.filter((item) => item.isPublished);
+    const missingMediaId = publishedItems.find((item) => !item.mediaItemId);
+    if (missingMediaId) {
+      throw new Error(`Published series item ${missingMediaId.sermonId} is missing a Subsplash media ID.`);
+    }
+
+    const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>(
+      'reorderseriesitems'
+    );
+    const reorderResult = await reorderFunction({
+      firestoreSeriesId: seriesId,
+      itemOrder: publishedItems.map((item, index) => ({
+        mediaItemId: item.mediaItemId as string,
+        // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
+        position: publishedItems.length - index,
+      })),
+    });
+
+    if (reorderResult.status !== 'success') {
+      throw new Error(reorderResult.message || 'Subsplash reorder failed.');
     }
   };
 
@@ -491,15 +514,38 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       }
 
       const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
-      const desiredPosition = await getSeriesPublishPosition(series.id, sermon.id);
       const addResult = await addToSeriesFunction({
         seriesSubsplashId,
         mediaItemId,
-        ...(desiredPosition !== undefined ? { position: desiredPosition } : {}),
       });
 
       if (!addResult || addResult.status !== 'success') {
         throw new Error(addResult.error || 'Failed to add sermon to series');
+      }
+      if (addResult.confirmedSeriesId !== seriesSubsplashId) {
+        throw new Error(
+          `Subsplash did not confirm series assignment. Expected ${seriesSubsplashId}, got ${addResult.confirmedSeriesId || 'null'}.`
+        );
+      }
+
+      try {
+        await reorderSeriesFromFirebaseOrder(
+          series.id,
+          sermon.id,
+          addResult.mediaItemId || mediaItemId
+        );
+      } catch (reorderError: any) {
+        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+        try {
+          await removeFromSeriesFunction({
+            mediaItemId: addResult.mediaItemId || mediaItemId,
+          });
+        } catch (rollbackError: any) {
+          throw new Error(
+            `Series reorder failed and rollback failed. Reorder error: ${reorderError?.message || 'Unknown'}; rollback error: ${rollbackError?.message || 'Unknown'}`
+          );
+        }
+        throw new Error(reorderError?.message || 'Series reorder failed after publish.');
       }
 
       const seriesItemRef = doc(firestore, `series/${series.id}/seriesItems`, sermon.id);
@@ -507,7 +553,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         seriesItemRef,
         {
           publishedToSubsplash: true,
-          sermonSubsplashId: mediaItemId,
+          sermonSubsplashId: addResult.mediaItemId || mediaItemId,
         },
         { merge: true }
       );
