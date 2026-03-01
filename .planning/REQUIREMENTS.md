@@ -35,7 +35,7 @@
 - [ ] **INVITE-03**: Successful invite claims redirect users to a dedicated invite success route.
 - [ ] **ROLE-REQ-01**: Role requests persist requester identity, requested role, timestamp, and admin-linkable metadata.
 - [x] **ROLE-REQ-02**: New role requests route notifications to environment-configurable recipients with required production defaults.
-- [ ] **OPS-ALERT-01**: Role-request notification failures emit operational alert signals without rolling back persisted requests.
+- [x] **OPS-ALERT-01**: Role-request notification failures emit operational alert signals without rolling back persisted requests.
 - [x] **OPS-ALERT-02**: Runtime caught failures enqueue structured operational notifications for every occurrence (no dedupe suppression).
 
 ## v2 Requirements
@@ -79,7 +79,7 @@
 | INVITE-03 | Phase 4 | In Progress |
 | ROLE-REQ-01 | Phase 4 | In Progress |
 | ROLE-REQ-02 | Phase 4 | Complete |
-| OPS-ALERT-01 | Phase 4 | In Progress |
+| OPS-ALERT-01 | Phase 4 | Complete |
 | OPS-ALERT-02 | Phase 4 | Complete |
 | SEC-01 | Next milestone candidate | Pending |
 | SEC-02 | Next milestone candidate | Pending |
@@ -95,4 +95,4 @@
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-03-01 after phase 04-01 completion*
+*Last updated: 2026-03-01 after phase 04-05 completion*

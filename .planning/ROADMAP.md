@@ -65,7 +65,7 @@ Plans:
 | 1. Series Subtitle Automation | 2/2 | Complete | 2026-02-28 |
 | 2. Dev External API Mocking | 0/1 | In progress | - |
 | 3. Subsplash alpha-lock concurrency control | 4/5 | In progress | - |
-| 4. Role-based invite onboarding and operational notification routing | 1/5 | In progress | - |
+| 4. Role-based invite onboarding and operational notification routing | 2/5 | In progress | - |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 
@@ -105,4 +105,4 @@ Plans:
 - [ ] 04-02-PLAN.md — Implement persistence-first role request callable with notification fallback and tests
 - [ ] 04-03-PLAN.md — Implement secure invite issue/claim backend with hashed tokens and no-downgrade role assignment
 - [ ] 04-04-PLAN.md — Wire new callables into exports and UI flows (admin invite, request form, invite claim/success routes)
-- [ ] 04-05-PLAN.md — Roll out runtime alert emission across publish and add-intro/outro catch paths with regression tests
+- [x] 04-05-PLAN.md — Roll out runtime alert emission across publish and add-intro/outro catch paths with regression tests

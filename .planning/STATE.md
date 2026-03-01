@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 04-role-based-invite-onboarding-and-operational-notification-routing
 status: executing
-last_updated: "2026-03-01T08:14:58Z"
-last_activity: 2026-03-01 - Completed phase 04 plan 01 notification foundation rollout
+last_updated: "2026-03-01T08:27:17Z"
+last_activity: 2026-03-01 - Completed phase 04 plan 05 runtime alert rollout
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 13
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Session State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 04-role-based-invite-onboarding-and-operational-notification-routing
-**Status:** In Progress (04-01 complete; 04-02 through 04-05 pending)
-**Last activity:** 2026-03-01 - Completed phase 04 plan 01 notification foundation rollout
+**Status:** In Progress (04-01 and 04-05 complete; 04-02 through 04-04 pending)
+**Last activity:** 2026-03-01 - Completed phase 04 plan 05 runtime alert rollout
 
 ## Decisions
 
@@ -51,6 +51,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Role-request and runtime-alert recipients are environment-configurable via firebase-functions params with production-safe defaults.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Operational alert helper intentionally enqueues one email per invocation with no dedupe suppression window.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Notification outbox docs include structured meta fields (source, alertType, alertCode) while remaining Trigger Email compatible.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Runtime alert codes are function-specific and deterministic for all targeted catch paths.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Add-intro/outro catch blocks wrap alert emission failures so existing status/error handling remains intact.
 
 ## Accumulated Context
 
@@ -83,3 +85,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-04 with sermon/media mutation lock wrappers and regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-03 with list mutation lock/idempotency wrappers and replay regression coverage.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-01 with notification params, queue helpers, and emulator regression tests.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-05 with publish/audio catch-path operational alert rollout and runtime regression coverage.
