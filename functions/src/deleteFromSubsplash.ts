@@ -6,6 +6,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 
 export interface DeleteFromSubsplashInputType {
+  operationKey: string;
   subsplashId: string;
 }
 
@@ -22,6 +23,9 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSub
   // Input validation
   if (!request.data || typeof request.data !== 'object' || !request.data.subsplashId || request.data.subsplashId.trim() === '') {
     throw new HttpsError('invalid-argument', 'The function must be called with a valid media item ID.');
+  }
+  if (!request.data.operationKey || request.data.operationKey.trim() === '') {
+    throw new HttpsError('invalid-argument', 'operationKey is required.');
   }
 
   // Environment validation

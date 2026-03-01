@@ -1,25 +1,36 @@
 import { logger } from 'firebase-functions/v2';
-import { onCall, CallableRequest } from 'firebase-functions/v2/https';
+import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
 import axios from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from './uploadToSubsplash';
 import { canUserRolePublish } from '../../types/User';
+import handleError from './handleError';
 
 export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   extends Partial<Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'audioUrl' | 'autoPublish'>> {
+  operationKey: string;
   subsplashId: string;
 }
 
 const editSubsplashSermon = onCall(
   async (request: CallableRequest<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>): Promise<unknown> => {
     if (!canUserRolePublish(request.auth?.token.role)) {
-      return { status: 'Not Authorized' };
+      throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
     }
     if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-      return 'Email or Password are not set in .env file';
+      throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
     }
 
     const data = request.data;
+    if (!data || typeof data !== 'object') {
+      throw new HttpsError('invalid-argument', 'Request data is required.');
+    }
+    if (!data.operationKey || !data.operationKey.trim()) {
+      throw new HttpsError('invalid-argument', 'operationKey is required.');
+    }
+    if (!data.subsplashId || !data.subsplashId.trim()) {
+      throw new HttpsError('invalid-argument', 'subsplashId is required.');
+    }
     logger.log('data', data);
     try {
       const bearerToken = await authenticateSubsplash();
@@ -72,9 +83,7 @@ const editSubsplashSermon = onCall(
       return (await axios(config)).data;
     } catch (error) {
       logger.error(error);
-      let message = 'Unknown Error';
-      if (error instanceof Error) message = error.message;
-      return message;
+      throw handleError(error);
     }
   }
 );

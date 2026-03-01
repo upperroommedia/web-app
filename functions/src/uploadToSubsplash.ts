@@ -1,12 +1,15 @@
 import { logger } from 'firebase-functions/v2';
-import { onCall, CallableRequest } from 'firebase-functions/v2/https';
+import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
 import axios, { AxiosResponse } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '../../types/Speaker';
 import { ImageType } from '../../types/Image';
 import { canUserRolePublish } from '../../types/User';
+import handleError from './handleError';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
+  operationKey: string;
+  lockKey: string;
   title: string;
   subtitle: string;
   speakers: ISpeaker[];
@@ -45,13 +48,22 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
 const uploadToSubsplash = onCall(async (request: CallableRequest<UPLOAD_TO_SUBSPLASH_INCOMING_DATA>): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
   if (!canUserRolePublish(request.auth?.token.role)) {
-    return { status: 'Not Authorized' };
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
   }
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-    return 'Email or Password are not set in .env file';
+    throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
   }
 
   const data = request.data;
+  if (!data || typeof data !== 'object') {
+    throw new HttpsError('invalid-argument', 'Request data is required.');
+  }
+  if (!data.operationKey || !data.operationKey.trim()) {
+    throw new HttpsError('invalid-argument', 'operationKey is required.');
+  }
+  if (!data.lockKey || !data.lockKey.trim()) {
+    throw new HttpsError('invalid-argument', 'lockKey is required.');
+  }
   logger.log('data', data);
   try {
     const bearerToken = await authenticateSubsplash();
@@ -109,9 +121,7 @@ const uploadToSubsplash = onCall(async (request: CallableRequest<UPLOAD_TO_SUBSP
     return (await axios(config)).data;
   } catch (error) {
     logger.error(error);
-    let message = 'Unknown Error';
-    if (error instanceof Error) message = error.message;
-    return message;
+    throw handleError(error);
   }
 });
 
