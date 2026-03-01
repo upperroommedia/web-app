@@ -111,6 +111,7 @@ const Uploader = (props: UploaderProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
   const [uploadedSermon, setUploadedSermon] = useState<Sermon | null>(null);
+  const [isNavigatingToSermon, setIsNavigatingToSermon] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
   const [subtitlesLoading, setSubtitlesLoading] = useState(true);
   const [formErrors, setFormErrors] = useState<FormErrors>(getFormErrorInitialState());
@@ -495,30 +496,43 @@ const Uploader = (props: UploaderProps) => {
     (_sermonId: string) => {
       // Store the sermon data for the success modal
       setUploadedSermon({ ...sermon });
+      setIsNavigatingToSermon(false);
     },
     [sermon]
   );
 
-  // Navigate to sermon details when user clicks "View Sermon"
-  const navigateToSermon = useCallback(() => {
+  useEffect(() => {
     if (!uploadedSermon) return;
+    const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
+    void router.prefetch(targetUrl);
+  }, [uploadedSermon, router]);
+
+  // Navigate to sermon details when user clicks "View Sermon"
+  const navigateToSermon = useCallback(async () => {
+    if (!uploadedSermon || isNavigatingToSermon) return;
 
     const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
 
     // Mark navigation as intentional to skip unsaved changes warning
     isIntentionalNavigation.current = true;
+    setIsNavigatingToSermon(true);
 
-    // Navigate to sermon details
-    router.push(targetUrl);
-
-    // Clean up
-    setIsUploading(false);
-    setUploadedSermon(null);
-    clearForm();
-  }, [uploadedSermon, router, clearForm]);
+    try {
+      const didNavigate = await router.push(targetUrl);
+      if (!didNavigate) {
+        isIntentionalNavigation.current = false;
+        setIsNavigatingToSermon(false);
+      }
+    } catch (error) {
+      console.error('Failed to navigate to sermon details:', error);
+      isIntentionalNavigation.current = false;
+      setIsNavigatingToSermon(false);
+    }
+  }, [uploadedSermon, isNavigatingToSermon, router]);
 
   // Dismiss the upload modal and stay on page
   const dismissUploadModal = useCallback(() => {
+    setIsNavigatingToSermon(false);
     setIsUploading(false);
     setUploadedSermon(null);
     setUploadProgress({ error: false, percent: 0, message: '' });
@@ -886,6 +900,7 @@ const Uploader = (props: UploaderProps) => {
                   isUploading={isUploading}
                   uploadProgress={uploadProgress}
                   sermon={uploadedSermon || undefined}
+                  isNavigatingToSermon={isNavigatingToSermon}
                   onNavigateToSermon={navigateToSermon}
                   onDismiss={dismissUploadModal}
                 />

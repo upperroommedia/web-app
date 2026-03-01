@@ -48,6 +48,7 @@ interface UploadProgressComponentProps {
   isUploading: boolean;
   uploadProgress: UploadProgress;
   sermon?: Sermon;
+  isNavigatingToSermon?: boolean;
   onNavigateToSermon?: () => void;
   onDismiss?: () => void;
 }
@@ -67,6 +68,7 @@ export default function UploadProgressComponent({
   isUploading,
   uploadProgress,
   sermon,
+  isNavigatingToSermon = false,
   onNavigateToSermon,
   onDismiss,
 }: UploadProgressComponentProps) {
@@ -79,7 +81,7 @@ export default function UploadProgressComponent({
   const isOpen = isUploading || (uploadProgress.message !== '' && (isComplete || isError));
 
   // Can dismiss when complete or error (not while actively uploading)
-  const canDismiss = isComplete || isError;
+  const canDismiss = (isComplete || isError) && !isNavigatingToSermon;
 
   if (!isOpen) {
     return null;
@@ -388,6 +390,7 @@ export default function UploadProgressComponent({
                 size="large"
                 endIcon={<ArrowForwardIcon />}
                 onClick={onNavigateToSermon}
+                disabled={isNavigatingToSermon}
                 sx={{
                   mt: 3,
                   px: 4,
@@ -402,7 +405,7 @@ export default function UploadProgressComponent({
                   },
                 }}
               >
-                View Sermon
+                {isNavigatingToSermon ? 'Opening Sermon...' : 'View Sermon'}
               </Button>
             )}
 
