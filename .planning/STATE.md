@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 02-dev-external-api-mocking
 status: In Progress
-last_updated: "2026-03-01T06:56:35.000Z"
+last_updated: "2026-03-01T07:07:51.000Z"
 progress:
   total_phases: 2
   completed_phases: 1
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 02-dev-external-api-mocking
 **Status:** Ready for next execution plan
-**Last activity:** 2026-03-01 - Completed quick task 1: Prevent sermon counter overwrites in edit writes
+**Last activity:** 2026-03-01 - Completed quick task 2: Immediate redirect to admin sermons with destination delete execution + toasts
 
 ## Decisions
 
@@ -35,6 +35,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 01-series-subtitle-automation]: Series published counts remain strict and ignore inferred fallback state.
 - [Phase 01-series-subtitle-automation]: Backfill runs dry-run by default and requires explicit --apply for writes.
 - [Phase 01-series-subtitle-automation]: Series verification used direct emulator+jest commands because pnpm test argument forwarding remained unreliable.
+- [Quick 2 immediate redirect]: Delete confirm now redirects immediately and executes delete once in `/admin/sermons` via intent payload.
 
 ## Accumulated Context
 
@@ -51,6 +52,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 1 | Prevent sermon counter overwrites in edit writes | 2026-03-01 | 5b7b798 | [1-prevent-sermon-counter-overwrites-in-edi](./quick/1-prevent-sermon-counter-overwrites-in-edi/) |
+| 2 | Immediately redirect to admin sermons after delete confirm; execute delete in destination with toast lifecycle | 2026-03-01 | d58a190 | [2-immediately-redirect-to-admin-sermons-af](./quick/2-immediately-redirect-to-admin-sermons-af/) |
 
 ## Session Log
 
@@ -59,3 +61,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-02-28: Expanded PROJECT.md, REQUIREMENTS.md, and ROADMAP.md to represent full platform context.
 - 2026-02-28: Completed 01-series-subtitle-automation/01-02 with atomic task commits and summary.
 - 2026-03-01: Completed quick task 1 (sermon counter overwrite prevention + invariant auto-recalc guard).
+- 2026-03-01: Completed quick task 2 (immediate details-page redirect to `/admin/sermons`, one-shot delete execution, progress/success/error toasts).
