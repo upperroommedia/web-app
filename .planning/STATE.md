@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 03-subsplash-alpha-lock-concurrency-control
 status: In Progress
-last_updated: "2026-03-01T07:41:01.000Z"
-last_activity: "2026-03-01 - Completed phase 03 plan 01 lock/idempotency substrate"
+last_updated: "2026-03-01T08:00:35.000Z"
+last_activity: "2026-03-01 - Completed phase 03 plan 04 sermon/media mutation lock contract"
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 8
-  completed_plans: 4
+  total_plans: 12
+  completed_plans: 5
 ---
 
 # Session State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** In Progress (03-01 complete, ready for 03-02)
-**Last activity:** 2026-03-01 - Completed phase 03 plan 01 lock/idempotency substrate
+**Status:** In Progress (03-01 and 03-04 complete; remaining phase 03 plans still in flight)
+**Last activity:** 2026-03-01 - Completed phase 03 plan 04 sermon/media mutation lock contract
 
 ## Decisions
 
@@ -40,6 +40,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: Lock rows are stored in RTDB under subsplashLocks/{encodedLockKey} with lease-based ownership and stale takeover.
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: Release failures always log structured Cloud Logging events and persist fallback records in Firestore lockReleaseFailures.
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: Failed idempotency records are reclaimable for retries and explicitly clear stale success payloads before re-execution.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: Required operationKey on upload/edit/delete and lockKey on upload before remote mutations.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: Wrapped sermon media mutations with withIdempotency outside withSubsplashLocks to replay duplicate operations without rerunning side effects.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: Updated shared firebase https test mocks to support both onCall signatures and HttpsError.details for deterministic lock-suite assertions.
 
 ## Accumulated Context
 
@@ -68,3 +71,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed quick task 1 (sermon counter overwrite prevention + invariant auto-recalc guard).
 - 2026-03-01: Completed quick task 2 (immediate details-page redirect to `/admin/sermons`, one-shot delete execution, progress/success/error toasts).
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-01 with lock/idempotency primitives and emulator lock-layer tests.
+- 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-04 with sermon/media mutation lock wrappers and regression coverage.
