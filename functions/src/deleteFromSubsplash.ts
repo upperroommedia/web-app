@@ -4,6 +4,8 @@ import { CallableRequest, HttpsError, FunctionsErrorCode, onCall } from 'firebas
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
+import { withIdempotency } from './locks/withIdempotency';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
 
 export interface DeleteFromSubsplashInputType {
   operationKey: string;
@@ -34,18 +36,27 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSub
   }
 
   const mediaItemId = request.data.subsplashId.trim();
+  const operationKey = request.data.operationKey.trim();
   console.log('Attempting to delete mediaItemId', mediaItemId);
   const url = `https://core.subsplash.com/media/v1/media-items/${mediaItemId}`;
   logger.log(`Attempting to delete media item: ${mediaItemId} from "${url}"`);
 
   try {
-    const bearerToken = await authenticateSubsplash();
-    const config = createAxiosConfig(url, bearerToken, 'DELETE');
-    logger.debug('config', config);
+    return await withIdempotency(operationKey, async () =>
+      withSubsplashLocks(
+        [`media-item:${mediaItemId}`],
+        async () => {
+          const bearerToken = await authenticateSubsplash();
+          const config = createAxiosConfig(url, bearerToken, 'DELETE');
+          logger.debug('config', config);
 
-    const response = await axios(config);
-    logger.log('Successfully deleted media item', { mediaItemId, status: response.status });
-    return;
+          const response = await axios(config);
+          logger.log('Successfully deleted media item', { mediaItemId, status: response.status });
+          return;
+        },
+        { operationKey }
+      )
+    );
   } catch (error) {
     logger.error('Error deleting from Subsplash', { mediaItemId, error });
 
