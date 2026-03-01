@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 04-role-based-invite-onboarding-and-operational-notification-routing
 status: executing
-last_updated: "2026-03-01T09:10:27Z"
-last_activity: 2026-03-01 - Completed phase 04 plan 03 invite backend implementation
+last_updated: "2026-03-01T09:19:42.565Z"
+last_activity: 2026-03-01 - Completed phase 04 plan 04 UI wiring for invite and role-request flows
 progress:
-  total_phases: 4
-  completed_phases: 1
-  total_plans: 13
-  completed_plans: 10
+  total_phases: 3
+  completed_phases: 2
+  total_plans: 12
+  completed_plans: 11
 ---
 
 # Session State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 04-role-based-invite-onboarding-and-operational-notification-routing
-**Status:** In Progress (04-01, 04-02, 04-03, and 04-05 complete; 04-04 pending)
-**Last activity:** 2026-03-01 - Completed phase 04 plan 03 invite backend implementation
+**Status:** Complete (04-01, 04-02, 04-03, 04-04, and 04-05 complete)
+**Last activity:** 2026-03-01 - Completed phase 04 plan 04 UI wiring for invite and role-request flows
 
 ## Decisions
 
@@ -59,6 +59,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Invite artifacts persist sha256 token hashes only; raw invite tokens are never stored.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Invite claim retries are allowed only from ROLE_FAILED and only for the original claimant uid/email.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Final claimed role resolves via ROLE_PRECEDENCE and merges existing custom claims before refresh-token revocation.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Exported createrolerequest/createinvite/claiminvite with lower-case keys for v2 callable URL compatibility.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Implemented admin invite issuance in users toolbar dialog without altering user-table sorting/pagination behavior.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Login now honors callbackurl and callbackUrl aliases while only allowing local callback paths.
 
 ## Accumulated Context
 
@@ -94,3 +97,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-05 with publish/audio catch-path operational alert rollout and runtime regression coverage.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-02 with persistence-first role request callable, queue-failure fallback, and emulator regression coverage.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-03 with secure invite issue/claim callables and emulator lifecycle regression coverage.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-04 with callable export wiring, admin invite UX, and invite claim onboarding routes.
