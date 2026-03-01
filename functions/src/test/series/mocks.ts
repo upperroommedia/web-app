@@ -25,14 +25,20 @@ jest.mock('../../subsplashUtils', () => ({
 }));
 
 jest.mock('firebase-functions/v2/https', () => ({
-  onCall: jest.fn(<T,>(handler: (request: CallableRequest<T>) => Promise<unknown>) => {
+  onCall: jest.fn(<T,>(
+    optsOrHandler: ((request: CallableRequest<T>) => Promise<unknown>) | unknown,
+    maybeHandler?: (request: CallableRequest<T>) => Promise<unknown>
+  ) => {
+    const handler = typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler;
     return handler as unknown as (request: unknown) => Promise<unknown>;
   }),
   HttpsError: class extends Error {
     code: string;
-    constructor(code: string, message: string) {
+    details?: unknown;
+    constructor(code: string, message: string, details?: unknown) {
       super(message);
       this.code = code;
+      this.details = details;
     }
   },
   CallableRequest: {},

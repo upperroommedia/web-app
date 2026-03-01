@@ -29,12 +29,19 @@ jest.mock('../../../../firebase/firebaseAdmin', () => ({
 }));
 
 jest.mock('firebase-functions/v2/https', () => ({
-  onCall: jest.fn((_opts: unknown, handler: (req: unknown) => Promise<unknown>) => handler),
+  onCall: jest.fn(
+    (
+      optsOrHandler: unknown,
+      maybeHandler?: (req: unknown) => Promise<unknown>
+    ) => (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+  ),
   HttpsError: class HttpsError extends Error {
     readonly code: string;
-    constructor(code: string, message: string) {
+    readonly details?: unknown;
+    constructor(code: string, message: string, details?: unknown) {
       super(message);
       this.code = code;
+      this.details = details;
     }
   },
   CallableRequest: undefined,
