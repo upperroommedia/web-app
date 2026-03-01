@@ -15,7 +15,7 @@ const firestoreDB = firebaseAdmin.firestore();
 
 export interface ItemOrderEntry {
   mediaItemId: string;
-  position: number;
+  position: number | null;
 }
 
 export interface ReorderSeriesItemsInputType {

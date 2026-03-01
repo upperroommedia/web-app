@@ -426,19 +426,21 @@ const SeriesDetailsPage = () => {
         const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>(
           'reorderseriesitems'
         );
-        const publishedItems = items.filter((item) => item.publishedToSubsplash);
-        const publishedItemsMissingIds = publishedItems.filter(
-          (item) => !item.sermonSubsplashId && !item.sermon?.subsplashId
+        const itemsWithMediaIds = items.filter((item) => item.sermonSubsplashId || item.sermon?.subsplashId);
+        const publishedItemsMissingIds = items.filter(
+          (item) => item.publishedToSubsplash && !item.sermonSubsplashId && !item.sermon?.subsplashId
         );
         if (publishedItemsMissingIds.length > 0) {
           throw new Error('One or more published items are missing Subsplash IDs. Refresh and try again.');
         }
 
+        let publishedPosition = 1;
+
         const reorderResult = await reorderFunction({
           firestoreSeriesId: seriesId,
-          itemOrder: publishedItems.map((item, index) => ({
+          itemOrder: itemsWithMediaIds.map((item) => ({
             mediaItemId: item.sermonSubsplashId || item.sermon?.subsplashId || '',
-            position: index + 1,
+            position: item.publishedToSubsplash ? publishedPosition++ : null,
           })),
         });
         if (reorderResult.status !== 'success') {
