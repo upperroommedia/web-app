@@ -26,6 +26,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Stack from '@mui/material/Stack';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import SearchIcon from '@mui/icons-material/Search';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
@@ -38,6 +40,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import UndoIcon from '@mui/icons-material/Undo';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import CollectionsIcon from '@mui/icons-material/Collections';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
 import Link from 'next/link';
 import { alpha, useTheme } from '@mui/material/styles';
 import {
@@ -64,15 +68,22 @@ import AppLayout from '../../../layout/AppLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import NewSeriesPopup from '../../../components/NewSeriesPopup';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
-import firestore, { doc, getDoc, collection, getDocs, query, orderBy, where, limit, deleteDoc, setDoc, updateDoc } from '../../../firebase/firestore';
+import firestore, { doc, getDoc, collection, getDocs, query, orderBy, where, limit, deleteDoc, setDoc, updateDoc, writeBatch } from '../../../firebase/firestore';
+import storage, { getDownloadURL, ref } from '../../../firebase/storage';
+import { isDevelopment } from '../../../firebase/firebase';
 import { Series, seriesConverter } from '../../../types/Series';
 import { SeriesItem } from '../../../types/SeriesItem';
-import { Sermon } from '../../../types/SermonTypes';
+import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import useAuth from '../../../context/user/UserContext';
 import { createFunctionV2 } from '../../../utils/createFunction';
+import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
 import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../../../functions/src/removeFromSeries';
-import { serverTimestamp } from 'firebase/firestore';
+import { AddToSeriesInputType, AddToSeriesOutputType } from '../../../functions/src/addToSeries';
+import { CreateSeriesInputType, CreateSeriesOutputType } from '../../../functions/src/createSeries';
+import { DeleteSeriesInputType, DeleteSeriesOutputType } from '../../../functions/src/deleteSeries';
+import type { BulkAddToSeriesInputType, BulkAddToSeriesOutputType } from '../../../functions/src/bulkAddToSeries';
+import { serverTimestamp, deleteField } from 'firebase/firestore';
 
 interface SeriesItemWithSermon extends SeriesItem {
   sermon?: Sermon;
@@ -87,10 +98,26 @@ const cloneSeriesItems = (source: SeriesItemWithSermon[]): SeriesItemWithSermon[
 interface SortableItemProps {
   item: SeriesItemWithSermon;
   index: number;
-  onRemove: (id: string) => void;
+  onOpenSermon: (id: string) => void;
+  onRequestPublish: (item: SeriesItemWithSermon) => void;
+  onRequestUnpublish: (item: SeriesItemWithSermon) => void;
+  onRequestRemove: (item: SeriesItemWithSermon) => void;
+  isPublishing: boolean;
+  isUnpublishing: boolean;
+  actionsDisabled: boolean;
 }
 
-const SortableItem = ({ item, index, onRemove }: SortableItemProps) => {
+const SortableItem = ({
+  item,
+  index,
+  onOpenSermon,
+  onRequestPublish,
+  onRequestUnpublish,
+  onRequestRemove,
+  isPublishing,
+  isUnpublishing,
+  actionsDisabled,
+}: SortableItemProps) => {
   const theme = useTheme();
   const {
     attributes,
@@ -108,15 +135,25 @@ const SortableItem = ({ item, index, onRemove }: SortableItemProps) => {
     position: 'relative' as const,
   };
 
+  const handleRowClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('button,a,[role="button"],[data-no-row-nav="true"]')) {
+      return;
+    }
+    onOpenSermon(item.id);
+  };
+
   return (
     <Box
       ref={setNodeRef}
       style={style}
+      onClick={handleRowClick}
       sx={{
         display: 'flex',
         alignItems: 'center',
         gap: { xs: 1.5, sm: 2 },
         p: { xs: 2, sm: 2.5 },
+        cursor: 'pointer',
         bgcolor: isDragging ? 'action.selected' : 'background.paper',
         boxShadow: isDragging ? 4 : 0,
         transition: 'background-color 0.15s ease',
@@ -127,6 +164,7 @@ const SortableItem = ({ item, index, onRemove }: SortableItemProps) => {
       <Box
         {...attributes}
         {...listeners}
+        data-no-row-nav="true"
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -201,10 +239,44 @@ const SortableItem = ({ item, index, onRemove }: SortableItemProps) => {
         </Box>
       </Box>
 
+      {item.publishedToSubsplash ? (
+        <Button
+          size="small"
+          color="warning"
+          variant="outlined"
+          startIcon={isUnpublishing ? <CircularProgress size={14} /> : <CloudOffIcon fontSize="small" />}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRequestUnpublish(item);
+          }}
+          disabled={actionsDisabled || isUnpublishing}
+        >
+          Unpublish
+        </Button>
+      ) : (
+        <Button
+          size="small"
+          color="primary"
+          variant="contained"
+          startIcon={isPublishing ? <CircularProgress size={14} color="inherit" /> : <CloudUploadIcon fontSize="small" />}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRequestPublish(item);
+          }}
+          disabled={actionsDisabled || isPublishing}
+        >
+          Publish
+        </Button>
+      )}
+
       <Tooltip title="Remove from series">
         <IconButton
           size="small"
-          onClick={() => onRemove(item.id)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRequestRemove(item);
+          }}
+          disabled={actionsDisabled}
           sx={{
             color: 'error.main',
             flexShrink: 0,
@@ -245,6 +317,14 @@ const SeriesDetailsPage = () => {
   const [availableSermons, setAvailableSermons] = useState<Sermon[]>([]);
   const [loadingSermons, setLoadingSermons] = useState(false);
   const [sermonSearchQuery, setSermonSearchQuery] = useState('');
+  const [selectedSermonIds, setSelectedSermonIds] = useState<Set<string>>(new Set());
+  const [isAddingSelectedSermons, setIsAddingSelectedSermons] = useState(false);
+  const [activeAddingSermonId, setActiveAddingSermonId] = useState<string | null>(null);
+  const [publishingItemId, setPublishingItemId] = useState<string | null>(null);
+  const [unpublishingItemId, setUnpublishingItemId] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<SeriesItemWithSermon | null>(null);
+  const [unpublishTarget, setUnpublishTarget] = useState<SeriesItemWithSermon | null>(null);
+  const [isRemovingItem, setIsRemovingItem] = useState(false);
 
   const isAdmin = user?.isAdmin() ?? false;
 
@@ -278,7 +358,8 @@ const SeriesDetailsPage = () => {
       // Fetch series items
       const itemsQuery = query(
         collection(firestore, `series/${seriesId}/seriesItems`),
-        orderBy('position', 'asc')
+        // Subsplash semantics: position 1 is the bottom item, so show highest position first.
+        orderBy('position', 'desc')
       );
 
       const itemsSnapshot = await getDocs(itemsQuery);
@@ -356,6 +437,270 @@ const SeriesDetailsPage = () => {
     setLoadingSermons(false);
   }, [user, seriesId, isAdmin]);
 
+  const closeAddItemDialog = useCallback(() => {
+    if (isAddingSelectedSermons) {
+      return;
+    }
+    setSermonSearchQuery('');
+    setSelectedSermonIds(new Set());
+    setAddItemPopup(false);
+  }, [isAddingSelectedSermons]);
+
+  const isSermonPublishedToSubsplash = useCallback((sermon: Sermon | undefined): boolean => {
+    if (!sermon) {
+      return false;
+    }
+
+    return Boolean(
+      sermon.subsplashId ||
+      sermon.status?.subsplash === uploadStatus.UPLOADED
+    );
+  }, []);
+
+  const ensureSeriesSubsplashId = useCallback(async (): Promise<string> => {
+    if (!series) {
+      throw new Error('Series not found.');
+    }
+
+    if (series.subsplashId) {
+      return series.subsplashId;
+    }
+
+    const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
+    const createResult = await createSeriesFunction({
+      title: series.name,
+      summary: series.summary,
+      ownerId: series.ownerId,
+      skipSubsplash: false,
+    });
+
+    if (createResult.status !== 'success' || !createResult.subsplashId) {
+      throw new Error(createResult.error || 'Failed to create series in Subsplash.');
+    }
+    const createdSubsplashId = createResult.subsplashId;
+
+    await updateDoc(doc(firestore, 'series', series.id), {
+      subsplashId: createdSubsplashId,
+      status: 'published',
+    });
+
+    setSeries((previousSeries) => (
+      previousSeries
+        ? { ...previousSeries, subsplashId: createdSubsplashId, status: 'published' }
+        : previousSeries
+    ));
+
+    return createdSubsplashId;
+  }, [series]);
+
+  const uploadSermonToSubsplash = useCallback(async (sermon: Sermon): Promise<string> => {
+    if (sermon.subsplashId) {
+      return sermon.subsplashId;
+    }
+
+    const uploadToSubsplashFunction = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, unknown>('uploadToSubsplash');
+    const audioUrl = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
+    const uploadPayload: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
+      title: sermon.title,
+      subtitle: sermon.subtitle,
+      speakers: sermon.speakers,
+      autoPublish: !isDevelopment,
+      audioTitle: sermon.title,
+      audioUrl,
+      topics: sermon.topics,
+      description: sermon.description,
+      images: sermon.images,
+      date: new Date(sermon.dateMillis),
+    };
+
+    const uploadResult = await uploadToSubsplashFunction(uploadPayload);
+    if (!uploadResult || typeof uploadResult === 'string' || typeof uploadResult !== 'object') {
+      throw new Error(typeof uploadResult === 'string' ? uploadResult : 'Failed to upload sermon to Subsplash.');
+    }
+
+    const uploadResultData = uploadResult as { id?: string };
+    if (!uploadResultData.id) {
+      throw new Error('Subsplash upload did not return a media item ID.');
+    }
+
+    const mediaItemId = uploadResultData.id;
+    await updateDoc(doc(firestore, 'sermons', sermon.id), {
+      subsplashId: mediaItemId,
+      status: { ...sermon.status, subsplash: uploadStatus.UPLOADED },
+      approverId: user?.uid ?? null,
+    });
+
+    setItems((previousItems) => previousItems.map((item) => (
+      item.id === sermon.id && item.sermon
+        ? {
+          ...item,
+          sermonSubsplashId: mediaItemId,
+          sermon: {
+            ...item.sermon,
+            subsplashId: mediaItemId,
+            status: { ...item.sermon.status, subsplash: uploadStatus.UPLOADED },
+          },
+        }
+        : item
+    )));
+
+    return mediaItemId;
+  }, [user?.uid]);
+
+  const reorderPublishedItemsInSubsplash = useCallback(async (
+    targetSermonId: string,
+    targetMediaItemId: string
+  ) => {
+    const orderedItemsSnapshot = await getDocs(
+      query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'desc'))
+    );
+    const orderedItems = orderedItemsSnapshot.docs.map((seriesItemDoc) => {
+      const data = seriesItemDoc.data() as {
+        publishedToSubsplash?: boolean;
+        sermonSubsplashId?: string;
+      };
+
+      return {
+        sermonId: seriesItemDoc.id,
+        published: seriesItemDoc.id === targetSermonId ? true : data.publishedToSubsplash === true,
+        mediaItemId: seriesItemDoc.id === targetSermonId
+          ? targetMediaItemId
+          : data.sermonSubsplashId,
+      };
+    });
+
+    const targetExists = orderedItems.some((item) => item.sermonId === targetSermonId);
+    if (!targetExists) {
+      throw new Error('Published item is missing from series order.');
+    }
+
+    const publishedItems = orderedItems.filter((item) => item.published);
+
+    const missingMediaIdItem = publishedItems.find((item) => !item.mediaItemId);
+    if (missingMediaIdItem) {
+      throw new Error(`Missing Subsplash media ID for sermon ${missingMediaIdItem.sermonId}.`);
+    }
+
+    const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
+    const reorderResult = await reorderFunction({
+      firestoreSeriesId: seriesId,
+      itemOrder: publishedItems.map((item, index) => ({
+        mediaItemId: item.mediaItemId as string,
+        // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
+        position: publishedItems.length - index,
+      })),
+    });
+
+    if (reorderResult.status !== 'success') {
+      throw new Error(reorderResult.message || 'Subsplash reorder failed.');
+    }
+  }, [seriesId]);
+
+  const publishItemToSeries = useCallback(async (
+    seriesItem: SeriesItemWithSermon,
+    options?: { suppressAlert?: boolean }
+  ): Promise<boolean> => {
+    if (!seriesItem.sermon) {
+      if (!options?.suppressAlert) {
+        alert('Sermon details are missing for this item. Refresh and retry.');
+      }
+      return false;
+    }
+
+    setPublishingItemId(seriesItem.id);
+    try {
+      const seriesSubsplashId = await ensureSeriesSubsplashId();
+      const mediaItemId = await uploadSermonToSubsplash(seriesItem.sermon);
+      const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
+      const addResult = await addToSeriesFunction({
+        seriesSubsplashId,
+        mediaItemId,
+      });
+
+      if (!addResult || addResult.status !== 'success') {
+        throw new Error(addResult?.error || 'Failed to add sermon to series in Subsplash.');
+      }
+
+      const confirmedMediaItemId = addResult.mediaItemId || mediaItemId;
+
+      try {
+        await reorderPublishedItemsInSubsplash(seriesItem.id, confirmedMediaItemId);
+      } catch (reorderError: any) {
+        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+        try {
+          await removeFromSeriesFunction({ mediaItemId: confirmedMediaItemId });
+        } catch (rollbackError: any) {
+          throw new Error(
+            `Series reorder failed and rollback failed. Reorder error: ${reorderError?.message || 'Unknown'}; rollback error: ${rollbackError?.message || 'Unknown'}.`
+          );
+        }
+        throw new Error(reorderError?.message || 'Series reorder failed after publish.');
+      }
+
+      await setDoc(
+        doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.id),
+        {
+          publishedToSubsplash: true,
+          sermonSubsplashId: confirmedMediaItemId,
+        },
+        { merge: true }
+      );
+
+      setItems((previousItems) => previousItems.map((item) => (
+        item.id === seriesItem.id
+          ? { ...item, publishedToSubsplash: true, sermonSubsplashId: confirmedMediaItemId }
+          : item
+      )));
+      originalItemsRef.current = originalItemsRef.current.map((item) => (
+        item.id === seriesItem.id
+          ? { ...item, publishedToSubsplash: true, sermonSubsplashId: confirmedMediaItemId }
+          : item
+      ));
+      return true;
+    } catch (err: any) {
+      console.error('Error publishing series item:', err);
+      if (!options?.suppressAlert) {
+        alert(`Error publishing item to series: ${err?.message || 'Unknown error'}`);
+      }
+      return false;
+    } finally {
+      setPublishingItemId(null);
+    }
+  }, [ensureSeriesSubsplashId, reorderPublishedItemsInSubsplash, seriesId, uploadSermonToSubsplash]);
+
+  const unpublishItemFromSeries = useCallback(async (seriesItem: SeriesItemWithSermon) => {
+    setUnpublishingItemId(seriesItem.id);
+    try {
+      const mediaItemId = seriesItem.sermonSubsplashId || seriesItem.sermon?.subsplashId;
+      if (mediaItemId) {
+        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+        await removeFromSeriesFunction({ mediaItemId });
+      }
+
+      await updateDoc(doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.id), {
+        publishedToSubsplash: false,
+        sermonSubsplashId: deleteField(),
+      });
+
+      setItems((previousItems) => previousItems.map((item) => (
+        item.id === seriesItem.id
+          ? { ...item, publishedToSubsplash: false, sermonSubsplashId: undefined }
+          : item
+      )));
+      originalItemsRef.current = originalItemsRef.current.map((item) => (
+        item.id === seriesItem.id
+          ? { ...item, publishedToSubsplash: false, sermonSubsplashId: undefined }
+          : item
+      ));
+    } catch (err: any) {
+      console.error('Error unpublishing series item:', err);
+      alert(`Error unpublishing item from series: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setUnpublishingItemId(null);
+      setUnpublishTarget(null);
+    }
+  }, [seriesId]);
+
   // Custom modifier to restrict drag to container bounds
   const restrictToContainer: Modifier = ({ transform, draggingNodeRect, containerNodeRect: _containerNodeRect }) => {
     if (!containerRef.current || !draggingNodeRect) {
@@ -402,7 +747,7 @@ const SeriesDetailsPage = () => {
         const newItems = arrayMove(prevItems, oldIndex, newIndex);
         // Update positions
         newItems.forEach((item, i) => {
-          item.position = i + 1;
+          item.position = newItems.length - i;
         });
         return newItems;
       });
@@ -452,7 +797,7 @@ const SeriesDetailsPage = () => {
         items.map(async (item, index) => {
           const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.id);
           try {
-            await updateDoc(itemRef, { position: index + 1 });
+            await updateDoc(itemRef, { position: items.length - index });
           } catch (err: any) {
             // Item might have been deleted by another user - skip it
             if (err?.code === 'not-found' || err?.message?.includes('NOT_FOUND')) {
@@ -475,68 +820,172 @@ const SeriesDetailsPage = () => {
     }
   };
 
-  // Remove item from series
-  const removeItem = async (itemId: string) => {
-    if (!confirm('Are you sure you want to remove this item from the series?')) return;
+  const executeRemoveItem = async () => {
+    if (!removeTarget || isRemovingItem) {
+      return;
+    }
 
+    setIsRemovingItem(true);
     try {
-      const itemToRemove = items.find((item) => item.id === itemId);
-      const mediaItemId = itemToRemove?.sermonSubsplashId || itemToRemove?.sermon?.subsplashId;
-
-      if (series?.subsplashId && mediaItemId) {
+      const mediaItemId = removeTarget.sermonSubsplashId || removeTarget.sermon?.subsplashId;
+      if (series?.subsplashId && removeTarget.publishedToSubsplash === true && mediaItemId) {
         const removeFromSeriesCallable = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         try {
           await removeFromSeriesCallable({ mediaItemId });
         } catch (removeErr: any) {
-          // If media item is already missing from Subsplash, continue local cleanup.
           if (removeErr?.code !== 'functions/not-found') {
             throw removeErr;
           }
         }
       }
 
-      // Delete from Firestore seriesItems subcollection
-      await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, itemId));
+      await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, removeTarget.id));
 
-      // Update sermon to remove seriesId (gracefully handle if sermon was already deleted)
       try {
-        await updateDoc(doc(firestore, 'sermons', itemId), {
+        await updateDoc(doc(firestore, 'sermons', removeTarget.id), {
           seriesId: null,
         });
       } catch (sermonErr: any) {
-        // Sermon might have been deleted - that's okay, just log and continue
         if (sermonErr?.code === 'not-found' || sermonErr?.message?.includes('NOT_FOUND')) {
-          console.warn(`Sermon ${itemId} not found - may have been deleted`);
+          console.warn(`Sermon ${removeTarget.id} not found - may have been deleted`);
         } else {
-          // Re-throw unexpected errors
           throw sermonErr;
         }
       }
 
-      // Update local state and original reference
-      setItems((prev) => prev.filter((item) => item.id !== itemId));
-      originalItemsRef.current = originalItemsRef.current.filter((item) => item.id !== itemId);
+      const updatedItems = items
+        .filter((item) => item.id !== removeTarget.id)
+        .map((item, index, source) => ({ ...item, position: source.length - index }));
+
+      await Promise.all(
+        updatedItems.map((item) => updateDoc(doc(firestore, `series/${seriesId}/seriesItems`, item.id), {
+          position: item.position,
+        }))
+      );
+
+      setItems(updatedItems);
+      originalItemsRef.current = cloneSeriesItems(updatedItems);
+      setRemoveTarget(null);
     } catch (err: any) {
       console.error('Error removing item:', err);
       alert(`Error removing item: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsRemovingItem(false);
     }
   };
 
   // Add item to series
-  const addItemToSeries = async (sermon: Sermon) => {
+  const addItemToSeries = useCallback(async (sermon: Sermon): Promise<boolean> => {
     try {
-      const newPosition = items.length + 1;
+      if (items.some((item) => item.id === sermon.id)) {
+        return false;
+      }
+      const latestPositionSnapshot = await getDocs(
+        query(
+          collection(firestore, `series/${seriesId}/seriesItems`),
+          orderBy('position', 'desc'),
+          limit(1)
+        )
+      );
+      const latestPosition = latestPositionSnapshot.docs[0]?.data()?.position;
+      const newPosition = typeof latestPosition === 'number' ? latestPosition + 1 : 1;
 
-      // Verify sermon still exists before adding
       const sermonDoc = await getDoc(doc(firestore, 'sermons', sermon.id));
       if (!sermonDoc.exists()) {
         alert('This sermon no longer exists. It may have been deleted.');
-        // Remove from available sermons list
-        setAvailableSermons((prev) => prev.filter((s) => s.id !== sermon.id));
+        setAvailableSermons((previousSermons) => previousSermons.filter((candidate) => candidate.id !== sermon.id));
+        return false;
+      }
+
+      const latestSermon = { ...sermonDoc.data(), id: sermon.id } as Sermon;
+      const previousSeriesId = latestSermon.seriesId ?? null;
+
+      const seriesDoc = await getDoc(doc(firestore, 'series', seriesId));
+      if (!seriesDoc.exists()) {
+        alert('This series no longer exists. Redirecting to series list.');
+        router.push('/admin/series');
+        return false;
+      }
+
+      const seriesItemData: Partial<SeriesItem> = {
+        id: latestSermon.id,
+        position: newPosition,
+        publishedToSubsplash: false,
+        ...(latestSermon.subsplashId !== undefined && { sermonSubsplashId: latestSermon.subsplashId }),
+      };
+
+      await setDoc(
+        doc(firestore, `series/${seriesId}/seriesItems`, latestSermon.id),
+        {
+          ...seriesItemData,
+          addedAt: serverTimestamp(),
+        }
+      );
+
+      await updateDoc(doc(firestore, 'sermons', latestSermon.id), {
+        seriesId,
+      });
+
+      const newItem: SeriesItemWithSermon = {
+        id: latestSermon.id,
+        position: newPosition,
+        publishedToSubsplash: false,
+        sermonSubsplashId: latestSermon.subsplashId,
+        addedAt: null,
+        sermon: { ...latestSermon, seriesId },
+      };
+
+      setItems((previousItems) => [newItem, ...previousItems]);
+      originalItemsRef.current = [newItem, ...originalItemsRef.current];
+
+      // Keep state fully consistent: if sermon is already in Subsplash, immediately publish it to series too.
+      if (isSermonPublishedToSubsplash(latestSermon)) {
+        const publishSucceeded = await publishItemToSeries(newItem, { suppressAlert: true });
+        if (!publishSucceeded) {
+          await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, latestSermon.id));
+          await updateDoc(doc(firestore, 'sermons', latestSermon.id), { seriesId: previousSeriesId });
+          setItems((previousItems) => previousItems.filter((item) => item.id !== latestSermon.id));
+          originalItemsRef.current = originalItemsRef.current.filter((item) => item.id !== latestSermon.id);
+          throw new Error(
+            `${latestSermon.title} is already published to Subsplash, but automatic series publish failed. The sermon was not added to this series.`
+          );
+        }
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error('Error adding item:', err);
+      alert(`Error adding item: ${err.message || 'Unknown error'}`);
+      return false;
+    }
+  }, [isSermonPublishedToSubsplash, items, publishItemToSeries, router, seriesId]);
+
+  const addSelectedSermons = useCallback(async () => {
+    if (isAddingSelectedSermons) {
+      return;
+    }
+
+    const sermonsToAdd = availableSermons
+      .filter((sermon) => selectedSermonIds.has(sermon.id))
+      .filter((sermon) => !items.some((item) => item.id === sermon.id));
+
+    if (sermonsToAdd.length === 0) {
+      return;
+    }
+
+    setIsAddingSelectedSermons(true);
+    try {
+      if (sermonsToAdd.length === 1) {
+        setActiveAddingSermonId(sermonsToAdd[0].id);
+        const added = await addItemToSeries(sermonsToAdd[0]);
+        if (added) {
+          setSermonSearchQuery('');
+          setSelectedSermonIds(new Set());
+          setAddItemPopup(false);
+        }
         return;
       }
 
-      // Verify series still exists
       const seriesDoc = await getDoc(doc(firestore, 'series', seriesId));
       if (!seriesDoc.exists()) {
         alert('This series no longer exists. Redirecting to series list.');
@@ -544,45 +993,188 @@ const SeriesDetailsPage = () => {
         return;
       }
 
-      // Add to series items collection
-      // Only include sermonSubsplashId if it exists (Firestore doesn't accept undefined values)
-      const seriesItemData: Partial<SeriesItem> = {
+      const currentMaxPosition = items.length > 0
+        ? Math.max(...items.map((item) => item.position))
+        : 0;
+
+      const additions = sermonsToAdd.map((sermon, index, source) => ({
+        sermon,
+        previousSeriesId: sermon.seriesId ?? null,
+        position: currentMaxPosition + (source.length - index),
+      }));
+
+      const MAX_SERMONS_PER_BATCH = 200;
+      for (let index = 0; index < additions.length; index += MAX_SERMONS_PER_BATCH) {
+        const chunk = additions.slice(index, index + MAX_SERMONS_PER_BATCH);
+        const batch = writeBatch(firestore);
+
+        chunk.forEach(({ sermon, position }) => {
+          batch.set(
+            doc(firestore, `series/${seriesId}/seriesItems`, sermon.id),
+            {
+              id: sermon.id,
+              position,
+              publishedToSubsplash: false,
+              ...(sermon.subsplashId !== undefined && { sermonSubsplashId: sermon.subsplashId }),
+              addedAt: serverTimestamp(),
+            }
+          );
+          batch.update(doc(firestore, 'sermons', sermon.id), {
+            seriesId,
+          });
+        });
+
+        await batch.commit();
+      }
+
+      const newItems = additions.map(({ sermon, position }) => ({
         id: sermon.id,
-        position: newPosition,
-        publishedToSubsplash: false,
-        ...(sermon.subsplashId !== undefined && { sermonSubsplashId: sermon.subsplashId }),
-      };
-
-      await setDoc(
-        doc(firestore, `series/${seriesId}/seriesItems`, sermon.id),
-        {
-          ...seriesItemData,
-          addedAt: serverTimestamp(),
-        }
-      );
-
-      // Update sermon with seriesId
-      await updateDoc(doc(firestore, 'sermons', sermon.id), {
-        seriesId,
-      });
-
-      // Update local state and original reference
-      const newItem: SeriesItemWithSermon = {
-        id: sermon.id,
-        position: newPosition,
+        position,
         publishedToSubsplash: false,
         sermonSubsplashId: sermon.subsplashId,
         addedAt: null,
-        sermon,
-      };
-      setItems((prev) => [...prev, newItem]);
-      originalItemsRef.current = [...originalItemsRef.current, newItem];
-      setAddItemPopup(false);
+        sermon: { ...sermon, seriesId },
+      } as SeriesItemWithSermon));
+      const orderedNewItems = [...newItems].sort((a, b) => b.position - a.position);
+
+      setItems((previousItems) => [...orderedNewItems, ...previousItems]);
+      originalItemsRef.current = [...orderedNewItems, ...originalItemsRef.current];
+
+      const publishedCandidates = orderedNewItems.filter((seriesItem) => isSermonPublishedToSubsplash(seriesItem.sermon));
+      if (publishedCandidates.length > 0) {
+        const priorSeriesIdsBySermonId = new Map(additions.map((entry) => [entry.sermon.id, entry.previousSeriesId]));
+        const mediaItemIdBySermonId = new Map<string, string>();
+        for (const seriesItem of publishedCandidates) {
+          if (!seriesItem.sermon) {
+            throw new Error(`Sermon details missing for ${seriesItem.id}.`);
+          }
+
+          setActiveAddingSermonId(seriesItem.id);
+          const mediaItemId = seriesItem.sermon.subsplashId
+            ? seriesItem.sermon.subsplashId
+            : await uploadSermonToSubsplash(seriesItem.sermon);
+          mediaItemIdBySermonId.set(seriesItem.id, mediaItemId);
+        }
+
+        const seriesSubsplashId = await ensureSeriesSubsplashId();
+        const publishedCandidateIds = new Set(publishedCandidates.map((item) => item.id));
+        const reorderedItems = [...orderedNewItems, ...items];
+        const publishedItemOrderWithGaps = reorderedItems
+          .filter((item) => item.publishedToSubsplash === true || publishedCandidateIds.has(item.id))
+          .map((item) => mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId || item.sermon?.subsplashId);
+        const publishedItemOrder = publishedItemOrderWithGaps.filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId));
+
+        if (publishedItemOrder.length === 0 || publishedItemOrder.length !== publishedItemOrderWithGaps.length) {
+          throw new Error('Cannot publish to series because one or more published sermons are missing Subsplash media IDs.');
+        }
+
+        const bulkAdds = publishedCandidates.map((item) => {
+          const mediaItemId = mediaItemIdBySermonId.get(item.id);
+          if (!mediaItemId) {
+            throw new Error(`Cannot publish sermon ${item.id} because it is missing a Subsplash media ID.`);
+          }
+
+          return {
+            sermonId: item.id,
+            mediaItemId,
+          };
+        });
+
+        const bulkAddToSeriesFunction = createFunctionV2<BulkAddToSeriesInputType, BulkAddToSeriesOutputType>('bulkaddtoseries');
+        const bulkResult = await bulkAddToSeriesFunction({
+          firestoreSeriesId: seriesId,
+          seriesSubsplashId,
+          adds: bulkAdds,
+          publishedItemOrder,
+          maxConcurrency: 4,
+          rollbackOnFailure: true,
+        });
+
+        if (bulkResult.status !== 'success' || bulkResult.failed > 0 || !bulkResult.reorderApplied) {
+          const rollbackBatch = writeBatch(firestore);
+          publishedCandidates.forEach((seriesItem) => {
+            rollbackBatch.delete(doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.id));
+            rollbackBatch.update(doc(firestore, 'sermons', seriesItem.id), {
+              seriesId: priorSeriesIdsBySermonId.get(seriesItem.id) ?? null,
+            });
+          });
+          await rollbackBatch.commit();
+
+          const rollbackIds = new Set(publishedCandidates.map((seriesItem) => seriesItem.id));
+          const rollbackTitles = publishedCandidates.map((item) => item.sermon?.title || item.id);
+          setItems((previousItems) => previousItems.filter((item) => !rollbackIds.has(item.id)));
+          originalItemsRef.current = originalItemsRef.current.filter((item) => !rollbackIds.has(item.id));
+          setSelectedSermonIds(new Set(rollbackIds));
+          alert(
+            `Some sermons were not added because automatic Subsplash series publish failed:\n${rollbackTitles.join('\n')}\n\n${bulkResult.message}`
+          );
+          return;
+        }
+
+        const publishBatch = writeBatch(firestore);
+        const publishedSermonIds = new Set<string>();
+        bulkResult.results.forEach((result) => {
+          if (result.status !== 'success' || !result.sermonId) {
+            return;
+          }
+          publishedSermonIds.add(result.sermonId);
+          publishBatch.set(
+            doc(firestore, `series/${seriesId}/seriesItems`, result.sermonId),
+            {
+              publishedToSubsplash: true,
+              sermonSubsplashId: result.mediaItemId,
+            },
+            { merge: true }
+          );
+        });
+        await publishBatch.commit();
+
+        setItems((previousItems) => previousItems.map((item) => {
+          if (!publishedSermonIds.has(item.id)) {
+            return item;
+          }
+          return {
+            ...item,
+            publishedToSubsplash: true,
+            sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
+          };
+        }));
+        originalItemsRef.current = originalItemsRef.current.map((item) => {
+          if (!publishedSermonIds.has(item.id)) {
+            return item;
+          }
+          return {
+            ...item,
+            publishedToSubsplash: true,
+            sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
+          };
+        });
+      }
+
+      if (orderedNewItems.length > 0) {
+        setSermonSearchQuery('');
+        setSelectedSermonIds(new Set());
+        setAddItemPopup(false);
+      }
     } catch (err: any) {
-      console.error('Error adding item:', err);
-      alert(`Error adding item: ${err.message || 'Unknown error'}`);
+      console.error('Error adding selected sermons:', err);
+      alert(`Error adding selected sermons: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setActiveAddingSermonId(null);
+      setIsAddingSelectedSermons(false);
     }
-  };
+  }, [
+    addItemToSeries,
+    availableSermons,
+    ensureSeriesSubsplashId,
+    isAddingSelectedSermons,
+    isSermonPublishedToSubsplash,
+    items,
+    router,
+    selectedSermonIds,
+    seriesId,
+    uploadSermonToSubsplash,
+  ]);
 
   // Delete series
   const handleDeleteSeries = async () => {
@@ -590,8 +1182,9 @@ const SeriesDetailsPage = () => {
 
     setIsDeleting(true);
     try {
-      // Delete series from Firestore
-      await deleteDoc(doc(firestore, 'series', seriesId));
+      // Always use callable so remote unlink/verify/delete semantics are enforced.
+      const deleteSeriesCallable = createFunctionV2<DeleteSeriesInputType, DeleteSeriesOutputType>('deleteseries');
+      await deleteSeriesCallable({ firestoreId: seriesId });
       router.push('/admin/series');
     } catch (err: any) {
       console.error('Error deleting series:', err);
@@ -639,6 +1232,27 @@ const SeriesDetailsPage = () => {
   const title = series.name || 'Series Details';
   const publishedItemsCount = items.filter((item) => item.publishedToSubsplash).length;
   const derivedSeriesSubtitle = `${publishedItemsCount} part series`;
+  const filteredAddableSermons = availableSermons
+    .filter((sermon) => !items.some((item) => item.id === sermon.id))
+    .filter((sermon) => (
+      !sermonSearchQuery ||
+      sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase())
+    ));
+  const displayedAddableSermons = sermonSearchQuery.trim().length === 0
+    ? [...filteredAddableSermons].sort((first, second) => {
+      const firstSelected = selectedSermonIds.has(first.id);
+      const secondSelected = selectedSermonIds.has(second.id);
+      if (firstSelected === secondSelected) {
+        return 0;
+      }
+      return firstSelected ? -1 : 1;
+    })
+    : filteredAddableSermons;
+  const selectedSermonCount = selectedSermonIds.size;
+  const allVisibleSermonsSelected = filteredAddableSermons.length > 0 &&
+    filteredAddableSermons.every((sermon) => selectedSermonIds.has(sermon.id));
+  const someVisibleSermonsSelected = filteredAddableSermons.some((sermon) => selectedSermonIds.has(sermon.id));
+  const listActionsDisabled = isSaving || isAddingSelectedSermons || isRemovingItem;
 
   return (
     <>
@@ -765,23 +1379,6 @@ const SeriesDetailsPage = () => {
                 }}
               />
               <Box sx={{ flex: 1 }}>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                  {series.subsplashId ? (
-                    <Chip
-                      icon={<CheckCircleIcon />}
-                      label="Published to Subsplash"
-                      color="success"
-                      size="small"
-                    />
-                  ) : (
-                    <Chip
-                      icon={<PendingIcon />}
-                      label="Not Published"
-                      color="warning"
-                      size="small"
-                    />
-                  )}
-                </Box>
                 <Typography variant="h6" color="text.secondary" sx={{ mb: 1, fontWeight: 400 }}>
                   {derivedSeriesSubtitle}
                 </Typography>
@@ -799,21 +1396,54 @@ const SeriesDetailsPage = () => {
                     borderColor: 'divider',
                   }}
                 >
-                  <Box>
-                    <Typography variant="h5" fontWeight={700} color="primary.main">
-                      {items.length}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Total Items
-                    </Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="h5" fontWeight={700} color="success.main">
-                      {publishedItemsCount}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Published
-                    </Typography>
+                  <Box
+                    sx={{
+                      width: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        gap: 4,
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="h5" fontWeight={700} color="primary.main">
+                          {items.length}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Total Items
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="h5" fontWeight={700} color="success.main">
+                          {publishedItemsCount}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Published
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                      {series.subsplashId ? (
+                        <Chip
+                          icon={<CheckCircleIcon />}
+                          label="Published to Subsplash"
+                          color="success"
+                          size="small"
+                        />
+                      ) : (
+                        <Chip
+                          icon={<PendingIcon />}
+                          label="Not Published"
+                          color="warning"
+                          size="small"
+                        />
+                      )}
+                    </Box>
                   </Box>
                 </Box>
               </Box>
@@ -863,6 +1493,8 @@ const SeriesDetailsPage = () => {
               startIcon={<AddIcon />}
               onClick={() => {
                 fetchAvailableSermons();
+                setSermonSearchQuery('');
+                setSelectedSermonIds(new Set());
                 setAddItemPopup(true);
               }}
             >
@@ -895,6 +1527,8 @@ const SeriesDetailsPage = () => {
               startIcon={<AddIcon />}
               onClick={() => {
                 fetchAvailableSermons();
+                setSermonSearchQuery('');
+                setSelectedSermonIds(new Set());
                 setAddItemPopup(true);
               }}
             >
@@ -918,7 +1552,13 @@ const SeriesDetailsPage = () => {
                     <SortableItem
                       item={item}
                       index={index}
-                      onRemove={removeItem}
+                      onOpenSermon={(id) => router.push(`/admin/sermons/${id}`)}
+                      onRequestPublish={publishItemToSeries}
+                      onRequestUnpublish={setUnpublishTarget}
+                      onRequestRemove={setRemoveTarget}
+                      isPublishing={publishingItemId === item.id}
+                      isUnpublishing={unpublishingItemId === item.id}
+                      actionsDisabled={listActionsDisabled}
                     />
                     {index < items.length - 1 && <Divider />}
                   </Box>
@@ -948,13 +1588,72 @@ const SeriesDetailsPage = () => {
         isDeleting={isDeleting}
       />
 
+      <Dialog
+        open={Boolean(removeTarget)}
+        onClose={() => !isRemovingItem && setRemoveTarget(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Remove Sermon From Series?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {removeTarget?.sermon?.title || 'This sermon'} will be removed from this series.
+            This also removes it from the Subsplash series when applicable.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRemoveTarget(null)} disabled={isRemovingItem}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={executeRemoveItem}
+            startIcon={isRemovingItem ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon fontSize="small" />}
+            disabled={isRemovingItem}
+          >
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(unpublishTarget)}
+        onClose={() => !unpublishingItemId && setUnpublishTarget(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Unpublish From Series?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {unpublishTarget?.sermon?.title || 'This sermon'} will be removed from the Subsplash series,
+            but will stay in this app series.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUnpublishTarget(null)} disabled={Boolean(unpublishingItemId)}>
+            Cancel
+          </Button>
+          <Button
+            color="warning"
+            variant="contained"
+            onClick={() => {
+              if (unpublishTarget) {
+                unpublishItemFromSeries(unpublishTarget);
+              }
+            }}
+            startIcon={Boolean(unpublishingItemId) ? <CircularProgress size={16} color="inherit" /> : <CloudOffIcon fontSize="small" />}
+            disabled={Boolean(unpublishingItemId)}
+          >
+            Unpublish
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Add Item Dialog */}
       <Dialog
         open={addItemPopup}
-        onClose={() => {
-          setSermonSearchQuery('');
-          setAddItemPopup(false);
-        }}
+        onClose={closeAddItemDialog}
         maxWidth="sm"
         fullWidth
         PaperProps={{
@@ -967,6 +1666,38 @@ const SeriesDetailsPage = () => {
           Add Item to Series
         </DialogTitle>
         <DialogContent>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1, mb: 1 }}>
+            <FormControlLabel
+              label="Select all visible"
+              control={(
+                <Checkbox
+                  checked={allVisibleSermonsSelected}
+                  indeterminate={!allVisibleSermonsSelected && someVisibleSermonsSelected}
+                  onChange={(event) => {
+                    if (isAddingSelectedSermons) {
+                      return;
+                    }
+                    setSelectedSermonIds((previousSelected) => {
+                      const nextSelected = new Set(previousSelected);
+                      if (event.target.checked) {
+                        filteredAddableSermons.forEach((sermon) => nextSelected.add(sermon.id));
+                      } else {
+                        filteredAddableSermons.forEach((sermon) => nextSelected.delete(sermon.id));
+                      }
+                      return nextSelected;
+                    });
+                  }}
+                  disabled={isAddingSelectedSermons || filteredAddableSermons.length === 0}
+                />
+              )}
+            />
+            <Chip
+              size="small"
+              color={selectedSermonCount > 0 ? 'primary' : 'default'}
+              label={`${selectedSermonCount} selected`}
+            />
+          </Stack>
+
           <TextField
             fullWidth
             size="small"
@@ -986,86 +1717,121 @@ const SeriesDetailsPage = () => {
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
               <CircularProgress />
             </Box>
-          ) : availableSermons.length === 0 ? (
+          ) : filteredAddableSermons.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Typography color="text.secondary">
-                No available sermons to add. Upload some sermons first!
+                {availableSermons.length === 0
+                  ? 'No available sermons to add. Upload some sermons first!'
+                  : `No sermons found matching "${sermonSearchQuery}".`}
               </Typography>
             </Box>
           ) : (
             <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
-              {availableSermons
-                .filter((sermon) => !items.some((item) => item.id === sermon.id))
-                .filter((sermon) =>
-                  !sermonSearchQuery ||
-                  sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase())
-                )
-                .map((sermon) => (
-                  <Box
-                    key={sermon.id}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 2,
-                      p: 1.5,
-                      borderRadius: 2,
-                      cursor: 'pointer',
-                      transition: 'background-color 0.15s ease',
-                      '&:hover': { bgcolor: 'action.hover' },
+              {displayedAddableSermons.map((sermon) => (
+                <Box
+                  key={sermon.id}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 2,
+                    p: 1.5,
+                    borderRadius: 2,
+                    cursor: isAddingSelectedSermons ? 'default' : 'pointer',
+                    transition: 'background-color 0.15s ease',
+                    bgcolor: selectedSermonIds.has(sermon.id) ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                    '&:hover': {
+                      bgcolor: isAddingSelectedSermons
+                        ? 'transparent'
+                        : (selectedSermonIds.has(sermon.id)
+                          ? alpha(theme.palette.primary.main, 0.12)
+                          : 'action.hover'),
+                    },
+                  }}
+                  onClick={() => {
+                    if (isAddingSelectedSermons) {
+                      return;
+                    }
+                    setSelectedSermonIds((previousSelected) => {
+                      const nextSelected = new Set(previousSelected);
+                      if (nextSelected.has(sermon.id)) {
+                        nextSelected.delete(sermon.id);
+                      } else {
+                        nextSelected.add(sermon.id);
+                      }
+                      return nextSelected;
+                    });
+                  }}
+                >
+                  <Checkbox
+                    checked={selectedSermonIds.has(sermon.id)}
+                    disabled={isAddingSelectedSermons}
+                    onChange={(event) => {
+                      event.stopPropagation();
+                      if (isAddingSelectedSermons) {
+                        return;
+                      }
+                      setSelectedSermonIds((previousSelected) => {
+                        const nextSelected = new Set(previousSelected);
+                        if (event.target.checked) {
+                          nextSelected.add(sermon.id);
+                        } else {
+                          nextSelected.delete(sermon.id);
+                        }
+                        return nextSelected;
+                      });
                     }}
-                    onClick={() => addItemToSeries(sermon)}
-                  >
-                    <AvatarWithDefaultImage
-                      image={sermon.images?.find((img) => img.type === 'square')}
-                      altName={sermon.title}
-                      width={48}
-                      height={48}
-                      borderRadius={6}
-                    />
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography
-                        variant="body2"
-                        fontWeight={500}
-                        sx={{
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {sermon.title}
-                      </Typography>
-                      {sermon.dateString && (
-                        <Typography variant="caption" color="text.secondary">
-                          {sermon.dateString}
-                        </Typography>
-                      )}
-                    </Box>
-                    <IconButton size="small" color="primary">
-                      <AddIcon />
-                    </IconButton>
-                  </Box>
-                ))}
-              {sermonSearchQuery && availableSermons
-                .filter((sermon) => !items.some((item) => item.id === sermon.id))
-                .filter((sermon) => sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase()))
-                .length === 0 && (
-                  <Box sx={{ textAlign: 'center', py: 3 }}>
-                    <Typography color="text.secondary">
-                      No sermons found matching &quot;{sermonSearchQuery}&quot;
+                  />
+                  <AvatarWithDefaultImage
+                    image={sermon.images?.find((img) => img.type === 'square')}
+                    altName={sermon.title}
+                    width={48}
+                    height={48}
+                    borderRadius={6}
+                  />
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography
+                      variant="body2"
+                      fontWeight={500}
+                      sx={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {sermon.title}
                     </Typography>
+                    {sermon.dateString && (
+                      <Typography variant="caption" color="text.secondary">
+                        {sermon.dateString}
+                      </Typography>
+                    )}
                   </Box>
-                )}
+                  <IconButton size="small" color="primary" disabled>
+                    {activeAddingSermonId === sermon.id
+                      ? <CircularProgress size={16} />
+                      : <AddIcon />}
+                  </IconButton>
+                </Box>
+              ))}
             </Box>
           )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button
-            onClick={() => {
-              setSermonSearchQuery('');
-              setAddItemPopup(false);
-            }}
+            onClick={closeAddItemDialog}
+            disabled={isAddingSelectedSermons}
           >
             Close
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={isAddingSelectedSermons ? <CircularProgress size={16} color="inherit" /> : <AddIcon fontSize="small" />}
+            disabled={selectedSermonCount === 0 || isAddingSelectedSermons}
+            onClick={addSelectedSermons}
+          >
+            {isAddingSelectedSermons
+              ? 'Adding...'
+              : `Add ${selectedSermonCount} sermon${selectedSermonCount === 1 ? '' : 's'}`}
           </Button>
         </DialogActions>
       </Dialog>

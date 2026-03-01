@@ -56,6 +56,7 @@ import deleteseries from './deleteSeries';
 import addtoseries from './addToSeries';
 import removefromseries from './removeFromSeries';
 import reorderseriesitems from './reorderSeriesItems';
+import bulkaddtoseries from './bulkAddToSeries';
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -114,3 +115,4 @@ exports.deleteseries = deleteseries;
 exports.addtoseries = addtoseries;
 exports.removefromseries = removefromseries;
 exports.reorderseriesitems = reorderseriesitems;
+exports.bulkaddtoseries = bulkaddtoseries;

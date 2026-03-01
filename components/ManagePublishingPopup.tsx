@@ -424,7 +424,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
     newlyPublishedMediaItemId: string
   ): Promise<void> => {
     const orderedItemsSnapshot = await getDocs(
-      query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'asc'))
+      query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'desc'))
     );
 
     const orderedItems = orderedItemsSnapshot.docs.map((seriesItemDoc) => {

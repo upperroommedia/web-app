@@ -234,6 +234,18 @@ const SermonListCard: FunctionComponent<Props> = ({
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
   const [publishPopup, setPublishPopup] = useState(false);
   const [series, setSeries] = useState<Series | null>(null);
+  const seriesItemRef = useMemo(
+    () => (
+      currentSermon.seriesId && currentSermon.id
+        ? doc(firestore, `series/${currentSermon.seriesId}/seriesItems`, currentSermon.id)
+        : null
+    ),
+    [currentSermon.seriesId, currentSermon.id]
+  );
+  const [seriesItemSnapshot] = useDocument(seriesItemRef, {
+    snapshotListenOptions: { includeMetadataChanges: false }
+  });
+  const seriesPublishedToSubsplash = seriesItemSnapshot?.exists() && seriesItemSnapshot.data()?.publishedToSubsplash === true;
 
   const uploaderName = (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
     uploader?.email ?? 'uploader';
@@ -634,30 +646,36 @@ const SermonListCard: FunctionComponent<Props> = ({
                       label={series.name}
                       size="small"
                       variant="filled"
-                      sx={{
-                        height: { sm: 22, md: 26 },
-                        cursor: 'pointer',
-                        maxWidth: { sm: 140, md: 180 },
-                        bgcolor: alpha(theme.palette.primary.main, 0.1),
-                        border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
-                        '& .MuiChip-label': { 
-                          fontSize: { sm: '0.65rem', md: '0.75rem' }, 
-                          px: { sm: 0.75, md: 1 }, 
-                          fontWeight: 500,
-                          overflow: 'hidden', 
-                          textOverflow: 'ellipsis',
-                          color: theme.palette.primary.main,
-                        },
-                        '& .MuiChip-avatar': { 
-                          ml: 0.5,
-                          width: { sm: 18, md: 22 },
-                          height: { sm: 18, md: 22 },
-                        },
-                        '&:hover': { 
-                          bgcolor: alpha(theme.palette.primary.main, 0.2),
-                          borderColor: theme.palette.primary.main,
-                        }
-                      }}
+                        sx={{
+                          height: { sm: 22, md: 26 },
+                          cursor: 'pointer',
+                          maxWidth: { sm: 140, md: 180 },
+                          bgcolor: seriesPublishedToSubsplash
+                            ? alpha(theme.palette.success.main, 0.12)
+                            : alpha(theme.palette.warning.main, 0.16),
+                          border: `1px solid ${seriesPublishedToSubsplash
+                            ? alpha(theme.palette.success.main, 0.35)
+                            : alpha(theme.palette.warning.main, 0.4)}`,
+                          '& .MuiChip-label': { 
+                            fontSize: { sm: '0.65rem', md: '0.75rem' }, 
+                            px: { sm: 0.75, md: 1 }, 
+                            fontWeight: 500,
+                            overflow: 'hidden', 
+                            textOverflow: 'ellipsis',
+                            color: seriesPublishedToSubsplash ? theme.palette.success.dark : theme.palette.warning.dark,
+                          },
+                          '& .MuiChip-avatar': { 
+                            ml: 0.5,
+                            width: { sm: 18, md: 22 },
+                            height: { sm: 18, md: 22 },
+                          },
+                          '&:hover': { 
+                            bgcolor: seriesPublishedToSubsplash
+                              ? alpha(theme.palette.success.main, 0.18)
+                              : alpha(theme.palette.warning.main, 0.24),
+                            borderColor: seriesPublishedToSubsplash ? theme.palette.success.main : theme.palette.warning.main,
+                          }
+                        }}
                     />
                   </Link>
                 )}

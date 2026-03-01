@@ -1,4 +1,4 @@
-import firestore, { deleteDoc, doc, writeBatch } from '../../firebase/firestore';
+import firestore, { deleteDoc, doc, writeBatch, getDocs, query, collection, orderBy, limit } from '../../firebase/firestore';
 import storage, { ref, uploadBytesResumable, UploadMetadata, deleteObject } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
@@ -46,10 +46,19 @@ const addFirestoreDocument = async (
   
   // Add sermon to series subcollection if seriesId is set
   if (sermon.seriesId) {
+    const latestPositionSnapshot = await getDocs(
+      query(
+        collection(firestore, `series/${sermon.seriesId}/seriesItems`),
+        orderBy('position', 'desc'),
+        limit(1)
+      )
+    );
+    const latestPosition = latestPositionSnapshot.docs[0]?.data()?.position;
+    const newPosition = typeof latestPosition === 'number' ? latestPosition + 1 : 1;
     const seriesItemRef = doc(firestore, 'series', sermon.seriesId, 'seriesItems', sermon.id);
     batch.set(seriesItemRef, {
       id: sermon.id,
-      position: 1, // Default position, can be reordered later
+      position: newPosition,
       publishedToSubsplash: false,
       sermonSubsplashId: sermon.subsplashId || null,
       addedAt: new Date(),

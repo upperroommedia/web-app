@@ -1,4 +1,4 @@
-import firestore, { collectionGroup, doc, getDocs, query, setDoc, where, writeBatch, runTransaction, increment } from '../../firebase/firestore';
+import firestore, { collection, collectionGroup, doc, getDocs, query, setDoc, where, writeBatch, runTransaction, increment, orderBy, limit } from '../../firebase/firestore';
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
@@ -92,6 +92,19 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
   // Only process if series has changed
   if (originalSeriesId !== newSeriesId) {
     try {
+      let newSeriesPosition = 1;
+      if (newSeriesId) {
+        const latestPositionSnapshot = await getDocs(
+          query(
+            collection(firestore, `series/${newSeriesId}/seriesItems`),
+            orderBy('position', 'desc'),
+            limit(1)
+          )
+        );
+        const latestPosition = latestPositionSnapshot.docs[0]?.data()?.position;
+        newSeriesPosition = typeof latestPosition === 'number' ? latestPosition + 1 : 1;
+      }
+
       await runTransaction(firestore, async (transaction) => {
         // Prepare document references
         const oldSeriesRef = originalSeriesId ? doc(firestore, 'series', originalSeriesId) : null;
@@ -124,7 +137,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         if (newSeriesItemRef && newSeriesDoc?.exists()) {
           transaction.set(newSeriesItemRef, {
             id: sermon.id,
-            position: 1, // Default position, can be reordered later
+            position: newSeriesPosition,
             publishedToSubsplash: false,
             sermonSubsplashId: sermon.subsplashId || null,
             addedAt: new Date(),

@@ -20,6 +20,14 @@ import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Autocomplete from '@mui/material/Autocomplete';
+import ListItem from '@mui/material/ListItem';
+import InputAdornment from '@mui/material/InputAdornment';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -35,13 +43,14 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import UploadIcon from '@mui/icons-material/Upload';
+import AddIcon from '@mui/icons-material/Add';
 import Link from 'next/link';
 import { alpha, useTheme } from '@mui/material/styles';
 
 import AppLayout from '../../../layout/AppLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
-import firestore, { doc, getDoc, getDocs, deleteDoc, collection, writeBatch, deleteField, updateDoc } from '../../../firebase/firestore';
+import firestore, { doc, getDoc, getDocs, deleteDoc, collection, writeBatch, deleteField, updateDoc, setDoc, query, orderBy, where, limit, serverTimestamp } from '../../../firebase/firestore';
 import storage, { getDownloadURL, ref } from '../../../firebase/storage';
 import { sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
 import { sermonConverter } from '../../../types/Sermon';
@@ -57,6 +66,10 @@ import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/upload
 import { AddtoListInputType, AddToListOutputType } from '../../../functions/src/addToList';
 import { RemoveFromListInputType, RemoveFromListOutputType } from '../../../functions/src/removeFromList';
 import { CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType } from '../../../functions/src/createNewSubsplashList';
+import { AddToSeriesInputType, AddToSeriesOutputType } from '../../../functions/src/addToSeries';
+import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../../../functions/src/removeFromSeries';
+import { CreateSeriesInputType, CreateSeriesOutputType } from '../../../functions/src/createSeries';
+import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
 import UserAvatar from '../../../components/UserAvatar';
 import { User } from '../../../types/User';
 import { GetUserInputType, GetUserOutputType } from '../../../functions/src/getUser';
@@ -87,6 +100,14 @@ const SermonDetailsPage = () => {
   // Publishing state
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
   const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
+  const [seriesPublishAction, setSeriesPublishAction] = useState<'publish' | 'unpublish' | null>(null);
+  const [confirmSeriesUnpublishOpen, setConfirmSeriesUnpublishOpen] = useState(false);
+  const [addToSeriesDialogOpen, setAddToSeriesDialogOpen] = useState(false);
+  const [ownedSeriesOptions, setOwnedSeriesOptions] = useState<Series[]>([]);
+  const [loadingOwnedSeries, setLoadingOwnedSeries] = useState(false);
+  const [selectedOwnedSeriesId, setSelectedOwnedSeriesId] = useState('');
+  const [ownedSeriesSearchQuery, setOwnedSeriesSearchQuery] = useState('');
+  const [isAddingToSeries, setIsAddingToSeries] = useState(false);
 
   // Real-time sermon document listener
   const [sermonSnapshot, sermonLoading, sermonError] = useDocument(
@@ -96,6 +117,9 @@ const SermonDetailsPage = () => {
     }
   );
   const sermon = sermonSnapshot?.data();
+  const [seriesItemSnapshot] = useDocument(
+    sermon?.seriesId ? doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id) : null
+  );
 
   // Sermon lists
   const [sermonLists, listsLoading, _listsError] = useCollectionData(
@@ -113,6 +137,13 @@ const SermonDetailsPage = () => {
 
   const listItemsUploaded = sermonLists?.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED) || [];
   const listItemsNotUploaded = sermonLists?.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED) || [];
+  const seriesPublishedToSubsplash = seriesItemSnapshot?.exists() && seriesItemSnapshot.data()?.publishedToSubsplash === true;
+  const refreshSeriesState = useCallback(async (seriesId: string) => {
+    const latestSeriesSnapshot = await getDoc(doc(firestore, 'series', seriesId).withConverter(seriesConverter));
+    if (latestSeriesSnapshot.exists()) {
+      setSeries(latestSeriesSnapshot.data());
+    }
+  }, []);
 
   // Fetch series and uploader when relevant ids change (narrow deps to avoid refetch on every sermon snapshot)
   useEffect(() => {
@@ -273,8 +304,8 @@ const SermonDetailsPage = () => {
   }, [sermon]);
 
   // Subsplash functions
-  const uploadToSubsplash = async (listsToUploadTo: SermonList[]) => {
-    if (!sermon) return;
+  const uploadToSubsplash = async (listsToUploadTo: SermonList[]): Promise<string | undefined> => {
+    if (!sermon) return undefined;
     try {
       const subsplashIdToListIdMap = new Map<string, string>();
       const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
@@ -336,11 +367,14 @@ const SermonDetailsPage = () => {
       });
       batch.update(sermonRef, { status: { ...sermon.status, subsplash: uploadStatus.UPLOADED }, approverId: user?.uid });
       await batch.commit();
+      return id;
     } catch (error) {
       console.error('Error uploading to Subsplash:', error);
       alert(error);
+      return undefined;
+    } finally {
+      setIsUploadingToSubsplash(false);
     }
-    setIsUploadingToSubsplash(false);
   };
 
   const removeFromList = async (listsToRemoveFrom: SermonList[]) => {
@@ -437,6 +471,262 @@ const SermonDetailsPage = () => {
     }
   }, [sermon]);
 
+  const publishToSeriesForSeries = useCallback(async (targetSeries: Series) => {
+    if (!sermon) {
+      throw new Error('Sermon not found.');
+    }
+
+    let mediaItemId = sermon.subsplashId;
+    if (!mediaItemId) {
+      mediaItemId = await uploadToSubsplash([]);
+    }
+
+    if (!mediaItemId) {
+      throw new Error('Sermon must be uploaded to Subsplash before publishing to series.');
+    }
+
+    let resolvedSeries = targetSeries;
+    let seriesSubsplashId = targetSeries.subsplashId;
+    if (!seriesSubsplashId) {
+      const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
+      const createResult = await createSeriesFunction({
+        title: targetSeries.name,
+        summary: targetSeries.summary,
+        ownerId: targetSeries.ownerId,
+        skipSubsplash: false,
+      });
+
+      if (createResult.status !== 'success' || !createResult.subsplashId) {
+        throw new Error(createResult.error || 'Failed to create series in Subsplash.');
+      }
+
+      seriesSubsplashId = createResult.subsplashId;
+      await updateDoc(doc(firestore, 'series', targetSeries.id), {
+        subsplashId: seriesSubsplashId,
+        status: 'published',
+      });
+      resolvedSeries = { ...targetSeries, subsplashId: seriesSubsplashId, status: 'published' };
+      setSeries((previousSeries) => (
+        previousSeries && previousSeries.id === targetSeries.id ? resolvedSeries : previousSeries
+      ));
+    }
+
+    const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
+    const addResult = await addToSeriesFunction({
+      seriesSubsplashId,
+      mediaItemId,
+    });
+    if (!addResult || addResult.status !== 'success') {
+      throw new Error(addResult?.error || 'Failed to add sermon to series.');
+    }
+    const confirmedMediaItemId = addResult.mediaItemId || mediaItemId;
+
+    const orderedItemsSnapshot = await getDocs(
+      query(collection(firestore, `series/${resolvedSeries.id}/seriesItems`), orderBy('position', 'desc'))
+    );
+    const targetExistsInOrder = orderedItemsSnapshot.docs.some((seriesItemDoc) => seriesItemDoc.id === sermon.id);
+    if (!targetExistsInOrder) {
+      throw new Error('Sermon is missing from Firestore series order. Refresh and retry.');
+    }
+
+    const publishedItems = orderedItemsSnapshot.docs
+      .map((seriesItemDoc) => {
+        const data = seriesItemDoc.data() as { publishedToSubsplash?: boolean; sermonSubsplashId?: string };
+        const isPublished = seriesItemDoc.id === sermon.id ? true : data.publishedToSubsplash === true;
+        const itemMediaItemId = seriesItemDoc.id === sermon.id
+          ? confirmedMediaItemId
+          : data.sermonSubsplashId;
+        return {
+          sermonId: seriesItemDoc.id,
+          isPublished,
+          mediaItemId: itemMediaItemId,
+        };
+      })
+      .filter((item) => item.isPublished);
+
+    const missingMediaId = publishedItems.find((item) => !item.mediaItemId);
+    if (missingMediaId) {
+      throw new Error(`Published series item ${missingMediaId.sermonId} is missing a Subsplash media ID.`);
+    }
+
+    const reorderSeriesFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
+    const reorderResult = await reorderSeriesFunction({
+      firestoreSeriesId: resolvedSeries.id,
+      itemOrder: publishedItems.map((item, index) => ({
+        mediaItemId: item.mediaItemId as string,
+        // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
+        position: publishedItems.length - index,
+      })),
+    });
+    if (reorderResult.status !== 'success') {
+      const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+      await removeFromSeriesFunction({ mediaItemId: confirmedMediaItemId });
+      throw new Error(reorderResult.message || 'Subsplash reorder failed.');
+    }
+
+    await setDoc(
+      doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id),
+      {
+        publishedToSubsplash: true,
+        sermonSubsplashId: confirmedMediaItemId,
+      },
+      { merge: true }
+    );
+    await refreshSeriesState(resolvedSeries.id);
+  }, [refreshSeriesState, sermon, uploadToSubsplash]);
+
+  const publishToSeries = useCallback(async () => {
+    if (!series) {
+      return;
+    }
+
+    setSeriesPublishAction('publish');
+    try {
+      await publishToSeriesForSeries(series);
+    } catch (err: any) {
+      console.error('Error publishing sermon to series:', err);
+      alert(err?.message || 'Failed to publish sermon to series');
+    } finally {
+      setSeriesPublishAction(null);
+    }
+  }, [publishToSeriesForSeries, series]);
+
+  const openAddToSeriesDialog = useCallback(async () => {
+    if (!user?.uid) {
+      return;
+    }
+
+    setAddToSeriesDialogOpen(true);
+    setLoadingOwnedSeries(true);
+    setOwnedSeriesOptions([]);
+    setSelectedOwnedSeriesId('');
+    setOwnedSeriesSearchQuery('');
+    try {
+      const ownedSeriesSnapshot = await getDocs(
+        query(
+          collection(firestore, 'series').withConverter(seriesConverter),
+          where('ownerId', '==', user.uid),
+          limit(100)
+        )
+      );
+      const ownedSeries = ownedSeriesSnapshot.docs
+        .map((seriesDoc) => seriesDoc.data())
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setOwnedSeriesOptions(ownedSeries);
+      if (ownedSeries.length === 1) {
+        setSelectedOwnedSeriesId(ownedSeries[0].id);
+      }
+    } catch (err: any) {
+      console.error('Error loading owned series:', err);
+      alert(err?.message || 'Failed to load your series');
+    } finally {
+      setLoadingOwnedSeries(false);
+    }
+  }, [user?.uid]);
+
+  const addSermonToSelectedSeries = useCallback(async () => {
+    if (!sermon || !user?.uid || !selectedOwnedSeriesId || isAddingToSeries) {
+      return;
+    }
+
+    setIsAddingToSeries(true);
+    try {
+      const selectedSeriesRef = doc(firestore, 'series', selectedOwnedSeriesId).withConverter(seriesConverter);
+      const selectedSeriesSnapshot = await getDoc(selectedSeriesRef);
+      if (!selectedSeriesSnapshot.exists()) {
+        throw new Error('Selected series no longer exists.');
+      }
+
+      const selectedSeries = selectedSeriesSnapshot.data();
+      if (selectedSeries.ownerId !== user.uid) {
+        throw new Error('You can only add sermons to series you own.');
+      }
+      if (sermon.seriesId && sermon.seriesId !== selectedSeries.id) {
+        throw new Error('This sermon is already assigned to another series.');
+      }
+
+      const latestPositionSnapshot = await getDocs(
+        query(
+          collection(firestore, `series/${selectedSeries.id}/seriesItems`),
+          orderBy('position', 'desc'),
+          limit(1)
+        )
+      );
+      const latestPosition = latestPositionSnapshot.docs[0]?.data()?.position;
+      const nextPosition = typeof latestPosition === 'number' ? latestPosition + 1 : 1;
+
+      await setDoc(
+        doc(firestore, `series/${selectedSeries.id}/seriesItems`, sermon.id),
+        {
+          id: sermon.id,
+          position: nextPosition,
+          publishedToSubsplash: false,
+          ...(sermon.subsplashId ? { sermonSubsplashId: sermon.subsplashId } : {}),
+          addedAt: serverTimestamp(),
+        }
+      );
+      await updateDoc(doc(firestore, 'sermons', sermon.id), { seriesId: selectedSeries.id });
+
+      if (sermon.subsplashId || sermon.status.subsplash === uploadStatus.UPLOADED) {
+        setSeriesPublishAction('publish');
+        try {
+          await publishToSeriesForSeries(selectedSeries);
+        } catch (publishErr: any) {
+          await deleteDoc(doc(firestore, `series/${selectedSeries.id}/seriesItems`, sermon.id));
+          await updateDoc(doc(firestore, 'sermons', sermon.id), { seriesId: null });
+          throw new Error(
+            publishErr?.message || 'Automatic series publish failed. Sermon was not added to series.'
+          );
+        } finally {
+          setSeriesPublishAction(null);
+        }
+      }
+
+      await refreshSeriesState(selectedSeries.id);
+      setAddToSeriesDialogOpen(false);
+      setSelectedOwnedSeriesId('');
+      setOwnedSeriesSearchQuery('');
+    } catch (err: any) {
+      console.error('Error adding sermon to selected series:', err);
+      alert(err?.message || 'Failed to add sermon to series');
+    } finally {
+      setIsAddingToSeries(false);
+    }
+  }, [isAddingToSeries, publishToSeriesForSeries, refreshSeriesState, selectedOwnedSeriesId, sermon, user?.uid]);
+
+  const unpublishFromSeries = useCallback(async () => {
+    if (!sermon || !series) {
+      return;
+    }
+
+    setSeriesPublishAction('unpublish');
+    try {
+      const seriesItemData = seriesItemSnapshot?.data() as { sermonSubsplashId?: string } | undefined;
+      const mediaItemId = seriesItemData?.sermonSubsplashId || sermon.subsplashId;
+
+      if (mediaItemId) {
+        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+        await removeFromSeriesFunction({ mediaItemId });
+      }
+
+      await setDoc(
+        doc(firestore, `series/${series.id}/seriesItems`, sermon.id),
+        {
+          publishedToSubsplash: false,
+          sermonSubsplashId: deleteField(),
+        },
+        { merge: true }
+      );
+      await refreshSeriesState(series.id);
+      setConfirmSeriesUnpublishOpen(false);
+    } catch (err: any) {
+      console.error('Error unpublishing sermon from series:', err);
+      alert(err?.message || 'Failed to unpublish sermon from series');
+    } finally {
+      setSeriesPublishAction(null);
+    }
+  }, [refreshSeriesState, series, seriesItemSnapshot, sermon]);
+
   // Play/pause toggle
   const handlePlayPause = () => {
     if (!sermon) return;
@@ -471,6 +761,7 @@ const SermonDetailsPage = () => {
   };
 
   const statusInfo = getStatusInfo();
+  const selectedOwnedSeries = ownedSeriesOptions.find((candidate) => candidate.id === selectedOwnedSeriesId) || null;
   const uploaderName = uploader
     ? (`${uploader.firstName ?? ''} ${uploader.lastName ?? ''}`.trim() || uploader.displayName || uploader.email)
     : 'Unknown';
@@ -823,11 +1114,65 @@ const SermonDetailsPage = () => {
                           key={listItemsNotUploaded.map((list) => list.id).join('') + 'NotUploaded'}
                           sectionTitle="Not Published"
                           sermonListItems={listItemsNotUploaded}
-                          buttonAction={uploadToSubsplash}
+                          buttonAction={async (lists) => { await uploadToSubsplash(lists); }}
                           buttonLabel="Publish to Subsplash"
                         />
                       </Stack>
                     )}
+                  </Card>
+
+                  {/* Subsplash Series */}
+                  <Card variant="outlined" sx={{ p: 2, mt: 2 }}>
+                    <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+                      <Stack direction="row" spacing={2} alignItems="center">
+                        <CollectionsIcon sx={{ fontSize: 28, color: seriesPublishedToSubsplash ? 'success.main' : 'text.disabled' }} />
+                        <Box>
+                          <Typography variant="subtitle2">Subsplash Series</Typography>
+                          {series ? (
+                            <Typography variant="body2" color="text.secondary">
+                              {series.name} • {seriesPublishedToSubsplash ? 'Published' : 'Not Published'}
+                            </Typography>
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              No series assigned
+                            </Typography>
+                          )}
+                        </Box>
+                      </Stack>
+
+                      {!series ? (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<AddIcon />}
+                          onClick={openAddToSeriesDialog}
+                          disabled={loadingOwnedSeries || isAddingToSeries}
+                        >
+                          Add To Series
+                        </Button>
+                      ) : seriesPublishAction ? (
+                        <CircularProgress size={22} />
+                      ) : seriesPublishedToSubsplash ? (
+                        <Button
+                          variant="outlined"
+                          color="warning"
+                          size="small"
+                          startIcon={<CloudOffIcon />}
+                          onClick={() => setConfirmSeriesUnpublishOpen(true)}
+                        >
+                          Unpublish
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<CloudUploadIcon />}
+                          onClick={publishToSeries}
+                        >
+                          Publish
+                        </Button>
+                      )}
+                    </Stack>
                   </Card>
                 </Box>
               </>
@@ -835,6 +1180,138 @@ const SermonDetailsPage = () => {
           </CardContent>
         </Card>
       </Box>
+
+      <Dialog
+        open={confirmSeriesUnpublishOpen}
+        onClose={() => !seriesPublishAction && setConfirmSeriesUnpublishOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Unpublish From Series?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            This will remove this sermon from the Subsplash series, but keep it assigned to the series in this app.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setConfirmSeriesUnpublishOpen(false)}
+            disabled={Boolean(seriesPublishAction)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={unpublishFromSeries}
+            disabled={Boolean(seriesPublishAction)}
+            startIcon={seriesPublishAction === 'unpublish' ? <CircularProgress size={16} color="inherit" /> : <CloudOffIcon fontSize="small" />}
+          >
+            Unpublish
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={addToSeriesDialogOpen}
+        onClose={() => {
+          if (isAddingToSeries) {
+            return;
+          }
+          setAddToSeriesDialogOpen(false);
+          setOwnedSeriesSearchQuery('');
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add Sermon To Series</DialogTitle>
+        <DialogContent>
+          {loadingOwnedSeries ? (
+            <Box sx={{ py: 3, display: 'flex', justifyContent: 'center' }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : ownedSeriesOptions.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              You don&apos;t have any series yet. Create one first from the series page.
+            </Typography>
+          ) : (
+            <Autocomplete
+              fullWidth
+              options={ownedSeriesOptions}
+              value={selectedOwnedSeries}
+              disabled={isAddingToSeries}
+              inputValue={ownedSeriesSearchQuery}
+              onInputChange={(_, newInputValue) => setOwnedSeriesSearchQuery(newInputValue)}
+              onChange={(_, newValue) => {
+                setSelectedOwnedSeriesId(newValue?.id || '');
+              }}
+              getOptionLabel={(option) => option.name}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              renderOption={(renderProps, option) => (
+                <ListItem {...renderProps} key={option.id}>
+                  <AvatarWithDefaultImage
+                    defaultImageURL="/sermon_default.png"
+                    altName={option.name}
+                    width={28}
+                    height={28}
+                    image={option.images?.find((image) => image.type === 'square')}
+                    borderRadius={5}
+                    sx={{ marginRight: '12px' }}
+                  />
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" noWrap>{option.name}</Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {option.publishedItemCount || 0} part series
+                    </Typography>
+                  </Box>
+                </ListItem>
+              )}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  margin="dense"
+                  label="Select your series"
+                  placeholder="Search your series..."
+                  InputProps={{
+                    ...params.InputProps,
+                    startAdornment: selectedOwnedSeries ? (
+                      <InputAdornment position="start">
+                        <AvatarWithDefaultImage
+                          defaultImageURL="/sermon_default.png"
+                          altName={selectedOwnedSeries.name}
+                          width={26}
+                          height={26}
+                          image={selectedOwnedSeries.images?.find((image) => image.type === 'square')}
+                          borderRadius={5}
+                        />
+                      </InputAdornment>
+                    ) : params.InputProps.startAdornment,
+                  }}
+                />
+              )}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setAddToSeriesDialogOpen(false);
+              setOwnedSeriesSearchQuery('');
+            }}
+            disabled={isAddingToSeries}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={addSermonToSelectedSeries}
+            disabled={isAddingToSeries || loadingOwnedSeries || ownedSeriesOptions.length === 0 || !selectedOwnedSeriesId}
+            startIcon={isAddingToSeries ? <CircularProgress size={16} color="inherit" /> : <AddIcon fontSize="small" />}
+          >
+            Add To Series
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Delete Confirmation Popup */}
       {deletePopup && (
