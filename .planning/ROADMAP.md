@@ -87,10 +87,20 @@ Plans:
 
 ### Phase 4: Role-based invite onboarding and operational notification routing
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Deliver role-based invite onboarding, role-request notification routing, and centralized operational runtime alerting with environment-configurable recipients.
+**Requirements**: [INVITE-01, INVITE-02, INVITE-03, ROLE-REQ-01, ROLE-REQ-02, OPS-ALERT-01, OPS-ALERT-02]
 **Depends on:** Phase 3
-**Plans:** 0 plans
+**Success Criteria** (what must be TRUE):
+  1. Admins can issue role-targeted invite links that are single-use, email-bound, and expire after 30 days.
+  2. Invite claims assign roles immediately, preserve highest existing role, and land users on a dedicated success route.
+  3. New role requests persist and trigger environment-configurable notifications containing requester identity, target role, timestamp, and admin link.
+  4. Notification failures do not roll back role-request writes and emit operational alert/log signals.
+  5. Caught runtime failures in upload/audio and related publish flows emit email + structured alert events for every occurrence.
+**Plans:** 5 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 4 to break down)
+- [ ] 04-01-PLAN.md — Build notification params, Firestore outbox queue, and shared operational alert utility
+- [ ] 04-02-PLAN.md — Implement persistence-first role request callable with notification fallback and tests
+- [ ] 04-03-PLAN.md — Implement secure invite issue/claim backend with hashed tokens and no-downgrade role assignment
+- [ ] 04-04-PLAN.md — Wire new callables into exports and UI flows (admin invite, request form, invite claim/success routes)
+- [ ] 04-05-PLAN.md — Roll out runtime alert emission across publish and add-intro/outro catch paths with regression tests
