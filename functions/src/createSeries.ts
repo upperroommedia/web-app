@@ -2,6 +2,7 @@
  * Firebase callable function to create a new media series
  */
 
+import { randomUUID } from 'node:crypto';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -14,6 +15,8 @@ import {
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { withIdempotency } from './locks/withIdempotency';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -23,6 +26,7 @@ export interface CreateSeriesInputType {
   ownerId: string;              // User ID who owns the series
   firestoreId?: string;         // Optional existing Firestore series ID to sync
   skipSubsplash?: boolean;      // If true, only create in Firestore (for upload time)
+  operationKey?: string;
   images?: Array<{              // Optional images for the series
     id: string;
     type: string;
@@ -49,18 +53,11 @@ const createSeries = onCall(
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
 
-    const { title, summary, ownerId, skipSubsplash, images } = request.data;
+    const { title, summary, ownerId, skipSubsplash, images, operationKey } = request.data;
     const firestoreId = request.data.firestoreId?.trim();
     const seriesRef = firestoreId
       ? firestoreDB.collection('series').doc(firestoreId)
       : firestoreDB.collection('series').doc();
-    const existingSeriesDoc = await seriesRef.get();
-    const existingSeriesImages = existingSeriesDoc.exists
-      ? (existingSeriesDoc.data()?.images as CreateSeriesInputType['images'] | undefined)
-      : undefined;
-    const inputImages = images?.filter((image) => Boolean(image?.id && image?.type)) || [];
-    const imagesToPersist = inputImages.length > 0 ? inputImages : (existingSeriesImages || []);
-    const initialSubtitle = getSeriesSubtitleFromPublishedCount(0);
 
     // Validation
     if (!title || !title.trim()) {
@@ -70,102 +67,122 @@ const createSeries = onCall(
       throw new HttpsError('invalid-argument', 'ownerId is required.');
     }
 
+    const normalizedOperationKey = operationKey?.trim() || `create-series:${seriesRef.id}:${randomUUID()}`;
+
     try {
-      // If skipSubsplash is true, only create in Firestore (for upload time)
-      if (skipSubsplash) {
-        const firestoreData: Record<string, unknown> = {
-          id: seriesRef.id,
-          name: title.trim(),
-          subtitle: initialSubtitle,
-          images: imagesToPersist,
-          itemCount: 0,
-          publishedItemCount: 0,
-          status: 'draft',
-          subsplashId: '',  // Empty until published
-          ownerId: ownerId.trim(),
-          updatedAt: FieldValue.serverTimestamp(),
-        };
-        if (!existingSeriesDoc.exists) {
-          firestoreData.createdAt = FieldValue.serverTimestamp();
-        }
+      return await withIdempotency(normalizedOperationKey, async () => {
+        return withSubsplashLocks(
+          [`series:${seriesRef.id}`],
+          async () => {
+            const existingSeriesDoc = await seriesRef.get();
+            const existingSeriesImages = existingSeriesDoc.exists
+              ? (existingSeriesDoc.data()?.images as CreateSeriesInputType['images'] | undefined)
+              : undefined;
+            const inputImages = images?.filter((image) => Boolean(image?.id && image?.type)) || [];
+            const imagesToPersist = inputImages.length > 0 ? inputImages : (existingSeriesImages || []);
+            const initialSubtitle = getSeriesSubtitleFromPublishedCount(0);
 
-        // Only add optional fields if they have values
-        if (summary?.trim()) {
-          firestoreData.summary = summary.trim();
-        }
+            // If skipSubsplash is true, only create in Firestore (for upload time)
+            if (skipSubsplash) {
+              const firestoreData: Record<string, unknown> = {
+                id: seriesRef.id,
+                name: title.trim(),
+                subtitle: initialSubtitle,
+                images: imagesToPersist,
+                itemCount: 0,
+                publishedItemCount: 0,
+                status: 'draft',
+                subsplashId: '',  // Empty until published
+                ownerId: ownerId.trim(),
+                updatedAt: FieldValue.serverTimestamp(),
+              };
+              if (!existingSeriesDoc.exists) {
+                firestoreData.createdAt = FieldValue.serverTimestamp();
+              }
 
-        await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
+              // Only add optional fields if they have values
+              if (summary?.trim()) {
+                firestoreData.summary = summary.trim();
+              }
 
-        logger.log(`Created local series: Firestore ID=${seriesRef.id} (no Subsplash sync)`);
+              await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
 
-        return {
-          status: 'success',
-          firestoreId: seriesRef.id,
-          subsplashId: '',  // Not yet created in Subsplash
-        };
-      }
+              logger.log(`Created local series: Firestore ID=${seriesRef.id} (no Subsplash sync)`);
 
-      // Full creation with Subsplash sync (requires publish permissions)
-      if (!canUserRolePublish(userRole)) {
-        throw new HttpsError('permission-denied', 'Publishing to Subsplash requires publish permissions.');
-      }
+              return {
+                status: 'success',
+                firestoreId: seriesRef.id,
+                subsplashId: '',  // Not yet created in Subsplash
+              };
+            }
 
-      // Authenticate with Subsplash
-      const token = await authenticateSubsplash();
+            // Full creation with Subsplash sync (requires publish permissions)
+            if (!canUserRolePublish(userRole)) {
+              throw new HttpsError('permission-denied', 'Publishing to Subsplash requires publish permissions.');
+            }
 
-      // Create series in Subsplash
-      const subsplashSeries = await createSubsplashSeries(title.trim(), token, {
-        subtitle: initialSubtitle,
-        summary: summary?.trim(),
-      });
-      if (imagesToPersist.length > 0) {
-        await patchSeriesMetadata(
-          subsplashSeries.id,
-          {
-            images: imagesToPersist.map((image) => ({
-              id: image.id,
-              type: image.type,
-            })),
+            // Authenticate with Subsplash
+            const token = await authenticateSubsplash();
+
+            // Create series in Subsplash
+            const subsplashSeries = await createSubsplashSeries(title.trim(), token, {
+              subtitle: initialSubtitle,
+              summary: summary?.trim(),
+            });
+            if (imagesToPersist.length > 0) {
+              await patchSeriesMetadata(
+                subsplashSeries.id,
+                {
+                  images: imagesToPersist.map((image) => ({
+                    id: image.id,
+                    type: image.type,
+                  })),
+                },
+                token
+              );
+            }
+
+            // Create Firestore document with Subsplash data
+            const firestoreData: Record<string, unknown> = {
+              id: seriesRef.id,
+              name: subsplashSeries.title,
+              subtitle: subsplashSeries.subtitle || initialSubtitle,
+              images: imagesToPersist,
+              itemCount: subsplashSeries.media_items_count,
+              publishedItemCount: subsplashSeries.published_media_items_count,
+              status: subsplashSeries.status,
+              subsplashId: subsplashSeries.id,
+              ownerId: ownerId.trim(),
+              slug: subsplashSeries.slug,
+              shortCode: subsplashSeries.short_code,
+              position: subsplashSeries.position,
+              updatedAt: FieldValue.serverTimestamp(),
+            };
+            if (!existingSeriesDoc.exists) {
+              firestoreData.createdAt = FieldValue.serverTimestamp();
+            }
+
+            // Only add optional fields if they have values (Firestore doesn't allow undefined)
+            if (subsplashSeries.summary) {
+              firestoreData.summary = subsplashSeries.summary;
+            }
+
+            await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
+
+            logger.log(`Created series: Firestore ID=${seriesRef.id}, Subsplash ID=${subsplashSeries.id}`);
+
+            return {
+              status: 'success',
+              firestoreId: seriesRef.id,
+              subsplashId: subsplashSeries.id,
+              slug: subsplashSeries.slug,
+            };
           },
-          token
+          {
+            operationKey: normalizedOperationKey,
+          }
         );
-      }
-
-      // Create Firestore document with Subsplash data
-      const firestoreData: Record<string, unknown> = {
-        id: seriesRef.id,
-        name: subsplashSeries.title,
-        subtitle: subsplashSeries.subtitle || initialSubtitle,
-        images: imagesToPersist,
-        itemCount: subsplashSeries.media_items_count,
-        publishedItemCount: subsplashSeries.published_media_items_count,
-        status: subsplashSeries.status,
-        subsplashId: subsplashSeries.id,
-        ownerId: ownerId.trim(),
-        slug: subsplashSeries.slug,
-        shortCode: subsplashSeries.short_code,
-        position: subsplashSeries.position,
-        updatedAt: FieldValue.serverTimestamp(),
-      };
-      if (!existingSeriesDoc.exists) {
-        firestoreData.createdAt = FieldValue.serverTimestamp();
-      }
-
-      // Only add optional fields if they have values (Firestore doesn't allow undefined)
-      if (subsplashSeries.summary) {
-        firestoreData.summary = subsplashSeries.summary;
-      }
-
-      await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
-
-      logger.log(`Created series: Firestore ID=${seriesRef.id}, Subsplash ID=${subsplashSeries.id}`);
-
-      return {
-        status: 'success',
-        firestoreId: seriesRef.id,
-        subsplashId: subsplashSeries.id,
-        slug: subsplashSeries.slug,
-      };
+      });
     } catch (err) {
       throw handleError(err);
     }

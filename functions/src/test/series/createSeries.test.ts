@@ -6,6 +6,7 @@
 import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mocks';
 import { clearFirestore, createSeriesDocument, getSeriesBySubsplashId, getAllSeries } from './firestoreHelpers';
 import createSeries, { CreateSeriesInputType, CreateSeriesOutputType } from '../../createSeries';
+import * as seriesHelpers from '../../helpers/seriesHelpers';
 
 // Type for the handler function
 type CreateSeriesHandler = (request: TestRequest<CreateSeriesInputType>) => Promise<CreateSeriesOutputType>;
@@ -408,5 +409,66 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
     
     const allSeries = await getAllSeries();
     expect(allSeries[0].images).toEqual([]);
+  });
+});
+
+describe('createSeries - Locking and Idempotency', () => {
+  beforeEach(async () => {
+    await clearFirestore();
+    subsplashSeriesMock.reset();
+    networkFailureInjector.clear();
+    jest.restoreAllMocks();
+  });
+
+  it('should replay prior terminal result for duplicate operation key', async () => {
+    const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries');
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Replay Create Series',
+        ownerId: TEST_USER_ID,
+        operationKey: 'create-op-replay-1',
+      } as CreateSeriesInputType,
+    };
+
+    const firstResult = await createSeriesHandler(request);
+    const secondResult = await createSeriesHandler(request);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should release lock after failure so next operation key can proceed', async () => {
+    let createCallCount = 0;
+    networkFailureInjector.registerFailure('createSeries', () => {
+      createCallCount += 1;
+      return createCallCount === 1;
+    });
+
+    const firstRequest: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Create Lock Release',
+        ownerId: TEST_USER_ID,
+        operationKey: 'create-op-fail-1',
+      } as CreateSeriesInputType,
+    };
+
+    await expect(createSeriesHandler(firstRequest)).rejects.toMatchObject({
+      code: 'internal',
+    });
+
+    const secondRequest: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Create Lock Release',
+        ownerId: TEST_USER_ID,
+        operationKey: 'create-op-fail-2',
+      } as CreateSeriesInputType,
+    };
+
+    await expect(createSeriesHandler(secondRequest)).resolves.toMatchObject({
+      status: 'success',
+    });
   });
 });

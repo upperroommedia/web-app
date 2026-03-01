@@ -11,6 +11,7 @@ import {
   getSeriesBySubsplashId,
 } from './firestoreHelpers';
 import deleteSeries, { DeleteSeriesInputType, DeleteSeriesOutputType } from '../../deleteSeries';
+import * as seriesHelpers from '../../helpers/seriesHelpers';
 
 type DeleteSeriesHandler = (request: TestRequest<DeleteSeriesInputType>) => Promise<DeleteSeriesOutputType>;
 const deleteSeriesHandler = deleteSeries as unknown as DeleteSeriesHandler;
@@ -374,5 +375,112 @@ describe('deleteSeries - Error handling', () => {
     expect(await getSeriesBySubsplashId(subsplashSeries.id)).not.toBeNull();
     expect(await getSeriesItemsCount(firestoreId)).toBe(1);
     expect(await getSermonSeriesId('delete-failure-sermon')).toBe(firestoreId);
+  });
+});
+
+describe('deleteSeries - Locking and Idempotency', () => {
+  beforeEach(async () => {
+    await clearFirestore();
+    subsplashSeriesMock.reset();
+    networkFailureInjector.clear();
+    jest.restoreAllMocks();
+  });
+
+  it('should serialize concurrent delete calls for the same series', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Concurrent Delete Series');
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Concurrent Delete Series',
+    });
+    const deleteSpy = jest.spyOn(seriesHelpers, 'deleteSubsplashSeries');
+
+    const requestA: TestRequest<DeleteSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreId,
+        operationKey: 'delete-op-concurrent-1a',
+      } as DeleteSeriesInputType,
+    };
+    const requestB: TestRequest<DeleteSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreId,
+        operationKey: 'delete-op-concurrent-1b',
+      } as DeleteSeriesInputType,
+    };
+
+    const [resultA, resultB] = await Promise.allSettled([
+      deleteSeriesHandler(requestA),
+      deleteSeriesHandler(requestB),
+    ]);
+
+    const successCount = [resultA, resultB].filter((result) => result.status === 'fulfilled').length;
+    const failureCount = [resultA, resultB].filter((result) => result.status === 'rejected').length;
+
+    expect(successCount).toBe(1);
+    expect(failureCount).toBe(1);
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should replay prior terminal result for duplicate operation key', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Delete Replay Series');
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Delete Replay Series',
+    });
+    const deleteSpy = jest.spyOn(seriesHelpers, 'deleteSubsplashSeries');
+
+    const request: TestRequest<DeleteSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreId,
+        operationKey: 'delete-op-replay-1',
+      } as DeleteSeriesInputType,
+    };
+
+    const firstResult = await deleteSeriesHandler(request);
+    const secondResult = await deleteSeriesHandler(request);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should release lock after failure so next operation key can proceed', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Delete Lock Release Series');
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Delete Lock Release Series',
+    });
+    await seedLocalSeriesMembership(firestoreId, ['release-sermon-1']);
+
+    let deleteCallCount = 0;
+    networkFailureInjector.registerFailure(`deleteSeries:${subsplashSeries.id}`, () => {
+      deleteCallCount += 1;
+      return deleteCallCount === 1;
+    });
+
+    const firstRequest: TestRequest<DeleteSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreId,
+        operationKey: 'delete-op-fail-1',
+      } as DeleteSeriesInputType,
+    };
+
+    await expect(deleteSeriesHandler(firstRequest)).rejects.toMatchObject({
+      code: 'internal',
+    });
+
+    const secondRequest: TestRequest<DeleteSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreId,
+        operationKey: 'delete-op-fail-2',
+      } as DeleteSeriesInputType,
+    };
+
+    await expect(deleteSeriesHandler(secondRequest)).resolves.toMatchObject({
+      status: 'success',
+    });
   });
 });
