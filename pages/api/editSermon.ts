@@ -1,4 +1,17 @@
-import firestore, { collection, collectionGroup, doc, getDocs, query, setDoc, where, writeBatch, runTransaction, increment, orderBy, limit } from '../../firebase/firestore';
+import firestore, {
+  collection,
+  collectionGroup,
+  doc,
+  getDocs,
+  query,
+  where,
+  writeBatch,
+  runTransaction,
+  increment,
+  orderBy,
+  limit,
+  updateDoc,
+} from '../../firebase/firestore';
 
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
@@ -7,6 +20,7 @@ import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSub
 import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
 import { getSquareImageStoragePath } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
+import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
 
 interface EditSermonOptions {
   originalSeriesId?: string;
@@ -43,12 +57,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
   }
 
   const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-  promises.push(
-    setDoc(sermonRef.withConverter(sermonConverter), {
-      ...sermon,
-      editedAtMillis: new Date().getTime(),
-    })
-  );
+  promises.push(updateDoc(sermonRef, buildEditableSermonPatch(sermon)));
   const results = await Promise.allSettled(promises);
   for (const result of results) {
     if (result.status !== 'fulfilled') {
