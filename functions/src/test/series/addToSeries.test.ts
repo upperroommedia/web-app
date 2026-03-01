@@ -9,6 +9,8 @@ import {
   createSeriesDocument,
 } from './firestoreHelpers';
 import addToSeries, { AddToSeriesInputType, AddToSeriesOutputType } from '../../addToSeries';
+import * as seriesHelpers from '../../helpers/seriesHelpers';
+import { claimOperation } from '../../locks/withIdempotency';
 
 // Type for the handler function
 type AddToSeriesHandler = (request: TestRequest<AddToSeriesInputType>) => Promise<AddToSeriesOutputType>;
@@ -360,5 +362,96 @@ describe('addToSeries - Error Handling', () => {
     };
 
     await expect(addToSeriesHandler(request)).rejects.toThrow();
+  });
+});
+
+describe('addToSeries - Locking and Idempotency', () => {
+  beforeEach(async () => {
+    await clearFirestore();
+    subsplashSeriesMock.reset();
+    networkFailureInjector.clear();
+    jest.restoreAllMocks();
+  });
+
+  it('should not patch Subsplash twice when two concurrent calls share an operation key', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Concurrent Series');
+    const mediaItem = subsplashSeriesMock.createMediaItem('Concurrent Item');
+
+    const originalPatchMediaItemSeries = seriesHelpers.patchMediaItemSeries;
+    const patchSpy = jest
+      .spyOn(seriesHelpers, 'patchMediaItemSeries')
+      .mockImplementation(async (...args: Parameters<typeof seriesHelpers.patchMediaItemSeries>) => {
+        await new Promise((resolve) => setTimeout(resolve, 75));
+        return originalPatchMediaItemSeries(...args);
+      });
+
+    const request: TestRequest<AddToSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        seriesSubsplashId: subsplashSeries.id,
+        mediaItemId: mediaItem.id,
+        operationKey: 'add-op-concurrent-1',
+      } as AddToSeriesInputType,
+    };
+
+    const [firstResult, secondResult] = await Promise.allSettled([
+      addToSeriesHandler(request),
+      addToSeriesHandler(request),
+    ]);
+
+    const successCount = [firstResult, secondResult].filter((result) => result.status === 'fulfilled').length;
+    const failureCount = [firstResult, secondResult].filter((result) => result.status === 'rejected').length;
+
+    expect(successCount + failureCount).toBe(2);
+    expect(successCount).toBeGreaterThanOrEqual(1);
+    expect(patchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should replay prior terminal result for duplicate operation key', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Replay Series');
+    const mediaItem = subsplashSeriesMock.createMediaItem('Replay Item');
+    const patchSpy = jest.spyOn(seriesHelpers, 'patchMediaItemSeries');
+
+    const request: TestRequest<AddToSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        seriesSubsplashId: subsplashSeries.id,
+        mediaItemId: mediaItem.id,
+        operationKey: 'add-op-replay-1',
+      } as AddToSeriesInputType,
+    };
+
+    const firstResult = await addToSeriesHandler(request);
+    const secondResult = await addToSeriesHandler(request);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(patchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should return busy payload details when operation key is already in progress', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Busy Payload Series');
+    const mediaItem = subsplashSeriesMock.createMediaItem('Busy Payload Item');
+    const patchSpy = jest.spyOn(seriesHelpers, 'patchMediaItemSeries');
+    await claimOperation('add-op-busy-1');
+
+    const request: TestRequest<AddToSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        seriesSubsplashId: subsplashSeries.id,
+        mediaItemId: mediaItem.id,
+        operationKey: 'add-op-busy-1',
+      } as AddToSeriesInputType,
+    };
+
+    await expect(addToSeriesHandler(request)).rejects.toMatchObject({
+      code: 'aborted',
+      details: {
+        code: 'SUBSPLASH_LOCK_BUSY',
+        locked_keys: ['operation:add-op-busy-1'],
+        wait_ms: 10000,
+        retry_after_ms: 1000,
+      },
+    });
+    expect(patchSpy).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,8 @@
 import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mocks';
 import { clearFirestore, createSeriesDocument } from './firestoreHelpers';
 import removeFromSeries, { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../../removeFromSeries';
+import * as seriesHelpers from '../../helpers/seriesHelpers';
+import { claimOperation } from '../../locks/withIdempotency';
 
 // Type for the handler function
 type RemoveFromSeriesHandler = (request: TestRequest<RemoveFromSeriesInputType>) => Promise<RemoveFromSeriesOutputType>;
@@ -210,5 +212,64 @@ describe('removeFromSeries - Error Handling', () => {
     };
 
     await expect(removeFromSeriesHandler(request)).rejects.toThrow();
+  });
+});
+
+describe('removeFromSeries - Locking and Idempotency', () => {
+  beforeEach(async () => {
+    await clearFirestore();
+    subsplashSeriesMock.reset();
+    networkFailureInjector.clear();
+    jest.restoreAllMocks();
+  });
+
+  it('should replay prior terminal result for duplicate operation key', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Replay Series');
+    const mediaItem = subsplashSeriesMock.createMediaItem('Replay Item', {
+      seriesId: subsplashSeries.id,
+    });
+    const patchSpy = jest.spyOn(seriesHelpers, 'patchMediaItemSeries');
+
+    const request: TestRequest<RemoveFromSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        mediaItemId: mediaItem.id,
+        operationKey: 'remove-op-replay-1',
+      } as RemoveFromSeriesInputType,
+    };
+
+    const firstResult = await removeFromSeriesHandler(request);
+    const secondResult = await removeFromSeriesHandler(request);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(patchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should return busy payload details when operation key is already in progress', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Busy Remove Series');
+    const mediaItem = subsplashSeriesMock.createMediaItem('Busy Remove Item', {
+      seriesId: subsplashSeries.id,
+    });
+    const patchSpy = jest.spyOn(seriesHelpers, 'patchMediaItemSeries');
+    await claimOperation('remove-op-busy-1');
+
+    const request: TestRequest<RemoveFromSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        mediaItemId: mediaItem.id,
+        operationKey: 'remove-op-busy-1',
+      } as RemoveFromSeriesInputType,
+    };
+
+    await expect(removeFromSeriesHandler(request)).rejects.toMatchObject({
+      code: 'aborted',
+      details: {
+        code: 'SUBSPLASH_LOCK_BUSY',
+        locked_keys: ['operation:remove-op-busy-1'],
+        wait_ms: 10000,
+        retry_after_ms: 1000,
+      },
+    });
+    expect(patchSpy).not.toHaveBeenCalled();
   });
 });

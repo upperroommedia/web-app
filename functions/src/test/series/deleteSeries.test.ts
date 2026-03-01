@@ -12,6 +12,7 @@ import {
 } from './firestoreHelpers';
 import deleteSeries, { DeleteSeriesInputType, DeleteSeriesOutputType } from '../../deleteSeries';
 import * as seriesHelpers from '../../helpers/seriesHelpers';
+import { claimOperation } from '../../locks/withIdempotency';
 
 type DeleteSeriesHandler = (request: TestRequest<DeleteSeriesInputType>) => Promise<DeleteSeriesOutputType>;
 const deleteSeriesHandler = deleteSeries as unknown as DeleteSeriesHandler;
@@ -420,6 +421,35 @@ describe('deleteSeries - Locking and Idempotency', () => {
     expect(successCount).toBe(1);
     expect(failureCount).toBe(1);
     expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should return busy payload details when operation key is already in progress', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Delete Busy Series');
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Delete Busy Series',
+    });
+    const deleteSpy = jest.spyOn(seriesHelpers, 'deleteSubsplashSeries');
+    await claimOperation('delete-op-busy-1');
+
+    const request: TestRequest<DeleteSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreId,
+        operationKey: 'delete-op-busy-1',
+      } as DeleteSeriesInputType,
+    };
+
+    await expect(deleteSeriesHandler(request)).rejects.toMatchObject({
+      code: 'aborted',
+      details: {
+        code: 'SUBSPLASH_LOCK_BUSY',
+        locked_keys: ['operation:delete-op-busy-1'],
+        wait_ms: 10000,
+        retry_after_ms: 1000,
+      },
+    });
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 
   it('should replay prior terminal result for duplicate operation key', async () => {

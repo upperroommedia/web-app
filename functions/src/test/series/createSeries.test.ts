@@ -7,6 +7,7 @@ import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mock
 import { clearFirestore, createSeriesDocument, getSeriesBySubsplashId, getAllSeries } from './firestoreHelpers';
 import createSeries, { CreateSeriesInputType, CreateSeriesOutputType } from '../../createSeries';
 import * as seriesHelpers from '../../helpers/seriesHelpers';
+import { claimOperation } from '../../locks/withIdempotency';
 
 // Type for the handler function
 type CreateSeriesHandler = (request: TestRequest<CreateSeriesInputType>) => Promise<CreateSeriesOutputType>;
@@ -436,6 +437,30 @@ describe('createSeries - Locking and Idempotency', () => {
 
     expect(firstResult).toEqual(secondResult);
     expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should return busy payload details when operation key is already in progress', async () => {
+    const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries');
+    await claimOperation('create-op-busy-1');
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Busy Create Series',
+        ownerId: TEST_USER_ID,
+        operationKey: 'create-op-busy-1',
+      } as CreateSeriesInputType,
+    };
+
+    await expect(createSeriesHandler(request)).rejects.toMatchObject({
+      code: 'aborted',
+      details: {
+        code: 'SUBSPLASH_LOCK_BUSY',
+        locked_keys: ['operation:create-op-busy-1'],
+        wait_ms: 10000,
+        retry_after_ms: 1000,
+      },
+    });
+    expect(createSpy).not.toHaveBeenCalled();
   });
 
   it('should release lock after failure so next operation key can proceed', async () => {

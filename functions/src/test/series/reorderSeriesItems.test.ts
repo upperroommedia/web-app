@@ -6,6 +6,8 @@
 import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mocks';
 import { clearFirestore, createSeriesDocument } from './firestoreHelpers';
 import reorderSeriesItems, { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../reorderSeriesItems';
+import * as seriesHelpers from '../../helpers/seriesHelpers';
+import * as lockStore from '../../locks/subsplashLockStore';
 
 // Type for the handler function
 type ReorderSeriesItemsHandler = (request: TestRequest<ReorderSeriesItemsInputType>) => Promise<ReorderSeriesItemsOutputType>;
@@ -255,5 +257,99 @@ describe('reorderSeriesItems - Error Handling', () => {
     };
 
     await expect(reorderSeriesItemsHandler(request)).rejects.toThrow();
+  });
+});
+
+describe('reorderSeriesItems - Locking and Idempotency', () => {
+  beforeEach(async () => {
+    await clearFirestore();
+    subsplashSeriesMock.reset();
+    networkFailureInjector.clear();
+    jest.restoreAllMocks();
+  });
+
+  it('should replay prior terminal result for duplicate operation key', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Replay Series');
+    const item = subsplashSeriesMock.createMediaItem('Replay Item', {
+      seriesId: subsplashSeries.id,
+      position: 1,
+    });
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Replay Series',
+      itemCount: 1,
+    });
+    const patchSpy = jest.spyOn(seriesHelpers, 'patchSeriesItemPositions');
+
+    const request: TestRequest<ReorderSeriesItemsInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreSeriesId: firestoreId,
+        itemOrder: [{ mediaItemId: item.id, position: 1 }],
+        operationKey: 'reorder-op-replay-1',
+      } as ReorderSeriesItemsInputType,
+    };
+
+    const firstResult = await reorderSeriesItemsHandler(request);
+    const secondResult = await reorderSeriesItemsHandler(request);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(patchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should wait for lock then return busy before reading remote membership', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Busy Series');
+    const item = subsplashSeriesMock.createMediaItem('Busy Item', {
+      seriesId: subsplashSeries.id,
+      position: 1,
+    });
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Busy Series',
+      itemCount: 1,
+    });
+
+    const lockKey = `series:${firestoreId}`;
+    await lockStore.acquireWithWait(lockKey, {
+      ownerToken: 'reorder-owner-1',
+      leaseTtlMs: 400,
+      pollIntervalMs: 25,
+    });
+    const heartbeat = lockStore.startHeartbeat(lockKey, {
+      ownerToken: 'reorder-owner-1',
+      leaseTtlMs: 400,
+      intervalMs: 100,
+    });
+
+    let getSeriesItemsCalls = 0;
+    networkFailureInjector.registerFailure(`getSeriesItems:${subsplashSeries.id}`, () => {
+      getSeriesItemsCalls += 1;
+      return true;
+    });
+
+    const request: TestRequest<ReorderSeriesItemsInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreSeriesId: firestoreId,
+        itemOrder: [{ mediaItemId: item.id, position: 1 }],
+        operationKey: 'reorder-op-busy-1',
+      } as ReorderSeriesItemsInputType,
+    };
+
+    try {
+      await expect(reorderSeriesItemsHandler(request)).rejects.toMatchObject({
+        code: 'aborted',
+        details: {
+          code: 'SUBSPLASH_LOCK_BUSY',
+          locked_keys: [lockKey],
+          wait_ms: 10000,
+          retry_after_ms: 200,
+        },
+      });
+      expect(getSeriesItemsCalls).toBe(0);
+    } finally {
+      heartbeat.stop();
+      await lockStore.releaseLock(lockKey, 'reorder-owner-1').catch(() => undefined);
+    }
   });
 });
