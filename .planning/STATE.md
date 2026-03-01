@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 03-subsplash-alpha-lock-concurrency-control
 status: executing
-last_updated: "2026-03-01T08:02:08.000Z"
-last_activity: 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
+last_updated: "2026-03-01T08:13:22.847Z"
+last_activity: 2026-03-01 - Completed phase 03 plan 05 caller lock/idempotency contract adoption
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 12
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Session State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** In Progress (03-01, 03-02, 03-03, and 03-04 complete; remaining phase 03 plans still in flight)
-**Last activity:** 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
+**Status:** Complete (03-01 through 03-05 complete)
+**Last activity:** 2026-03-01 - Completed phase 03 plan 05 caller lock/idempotency contract adoption
 
 ## Decisions
 
@@ -48,6 +48,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 03]: Series callables now use idempotency as an outer wrapper and lock scopes as inner execution guards.
 - [Phase 03]: Series mutation input interfaces keep operationKey optional with generated fallback keys for backwards-compatible callers.
 - [Phase 03]: Busy contention contract validation combines deterministic operation-key in-progress claims with explicit lock-timeout assertions.
+- [Phase 03]: Caller retries remain user-triggered; lock busy responses provide retry_after_ms guidance only.
+- [Phase 03]: Operation-key generation is centralized in utils/callableConcurrency.ts and reused across UI/API call sites.
 
 ## Accumulated Context
 
@@ -58,7 +60,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 ## Blockers
 
-- None recorded in state file.
+- Root lint/build currently blocked by pre-existing `no-void` errors in:
+  - `pages/admin/sermons.tsx:110`
+  - `components/uploaderComponents/UploaderComponent.tsx:507`
 
 ### Quick Tasks Completed
 
@@ -79,3 +83,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-02 with series mutation lock/idempotency wrappers and contention/replay regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-04 with sermon/media mutation lock wrappers and regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-03 with list mutation lock/idempotency wrappers and replay regression coverage.
+- 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-05 with caller operation-key propagation, lock-busy retry guidance, and client contract tests.
