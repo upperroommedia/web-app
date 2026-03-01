@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 04-role-based-invite-onboarding-and-operational-notification-routing
 status: executing
-last_updated: "2026-03-01T09:08:40Z"
-last_activity: 2026-03-01 - Completed phase 04 plan 02 role request creation
+last_updated: "2026-03-01T09:10:27Z"
+last_activity: 2026-03-01 - Completed phase 04 plan 03 invite backend implementation
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 13
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Session State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 04-role-based-invite-onboarding-and-operational-notification-routing
-**Status:** In Progress (04-01, 04-02, and 04-05 complete; 04-03 and 04-04 pending)
-**Last activity:** 2026-03-01 - Completed phase 04 plan 02 role request creation
+**Status:** In Progress (04-01, 04-02, 04-03, and 04-05 complete; 04-04 pending)
+**Last activity:** 2026-03-01 - Completed phase 04 plan 03 invite backend implementation
 
 ## Decisions
 
@@ -56,6 +56,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Role-request writes remain authoritative even when outbound notification enqueue fails.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Duplicate pending requests for the same requester/role return existing request metadata and skip re-queue.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Role request callable must be exported from functions index to be deployable.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Invite artifacts persist sha256 token hashes only; raw invite tokens are never stored.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Invite claim retries are allowed only from ROLE_FAILED and only for the original claimant uid/email.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Final claimed role resolves via ROLE_PRECEDENCE and merges existing custom claims before refresh-token revocation.
 
 ## Accumulated Context
 
@@ -90,3 +93,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-01 with notification params, queue helpers, and emulator regression tests.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-05 with publish/audio catch-path operational alert rollout and runtime regression coverage.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-02 with persistence-first role request callable, queue-failure fallback, and emulator regression coverage.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-03 with secure invite issue/claim callables and emulator lifecycle regression coverage.

@@ -30,9 +30,9 @@
 
 ### Invite Onboarding + Operational Notifications (Current Milestone)
 
-- [ ] **INVITE-01**: Admins can issue role-targeted invite links that are single-use, email-bound, and expire after 30 days.
-- [ ] **INVITE-02**: Invite claims assign roles immediately for matching authenticated users while preventing implicit role downgrades.
-- [ ] **INVITE-03**: Successful invite claims redirect users to a dedicated invite success route.
+- [x] **INVITE-01**: Admins can issue role-targeted invite links that are single-use, email-bound, and expire after 30 days.
+- [x] **INVITE-02**: Invite claims assign roles immediately for matching authenticated users while preventing implicit role downgrades.
+- [x] **INVITE-03**: Successful invite claims redirect users to a dedicated invite success route.
 - [x] **ROLE-REQ-01**: Role requests persist requester identity, requested role, timestamp, and admin-linkable metadata.
 - [x] **ROLE-REQ-02**: New role requests route notifications to environment-configurable recipients with required production defaults.
 - [x] **OPS-ALERT-01**: Role-request notification failures emit operational alert signals without rolling back persisted requests.
