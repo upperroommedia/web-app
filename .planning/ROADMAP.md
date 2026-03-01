@@ -84,3 +84,13 @@ Plans:
 - [ ] 03-03: Migrate list mutation callables to lock + idempotency wrappers
 - [ ] 03-04: Migrate sermon/media mutation callables to lock + idempotency wrappers
 - [ ] 03-05: Wire admin callers to operation keys and lock-busy retry handling
+
+### Phase 4: Role-based invite onboarding and operational notification routing
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 4 to break down)

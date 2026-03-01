@@ -42,6 +42,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 ### Roadmap Evolution
 
 - Phase 3 added: Subsplash alpha-lock concurrency control
+- Phase 4 added: Role-based invite onboarding and operational notification routing
 
 ## Blockers
 
