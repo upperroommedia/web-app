@@ -9,7 +9,7 @@ import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import PopUp from './PopUp';
@@ -32,6 +32,7 @@ const getDerivedSubtitle = (publishedItemCount: number): string => `${publishedI
 
 const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   const { user } = useAuth();
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
   const [formData, setFormData] = useState<{
     name: string;
     summary: string;
@@ -64,6 +65,14 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
       setNameError(null);
     }
   }, [formData.name]);
+
+  useEffect(() => {
+    if (!props.open) return;
+    const focusTimer = window.setTimeout(() => {
+      nameInputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [props.open]);
 
   const handleImageChange = useCallback((image: ImageType | ImageSizeType) => {
     setFormData((prev) => {
@@ -214,6 +223,8 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         )}
         
         <TextField
+          autoFocus
+          inputRef={nameInputRef}
           value={formData.name}
           onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
           error={!!nameError && formData.name !== ''}

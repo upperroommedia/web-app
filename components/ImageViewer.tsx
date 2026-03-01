@@ -1,7 +1,7 @@
 import { AspectRatio, ImageSizeType, ImageSizes, ImageType } from '../types/Image';
 
 import ImageSelector from './ImageSelector';
-import { memo, useCallback, useState } from 'react';
+import { KeyboardEvent, memo, useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import styles from '../styles/ImageViewer.module.css';
@@ -9,6 +9,7 @@ import { ISpeaker } from '../types/Speaker';
 import Button from '@mui/material/Button';
 import Cancel from '@mui/icons-material/Cancel';
 import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
 
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 interface propsType {
@@ -38,6 +39,12 @@ const ImageViewer = (props: propsType) => {
     confirmSelectedImage(newSelectedImage);
   }, [newSelectedImage, confirmSelectedImage]);
 
+  const handleKeyboardAction = useCallback((event: KeyboardEvent, action: () => void) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    action();
+  }, []);
+
   return (
     <>
       <div
@@ -61,11 +68,21 @@ const ImageViewer = (props: propsType) => {
                     aspectRatio: AspectRatio[type],
                     backgroundColor: image.averageColorHex || 'var(--placeholder-bg, #2d323b)',
                   }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Change ${type} image`}
                   onClick={() => {
                     setImageSelectorPopup(true);
                     setSelectedImage(image);
                     setNewSelectedImage(image);
                   }}
+                  onKeyDown={(event) =>
+                    handleKeyboardAction(event, () => {
+                      setImageSelectorPopup(true);
+                      setSelectedImage(image);
+                      setNewSelectedImage(image);
+                    })
+                  }
                 >
                   <Image
                     src={image.downloadLink}
@@ -80,14 +97,17 @@ const ImageViewer = (props: propsType) => {
                 <h3 className={styles.imageCover}>Change Image</h3>
                 <div className={styles.removeImage} onMouseOver={(e) => e.preventDefault()}>
                   <Tooltip title="Remove Image" placement="right-start">
-                    <Cancel
-                      sx={{ color: 'red' }}
+                    <IconButton
+                      size="small"
+                      aria-label={`Remove ${type} image`}
                       onClick={() => {
                         newImageCallback(image.type);
                         setSelectedImage(undefined);
                         setNewSelectedImage(undefined);
                       }}
-                    />
+                    >
+                      <Cancel sx={{ color: 'red' }} />
+                    </IconButton>
                   </Tooltip>
                 </div>
               </div>
@@ -122,10 +142,19 @@ const ImageViewer = (props: propsType) => {
                   cursor: 'pointer',
                   transition: 'all 0.2s ease-in-out',
                 }}
+                role="button"
+                tabIndex={0}
+                aria-label={`Add ${type} image`}
                 onClick={() => {
                   setImageSelectorPopup(true);
                   setSelectedImage({ type } as ImageType);
                 }}
+                onKeyDown={(event) =>
+                  handleKeyboardAction(event, () => {
+                    setImageSelectorPopup(true);
+                    setSelectedImage({ type } as ImageType);
+                  })
+                }
               >
                 <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '0.875rem' }}>Add image +</span>
               </div>
