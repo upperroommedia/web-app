@@ -47,3 +47,4 @@ tsconfig.tsbuildinfo
 .github
 
 test-results/
+output/
