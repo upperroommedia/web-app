@@ -5,11 +5,19 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { withIdempotency } from './locks/withIdempotency';
 
 export interface DeleteSubsplashListInputType {
   listId: string;
+  operationKey?: string;
 }
 export type DeleteSubsplashListOutputType = void;
+
+const getOperationKey = (operationKey?: string): string | undefined => {
+  const normalizedKey = operationKey?.trim();
+  return normalizedKey ? normalizedKey : undefined;
+};
 
 const deleteSubsplashList = onCall(
   async (request: CallableRequest<DeleteSubsplashListInputType>): Promise<DeleteSubsplashListOutputType> => {
@@ -18,9 +26,25 @@ const deleteSubsplashList = onCall(
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     const url = `https://core.subsplash.com/builder/v1/lists/${request.data.listId}`;
-    try {
+    const operationKey = getOperationKey(request.data.operationKey);
+
+    const runMutation = async (): Promise<DeleteSubsplashListOutputType> => {
       const config = createAxiosConfig(url, await authenticateSubsplash(), 'DELETE');
       await axios(config);
+    };
+
+    const runLockedMutation = async (): Promise<DeleteSubsplashListOutputType> => {
+      return withSubsplashLocks([`list:${request.data.listId}`], runMutation, {
+        ...(operationKey ? { operationKey } : {}),
+      });
+    };
+
+    try {
+      if (operationKey) {
+        await withIdempotency(operationKey, runLockedMutation);
+        return;
+      }
+      await runLockedMutation();
     } catch (error) {
       const httpsError = handleError(error);
       JSON.parse(JSON.stringify(httpsError));

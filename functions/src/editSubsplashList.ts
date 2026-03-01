@@ -5,14 +5,22 @@ import { ImageType } from '../../types/Image';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { withIdempotency } from './locks/withIdempotency';
 
 export interface EditSubsplashListInputType {
   listId: string;
   title?: string;
   subtitle?: string;
   images?: ImageType[];
+  operationKey?: string;
 }
 export type EditSubsplashListOutputType = void;
+
+const getOperationKey = (operationKey?: string): string | undefined => {
+  const normalizedKey = operationKey?.trim();
+  return normalizedKey ? normalizedKey : undefined;
+};
 
 const editSubpslashList = onCall(
   async (request: CallableRequest<EditSubsplashListInputType>): Promise<EditSubsplashListOutputType> => {
@@ -41,7 +49,8 @@ const editSubpslashList = onCall(
       }),
     });
     logger.log('request data', requestData);
-    try {
+    const operationKey = getOperationKey(data.operationKey);
+    const runMutation = async (): Promise<EditSubsplashListOutputType> => {
       const config = createAxiosConfig(
         `https://core.subsplash.com/builder/v1/lists/${data.listId}`,
         await authenticateSubsplash(),
@@ -50,6 +59,19 @@ const editSubpslashList = onCall(
       );
       logger.log('config', config);
       return (await axios(config)).data;
+    };
+
+    const runLockedMutation = async (): Promise<EditSubsplashListOutputType> => {
+      return withSubsplashLocks([`list:${data.listId}`], runMutation, {
+        ...(operationKey ? { operationKey } : {}),
+      });
+    };
+
+    try {
+      if (operationKey) {
+        return await withIdempotency(operationKey, runLockedMutation);
+      }
+      return await runLockedMutation();
     } catch (error) {
       throw handleError(error);
     }
