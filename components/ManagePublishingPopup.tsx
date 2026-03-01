@@ -23,7 +23,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CollectionsIcon from '@mui/icons-material/Collections';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
-import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField, setDoc } from '../firebase/firestore';
+import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField, setDoc, query, orderBy } from '../firebase/firestore';
 import { FunctionComponent, useCallback, useEffect, useState } from 'react';
 import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
 import { RemoveFromListInputType, RemoveFromListOutputType } from '../functions/src/removeFromList';
@@ -417,6 +417,41 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   // ==================== Series Functions ====================
+  const getSeriesPublishPosition = async (seriesId: string, sermonId: string): Promise<number | undefined> => {
+    try {
+      const orderedItemsSnapshot = await getDocs(
+        query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'asc'))
+      );
+
+      if (orderedItemsSnapshot.empty) {
+        return undefined;
+      }
+
+      const orderedItems = orderedItemsSnapshot.docs.map((seriesItemDoc) => {
+        const data = seriesItemDoc.data() as { publishedToSubsplash?: boolean };
+        return {
+          id: seriesItemDoc.id,
+          publishedToSubsplash: data.publishedToSubsplash === true,
+        };
+      });
+
+      const targetIndex = orderedItems.findIndex((item) => item.id === sermonId);
+      if (targetIndex < 0) {
+        return undefined;
+      }
+
+      const publishedAboveCount = orderedItems.slice(0, targetIndex).filter((item) => item.publishedToSubsplash).length;
+      const totalPublishedBeforeInsert = orderedItems.filter((item) => item.publishedToSubsplash).length;
+      const totalPublishedAfterInsert = totalPublishedBeforeInsert + 1;
+
+      // Subsplash positions are inverted: 1 = bottom.
+      return totalPublishedAfterInsert - publishedAboveCount;
+    } catch (err) {
+      console.warn('Failed to derive series publish position; falling back to default Subsplash ordering.', err);
+      return undefined;
+    }
+  };
+
   const publishToSeries = async (options?: { mediaItemId?: string; suppressAlert?: boolean }): Promise<SeriesPublishResult> => {
     const mediaItemId = options?.mediaItemId || sermon.subsplashId;
     if (!series || !mediaItemId) {
@@ -456,9 +491,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       }
 
       const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
+      const desiredPosition = await getSeriesPublishPosition(series.id, sermon.id);
       const addResult = await addToSeriesFunction({
         seriesSubsplashId,
         mediaItemId,
+        ...(desiredPosition !== undefined ? { position: desiredPosition } : {}),
       });
 
       if (!addResult || addResult.status !== 'success') {
