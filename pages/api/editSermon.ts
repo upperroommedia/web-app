@@ -21,6 +21,7 @@ import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSo
 import { getSquareImageStoragePath } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
 import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
+import { createOperationKey, parseLockBusyDetails } from '../../utils/callableConcurrency';
 
 interface EditSermonOptions {
   originalSeriesId?: string;
@@ -39,6 +40,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       topics: sermon.topics,
       images: sermon.images,
       date: new Date(sermon.dateMillis),
+      operationKey: createOperationKey('edit-sermon-subsplash-edit', sermon.id),
     };
     promises.push(editSubsplashSermon(input));
   }
@@ -61,7 +63,15 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
   const results = await Promise.allSettled(promises);
   for (const result of results) {
     if (result.status !== 'fulfilled') {
-      alert(result.reason);
+      const busyDetails = parseLockBusyDetails(result.reason);
+      if (busyDetails) {
+        const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
+        const lockedKeys = busyDetails.locked_keys.length > 0 ? ` Locked keys: ${busyDetails.locked_keys.join(', ')}.` : '';
+        alert(`Subsplash is busy processing another mutation.${lockedKeys} Retry in about ${retryInSeconds}s.`);
+      } else {
+        const reason = result.reason;
+        alert(reason instanceof Error ? reason.message : String(reason));
+      }
     }
   }
 

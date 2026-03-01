@@ -76,6 +76,7 @@ import { SeriesItem } from '../../../types/SeriesItem';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import useAuth from '../../../context/user/UserContext';
 import { createFunctionV2 } from '../../../utils/createFunction';
+import { createOperationKey, parseLockBusyDetails } from '../../../utils/callableConcurrency';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
@@ -89,6 +90,17 @@ import { serverTimestamp, deleteField } from 'firebase/firestore';
 interface SeriesItemWithSermon extends SeriesItem {
   sermon?: Sermon;
 }
+
+const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
+  const busyDetails = parseLockBusyDetails(error);
+  if (!busyDetails) {
+    return fallbackMessage;
+  }
+
+  const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
+  const lockedKeys = busyDetails.locked_keys.length > 0 ? ` Locked keys: ${busyDetails.locked_keys.join(', ')}.` : '';
+  return `${fallbackMessage} Another publishing action is in progress.${lockedKeys} Retry in about ${retryInSeconds}s.`;
+};
 
 const cloneSeriesItems = (source: SeriesItemWithSermon[]): SeriesItemWithSermon[] =>
   source.map((item) => ({
@@ -480,6 +492,7 @@ const SeriesDetailsPage = () => {
       firestoreId: series.id,
       skipSubsplash: false,
       images: series.images,
+      operationKey: createOperationKey('series-admin-create-series', series.id),
     });
 
     if (createResult.status !== 'success' || !createResult.subsplashId) {
@@ -519,6 +532,8 @@ const SeriesDetailsPage = () => {
       description: sermon.description,
       images: sermon.images,
       date: new Date(sermon.dateMillis),
+      operationKey: createOperationKey('series-admin-upload', sermon.id),
+      lockKey: sermon.id,
     };
 
     const uploadResult = await uploadToSubsplashFunction(uploadPayload);
@@ -597,6 +612,7 @@ const SeriesDetailsPage = () => {
         // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
         position: publishedItems.length - index,
       })),
+      operationKey: createOperationKey('series-admin-reorder', seriesId),
     });
 
     if (reorderResult.status !== 'success') {
@@ -665,6 +681,7 @@ const SeriesDetailsPage = () => {
       const addResult = await addToSeriesFunction({
         seriesSubsplashId,
         mediaItemId,
+        operationKey: createOperationKey('series-admin-add-item', seriesItem.id),
       });
 
       if (!addResult || addResult.status !== 'success') {
@@ -683,7 +700,10 @@ const SeriesDetailsPage = () => {
       } catch (reorderError: any) {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         try {
-          await removeFromSeriesFunction({ mediaItemId: confirmedMediaItemId });
+          await removeFromSeriesFunction({
+            mediaItemId: confirmedMediaItemId,
+            operationKey: createOperationKey('series-admin-rollback-remove', seriesItem.id),
+          });
           await syncSeriesItemPublishedState(seriesItem.id, {
             publishedToSubsplash: false,
           });
@@ -708,7 +728,7 @@ const SeriesDetailsPage = () => {
     } catch (err: any) {
       console.error('Error publishing series item:', err);
       if (!options?.suppressAlert) {
-        alert(`Error publishing item to series: ${err?.message || 'Unknown error'}`);
+        alert(`Error publishing item to series: ${getLockBusyMessage(err, err?.message || 'Unknown error')}`);
       }
       return false;
     } finally {
@@ -722,7 +742,10 @@ const SeriesDetailsPage = () => {
       const mediaItemId = seriesItem.sermonSubsplashId || seriesItem.sermon?.subsplashId;
       if (mediaItemId) {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-        await removeFromSeriesFunction({ mediaItemId });
+        await removeFromSeriesFunction({
+          mediaItemId,
+          operationKey: createOperationKey('series-admin-unpublish-item', seriesItem.id),
+        });
       }
 
       await updateDoc(doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.id), {
@@ -742,7 +765,7 @@ const SeriesDetailsPage = () => {
       ));
     } catch (err: any) {
       console.error('Error unpublishing series item:', err);
-      alert(`Error unpublishing item from series: ${err?.message || 'Unknown error'}`);
+      alert(`Error unpublishing item from series: ${getLockBusyMessage(err, err?.message || 'Unknown error')}`);
     } finally {
       setUnpublishingItemId(null);
       setUnpublishTarget(null);
@@ -834,6 +857,7 @@ const SeriesDetailsPage = () => {
             // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
             position: publishedItems.length - index,
           })),
+          operationKey: createOperationKey('series-admin-reorder', seriesId),
         });
         if (reorderResult.status !== 'success') {
           throw new Error(reorderResult.message || 'Subsplash reorder failed.');
@@ -862,7 +886,7 @@ const SeriesDetailsPage = () => {
     } catch (err: any) {
       console.error('Error saving order:', err);
       setItems(previousItems);
-      alert(`Error saving order. Reverted to last synced state.\n${err.message || 'Unknown error'}`);
+      alert(`Error saving order. Reverted to last synced state.\n${getLockBusyMessage(err, err.message || 'Unknown error')}`);
     } finally {
       setIsSaving(false);
     }
@@ -879,7 +903,10 @@ const SeriesDetailsPage = () => {
       if (series?.subsplashId && removeTarget.publishedToSubsplash === true && mediaItemId) {
         const removeFromSeriesCallable = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         try {
-          await removeFromSeriesCallable({ mediaItemId });
+          await removeFromSeriesCallable({
+            mediaItemId,
+            operationKey: createOperationKey('series-admin-remove-item', removeTarget.id),
+          });
         } catch (removeErr: any) {
           if (removeErr?.code !== 'functions/not-found') {
             throw removeErr;
@@ -916,7 +943,7 @@ const SeriesDetailsPage = () => {
       setRemoveTarget(null);
     } catch (err: any) {
       console.error('Error removing item:', err);
-      alert(`Error removing item: ${err.message || 'Unknown error'}`);
+      alert(`Error removing item: ${getLockBusyMessage(err, err.message || 'Unknown error')}`);
     } finally {
       setIsRemovingItem(false);
     }
@@ -1279,7 +1306,7 @@ const SeriesDetailsPage = () => {
       }
     } catch (err: any) {
       console.error('Error adding selected sermons:', err);
-      alert(`Error adding selected sermons: ${err?.message || 'Unknown error'}`);
+      alert(`Error adding selected sermons: ${getLockBusyMessage(err, err?.message || 'Unknown error')}`);
     } finally {
       setActiveAddingSermonId(null);
       setIsAddingSelectedSermons(false);
@@ -1305,11 +1332,14 @@ const SeriesDetailsPage = () => {
     try {
       // Always use callable so remote unlink/verify/delete semantics are enforced.
       const deleteSeriesCallable = createFunctionV2<DeleteSeriesInputType, DeleteSeriesOutputType>('deleteseries');
-      await deleteSeriesCallable({ firestoreId: seriesId });
+      await deleteSeriesCallable({
+        firestoreId: seriesId,
+        operationKey: createOperationKey('series-admin-delete-series', seriesId),
+      });
       router.push('/admin/series');
     } catch (err: any) {
       console.error('Error deleting series:', err);
-      alert(`Error deleting series: ${err.message || 'Unknown error'}`);
+      alert(`Error deleting series: ${getLockBusyMessage(err, err.message || 'Unknown error')}`);
     }
     setIsDeleting(false);
   };
@@ -1765,8 +1795,8 @@ const SeriesDetailsPage = () => {
                 unpublishItemFromSeries(unpublishTarget);
               }
             }}
-            startIcon={Boolean(unpublishingItemId) ? <CircularProgress size={16} color="inherit" /> : <CloudOffIcon fontSize="small" />}
-            disabled={Boolean(unpublishingItemId)}
+            startIcon={unpublishingItemId ? <CircularProgress size={16} color="inherit" /> : <CloudOffIcon fontSize="small" />}
+            disabled={!!unpublishingItemId}
           >
             Unpublish
           </Button>

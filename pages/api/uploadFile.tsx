@@ -11,6 +11,7 @@ import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
 import { UploadProgress } from '../../context/types';
+import { createOperationKey } from '../../utils/callableConcurrency';
 
 export type AudioSource =
   | {
@@ -127,7 +128,9 @@ const uploadFile = async (props: UploadFileProps) => {
         introUrl: introRef,
         outroUrl: outroRef,
       };
-      await generateAddIntroOutroTask(data);
+      await generateAddIntroOutroTask(data, {
+        metadata: { operationKey: createOperationKey('upload-file-add-intro-outro', props.sermon.id) },
+      });
       props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
     } catch (e) {
       // eslint-disable-next-line no-console
@@ -174,7 +177,9 @@ const uploadFile = async (props: UploadFileProps) => {
               introUrl: introRef,
               outroUrl: outroRef,
             };
-            await generateAddIntroOutroTask(data);
+            await generateAddIntroOutroTask(data, {
+              metadata: { operationKey: createOperationKey('upload-file-add-intro-outro', props.sermon.id) },
+            });
             props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
             resolve();
           } catch (e) {

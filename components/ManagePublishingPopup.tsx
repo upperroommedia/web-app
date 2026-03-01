@@ -41,6 +41,7 @@ import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { Series, seriesConverter } from '../types/Series';
 import { createFunctionV2 } from '../utils/createFunction';
+import { createOperationKey, parseLockBusyDetails } from '../utils/callableConcurrency';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { SermonList, sermonListConverter } from '../types/SermonList';
@@ -70,6 +71,17 @@ interface SeriesPublishResult {
   status: 'success' | 'error';
   error?: string;
 }
+
+const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
+  const busyDetails = parseLockBusyDetails(error);
+  if (!busyDetails) {
+    return fallbackMessage;
+  }
+
+  const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
+  const lockedKeys = busyDetails.locked_keys.length > 0 ? ` Locked keys: ${busyDetails.locked_keys.join(', ')}.` : '';
+  return `${fallbackMessage} Another publishing action is in progress.${lockedKeys} Retry in about ${retryInSeconds}s.`;
+};
 
 const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   sermon,
@@ -219,10 +231,14 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   // ==================== Subsplash Functions ====================
   const deleteFromSubsplash = useCallback(async () => {
     const deleteFromSubsplashCall = createFunctionV2<{ subsplashId: string }, void>('deletefromsubsplash');
+    const deleteOperationKey = createOperationKey('manage-publishing-delete', sermon.id);
     try {
       setIsUploadingToSubsplash(true);
       if (sermon.subsplashId) {
-        await deleteFromSubsplashCall({ subsplashId: sermon.subsplashId });
+        await deleteFromSubsplashCall(
+          { subsplashId: sermon.subsplashId },
+          { metadata: { operationKey: deleteOperationKey } }
+        );
       }
       
       const batch = writeBatch(firestore);
@@ -271,7 +287,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         onUpdate?.();
       } else {
         console.error('Error deleting from Subsplash:', error);
-        alert(error.message || 'Failed to delete from Subsplash');
+        alert(getLockBusyMessage(error, error.message || 'Failed to delete from Subsplash'));
       }
     } finally {
       setIsUploadingToSubsplash(false);
@@ -287,6 +303,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const subsplashIdToListIdMap = new Map<string, string>();
       const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
+      const uploadOperationKey = createOperationKey('manage-publishing-upload', sermon.id);
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
       const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
         title: sermon.title,
@@ -304,7 +321,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       let id = sermon.subsplashId;
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       if (!id) {
-        const response = (await uploadToSubsplashCallable(data)) as unknown as { id: string };
+        const response = (await uploadToSubsplashCallable({
+          ...data,
+          operationKey: uploadOperationKey,
+          lockKey: sermon.id,
+        })) as unknown as { id: string };
         id = response.id;
         await updateDoc(sermonRef, { subsplashId: id });
       }
@@ -322,6 +343,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
             title: list.name,
             subtitle: '',
             images: list.images,
+            operationKey: createOperationKey('manage-publishing-list-create', `${sermon.id}-${list.id}`),
           });
           await updateDoc(doc(firestore, `lists/${list.id}`), { subsplashId: listId });
           subsplashIdToListIdMap.set(listId, list.id);
@@ -332,6 +354,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const addToListReturn = await addToList({
         destinationListIds: listsMetadata.map(m => m.listId),
         mediaItem: { id, type: 'media-item' },
+        operationKey: createOperationKey('manage-publishing-list-add', sermon.id),
       });
 
       const batch = writeBatch(firestore);
@@ -362,7 +385,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       };
     } catch (error: any) {
       console.error('Error uploading to Subsplash:', error);
-      const errorMessage = error?.message || 'Unknown error';
+      const errorMessage = getLockBusyMessage(error, error?.message || 'Unknown error');
       if (!options?.suppressAlert) {
         alert(errorMessage);
       }
@@ -396,6 +419,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         ) as string[],
         itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
         itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
+        operationKey: createOperationKey('manage-publishing-list-remove', sermon.id),
       });
       
       const batch = writeBatch(firestore);
@@ -414,7 +438,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       onUpdate?.();
     } catch (error) {
       console.error('Error removing from list:', error);
-      alert(error);
+      alert(getLockBusyMessage(error, 'Failed to remove sermon from one or more Subsplash lists.'));
     }
   };
 
@@ -469,6 +493,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
         position: publishedItems.length - index,
       })),
+      operationKey: createOperationKey('manage-publishing-series-reorder', seriesId),
     });
 
     if (reorderResult.status !== 'success') {
@@ -512,6 +537,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
           firestoreId: series.id,
           skipSubsplash: false,
           images: series.images,
+          operationKey: createOperationKey('manage-publishing-series-create', series.id),
         });
 
         if (createResult.status !== 'success' || !createResult.subsplashId) {
@@ -530,6 +556,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const addResult = await addToSeriesFunction({
         seriesSubsplashId,
         mediaItemId,
+        operationKey: createOperationKey('manage-publishing-series-publish', sermon.id),
       });
 
       if (!addResult || addResult.status !== 'success') {
@@ -552,6 +579,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         try {
           await removeFromSeriesFunction({
             mediaItemId: addResult.mediaItemId || mediaItemId,
+            operationKey: createOperationKey('manage-publishing-series-rollback', sermon.id),
           });
         } catch (rollbackError: any) {
           throw new Error(
@@ -587,7 +615,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
     } catch (err: any) {
       console.error('Error publishing to series:', err);
       setSeriesPublished(false);
-      const errorMessage = err.message || 'Unknown error';
+      const errorMessage = getLockBusyMessage(err, err.message || 'Unknown error');
       if (!options?.suppressAlert) {
         alert(`Error publishing to series: ${errorMessage}`);
       }
@@ -619,7 +647,10 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
 
       if (mediaItemId) {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-        await removeFromSeriesFunction({ mediaItemId });
+        await removeFromSeriesFunction({
+          mediaItemId,
+          operationKey: createOperationKey('manage-publishing-series-unpublish', sermon.id),
+        });
       }
 
       if (seriesItemSnapshot.exists()) {
@@ -636,7 +667,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       };
     } catch (err: any) {
       console.error('Error unpublishing from series:', err);
-      const errorMessage = err.message || 'Unknown error';
+      const errorMessage = getLockBusyMessage(err, err.message || 'Unknown error');
       if (!options?.suppressAlert) {
         alert(`Error unpublishing from series: ${errorMessage}`);
       }

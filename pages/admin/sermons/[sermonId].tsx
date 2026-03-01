@@ -60,6 +60,7 @@ import useAuth from '../../../context/user/UserContext';
 import useAudioPlayer from '../../../context/audio/audioPlayerContext';
 import { useMediaState, useMediaRemote } from '@vidstack/react';
 import { createFunctionV2 } from '../../../utils/createFunction';
+import { createOperationKey, parseLockBusyDetails } from '../../../utils/callableConcurrency';
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../../../functions/src/uploadToSoundCloud';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
 import { AddtoListInputType, AddToListOutputType } from '../../../functions/src/addToList';
@@ -80,6 +81,17 @@ import database, { ref as dbRef } from '../../../firebase/database';
 import UploadStatusList from '../../../components/UploadStatusList';
 import LinearProgress from '@mui/material/LinearProgress';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
+
+const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
+  const busyDetails = parseLockBusyDetails(error);
+  if (!busyDetails) {
+    return fallbackMessage;
+  }
+
+  const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
+  const lockedKeys = busyDetails.locked_keys.length > 0 ? ` Locked keys: ${busyDetails.locked_keys.join(', ')}.` : '';
+  return `${fallbackMessage} Another publishing action is in progress.${lockedKeys} Retry in about ${retryInSeconds}s.`;
+};
 
 const SermonDetailsPage = () => {
   const router = useRouter();
@@ -311,6 +323,7 @@ const SermonDetailsPage = () => {
       const subsplashIdToListIdMap = new Map<string, string>();
       const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
+      const uploadOperationKey = createOperationKey('sermon-admin-upload', sermon.id);
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
 
       const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
@@ -331,7 +344,11 @@ const SermonDetailsPage = () => {
       let id = sermon.subsplashId;
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       if (!id) {
-        const response = (await uploadToSubsplashCallable(data)) as unknown as { id: string };
+        const response = (await uploadToSubsplashCallable({
+          ...data,
+          operationKey: uploadOperationKey,
+          lockKey: sermon.id,
+        })) as unknown as { id: string };
         id = response.id;
         await updateDoc(sermonRef, { subsplashId: id });
       }
@@ -343,7 +360,12 @@ const SermonDetailsPage = () => {
             return { listId: list.subsplashId, overflowBehavior: list.overflowBehavior, type: list.type };
           }
           const createNewSubsplashList = createFunctionV2<CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType>('createnewsubsplashlist');
-          const { listId } = await createNewSubsplashList({ title: list.name, subtitle: '', images: list.images });
+          const { listId } = await createNewSubsplashList({
+            title: list.name,
+            subtitle: '',
+            images: list.images,
+            operationKey: createOperationKey('sermon-admin-list-create', `${sermon.id}-${list.id}`),
+          });
           await updateDoc(doc(firestore, `lists/${list.id}`), { subsplashId: listId });
           subsplashIdToListIdMap.set(listId, list.id);
           return { listId, overflowBehavior: list.overflowBehavior, type: list.type };
@@ -353,6 +375,7 @@ const SermonDetailsPage = () => {
       const addToListReturn = await addToList({
         destinationListIds: listsMetadata.map(m => m.listId),
         mediaItem: { id, type: 'media-item' },
+        operationKey: createOperationKey('sermon-admin-list-add', sermon.id),
       });
 
       const batch = writeBatch(firestore);
@@ -371,7 +394,7 @@ const SermonDetailsPage = () => {
       return id;
     } catch (error) {
       console.error('Error uploading to Subsplash:', error);
-      alert(error);
+      alert(getLockBusyMessage(error, 'Failed to upload sermon to Subsplash.'));
       return undefined;
     } finally {
       setIsUploadingToSubsplash(false);
@@ -396,6 +419,7 @@ const SermonDetailsPage = () => {
         listItemIds: listsToRemoveFiltered.map((list) => list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : '') as string[],
         itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
         itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
+        operationKey: createOperationKey('sermon-admin-list-remove', sermon.id),
       });
 
       const batch = writeBatch(firestore);
@@ -411,17 +435,21 @@ const SermonDetailsPage = () => {
       await batch.commit();
     } catch (error) {
       console.error('Error removing from list:', error);
-      alert(error);
+      alert(getLockBusyMessage(error, 'Failed to remove sermon from one or more Subsplash lists.'));
     }
   };
 
   const deleteFromSubsplash = useCallback(async () => {
     if (!sermon) return;
     const deleteFromSubsplashCall = createFunctionV2<{ subsplashId: string }, void>('deletefromsubsplash');
+    const deleteOperationKey = createOperationKey('sermon-admin-delete', sermon.id);
     try {
       setIsUploadingToSubsplash(true);
       if (sermon.subsplashId) {
-        await deleteFromSubsplashCall({ subsplashId: sermon.subsplashId });
+        await deleteFromSubsplashCall(
+          { subsplashId: sermon.subsplashId },
+          { metadata: { operationKey: deleteOperationKey } }
+        );
       }
 
       const batch = writeBatch(firestore);
@@ -465,7 +493,7 @@ const SermonDetailsPage = () => {
         await batch.commit();
       } else {
         console.error('Error deleting from Subsplash:', error);
-        alert(error.message || 'Failed to delete from Subsplash');
+        alert(getLockBusyMessage(error, error.message || 'Failed to delete from Subsplash'));
       }
     } finally {
       setIsUploadingToSubsplash(false);
@@ -500,6 +528,7 @@ const SermonDetailsPage = () => {
         firestoreId: targetSeries.id,
         skipSubsplash: false,
         images: targetSeries.images,
+        operationKey: createOperationKey('sermon-admin-series-create', targetSeries.id),
       });
 
       if (createResult.status !== 'success' || !createResult.subsplashId) {
@@ -521,6 +550,7 @@ const SermonDetailsPage = () => {
     const addResult = await addToSeriesFunction({
       seriesSubsplashId,
       mediaItemId,
+      operationKey: createOperationKey('sermon-admin-series-publish', sermon.id),
     });
     if (!addResult || addResult.status !== 'success') {
       throw new Error(addResult?.error || 'Failed to add sermon to series.');
@@ -573,6 +603,7 @@ const SermonDetailsPage = () => {
           // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
           position: publishedItems.length - index,
         })),
+        operationKey: createOperationKey('sermon-admin-series-reorder', resolvedSeries.id),
       });
       if (reorderResult.status !== 'success') {
         throw new Error(reorderResult.message || 'Subsplash reorder failed.');
@@ -580,7 +611,10 @@ const SermonDetailsPage = () => {
     } catch (reorderError: any) {
       const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
       try {
-        await removeFromSeriesFunction({ mediaItemId: confirmedMediaItemId });
+        await removeFromSeriesFunction({
+          mediaItemId: confirmedMediaItemId,
+          operationKey: createOperationKey('sermon-admin-series-rollback', sermon.id),
+        });
         await setDoc(
           doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id),
           {
@@ -618,7 +652,7 @@ const SermonDetailsPage = () => {
       await publishToSeriesForSeries(series);
     } catch (err: any) {
       console.error('Error publishing sermon to series:', err);
-      alert(err?.message || 'Failed to publish sermon to series');
+      alert(getLockBusyMessage(err, err?.message || 'Failed to publish sermon to series'));
     } finally {
       setSeriesPublishAction(null);
     }
@@ -739,7 +773,10 @@ const SermonDetailsPage = () => {
 
       if (mediaItemId) {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-        await removeFromSeriesFunction({ mediaItemId });
+        await removeFromSeriesFunction({
+          mediaItemId,
+          operationKey: createOperationKey('sermon-admin-series-unpublish', sermon.id),
+        });
       }
 
       await setDoc(
@@ -754,7 +791,7 @@ const SermonDetailsPage = () => {
       setConfirmSeriesUnpublishOpen(false);
     } catch (err: any) {
       console.error('Error unpublishing sermon from series:', err);
-      alert(err?.message || 'Failed to unpublish sermon from series');
+      alert(getLockBusyMessage(err, err?.message || 'Failed to unpublish sermon from series'));
     } finally {
       setSeriesPublishAction(null);
     }
