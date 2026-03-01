@@ -33,7 +33,7 @@
 - [ ] **INVITE-01**: Admins can issue role-targeted invite links that are single-use, email-bound, and expire after 30 days.
 - [ ] **INVITE-02**: Invite claims assign roles immediately for matching authenticated users while preventing implicit role downgrades.
 - [ ] **INVITE-03**: Successful invite claims redirect users to a dedicated invite success route.
-- [ ] **ROLE-REQ-01**: Role requests persist requester identity, requested role, timestamp, and admin-linkable metadata.
+- [x] **ROLE-REQ-01**: Role requests persist requester identity, requested role, timestamp, and admin-linkable metadata.
 - [x] **ROLE-REQ-02**: New role requests route notifications to environment-configurable recipients with required production defaults.
 - [x] **OPS-ALERT-01**: Role-request notification failures emit operational alert signals without rolling back persisted requests.
 - [x] **OPS-ALERT-02**: Runtime caught failures enqueue structured operational notifications for every occurrence (no dedupe suppression).
@@ -77,7 +77,7 @@
 | INVITE-01 | Phase 4 | In Progress |
 | INVITE-02 | Phase 4 | In Progress |
 | INVITE-03 | Phase 4 | In Progress |
-| ROLE-REQ-01 | Phase 4 | In Progress |
+| ROLE-REQ-01 | Phase 4 | Complete |
 | ROLE-REQ-02 | Phase 4 | Complete |
 | OPS-ALERT-01 | Phase 4 | Complete |
 | OPS-ALERT-02 | Phase 4 | Complete |
@@ -95,4 +95,4 @@
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-03-01 after phase 04-05 completion*
+*Last updated: 2026-03-01 after phase 04-02 completion*
