@@ -1,4 +1,4 @@
-import { ChangeEvent, memo, useState } from 'react';
+import { ChangeEvent, ReactNode, memo, useState } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -138,9 +138,10 @@ const UserTableHead = (props: UserTableProps) => {
 interface UserTableToolbarProps {
   searchValue: string;
   onSearchChange: (value: string) => void;
+  actions?: ReactNode;
 }
 
-const UserTableToolbar = ({ searchValue, onSearchChange }: UserTableToolbarProps) => {
+const UserTableToolbar = ({ searchValue, onSearchChange, actions }: UserTableToolbarProps) => {
   return (
     <Toolbar
       sx={{
@@ -167,6 +168,7 @@ const UserTableToolbar = ({ searchValue, onSearchChange }: UserTableToolbarProps
           ),
         }}
       />
+      {actions && <Box sx={{ flexShrink: 0 }}>{actions}</Box>}
     </Toolbar>
   );
 };
@@ -175,6 +177,7 @@ const UserTable = (props: {
   usersWithLoading: UserWithLoading[];
   handleRoleChange: (uid: string, role: string) => Promise<void>;
   loading: boolean;
+  toolbarActions?: ReactNode;
 }) => {
   const [order, setOrder] = useState<Order>('asc');
   const [orderBy, setOrderBy] = useState<keyof User>('email');
@@ -211,7 +214,7 @@ const UserTable = (props: {
   return (
     <Box width={1} display="flex" justifyContent="center">
       <Card sx={{ width: 1 }}>
-        <UserTableToolbar searchValue={searchQuery} onSearchChange={setSearchQuery} />
+        <UserTableToolbar searchValue={searchQuery} onSearchChange={setSearchQuery} actions={props.toolbarActions} />
         <TableContainer>
           <Table aria-labelledby="tableTitle" size={'medium'}>
             <UserTableHead
@@ -324,8 +327,8 @@ const UserTable = (props: {
 };
 
 function userTablesAreEqual(
-  prevProps: { usersWithLoading: UserWithLoading[]; loading: boolean },
-  nextProps: { usersWithLoading: UserWithLoading[]; loading: boolean }
+  prevProps: { usersWithLoading: UserWithLoading[]; loading: boolean; toolbarActions?: ReactNode },
+  nextProps: { usersWithLoading: UserWithLoading[]; loading: boolean; toolbarActions?: ReactNode }
 ) {
   return (
     prevProps.loading === nextProps.loading &&
