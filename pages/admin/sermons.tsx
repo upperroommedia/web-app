@@ -163,10 +163,10 @@ const AdminSermons = () => {
       </Box>
       <Snackbar
         key={deleteToast.id}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         open={deleteToast.open}
         autoHideDuration={deleteToast.severity === 'info' ? undefined : 6000}
-        TransitionComponent={(props) => <Slide {...props} direction="right" />}
+        TransitionComponent={(props) => <Slide {...props} direction="up" />}
         onClose={(_, reason) => {
           if (reason === 'clickaway') return;
           setDeleteToast((previousToast) => ({ ...previousToast, open: false }));
