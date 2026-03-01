@@ -60,7 +60,6 @@ import useAuth from '../../../context/user/UserContext';
 import useAudioPlayer from '../../../context/audio/audioPlayerContext';
 import { useMediaState, useMediaRemote } from '@vidstack/react';
 import { createFunctionV2 } from '../../../utils/createFunction';
-import { DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType } from '../../../functions/src/deleteFromSubsplash';
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../../../functions/src/uploadToSoundCloud';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
 import { AddtoListInputType, AddToListOutputType } from '../../../functions/src/addToList';
@@ -79,6 +78,7 @@ import { useCollectionData, useDocument } from 'react-firebase-hooks/firestore';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref as dbRef } from '../../../firebase/database';
 import UploadStatusList from '../../../components/UploadStatusList';
+import { deleteSermonWithExternalCleanup } from '../../../utils/deleteSermonWithExternalCleanup';
 import LinearProgress from '@mui/material/LinearProgress';
 
 const SermonDetailsPage = () => {
@@ -208,31 +208,24 @@ const SermonDetailsPage = () => {
 
     setIsDeleting(true);
     try {
-      const promises: Promise<any>[] = [];
-
-      if (sermon.subsplashId) {
-        const deleteFromSubsplash = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>('deletefromsubsplash');
-        promises.push(deleteFromSubsplash({ subsplashId: sermon.subsplashId }));
-      }
-
-      if (sermon.soundCloudTrackId) {
-        const deleteFromSoundCloud = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
-        promises.push(deleteFromSoundCloud({ soundCloudTrackId: sermon.soundCloudTrackId }));
-      }
-
-      await Promise.allSettled(promises);
-      await deleteDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter));
+      await deleteSermonWithExternalCleanup({
+        sermonId: sermon.id,
+        subsplashId: sermon.subsplashId,
+        soundCloudTrackId: sermon.soundCloudTrackId,
+      });
 
       if (currentSermon?.id === sermon.id) {
         setCurrentSermon(undefined);
       }
 
-      router.push('/admin/sermons');
-    } catch (err: any) {
+      await router.replace('/admin/sermons');
+    } catch (err) {
       console.error('Error deleting sermon:', err);
-      alert(err.message || 'Failed to delete sermon');
+      const message = err instanceof Error ? err.message : 'Failed to delete sermon';
+      alert(message);
+    } finally {
+      setIsDeleting(false);
     }
-    setIsDeleting(false);
   }, [sermon, currentSermon, setCurrentSermon, router]);
 
   // SoundCloud upload/delete
