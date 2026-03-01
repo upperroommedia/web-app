@@ -20,8 +20,10 @@ import {
 import { createListDocument, clearFirestore } from './firestoreHelpers';
 import addToList from '../../addToList';
 import { SubsplashListRow } from '../../types/Subsplash';
+import axios from 'axios';
 
 const addToListHandler = addToList as unknown as AddToListHandler;
+const axiosMock = axios as unknown as jest.Mock;
 
 describe('addToList - Transaction Retry Duplication Bug', () => {
   beforeEach(async () => {
@@ -273,5 +275,47 @@ describe('addToList - Transaction Retry Duplication Bug', () => {
     expect(uniqueItemIds).toContain('item-8');
     expect(uniqueItemIds).toContain('item-9');
   });
-});
 
+  it('should replay overflow mutation result for duplicate operation keys', async () => {
+    const listId = 'retry-duplication-op-key-replay';
+    subsplashMock.createList(listId, 'Replay Duplication List', 10);
+
+    const initialRows: SubsplashListRow[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `row-${i}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: i + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: listId },
+        'media-item': { id: `item-${i}` },
+      },
+    }));
+    subsplashMock.listRows.set(listId, initialRows);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Replay Duplication List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 10,
+    });
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem: { id: 'replay-item', type: 'media-item' as const },
+        maxListSize: 10,
+        operationKey: 'duplication-replay-op-1',
+      },
+    };
+
+    axiosMock.mockClear();
+    const firstResult = await addToListHandler(request);
+    const callCountAfterFirst = axiosMock.mock.calls.length;
+    const secondResult = await addToListHandler(request);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(axiosMock.mock.calls.length).toBe(callCountAfterFirst);
+  });
+});

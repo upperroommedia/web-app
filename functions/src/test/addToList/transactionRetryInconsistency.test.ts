@@ -26,9 +26,11 @@ import addToList from '../../addToList';
 import { SubsplashListRow } from '../../types/Subsplash';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
+import axios from 'axios';
 
 const addToListHandler = addToList as unknown as AddToListHandler;
 const firestoreDB = firebaseAdmin.firestore();
+const axiosMock = axios as unknown as jest.Mock;
 
 describe('addToList - Transaction Retry Inconsistency Bug', () => {
   beforeEach(async () => {
@@ -277,5 +279,47 @@ describe('addToList - Transaction Retry Inconsistency Bug', () => {
     expect(overflowData.subsplashId).toBe(overflowListId);
     expect(overflowData.isMoreSermonsList).toBe(true);
   });
-});
 
+  it('should replay deterministic result for duplicate operation keys after overflow writes', async () => {
+    const listId = 'retry-inconsistency-op-key-replay';
+    subsplashMock.createList(listId, 'Replay Inconsistency List', 10);
+
+    const initialRows: SubsplashListRow[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `row-${i}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: i + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: listId },
+        'media-item': { id: `item-${i}` },
+      },
+    }));
+    subsplashMock.listRows.set(listId, initialRows);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Replay Inconsistency List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 10,
+    });
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem: { id: 'replay-inconsistency-item', type: 'media-item' as const },
+        maxListSize: 10,
+        operationKey: 'inconsistency-replay-op-1',
+      },
+    };
+
+    axiosMock.mockClear();
+    const firstResult = await addToListHandler(request);
+    const callCountAfterFirst = axiosMock.mock.calls.length;
+    const secondResult = await addToListHandler(request);
+
+    expect(firstResult).toEqual(secondResult);
+    expect(axiosMock.mock.calls.length).toBe(callCountAfterFirst);
+  });
+});
