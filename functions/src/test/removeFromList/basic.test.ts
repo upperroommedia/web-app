@@ -6,6 +6,9 @@ import {
 import { createListDocument, clearFirestore } from '../addToList/firestoreHelpers';
 import removeFromList from '../../removeFromList';
 import { RemoveFromListInputType } from '../../removeFromList';
+import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import axios from 'axios';
+import * as lockStore from '../../locks/subsplashLockStore';
 
 // Type for the handler function (what onCall wraps)
 export type RemoveFromListTestRequest = {
@@ -18,6 +21,7 @@ export type RemoveFromListTestRequest = {
 };
 
 export type RemoveFromListHandler = (request: RemoveFromListTestRequest) => Promise<import('../../removeFromList').RemoveFromListOutputType>;
+const axiosMock = axios as unknown as jest.Mock;
 
 // Mock dependencies (Subsplash API only - Firestore uses real emulator)
 jest.mock('../../subsplashUtils', () => ({
@@ -52,9 +56,12 @@ jest.mock('firebase-functions/v2/https', () => ({
 
 const removeFromListHandler = removeFromList as unknown as RemoveFromListHandler;
 
+jest.setTimeout(20_000);
+
 describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () => {
   beforeEach(async () => {
     await clearFirestore();
+    await firebaseAdmin.database().ref('subsplashLocks').remove();
     subsplashMock.reset();
   });
 
@@ -450,5 +457,110 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     const overflow2Rows = subsplashMock.getListRows(overflowList2Id);
     expect(overflow2Rows).toHaveLength(0);
   });
-});
 
+  it('should replay duplicate operation keys without repeating delete work', async () => {
+    const listId = 'remove-test-op-key-replay';
+    subsplashMock.createList(listId, 'Replay Remove List');
+    subsplashMock.listRows.set(listId, [
+      {
+        id: 'remove-row-op-key',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'remove-item-op-key' },
+        },
+      },
+    ]);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Replay Remove List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+    });
+
+    const request: RemoveFromListTestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        listIds: [listId],
+        listItemIds: ['remove-row-op-key'],
+        itemIds: ['remove-item-op-key'],
+        itemTypes: ['media-item'],
+        operationKey: 'remove-op-key-replay-1',
+      } as RemoveFromListInputType & { operationKey: string },
+    };
+
+    axiosMock.mockClear();
+    const firstResult = await removeFromListHandler(request);
+    const callCountAfterFirst = axiosMock.mock.calls.length;
+    const secondResult = await removeFromListHandler(request);
+
+    expect(firstResult[0].status).toBe('success');
+    expect(secondResult).toEqual(firstResult);
+    expect(axiosMock.mock.calls.length).toBe(callCountAfterFirst);
+  });
+
+  it('should return busy lock metadata when list lock contention times out', async () => {
+    const listId = 'remove-test-lock-timeout';
+    subsplashMock.createList(listId, 'Remove Timeout List');
+    subsplashMock.listRows.set(listId, [
+      {
+        id: 'remove-timeout-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'remove-timeout-item' },
+        },
+      },
+    ]);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Remove Timeout List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+    });
+
+    await lockStore.acquireWithWait(`list:${listId}`, {
+      ownerToken: 'remove-timeout-owner',
+      leaseTtlMs: 400,
+      pollIntervalMs: 25,
+    });
+    const heartbeat = lockStore.startHeartbeat(`list:${listId}`, {
+      ownerToken: 'remove-timeout-owner',
+      leaseTtlMs: 400,
+      intervalMs: 100,
+    });
+
+    try {
+      const result = await removeFromListHandler({
+        auth: { token: { role: 'admin' } },
+        data: {
+          listIds: [listId],
+          listItemIds: ['remove-timeout-row'],
+          itemIds: ['remove-timeout-item'],
+          itemTypes: ['media-item'],
+          operationKey: 'remove-op-key-lock-timeout',
+        } as RemoveFromListInputType & { operationKey: string },
+      });
+
+      expect(result[0].status).toBe('error');
+      if (result[0].status === 'error') {
+        expect((result[0] as { errorCode?: string }).errorCode).toBe('aborted');
+        expect((result[0] as { errorDetails?: { code?: string; locked_keys?: string[]; wait_ms?: number } }).errorDetails)
+          .toMatchObject({
+            code: 'SUBSPLASH_LOCK_BUSY',
+            locked_keys: [`list:${listId}`],
+            wait_ms: 10_000,
+          });
+      }
+    } finally {
+      heartbeat.stop();
+      await lockStore.releaseLock(`list:${listId}`, 'remove-timeout-owner').catch(() => undefined);
+    }
+  });
+});

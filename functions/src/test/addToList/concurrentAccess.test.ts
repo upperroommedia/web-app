@@ -7,14 +7,17 @@ import {
 import { createListDocument, clearFirestore } from './firestoreHelpers';
 import addToList from '../../addToList';
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import axios from 'axios';
 
 const firestoreDB = firebaseAdmin.firestore();
+const axiosMock = axios as unknown as jest.Mock;
 
 const addToListHandler = addToList as unknown as AddToListHandler;
 
 describe('addToList - Concurrent Access with Firestore Transactions (Real Firestore Emulator)', () => {
   beforeEach(async () => {
     await clearFirestore();
+    await firebaseAdmin.database().ref('subsplashLocks').remove();
     subsplashMock.reset();
     subsplashMock.maxListSize = 10; // Set to 10 for testing
   });
@@ -337,5 +340,35 @@ describe('addToList - Concurrent Access with Firestore Transactions (Real Firest
     expect(itemIds).toContain('delayed-item-1');
     expect(itemIds).toContain('delayed-item-2');
   });
-});
 
+  it('should replay duplicate operation keys without repeating write work', async () => {
+    const listId = 'concurrentAccess-op-key-replay';
+    const mediaItem = { id: 'item-op-key', type: 'media-item' as const };
+    subsplashMock.createList(listId, 'Operation Key Replay List');
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Operation Key Replay List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+    });
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem,
+        maxListSize: 10,
+        operationKey: 'add-list-replay-1',
+      } as TestRequest['data'] & { operationKey: string },
+    };
+
+    axiosMock.mockClear();
+    const firstResult = await addToListHandler(request);
+    const callCountAfterFirst = axiosMock.mock.calls.length;
+    const secondResult = await addToListHandler(request);
+
+    expect(firstResult[0].status).toBe('success');
+    expect(secondResult).toEqual(firstResult);
+    expect(axiosMock.mock.calls.length).toBe(callCountAfterFirst);
+  });
+});
