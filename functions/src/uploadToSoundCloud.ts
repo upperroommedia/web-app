@@ -5,6 +5,7 @@ import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '../../types/User';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface UploadToSoundCloudInputType {
   audioStoragePath: string;
@@ -44,6 +45,15 @@ const uploadToSoundCloudCall = onCall(
       logger.log('SoundCloud upload response track id', soundCloudTrackId);
       return { soundCloudTrackId };
     } catch (error) {
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
+        summary: 'uploadToSoundCloud callable failed during publish upload flow.',
+        error,
+        context: {
+          functionName: 'uploadToSoundCloud',
+          audioStoragePath: data.audioStoragePath,
+        },
+      });
       throw handleError(error);
     }
   }

@@ -4,6 +4,7 @@ import { soundcloudAccessToken } from './soundcloudSecrets';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '../../types/User';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface DeleteFromSoundCloudInputType {
   soundCloudTrackId: string;
@@ -28,6 +29,15 @@ const deleteFromSoundCloud = onCall(
       logger.log('Track deleted from SoundCloud');
     } catch (error) {
       logger.error(error);
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SOUNDCLOUD_DELETE_RUNTIME_FAILURE',
+        summary: 'deleteFromSoundCloud callable failed during publish delete flow.',
+        error,
+        context: {
+          functionName: 'deleteFromSoundCloud',
+          soundCloudTrackId: request.data.soundCloudTrackId,
+        },
+      });
       throw handleError(error);
     }
   }

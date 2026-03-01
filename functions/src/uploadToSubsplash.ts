@@ -8,6 +8,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   operationKey: string;
@@ -133,6 +134,16 @@ const uploadToSubsplash = onCall(async (request: CallableRequest<UPLOAD_TO_SUBSP
     );
   } catch (error) {
     logger.error(error);
+    await emitOperationalAlert({
+      alertCode: 'PUBLISH_SUBSPLASH_UPLOAD_RUNTIME_FAILURE',
+      summary: 'uploadToSubsplash callable failed during publish upload flow.',
+      error,
+      context: {
+        functionName: 'uploadToSubsplash',
+        operationKey,
+        lockKey,
+      },
+    });
     throw handleError(error);
   }
 });

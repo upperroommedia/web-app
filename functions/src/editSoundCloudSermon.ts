@@ -6,6 +6,7 @@ import { UploadToSoundCloudInputType } from './uploadToSoundCloud';
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
 import { canUserRolePublish } from '../../types/User';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA
   extends Partial<Omit<UploadToSoundCloudInputType, 'audioStoragePath'>> {
@@ -36,6 +37,15 @@ const editOnSoundCloud = onCall(
         }),
       });
     } catch (error) {
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SOUNDCLOUD_EDIT_RUNTIME_FAILURE',
+        summary: 'editSoundCloudSermon callable failed during publish edit flow.',
+        error,
+        context: {
+          functionName: 'editSoundCloudSermon',
+          trackId: data.trackId,
+        },
+      });
       throw handleError(error);
     }
   }
