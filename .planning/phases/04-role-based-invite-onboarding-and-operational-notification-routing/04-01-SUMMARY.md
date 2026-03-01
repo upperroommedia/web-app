@@ -35,7 +35,7 @@ patterns-established:
   - "Notification helper boundary: build structured payload -> logger.error -> queueEmail."
   - "Param accessors must tolerate local/emulator execution where firebase-functions list params can be unset."
 requirements-completed: [ROLE-REQ-02, OPS-ALERT-02]
-duration: 5m
+duration: 8m
 completed: 2026-03-01
 ---
 
@@ -45,9 +45,9 @@ completed: 2026-03-01
 
 ## Performance
 
-- **Duration:** 5 min
+- **Duration:** 8 min
 - **Started:** 2026-03-01T08:07:52Z
-- **Completed:** 2026-03-01T08:12:50Z
+- **Completed:** 2026-03-01T08:16:36Z
 - **Tasks:** 3
 - **Files modified:** 6
 
