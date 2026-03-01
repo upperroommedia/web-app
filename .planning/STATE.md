@@ -2,14 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
-current_phase: 02-dev-external-api-mocking
+current_phase: 03-subsplash-alpha-lock-concurrency-control
 status: In Progress
-last_updated: "2026-03-01T07:07:51.000Z"
+last_updated: "2026-03-01T07:41:01.000Z"
+last_activity: "2026-03-01 - Completed phase 03 plan 01 lock/idempotency substrate"
 progress:
-  total_phases: 2
+  total_phases: 4
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 2
+  total_plans: 8
+  completed_plans: 4
 ---
 
 # Session State
@@ -19,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Phase 02-01 dev safety work
+**Current focus:** Phase 03 lock/idempotency substrate rollout
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
-**Current phase:** 02-dev-external-api-mocking
-**Status:** Ready for next execution plan
-**Last activity:** 2026-03-01 - Completed quick task 2: Immediate redirect to admin sermons with destination delete execution + toasts
+**Current phase:** 03-subsplash-alpha-lock-concurrency-control
+**Status:** In Progress (03-01 complete, ready for 03-02)
+**Last activity:** 2026-03-01 - Completed phase 03 plan 01 lock/idempotency substrate
 
 ## Decisions
 
@@ -36,6 +37,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 01-series-subtitle-automation]: Backfill runs dry-run by default and requires explicit --apply for writes.
 - [Phase 01-series-subtitle-automation]: Series verification used direct emulator+jest commands because pnpm test argument forwarding remained unreliable.
 - [Quick 2 immediate redirect]: Delete confirm now redirects immediately and executes delete once in `/admin/sermons` via intent payload.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: Lock rows are stored in RTDB under subsplashLocks/{encodedLockKey} with lease-based ownership and stale takeover.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: Release failures always log structured Cloud Logging events and persist fallback records in Firestore lockReleaseFailures.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: Failed idempotency records are reclaimable for retries and explicitly clear stale success payloads before re-execution.
 
 ## Accumulated Context
 
@@ -63,3 +67,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-02-28: Completed 01-series-subtitle-automation/01-02 with atomic task commits and summary.
 - 2026-03-01: Completed quick task 1 (sermon counter overwrite prevention + invariant auto-recalc guard).
 - 2026-03-01: Completed quick task 2 (immediate details-page redirect to `/admin/sermons`, one-shot delete execution, progress/success/error toasts).
+- 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-01 with lock/idempotency primitives and emulator lock-layer tests.
