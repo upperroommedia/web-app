@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 03-subsplash-alpha-lock-concurrency-control
 status: executing
-last_updated: "2026-03-01T08:03:01.507Z"
+last_updated: "2026-03-01T08:02:08.000Z"
 last_activity: 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
 progress:
   total_phases: 3
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** In Progress (03-01, 03-03, and 03-04 complete; remaining phase 03 plans still in flight)
+**Status:** In Progress (03-01, 03-02, 03-03, and 03-04 complete; remaining phase 03 plans still in flight)
 **Last activity:** 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
 
 ## Decisions
@@ -76,5 +76,6 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed quick task 1 (sermon counter overwrite prevention + invariant auto-recalc guard).
 - 2026-03-01: Completed quick task 2 (immediate details-page redirect to `/admin/sermons`, one-shot delete execution, progress/success/error toasts).
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-01 with lock/idempotency primitives and emulator lock-layer tests.
+- 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-02 with series mutation lock/idempotency wrappers and contention/replay regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-04 with sermon/media mutation lock wrappers and regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-03 with list mutation lock/idempotency wrappers and replay regression coverage.
