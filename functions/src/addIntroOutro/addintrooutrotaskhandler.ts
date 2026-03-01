@@ -28,6 +28,7 @@ import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
 import { PROCESSED_SERMONS_BUCKET } from '../../../constants/storage_constants';
 import trim from './trim';
+import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 // import http from 'http';
 
 // These will remain constant between function invocations
@@ -305,6 +306,25 @@ const addintrooutrotaskhandler = onTaskDispatched(
         timeoutMillis
       );
     } catch (e) {
+      try {
+        await emitOperationalAlert({
+          alertCode: 'AUDIO_TASK_HANDLER_RUNTIME_FAILURE',
+          summary: 'addintrooutrotaskhandler failed while processing add-intro/outro task.',
+          error: e,
+          context: {
+            functionName: 'addintrooutrotaskhandler',
+            sermonId: data.id,
+            audioSourceType: audioSource.type,
+            audioSource: audioSource.source,
+            taskRoute: 'process-audio',
+          },
+        });
+      } catch (alertError) {
+        logger.error('Failed to emit operational alert for addintrooutrotaskhandler', {
+          alertError,
+          originalError: e,
+        });
+      }
       let message = 'Something Went Wrong';
       if (e instanceof HttpsError) {
         message = e.message;
