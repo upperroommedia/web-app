@@ -6,7 +6,11 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { FieldValue } from 'firebase-admin/firestore';
 import { authenticateSubsplash } from './subsplashUtils';
-import { createSubsplashSeries, getSeriesSubtitleFromPublishedCount } from './helpers/seriesHelpers';
+import {
+  createSubsplashSeries,
+  getSeriesSubtitleFromPublishedCount,
+  patchSeriesMetadata,
+} from './helpers/seriesHelpers';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
@@ -17,6 +21,7 @@ export interface CreateSeriesInputType {
   title: string;
   summary?: string;
   ownerId: string;              // User ID who owns the series
+  firestoreId?: string;         // Optional existing Firestore series ID to sync
   skipSubsplash?: boolean;      // If true, only create in Firestore (for upload time)
   images?: Array<{              // Optional images for the series
     id: string;
@@ -45,6 +50,16 @@ const createSeries = onCall(
     }
 
     const { title, summary, ownerId, skipSubsplash, images } = request.data;
+    const firestoreId = request.data.firestoreId?.trim();
+    const seriesRef = firestoreId
+      ? firestoreDB.collection('series').doc(firestoreId)
+      : firestoreDB.collection('series').doc();
+    const existingSeriesDoc = await seriesRef.get();
+    const existingSeriesImages = existingSeriesDoc.exists
+      ? (existingSeriesDoc.data()?.images as CreateSeriesInputType['images'] | undefined)
+      : undefined;
+    const inputImages = images?.filter((image) => Boolean(image?.id && image?.type)) || [];
+    const imagesToPersist = inputImages.length > 0 ? inputImages : (existingSeriesImages || []);
     const initialSubtitle = getSeriesSubtitleFromPublishedCount(0);
 
     // Validation
@@ -56,30 +71,30 @@ const createSeries = onCall(
     }
 
     try {
-      const seriesRef = firestoreDB.collection('series').doc();
-
       // If skipSubsplash is true, only create in Firestore (for upload time)
       if (skipSubsplash) {
         const firestoreData: Record<string, unknown> = {
           id: seriesRef.id,
           name: title.trim(),
           subtitle: initialSubtitle,
-          images: images || [],
+          images: imagesToPersist,
           itemCount: 0,
           publishedItemCount: 0,
           status: 'draft',
           subsplashId: '',  // Empty until published
           ownerId: ownerId.trim(),
-          createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         };
+        if (!existingSeriesDoc.exists) {
+          firestoreData.createdAt = FieldValue.serverTimestamp();
+        }
 
         // Only add optional fields if they have values
         if (summary?.trim()) {
           firestoreData.summary = summary.trim();
         }
 
-        await seriesRef.set(firestoreData);
+        await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
 
         logger.log(`Created local series: Firestore ID=${seriesRef.id} (no Subsplash sync)`);
 
@@ -103,13 +118,25 @@ const createSeries = onCall(
         subtitle: initialSubtitle,
         summary: summary?.trim(),
       });
+      if (imagesToPersist.length > 0) {
+        await patchSeriesMetadata(
+          subsplashSeries.id,
+          {
+            images: imagesToPersist.map((image) => ({
+              id: image.id,
+              type: image.type,
+            })),
+          },
+          token
+        );
+      }
 
       // Create Firestore document with Subsplash data
       const firestoreData: Record<string, unknown> = {
         id: seriesRef.id,
         name: subsplashSeries.title,
         subtitle: subsplashSeries.subtitle || initialSubtitle,
-        images: [],
+        images: imagesToPersist,
         itemCount: subsplashSeries.media_items_count,
         publishedItemCount: subsplashSeries.published_media_items_count,
         status: subsplashSeries.status,
@@ -118,16 +145,18 @@ const createSeries = onCall(
         slug: subsplashSeries.slug,
         shortCode: subsplashSeries.short_code,
         position: subsplashSeries.position,
-        createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       };
+      if (!existingSeriesDoc.exists) {
+        firestoreData.createdAt = FieldValue.serverTimestamp();
+      }
 
       // Only add optional fields if they have values (Firestore doesn't allow undefined)
       if (subsplashSeries.summary) {
         firestoreData.summary = subsplashSeries.summary;
       }
 
-      await seriesRef.set(firestoreData);
+      await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
 
       logger.log(`Created series: Firestore ID=${seriesRef.id}, Subsplash ID=${subsplashSeries.id}`);
 

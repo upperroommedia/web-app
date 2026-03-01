@@ -51,6 +51,7 @@ import CountOfUploadsCircularProgress from './CountOfUploadsCircularProgress';
 import Link from 'next/link';
 import { getSquareImageStoragePath } from '../utils/utils';
 import { alpha, useTheme } from '@mui/material/styles';
+import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../utils/seriesPublishUtils';
 
 interface ManagePublishingPopupProps {
   sermon: Sermon;
@@ -476,6 +477,16 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   const publishToSeries = async (options?: { mediaItemId?: string; suppressAlert?: boolean }): Promise<SeriesPublishResult> => {
+    if (!canPublishSermonToSeries(sermon)) {
+      if (!options?.suppressAlert) {
+        alert(SERIES_PUBLISH_BLOCKED_MESSAGE);
+      }
+      return {
+        status: 'error',
+        error: SERIES_PUBLISH_BLOCKED_MESSAGE,
+      };
+    }
+
     const mediaItemId = options?.mediaItemId || sermon.subsplashId;
     if (!series || !mediaItemId) {
       const message = 'Sermon must be uploaded to Subsplash first before adding to series';
@@ -498,7 +509,9 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
           title: series.name,
           summary: series.summary,
           ownerId: series.ownerId,
+          firestoreId: series.id,
           skipSubsplash: false,
+          images: series.images,
         });
 
         if (createResult.status !== 'success' || !createResult.subsplashId) {
@@ -656,7 +669,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         }
       }
 
-      if (!mediaItemId && !seriesPublished) {
+      if (!mediaItemId && !seriesPublished && canPublishSermonToSeries(sermon)) {
         const uploadResult = await uploadToSubsplash([], { suppressAlert: true });
         if (uploadResult.status === 'success') {
           mediaItemId = uploadResult.mediaItemId || mediaItemId;
@@ -665,7 +678,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         }
       }
 
-      if (!seriesPublished) {
+      if (!seriesPublished && canPublishSermonToSeries(sermon)) {
         const seriesResult = await publishToSeries({
           mediaItemId,
           suppressAlert: true,
@@ -675,6 +688,8 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         } else {
           errors.push(`Series: ${seriesResult.error || 'Unknown error'}`);
         }
+      } else if (!seriesPublished) {
+        errors.push(`Series: ${SERIES_PUBLISH_BLOCKED_MESSAGE}`);
       }
 
       if (errors.length === 0) {
@@ -698,6 +713,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   const handlePublishToSeries = async () => {
+    if (!canPublishSermonToSeries(sermon)) {
+      alert(SERIES_PUBLISH_BLOCKED_MESSAGE);
+      return;
+    }
+
     let mediaItemId = sermon.subsplashId;
     if (!mediaItemId) {
       const uploadResult = await uploadToSubsplash([], { suppressAlert: true });
@@ -712,6 +732,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   };
 
   const isSoundCloudUploaded = sermon.status.soundCloud === uploadStatus.UPLOADED;
+  const canPublishToSeries = canPublishSermonToSeries(sermon);
   const uploadedListsCount = listArrayFirestore?.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED).length || 0;
   const totalListsCount = listArrayFirestore?.length || 0;
 
@@ -872,7 +893,14 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                             size="small"
                             variant="contained"
                             onClick={handlePublishToSeries}
-                            disabled={isPublishingToSeries || isUnpublishingFromSeries || isPublishingEverywhere || isUploadingToSubsplash}
+                            disabled={
+                              isPublishingToSeries ||
+                              isUnpublishingFromSeries ||
+                              isPublishingEverywhere ||
+                              isUploadingToSubsplash ||
+                              !canPublishToSeries
+                            }
+                            title={!canPublishToSeries ? SERIES_PUBLISH_BLOCKED_MESSAGE : undefined}
                           >
                             {isPublishingToSeries ? (
                               <CircularProgress size={20} />

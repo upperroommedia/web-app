@@ -76,6 +76,7 @@ import { SeriesItem } from '../../../types/SeriesItem';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import useAuth from '../../../context/user/UserContext';
 import { createFunctionV2 } from '../../../utils/createFunction';
+import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
 import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../../../functions/src/removeFromSeries';
@@ -105,6 +106,8 @@ interface SortableItemProps {
   isPublishing: boolean;
   isUnpublishing: boolean;
   actionsDisabled: boolean;
+  canPublish: boolean;
+  publishBlockedReason?: string;
 }
 
 const SortableItem = ({
@@ -117,6 +120,8 @@ const SortableItem = ({
   isPublishing,
   isUnpublishing,
   actionsDisabled,
+  canPublish,
+  publishBlockedReason,
 }: SortableItemProps) => {
   const theme = useTheme();
   const {
@@ -263,7 +268,8 @@ const SortableItem = ({
             event.stopPropagation();
             onRequestPublish(item);
           }}
-          disabled={actionsDisabled || isPublishing}
+          disabled={actionsDisabled || isPublishing || !canPublish}
+          title={!canPublish ? (publishBlockedReason || SERIES_PUBLISH_BLOCKED_MESSAGE) : undefined}
         >
           Publish
         </Button>
@@ -471,7 +477,9 @@ const SeriesDetailsPage = () => {
       title: series.name,
       summary: series.summary,
       ownerId: series.ownerId,
+      firestoreId: series.id,
       skipSubsplash: false,
+      images: series.images,
     });
 
     if (createResult.status !== 'success' || !createResult.subsplashId) {
@@ -596,6 +604,41 @@ const SeriesDetailsPage = () => {
     }
   }, [seriesId]);
 
+  const syncSeriesItemPublishedState = useCallback(async (
+    seriesItemId: string,
+    options: { publishedToSubsplash: boolean; sermonSubsplashId?: string }
+  ) => {
+    await setDoc(
+      doc(firestore, `series/${seriesId}/seriesItems`, seriesItemId),
+      {
+        publishedToSubsplash: options.publishedToSubsplash,
+        sermonSubsplashId: options.publishedToSubsplash
+          ? options.sermonSubsplashId
+          : deleteField(),
+      },
+      { merge: true }
+    );
+
+    setItems((previousItems) => previousItems.map((item) => (
+      item.id === seriesItemId
+        ? {
+          ...item,
+          publishedToSubsplash: options.publishedToSubsplash,
+          sermonSubsplashId: options.publishedToSubsplash ? options.sermonSubsplashId : undefined,
+        }
+        : item
+    )));
+    originalItemsRef.current = originalItemsRef.current.map((item) => (
+      item.id === seriesItemId
+        ? {
+          ...item,
+          publishedToSubsplash: options.publishedToSubsplash,
+          sermonSubsplashId: options.publishedToSubsplash ? options.sermonSubsplashId : undefined,
+        }
+        : item
+    ));
+  }, [seriesId]);
+
   const publishItemToSeries = useCallback(async (
     seriesItem: SeriesItemWithSermon,
     options?: { suppressAlert?: boolean }
@@ -603,6 +646,13 @@ const SeriesDetailsPage = () => {
     if (!seriesItem.sermon) {
       if (!options?.suppressAlert) {
         alert('Sermon details are missing for this item. Refresh and retry.');
+      }
+      return false;
+    }
+
+    if (!canPublishSermonToSeries(seriesItem.sermon)) {
+      if (!options?.suppressAlert) {
+        alert(SERIES_PUBLISH_BLOCKED_MESSAGE);
       }
       return false;
     }
@@ -622,6 +672,11 @@ const SeriesDetailsPage = () => {
       }
 
       const confirmedMediaItemId = addResult.mediaItemId || mediaItemId;
+      // Subsplash is source of truth: once add succeeds, persist published state immediately.
+      await syncSeriesItemPublishedState(seriesItem.id, {
+        publishedToSubsplash: true,
+        sermonSubsplashId: confirmedMediaItemId,
+      });
 
       try {
         await reorderPublishedItemsInSubsplash(seriesItem.id, confirmedMediaItemId);
@@ -629,33 +684,26 @@ const SeriesDetailsPage = () => {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         try {
           await removeFromSeriesFunction({ mediaItemId: confirmedMediaItemId });
+          await syncSeriesItemPublishedState(seriesItem.id, {
+            publishedToSubsplash: false,
+          });
+          throw new Error(reorderError?.message || 'Series reorder failed after publish.');
         } catch (rollbackError: any) {
-          throw new Error(
-            `Series reorder failed and rollback failed. Reorder error: ${reorderError?.message || 'Unknown'}; rollback error: ${rollbackError?.message || 'Unknown'}.`
-          );
+          // Rollback failure means item likely remains published in Subsplash.
+          await syncSeriesItemPublishedState(seriesItem.id, {
+            publishedToSubsplash: true,
+            sermonSubsplashId: confirmedMediaItemId,
+          });
+          const partialFailureMessage =
+            `Series reorder failed and rollback failed. ${seriesItem.sermon?.title || 'This sermon'} remains published in Subsplash and has been kept published locally. Reorder error: ${reorderError?.message || 'Unknown'}; rollback error: ${rollbackError?.message || 'Unknown'}.`;
+          console.error(partialFailureMessage);
+          if (!options?.suppressAlert) {
+            alert(partialFailureMessage);
+          }
+          return true;
         }
-        throw new Error(reorderError?.message || 'Series reorder failed after publish.');
       }
 
-      await setDoc(
-        doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.id),
-        {
-          publishedToSubsplash: true,
-          sermonSubsplashId: confirmedMediaItemId,
-        },
-        { merge: true }
-      );
-
-      setItems((previousItems) => previousItems.map((item) => (
-        item.id === seriesItem.id
-          ? { ...item, publishedToSubsplash: true, sermonSubsplashId: confirmedMediaItemId }
-          : item
-      )));
-      originalItemsRef.current = originalItemsRef.current.map((item) => (
-        item.id === seriesItem.id
-          ? { ...item, publishedToSubsplash: true, sermonSubsplashId: confirmedMediaItemId }
-          : item
-      ));
       return true;
     } catch (err: any) {
       console.error('Error publishing series item:', err);
@@ -666,7 +714,7 @@ const SeriesDetailsPage = () => {
     } finally {
       setPublishingItemId(null);
     }
-  }, [ensureSeriesSubsplashId, reorderPublishedItemsInSubsplash, seriesId, uploadSermonToSubsplash]);
+  }, [ensureSeriesSubsplashId, reorderPublishedItemsInSubsplash, syncSeriesItemPublishedState, uploadSermonToSubsplash]);
 
   const unpublishItemFromSeries = useCallback(async (seriesItem: SeriesItemWithSermon) => {
     setUnpublishingItemId(seriesItem.id);
@@ -1091,22 +1139,95 @@ const SeriesDetailsPage = () => {
         });
 
         if (bulkResult.status !== 'success' || bulkResult.failed > 0 || !bulkResult.reorderApplied) {
-          const rollbackBatch = writeBatch(firestore);
-          publishedCandidates.forEach((seriesItem) => {
-            rollbackBatch.delete(doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.id));
-            rollbackBatch.update(doc(firestore, 'sermons', seriesItem.id), {
-              seriesId: priorSeriesIdsBySermonId.get(seriesItem.id) ?? null,
-            });
-          });
-          await rollbackBatch.commit();
+          const rolledBackMediaItemIds = new Set(bulkResult.rolledBackMediaItemIds || []);
+          const resultBySermonId = new Map(
+            bulkResult.results
+              .filter((result) => Boolean(result.sermonId))
+              .map((result) => [result.sermonId as string, result])
+          );
 
-          const rollbackIds = new Set(publishedCandidates.map((seriesItem) => seriesItem.id));
-          const rollbackTitles = publishedCandidates.map((item) => item.sermon?.title || item.id);
-          setItems((previousItems) => previousItems.filter((item) => !rollbackIds.has(item.id)));
-          originalItemsRef.current = originalItemsRef.current.filter((item) => !rollbackIds.has(item.id));
-          setSelectedSermonIds(new Set(rollbackIds));
+          const idsToRemoveLocally = new Set<string>();
+          const idsToKeepPublished = new Set<string>();
+          const titlesToRetry: string[] = [];
+          const titlesKeptPublished: string[] = [];
+
+          publishedCandidates.forEach((seriesItem) => {
+            const mediaItemId = mediaItemIdBySermonId.get(seriesItem.id);
+            const result = resultBySermonId.get(seriesItem.id);
+            const wasAdded = result?.status === 'success';
+            const wasRolledBack = mediaItemId ? rolledBackMediaItemIds.has(mediaItemId) : false;
+
+            if (wasAdded && !wasRolledBack) {
+              idsToKeepPublished.add(seriesItem.id);
+              titlesKeptPublished.push(seriesItem.sermon?.title || seriesItem.id);
+            } else {
+              idsToRemoveLocally.add(seriesItem.id);
+              titlesToRetry.push(seriesItem.sermon?.title || seriesItem.id);
+            }
+          });
+
+          if (idsToRemoveLocally.size > 0) {
+            const rollbackBatch = writeBatch(firestore);
+            idsToRemoveLocally.forEach((sermonId) => {
+              rollbackBatch.delete(doc(firestore, `series/${seriesId}/seriesItems`, sermonId));
+              rollbackBatch.update(doc(firestore, 'sermons', sermonId), {
+                seriesId: priorSeriesIdsBySermonId.get(sermonId) ?? null,
+              });
+            });
+            await rollbackBatch.commit();
+          }
+
+          if (idsToKeepPublished.size > 0) {
+            const keepBatch = writeBatch(firestore);
+            idsToKeepPublished.forEach((sermonId) => {
+              const mediaItemId = mediaItemIdBySermonId.get(sermonId);
+              keepBatch.set(
+                doc(firestore, `series/${seriesId}/seriesItems`, sermonId),
+                {
+                  publishedToSubsplash: true,
+                  sermonSubsplashId: mediaItemId,
+                },
+                { merge: true }
+              );
+            });
+            await keepBatch.commit();
+          }
+
+          setItems((previousItems) => previousItems
+            .filter((item) => !idsToRemoveLocally.has(item.id))
+            .map((item) => (
+              idsToKeepPublished.has(item.id)
+                ? {
+                  ...item,
+                  publishedToSubsplash: true,
+                  sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
+                }
+                : item
+            )));
+          originalItemsRef.current = originalItemsRef.current
+            .filter((item) => !idsToRemoveLocally.has(item.id))
+            .map((item) => (
+              idsToKeepPublished.has(item.id)
+                ? {
+                  ...item,
+                  publishedToSubsplash: true,
+                  sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
+                }
+                : item
+            ));
+          setSelectedSermonIds(new Set(idsToRemoveLocally));
+
+          const keptPublishedMessage = titlesKeptPublished.length > 0
+            ? `\n\nThese sermons were added in Subsplash and were kept published locally:\n${titlesKeptPublished.join('\n')}`
+            : '';
+          const retryMessage = titlesToRetry.length > 0
+            ? `\n\nThese sermons were not safely published and were removed locally:\n${titlesToRetry.join('\n')}`
+            : '';
+          const rollbackFailureMessage = bulkResult.rollbackFailures.length > 0
+            ? `\n\nRollback failures:\n${bulkResult.rollbackFailures.map((failure) => `${failure.mediaItemId}: ${failure.error}`).join('\n')}`
+            : '';
           alert(
-            `Some sermons were not added because automatic Subsplash series publish failed:\n${rollbackTitles.join('\n')}\n\n${bulkResult.message}`
+            `Automatic Subsplash series publish did not fully complete.\n${bulkResult.message}${retryMessage}${keptPublishedMessage}${rollbackFailureMessage}`
           );
           return;
         }
@@ -1559,6 +1680,8 @@ const SeriesDetailsPage = () => {
                       isPublishing={publishingItemId === item.id}
                       isUnpublishing={unpublishingItemId === item.id}
                       actionsDisabled={listActionsDisabled}
+                      canPublish={canPublishSermonToSeries(item.sermon)}
+                      publishBlockedReason={SERIES_PUBLISH_BLOCKED_MESSAGE}
                     />
                     {index < items.length - 1 && <Divider />}
                   </Box>

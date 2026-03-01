@@ -4,7 +4,7 @@
  */
 
 import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mocks';
-import { clearFirestore, getSeriesBySubsplashId, getAllSeries } from './firestoreHelpers';
+import { clearFirestore, createSeriesDocument, getSeriesBySubsplashId, getAllSeries } from './firestoreHelpers';
 import createSeries, { CreateSeriesInputType, CreateSeriesOutputType } from '../../createSeries';
 
 // Type for the handler function
@@ -113,6 +113,60 @@ describe('createSeries - Basic Functionality', () => {
 
     const firestoreSeries = await getSeriesBySubsplashId(result.subsplashId!);
     expect(firestoreSeries?.status).toBe('draft');
+  });
+
+  it('should persist provided images when syncing to Subsplash', async () => {
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Series With Synced Images',
+        ownerId: TEST_USER_ID,
+        images: [
+          { id: 'img-square', type: 'square', downloadLink: 'https://example.com/square.jpg', name: 'Square' },
+          { id: 'img-wide', type: 'wide', downloadLink: 'https://example.com/wide.jpg', name: 'Wide' },
+        ],
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+    expect(result.status).toBe('success');
+
+    const firestoreSeries = await getSeriesBySubsplashId(result.subsplashId!);
+    expect(firestoreSeries).not.toBeNull();
+    expect(firestoreSeries?.images).toHaveLength(2);
+    expect(firestoreSeries?.images[0].id).toBe('img-square');
+    expect(firestoreSeries?.images[1].id).toBe('img-wide');
+  });
+
+  it('should update existing firestore series when firestoreId is provided', async () => {
+    const existingSeriesId = await createSeriesDocument({
+      subsplashId: '',
+      name: 'Local Draft Series',
+      summary: 'Local summary',
+      images: [{ id: 'existing-img', type: 'square', downloadLink: 'https://example.com/existing.jpg' }],
+      status: 'draft',
+    });
+
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreId: existingSeriesId,
+        title: 'Local Draft Series',
+        summary: 'Local summary',
+        ownerId: TEST_USER_ID,
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+    expect(result.status).toBe('success');
+    expect(result.firestoreId).toBe(existingSeriesId);
+
+    const allSeries = await getAllSeries();
+    expect(allSeries).toHaveLength(1);
+    expect(allSeries[0].id).toBe(existingSeriesId);
+    expect(allSeries[0].subsplashId).toBe(result.subsplashId);
+    expect(allSeries[0].images).toHaveLength(1);
+    expect(allSeries[0].images[0].id).toBe('existing-img');
   });
 });
 

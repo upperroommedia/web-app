@@ -15,6 +15,74 @@ import {
 } from '../types/SubsplashSeries';
 
 const APP_KEY = '9XTSHD';
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 400;
+const RETRY_MAX_DELAY_MS = 5000;
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const getAxiosStatusCode = (error: unknown): number | undefined => (
+  error && typeof error === 'object' && 'response' in error
+    ? (error as { response?: { status?: number } }).response?.status
+    : undefined
+);
+
+const getRetryAfterDelayMs = (error: unknown): number | undefined => {
+  if (!(error && typeof error === 'object' && 'response' in error)) {
+    return undefined;
+  }
+
+  const headers = (error as { response?: { headers?: Record<string, unknown> } }).response?.headers;
+  if (!headers) return undefined;
+
+  const retryAfter = headers['retry-after'];
+  if (typeof retryAfter === 'number' && Number.isFinite(retryAfter)) {
+    return retryAfter * 1000;
+  }
+  if (typeof retryAfter === 'string') {
+    const numeric = Number.parseInt(retryAfter, 10);
+    if (Number.isFinite(numeric)) {
+      return numeric * 1000;
+    }
+  }
+
+  return undefined;
+};
+
+const shouldRetryRequest = (status?: number): boolean => (
+  status === 429 || status === 408 || status === 502 || status === 503 || status === 504
+);
+
+const withSubsplashRetry = async <T>(operationName: string, requestFn: () => Promise<T>): Promise<T> => {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      const status = getAxiosStatusCode(error);
+      if (!shouldRetryRequest(status) || attempt >= MAX_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      const retryAfterMs = getRetryAfterDelayMs(error);
+      const computedBackoffMs = Math.min(RETRY_BASE_DELAY_MS * (2 ** attempt), RETRY_MAX_DELAY_MS);
+      const delayMs = retryAfterMs ?? computedBackoffMs;
+
+      logger.warn(`Subsplash ${operationName} received retryable status ${status}; retrying`, {
+        operationName,
+        status,
+        attempt: attempt + 1,
+        maxAttempts: MAX_RETRY_ATTEMPTS + 1,
+        delayMs,
+      });
+
+      await sleep(delayMs);
+      attempt += 1;
+    }
+  }
+};
 
 export interface DerivedSeriesMetadata {
   itemCount: number;
@@ -65,7 +133,7 @@ export async function createSubsplashSeries(
   );
 
   try {
-    const response = await axios(config);
+    const response = await withSubsplashRetry('createSeries', () => axios(config));
     return response.data;
   } catch (error: unknown) {
     const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -87,7 +155,7 @@ export async function getSeriesDetails(seriesId: string, token: string): Promise
   );
 
   try {
-    const response = await axios(config);
+    const response = await withSubsplashRetry('getSeriesDetails', () => axios(config));
     return response.data;
   } catch (error: unknown) {
     const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -116,7 +184,7 @@ export async function getSeriesItems(
   );
 
   try {
-    const response = await axios(config);
+    const response = await withSubsplashRetry('getSeriesItems', () => axios(config));
     return response.data._embedded?.['media-items'] || [];
   } catch (error: unknown) {
     const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -188,7 +256,7 @@ export async function patchMediaItemSeries(
   );
 
   try {
-    const response = await axios(config);
+    const response = await withSubsplashRetry('patchMediaItemSeries', () => axios(config));
     logger.log(`Successfully ${seriesId ? 'assigned' : 'unassigned'} media item ${mediaItemId} ${seriesId ? `to series ${seriesId}` : 'from series'}`);
     return response.data;
   } catch (error: unknown) {
@@ -273,7 +341,7 @@ export async function patchSeriesItemPositions(
   );
 
   try {
-    await axios(config);
+    await withSubsplashRetry('patchSeriesItemPositions', () => axios(config));
     logger.log(`Successfully updated positions for ${items.length} items in series ${seriesId}`);
   } catch (error: unknown) {
     const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -295,7 +363,7 @@ export async function deleteSubsplashSeries(seriesId: string, token: string): Pr
   );
 
   try {
-    await axios(config);
+    await withSubsplashRetry('deleteSubsplashSeries', () => axios(config));
     logger.log(`Successfully deleted series ${seriesId}`);
   } catch (error: unknown) {
     // Check if it's a 404 - series already deleted
@@ -337,7 +405,7 @@ export async function patchSeriesMetadata(
   );
 
   try {
-    const response = await axios(config);
+    const response = await withSubsplashRetry('patchSeriesMetadata', () => axios(config));
     logger.log(`Successfully updated metadata for series ${seriesId}`);
     return response.data;
   } catch (error: unknown) {
