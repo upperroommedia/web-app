@@ -49,7 +49,9 @@ import { updateSubsplashTag } from './Scrapers/updateSubsplashTag';
 import { updateImageMetadata } from './helpers/updateImageMetadata';
 import imageOnDelete from './DocumentListeners/Images/imageOnDelete';
 import seriesItemOnWrite from './DocumentListeners/Series/seriesItemOnWrite';
-import createRoleRequest from './roleRequests/createRoleRequest';
+import createrolerequest from './roleRequests/createRoleRequest';
+import createinvite from './invites/createInvite';
+import claiminvite from './invites/claimInvite';
 
 // Series functions
 import createseries from './createSeries';
@@ -109,7 +111,9 @@ exports.updatesubsplashtag = updateSubsplashTag;
 exports.updateimagemetadata = updateImageMetadata;
 exports.imageondelete = imageOnDelete;
 exports.seriesitemonwrite = seriesItemOnWrite;
-exports.createRoleRequest = createRoleRequest;
+exports.createrolerequest = createrolerequest;
+exports.createinvite = createinvite;
+exports.claiminvite = claiminvite;
 
 // Series exports
 exports.createseries = createseries;
