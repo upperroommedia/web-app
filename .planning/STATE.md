@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
-current_phase: 03-subsplash-alpha-lock-concurrency-control
+current_phase: 04-role-based-invite-onboarding-and-operational-notification-routing
 status: executing
-last_updated: "2026-03-01T08:02:08.000Z"
-last_activity: 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
+last_updated: "2026-03-01T08:14:58Z"
+last_activity: 2026-03-01 - Completed phase 04 plan 01 notification foundation rollout
 progress:
-  total_phases: 3
+  total_phases: 4
   completed_phases: 1
-  total_plans: 12
-  completed_plans: 6
+  total_plans: 13
+  completed_plans: 7
 ---
 
 # Session State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Phase 03 lock/idempotency substrate rollout
+**Current focus:** Phase 04 notification foundation rollout for invite onboarding and operational alert routing
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
-**Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** In Progress (03-01, 03-02, 03-03, and 03-04 complete; remaining phase 03 plans still in flight)
-**Last activity:** 2026-03-01 - Completed phase 03 plan 03 list lock/idempotency rollout
+**Current phase:** 04-role-based-invite-onboarding-and-operational-notification-routing
+**Status:** In Progress (04-01 complete; 04-02 through 04-05 pending)
+**Last activity:** 2026-03-01 - Completed phase 04 plan 01 notification foundation rollout
 
 ## Decisions
 
@@ -48,6 +48,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 03]: Series callables now use idempotency as an outer wrapper and lock scopes as inner execution guards.
 - [Phase 03]: Series mutation input interfaces keep operationKey optional with generated fallback keys for backwards-compatible callers.
 - [Phase 03]: Busy contention contract validation combines deterministic operation-key in-progress claims with explicit lock-timeout assertions.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Role-request and runtime-alert recipients are environment-configurable via firebase-functions params with production-safe defaults.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Operational alert helper intentionally enqueues one email per invocation with no dedupe suppression window.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Notification outbox docs include structured meta fields (source, alertType, alertCode) while remaining Trigger Email compatible.
 
 ## Accumulated Context
 
@@ -79,3 +82,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-02 with series mutation lock/idempotency wrappers and contention/replay regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-04 with sermon/media mutation lock wrappers and regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-03 with list mutation lock/idempotency wrappers and replay regression coverage.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-01 with notification params, queue helpers, and emulator regression tests.
