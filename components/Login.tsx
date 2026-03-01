@@ -61,12 +61,41 @@ const Login = () => {
   //   router.push(authResult.dest);
   // };
   // Type guard function
-function isAuthError(error: any): error is AuthError {
-  return error && 
-         typeof error.code === 'string' && 
-         error.code.startsWith('auth/') &&
-         typeof error.message === 'string';
-}
+  function isAuthError(error: any): error is AuthError {
+    return (
+      error &&
+      typeof error.code === 'string' &&
+      error.code.startsWith('auth/') &&
+      typeof error.message === 'string'
+    );
+  }
+
+  const getCallbackDestination = () => {
+    const candidates = [router.query.callbackurl, router.query.callbackUrl];
+    const rawValue = candidates.find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    if (!rawValue) {
+      return '/';
+    }
+
+    const trimmedValue = rawValue.trim();
+    let decodedValue = trimmedValue;
+    try {
+      decodedValue = decodeURIComponent(trimmedValue);
+    } catch (_error) {
+      decodedValue = trimmedValue;
+    }
+
+    if (decodedValue === '/login') {
+      return '/';
+    }
+
+    if (decodedValue.startsWith('http://') || decodedValue.startsWith('https://')) {
+      return '/';
+    }
+
+    return decodedValue.startsWith('/') ? decodedValue : `/${decodedValue}`;
+  };
 
   const handleLogin = async (loginFunction: () => Promise<UserCredential>) => {
     try {
@@ -104,16 +133,8 @@ function isAuthError(error: any): error is AuthError {
       }
     }
       
-      // Success - redirect user
-      const { callbackurl: possibleCallback } = router.query;
-      const rawCallback = (possibleCallback as string) || '';
-      if (rawCallback === '/login') {
-        router.push('/');
-      } else if (rawCallback.startsWith('/')) {
-        router.push(rawCallback);
-      } else {
-        router.push(`/${rawCallback}`);
-      }
+    // Success - redirect user
+    router.push(getCallbackDestination());
   };
 
   return (
@@ -215,15 +236,7 @@ function isAuthError(error: any): error is AuthError {
                       setOpen(true);
                     } else {
                       // Success - redirect
-                      const { callbackurl: possibleCallback } = router.query;
-                      const rawCallback = (possibleCallback as string) || '';
-                      if (rawCallback === '/login') {
-                        router.push('/');
-                      } else if (rawCallback.startsWith('/')) {
-                        router.push(rawCallback);
-                      } else {
-                        router.push(`/${rawCallback}`);
-                      }
+                      router.push(getCallbackDestination());
                     }
                   } catch (e: any) {
                     setTitle('Dev Login Error');
