@@ -1,12 +1,13 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
-import { getAdminBaseUrl } from '../notifications/notificationParams';
+import { buildInviteClaimUrl, queueInviteEmail } from './inviteEmail';
 import { createInviteTokenArtifact } from './inviteToken';
 import {
   CreateInviteInputType,
   CreateInviteResultData,
   INVITE_EXPIRY_MS,
   InviteClaimStatus,
+  InviteEmailStatus,
   ROLE_INVITES_COLLECTION,
   isValidInviteEmail,
   normalizeInviteEmail,
@@ -14,12 +15,6 @@ import {
 } from './inviteTypes';
 
 type CreateInviteOutputType = { status: 'success'; data: CreateInviteResultData } | { status: 'error'; error: string };
-
-const buildClaimUrl = (token: string): string => {
-  const baseUrl = getAdminBaseUrl();
-  const encodedToken = encodeURIComponent(token);
-  return `${baseUrl}/invite/claim?token=${encodedToken}`;
-};
 
 export const createInviteHandler = async (
   request: CallableRequest<CreateInviteInputType>
@@ -45,6 +40,7 @@ export const createInviteHandler = async (
     typeof request.auth.token.email === 'string' && request.auth.token.email.trim().length > 0
       ? normalizeInviteEmail(request.auth.token.email)
       : null;
+  const inviteUrl = buildInviteClaimUrl(rawToken);
 
   const inviteRef = await firebaseAdmin.firestore().collection(ROLE_INVITES_COLLECTION).add({
     invitedEmail: normalizedEmail,
@@ -55,16 +51,32 @@ export const createInviteHandler = async (
     createdByEmail,
     createdAtMs,
     expiresAtMs,
+    email: {
+      status: InviteEmailStatus.NOT_ATTEMPTED,
+    },
+  });
+
+  const emailState = await queueInviteEmail({
+    inviteId: inviteRef.id,
+    invitedEmail: normalizedEmail,
+    invitedRole: normalizedRole,
+    inviteUrl,
+    expiresAtMs,
+  });
+
+  await inviteRef.update({
+    email: emailState,
   });
 
   return {
     status: 'success',
     data: {
       inviteId: inviteRef.id,
-      inviteUrl: buildClaimUrl(rawToken),
+      inviteUrl,
       invitedEmail: normalizedEmail,
       invitedRole: normalizedRole,
       expiresAtMs,
+      emailStatus: emailState.status,
     },
   };
 };

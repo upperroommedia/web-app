@@ -1,6 +1,10 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
+import {
+  buildProfessionalEmailHtml,
+  formatEmailDateTime,
+} from '../notifications/emailTemplates';
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 import { getAdminBaseUrl, getRoleRequestRecipients } from '../notifications/notificationParams';
 import { RoleRequestNotificationPayload } from '../notifications/notificationTypes';
@@ -37,7 +41,44 @@ const readRequesterDisplayName = (request: CallableRequest<CreateRoleRequestInpu
   return normalizedName.length > 0 ? normalizedName : undefined;
 };
 
-const buildRoleRequestMessage = (payload: RoleRequestNotificationPayload): string => JSON.stringify(payload, null, 2);
+const buildRoleRequestMessageText = (payload: RoleRequestNotificationPayload): string => {
+  const requesterIdentity = payload.requesterDisplayName
+    ? `${payload.requesterDisplayName} <${payload.requesterEmail}>`
+    : payload.requesterEmail;
+
+  return [
+    'A new role request was submitted.',
+    '',
+    `Requester: ${requesterIdentity}`,
+    `Requested role: ${payload.requestedRole}`,
+    `Submitted at: ${formatEmailDateTime(payload.requestedAtMs)}`,
+    `Reason: ${payload.reason}`,
+    '',
+    `Review request: ${payload.adminUrl}`,
+  ].join('\n');
+};
+
+const buildRoleRequestMessageHtml = (payload: RoleRequestNotificationPayload): string => {
+  const requesterIdentity = payload.requesterDisplayName
+    ? `${payload.requesterDisplayName} <${payload.requesterEmail}>`
+    : payload.requesterEmail;
+
+  return buildProfessionalEmailHtml({
+    preheader: `Role request from ${payload.requesterEmail}`,
+    heading: 'New role request submitted',
+    intro: 'A user submitted a role access request and is waiting for admin review.',
+    details: [
+      { label: 'Requester', value: requesterIdentity },
+      { label: 'Requested role', value: payload.requestedRole },
+      { label: 'Submitted at', value: formatEmailDateTime(payload.requestedAtMs) },
+      { label: 'Reason', value: payload.reason },
+    ],
+    actionLabel: 'Review requests',
+    actionUrl: payload.adminUrl,
+    actionHint: 'Open this URL directly if the button does not work:',
+    footer: 'UpperRoom Media admin notification',
+  });
+};
 
 const listExistingRoleRequests = async (
   requesterUid: string
@@ -115,6 +156,7 @@ const createRoleRequest = onCall(
       requesterEmail,
       ...(requesterDisplayName ? { requesterDisplayName } : {}),
       requestedRole: validation.value.requestedRole,
+      reason: validation.value.reason,
       requestedAtMs: createdAtMs,
       adminUrl,
     };
@@ -131,12 +173,14 @@ const createRoleRequest = onCall(
           requesterUid,
           requesterEmail,
           requestedRole: validation.value.requestedRole,
+          reason: validation.value.reason,
           requestedAtMs: createdAtMs,
           adminUrl,
         },
         message: {
           subject: `[URM] Role request: ${validation.value.requestedRole}`,
-          text: buildRoleRequestMessage(roleRequestPayload),
+          text: buildRoleRequestMessageText(roleRequestPayload),
+          html: buildRoleRequestMessageHtml(roleRequestPayload),
         },
       });
 

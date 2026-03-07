@@ -5,6 +5,14 @@ import { UserRoleType } from '../../../types/User';
 export const ROLE_REQUEST_EMAIL_ENQUEUE_FAILED = 'ROLE_REQUEST_EMAIL_ENQUEUE_FAILED' as const;
 export const ROLE_REQUESTS_COLLECTION = 'roleRequests' as const;
 export const ROLE_REQUEST_STATUS_PENDING = 'pending' as const;
+export const ROLE_REQUEST_STATUS_ACCEPTED = 'accepted' as const;
+export const ROLE_REQUEST_STATUS_DENIED = 'denied' as const;
+export const ROLE_REQUEST_STATUSES = [
+  ROLE_REQUEST_STATUS_PENDING,
+  ROLE_REQUEST_STATUS_ACCEPTED,
+  ROLE_REQUEST_STATUS_DENIED,
+] as const;
+export type RoleRequestStatusType = (typeof ROLE_REQUEST_STATUSES)[number];
 
 export const ROLE_REQUEST_NOTIFICATION_STATUSES = [
   'not_attempted',
@@ -40,11 +48,32 @@ export interface PersistedRoleRequestDocument {
   requesterDisplayName?: string;
   requestedRole: RequestableRoleType;
   reason: string;
-  status: typeof ROLE_REQUEST_STATUS_PENDING;
+  status: RoleRequestStatusType;
   createdAtMs: number;
   updatedAtMs: number;
   adminUrl: string;
   notification: RoleRequestNotificationState;
+  resolutionNotification?: RoleRequestNotificationState;
+  resolvedAtMs?: number;
+  resolvedByUid?: string;
+  resolvedByEmail?: string | null;
+}
+
+export interface RoleRequestSummary {
+  roleRequestId: string;
+  requesterUid: string;
+  requesterEmail: string;
+  requesterDisplayName?: string;
+  requestedRole: RequestableRoleType;
+  reason: string;
+  status: RoleRequestStatusType;
+  createdAtMs: number;
+  updatedAtMs: number;
+  notificationStatus: RoleRequestNotificationStatus;
+  notificationAttemptedAtMs?: number;
+  resolvedAtMs?: number;
+  resolvedByUid?: string;
+  resolvedByEmail?: string | null;
 }
 
 export interface CreateRoleRequestSuccessData {
@@ -58,6 +87,52 @@ export interface CreateRoleRequestSuccessData {
 }
 
 export type CreateRoleRequestOutputType = FunctionOutputType<CreateRoleRequestSuccessData>;
+
+export interface ListRoleRequestsInputType {
+  limit?: number;
+  requesterUid?: string;
+  pageToken?: string;
+}
+
+export interface ListRoleRequestsResultData {
+  roleRequests: RoleRequestSummary[];
+  nextPageToken?: string;
+}
+
+export type ListRoleRequestsOutputType = FunctionOutputType<ListRoleRequestsResultData>;
+
+export interface AcceptRoleRequestInputType {
+  roleRequestId: string;
+}
+
+export interface RoleRequestResolutionWarning {
+  code: typeof ROLE_REQUEST_EMAIL_ENQUEUE_FAILED;
+  message: string;
+}
+
+export interface AcceptRoleRequestResultData {
+  roleRequestId: string;
+  requesterUid: string;
+  requestedRole: RequestableRoleType;
+  status: typeof ROLE_REQUEST_STATUS_ACCEPTED;
+  warning?: RoleRequestResolutionWarning;
+}
+
+export type AcceptRoleRequestOutputType = FunctionOutputType<AcceptRoleRequestResultData>;
+
+export interface DenyRoleRequestInputType {
+  roleRequestId: string;
+}
+
+export interface DenyRoleRequestResultData {
+  roleRequestId: string;
+  requesterUid: string;
+  requestedRole: RequestableRoleType;
+  status: typeof ROLE_REQUEST_STATUS_DENIED;
+  warning?: RoleRequestResolutionWarning;
+}
+
+export type DenyRoleRequestOutputType = FunctionOutputType<DenyRoleRequestResultData>;
 
 export const isRequestableRole = (value: string): value is RequestableRoleType => REQUESTABLE_ROLE_SET.has(value);
 

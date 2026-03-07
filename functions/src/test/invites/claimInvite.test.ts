@@ -74,6 +74,7 @@ const issueInvite = async (email: string, role: string): Promise<{ inviteId: str
 describe('claimInvite', () => {
   beforeEach(async () => {
     await clearCollection(ROLE_INVITES_COLLECTION);
+    await clearCollection('mail');
     await clearAuthUsers();
   });
 
@@ -130,7 +131,30 @@ describe('claimInvite', () => {
     });
   });
 
-  it('consumes invite once, upgrades lower role, preserves higher role, and revokes refresh tokens', async () => {
+  it('rejects revoked invites', async () => {
+    const { token, inviteId } = await issueInvite('revoked@example.org', 'uploader');
+    await auth.createUser({ uid: 'revoked-user', email: 'revoked@example.org' });
+
+    await firestore.collection(ROLE_INVITES_COLLECTION).doc(inviteId).update({
+      revokedAtMs: Date.now(),
+      revokedByUid: 'admin-1',
+      revokedByEmail: 'admin@example.org',
+    });
+
+    const response = await claimInviteHandler(
+      buildClaimInviteRequest(
+        { token },
+        { uid: 'revoked-user', token: { role: 'user', email: 'revoked@example.org' } }
+      )
+    );
+
+    expect(response).toEqual({
+      status: 'error',
+      error: 'Invite has been revoked.',
+    });
+  });
+
+  it('consumes invite once, applies invite role exactly, and revokes refresh tokens', async () => {
     await auth.createUser({ uid: 'upgrade-user', email: 'upgrade@example.org' });
     await auth.setCustomUserClaims('upgrade-user', { role: 'user', source: 'existing-claim' });
 
@@ -166,9 +190,16 @@ describe('claimInvite', () => {
         { uid: 'upgrade-user', token: { role: 'publisher', email: 'upgrade@example.org' } }
       )
     );
-    expect(duplicateResponse).toEqual({
-      status: 'error',
-      error: 'Invite has already been claimed.',
+    expect(duplicateResponse.status).toBe('success');
+    if (duplicateResponse.status !== 'success') {
+      throw new Error(duplicateResponse.error);
+    }
+    expect(duplicateResponse.data).toMatchObject({
+      inviteId: upgradeInviteId,
+      invitedEmail: 'upgrade@example.org',
+      invitedRole: 'publisher',
+      effectiveRole: 'publisher',
+      claimStatus: InviteClaimStatus.COMPLETE,
     });
 
     await auth.createUser({ uid: 'admin-user', email: 'admin-user@example.org' });
@@ -186,11 +217,11 @@ describe('claimInvite', () => {
     if (downgradeResponse.status !== 'success') {
       throw new Error(downgradeResponse.error);
     }
-    expect(downgradeResponse.data.effectiveRole).toBe('admin');
+    expect(downgradeResponse.data.effectiveRole).toBe('user');
 
     const adminUser = await auth.getUser('admin-user');
     expect(adminUser.customClaims).toMatchObject({
-      role: 'admin',
+      role: 'user',
       retain: true,
     });
 

@@ -5,6 +5,7 @@ export interface RoleRequestNotificationPayload {
   requesterEmail: string;
   requesterDisplayName?: string;
   requestedRole: string;
+  reason: string;
   requestedAtMs: number;
   adminUrl: string;
 }

@@ -186,16 +186,15 @@ describe('createRoleRequest', () => {
     });
     expect(typeof queueInput.metadata?.requestedAtMs).toBe('number');
     expect(queueInput.metadata?.requestedAtMs).toBe(persistedData?.createdAtMs);
-
-    const parsedMessagePayload = JSON.parse(queueInput.message.text ?? '{}') as Record<string, unknown>;
-    expect(parsedMessagePayload).toMatchObject({
-      requesterUid: 'requester-1',
-      requesterEmail: 'requester@example.org',
-      requesterDisplayName: 'Requester Name',
-      requestedRole: 'publisher',
-      adminUrl: 'https://admin.upperroommedia.test/admin/users',
-    });
-    expect(parsedMessagePayload.requestedAtMs).toBe(persistedData?.createdAtMs);
+    expect(queueInput.metadata?.reason).toBe('Need publish access for Sunday uploads.');
+    expect(queueInput.message.text).toContain('A new role request was submitted.');
+    expect(queueInput.message.text).toContain('Requester: Requester Name <requester@example.org>');
+    expect(queueInput.message.text).toContain('Requested role: publisher');
+    expect(queueInput.message.text).toContain('Reason: Need publish access for Sunday uploads.');
+    expect(queueInput.message.text).toContain('Review request: https://admin.upperroommedia.test/admin/users');
+    expect(queueInput.message.html).toContain('New role request submitted');
+    expect(queueInput.message.html).toContain('Requester Name &lt;requester@example.org&gt;');
+    expect(queueInput.message.html).toContain('Review requests');
   });
 
   it('attempts queueing only for newly-created requests and returns existing on duplicate pending role request', async () => {

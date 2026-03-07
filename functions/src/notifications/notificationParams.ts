@@ -1,8 +1,11 @@
 import { defineList, defineString } from 'firebase-functions/params';
 
-const ROLE_REQUEST_RECIPIENT_DEFAULTS = ['youssef.a.asaad@gmail.com', 'contact@upperroommedia.org'] as const;
-const RUNTIME_ALERT_RECIPIENT_DEFAULTS = ['youssef.a.asaad@gmail.com', 'contact@upperroommedia.org'] as const;
-const ADMIN_BASE_URL_DEFAULT = 'https://www.upperroommedia.org';
+// const ROLE_REQUEST_RECIPIENT_DEFAULTS = ['youssef.a.asaad@gmail.com', 'contact@upperroommedia.org'] as const;
+// const RUNTIME_ALERT_RECIPIENT_DEFAULTS = ['youssef.a.asaad@gmail.com', 'contact@upperroommedia.org'] as const;
+// const ADMIN_BASE_URL_DEFAULT = 'https://uploader.upperroommedia.org';
+const ROLE_REQUEST_RECIPIENT_DEFAULTS = ['youssef.a.asaad@gmail.com'] as const;
+const RUNTIME_ALERT_RECIPIENT_DEFAULTS = ['youssef.a.asaad@gmail.com'] as const;
+const ADMIN_BASE_URL_DEFAULT = 'http://localhost:3000';
 
 const normalizeRecipientList = (rawRecipients: readonly string[]): string[] => {
   const cleaned = rawRecipients.map((recipient) => recipient.trim()).filter((recipient) => recipient.length > 0);
@@ -30,7 +33,10 @@ const parseRecipientEnvValue = (rawValue: string | undefined): string[] => {
     // Fall back to comma-delimited values if JSON parsing fails.
   }
 
-  return trimmed.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  return trimmed
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 };
 
 const readListParam = (
@@ -46,11 +52,7 @@ const readListParam = (
   }
 };
 
-const readStringParam = (
-  param: { value: () => string },
-  envName: string,
-  defaultValue: string
-): string => {
+const readStringParam = (param: { value: () => string }, envName: string, defaultValue: string): string => {
   try {
     return trimTrailingSlash(param.value());
   } catch {
@@ -80,5 +82,4 @@ export const getRoleRequestRecipients = (): string[] =>
 export const getRuntimeAlertRecipients = (): string[] =>
   readListParam(runtimeAlertRecipients, 'RUNTIME_ALERT_RECIPIENTS', RUNTIME_ALERT_RECIPIENT_DEFAULTS);
 
-export const getAdminBaseUrl = (): string =>
-  readStringParam(adminBaseUrl, 'ADMIN_BASE_URL', ADMIN_BASE_URL_DEFAULT);
+export const getAdminBaseUrl = (): string => readStringParam(adminBaseUrl, 'ADMIN_BASE_URL', ADMIN_BASE_URL_DEFAULT);

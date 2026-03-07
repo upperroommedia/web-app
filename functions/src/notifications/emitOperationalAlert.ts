@@ -1,4 +1,8 @@
 import { logger } from 'firebase-functions/v2';
+import {
+  buildProfessionalEmailHtml,
+  formatEmailDateTime,
+} from './emailTemplates';
 import { getRuntimeAlertRecipients } from './notificationParams';
 import { OperationalAlertPayload } from './notificationTypes';
 import { queueEmail } from './queueEmail';
@@ -39,6 +43,36 @@ const buildAlertPayload = (input: EmitOperationalAlertInput, occurredAtMs: numbe
   };
 };
 
+const buildAlertMessageText = (payload: OperationalAlertPayload): string =>
+  [
+    'UpperRoom Media runtime alert',
+    '',
+    `Alert code: ${payload.alertCode}`,
+    `Summary: ${payload.summary}`,
+    `Occurred at: ${formatEmailDateTime(payload.occurredAtMs)}`,
+    `Error message: ${payload.errorMessage}`,
+    payload.errorName ? `Error name: ${payload.errorName}` : null,
+    payload.errorStack ? `Error stack: ${payload.errorStack}` : null,
+    payload.context ? `Context: ${JSON.stringify(payload.context, null, 2)}` : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+
+const buildAlertMessageHtml = (payload: OperationalAlertPayload): string =>
+  buildProfessionalEmailHtml({
+    preheader: `Runtime alert ${payload.alertCode}`,
+    heading: `Runtime alert: ${payload.alertCode}`,
+    intro: payload.summary,
+    details: [
+      { label: 'Occurred at', value: formatEmailDateTime(payload.occurredAtMs) },
+      { label: 'Error message', value: payload.errorMessage },
+      ...(payload.errorName ? [{ label: 'Error name', value: payload.errorName }] : []),
+      ...(payload.errorStack ? [{ label: 'Error stack', value: payload.errorStack }] : []),
+      ...(payload.context ? [{ label: 'Context', value: JSON.stringify(payload.context, null, 2) }] : []),
+    ],
+    footer: 'UpperRoom Media operational alert',
+  });
+
 export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Promise<void> => {
   const recipients = getRuntimeAlertRecipients();
   const payload = buildAlertPayload(input, Date.now());
@@ -62,7 +96,8 @@ export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Pr
     metadata: payload.context,
     message: {
       subject: `[URM] Runtime alert: ${payload.alertCode}`,
-      text: JSON.stringify(payload, null, 2),
+      text: buildAlertMessageText(payload),
+      html: buildAlertMessageHtml(payload),
     },
   });
 };

@@ -2,7 +2,13 @@ import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { CallableRequest } from 'firebase-functions/v2/https';
 import { createInviteHandler } from '../../invites/createInvite';
 import { hashInviteToken } from '../../invites/inviteToken';
-import { CreateInviteInputType, INVITE_EXPIRY_MS, InviteClaimStatus, ROLE_INVITES_COLLECTION } from '../../invites/inviteTypes';
+import {
+  CreateInviteInputType,
+  INVITE_EXPIRY_MS,
+  InviteClaimStatus,
+  InviteEmailStatus,
+  ROLE_INVITES_COLLECTION,
+} from '../../invites/inviteTypes';
 
 jest.setTimeout(45_000);
 
@@ -31,6 +37,7 @@ const buildRequest = (
 describe('createInvite', () => {
   beforeEach(async () => {
     await clearCollection(ROLE_INVITES_COLLECTION);
+    await clearCollection('mail');
   });
 
   it('allows admins to create invites and persists only token hashes', async () => {
@@ -48,6 +55,7 @@ describe('createInvite', () => {
     if (response.status !== 'success') {
       throw new Error(response.error);
     }
+    expect(response.data.emailStatus).toBe(InviteEmailStatus.QUEUED);
 
     const inviteUrl = new URL(response.data.inviteUrl, 'https://example.test');
     const rawToken = inviteUrl.searchParams.get('token');
@@ -63,6 +71,9 @@ describe('createInvite', () => {
       createdByUid: 'admin-1',
       createdByEmail: 'admin@example.org',
       claimStatus: InviteClaimStatus.PENDING,
+      email: {
+        status: InviteEmailStatus.QUEUED,
+      },
     });
 
     const hashedToken = hashInviteToken(rawToken as string);
@@ -72,6 +83,18 @@ describe('createInvite', () => {
     expect(typeof written?.createdAtMs).toBe('number');
     expect(typeof written?.expiresAtMs).toBe('number');
     expect((written?.expiresAtMs as number) - (written?.createdAtMs as number)).toBe(INVITE_EXPIRY_MS);
+
+    const mailSnapshot = await firestore.collection('mail').get();
+    expect(mailSnapshot.size).toBe(1);
+    expect(mailSnapshot.docs[0].data()).toMatchObject({
+      to: ['invitee@example.org'],
+      message: {
+        subject: 'UpperRoom Media invite',
+      },
+      meta: {
+        alertType: 'invite-issued',
+      },
+    });
   });
 
   it('rejects non-admin invite creation attempts', async () => {

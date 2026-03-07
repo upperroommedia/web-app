@@ -18,8 +18,38 @@ export const InviteClaimStatus = {
 
 export type InviteClaimStatusType = (typeof InviteClaimStatus)[keyof typeof InviteClaimStatus];
 
+export const InviteEmailStatus = {
+  NOT_ATTEMPTED: 'NOT_ATTEMPTED',
+  QUEUED: 'QUEUED',
+  QUEUE_FAILED: 'QUEUE_FAILED',
+} as const;
+
+export type InviteEmailStatusType = (typeof InviteEmailStatus)[keyof typeof InviteEmailStatus];
+
+export const InviteLifecycleStatus = {
+  SENT: 'SENT',
+  SEND_FAILED: 'SEND_FAILED',
+  OPEN: 'OPEN',
+  CLAIMING: 'CLAIMING',
+  CLAIM_FAILED: 'CLAIM_FAILED',
+  CLAIMED: 'CLAIMED',
+  EXPIRED: 'EXPIRED',
+  REVOKED: 'REVOKED',
+} as const;
+
+export type InviteLifecycleStatusType = (typeof InviteLifecycleStatus)[keyof typeof InviteLifecycleStatus];
+
 export const ROLE_INVITES_COLLECTION = 'roleInvites';
 export const INVITE_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+export const INVITE_EMAIL_ENQUEUE_FAILED = 'INVITE_EMAIL_ENQUEUE_FAILED' as const;
+
+export interface InviteEmailState {
+  status: InviteEmailStatusType;
+  attemptedAtMs?: number;
+  queueMailId?: string;
+  queueErrorMessage?: string;
+  warningCode?: typeof INVITE_EMAIL_ENQUEUE_FAILED;
+}
 
 export interface InviteDocument {
   invitedEmail: string;
@@ -36,6 +66,13 @@ export interface InviteDocument {
   roleAssignedAtMs?: number;
   roleFailureAtMs?: number;
   roleFailureMessage?: string;
+  revokedAtMs?: number;
+  revokedByUid?: string;
+  revokedByEmail?: string | null;
+  resentAtMs?: number;
+  resentByInviteId?: string;
+  resendOfInviteId?: string;
+  email?: InviteEmailState;
 }
 
 export interface CreateInviteInputType {
@@ -49,6 +86,7 @@ export interface CreateInviteResultData {
   invitedEmail: string;
   invitedRole: InviteRoleType;
   expiresAtMs: number;
+  emailStatus: InviteEmailStatusType;
 }
 
 export interface ClaimInviteInputType {
@@ -61,6 +99,50 @@ export interface ClaimInviteResultData {
   invitedRole: InviteRoleType;
   effectiveRole: InviteRoleType;
   claimStatus: typeof InviteClaimStatus.COMPLETE;
+}
+
+export interface ListInvitesInputType {
+  limit?: number;
+}
+
+export interface InviteSummary {
+  inviteId: string;
+  invitedEmail: string;
+  invitedRole: InviteRoleType;
+  createdAtMs: number;
+  createdByEmail?: string | null;
+  expiresAtMs: number;
+  claimStatus: InviteClaimStatusType;
+  lifecycleStatus: InviteLifecycleStatusType;
+  emailStatus: InviteEmailStatusType;
+  inviteUrl?: string;
+  claimedByEmail?: string;
+  claimedAtMs?: number;
+  revokedAtMs?: number;
+  canRevoke: boolean;
+  canResend: boolean;
+}
+
+export interface ListInvitesResultData {
+  invites: InviteSummary[];
+}
+
+export interface RevokeInviteInputType {
+  inviteId: string;
+}
+
+export interface RevokeInviteResultData {
+  inviteId: string;
+  revokedAtMs: number;
+  lifecycleStatus: typeof InviteLifecycleStatus.REVOKED;
+}
+
+export interface ResendInviteInputType {
+  inviteId: string;
+}
+
+export interface ResendInviteResultData extends CreateInviteResultData {
+  resentFromInviteId: string;
 }
 
 export const normalizeInviteEmail = (email: string): string => email.trim().toLowerCase();
@@ -92,4 +174,38 @@ export const resolveHighestRole = (currentRole: InviteRoleType | null, invitedRo
     return invitedRole;
   }
   return ROLE_PRECEDENCE[currentRole] >= ROLE_PRECEDENCE[invitedRole] ? currentRole : invitedRole;
+};
+
+export const isInviteRevoked = (invite: InviteDocument): boolean => typeof invite.revokedAtMs === 'number';
+
+export const isInviteExpired = (invite: InviteDocument, nowMs = Date.now()): boolean =>
+  typeof invite.expiresAtMs === 'number' && invite.expiresAtMs <= nowMs;
+
+export const getInviteEmailStatus = (invite: InviteDocument): InviteEmailStatusType =>
+  invite.email?.status ?? InviteEmailStatus.NOT_ATTEMPTED;
+
+export const getInviteLifecycleStatus = (invite: InviteDocument, nowMs = Date.now()): InviteLifecycleStatusType => {
+  if (isInviteRevoked(invite)) {
+    return InviteLifecycleStatus.REVOKED;
+  }
+  if (invite.claimStatus === InviteClaimStatus.COMPLETE) {
+    return InviteLifecycleStatus.CLAIMED;
+  }
+  if (isInviteExpired(invite, nowMs)) {
+    return InviteLifecycleStatus.EXPIRED;
+  }
+  if (invite.claimStatus === InviteClaimStatus.ROLE_PENDING) {
+    return InviteLifecycleStatus.CLAIMING;
+  }
+  if (invite.claimStatus === InviteClaimStatus.ROLE_FAILED) {
+    return InviteLifecycleStatus.CLAIM_FAILED;
+  }
+  const emailStatus = getInviteEmailStatus(invite);
+  if (emailStatus === InviteEmailStatus.QUEUED) {
+    return InviteLifecycleStatus.SENT;
+  }
+  if (emailStatus === InviteEmailStatus.QUEUE_FAILED) {
+    return InviteLifecycleStatus.SEND_FAILED;
+  }
+  return InviteLifecycleStatus.OPEN;
 };
