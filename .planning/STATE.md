@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
-current_phase: 03-subsplash-alpha-lock-concurrency-control
+current_phase: 04-role-based-invite-onboarding-and-operational-notification-routing
 status: executing
-last_updated: "2026-03-01T08:13:22.847Z"
-last_activity: 2026-03-01 - Completed phase 03 plan 05 caller lock/idempotency contract adoption
+last_updated: "2026-03-07T00:00:00.000Z"
+last_activity: 2026-03-01 - Completed phase 04 plan 05 runtime alert rollout coverage and verification
 progress:
-  total_phases: 3
-  completed_phases: 2
-  total_plans: 12
-  completed_plans: 7
+  total_phases: 4
+  completed_phases: 3
+  total_plans: 13
+  completed_plans: 12
 ---
 
 # Session State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Phase 03 lock/idempotency substrate rollout
+**Current focus:** Stabilize Phase 04 invite/role-request/notification workflow while preparing Phase 02 execution.
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
-**Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** Complete (03-01 through 03-05 complete)
-**Last activity:** 2026-03-01 - Completed phase 03 plan 05 caller lock/idempotency contract adoption
+**Current phase:** 04-role-based-invite-onboarding-and-operational-notification-routing
+**Status:** Complete (04-01, 04-02, 04-03, 04-04, and 04-05 complete)
+**Last activity:** 2026-03-01 - Completed phase 04 plan 05 runtime alert rollout coverage and verification
 
 ## Decisions
 
@@ -50,6 +50,20 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 03]: Busy contention contract validation combines deterministic operation-key in-progress claims with explicit lock-timeout assertions.
 - [Phase 03]: Caller retries remain user-triggered; lock busy responses provide retry_after_ms guidance only.
 - [Phase 03]: Operation-key generation is centralized in utils/callableConcurrency.ts and reused across UI/API call sites.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Role-request and runtime-alert recipients are environment-configurable via firebase-functions params with production-safe defaults.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Operational alert helper intentionally enqueues one email per invocation with no dedupe suppression window.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Notification outbox docs include structured meta fields (source, alertType, alertCode) while remaining Trigger Email compatible.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Runtime alert codes are function-specific and deterministic for all targeted catch paths.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Add-intro/outro catch blocks wrap alert emission failures so existing status/error handling remains intact.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Role-request writes remain authoritative even when outbound notification enqueue fails.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Duplicate pending requests for the same requester/role return existing request metadata and skip re-queue.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Role request callable must be exported from functions index to be deployable.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Invite artifacts persist sha256 token hashes only; raw invite tokens are never stored.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Invite claim retries are allowed only from ROLE_FAILED and only for the original claimant uid/email.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Final claimed role resolves via ROLE_PRECEDENCE and merges existing custom claims before refresh-token revocation.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Exported createrolerequest/createinvite/claiminvite with lower-case keys for v2 callable URL compatibility.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Implemented admin invite issuance in users toolbar dialog without altering user-table sorting/pagination behavior.
+- [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Login now honors callbackurl and callbackUrl aliases while only allowing local callback paths.
 
 ## Accumulated Context
 
@@ -60,9 +74,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 ## Blockers
 
-- Root lint/build currently blocked by pre-existing `no-void` errors in:
-  - `pages/admin/sermons.tsx:110`
-  - `components/uploaderComponents/UploaderComponent.tsx:507`
+- None recorded in state file.
 
 ### Quick Tasks Completed
 
@@ -84,3 +96,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-04 with sermon/media mutation lock wrappers and regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-03 with list mutation lock/idempotency wrappers and replay regression coverage.
 - 2026-03-01: Completed 03-subsplash-alpha-lock-concurrency-control/03-05 with caller operation-key propagation, lock-busy retry guidance, and client contract tests.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-01 with notification params, queue helpers, and emulator regression tests.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-05 with publish/audio catch-path operational alert rollout and runtime regression coverage.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-02 with persistence-first role request callable, queue-failure fallback, and emulator regression coverage.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-03 with secure invite issue/claim callables and emulator lifecycle regression coverage.
+- 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-04 with callable export wiring, admin invite UX, and invite claim onboarding routes.

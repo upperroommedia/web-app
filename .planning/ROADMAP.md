@@ -7,14 +7,15 @@ This roadmap tracks active GSD-managed work on top of an already substantial bro
 ## Milestones
 
 - ✅ **Pre-GSD Product Foundation** - Existing platform capabilities established before current planning cycle
-- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-2 (in progress)
+- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-4 (in progress)
 - 📋 **v1.1 Platform Hardening (Candidate)** - Security/reliability simplification work to be phased next
 
 ## Phases
 
 - [x] **Phase 1: Series Subtitle Automation** - Finalize canonical series publish metadata and publish UX behavior.
 - [ ] **Phase 2: Dev External API Mocking** - Enforce fail-closed local external API policy with deterministic mocks.
-- [ ] **Phase 3: Subsplash Alpha-Lock Concurrency Control** - Prevent stale-write races across Subsplash-linked mutation paths.
+- [x] **Phase 3: Subsplash Alpha-Lock Concurrency Control** - Prevent stale-write races across Subsplash-linked mutation paths.
+- [x] **Phase 4: Role-Based Invite Onboarding + Notification Routing** - Add invite onboarding and centralized notification/operational alert infrastructure.
 
 ## 🚧 v1.0 Publishing Reliability + Dev Safety
 
@@ -64,6 +65,7 @@ Plans:
 | 1. Series Subtitle Automation | 2/2 | Complete | 2026-02-28 |
 | 2. Dev External API Mocking | 0/1 | In progress | - |
 | 3. Subsplash alpha-lock concurrency control | 5/5 | Complete | 2026-03-01 |
+| 4. Role-based invite onboarding and operational notification routing | 5/5 | Complete | 2026-03-01 |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 
@@ -99,8 +101,8 @@ Plans:
 **Plans:** 5 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Build notification params, Firestore outbox queue, and shared operational alert utility
-- [ ] 04-02-PLAN.md — Implement persistence-first role request callable with notification fallback and tests
-- [ ] 04-03-PLAN.md — Implement secure invite issue/claim backend with hashed tokens and no-downgrade role assignment
-- [ ] 04-04-PLAN.md — Wire new callables into exports and UI flows (admin invite, request form, invite claim/success routes)
-- [ ] 04-05-PLAN.md — Roll out runtime alert emission across publish and add-intro/outro catch paths with regression tests
+- [x] 04-01-PLAN.md — Build notification params, Firestore outbox queue, and shared operational alert utility
+- [x] 04-02-PLAN.md — Implement persistence-first role request callable with notification fallback and tests
+- [x] 04-03-PLAN.md — Implement secure invite issue/claim backend with hashed tokens and no-downgrade role assignment
+- [x] 04-04-PLAN.md — Wire new callables into exports and UI flows (admin invite, request form, invite claim/success routes)
+- [x] 04-05-PLAN.md — Roll out runtime alert emission across publish and add-intro/outro catch paths with regression tests
