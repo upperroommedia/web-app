@@ -1,15 +1,20 @@
 // import Button from '@mui/material/Button';
 // import TextField from '@mui/material/TextField';
 import { useRouter } from 'next/router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useAuth from '../context/user/UserContext';
 import PopUp from './PopUp';
 // import Alert from '@mui/material/Alert';
 // import Collapse from '@mui/material/Collapse';
 import { GoogleLoginButton, AppleLoginButton, MicrosoftLoginButton } from 'react-social-login-buttons';
-import { AuthErrorCodes, AuthError, UserCredential } from 'firebase/auth';
+import { AuthErrorCodes, AuthError, UserCredential, getAdditionalUserInfo } from 'firebase/auth';
 import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD, isDevelopment } from '../context/user/devAuth';
 import Button from '@mui/material/Button';
+import Alert from '@mui/material/Alert';
+import Snackbar from '@mui/material/Snackbar';
+
+const INVITE_CLAIM_AUTH_META_KEY = 'invite-claim-auth-meta';
+const INVITE_LOGIN_NOTICE_KEY = 'invite-claim-login-notice';
 
 const Login = () => {
   const router = useRouter();
@@ -23,6 +28,8 @@ const Login = () => {
   const [open, setOpen] = useState<boolean>(false);
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [inviteNotice, setInviteNotice] = useState('');
+  const [inviteNoticeOpen, setInviteNoticeOpen] = useState(false);
 
   // const [forgotPasswordPopup, setForgotPasswordPopup] = useState<boolean>(false);
   // const [forgotPasswordEmail, setForgotPasswordEmail] = useState<string>('');
@@ -61,16 +68,59 @@ const Login = () => {
   //   router.push(authResult.dest);
   // };
   // Type guard function
-function isAuthError(error: any): error is AuthError {
-  return error && 
-         typeof error.code === 'string' && 
-         error.code.startsWith('auth/') &&
-         typeof error.message === 'string';
-}
+  function isAuthError(error: any): error is AuthError {
+    return (
+      error &&
+      typeof error.code === 'string' &&
+      error.code.startsWith('auth/') &&
+      typeof error.message === 'string'
+    );
+  }
+
+  const getCallbackDestination = () => {
+    const candidates = [router.query.callbackurl, router.query.callbackUrl];
+    const rawValue = candidates.find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    if (!rawValue) {
+      return '/';
+    }
+
+    const trimmedValue = rawValue.trim();
+    let decodedValue = trimmedValue;
+    try {
+      decodedValue = decodeURIComponent(trimmedValue);
+    } catch (_error) {
+      decodedValue = trimmedValue;
+    }
+
+    if (decodedValue === '/login') {
+      return '/';
+    }
+
+    if (decodedValue.startsWith('http://') || decodedValue.startsWith('https://')) {
+      return '/';
+    }
+
+    return decodedValue.startsWith('/') ? decodedValue : `/${decodedValue}`;
+  };
+
+  useEffect(() => {
+    if (!router.isReady || typeof window === 'undefined') {
+      return;
+    }
+    const notice = sessionStorage.getItem(INVITE_LOGIN_NOTICE_KEY);
+    if (!notice) {
+      return;
+    }
+    sessionStorage.removeItem(INVITE_LOGIN_NOTICE_KEY);
+    setInviteNotice(notice);
+    setInviteNoticeOpen(true);
+  }, [router.isReady]);
 
   const handleLogin = async (loginFunction: () => Promise<UserCredential>) => {
+    let credential: UserCredential | null = null;
     try {
-      await loginFunction();
+      credential = await loginFunction();
     } catch (error) {
       if (isAuthError(error)) {
         if (error.code === AuthErrorCodes.CREDENTIAL_ALREADY_IN_USE || error.code === AuthErrorCodes.NEED_CONFIRMATION) {
@@ -103,17 +153,28 @@ function isAuthError(error: any): error is AuthError {
         return;
       }
     }
-      
-      // Success - redirect user
-      const { callbackurl: possibleCallback } = router.query;
-      const rawCallback = (possibleCallback as string) || '';
-      if (rawCallback === '/login') {
-        router.push('/');
-      } else if (rawCallback.startsWith('/')) {
-        router.push(rawCallback);
-      } else {
-        router.push(`/${rawCallback}`);
+
+    const callbackDestination = getCallbackDestination();
+    if (callbackDestination.startsWith('/invite/claim')) {
+      const additionalInfo = credential ? getAdditionalUserInfo(credential) : null;
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(
+          INVITE_CLAIM_AUTH_META_KEY,
+          JSON.stringify({
+            uid: credential?.user.uid ?? null,
+            email: credential?.user.email ?? null,
+            isNewUser: additionalInfo?.isNewUser === true,
+            providerId: additionalInfo?.providerId ?? null,
+            capturedAtMs: Date.now(),
+          })
+        );
       }
+    } else if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(INVITE_CLAIM_AUTH_META_KEY);
+    }
+
+    // Success - redirect user
+    router.push(callbackDestination);
   };
 
   return (
@@ -215,15 +276,7 @@ function isAuthError(error: any): error is AuthError {
                       setOpen(true);
                     } else {
                       // Success - redirect
-                      const { callbackurl: possibleCallback } = router.query;
-                      const rawCallback = (possibleCallback as string) || '';
-                      if (rawCallback === '/login') {
-                        router.push('/');
-                      } else if (rawCallback.startsWith('/')) {
-                        router.push(rawCallback);
-                      } else {
-                        router.push(`/${rawCallback}`);
-                      }
+                      router.push(getCallbackDestination());
                     }
                   } catch (e: any) {
                     setTitle('Dev Login Error');
@@ -260,6 +313,16 @@ function isAuthError(error: any): error is AuthError {
       <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
         {errorMessage}
       </PopUp>
+      <Snackbar
+        open={inviteNoticeOpen}
+        autoHideDuration={9000}
+        onClose={() => setInviteNoticeOpen(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setInviteNoticeOpen(false)} severity="warning" variant="filled" sx={{ width: '100%' }}>
+          {inviteNotice}
+        </Alert>
+      </Snackbar>
     </div>
   );
 };

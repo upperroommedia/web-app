@@ -1,4 +1,5 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { IdempotencyRecord } from './lockTypes';
 
 const IDEMPOTENCY_COLLECTION = 'subsplashOperationKeys';
@@ -116,10 +117,10 @@ export const claimOperation = async (operationKey: string): Promise<ClaimOperati
       status: 'in_progress',
       startedAtMs: nowMs,
       updatedAtMs: nowMs,
-      result: firebaseAdmin.firestore.FieldValue.delete(),
-      failure: firebaseAdmin.firestore.FieldValue.delete(),
-      completedAtMs: firebaseAdmin.firestore.FieldValue.delete(),
-      failedAtMs: firebaseAdmin.firestore.FieldValue.delete(),
+      result: FieldValue.delete(),
+      failure: FieldValue.delete(),
+      completedAtMs: FieldValue.delete(),
+      failedAtMs: FieldValue.delete(),
     }, { merge: true });
 
     claimResult = {
@@ -148,8 +149,8 @@ export const completeOperation = async (
     result,
     updatedAtMs: nowMs,
     completedAtMs: nowMs,
-    failure: firebaseAdmin.firestore.FieldValue.delete(),
-    failedAtMs: firebaseAdmin.firestore.FieldValue.delete(),
+    failure: FieldValue.delete(),
+    failedAtMs: FieldValue.delete(),
   }, { merge: true });
 
   const snapshot = await ref.get();
@@ -175,8 +176,8 @@ export const markOperationFailed = async (
     failure: failurePayload,
     updatedAtMs: nowMs,
     failedAtMs: nowMs,
-    result: firebaseAdmin.firestore.FieldValue.delete(),
-    completedAtMs: firebaseAdmin.firestore.FieldValue.delete(),
+    result: FieldValue.delete(),
+    completedAtMs: FieldValue.delete(),
   }, { merge: true });
 
   const snapshot = await ref.get();

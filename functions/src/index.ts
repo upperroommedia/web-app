@@ -49,6 +49,15 @@ import { updateSubsplashTag } from './Scrapers/updateSubsplashTag';
 import { updateImageMetadata } from './helpers/updateImageMetadata';
 import imageOnDelete from './DocumentListeners/Images/imageOnDelete';
 import seriesItemOnWrite from './DocumentListeners/Series/seriesItemOnWrite';
+import createrolerequest from './roleRequests/createRoleRequest';
+import listrolerequests from './roleRequests/listRoleRequests';
+import acceptrolerequest from './roleRequests/acceptRoleRequest';
+import denyrolerequest from './roleRequests/denyRoleRequest';
+import createinvite from './invites/createInvite';
+import claiminvite from './invites/claimInvite';
+import listinvites from './invites/listInvites';
+import revokeinvite from './invites/revokeInvite';
+import resendinvite from './invites/resendInvite';
 
 // Series functions
 import createseries from './createSeries';
@@ -108,6 +117,15 @@ exports.updatesubsplashtag = updateSubsplashTag;
 exports.updateimagemetadata = updateImageMetadata;
 exports.imageondelete = imageOnDelete;
 exports.seriesitemonwrite = seriesItemOnWrite;
+exports.createrolerequest = createrolerequest;
+exports.listrolerequests = listrolerequests;
+exports.acceptrolerequest = acceptrolerequest;
+exports.denyrolerequest = denyrolerequest;
+exports.createinvite = createinvite;
+exports.claiminvite = claiminvite;
+exports.listinvites = listinvites;
+exports.revokeinvite = revokeinvite;
+exports.resendinvite = resendinvite;
 
 // Series exports
 exports.createseries = createseries;

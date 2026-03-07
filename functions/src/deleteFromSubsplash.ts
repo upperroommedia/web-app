@@ -6,6 +6,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface DeleteFromSubsplashInputType {
   operationKey: string;
@@ -59,6 +60,16 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSub
     );
   } catch (error) {
     logger.error('Error deleting from Subsplash', { mediaItemId, error });
+    await emitOperationalAlert({
+      alertCode: 'PUBLISH_SUBSPLASH_DELETE_RUNTIME_FAILURE',
+      summary: 'deleteFromSubsplash callable failed during publish delete flow.',
+      error,
+      context: {
+        functionName: 'deleteFromSubsplash',
+        operationKey,
+        subsplashId: mediaItemId,
+      },
+    });
 
     // Handle specific Subsplash API errors
     if (isAxiosError(error) && error.response?.data?.errors) {

@@ -7,6 +7,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   extends Partial<Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'audioUrl' | 'autoPublish'>> {
@@ -95,6 +96,16 @@ const editSubsplashSermon = onCall(
       );
     } catch (error) {
       logger.error(error);
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SUBSPLASH_EDIT_RUNTIME_FAILURE',
+        summary: 'editSubsplashSermon callable failed during publish edit flow.',
+        error,
+        context: {
+          functionName: 'editSubsplashSermon',
+          operationKey,
+          subsplashId,
+        },
+      });
       throw handleError(error);
     }
   }

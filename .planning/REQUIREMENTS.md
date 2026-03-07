@@ -28,6 +28,16 @@
 - [ ] **DEVSAFE-03**: Local admin publishing/testing flows remain usable through deterministic mocks.
 - [ ] **DEVSAFE-04**: Regression checks block reintroduction of direct production endpoint usage in disallowed paths.
 
+### Invite Onboarding + Operational Notifications (Current Milestone)
+
+- [x] **INVITE-01**: Admins can issue role-targeted invite links that are single-use, email-bound, and expire after 30 days.
+- [x] **INVITE-02**: Invite claims assign roles immediately for matching authenticated users while preventing implicit role downgrades.
+- [x] **INVITE-03**: Successful invite claims redirect users to a dedicated invite success route.
+- [x] **ROLE-REQ-01**: Role requests persist requester identity, requested role, timestamp, and admin-linkable metadata.
+- [x] **ROLE-REQ-02**: New role requests route notifications to environment-configurable recipients with required production defaults.
+- [x] **OPS-ALERT-01**: Role-request notification failures emit operational alert signals without rolling back persisted requests.
+- [x] **OPS-ALERT-02**: Runtime caught failures enqueue structured operational notifications for every occurrence (no dedupe suppression).
+
 ## v2 Requirements
 
 ### Platform Hardening and Simplification
@@ -64,6 +74,13 @@
 | DEVSAFE-02 | Phase 2 | In Progress |
 | DEVSAFE-03 | Phase 2 | In Progress |
 | DEVSAFE-04 | Phase 2 | In Progress |
+| INVITE-01 | Phase 4 | Complete |
+| INVITE-02 | Phase 4 | Complete |
+| INVITE-03 | Phase 4 | Complete |
+| ROLE-REQ-01 | Phase 4 | Complete |
+| ROLE-REQ-02 | Phase 4 | Complete |
+| OPS-ALERT-01 | Phase 4 | Complete |
+| OPS-ALERT-02 | Phase 4 | Complete |
 | SEC-01 | Next milestone candidate | Pending |
 | SEC-02 | Next milestone candidate | Pending |
 | REL-01 | Next milestone candidate | Pending |
@@ -72,10 +89,10 @@
 | TEST-01 | Next milestone candidate | Pending |
 
 **Coverage:**
-- v1 requirements: 14 total
-- Mapped to active phases or baseline: 14
+- v1 requirements: 21 total
+- Mapped to active phases or baseline: 21
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-02-28 after $gsd-map-codebase refresh*
+*Last updated: 2026-03-01 after phase 04-04 completion*
