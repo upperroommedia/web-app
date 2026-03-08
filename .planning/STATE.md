@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 03-subsplash-alpha-lock-concurrency-control
 status: executing
-last_updated: "2026-03-08T00:27:04.601Z"
-last_activity: 2026-03-08 - Completed phase 03 plan 06 bulkAddToSeries lock/idempotency + caller retry-key rollout
+last_updated: "2026-03-08T00:36:01.160Z"
+last_activity: 2026-03-08 - Completed phase 03 plan 07 caller lock-busy cleanup contract + LOCK traceability closure
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 14
-  completed_plans: 13
+  total_plans: 15
+  completed_plans: 14
 ---
 
 # Session State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Close remaining Phase 03 verification work (03-07) and then resume Phase 02 execution.
+**Current focus:** Resume Phase 02 execution (`02-01`) now that Phase 03 lock-concurrency verification closure is complete.
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** In progress (03-01 through 03-06 complete; 03-07 pending)
-**Last activity:** 2026-03-08 - Completed phase 03 plan 06 bulkAddToSeries lock/idempotency + caller retry-key rollout
+**Status:** In progress (Phase 03 complete, Phase 02 pending)
+**Last activity:** 2026-03-08 - Completed phase 03 plan 07 caller lock-busy cleanup contract + LOCK traceability closure
 
 ## Decisions
 
@@ -67,6 +67,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 03]: bulkaddtoseries now requires operationKey and expectedPublishedMembershipHash to enforce deterministic replay and stale-snapshot protection
 - [Phase 03]: bulkaddtoseries lock scope uses series:{firestoreSeriesId} plus sorted media-item lock keys for cross-callable serialization
 - [Phase 03]: series admin bulk publish retries now derive deterministic createRetryIntentKey values from intent fingerprints
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: Series-list delete callables now include deterministic operationKey payloads and lock-busy retry guidance.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: deleteSermonWithExternalCleanup now fails fast and preserves callable code/details via ExternalCleanupError for UI contention handling.
+- [Phase 03-subsplash-alpha-lock-concurrency-control]: LOCK-01..LOCK-05 definitions and traceability rows are restored as complete in REQUIREMENTS.md.
 
 ## Accumulated Context
 
@@ -105,3 +108,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-03 with secure invite issue/claim callables and emulator lifecycle regression coverage.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-04 with callable export wiring, admin invite UX, and invite claim onboarding routes.
 - 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-06 with bulkAddToSeries lock/idempotency migration, stale-snapshot guard, and caller intent-scoped retry keys.
+- 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-07 with delete caller operation-key adoption, lock-busy retry UX wiring, and LOCK requirements traceability restoration.
