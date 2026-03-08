@@ -45,10 +45,11 @@ Plans:
   2. Local workflows run with deterministic mock responses for external integrations.
   3. Misconfigured mode fails closed with actionable operator feedback.
   4. Tests/static checks enforce the policy against regression.
-**Plans:** 1 plan
+**Plans:** 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Implement external API mode policy, provider mocks, and guardrail tests/docs
+- [ ] 02-01-PLAN.md — Implement external API mode policy and deterministic provider mock contracts
+- [ ] 02-02-PLAN.md — Wire publish callables to policy-aware adapters and add endpoint guardrail regression test
 
 ## Upcoming Scope Candidates (Not Yet Phased)
 
