@@ -1,9 +1,10 @@
-import axios, { AxiosRequestConfig } from 'axios';
-import FormData from 'form-data';
 import handleError from './handleError';
+import { deleteTrack } from './soundcloudClient';
+import { soundcloudAccessToken } from './soundcloudSecrets';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '../../types/User';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface DeleteFromSoundCloudInputType {
   soundCloudTrackId: string;
@@ -11,43 +12,32 @@ export interface DeleteFromSoundCloudInputType {
 
 export type DeleteFromSoundCloudReturnType = void;
 
-const deleteFromSoundCloudHelper = async (soundCloudTrackId: string) => {
-  const formData = new FormData();
-  console.log('soundCloudTrackId', soundCloudTrackId);
-  formData.append('trackId', soundCloudTrackId);
-  const config: AxiosRequestConfig = {
-    method: 'POST',
-    url: 'https://hook.eu1.make.com/c7mnio0orvi8teayuo11nlrdocvwmsoj',
-    headers: {
-      ...formData.getHeaders(),
-    },
-    data: formData,
-  };
-  try {
-    console.log('Config', config);
-    const response = await axios(config);
-    logger.log('response status', response.status);
-    logger.log('response data', response.data);
-    if (response.status !== 200) {
-      throw new HttpsError('internal', response.data);
-    }
-  } catch (error) {
-    throw handleError(error);
-  }
-};
-
 const deleteFromSoundCloud = onCall(
+  { secrets: [soundcloudAccessToken] },
   async (request: CallableRequest<DeleteFromSoundCloudInputType>): Promise<DeleteFromSoundCloudReturnType> => {
     logger.log('deleteFromSoundCloud', request);
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
+    const token = soundcloudAccessToken.value();
+    if (!token) {
+      throw new HttpsError('failed-precondition', 'SOUNDCLOUD_ACCESS_TOKEN is not set.');
+    }
     try {
       logger.log('Attempting to delete from SoundCloud', request.data);
-      await deleteFromSoundCloudHelper(request.data.soundCloudTrackId);
+      await deleteTrack(token, request.data.soundCloudTrackId);
       logger.log('Track deleted from SoundCloud');
     } catch (error) {
       logger.error(error);
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SOUNDCLOUD_DELETE_RUNTIME_FAILURE',
+        summary: 'deleteFromSoundCloud callable failed during publish delete flow.',
+        error,
+        context: {
+          functionName: 'deleteFromSoundCloud',
+          soundCloudTrackId: request.data.soundCloudTrackId,
+        },
+      });
       throw handleError(error);
     }
   }

@@ -1,10 +1,11 @@
 import React, { Dispatch, SetStateAction } from 'react';
-import styles from '../../styles/Uploader.module.css';
 import uploadFile, { AudioSource } from '../../pages/api/uploadFile';
 import { User } from '../../types/User';
 import { UploadProgress } from '../../context/types';
 import { List } from '../../types/List';
 import { Sermon } from '../../types/SermonTypes';
+import Button from '@mui/material/Button';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 
 interface UploadButtonProps {
   user: User;
@@ -17,7 +18,7 @@ interface UploadButtonProps {
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>;
   setInvalidFormMessage: Dispatch<SetStateAction<string | undefined>>;
   setIsUploading: Dispatch<SetStateAction<boolean>>;
-  clearForm: () => void;
+  onUploadSuccess?: (sermonId: string) => void;
 }
 
 export default function UploadButton({
@@ -30,13 +31,13 @@ export default function UploadButton({
   setUploadProgress,
   setInvalidFormMessage,
   setIsUploading,
-  clearForm,
+  onUploadSuccess,
 }: UploadButtonProps) {
   return (
-    <input
-      className={styles.button}
-      type="button"
-      value="Upload"
+    <Button
+      variant="contained"
+      color="primary"
+      startIcon={<CloudUploadIcon />}
       onClick={async () => {
         // if (audioSource !== undefined && date != null && user.canUpload()) {
         if (validateForm() && audioSource != null) {
@@ -49,18 +50,23 @@ export default function UploadButton({
               sermon,
               sermonList,
             });
-            clearForm();
+            // Call success callback with sermon ID
+            onUploadSuccess?.(sermon.id);
           } catch (error) {
             setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
-          } finally {
             setIsUploading(false);
           }
+          // Note: We don't set isUploading to false on success because
+          // the modal stays open to show "View Sermon" button
         } else if (!user.canUpload()) {
           setUploadProgress({ error: true, message: 'You do not have permission to upload', percent: 0 });
         } else {
           setInvalidFormMessage('Please make sure all required fields are filled out');
         }
       }}
-    />
+      sx={{ minWidth: 120 }}
+    >
+      Upload
+    </Button>
   );
 }

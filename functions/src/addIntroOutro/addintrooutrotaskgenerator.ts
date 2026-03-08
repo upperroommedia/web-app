@@ -8,6 +8,7 @@ import { TIMEOUT_SECONDS } from './consts';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { sermonStatusType } from '../../../types/SermonTypes';
 import { getAudioSource, validateAddIntroOutroData } from './utils';
+import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 
 // let auth: GoogleAuth | undefined;
 // /**
@@ -91,6 +92,25 @@ const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddInt
     return await queue.enqueue(data, taskOptions);
   } catch (e) {
     logger.error(e);
+    try {
+      await emitOperationalAlert({
+        alertCode: 'AUDIO_TASK_GENERATOR_RUNTIME_FAILURE',
+        summary: 'addintrooutrotaskgenerator failed to enqueue add-intro/outro task.',
+        error: e,
+        context: {
+          functionName: 'addintrooutrotaskgenerator',
+          sermonId: data.id,
+          audioSourceType: audioSource.type,
+          audioSource: audioSource.source,
+          taskRoute: 'addintrooutrotaskhandler',
+        },
+      });
+    } catch (alertError) {
+      logger.error('Failed to emit operational alert for addintrooutrotaskgenerator', {
+        alertError,
+        originalError: e,
+      });
+    }
     throw handleError(e);
   }
 });

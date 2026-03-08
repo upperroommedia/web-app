@@ -9,17 +9,24 @@ import ReportProblemRoundedIcon from '@mui/icons-material/ReportProblemRounded';
 import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
 import Checkbox from '@mui/material/Checkbox';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Button, { ButtonPropsColorOverrides } from '@mui/material/Button';
 import { OverridableStringUnion } from '@mui/types';
 import CircularProgress from '@mui/material/CircularProgress';
+
 interface UploadStatusListProps {
   sectionTitle: string;
   sermonListItems: SermonList[];
   buttonAction: (lists: SermonList[]) => Promise<void>;
   allSelectedButtonAction?: (lists?: SermonList[]) => Promise<void>;
   buttonLabel: string;
+  secondaryButtonAction?: (lists: SermonList[]) => Promise<void>;
+  secondaryButtonLabel?: string;
+  secondaryButtonColorVariant?: OverridableStringUnion<
+    'inherit' | 'primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning',
+    ButtonPropsColorOverrides
+  >;
   buttonColorVariant?: OverridableStringUnion<
     'inherit' | 'primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning',
     ButtonPropsColorOverrides
@@ -32,15 +39,51 @@ const UploadStatusList = ({
   buttonAction,
   allSelectedButtonAction,
   buttonLabel,
+  secondaryButtonAction,
+  secondaryButtonLabel,
+  secondaryButtonColorVariant,
   buttonColorVariant,
 }: UploadStatusListProps) => {
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loadingAction, setLoadingAction] = useState<'primary' | 'secondary' | null>(null);
   const [loadingListIds, setLoadingListIds] = useState<Set<string>>(new Set());
   const [checked, setChecked] = useState<boolean[]>(new Array(sermonListItems.length).fill(false));
+
+  useEffect(() => {
+    setChecked(new Array(sermonListItems.length).fill(false));
+  }, [sermonListItems]);
 
   if (sermonListItems.length === 0 || checked.length === 0) {
     return <></>;
   }
+
+  const hasSelection = checked.some((value) => value === true);
+  const isLoading = loadingAction !== null;
+  const runAction = async (action: 'primary' | 'secondary') => {
+    const selectedItems = sermonListItems.filter((_, index) => checked[index]);
+    if (selectedItems.length === 0) return;
+
+    setLoadingAction(action);
+    setLoadingListIds(new Set(selectedItems.map((item) => item.id)));
+    try {
+      if (action === 'primary') {
+        if (allSelectedButtonAction && selectedItems.length === sermonListItems.length) {
+          await allSelectedButtonAction(selectedItems);
+          return;
+        }
+        await buttonAction(selectedItems);
+        return;
+      }
+
+      if (secondaryButtonAction) {
+        await secondaryButtonAction(selectedItems);
+      }
+    } catch (error) {
+      alert(error);
+    } finally {
+      setLoadingAction(null);
+      setLoadingListIds(new Set());
+    }
+  };
 
   return (
     <Stack>
@@ -97,30 +140,28 @@ const UploadStatusList = ({
           );
         })}
       </List>
-      <Button
-        color={buttonColorVariant}
-        variant="contained"
-        disabled={checked.every((value) => value === false) || loading}
-        onClick={async () => {
-          setLoading(true);
-          const selectedItems = sermonListItems.filter((_, index) => checked[index]);
-          setLoadingListIds(new Set(selectedItems.map((item) => item.id)));
-          try {
-            // check if all selected
-            if (allSelectedButtonAction && selectedItems.length === sermonListItems.length) {
-              await allSelectedButtonAction(selectedItems);
-              return;
-            }
-            await buttonAction(selectedItems);
-          } catch (error) {
-            alert(error);
-          }
-          setLoading(false);
-          setLoadingListIds(new Set());
-        }}
-      >
-        {loading ? <CircularProgress size="1.5rem" /> : buttonLabel}
-      </Button>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+        <Button
+          color={buttonColorVariant}
+          variant="contained"
+          disabled={!hasSelection || isLoading}
+          onClick={() => runAction('primary')}
+          sx={{ flex: 1 }}
+        >
+          {loadingAction === 'primary' ? <CircularProgress size="1.5rem" /> : buttonLabel}
+        </Button>
+        {secondaryButtonAction && secondaryButtonLabel && (
+          <Button
+            color={secondaryButtonColorVariant ?? 'secondary'}
+            variant="outlined"
+            disabled={!hasSelection || isLoading}
+            onClick={() => runAction('secondary')}
+            sx={{ flex: 1 }}
+          >
+            {loadingAction === 'secondary' ? <CircularProgress size="1.5rem" /> : secondaryButtonLabel}
+          </Button>
+        )}
+      </Stack>
     </Stack>
   );
 };

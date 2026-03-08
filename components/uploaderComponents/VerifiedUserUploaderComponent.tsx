@@ -1,6 +1,6 @@
-import React, { Dispatch, SetStateAction } from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useRef } from 'react';
 import useAuth from '../../context/user/UserContext';
-import { useRouter } from 'next/router';
+import Router from 'next/router';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
@@ -18,10 +18,30 @@ export interface VerifiedUserUploaderProps {
 }
 
 export default function VerifiedUserUploaderComponent(props: VerifiedUserUploaderProps) {
-  const { user } = useAuth();
-  const router = useRouter();
-  if (!user) {
-    router.push('/login');
+  const { user, loading } = useAuth();
+  const redirectingRef = useRef(false);
+  const isAuthenticated = user != null;
+
+  useEffect(() => {
+    if (loading || isAuthenticated) {
+      redirectingRef.current = false;
+      return;
+    }
+
+    if (redirectingRef.current) {
+      return;
+    }
+    redirectingRef.current = true;
+
+    const callbackPath =
+      typeof window !== 'undefined' && window.location.pathname !== '/login'
+        ? `${window.location.pathname}${window.location.search}`
+        : '/';
+
+    Router.replace(`/login?callbackurl=${encodeURIComponent(callbackPath)}`);
+  }, [loading, isAuthenticated]);
+
+  if (loading || !user) {
     return (
       <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
         <CircularProgress />

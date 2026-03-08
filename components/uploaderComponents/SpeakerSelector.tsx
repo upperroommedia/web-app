@@ -148,6 +148,12 @@ function SpeakerSelector({
               
               if (querySnapshot.docs.length > 0) {
                 const list = querySnapshot.docs[0].data();
+                // Don't add overflow lists to the sermon list
+                if (list.isMoreSermonsList) {
+                  // eslint-disable-next-line no-console
+                  console.warn(`Attempted to add overflow list ${details.option.listId} - skipping`);
+                  return;
+                }
                 setSermonList((oldSermonList) => {
                   if (
                     oldSermonList.find((existingSermon) => {

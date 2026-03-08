@@ -30,38 +30,23 @@ export const AudioPlayerProvider = ({ children }: { children: React.ReactNode })
 
   const togglePlaying = useCallback(
     (play?: boolean) => {
-      const shouldPlay = play === undefined ? !state.playing : play;
-      dispatch({ type: 'TOGGLE_PLAYING', payload: shouldPlay });
+      dispatch({ type: 'TOGGLE_PLAYING', payload: play });
     },
-    [state.playing]
+    []
   );
 
   const setCurrentSermon = useCallback(
     (sermon: Sermon | undefined) => {
-      if (!sermon) {
-        dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: undefined });
-        return;
-      }
-      if (state.currentSermon?.id === sermon.id) return;
-      const newCurrentSermon: SermonWithMetadata = { ...sermon, currentSecond: 0 };
-      dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: newCurrentSermon });
+      dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: sermon });
     },
-    [state.currentSermon?.id]
+    []
   );
 
   const setCurrentSermonUrl = useCallback(
     (url: string) => {
-      if (!state.currentSermon) {
-        console.error('No sermon found');
-        return;
-      }
-      const sermon: SermonWithMetadata = {
-        ...state.currentSermon,
-        url,
-      };
-      dispatch({ type: 'UPDATE_CURRENT_SERMON', payload: sermon });
+      dispatch({ type: 'SET_CURRENT_SERMON_URL', payload: url });
     },
-    [state.currentSermon]
+    []
   );
 
   // ✅ Memoize context value to prevent unnecessary re-renders

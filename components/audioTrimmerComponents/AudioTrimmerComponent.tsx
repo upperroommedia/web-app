@@ -1,10 +1,13 @@
 import React, { Dispatch, FunctionComponent, SetStateAction } from 'react';
-import Cancel from '@mui/icons-material/Cancel';
+import CloseIcon from '@mui/icons-material/Close';
+import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import dynamic from 'next/dynamic';
-import { isBrowser } from 'react-device-detect';
 
+// Use the same AudioTrimmer for both mobile and desktop
+// The new trimmer components are responsive and work on mobile
 const DynamicAudioTrimmer = dynamic(() => import('./AudioTrimmer'), { ssr: false });
-const DynamicMobileAudioTrimmer = dynamic(() => import('./MobileAudioTrimmerComponent'), { ssr: false });
 
 type AudioTrimmerComponentProps = {
   url: string;
@@ -24,22 +27,35 @@ const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
   setHasTrimmed,
 }) => {
   return (
-    <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'right' }}>
-        <Cancel sx={{ color: 'red' }} onClick={clearAudioTrimmer} />
-      </div>
-      {isBrowser ? (
-        <DynamicAudioTrimmer
-          url={url}
-          trimStart={trimStart}
-          setTrimStart={setTrimStart}
-          setTrimDuration={setTrimDuration}
-          setHasTrimmed={setHasTrimmed}
-        />
-      ) : (
-        <DynamicMobileAudioTrimmer url={url} setDuration={setTrimDuration} />
-      )}
-    </div>
+    <Box sx={{ width: '100%', position: 'relative' }}>
+      {/* Close button - positioned in top right */}
+      <Tooltip title="Remove audio" placement="left">
+        <IconButton
+          size="small"
+          onClick={clearAudioTrimmer}
+          sx={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            zIndex: 10,
+            color: 'text.secondary',
+            '&:hover': {
+              color: 'error.main',
+              bgcolor: 'rgba(239, 68, 68, 0.1)',
+            },
+          }}
+        >
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+      <DynamicAudioTrimmer
+        url={url}
+        trimStart={trimStart}
+        setTrimStart={setTrimStart}
+        setTrimDuration={setTrimDuration}
+        setHasTrimmed={setHasTrimmed}
+      />
+    </Box>
   );
 };
 

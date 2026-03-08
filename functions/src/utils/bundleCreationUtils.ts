@@ -84,9 +84,10 @@ export async function generateAndStoreBundle<T>(
         logger.info(`Generating new ${config.displayName} bundle`);
 
         // Build query
+        const adminConverter = config.converter as unknown as FirestoreDataConverter<T>;
         let query: Query<T> = firestoreAdmin
             .collection(config.collectionName)
-            .withConverter(config.converter);
+            .withConverter(adminConverter);
 
         // Add where conditions if specified
         if (config.whereConditions) {

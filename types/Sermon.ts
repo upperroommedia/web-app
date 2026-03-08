@@ -60,7 +60,12 @@ export const getDateString = (date: Date) => {
  */
 export const sermonConverter: FirestoreDataConverter<Sermon> = {
   toFirestore: (sermon: Sermon): FirebaseSermon => {
-    return { ...sermon, date: Timestamp.fromMillis(sermon.dateMillis) };
+    // Filter out undefined values to prevent Firebase errors
+    // (Firestore doesn't accept undefined, only null or omitted fields)
+    const cleanedSermon = Object.fromEntries(
+      Object.entries(sermon).filter(([, value]) => value !== undefined)
+    ) as Sermon;
+    return { ...cleanedSermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars

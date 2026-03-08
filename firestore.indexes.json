@@ -47,6 +47,24 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "isMoreSermonsList",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAtMillis",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "lists",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "listTagAndPosition.listTag",
           "order": "ASCENDING"
         },
@@ -84,6 +102,20 @@
         },
         {
           "fieldPath": "createdAtMillis",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "roleRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "requesterUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAtMs",
           "order": "DESCENDING"
         }
       ]

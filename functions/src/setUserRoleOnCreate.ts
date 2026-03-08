@@ -5,9 +5,7 @@ import {
 
 
 const setUserRoleOnCreate = beforeUserCreated((event) => {
-  // In development/emulator mode, default to 'admin' role for easier testing
-  // In production, default to 'user' role for security
-  const defaultRole = process.env.FUNCTIONS_EMULATOR === 'true' ? 'admin' : 'user';
+  const defaultRole = 'user';
   logger.info(`Setting customClaims role:${defaultRole} for: ${event.data?.displayName}`, { event: event });
   // Return the custom claims to be set on the user
   // This will be merged with the user's existing data

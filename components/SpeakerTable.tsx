@@ -12,7 +12,11 @@ import TableRow from '@mui/material/TableRow';
 import TableSortLabel from '@mui/material/TableSortLabel';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import Paper from '@mui/material/Paper';
+import Card from '@mui/material/Card';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import SearchIcon from '@mui/icons-material/Search';
+import CircularProgress from '@mui/material/CircularProgress';
 import { ISpeaker, speakerConverter } from '../types/Speaker';
 import { visuallyHidden } from '@mui/utils';
 // import FormGroup from '@mui/material/FormGroup';
@@ -120,75 +124,41 @@ export interface Filters {
 //   hasBannerImage = 'Contains Banner Image',
 // }
 
-const SpeakerTableToolbar = () =>
-  // filters: Filters;
-  // setFilters: Dispatch<SetStateAction<Filters>>;
-  // handleRequestFilter: (filter: string) => void;
-  {
-    // const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-    // const open = Boolean(anchorEl);
-    // const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    //   setAnchorEl(event.currentTarget);
-    // };
-    // const handleClose = () => {
-    //   setAnchorEl(null);
-    // };
-    return (
-      <Toolbar
-        sx={{
-          pl: { sm: 2 },
-          pr: { xs: 1, sm: 1 },
+interface SpeakerTableToolbarProps {
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+}
+
+const SpeakerTableToolbar = ({ searchValue, onSearchChange }: SpeakerTableToolbarProps) => {
+  return (
+    <Toolbar
+      sx={{
+        pl: { sm: 2 },
+        pr: { xs: 1, sm: 2 },
+        gap: 2,
+        flexWrap: 'wrap',
+      }}
+    >
+      <Typography variant="h6" id="tableTitle" component="div" sx={{ flexShrink: 0 }}>
+        Speakers
+      </Typography>
+      <TextField
+        placeholder="Search speakers by name..."
+        value={searchValue}
+        onChange={(e) => onSearchChange(e.target.value)}
+        size="small"
+        sx={{ flex: 1, minWidth: 200, maxWidth: 350 }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon color="action" />
+            </InputAdornment>
+          ),
         }}
-      >
-        <Typography sx={{ flex: '1 1 100%' }} variant="h6" id="tableTitle" component="div">
-          Speakers
-        </Typography>
-        {/* <Button
-        id="basic-button"
-        aria-controls={open ? 'basic-menu' : undefined}
-        aria-haspopup="true"
-        aria-expanded={open ? 'true' : undefined}
-        onClick={handleClick}
-      >
-        Filters
-      </Button>
-      <Menu
-        id="basic-menu"
-        anchorEl={anchorEl}
-        open={open}
-        onClose={handleClose}
-        MenuListProps={{
-          'aria-labelledby': 'basic-button',
-        }}
-      >
-        <FormGroup sx={{ pl: '1em' }}>
-          {Object.ids(props.filters).map((filter) => {
-            return (
-              <FormControlLabel
-                key={filter}
-                control={<Checkbox checked={props.filters[filter as keyof Filters]} />}
-                label={FilterLabels[filter as keyof Filters]}
-                onClick={() => {
-                  props.setFilters((oldFilters) => ({ ...oldFilters, [filter]: !oldFilters[filter as keyof Filters] }));
-                  if (filter === 'none' && props.filters.none === false) {
-                    props.setFilters({
-                      none: true,
-                      hasListId: false,
-                      hasSquareImage: false,
-                      hasWideImage: false,
-                      hasBannerImage: false,
-                    });
-                  }
-                }}
-                disabled={filter !== 'none' && props.filters.none}
-              />
-            );
-          })}
-        </FormGroup>
-      </Menu> */}
-      </Toolbar>
-    );
-  };
+      />
+    </Toolbar>
+  );
+};
 
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 
@@ -207,6 +177,9 @@ const SpeakerTable = (props: {
   setSortOrder: Dispatch<SetStateAction<Order>>;
   sortProperty: keyof ISpeaker;
   setSortProperty: Dispatch<SetStateAction<keyof ISpeaker>>;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  loading?: boolean;
 }) => {
   const [filteredSpeakers, setFilteredSpeakers] = useState<ISpeaker[]>(props.speakers);
   // const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
@@ -370,9 +343,9 @@ const SpeakerTable = (props: {
 
   return (
     <>
-      <Box width={1} display="flex" padding="30px" justifyContent="center">
-        <Paper sx={{ width: 1, mb: 2 }}>
-          <SpeakerTableToolbar />
+      <Box width={1} display="flex" justifyContent="center">
+        <Card sx={{ width: 1 }}>
+          <SpeakerTableToolbar searchValue={props.searchValue} onSearchChange={props.onSearchChange} />
           <TableContainer>
             <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
               <SpeakerTableHead
@@ -382,54 +355,73 @@ const SpeakerTable = (props: {
                 rowCount={filteredSpeakers.length}
               />
               <TableBody>
-                {props.speakers
-                  .slice(props.page * props.rowsPerPage, props.page * props.rowsPerPage + props.rowsPerPage)
-                  .map((speaker) => {
-                    return (
-                      <TableRow hover onClick={() => handleClick(speaker)} tabIndex={-1} key={speaker.id}>
-                        <TableCell align="center" component="th" id={speaker.name} scope="row" padding="none">
-                          {speaker.name}
-                        </TableCell>
-                        <TableCell align="center">{speaker.sermonCount || 0}</TableCell>
-                        <TableCell align="center">{speaker.listId || 'No list'}</TableCell>
-                        <TableCell style={{ display: 'flex', gap: '10px', justifyContent: 'start' }}>
-                          <Box
-                            display="flex"
-                            justifyContent="center"
-                            gap={1}
-                            sx={{ marginLeft: 'auto', marginRight: 'auto' }}
-                          >
-                            {['square', 'wide', 'banner'].map((type, i) => {
-                              const image = speaker.images?.find((image) => image.type === type);
-                              return (
-                                <div
-                                  key={image?.id || i}
-                                  style={{
-                                    borderRadius: '2px',
-                                    overflow: 'hidden',
-                                    position: 'relative',
-                                    width: 50,
-                                    height: 50,
-                                    backgroundColor: image?.averageColorHex || '#f3f1f1',
-                                  }}
-                                >
-                                  {image && (
-                                    <Image
-                                      src={image.downloadLink}
-                                      alt={`Image of ${image.name}`}
-                                      width={50}
-                                      height={50}
-                                      style={{ objectFit: 'contain' }}
-                                    />
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                {props.loading ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center">
+                      <Box display="flex" justifyContent="center" py={4}>
+                        <CircularProgress />
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                ) : props.speakers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center">
+                      <Typography color="text.secondary" py={4}>
+                        {props.searchValue ? `No speakers found matching "${props.searchValue}"` : 'No speakers found'}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  props.speakers
+                    .slice(props.page * props.rowsPerPage, props.page * props.rowsPerPage + props.rowsPerPage)
+                    .map((speaker) => {
+                      return (
+                        <TableRow hover onClick={() => handleClick(speaker)} tabIndex={-1} key={speaker.id} sx={{ cursor: 'pointer' }}>
+                          <TableCell align="center" component="th" id={speaker.name} scope="row" padding="none">
+                            {speaker.name}
+                          </TableCell>
+                          <TableCell align="center">{speaker.sermonCount || 0}</TableCell>
+                          <TableCell align="center">{speaker.listId || 'No list'}</TableCell>
+                          <TableCell>
+                            <Box
+                              display="flex"
+                              justifyContent="center"
+                              gap={1}
+                            >
+                              {['square', 'wide', 'banner'].map((type, i) => {
+                                const image = speaker.images?.find((image) => image.type === type);
+                                return (
+                                  <Box
+                                    key={image?.id || i}
+                                    sx={{
+                                      borderRadius: 1,
+                                      overflow: 'hidden',
+                                      position: 'relative',
+                                      width: 44,
+                                      height: 44,
+                                      bgcolor: image?.averageColorHex || 'background.default',
+                                      border: '1px solid',
+                                      borderColor: 'divider',
+                                    }}
+                                  >
+                                    {image && (
+                                      <Image
+                                        src={image.downloadLink}
+                                        alt={`Image of ${image.name}`}
+                                        width={44}
+                                        height={44}
+                                        style={{ objectFit: 'contain' }}
+                                      />
+                                    )}
+                                  </Box>
+                                );
+                              })}
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -442,7 +434,7 @@ const SpeakerTable = (props: {
             onPageChange={(_, newPage) => props.handlePageChange(newPage)}
             onRowsPerPageChange={props.handleChangeRowsPerPage}
           />
-        </Paper>
+        </Card>
       </Box>
       <DynamicPopUp
         title="Speaker Details"

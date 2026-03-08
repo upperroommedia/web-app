@@ -1,0 +1,29 @@
+{
+  "name": "functions-media",
+  "private": true,
+  "main": "lib/functions-media/src/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "catalog:",
+    "@google-cloud/storage": "catalog:",
+    "axios": "catalog:",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "firebase-admin": "catalog:",
+    "firebase-functions": "catalog:",
+    "fluent-ffmpeg": "^2.1.2",
+    "form-data": "catalog:",
+    "p-limit": "catalog:",
+    "ytdl-core": "^4.11.5"
+  },
+  "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.24",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}
