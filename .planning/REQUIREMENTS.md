@@ -28,6 +28,14 @@
 - [ ] **DEVSAFE-03**: Local admin publishing/testing flows remain usable through deterministic mocks.
 - [ ] **DEVSAFE-04**: Regression checks block reintroduction of direct production endpoint usage in disallowed paths.
 
+### Subsplash Alpha-Lock Concurrency Control (Current Milestone)
+
+- [x] **LOCK-01**: Lock acquisition is enforced before remote mutation reads/writes using deterministic lock-key sequencing per resource scope.
+- [x] **LOCK-02**: Lock contention failures return bounded, structured payloads including `code`, `locked_keys`, `wait_ms`, and `retry_after_ms`.
+- [x] **LOCK-03**: Callable mutation idempotency uses operation-key semantics so duplicate retry intents replay safely without duplicate side effects.
+- [x] **LOCK-04**: Lock release executes in finally-path semantics and records dead-letter diagnostics when release attempts fail.
+- [x] **LOCK-05**: Caller surfaces propagate operation keys and lock-busy retry guidance without swallowing external cleanup contention/failure details.
+
 ### Invite Onboarding + Operational Notifications (Current Milestone)
 
 - [x] **INVITE-01**: Admins can issue role-targeted invite links that are single-use, email-bound, and expire after 30 days.
@@ -74,6 +82,11 @@
 | DEVSAFE-02 | Phase 2 | In Progress |
 | DEVSAFE-03 | Phase 2 | In Progress |
 | DEVSAFE-04 | Phase 2 | In Progress |
+| LOCK-01 | Phase 3 | Complete |
+| LOCK-02 | Phase 3 | Complete |
+| LOCK-03 | Phase 3 | Complete |
+| LOCK-04 | Phase 3 | Complete |
+| LOCK-05 | Phase 3 | Complete |
 | INVITE-01 | Phase 4 | Complete |
 | INVITE-02 | Phase 4 | Complete |
 | INVITE-03 | Phase 4 | Complete |
@@ -89,10 +102,10 @@
 | TEST-01 | Next milestone candidate | Pending |
 
 **Coverage:**
-- v1 requirements: 21 total
-- Mapped to active phases or baseline: 21
+- v1 requirements: 26 total
+- Mapped to active phases or baseline: 26
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-03-01 after phase 04-04 completion*
+*Last updated: 2026-03-08 after phase 03-07 completion*
