@@ -102,4 +102,7 @@ Phase 03 verification gaps targeted by plan `03-07` are closed and auditable; ph
 
 ## Self-Check: PASSED
 
-- Found summary file: .planning/phases/03-subsplash-alpha-lock-concurrency-control/03-07-SUMMARY.md\n- Found task commit: c6271229\n- Found task commit: c6a1f6ed\n- Found task commit: f37679ca\n
+- Found summary file: .planning/phases/03-subsplash-alpha-lock-concurrency-control/03-07-SUMMARY.md
+- Found task commit: c6271229
+- Found task commit: c6a1f6ed
+- Found task commit: f37679ca
