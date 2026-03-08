@@ -48,3 +48,7 @@ firestore-coverage.html
 
 test-results/
 output/
+
+# Firebase extension local secrets/config
+/extensions/*.env
+/extensions/*.secret.local
