@@ -10,6 +10,8 @@ describe('caller lock/idempotency contract adoption', () => {
     const managePublishingPopup = readFile('components/ManagePublishingPopup.tsx');
     const seriesAdminPage = readFile('pages/admin/series/[seriesId].tsx');
     const sermonAdminPage = readFile('pages/admin/sermons/[sermonId].tsx');
+    const seriesListAdminPage = readFile('pages/admin/series.tsx');
+    const sermonsListAdminPage = readFile('pages/admin/sermons.tsx');
 
     expect(managePublishingPopup).toContain("createOperationKey('manage-publishing-upload', sermon.id)");
     expect(managePublishingPopup).toContain("createOperationKey('manage-publishing-list-add', sermon.id)");
@@ -27,6 +29,13 @@ describe('caller lock/idempotency contract adoption', () => {
     expect(sermonAdminPage).toContain("createOperationKey('sermon-admin-list-add', sermon.id)");
     expect(sermonAdminPage).toContain("createOperationKey('sermon-admin-series-publish', sermon.id)");
     expect(sermonAdminPage).toContain('parseLockBusyDetails(');
+
+    expect(seriesListAdminPage).toContain("createOperationKey('series-admin-delete', selectedSeries.id)");
+    expect(seriesListAdminPage).toContain('parseLockBusyDetails(');
+    expect(seriesListAdminPage).toContain('formatLockBusyRetryMessage(');
+
+    expect(sermonsListAdminPage).toContain('parseLockBusyDetails(');
+    expect(sermonsListAdminPage).toContain('formatLockBusyRetryMessage(');
   });
 
   it('propagates operation keys from API-layer mutation helpers', () => {
