@@ -1,4 +1,9 @@
-import { createOperationKey, parseLockBusyDetails } from './callableConcurrency';
+import {
+  createOperationKey,
+  createPublishedMembershipHash,
+  createRetryIntentKey,
+  parseLockBusyDetails,
+} from './callableConcurrency';
 
 describe('callableConcurrency', () => {
   describe('createOperationKey', () => {
@@ -9,6 +14,47 @@ describe('callableConcurrency', () => {
       expect(first).toMatch(/^series-publish:sermon-123:[a-f0-9-]{36}$/);
       expect(second).toMatch(/^series-publish:sermon-123:[a-f0-9-]{36}$/);
       expect(first).not.toBe(second);
+    });
+  });
+
+  describe('createRetryIntentKey', () => {
+    it('returns the same key for the same explicit retry intent', () => {
+      const first = createRetryIntentKey(
+        'series-admin-bulk-add',
+        'series-123',
+        'adds:sermon-a,sermon-b|order:media-3,media-2,media-1|snapshot:media-1|media-2'
+      );
+      const second = createRetryIntentKey(
+        'series-admin-bulk-add',
+        'series-123',
+        'adds:sermon-a,sermon-b|order:media-3,media-2,media-1|snapshot:media-1|media-2'
+      );
+
+      expect(first).toBe(second);
+      expect(first).toMatch(/^series-admin-bulk-add:series-123:retry-[a-f0-9]{8}$/);
+    });
+
+    it('returns different keys when intent changes', () => {
+      const initial = createRetryIntentKey(
+        'series-admin-bulk-add',
+        'series-123',
+        'adds:sermon-a|order:media-2,media-1|snapshot:media-1'
+      );
+      const changed = createRetryIntentKey(
+        'series-admin-bulk-add',
+        'series-123',
+        'adds:sermon-a,sermon-b|order:media-3,media-2,media-1|snapshot:media-1|media-2'
+      );
+
+      expect(initial).not.toBe(changed);
+    });
+  });
+
+  describe('createPublishedMembershipHash', () => {
+    it('creates deterministic hash output for a membership snapshot', () => {
+      const hash = createPublishedMembershipHash([' media-2 ', 'media-1', 'media-2']);
+
+      expect(hash).toBe('media-1|media-2');
     });
   });
 

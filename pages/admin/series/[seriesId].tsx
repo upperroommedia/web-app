@@ -76,7 +76,12 @@ import { SeriesItem } from '../../../types/SeriesItem';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import useAuth from '../../../context/user/UserContext';
 import { createFunctionV2 } from '../../../utils/createFunction';
-import { createOperationKey, parseLockBusyDetails } from '../../../utils/callableConcurrency';
+import {
+  createOperationKey,
+  createPublishedMembershipHash,
+  createRetryIntentKey,
+  parseLockBusyDetails,
+} from '../../../utils/callableConcurrency';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
@@ -1143,6 +1148,15 @@ const SeriesDetailsPage = () => {
           throw new Error('Cannot publish to series because one or more published sermons are missing Subsplash media IDs.');
         }
 
+        const currentPublishedMembershipWithGaps = items
+          .filter((item) => item.publishedToSubsplash === true)
+          .map((item) => item.sermonSubsplashId || item.sermon?.subsplashId);
+        const currentPublishedMembership = currentPublishedMembershipWithGaps.filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId));
+        if (currentPublishedMembership.length !== currentPublishedMembershipWithGaps.length) {
+          throw new Error('Cannot publish to series because an existing published sermon is missing a Subsplash media ID.');
+        }
+        const expectedPublishedMembershipHash = createPublishedMembershipHash(currentPublishedMembership);
+
         const bulkAdds = publishedCandidates.map((item) => {
           const mediaItemId = mediaItemIdBySermonId.get(item.id);
           if (!mediaItemId) {
@@ -1154,11 +1168,19 @@ const SeriesDetailsPage = () => {
             mediaItemId,
           };
         });
+        const intentFingerprint = [
+          ...bulkAdds.map((entry) => `${entry.sermonId}:${entry.mediaItemId}`).sort(),
+          `order:${publishedItemOrder.join(',')}`,
+          `snapshot:${expectedPublishedMembershipHash}`,
+        ].join('|');
+        const operationKey = createRetryIntentKey('series-admin-bulk-add', seriesId, intentFingerprint);
 
         const bulkAddToSeriesFunction = createFunctionV2<BulkAddToSeriesInputType, BulkAddToSeriesOutputType>('bulkaddtoseries');
         const bulkResult = await bulkAddToSeriesFunction({
           firestoreSeriesId: seriesId,
           seriesSubsplashId,
+          operationKey,
+          expectedPublishedMembershipHash,
           adds: bulkAdds,
           publishedItemOrder,
           maxConcurrency: 4,

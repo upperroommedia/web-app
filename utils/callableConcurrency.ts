@@ -52,6 +52,36 @@ export const createOperationKey = (scope: string, entityId: string): string => {
   return `${normalizedScope}:${normalizedEntityId}:${createUuid()}`;
 };
 
+const hashIntentFingerprint = (value: string): string => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
+export const createRetryIntentKey = (
+  scope: string,
+  entityId: string,
+  intentFingerprint: string
+): string => {
+  const normalizedScope = normalizeSegment(scope, 'mutation');
+  const normalizedEntityId = normalizeSegment(entityId, 'entity');
+  const normalizedIntentFingerprint = intentFingerprint.trim();
+  if (!normalizedIntentFingerprint) {
+    throw new Error('intentFingerprint is required.');
+  }
+
+  return `${normalizedScope}:${normalizedEntityId}:retry-${hashIntentFingerprint(normalizedIntentFingerprint)}`;
+};
+
+export const createPublishedMembershipHash = (mediaItemIds: string[]): string => {
+  const normalizedIds = Array.from(new Set(mediaItemIds.map((mediaItemId) => mediaItemId.trim()).filter(Boolean))).sort();
+  return normalizedIds.length > 0 ? normalizedIds.join('|') : 'empty';
+};
+
 export const parseLockBusyDetails = (error: unknown): LockBusyDetails | null => {
   const details = isRecord(error) && isRecord(error.details) ? error.details : null;
   if (!details || details.code !== SUBSPLASH_LOCK_BUSY_CODE) {

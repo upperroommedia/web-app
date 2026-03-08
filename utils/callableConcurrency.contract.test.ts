@@ -19,6 +19,8 @@ describe('caller lock/idempotency contract adoption', () => {
     expect(seriesAdminPage).toContain("createOperationKey('series-admin-upload', sermon.id)");
     expect(seriesAdminPage).toContain("createOperationKey('series-admin-add-item', seriesItem.id)");
     expect(seriesAdminPage).toContain("createOperationKey('series-admin-reorder', seriesId)");
+    expect(seriesAdminPage).toContain("createRetryIntentKey('series-admin-bulk-add', seriesId, intentFingerprint)");
+    expect(seriesAdminPage).toContain('expectedPublishedMembershipHash');
     expect(seriesAdminPage).toContain('parseLockBusyDetails(');
 
     expect(sermonAdminPage).toContain("createOperationKey('sermon-admin-upload', sermon.id)");
