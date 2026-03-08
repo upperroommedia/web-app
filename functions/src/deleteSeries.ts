@@ -41,6 +41,16 @@ export interface DeleteSeriesOutputType {
   error?: string;
 }
 
+const buildAlreadyDeletedResponse = (): DeleteSeriesOutputType => ({
+  status: 'success',
+  remoteUnlinkAttempted: 0,
+  remoteUnlinkSucceeded: 0,
+  remoteUnlinkSkippedNotFound: 0,
+  remoteRemainingLinkedCount: 0,
+  localSeriesItemsDeleted: 0,
+  localSermonsUnlinked: 0,
+});
+
 const cleanupLocalSeriesData = async (
   firestoreId: string
 ): Promise<{ localSeriesItemsDeleted: number; localSermonsUnlinked: number }> => {
@@ -115,34 +125,47 @@ const deleteSeries = onCall(
 
     try {
       return await withIdempotency(normalizedOperationKey, async () => {
-        return withSubsplashLocks(
-          [`series:${normalizedFirestoreId}`],
-          async () => {
-            // Get the series document from Firestore.
-            const seriesRef = firestoreDB
-              .collection('series')
-              .doc(normalizedFirestoreId)
-              .withConverter(firestoreAdminSeriesConverter);
-            const seriesDoc = await seriesRef.get();
+        const seriesRef = firestoreDB
+          .collection('series')
+          .doc(normalizedFirestoreId)
+          .withConverter(firestoreAdminSeriesConverter);
+        const seriesDoc = await seriesRef.get();
 
-            if (!seriesDoc.exists) {
-              throw new HttpsError('not-found', `Series with Firestore ID ${normalizedFirestoreId} not found.`);
+        if (!seriesDoc.exists) {
+          logger.warn(
+            `deleteSeries noop: Firestore series ${normalizedFirestoreId} not found; treating as already deleted.`
+          );
+          return buildAlreadyDeletedResponse();
+        }
+
+        const seriesData = seriesDoc.data()!;
+        const subsplashId = seriesData.subsplashId;
+        const lockKeys = subsplashId ? [`series:${subsplashId}`] : [];
+
+        return withSubsplashLocks(
+          lockKeys,
+          async () => {
+            const latestSeriesDoc = await seriesRef.get();
+            if (!latestSeriesDoc.exists) {
+              logger.warn(
+                `deleteSeries noop inside lock: Firestore series ${normalizedFirestoreId} not found; treating as already deleted.`
+              );
+              return buildAlreadyDeletedResponse();
             }
 
-            const seriesData = seriesDoc.data()!;
-            const subsplashId = seriesData.subsplashId;
-
+            const latestSeriesData = latestSeriesDoc.data()!;
+            const latestSubsplashId = latestSeriesData.subsplashId;
             let remoteUnlinkAttempted = 0;
             let remoteUnlinkSucceeded = 0;
             let remoteUnlinkSkippedNotFound = 0;
             let remoteRemainingLinkedCount = 0;
 
             // If published to Subsplash, unlink all series members first, verify, then delete the series.
-            if (subsplashId) {
+            if (latestSubsplashId) {
               const token = await authenticateSubsplash();
-              logger.log(`deleteSeries remote phase started: Firestore ID=${normalizedFirestoreId}, Subsplash ID=${subsplashId}`);
+              logger.log(`deleteSeries remote phase started: Firestore ID=${normalizedFirestoreId}, Subsplash ID=${latestSubsplashId}`);
 
-              const linkedRemoteItems = await getAllSeriesItemsAcrossStatuses(subsplashId, token);
+              const linkedRemoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
               remoteUnlinkAttempted = linkedRemoteItems.length;
               logger.log(`deleteSeries found ${remoteUnlinkAttempted} linked remote items to unlink`);
 
@@ -161,19 +184,19 @@ const deleteSeries = onCall(
                   remoteUnlinkSucceeded += 1;
               });
 
-              const remainingRemoteItems = await getAllSeriesItemsAcrossStatuses(subsplashId, token);
+              const remainingRemoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
               remoteRemainingLinkedCount = remainingRemoteItems.length;
               if (remoteRemainingLinkedCount > 0) {
                 logger.error(
-                  `deleteSeries aborting due to remaining linked items. Firestore ID=${normalizedFirestoreId}, Subsplash ID=${subsplashId}, remaining=${remoteRemainingLinkedCount}`
+                  `deleteSeries aborting due to remaining linked items. Firestore ID=${normalizedFirestoreId}, Subsplash ID=${latestSubsplashId}, remaining=${remoteRemainingLinkedCount}`
                 );
                 throw new HttpsError(
                   'failed-precondition',
-                  `Cannot delete series ${subsplashId}: ${remoteRemainingLinkedCount} media item(s) are still linked.`
+                  `Cannot delete series ${latestSubsplashId}: ${remoteRemainingLinkedCount} media item(s) are still linked.`
                 );
               }
 
-              await deleteSubsplashSeries(subsplashId, token);
+              await deleteSubsplashSeries(latestSubsplashId, token);
               logger.log(
                 `deleteSeries remote phase complete: attempted=${remoteUnlinkAttempted}, unlinked=${remoteUnlinkSucceeded}, skippedNotFound=${remoteUnlinkSkippedNotFound}`
               );

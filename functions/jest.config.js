@@ -4,11 +4,10 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   moduleFileExtensions: ['ts', 'js', 'json', 'node'],
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
-  testTimeout: 30000, // Increase timeout for emulator tests
+  testTimeout: Number(process.env.JEST_TEST_TIMEOUT_MS || 180000), // Emulator-backed suites need a higher default.
   maxWorkers: 1, // Run tests serially to avoid Firestore emulator interference between parallel tests
   // Silence console output by default unless VERBOSE is set
   silent: !process.env.VERBOSE,
   verbose: !!process.env.VERBOSE,
 };
-
 

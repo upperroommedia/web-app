@@ -2,6 +2,7 @@ import { createAxiosConfig } from '../subsplashUtils';
 import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { Sermon } from '../../../types/SermonTypes';
+import { withSubsplashLocks } from '../locks/withSubsplashLocks';
 
 // Helper function to update Subsplash with new sermon topics
 const updateSubsplashSermonTopics = async (sermon: Sermon, bearerToken: string): Promise<void> => {
@@ -35,14 +36,16 @@ const updateSubsplashSermonTopics = async (sermon: Sermon, bearerToken: string):
             ...(tags.length > 0 && { tags: tags }),
         });
 
-        const config = createAxiosConfig(
-            `https://core.subsplash.com/media/v1/media-items/${sermon.subsplashId}`,
-            bearerToken,
-            'PATCH',
-            requestData
-        );
-        logger.log(`Request data: ${requestData}`);
-        await axios(config);
+        await withSubsplashLocks([`media-item:${sermon.subsplashId}`], async () => {
+            const config = createAxiosConfig(
+                `https://core.subsplash.com/media/v1/media-items/${sermon.subsplashId}`,
+                bearerToken,
+                'PATCH',
+                requestData
+            );
+            logger.log(`Request data: ${requestData}`);
+            await axios(config);
+        });
         logger.log(`Successfully updated Subsplash sermon ${sermon.subsplashId} with topics`);
 
     } catch (error) {

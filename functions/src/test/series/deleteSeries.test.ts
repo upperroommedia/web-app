@@ -347,6 +347,23 @@ describe('deleteSeries - Authentication and validation', () => {
 
     await expect(deleteSeriesHandler(request)).rejects.toThrow();
   });
+
+  it('should treat missing firestore series as already deleted', async () => {
+    const request: TestRequest<DeleteSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: { firestoreId: 'missing-series-id' },
+    };
+
+    await expect(deleteSeriesHandler(request)).resolves.toMatchObject({
+      status: 'success',
+      remoteUnlinkAttempted: 0,
+      remoteUnlinkSucceeded: 0,
+      remoteUnlinkSkippedNotFound: 0,
+      remoteRemainingLinkedCount: 0,
+      localSeriesItemsDeleted: 0,
+      localSermonsUnlinked: 0,
+    });
+  });
 });
 
 describe('deleteSeries - Error handling', () => {
@@ -416,10 +433,8 @@ describe('deleteSeries - Locking and Idempotency', () => {
     ]);
 
     const successCount = [resultA, resultB].filter((result) => result.status === 'fulfilled').length;
-    const failureCount = [resultA, resultB].filter((result) => result.status === 'rejected').length;
 
-    expect(successCount).toBe(1);
-    expect(failureCount).toBe(1);
+    expect(successCount).toBe(2);
     expect(deleteSpy).toHaveBeenCalledTimes(1);
   });
 

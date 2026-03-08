@@ -5,6 +5,7 @@ import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { authenticateSubsplash } from '../../subsplashUtils';
 import { deriveSeriesMetadata, patchSeriesMetadata } from '../../helpers/seriesHelpers';
 import handleError from '../../handleError';
+import { withSubsplashLocks } from '../../locks/withSubsplashLocks';
 
 const firestore = firebaseAdmin.firestore();
 
@@ -39,11 +40,16 @@ const seriesItemOnWrite = onDocumentWritten('series/{seriesId}/seriesItems/{item
       seriesData?.subsplashId &&
       seriesData.subtitle !== metadata.subtitle
     ) {
-      const token = await authenticateSubsplash();
-      await patchSeriesMetadata(
-        seriesData.subsplashId,
-        { subtitle: metadata.subtitle },
-        token
+      await withSubsplashLocks(
+        [`series:${seriesData.subsplashId}`],
+        async () => {
+          const token = await authenticateSubsplash();
+          await patchSeriesMetadata(
+            seriesData.subsplashId!,
+            { subtitle: metadata.subtitle },
+            token
+          );
+        }
       );
       logger.info(`seriesItemOnWrite: synced subtitle to Subsplash for series/${seriesId}`, {
         subsplashId: seriesData.subsplashId,

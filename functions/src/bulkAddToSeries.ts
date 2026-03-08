@@ -258,7 +258,7 @@ const bulkAddToSeries = onCall(
           ])
         ).sort();
         const lockKeys = [
-          `series:${firestoreSeriesId.trim()}`,
+          `series:${seriesSubsplashId.trim()}`,
           ...lockMediaItemIds.map((mediaItemId) => `media-item:${mediaItemId}`),
         ];
 

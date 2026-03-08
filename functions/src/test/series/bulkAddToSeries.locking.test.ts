@@ -94,7 +94,7 @@ describe('bulkAddToSeries lock/idempotency contract', () => {
 
     expect(mockWithIdempotency).toHaveBeenCalledWith('bulk-lock-op-1', expect.any(Function));
     expect(mockWithSubsplashLocks).toHaveBeenCalledWith(
-      ['series:firestore-series-1', 'media-item:media-a', 'media-item:media-b', 'media-item:media-existing'],
+      ['series:subsplash-series-1', 'media-item:media-a', 'media-item:media-b', 'media-item:media-existing'],
       expect.any(Function),
       expect.objectContaining({ operationKey: 'bulk-lock-op-1' })
     );
@@ -102,7 +102,7 @@ describe('bulkAddToSeries lock/idempotency contract', () => {
 
   it('surfaces SUBSPLASH_LOCK_BUSY details when lock acquisition fails', async () => {
     const busyError = buildSubsplashLockBusyError({
-      lockedKeys: ['series:firestore-series-1'],
+      lockedKeys: ['series:subsplash-series-1'],
       waitMs: 10_000,
       retryAfterMs: 250,
     });
@@ -117,7 +117,7 @@ describe('bulkAddToSeries lock/idempotency contract', () => {
       code: 'aborted',
       details: {
         code: 'SUBSPLASH_LOCK_BUSY',
-        locked_keys: ['series:firestore-series-1'],
+        locked_keys: ['series:subsplash-series-1'],
         wait_ms: 10_000,
         retry_after_ms: 250,
       },

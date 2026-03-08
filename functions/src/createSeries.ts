@@ -71,10 +71,15 @@ const createSeries = onCall(
 
     try {
       return await withIdempotency(normalizedOperationKey, async () => {
+        const existingSeriesDoc = await seriesRef.get();
+        const existingSubsplashId = existingSeriesDoc.exists
+          ? (existingSeriesDoc.data()?.subsplashId as string | undefined)
+          : undefined;
+        const seriesLockKeys = existingSubsplashId ? [`series:${existingSubsplashId}`] : [];
+
         return withSubsplashLocks(
-          [`series:${seriesRef.id}`],
+          seriesLockKeys,
           async () => {
-            const existingSeriesDoc = await seriesRef.get();
             const existingSeriesImages = existingSeriesDoc.exists
               ? (existingSeriesDoc.data()?.images as CreateSeriesInputType['images'] | undefined)
               : undefined;

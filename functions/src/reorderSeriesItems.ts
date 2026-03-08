@@ -59,29 +59,29 @@ const reorderSeriesItems = onCall(
 
     try {
       return await withIdempotency(normalizedOperationKey, async () => {
+        // Resolve Subsplash series id up front so lock keys are always based on remote ids.
+        const seriesDoc = await firestoreDB
+          .collection('series')
+          .doc(normalizedFirestoreSeriesId)
+          .withConverter(firestoreAdminSeriesConverter)
+          .get();
+
+        if (!seriesDoc.exists) {
+          throw new HttpsError('not-found', `Series with firestoreId ${normalizedFirestoreSeriesId} not found.`);
+        }
+
+        const seriesData = seriesDoc.data()!;
+        const subsplashSeriesId = seriesData.subsplashId;
+        if (!subsplashSeriesId) {
+          throw new HttpsError(
+            'failed-precondition',
+            `Series ${normalizedFirestoreSeriesId} is not linked to Subsplash and cannot be reordered remotely.`
+          );
+        }
+
         return withSubsplashLocks(
-          [`series:${normalizedFirestoreSeriesId}`],
+          [`series:${subsplashSeriesId}`],
           async () => {
-            // Get series from Firestore to get Subsplash ID.
-            const seriesDoc = await firestoreDB
-              .collection('series')
-              .doc(normalizedFirestoreSeriesId)
-              .withConverter(firestoreAdminSeriesConverter)
-              .get();
-
-            if (!seriesDoc.exists) {
-              throw new HttpsError('not-found', `Series with firestoreId ${normalizedFirestoreSeriesId} not found.`);
-            }
-
-            const seriesData = seriesDoc.data()!;
-            const subsplashSeriesId = seriesData.subsplashId;
-            if (!subsplashSeriesId) {
-              throw new HttpsError(
-                'failed-precondition',
-                `Series ${normalizedFirestoreSeriesId} is not linked to Subsplash and cannot be reordered remotely.`
-              );
-            }
-
             // If no items to reorder, return success.
             if (!itemOrder || itemOrder.length === 0) {
               return {

@@ -4,6 +4,7 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import handleError from '../handleError';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
+import { withSubsplashLocks } from '../locks/withSubsplashLocks';
 
 const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list'] as const;
 type MediaType = (typeof mediaTypes)[number];
@@ -160,8 +161,10 @@ const repopulateListFromSpeakerItems = onCall(
     const maxListCount = 200;
     const token = await authenticateSubsplash();
     try {
-      const mediaItemIds: MediaItem[] = await getSpeakerItems(data.speakerId, token);
-      await addToSingleList(data.listId, mediaItemIds, maxListCount, token);
+      await withSubsplashLocks([`list:${data.listId}`], async () => {
+        const mediaItemIds: MediaItem[] = await getSpeakerItems(data.speakerId, token);
+        await addToSingleList(data.listId, mediaItemIds, maxListCount, token);
+      });
     } catch (err) {
       throw handleError(err);
     }

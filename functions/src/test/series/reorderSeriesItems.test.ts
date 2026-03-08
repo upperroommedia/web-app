@@ -309,7 +309,7 @@ describe('reorderSeriesItems - Locking and Idempotency', () => {
       itemCount: 1,
     });
 
-    const lockKey = `series:${firestoreId}`;
+    const lockKey = `series:${subsplashSeries.id}`;
     await lockStore.acquireWithWait(lockKey, {
       ownerToken: 'reorder-owner-1',
       leaseTtlMs: 400,

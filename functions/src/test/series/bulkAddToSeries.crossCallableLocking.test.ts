@@ -44,7 +44,7 @@ describe('bulkAddToSeries - Cross-callable locking', () => {
       itemCount: 1,
     });
 
-    const lockKey = `series:${firestoreSeriesId}`;
+    const lockKey = `series:${subsplashSeries.id}`;
     await lockStore.acquireWithWait(lockKey, {
       ownerToken: 'cross-callable-owner-1',
       leaseTtlMs: 400,
