@@ -4,6 +4,24 @@ const createFunctionV2Mock = jest.fn();
 const deleteFromSubsplashMock = jest.fn();
 const deleteFromSoundCloudMock = jest.fn();
 const createOperationKeyMock = jest.fn(() => 'operation-key-123');
+const parseLockBusyDetailsMock = jest.fn((error: unknown) => {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'details' in error &&
+    error.details &&
+    typeof error.details === 'object' &&
+    'code' in error.details &&
+    error.details.code === 'SUBSPLASH_LOCK_BUSY'
+  ) {
+    return error.details;
+  }
+  return null;
+});
+const formatLockBusyRetryMessageMock = jest.fn((fallbackMessage: string, details: { retry_after_ms: number }) => {
+  const retryInSeconds = Math.max(1, Math.ceil(details.retry_after_ms / 1000));
+  return `${fallbackMessage} Retry in about ${retryInSeconds}s.`;
+});
 const deleteDocMock = jest.fn();
 const withConverterMock = jest.fn(() => 'sermon-doc-ref');
 const docMock = jest.fn(() => ({
@@ -16,6 +34,8 @@ jest.mock('./createFunction', () => ({
 
 jest.mock('./callableConcurrency', () => ({
   createOperationKey: (...args: unknown[]) => createOperationKeyMock(...args),
+  parseLockBusyDetails: (...args: unknown[]) => parseLockBusyDetailsMock(...args),
+  formatLockBusyRetryMessage: (...args: unknown[]) => formatLockBusyRetryMessageMock(...args),
 }));
 
 jest.mock('../firebase/firestore', () => ({

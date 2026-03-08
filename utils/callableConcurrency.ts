@@ -106,3 +106,11 @@ export const parseLockBusyDetails = (error: unknown): LockBusyDetails | null => 
     retry_after_ms: retryAfterMs,
   };
 };
+
+export const formatLockBusyRetryMessage = (fallbackMessage: string, details: LockBusyDetails): string => {
+  const retryInSeconds = Math.max(1, Math.ceil(details.retry_after_ms / 1000));
+  const lockedKeysSuffix = details.locked_keys.length > 0
+    ? ` Locked keys: ${details.locked_keys.join(', ')}.`
+    : '';
+  return `${fallbackMessage} Another publishing action is in progress.${lockedKeysSuffix} Retry in about ${retryInSeconds}s.`;
+};

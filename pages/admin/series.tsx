@@ -39,10 +39,24 @@ import InputAdornment from '@mui/material/InputAdornment';
 import SearchIcon from '@mui/icons-material/Search';
 import useAuth from '../../context/user/UserContext';
 import { alpha, useTheme } from '@mui/material/styles';
+import {
+  createOperationKey,
+  formatLockBusyRetryMessage,
+  parseLockBusyDetails,
+} from '../../utils/callableConcurrency';
 
 const ITEMS_PER_PAGE = 20;
 
 type FilterType = 'all' | 'published' | 'draft';
+
+const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
+  const lockBusyDetails = parseLockBusyDetails(error);
+  if (!lockBusyDetails) {
+    return fallbackMessage;
+  }
+
+  return formatLockBusyRetryMessage(fallbackMessage, lockBusyDetails);
+};
 
 interface SeriesListItemRowProps {
   series: Series;
@@ -245,13 +259,17 @@ const AdminSeriesPage = () => {
 
       // Always route through callable to enforce consistent remote/local deletion semantics.
       const deleteSeries = createFunctionV2<DeleteSeriesInputType, DeleteSeriesOutputType>('deleteseries');
-      await deleteSeries({ firestoreId: selectedSeries.id });
+      await deleteSeries({
+        firestoreId: selectedSeries.id,
+        operationKey: createOperationKey('series-admin-delete', selectedSeries.id),
+      });
 
       setSeriesList((prev) => prev.filter((s) => s.id !== selectedSeries.id));
       setDeleteSeriesPopup(false);
     } catch (err: any) {
       console.error('Error deleting series:', err);
-      alert(`Error deleting series: ${err.message || 'Unknown error'}`);
+      const fallbackMessage = `Error deleting series: ${err.message || 'Unknown error'}`;
+      alert(getLockBusyMessage(err, fallbackMessage));
     } finally {
       setIsDeleting(false);
     }

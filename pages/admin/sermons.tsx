@@ -9,6 +9,7 @@ import AddIcon from '@mui/icons-material/Add';
 import { useRouter } from 'next/router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppLayout from '../../layout/AppLayout';
+import { formatLockBusyRetryMessage, parseLockBusyDetails } from '../../utils/callableConcurrency';
 import SearchableAdminSermonList from '../../components/SearchableAdminSermonsList';
 import { deleteSermonWithExternalCleanup } from '../../utils/deleteSermonWithExternalCleanup';
 
@@ -24,6 +25,22 @@ const getQueryString = (value: string | string[] | undefined): string | undefine
     return value[0];
   }
   return value;
+};
+
+const getDeleteFailureMessage = (error: unknown): string => {
+  const busyDetails = parseLockBusyDetails(error);
+  if (busyDetails) {
+    return formatLockBusyRetryMessage(
+      'Failed to delete sermon because another cleanup is in progress.',
+      busyDetails
+    );
+  }
+
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Failed to delete sermon';
 };
 
 const AdminSermons = () => {
@@ -117,11 +134,10 @@ const AdminSermons = () => {
           id: Date.now(),
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to delete sermon';
         setDeleteToast({
           open: true,
           severity: 'error',
-          message,
+          message: getDeleteFailureMessage(error),
           id: Date.now(),
         });
       } finally {
