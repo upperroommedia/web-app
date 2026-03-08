@@ -1,7 +1,7 @@
 import os from 'os';
 import path from 'path';
 import ffmpegStatic from 'ffmpeg-static';
-import ffmpeg from 'fluent-ffmpeg';
+import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
 import { exec } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { readdir, stat } from 'fs/promises';

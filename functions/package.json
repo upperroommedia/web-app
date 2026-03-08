@@ -30,7 +30,7 @@
     "firebase": "catalog:",
     "firebase-admin": "catalog:",
     "firebase-functions": "catalog:",
-    "fluent-ffmpeg": "^2.1.2",
+    "@ts-ffmpeg/fluent-ffmpeg": "^2.0.4",
     "form-data": "catalog:",
     "google-auth-library": "catalog:",
     "headers": "catalog:",
@@ -43,7 +43,7 @@
     "node-vibrant": "^4.0.3",
     "p-limit": "catalog:",
     "sharp": "0.33.5",
-    "uuidv4": "^6.2.13",
+    "uuid": "^9.0.1",
     "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
@@ -51,7 +51,6 @@
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.28.0",
     "@types/ffprobe-static": "^2.0.3",
-    "@types/fluent-ffmpeg": "^2.1.24",
     "@types/imagemagick": "^0.0.31",
     "@types/jest": "^29.5.14",
     "@types/lodash": "^4.17.17",

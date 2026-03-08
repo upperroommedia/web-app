@@ -16,7 +16,7 @@ const targets = [
       '@firebase/firestore',
       'ffmpeg-static',
       'ffprobe-static',
-      'fluent-ffmpeg',
+      '@ts-ffmpeg/fluent-ffmpeg',
       'ytdl-core',
       'node-vibrant',
       'fast-average-color-node',
@@ -29,18 +29,18 @@ const targets = [
     name: 'media',
     entry: 'functions-media/lib/functions-media/src/index.js',
     disallow: ['algoliasearch', 'node-vibrant', 'fast-average-color-node'],
-    requireAny: ['ffmpeg-static', 'fluent-ffmpeg', 'ytdl-core'],
+    requireAny: ['ffmpeg-static', '@ts-ffmpeg/fluent-ffmpeg', 'ytdl-core'],
   },
   {
     name: 'image',
     entry: 'functions-image/lib/functions-image/src/index.js',
-    disallow: ['ffmpeg-static', 'fluent-ffmpeg', 'ytdl-core', 'algoliasearch'],
+    disallow: ['ffmpeg-static', '@ts-ffmpeg/fluent-ffmpeg', 'ytdl-core', 'algoliasearch'],
     requireAny: ['node-vibrant', 'fast-average-color-node', 'buffer-image-size'],
   },
   {
     name: 'integrations',
     entry: 'functions-integrations/lib/functions-integrations/src/index.js',
-    disallow: ['ffmpeg-static', 'fluent-ffmpeg', 'ytdl-core', 'node-vibrant', 'fast-average-color-node'],
+    disallow: ['ffmpeg-static', '@ts-ffmpeg/fluent-ffmpeg', 'ytdl-core', 'node-vibrant', 'fast-average-color-node'],
   },
 ];
 

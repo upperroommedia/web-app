@@ -13,7 +13,7 @@ import ytdl from 'ytdl-core';
 // import { HttpsProxyAgent } from 'https-proxy-agent';
 
 const trimAndTranscode = async (
-  ffmpeg: typeof import('fluent-ffmpeg'),
+  ffmpeg: typeof import('@ts-ffmpeg/fluent-ffmpeg'),
   cancelToken: CancelToken,
   bucket: Bucket,
   audioSource: AudioSource,

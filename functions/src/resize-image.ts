@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import { logger } from 'firebase-functions';
 import { resizeType, supportedContentTypes } from '../../types/Image';
 import { Bucket } from '@google-cloud/storage';
-import { uuid } from 'uuidv4';
+import { v4 as uuid } from 'uuid';
 import { StorageObjectData } from 'firebase-functions/v2/storage';
 
 type resizeFormat = 'jpg' | 'jpeg' | 'png' | 'tif' | 'tiff' | 'webp' | 'gif';

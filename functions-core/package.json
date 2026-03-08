@@ -23,7 +23,7 @@
     "mkdirp": "catalog:",
     "node-fetch": "catalog:",
     "p-limit": "catalog:",
-    "uuidv4": "^6.2.13"
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",
