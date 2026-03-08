@@ -13,12 +13,16 @@ import handleError from './handleError';
 import { authenticateSubsplash } from './subsplashUtils';
 import { getSeriesItems, patchMediaItemSeries, patchSeriesItemPositions } from './helpers/seriesHelpers';
 import { runWithConcurrency } from './utils/runWithConcurrency';
+import { withIdempotency } from './locks/withIdempotency';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
 
 type AddStatus = 'success' | 'error';
 
 export interface BulkAddToSeriesInputType {
   firestoreSeriesId: string;
   seriesSubsplashId: string;
+  operationKey: string;
+  expectedPublishedMembershipHash: string;
   adds: Array<{
     mediaItemId: string;
     sermonId?: string;
@@ -60,6 +64,31 @@ interface RemoteSeriesItem {
 
 const MAX_CONCURRENCY = 5;
 const DEFAULT_CONCURRENCY = 4;
+const MAX_BULK_ADDS = 200;
+const MAX_PUBLISHED_ORDER_ITEMS = 1000;
+
+const normalizeOperationKey = (operationKey: string): string => {
+  const normalized = operationKey?.trim();
+  if (!normalized) {
+    throw new HttpsError('invalid-argument', 'operationKey is required.');
+  }
+
+  return normalized;
+};
+
+const normalizeMembershipHash = (expectedHash: string): string => {
+  const normalized = expectedHash?.trim();
+  if (!normalized) {
+    throw new HttpsError('invalid-argument', 'expectedPublishedMembershipHash is required.');
+  }
+
+  return normalized;
+};
+
+const toMembershipHash = (mediaItemIds: string[]): string => {
+  const normalized = Array.from(new Set(mediaItemIds.map((mediaItemId) => mediaItemId.trim()).filter(Boolean))).sort();
+  return normalized.length > 0 ? normalized.join('|') : 'empty';
+};
 
 const getErrorMessage = (error: unknown): string => {
   if (error && typeof error === 'object') {
@@ -149,6 +178,8 @@ const bulkAddToSeries = onCall(
     const {
       firestoreSeriesId,
       seriesSubsplashId,
+      operationKey,
+      expectedPublishedMembershipHash,
       adds,
       publishedItemOrder,
       maxConcurrency,
@@ -162,6 +193,9 @@ const bulkAddToSeries = onCall(
     if (!seriesSubsplashId || !seriesSubsplashId.trim()) {
       throw new HttpsError('invalid-argument', 'seriesSubsplashId is required.');
     }
+
+    const normalizedOperationKey = normalizeOperationKey(operationKey);
+    const normalizedExpectedMembershipHash = normalizeMembershipHash(expectedPublishedMembershipHash);
 
     if (!Array.isArray(adds) || adds.length === 0) {
       throw new HttpsError('invalid-argument', 'adds must contain at least one media item.');
@@ -188,6 +222,12 @@ const bulkAddToSeries = onCall(
     if (uniqueAdds.length === 0) {
       throw new HttpsError('invalid-argument', 'adds contains no valid media item IDs.');
     }
+    if (uniqueAdds.length > MAX_BULK_ADDS) {
+      throw new HttpsError(
+        'invalid-argument',
+        `adds exceeds the maximum supported bulk size of ${MAX_BULK_ADDS} media items.`
+      );
+    }
 
     const uniquePublishedOrder = Array.from(
       new Set(
@@ -200,122 +240,160 @@ const bulkAddToSeries = onCall(
     if (uniquePublishedOrder.length === 0) {
       throw new HttpsError('invalid-argument', 'publishedItemOrder contains no valid media item IDs.');
     }
+    if (uniquePublishedOrder.length > MAX_PUBLISHED_ORDER_ITEMS) {
+      throw new HttpsError(
+        'invalid-argument',
+        `publishedItemOrder exceeds the maximum supported size of ${MAX_PUBLISHED_ORDER_ITEMS} media items.`
+      );
+    }
 
     const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, maxConcurrency ?? DEFAULT_CONCURRENCY));
 
     try {
-      const token = await authenticateSubsplash();
-      const remoteMembershipBeforeAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
-      const existingMediaItemIds = new Set(remoteMembershipBeforeAdds.keys());
+      return await withIdempotency(normalizedOperationKey, async () => {
+        const lockMediaItemIds = Array.from(
+          new Set([
+            ...uniqueAdds.map((entry) => entry.mediaItemId),
+            ...uniquePublishedOrder,
+          ])
+        ).sort();
+        const lockKeys = [
+          `series:${firestoreSeriesId.trim()}`,
+          ...lockMediaItemIds.map((mediaItemId) => `media-item:${mediaItemId}`),
+        ];
 
-      const results = await runWithConcurrency(uniqueAdds, concurrency, async (entry): Promise<BulkAddToSeriesResultItem> => {
-          try {
-            const patchedItem = await patchMediaItemSeries(entry.mediaItemId, seriesSubsplashId.trim(), token);
-            const confirmedSeriesId = patchedItem._embedded?.['media-series']?.id ?? null;
-            if (confirmedSeriesId !== seriesSubsplashId.trim()) {
+        return withSubsplashLocks(
+          lockKeys,
+          async () => {
+            const token = await authenticateSubsplash();
+            const remoteMembershipBeforeAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
+            const remoteMembershipHash = toMembershipHash(Array.from(remoteMembershipBeforeAdds.keys()));
+            if (normalizedExpectedMembershipHash !== remoteMembershipHash) {
+              throw new HttpsError(
+                'failed-precondition',
+                'Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.',
+                {
+                  expected_hash: normalizedExpectedMembershipHash,
+                  actual_hash: remoteMembershipHash,
+                }
+              );
+            }
+
+            const existingMediaItemIds = new Set(remoteMembershipBeforeAdds.keys());
+            const results = await runWithConcurrency(uniqueAdds, concurrency, async (entry): Promise<BulkAddToSeriesResultItem> => {
+                try {
+                  const patchedItem = await patchMediaItemSeries(entry.mediaItemId, seriesSubsplashId.trim(), token);
+                  const confirmedSeriesId = patchedItem._embedded?.['media-series']?.id ?? null;
+                  if (confirmedSeriesId !== seriesSubsplashId.trim()) {
+                    return {
+                      mediaItemId: entry.mediaItemId,
+                      sermonId: entry.sermonId,
+                      status: 'error',
+                      error: `Subsplash did not confirm series assignment. Expected ${seriesSubsplashId}, got ${confirmedSeriesId ?? 'null'}.`,
+                    };
+                  }
+
+                  return {
+                    mediaItemId: entry.mediaItemId,
+                    sermonId: entry.sermonId,
+                    status: 'success',
+                    confirmedSeriesId,
+                    position: patchedItem.position ?? null,
+                    alreadyInSeries: existingMediaItemIds.has(entry.mediaItemId),
+                  };
+                } catch (error) {
+                  return {
+                    mediaItemId: entry.mediaItemId,
+                    sermonId: entry.sermonId,
+                    status: 'error',
+                    error: getErrorMessage(error),
+                  };
+                }
+            });
+
+            const successfulAdds = results.filter((result) => result.status === 'success');
+            const failedAdds = results.filter((result) => result.status === 'error');
+            const rollbackEligibleMediaItemIds = new Set(
+              successfulAdds
+                .filter((result) => result.alreadyInSeries !== true)
+                .map((result) => result.mediaItemId)
+            );
+
+            if (failedAdds.length > 0) {
+              const rollback = rollbackOnFailure
+                ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
+                : { rolledBackMediaItemIds: [], rollbackFailures: [] };
+
               return {
-                mediaItemId: entry.mediaItemId,
-                sermonId: entry.sermonId,
-                status: 'error',
-                error: `Subsplash did not confirm series assignment. Expected ${seriesSubsplashId}, got ${confirmedSeriesId ?? 'null'}.`,
+                status: successfulAdds.length > 0 ? 'partial' : 'error',
+                message: `Failed to add ${failedAdds.length} of ${results.length} item(s) to Subsplash series.`,
+                firestoreSeriesId,
+                seriesSubsplashId: seriesSubsplashId.trim(),
+                processed: results.length,
+                succeeded: successfulAdds.length,
+                failed: failedAdds.length,
+                reorderApplied: false,
+                results,
+                rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
+                rollbackFailures: rollback.rollbackFailures,
               };
             }
 
+            const remoteMembershipAfterAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
+            const missingOrderedIds = uniquePublishedOrder.filter((mediaItemId) => !remoteMembershipAfterAdds.has(mediaItemId));
+            if (missingOrderedIds.length > 0) {
+              const rollback = rollbackOnFailure
+                ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
+                : { rolledBackMediaItemIds: [], rollbackFailures: [] };
+
+              return {
+                status: 'error',
+                message: `Cannot reorder series because ${missingOrderedIds.length} ordered item(s) are missing in Subsplash membership.`,
+                firestoreSeriesId,
+                seriesSubsplashId: seriesSubsplashId.trim(),
+                processed: results.length,
+                succeeded: successfulAdds.length,
+                failed: 0,
+                reorderApplied: false,
+                results,
+                rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
+                rollbackFailures: rollback.rollbackFailures,
+              };
+            }
+
+            const requestedPositions = new Map(
+              uniquePublishedOrder.map((mediaItemId, index) => [
+                mediaItemId,
+                // Subsplash semantics: position 1 is the bottom item.
+                uniquePublishedOrder.length - index,
+              ])
+            );
+            const itemsToUpdate = Array.from(remoteMembershipAfterAdds.values()).map((item) => ({
+              id: item.id,
+              position: requestedPositions.get(item.id) ?? item.position,
+            }));
+
+            await patchSeriesItemPositions(seriesSubsplashId.trim(), itemsToUpdate, token);
+
             return {
-              mediaItemId: entry.mediaItemId,
-              sermonId: entry.sermonId,
               status: 'success',
-              confirmedSeriesId,
-              position: patchedItem.position ?? null,
-              alreadyInSeries: existingMediaItemIds.has(entry.mediaItemId),
+              message: `Added ${successfulAdds.length} item(s) and applied series reorder.`,
+              firestoreSeriesId,
+              seriesSubsplashId: seriesSubsplashId.trim(),
+              processed: results.length,
+              succeeded: successfulAdds.length,
+              failed: 0,
+              reorderApplied: true,
+              results,
+              rolledBackMediaItemIds: [],
+              rollbackFailures: [],
             };
-          } catch (error) {
-            return {
-              mediaItemId: entry.mediaItemId,
-              sermonId: entry.sermonId,
-              status: 'error',
-              error: getErrorMessage(error),
-            };
+          },
+          {
+            operationKey: normalizedOperationKey,
           }
+        );
       });
-
-      const successfulAdds = results.filter((result) => result.status === 'success');
-      const failedAdds = results.filter((result) => result.status === 'error');
-      const rollbackEligibleMediaItemIds = new Set(
-        successfulAdds
-          .filter((result) => result.alreadyInSeries !== true)
-          .map((result) => result.mediaItemId)
-      );
-
-      if (failedAdds.length > 0) {
-        const rollback = rollbackOnFailure
-          ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
-          : { rolledBackMediaItemIds: [], rollbackFailures: [] };
-
-        return {
-          status: successfulAdds.length > 0 ? 'partial' : 'error',
-          message: `Failed to add ${failedAdds.length} of ${results.length} item(s) to Subsplash series.`,
-          firestoreSeriesId,
-          seriesSubsplashId: seriesSubsplashId.trim(),
-          processed: results.length,
-          succeeded: successfulAdds.length,
-          failed: failedAdds.length,
-          reorderApplied: false,
-          results,
-          rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
-          rollbackFailures: rollback.rollbackFailures,
-        };
-      }
-
-      const remoteMembershipAfterAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
-      const missingOrderedIds = uniquePublishedOrder.filter((mediaItemId) => !remoteMembershipAfterAdds.has(mediaItemId));
-      if (missingOrderedIds.length > 0) {
-        const rollback = rollbackOnFailure
-          ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
-          : { rolledBackMediaItemIds: [], rollbackFailures: [] };
-
-        return {
-          status: 'error',
-          message: `Cannot reorder series because ${missingOrderedIds.length} ordered item(s) are missing in Subsplash membership.`,
-          firestoreSeriesId,
-          seriesSubsplashId: seriesSubsplashId.trim(),
-          processed: results.length,
-          succeeded: successfulAdds.length,
-          failed: 0,
-          reorderApplied: false,
-          results,
-          rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
-          rollbackFailures: rollback.rollbackFailures,
-        };
-      }
-
-      const requestedPositions = new Map(
-        uniquePublishedOrder.map((mediaItemId, index) => [
-          mediaItemId,
-          // Subsplash semantics: position 1 is the bottom item.
-          uniquePublishedOrder.length - index,
-        ])
-      );
-      const itemsToUpdate = Array.from(remoteMembershipAfterAdds.values()).map((item) => ({
-        id: item.id,
-        position: requestedPositions.get(item.id) ?? item.position,
-      }));
-
-      await patchSeriesItemPositions(seriesSubsplashId.trim(), itemsToUpdate, token);
-
-      return {
-        status: 'success',
-        message: `Added ${successfulAdds.length} item(s) and applied series reorder.`,
-        firestoreSeriesId,
-        seriesSubsplashId: seriesSubsplashId.trim(),
-        processed: results.length,
-        succeeded: successfulAdds.length,
-        failed: 0,
-        reorderApplied: true,
-        results,
-        rolledBackMediaItemIds: [],
-        rollbackFailures: [],
-      };
     } catch (err) {
       throw handleError(err);
     }
