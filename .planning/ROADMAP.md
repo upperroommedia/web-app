@@ -48,7 +48,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 02-01: Implement external API mode policy, provider mocks, and guardrail tests/docs
+- [ ] 02-01-PLAN.md — Implement external API mode policy, provider mocks, and guardrail tests/docs
 
 ## Upcoming Scope Candidates (Not Yet Phased)
 
