@@ -317,7 +317,7 @@ const SermonDetailsPage = () => {
   }, [sermon]);
 
   // Subsplash functions
-  const uploadToSubsplash = async (listsToUploadTo: SermonList[]): Promise<string | undefined> => {
+  const uploadToSubsplash = useCallback(async (listsToUploadTo: SermonList[]): Promise<string | undefined> => {
     if (!sermon) return undefined;
     try {
       const subsplashIdToListIdMap = new Map<string, string>();
@@ -326,7 +326,7 @@ const SermonDetailsPage = () => {
       const uploadOperationKey = createOperationKey('sermon-admin-upload', sermon.id);
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
 
-      const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
+      const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
         title: sermon.title,
         subtitle: sermon.subtitle,
         speakers: sermon.speakers,
@@ -399,7 +399,7 @@ const SermonDetailsPage = () => {
     } finally {
       setIsUploadingToSubsplash(false);
     }
-  };
+  }, [sermon, user?.uid]);
 
   const removeFromList = async (listsToRemoveFrom: SermonList[]) => {
     if (!sermon) return;

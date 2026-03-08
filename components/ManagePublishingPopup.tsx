@@ -305,7 +305,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
       const uploadOperationKey = createOperationKey('manage-publishing-upload', sermon.id);
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
-      const data: UPLOAD_TO_SUBSPLASH_INCOMING_DATA = {
+      const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
         title: sermon.title,
         subtitle: sermon.subtitle,
         speakers: sermon.speakers,

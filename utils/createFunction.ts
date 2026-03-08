@@ -11,7 +11,7 @@ export interface CallableMutationMetadata {
   lockKey?: string;
 }
 
-export interface CallableCallOptions<M extends Record<string, unknown> = CallableMutationMetadata> {
+export interface CallableCallOptions<M extends object = CallableMutationMetadata> {
   metadata?: M;
 }
 
@@ -19,7 +19,7 @@ const isObjectRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
-const mergeCallableDataWithMetadata = <T, M extends Record<string, unknown>>(
+const mergeCallableDataWithMetadata = <T, M extends object>(
   data: T,
   options?: CallableCallOptions<M>
 ): T => {
@@ -33,7 +33,7 @@ const mergeCallableDataWithMetadata = <T, M extends Record<string, unknown>>(
   } as T;
 };
 
-export const createFunctionV2 = <T = any, R = any, M extends Record<string, unknown> = CallableMutationMetadata>(
+export const createFunctionV2 = <T = any, R = any, M extends object = CallableMutationMetadata>(
   name: string
 ): ((data: T, options?: CallableCallOptions<M>) => Promise<R>) => {
   const url = isDevelopment

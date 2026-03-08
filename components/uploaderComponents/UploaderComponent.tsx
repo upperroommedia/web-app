@@ -504,7 +504,9 @@ const Uploader = (props: UploaderProps) => {
   useEffect(() => {
     if (!uploadedSermon) return;
     const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
-    void router.prefetch(targetUrl);
+    router.prefetch(targetUrl).catch((error) => {
+      console.error('Failed to prefetch sermon details page:', error);
+    });
   }, [uploadedSermon, router]);
 
   // Navigate to sermon details when user clicks "View Sermon"

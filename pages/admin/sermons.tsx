@@ -124,7 +124,7 @@ const AdminSermons = () => {
       id: Date.now(),
     });
 
-    void (async () => {
+    const runDeleteIntent = async () => {
       try {
         await deleteSermonWithExternalCleanup(deleteIntentPayload);
         setDeleteToast({
@@ -143,7 +143,9 @@ const AdminSermons = () => {
       } finally {
         await clearDeleteIntentPayload();
       }
-    })();
+    };
+
+    runDeleteIntent();
   }, [clearDeleteIntentPayload, deleteIntentPayload]);
 
   return (
