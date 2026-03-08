@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
-current_phase: 04-role-based-invite-onboarding-and-operational-notification-routing
+current_phase: 03-subsplash-alpha-lock-concurrency-control
 status: executing
-last_updated: "2026-03-07T00:00:00.000Z"
-last_activity: 2026-03-01 - Completed phase 04 plan 05 runtime alert rollout coverage and verification
+last_updated: "2026-03-08T00:27:04.601Z"
+last_activity: 2026-03-08 - Completed phase 03 plan 06 bulkAddToSeries lock/idempotency + caller retry-key rollout
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 13
-  completed_plans: 12
+  total_plans: 14
+  completed_plans: 13
 ---
 
 # Session State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Stabilize Phase 04 invite/role-request/notification workflow while preparing Phase 02 execution.
+**Current focus:** Close remaining Phase 03 verification work (03-07) and then resume Phase 02 execution.
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
-**Current phase:** 04-role-based-invite-onboarding-and-operational-notification-routing
-**Status:** Complete (04-01, 04-02, 04-03, 04-04, and 04-05 complete)
-**Last activity:** 2026-03-01 - Completed phase 04 plan 05 runtime alert rollout coverage and verification
+**Current phase:** 03-subsplash-alpha-lock-concurrency-control
+**Status:** In progress (03-01 through 03-06 complete; 03-07 pending)
+**Last activity:** 2026-03-08 - Completed phase 03 plan 06 bulkAddToSeries lock/idempotency + caller retry-key rollout
 
 ## Decisions
 
@@ -64,6 +64,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Exported createrolerequest/createinvite/claiminvite with lower-case keys for v2 callable URL compatibility.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Implemented admin invite issuance in users toolbar dialog without altering user-table sorting/pagination behavior.
 - [Phase 04-role-based-invite-onboarding-and-operational-notification-routing]: Login now honors callbackurl and callbackUrl aliases while only allowing local callback paths.
+- [Phase 03]: bulkaddtoseries now requires operationKey and expectedPublishedMembershipHash to enforce deterministic replay and stale-snapshot protection
+- [Phase 03]: bulkaddtoseries lock scope uses series:{firestoreSeriesId} plus sorted media-item lock keys for cross-callable serialization
+- [Phase 03]: series admin bulk publish retries now derive deterministic createRetryIntentKey values from intent fingerprints
 
 ## Accumulated Context
 
@@ -101,3 +104,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-02 with persistence-first role request callable, queue-failure fallback, and emulator regression coverage.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-03 with secure invite issue/claim callables and emulator lifecycle regression coverage.
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-04 with callable export wiring, admin invite UX, and invite claim onboarding routes.
+- 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-06 with bulkAddToSeries lock/idempotency migration, stale-snapshot guard, and caller intent-scoped retry keys.
