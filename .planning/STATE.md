@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 03-subsplash-alpha-lock-concurrency-control
-status: executing
-last_updated: "2026-03-08T00:36:01.160Z"
+status: planning
+last_updated: "2026-03-08T00:44:25.997Z"
 last_activity: 2026-03-08 - Completed phase 03 plan 07 caller lock-busy cleanup contract + LOCK traceability closure
 progress:
-  total_phases: 4
+  total_phases: 3
   completed_phases: 3
-  total_plans: 15
+  total_plans: 14
   completed_plans: 14
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** In progress (Phase 03 complete, Phase 02 pending)
+**Status:** Ready to plan
 **Last activity:** 2026-03-08 - Completed phase 03 plan 07 caller lock-busy cleanup contract + LOCK traceability closure
 
 ## Decisions
