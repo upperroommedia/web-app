@@ -119,8 +119,9 @@ export const uploadSermon = async (
 };
 
 export const getDurationSeconds = (filePath: string): Promise<number> => {
+  const ffmpegModule = loadStaticFFMPEG();
   return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
+    ffmpegModule.ffprobe(filePath, (err, metadata) => {
       if (err) {
         reject(err);
       }

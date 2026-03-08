@@ -1,6 +1,10 @@
 packages:
   - "."
   - "functions"
+  - "functions-core"
+  - "functions-media"
+  - "functions-image"
+  - "functions-integrations"
 
 onlyBuiltDependencies:
   - ffmpeg-static

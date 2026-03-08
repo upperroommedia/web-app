@@ -5,11 +5,17 @@
   "private": true,
   "workspaces": [
     ".",
-    "functions"
+    "functions",
+    "functions-core",
+    "functions-media",
+    "functions-image",
+    "functions-integrations"
   ],
   "scripts": {
     "build-functions": "cd functions && pnpm build",
     "build-functions-watch": "cd functions && pnpm build-watch",
+    "build-functions-codebases": "pnpm --dir functions-core build && pnpm --dir functions-media build && pnpm --dir functions-image build && pnpm --dir functions-integrations build",
+    "check:function-startup-loads": "node scripts/check-function-startup-loads.mjs",
     "next-dev": "next dev --turbopack & pnpm run start-emulators",
     "start-emulators": "pnpm run build-functions-watch & firebase emulators:start --import=./dir",
     "dev:core": "pnpm kill-port 8081 9099 4000 3000 5001 9000 8123 && pnpm run next-dev",

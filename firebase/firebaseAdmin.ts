@@ -1,5 +1,6 @@
 import * as firebaseAdmin from 'firebase-admin';
-import { isDevelopment } from './firebase';
+
+const isDevelopment = process.env.NODE_ENV === 'development';
 
 if (!firebaseAdmin.apps.length) {
   if (isDevelopment) {
