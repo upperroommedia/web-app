@@ -67,7 +67,7 @@ if (mail) {
   }
 
   console.log(`[dev] --mail enabled; recipients=${recipients.join(', ')}`);
-  console.log(`[dev] ADMIN_BASE_URL=${env.ADMIN_BASE_URL}`);
+  console.log('[dev] ADMIN_BASE_URL configured for mail templates');
 } else {
   console.log('[dev] --mail disabled (default)');
 }

@@ -12,6 +12,7 @@ import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD, isDevelopment } from '../context/u
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
+import { resolveAuthCallbackDestination } from '../utils/authRedirect';
 
 const INVITE_CLAIM_AUTH_META_KEY = 'invite-claim-auth-meta';
 const INVITE_LOGIN_NOTICE_KEY = 'invite-claim-login-notice';
@@ -68,40 +69,21 @@ const Login = () => {
   //   router.push(authResult.dest);
   // };
   // Type guard function
-  function isAuthError(error: any): error is AuthError {
+  function isAuthError(error: unknown): error is AuthError {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const candidate = error as { code?: unknown; message?: unknown };
     return (
-      error &&
-      typeof error.code === 'string' &&
-      error.code.startsWith('auth/') &&
-      typeof error.message === 'string'
+      typeof candidate.code === 'string' &&
+      candidate.code.startsWith('auth/') &&
+      typeof candidate.message === 'string'
     );
   }
 
   const getCallbackDestination = () => {
-    const candidates = [router.query.callbackurl, router.query.callbackUrl];
-    const rawValue = candidates.find((value): value is string => typeof value === 'string' && value.trim().length > 0);
-
-    if (!rawValue) {
-      return '/';
-    }
-
-    const trimmedValue = rawValue.trim();
-    let decodedValue = trimmedValue;
-    try {
-      decodedValue = decodeURIComponent(trimmedValue);
-    } catch (_error) {
-      decodedValue = trimmedValue;
-    }
-
-    if (decodedValue === '/login') {
-      return '/';
-    }
-
-    if (decodedValue.startsWith('http://') || decodedValue.startsWith('https://')) {
-      return '/';
-    }
-
-    return decodedValue.startsWith('/') ? decodedValue : `/${decodedValue}`;
+    return resolveAuthCallbackDestination(router.query.callbackurl, router.query.callbackUrl);
   };
 
   useEffect(() => {
@@ -278,9 +260,10 @@ const Login = () => {
                       // Success - redirect
                       router.push(getCallbackDestination());
                     }
-                  } catch (e: any) {
+                  } catch (e: unknown) {
+                    const message = e instanceof Error ? e.message : 'Unknown error';
                     setTitle('Dev Login Error');
-                    setErrorMessage(e.message || 'Unknown error');
+                    setErrorMessage(message);
                     setOpen(true);
                   } finally {
                     setDevLoginLoading(false);
