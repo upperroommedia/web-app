@@ -100,7 +100,6 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           // Cache the topics data to avoid re-fetching when search is cleared
           setCachedTopics(topics);
         } catch (error) {
-          // eslint-disable-next-line no-console
           console.error('Error loading topics from bundle:', error);
         } finally {
           setIsLoadingBundles(false);
@@ -123,7 +122,6 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
       const searchResults = localTopicSearch.search(query);
       return searchResults.map(result => topicToListWithHighlight(result.item));
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Error searching topics locally:', error);
       return [];
     }
@@ -180,33 +178,38 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           }}
           id="bundle-list-selector-input"
           options={getListUnion(value, allListArray)}
-          renderTags={(list, _) => {
-            return list.map((list) => (
-              <Chip
-                key={list.id}
-                label={list.name}
-                onDelete={() => {
-                  updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
-                  if (
-                    props.sermonList.filter((list) => list.type === ListType.SERIES).length === 1 &&
-                    props.listType === ListType.SERIES &&
-                    props.subtitle !== undefined
-                  ) {
-                    props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+          renderTags={(list, getTagProps) => {
+            return list.map((list, index) => {
+              const { key: _tagKey, ...tagProps } = getTagProps({ index });
+              return (
+                <Chip
+                  {...tagProps}
+                  key={list.id}
+                  label={list.name}
+                  onDelete={() => {
+                    updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
+                    if (
+                      props.sermonList.filter((list) => list.type === ListType.SERIES).length === 1 &&
+                      props.listType === ListType.SERIES &&
+                      props.subtitle !== undefined
+                    ) {
+                      props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+                    }
+                  }}
+                  sx={{ mr: 0.5, mb: 0.5 }}
+                  avatar={
+                    <AvatarWithDefaultImage
+                      defaultImageURL="/user.png"
+                      altName={list.name}
+                      width={24}
+                      height={24}
+                      borderRadius={12}
+                      image={list.images?.find((image) => image.type === 'square')}
+                    />
                   }
-                }}
-                avatar={
-                  <AvatarWithDefaultImage
-                    defaultImageURL="/user.png"
-                    altName={list.name}
-                    width={24}
-                    height={24}
-                    borderRadius={12}
-                    image={list.images?.find((image) => image.type === 'square')}
-                  />
-                }
-              />
-            ));
+                />
+              );
+            });
           }}
           onInputChange={async (_, newInputValue) => {
             const hasQuery = newInputValue.trim().length > 0;

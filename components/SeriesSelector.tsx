@@ -27,6 +27,9 @@ interface SeriesSelectorProps {
   selectedSeries: Series | null;
   setSelectedSeries: Dispatch<SetStateAction<Series | null>>;
   disabled?: boolean;
+  required?: boolean;
+  error?: boolean;
+  helperText?: string;
 }
 
 const SeriesSelector: FunctionComponent<SeriesSelectorProps> = (props) => {
@@ -138,6 +141,9 @@ const SeriesSelector: FunctionComponent<SeriesSelectorProps> = (props) => {
               {...params}
               label="Series"
               placeholder="Select a series..."
+              required={props.required}
+              error={props.error}
+              helperText={props.helperText}
               InputProps={{
                 ...params.InputProps,
                 startAdornment: props.selectedSeries ? (

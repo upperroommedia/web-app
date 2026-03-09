@@ -129,7 +129,6 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
         // Also filter client-side as a safety measure
         return result.hits.map((hit)=> hit).filter((list) => list.isMoreSermonsList !== true);
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error('Search error:', error);
         return [];
       }
@@ -164,33 +163,38 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           }}
           id={`${props.listType}-list-selector-input`}
           options={getListUnion(value, allListArray)}
-          renderTags={(list, _) => {
-            return list.map((list) => (
-              <Chip
-                key={list.id}
-                label={list.name}
-                onDelete={() => {
-                  updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
-                  if (
-                    props.sermonList.filter((list) => list.type === ListType.SERIES).length === 1 &&
-                    props.listType === ListType.SERIES &&
-                    props.subtitle !== undefined
-                  ) {
-                    props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+          renderTags={(list, getTagProps) => {
+            return list.map((list, index) => {
+              const { key: _tagKey, ...tagProps } = getTagProps({ index });
+              return (
+                <Chip
+                  {...tagProps}
+                  key={list.id}
+                  label={list.name}
+                  onDelete={() => {
+                    updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
+                    if (
+                      props.sermonList.filter((list) => list.type === ListType.SERIES).length === 1 &&
+                      props.listType === ListType.SERIES &&
+                      props.subtitle !== undefined
+                    ) {
+                      props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+                    }
+                  }}
+                  sx={{ mr: 0.5, mb: 0.5 }}
+                  avatar={
+                    <AvatarWithDefaultImage
+                      defaultImageURL="/user.png"
+                      altName={list.name}
+                      width={24}
+                      height={24}
+                      borderRadius={12}
+                      image={list.images?.find((image) => image.type === 'square')}
+                    />
                   }
-                }}
-                avatar={
-                  <AvatarWithDefaultImage
-                    defaultImageURL="/user.png"
-                    altName={list.name}
-                    width={24}
-                    height={24}
-                    borderRadius={12}
-                    image={list.images?.find((image) => image.type === 'square')}
-                  />
-                }
-              />
-            ));
+                />
+              );
+            });
           }}
           onInputChange={async (_, newInputValue) => {
             setAllListArray(await queryAlgolia(newInputValue));
