@@ -45,6 +45,7 @@ jobs:
       - id: detect
         name: Detect deploy targets from changed files
         env:
+          EVENT_NAME: ${{ github.event_name }}
           BEFORE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
           FORCE_FULL_REDEPLOY: ${{ github.event.inputs.force_full_redeploy || 'false' }}
@@ -60,7 +61,16 @@ jobs:
           head_sha="$HEAD_SHA"
 
           if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
-            changed_files="$(git ls-files)"
+            if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if git rev-parse "${head_sha}^" >/dev/null 2>&1; then
+                base_sha="$(git rev-parse "${head_sha}^")"
+                changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
+              else
+                changed_files="$(git show --name-only --pretty=format: "$head_sha")"
+              fi
+            else
+              changed_files="$(git ls-files)"
+            fi
           else
             changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
           fi
@@ -133,7 +143,9 @@ jobs:
           fi
 
           anything_to_deploy=false
-          if [[ "$deploy_apphosting" == "true" || "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
+          # App Hosting rollout is handled by the Firebase App Hosting GitHub app.
+          # This workflow only deploys non-App-Hosting Firebase targets.
+          if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
             anything_to_deploy=true
           fi
 
@@ -175,7 +187,7 @@ jobs:
             echo "## Staging Selective Deploy"
             echo ""
             echo "- Event: \\`$EVENT_NAME\\`"
-            echo "- App Hosting: \\`$DEPLOY_APPHOSTING\\`"
+            echo "- App Hosting (auto-rollout via Firebase app): \\`$DEPLOY_APPHOSTING\\`"
             echo "- Firestore rules/indexes: \\`$DEPLOY_FIRESTORE\\`"
             echo "- Realtime Database rules: \\`$DEPLOY_DATABASE\\`"
             echo "- Storage rules: \\`$DEPLOY_STORAGE\\`"
@@ -183,7 +195,7 @@ jobs:
             echo "- Functions media: \\`$DEPLOY_FUNCTIONS_MEDIA\\`"
             echo "- Functions image: \\`$DEPLOY_FUNCTIONS_IMAGE\\`"
             echo "- Functions integrations: \\`$DEPLOY_FUNCTIONS_INTEGRATIONS\\`"
-            echo "- Anything to deploy: \\`$ANYTHING_TO_DEPLOY\\`"
+            echo "- Anything to deploy from this workflow (excludes App Hosting): \\`$ANYTHING_TO_DEPLOY\\`"
             echo ""
             echo "### Changed Files"
             echo '\`\`\`'
@@ -240,8 +252,6 @@ jobs:
         if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GITHUB_SHA: ${{ github.sha }}
-          DEPLOY_APPHOSTING: ${{ needs.detect-changes.outputs.deploy_apphosting }}
           DEPLOY_FIRESTORE: ${{ needs.detect-changes.outputs.deploy_firestore }}
           DEPLOY_DATABASE: ${{ needs.detect-changes.outputs.deploy_database }}
           DEPLOY_STORAGE: ${{ needs.detect-changes.outputs.deploy_storage }}
@@ -253,71 +263,6 @@ jobs:
           set -euo pipefail
 
           deployed_targets=()
-
-          if [[ "$DEPLOY_APPHOSTING" == "true" ]]; then
-            APPHOSTING_BACKEND="web-staging"
-            APPHOSTING_REGION="us-central1"
-            APPHOSTING_COMMIT="$GITHUB_SHA"
-
-            find_apphosting_build_for_commit() {
-              gcloud builds list \
-                --project "$FIREBASE_PROJECT" \
-                --region "$APPHOSTING_REGION" \
-                --sort-by=~createTime \
-                --limit=50 \
-                --format=json \
-                | jq -r --arg sha "$APPHOSTING_COMMIT" '
-                    .[]
-                    | select(((.tags // []) | index($sha)) != null)
-                    | .id
-                  ' \
-                | head -n 1
-            }
-
-            apphosting_build_id="$(find_apphosting_build_for_commit || true)"
-
-            if [[ -z "$apphosting_build_id" ]]; then
-              pnpm exec firebase apphosting:rollouts:create "$APPHOSTING_BACKEND" \
-                --project "$FIREBASE_PROJECT" \
-                --git-commit "$APPHOSTING_COMMIT" \
-                --force
-              sleep 5
-              apphosting_build_id="$(find_apphosting_build_for_commit || true)"
-            fi
-
-            if [[ -z "$apphosting_build_id" ]]; then
-              echo "::error::Unable to locate App Hosting build for commit $APPHOSTING_COMMIT"
-              exit 1
-            fi
-
-            apphosting_status=""
-            for _ in {1..180}; do
-              apphosting_status="$(gcloud builds describe "$apphosting_build_id" \
-                --project "$FIREBASE_PROJECT" \
-                --region "$APPHOSTING_REGION" \
-                --format='value(status)')"
-              if [[ "$apphosting_status" == "SUCCESS" ]]; then
-                break
-              fi
-              if [[ "$apphosting_status" == "FAILURE" || "$apphosting_status" == "CANCELLED" || "$apphosting_status" == "TIMEOUT" || "$apphosting_status" == "EXPIRED" || "$apphosting_status" == "INTERNAL_ERROR" ]]; then
-                apphosting_log_url="$(gcloud builds describe "$apphosting_build_id" \
-                  --project "$FIREBASE_PROJECT" \
-                  --region "$APPHOSTING_REGION" \
-                  --format='value(logUrl)')"
-                echo "::error::App Hosting build $apphosting_build_id failed with status $apphosting_status"
-                echo "::error::Build logs: $apphosting_log_url"
-                exit 1
-              fi
-              sleep 20
-            done
-
-            if [[ "$apphosting_status" != "SUCCESS" ]]; then
-              echo "::error::Timed out waiting for App Hosting build $apphosting_build_id to finish"
-              exit 1
-            fi
-
-            deployed_targets+=("apphosting:web-staging:$apphosting_build_id")
-          fi
 
           if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
             pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
@@ -362,7 +307,7 @@ jobs:
               echo "No targets deployed."
             else
               for target in "${deployed_targets[@]}"; do
-                echo "- \\`$target\\`"
+                printf '%s\n' "- \`$target\`"
               done
             fi
           } >> "$GITHUB_STEP_SUMMARY"
