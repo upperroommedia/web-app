@@ -16,6 +16,7 @@ type ListInvitesOutputType = { status: 'success'; data: ListInvitesResultData } 
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+const MAIL_COLLECTION = 'mail';
 
 const resolveLimit = (rawLimit: unknown): number => {
   if (typeof rawLimit !== 'number' || !Number.isFinite(rawLimit)) {
@@ -50,6 +51,29 @@ export const listInvitesHandler = async (
     .limit(limit)
     .get();
 
+  const queueMailIds = Array.from(
+    new Set(
+      snapshot.docs
+        .map((doc) => (doc.data() as InviteDocument).email?.queueMailId)
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    )
+  );
+
+  const mailDeliveryStateById = new Map<string, string>();
+  if (queueMailIds.length > 0) {
+    const mailRefs = queueMailIds.map((mailId) => firebaseAdmin.firestore().collection(MAIL_COLLECTION).doc(mailId));
+    const mailSnapshots = await firebaseAdmin.firestore().getAll(...mailRefs);
+    for (const mailSnapshot of mailSnapshots) {
+      if (!mailSnapshot.exists) {
+        continue;
+      }
+      const deliveryState = mailSnapshot.get('delivery.state');
+      if (typeof deliveryState === 'string') {
+        mailDeliveryStateById.set(mailSnapshot.id, deliveryState);
+      }
+    }
+  }
+
   const invites = snapshot.docs.flatMap((doc) => {
     const invite = doc.data() as InviteDocument;
     const invitedRole = normalizeInviteRole(invite.invitedRole ?? '');
@@ -57,7 +81,15 @@ export const listInvitesHandler = async (
       return [];
     }
 
-    const lifecycleStatus = getInviteLifecycleStatus(invite, nowMs);
+    let lifecycleStatus = getInviteLifecycleStatus(invite, nowMs);
+    const queueMailId = invite.email?.queueMailId;
+    if (
+      lifecycleStatus === InviteLifecycleStatus.SENT &&
+      typeof queueMailId === 'string' &&
+      mailDeliveryStateById.get(queueMailId) === 'ERROR'
+    ) {
+      lifecycleStatus = InviteLifecycleStatus.SEND_FAILED;
+    }
 
     return [
       {
@@ -80,7 +112,8 @@ export const listInvitesHandler = async (
           lifecycleStatus === InviteLifecycleStatus.CLAIMING ||
           lifecycleStatus === InviteLifecycleStatus.CLAIM_FAILED,
         canResend:
-          lifecycleStatus === InviteLifecycleStatus.EXPIRED,
+          lifecycleStatus === InviteLifecycleStatus.EXPIRED ||
+          lifecycleStatus === InviteLifecycleStatus.SEND_FAILED,
       },
     ];
   });

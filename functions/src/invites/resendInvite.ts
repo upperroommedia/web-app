@@ -20,6 +20,7 @@ type ResendInviteOutputType = { status: 'success'; data: ResendInviteResultData 
 
 const isAdmin = (request: CallableRequest<unknown>): boolean =>
   request.auth?.token.role === 'admin' && typeof request.auth.uid === 'string';
+const MAIL_COLLECTION = 'mail';
 
 export const resendInviteHandler = async (
   request: CallableRequest<ResendInviteInputType>
@@ -43,8 +44,29 @@ export const resendInviteHandler = async (
   if (previousInvite.claimStatus === InviteClaimStatus.COMPLETE) {
     return { status: 'error', error: 'Claimed invites cannot be resent.' };
   }
-  if (getInviteLifecycleStatus(previousInvite) !== InviteLifecycleStatus.EXPIRED) {
-    return { status: 'error', error: 'Only expired invites can be resent.' };
+
+  const inviteLifecycleStatus = getInviteLifecycleStatus(previousInvite);
+  let deliveryFailed = false;
+  if (
+    inviteLifecycleStatus === InviteLifecycleStatus.SENT &&
+    previousInvite.email?.status === InviteEmailStatus.QUEUED &&
+    typeof previousInvite.email.queueMailId === 'string' &&
+    previousInvite.email.queueMailId.trim().length > 0
+  ) {
+    const mailSnapshot = await firebaseAdmin
+      .firestore()
+      .collection(MAIL_COLLECTION)
+      .doc(previousInvite.email.queueMailId)
+      .get();
+    if (mailSnapshot.exists) {
+      const deliveryState = mailSnapshot.get('delivery.state');
+      deliveryFailed = deliveryState === 'ERROR';
+    }
+  }
+
+  const canResend = inviteLifecycleStatus === InviteLifecycleStatus.EXPIRED || deliveryFailed;
+  if (!canResend) {
+    return { status: 'error', error: 'Only expired or delivery-failed invites can be resent.' };
   }
 
   const invitedEmail = normalizeInviteEmail(previousInvite.invitedEmail ?? '');
