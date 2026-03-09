@@ -256,10 +256,6 @@ jobs:
         if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Install Firebase CLI
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
-        run: npm install -g firebase-tools@13.33.0
-
       - name: Deploy selected staging targets
         if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
         env:
@@ -278,43 +274,43 @@ jobs:
 
           if [[ "$DEPLOY_APPHOSTING" == "true" ]]; then
             cp apphosting.staging.yaml apphosting.yaml
-            firebase deploy --project "$FIREBASE_PROJECT" --only apphosting
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only apphosting
             deployed_targets+=("apphosting:web-staging")
           fi
 
           if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
-            firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes
             deployed_targets+=("firestore:rules")
             deployed_targets+=("firestore:indexes")
           fi
 
           if [[ "$DEPLOY_DATABASE" == "true" ]]; then
-            firebase deploy --project "$FIREBASE_PROJECT" --only database
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database
             deployed_targets+=("database")
           fi
 
           if [[ "$DEPLOY_STORAGE" == "true" ]]; then
-            firebase deploy --project "$FIREBASE_PROJECT" --only storage
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage
             deployed_targets+=("storage")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_CORE" == "true" ]]; then
-            firebase deploy --project "$FIREBASE_PROJECT" --only functions:core
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core
             deployed_targets+=("functions:core")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_MEDIA" == "true" ]]; then
-            firebase deploy --project "$FIREBASE_PROJECT" --only functions:media
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media
             deployed_targets+=("functions:media")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_IMAGE" == "true" ]]; then
-            firebase deploy --project "$FIREBASE_PROJECT" --only functions:image
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image
             deployed_targets+=("functions:image")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_INTEGRATIONS" == "true" ]]; then
-            firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations
             deployed_targets+=("functions:integrations")
           fi
 
