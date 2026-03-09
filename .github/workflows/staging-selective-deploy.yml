@@ -260,6 +260,8 @@ jobs:
       - name: Deploy selected staging targets
         if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
           DEPLOY_APPHOSTING: ${{ needs.detect-changes.outputs.deploy_apphosting }}
           DEPLOY_FIRESTORE: ${{ needs.detect-changes.outputs.deploy_firestore }}
           DEPLOY_DATABASE: ${{ needs.detect-changes.outputs.deploy_database }}
@@ -274,9 +276,68 @@ jobs:
           deployed_targets=()
 
           if [[ "$DEPLOY_APPHOSTING" == "true" ]]; then
-            cp apphosting.staging.yaml apphosting.yaml
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only apphosting --force --non-interactive
-            deployed_targets+=("apphosting:web-staging")
+            APPHOSTING_BACKEND="web-staging"
+            APPHOSTING_REGION="us-central1"
+            APPHOSTING_COMMIT="$GITHUB_SHA"
+
+            find_apphosting_build_for_commit() {
+              gcloud builds list \
+                --project "$FIREBASE_PROJECT" \
+                --region "$APPHOSTING_REGION" \
+                --sort-by=~createTime \
+                --limit=50 \
+                --format=json \
+                | jq -r --arg sha "$APPHOSTING_COMMIT" '
+                    .[]
+                    | select(((.tags // []) | index($sha)) != null)
+                    | .id
+                  ' \
+                | head -n 1
+            }
+
+            apphosting_build_id="$(find_apphosting_build_for_commit || true)"
+
+            if [[ -z "$apphosting_build_id" ]]; then
+              pnpm exec firebase apphosting:rollouts:create "$APPHOSTING_BACKEND" \
+                --project "$FIREBASE_PROJECT" \
+                --git-commit "$APPHOSTING_COMMIT" \
+                --force
+              sleep 5
+              apphosting_build_id="$(find_apphosting_build_for_commit || true)"
+            fi
+
+            if [[ -z "$apphosting_build_id" ]]; then
+              echo "::error::Unable to locate App Hosting build for commit $APPHOSTING_COMMIT"
+              exit 1
+            fi
+
+            apphosting_status=""
+            for _ in {1..180}; do
+              apphosting_status="$(gcloud builds describe "$apphosting_build_id" \
+                --project "$FIREBASE_PROJECT" \
+                --region "$APPHOSTING_REGION" \
+                --format='value(status)')"
+              if [[ "$apphosting_status" == "SUCCESS" ]]; then
+                break
+              fi
+              if [[ "$apphosting_status" == "FAILURE" || "$apphosting_status" == "CANCELLED" || "$apphosting_status" == "TIMEOUT" || "$apphosting_status" == "EXPIRED" || "$apphosting_status" == "INTERNAL_ERROR" ]]; then
+                apphosting_log_url="$(gcloud builds describe "$apphosting_build_id" \
+                  --project "$FIREBASE_PROJECT" \
+                  --region "$APPHOSTING_REGION" \
+                  --format='value(logUrl)')"
+                echo "::error::App Hosting build $apphosting_build_id failed with status $apphosting_status"
+                echo "::error::Build logs: $apphosting_log_url"
+                exit 1
+              fi
+              sleep 20
+            done
+
+            if [[ "$apphosting_status" != "SUCCESS" ]]; then
+              echo "::error::Timed out waiting for App Hosting build $apphosting_build_id to finish"
+              exit 1
+            fi
+
+            deployed_targets+=("apphosting:web-staging:$apphosting_build_id")
           fi
 
           if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
