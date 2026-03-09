@@ -483,68 +483,68 @@ importers:
   functions-core:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.0
         version: 7.1.0(firebase-admin@13.7.0(encoding@0.1.13))
       form-data:
-        specifier: 'catalog:'
+        specifier: ^4.0.0
         version: 4.0.5
       google-auth-library:
-        specifier: 'catalog:'
+        specifier: ^9.15.1
         version: 9.15.1(encoding@0.1.13)
       headers:
-        specifier: 'catalog:'
+        specifier: ^0.9.6
         version: 0.9.6
       https-proxy-agent:
-        specifier: 'catalog:'
+        specifier: ^7.0.4
         version: 7.0.6
       image-size:
-        specifier: 'catalog:'
+        specifier: ^1.1.1
         version: 1.2.1
       lodash:
-        specifier: 'catalog:'
+        specifier: ^4.17.23
         version: 4.17.23
       mkdirp:
-        specifier: 'catalog:'
+        specifier: ^2.1.6
         version: 2.1.6
       node-fetch:
-        specifier: 'catalog:'
+        specifier: 3.3.0
         version: 3.3.0
       p-limit:
-        specifier: 'catalog:'
+        specifier: ^6.2.0
         version: 6.2.0
       uuid:
         specifier: ^9.0.1
         version: 9.0.1
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
   functions-image:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       buffer-image-size:
         specifier: ^0.6.4
@@ -553,29 +553,29 @@ importers:
         specifier: ^3.1.0
         version: 3.2.0
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.0
         version: 7.1.0(firebase-admin@13.7.0(encoding@0.1.13))
       mkdirp:
-        specifier: 'catalog:'
+        specifier: ^2.1.6
         version: 2.1.6
       node-vibrant:
         specifier: ^4.0.3
         version: 4.0.4(encoding@0.1.13)
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
   functions-integrations:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
@@ -584,50 +584,50 @@ importers:
         specifier: 5.27.0
         version: 5.27.0
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.0
         version: 7.1.0(firebase-admin@13.7.0(encoding@0.1.13))
       form-data:
-        specifier: 'catalog:'
+        specifier: ^4.0.0
         version: 4.0.5
       google-auth-library:
-        specifier: 'catalog:'
+        specifier: ^9.15.1
         version: 9.15.1(encoding@0.1.13)
       headers:
-        specifier: 'catalog:'
+        specifier: ^0.9.6
         version: 0.9.6
       https-proxy-agent:
-        specifier: 'catalog:'
+        specifier: ^7.0.4
         version: 7.0.6
       image-size:
-        specifier: 'catalog:'
+        specifier: ^1.1.1
         version: 1.2.1
       lodash:
-        specifier: 'catalog:'
+        specifier: ^4.17.23
         version: 4.17.23
       mkdirp:
-        specifier: 'catalog:'
+        specifier: ^2.1.6
         version: 2.1.6
       node-fetch:
-        specifier: 'catalog:'
+        specifier: 3.3.0
         version: 3.3.0
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
   functions-media:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
@@ -636,7 +636,7 @@ importers:
         specifier: ^2.0.4
         version: 2.2.6
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       ffmpeg-static:
         specifier: ^5.2.0
@@ -645,26 +645,26 @@ importers:
         specifier: ^3.1.0
         version: 3.1.0
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.0
         version: 7.1.0(firebase-admin@13.7.0(encoding@0.1.13))
       form-data:
-        specifier: 'catalog:'
+        specifier: ^4.0.0
         version: 4.0.5
       p-limit:
-        specifier: 'catalog:'
+        specifier: ^6.2.0
         version: 6.2.0
       ytdl-core:
         specifier: ^4.11.5
         version: 4.11.5
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
 packages:
