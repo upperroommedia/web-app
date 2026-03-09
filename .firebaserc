@@ -3,5 +3,22 @@
     "default": "urm-app",
     "prod": "urm-app",
     "staging": "urm-app-staging"
-  }
+  },
+  "targets": {
+    "urm-app-staging": {
+      "database": {
+        "rtdb": [
+          "urm-app-staging-815ca"
+        ]
+      }
+    },
+    "urm-app": {
+      "database": {
+        "rtdb": [
+          "urm-app-default-rtdb"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

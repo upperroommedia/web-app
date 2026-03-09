@@ -286,8 +286,8 @@ jobs:
           fi
 
           if [[ "$DEPLOY_DATABASE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database --non-interactive
-            deployed_targets+=("database")
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database:rtdb --non-interactive
+            deployed_targets+=("database:rtdb")
           fi
 
           if [[ "$DEPLOY_STORAGE" == "true" ]]; then

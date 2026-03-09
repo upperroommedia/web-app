@@ -58,6 +58,23 @@ curl -X POST "https://firebasedatabase.googleapis.com/v1beta/projects/2516802311
   -d '{"type":"USER_DATABASE"}'
 ```
 
+Create the default Realtime Database instance (required for Firebase CLI `database` deploy flows):
+
+```bash
+ACCESS_TOKEN=$(gcloud auth print-access-token)
+curl -X POST "https://firebasedatabase.googleapis.com/v1beta/projects/251680231116/locations/us-central1/instances" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "x-goog-user-project: urm-app-staging" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"DEFAULT_DATABASE"}'
+```
+
+Map RTDB deploy target to the staging instance:
+
+```bash
+firebase target:apply database rtdb urm-app-staging-815ca --project urm-app-staging
+```
+
 ## 5. Configure GitHub OIDC for staging deploy workflow
 
 Create a Workload Identity Provider and service account with Firebase deploy permissions, then add these repository secrets:
