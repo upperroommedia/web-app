@@ -2,11 +2,49 @@
   "functions": [
     {
       "predeploy": [
-        "npm --prefix \"$RESOURCE_DIR\" run lint",
-        "npm --prefix \"$RESOURCE_DIR\" run build"
+        "pnpm --dir \"$RESOURCE_DIR\" run build"
       ],
-      "source": "functions",
-      "codebase": "default",
+      "source": "functions-core",
+      "codebase": "core",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    },
+    {
+      "predeploy": [
+        "pnpm --dir \"$RESOURCE_DIR\" run build"
+      ],
+      "source": "functions-media",
+      "codebase": "media",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    },
+    {
+      "predeploy": [
+        "pnpm --dir \"$RESOURCE_DIR\" run build"
+      ],
+      "source": "functions-image",
+      "codebase": "image",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    },
+    {
+      "predeploy": [
+        "pnpm --dir \"$RESOURCE_DIR\" run build"
+      ],
+      "source": "functions-integrations",
+      "codebase": "integrations",
       "ignore": [
         "node_modules",
         ".git",
@@ -24,6 +62,17 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "apphosting": {
+    "backendId": "web-staging",
+    "rootDir": ".",
+    "ignore": [
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      ".next/cache"
+    ]
   },
   "emulators": {
     "auth": {
@@ -48,5 +97,8 @@
       "enabled": true
     },
     "singleProjectMode": true
+  },
+  "extensions": {
+    "firestore-send-email-6emo": "firebase/firestore-send-email@0.2.5"
   }
 }

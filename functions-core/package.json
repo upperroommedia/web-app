@@ -1,0 +1,33 @@
+{
+  "name": "functions-core",
+  "private": true,
+  "main": "lib/functions-core/src/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "catalog:",
+    "@google-cloud/storage": "catalog:",
+    "axios": "catalog:",
+    "firebase-admin": "catalog:",
+    "firebase-functions": "catalog:",
+    "form-data": "catalog:",
+    "google-auth-library": "catalog:",
+    "headers": "catalog:",
+    "https-proxy-agent": "catalog:",
+    "image-size": "catalog:",
+    "lodash": "catalog:",
+    "mkdirp": "catalog:",
+    "node-fetch": "catalog:",
+    "p-limit": "catalog:",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "functions-integrations",
+  "private": true,
+  "main": "lib/functions-integrations/src/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "catalog:",
+    "@google-cloud/storage": "catalog:",
+    "algoliasearch": "catalog:",
+    "axios": "catalog:",
+    "firebase-admin": "catalog:",
+    "firebase-functions": "catalog:",
+    "form-data": "catalog:",
+    "google-auth-library": "catalog:",
+    "headers": "catalog:",
+    "https-proxy-agent": "catalog:",
+    "image-size": "catalog:",
+    "lodash": "catalog:",
+    "mkdirp": "catalog:",
+    "node-fetch": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

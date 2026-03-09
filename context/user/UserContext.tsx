@@ -1,9 +1,10 @@
-import { useContext, createContext, useEffect, useState } from 'react';
+import { useContext, createContext, useEffect, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   // FacebookAuthProvider,
   GoogleAuthProvider,
   OAuthProvider,
+  onIdTokenChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -37,13 +38,16 @@ export const UserProvider = ({ children }: any) => {
   const [user, setUser] = useState<User>();
   const [artificalLoading, setArtificalLoading] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
+  const authHydratedRef = useRef(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as any).nookies = nookies;
     }
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      setLoading(true);
+    const unsubscribe = onIdTokenChanged(auth, async (user) => {
+      if (!authHydratedRef.current) {
+        setLoading(true);
+      }
       if (!user) {
         setUser(undefined);
         nookies.destroy(null, 'token');
@@ -65,10 +69,16 @@ export const UserProvider = ({ children }: any) => {
           nookies.set(null, 'token', token, { path: '/' });
           // router.reload();
         } catch (e) {
-          return e;
+          setUser(undefined);
+          nookies.destroy(null, 'token');
+          nookies.set(null, 'token', '', { path: '/' });
+          console.error('Failed to hydrate auth user state', e);
         }
       }
-      setLoading(false);
+      if (!authHydratedRef.current) {
+        authHydratedRef.current = true;
+        setLoading(false);
+      }
     });
 
     const timer = setTimeout(() => {
@@ -146,7 +156,7 @@ export const UserProvider = ({ children }: any) => {
           alignItems: 'center',
         }}
       >
-        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} />
+        <Image src="/URM_icon.png" alt="Upper Room Media Logo" width={100} height={100} priority />
       </Stack>
     );
   }

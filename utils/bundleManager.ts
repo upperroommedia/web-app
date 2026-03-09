@@ -1,6 +1,10 @@
 import firestore, { loadBundle, namedQuery, getDocsFromCache, doc, getDoc } from '../firebase/firestore';
 import database, { ref, get } from '../firebase/database';
 import { BundleConfig } from '../shared/bundleConfigs';
+import {
+    getFirebaseFunctionsBaseUrl,
+    getFirebaseFunctionsEmulatorBaseUrl,
+} from '../shared/firebaseProjectConfig';
 
 export interface BundleMetadata {
     lastUpdated: number;
@@ -68,12 +72,10 @@ export class BundleManager<T> {
 
         if (isDevelopment) {
             // Use emulator URL
-            return `http://localhost:5001/urm-app/us-central1/${this.config.functionName}`;
+            return `${getFirebaseFunctionsEmulatorBaseUrl()}/${this.config.functionName}`;
         } else {
             // Use production URL
-            const functionsUrl = process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_URL ||
-                'https://us-central1-urm-app.cloudfunctions.net';
-            return `${functionsUrl}/${this.config.functionName}`;
+            return `${getFirebaseFunctionsBaseUrl()}/${this.config.functionName}`;
         }
     }
 

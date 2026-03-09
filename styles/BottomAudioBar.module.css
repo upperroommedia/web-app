@@ -1,3 +1,8 @@
+/*************************************************************************************************
+ * Floating Audio Player Styles
+ *************************************************************************************************/
+
+/* Legacy container styles - kept for compatibility */
 .container {
   display: grid;
   grid-template-columns: 1fr 1.75fr 1fr;
@@ -27,7 +32,6 @@
 }
 
 .title {
-  /* grid-area: 1 / 1 / 1 / 2; */
   font-size: 1.2em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -43,7 +47,6 @@
 }
 
 .vertical-container {
-  /* background-color: green; */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -59,20 +62,16 @@
 }
 
 .slider {
-  /* -webkit-appearance: none; */
   width: 100%;
   justify-self: center;
   align-self: center;
-  /* background: red; */
-  /* border-radius: 0.5em; */
-  /* height: 0.3em; */
 }
 
 /*************************************************************************************************
- * Controls
+ * Modern Controls
  *************************************************************************************************/
 
- .controls {
+.controls {
   border-radius: var(--media-border-radius);
 }
 
@@ -135,11 +134,10 @@
 }
 
 /*************************************************************************************************
- * Player
+ * Player Base
  *************************************************************************************************/
 
-
- .player {
+.player {
   --media-brand: #f5f5f5;
   --media-focus-ring-color: #4e9cf6;
   --media-focus-ring: 0 0 0 3px var(--media-focus-ring-color);

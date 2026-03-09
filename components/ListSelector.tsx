@@ -8,7 +8,7 @@ import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewListPopup from './NewListPopup';
-import firestore, { query, collection, getDocs, where, limit, orderBy, QueryConstraint } from '../firebase/firestore';
+import firestore, { query, collection, getDocs, where, limit, orderBy, startAfter, QueryConstraint, QueryDocumentSnapshot } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
 import { algoliasearch, SearchResponse} from 'algoliasearch';
@@ -58,18 +58,56 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
 
   useEffect(() => {
     const fetchList = async () => {
-      const queryConstraints: QueryConstraint[] = [limit(5), orderBy('updatedAtMillis', 'desc')];
-      if (props.listType) {
-        queryConstraints.push(where('type', '==', props.listType));
+      const targetLimit = 5;
+      const batchSize = 5; // Fetch in batches to handle filtering efficiently
+      let allValidLists: List[] = [];
+      let lastDoc: QueryDocumentSnapshot<List> | null = null;
+      let hasMore = true;
+
+      // Fetch batches until we have enough valid results or run out of documents
+      while (allValidLists.length < targetLimit && hasMore) {
+        const queryConstraints: QueryConstraint[] = [
+          limit(batchSize),
+          orderBy('updatedAtMillis', 'desc')
+        ];
+        
+        if (props.listType) {
+          queryConstraints.push(where('type', '==', props.listType));
+        }
+        
+        // Use startAfter for pagination if we have a last document
+        if (lastDoc) {
+          queryConstraints.push(startAfter(lastDoc));
+        }
+
+        const listQuery = query(collection(firestore, 'lists'), ...queryConstraints).withConverter(listConverter);
+        const listQuerySnapshot = await getDocs(listQuery);
+        
+        if (listQuerySnapshot.empty) {
+          hasMore = false;
+          break;
+        }
+
+        // Filter out isMoreSermonsList === true (include false and undefined)
+        const validLists = listQuerySnapshot.docs
+          .map((doc) => doc.data())
+          .filter((list) => list.isMoreSermonsList !== true);
+
+        // Add to our collection, avoiding duplicates
+        const existingIds = new Set(allValidLists.map(l => l.id));
+        const newLists = validLists.filter(list => !existingIds.has(list.id));
+        allValidLists = [...allValidLists, ...newLists].slice(0, targetLimit);
+
+        // Update lastDoc for pagination
+        lastDoc = listQuerySnapshot.docs[listQuerySnapshot.docs.length - 1];
+        
+        // If we got fewer documents than batchSize, we've reached the end
+        if (listQuerySnapshot.docs.length < batchSize) {
+          hasMore = false;
+        }
       }
-      const listQuery = query(collection(firestore, 'lists'), ...queryConstraints).withConverter(listConverter);
-      const listQuerySnapshot = await getDocs(listQuery);
-      setAllListArray(
-        listQuerySnapshot.docs.map((doc) => {
-          const list = doc.data();
-          return list;
-        })
-      );
+
+      setAllListArray(allValidLists.slice(0, targetLimit));
     };
     fetchList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,11 +122,13 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
             query,
             hitsPerPage: 5,
             ...(props.listType && { facetFilters: `type:${props.listType}` }),
+            // Exclude overflow lists from search results
+            filters: 'NOT isMoreSermonsList:true',
           }
         });
-        return result.hits.map((hit)=> hit);
+        // Also filter client-side as a safety measure
+        return result.hits.map((hit)=> hit).filter((list) => list.isMoreSermonsList !== true);
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error('Search error:', error);
         return [];
       }
@@ -123,33 +163,38 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           }}
           id={`${props.listType}-list-selector-input`}
           options={getListUnion(value, allListArray)}
-          renderTags={(list, _) => {
-            return list.map((list) => (
-              <Chip
-                key={list.id}
-                label={list.name}
-                onDelete={() => {
-                  updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
-                  if (
-                    props.sermonList.filter((list) => list.type === ListType.SERIES).length === 1 &&
-                    props.listType === ListType.SERIES &&
-                    props.subtitle !== undefined
-                  ) {
-                    props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+          renderTags={(list, getTagProps) => {
+            return list.map((list, index) => {
+              const { key: _tagKey, ...tagProps } = getTagProps({ index });
+              return (
+                <Chip
+                  {...tagProps}
+                  key={list.id}
+                  label={list.name}
+                  onDelete={() => {
+                    updateSermonList(props.sermonList.filter((s) => s.id !== list.id));
+                    if (
+                      props.sermonList.filter((list) => list.type === ListType.SERIES).length === 1 &&
+                      props.listType === ListType.SERIES &&
+                      props.subtitle !== undefined
+                    ) {
+                      props.setSermonList((oldSermonList) => [...oldSermonList, props.subtitle!]);
+                    }
+                  }}
+                  sx={{ mr: 0.5, mb: 0.5 }}
+                  avatar={
+                    <AvatarWithDefaultImage
+                      defaultImageURL="/user.png"
+                      altName={list.name}
+                      width={24}
+                      height={24}
+                      borderRadius={12}
+                      image={list.images?.find((image) => image.type === 'square')}
+                    />
                   }
-                }}
-                avatar={
-                  <AvatarWithDefaultImage
-                    defaultImageURL="/user.png"
-                    altName={list.name}
-                    width={24}
-                    height={24}
-                    borderRadius={12}
-                    image={list.images?.find((image) => image.type === 'square')}
-                  />
-                }
-              />
-            ));
+                />
+              );
+            });
           }}
           onInputChange={async (_, newInputValue) => {
             setAllListArray(await queryAlgolia(newInputValue));

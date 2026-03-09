@@ -1,0 +1,37 @@
+name: main-from-staging
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - edited
+
+permissions:
+  contents: read
+
+jobs:
+  enforce-staging-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate pull request source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          if [[ "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "::error::PRs to main must come from the same repository and use the staging branch."
+            exit 1
+          fi
+
+          if [[ "$HEAD_REF" != "staging" ]]; then
+            echo "::error::Only PRs from 'staging' to 'main' are allowed. Current head branch: '$HEAD_REF'."
+            exit 1
+          fi
+
+          echo "PR source branch policy satisfied: staging -> main"

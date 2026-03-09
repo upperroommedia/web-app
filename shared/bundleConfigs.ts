@@ -1,7 +1,6 @@
-import { firestoreAdminListConverter, firestoreAdminTopicConverter } from '../functions/src/firestoreDataConverter';
-import { FirestoreDataConverter } from 'firebase-admin/firestore';
-import { Topic } from '../types/Topic';
-import { List, ListTag, ListType } from '../types/List';
+import type { FirestoreDataConverter } from 'firebase/firestore';
+import { Topic, topicConverter } from '../types/Topic';
+import { List, ListTag, ListType, listConverter } from '../types/List';
 import { isEqual, omit } from 'lodash';
 
 export interface BundleConfig<T> {
@@ -31,7 +30,7 @@ export const TOPIC_BUNDLE_CONFIG: BundleConfig<Topic> = {
   bundlePath: 'bundles/topics-bundle.bin',
   collectionName: 'topics',
   collectionPath: 'topics/{topicId}',
-  converter: firestoreAdminTopicConverter,
+  converter: topicConverter,
   shouldTrigger: () => true,
   orderByField: 'title',
 };
@@ -46,7 +45,7 @@ export const SUBTITLE_BUNDLE_CONFIG: BundleConfig<List> = {
   bundlePath: 'bundles/subtitles-bundle.bin',
   collectionName: 'lists',
   collectionPath: 'lists/{listId}',
-  converter: firestoreAdminListConverter,
+  converter: listConverter,
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for category lists (subtitles)
     return beforeData?.type === ListType.CATEGORY_LIST || afterData?.type === ListType.CATEGORY_LIST;
@@ -65,7 +64,7 @@ export const BIBLE_CHAPTER_BUNDLE_CONFIG: BundleConfig<List> = {
   bundlePath: 'bundles/bible-chapters-bundle.bin',
   collectionName: 'lists',
   collectionPath: 'lists/{listId}',
-  converter: firestoreAdminListConverter,
+  converter: listConverter,
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for bible chapter lists
     return (
@@ -88,7 +87,7 @@ export const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleConfig<List> = {
   bundlePath: 'bundles/sunday-homilies-bundle.bin',
   collectionName: 'lists',
   collectionPath: 'lists/{listId}',
-  converter: firestoreAdminListConverter,
+  converter: listConverter,
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     // Only trigger for sunday homily lists
     return (
@@ -111,7 +110,7 @@ export const LATEST_LIST_BUNDLE_CONFIG: BundleConfig<List> = {
   bundlePath: 'bundles/latest-list.bun',
   collectionName: 'lists',
   collectionPath: 'lists/{listId}',
-  converter: firestoreAdminListConverter,
+  converter: listConverter,
   shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
     return beforeData?.type === ListType.LATEST || afterData?.type === ListType.LATEST;
   },

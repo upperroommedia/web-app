@@ -29,6 +29,7 @@
 .env.test.local
 .env.production.local
 .env*
+!.env.template
 
 # vercel
 .vercel
@@ -38,3 +39,19 @@ sa.json
 
 .firebase/
 firestore-coverage.html
+*.har
+*.tsbuildinfo
+.vscode
+.cursor
+.turbo
+.agents
+.github/*
+!.github/workflows/
+!.github/workflows/*.yml
+
+test-results/
+output/
+
+# Firebase extension local secrets/config
+/extensions/*.env
+/extensions/*.secret.local

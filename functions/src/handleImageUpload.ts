@@ -19,6 +19,7 @@ import { mkdirp } from 'mkdirp';
 import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
+import { getFirebaseImagesBucket } from '../../shared/firebaseProjectConfig';
 // import { resize } from 'imagemagick';
 
 // const adminImageConvertor = {
@@ -77,7 +78,7 @@ const uploadImageToSubsplash = async (name: string, originalFile: string): Promi
 
 const handleImageUpload = onObjectFinalized(
   {
-    bucket: 'urm-app-images',
+    bucket: getFirebaseImagesBucket(),
     timeoutSeconds: 300,
     memory: '1GiB',
   },

@@ -2,7 +2,7 @@ import TextField from '@mui/material/TextField';
 import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
-import { FunctionComponent, Dispatch, SetStateAction, memo, useState, useEffect } from 'react';
+import { FunctionComponent, Dispatch, SetStateAction, memo, useMemo, useState } from 'react';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import { List, ListType, ListWithHighlight } from '../types/List';
@@ -20,39 +20,25 @@ interface SubtitleSelectorProps {
   subtitleError?: UploaderFieldError;
   setSubtitleError: (error: boolean, message: string) => void;
   isLoading?: boolean;
+  required?: boolean;
 }
 
 const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: SubtitleSelectorProps) => {
-  const [filteredSubtitles, setFilteredSubtitles] = useState<List[]>(props.subtitles);
-  const [localSearch, setLocalSearch] = useState<LocalSearch<List> | null>(null);
-  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Initialize local search when subtitles change
-  useEffect(() => {
-    if (props.subtitles.length > 0) {
-      const searchInstance = new LocalSearch(props.subtitles, 'name', 'subtitles');
-      setLocalSearch(searchInstance);
+  const localSearch = useMemo(() => {
+    if (props.subtitles.length === 0) {
+      return null;
     }
+    return new LocalSearch(props.subtitles, 'name', 'subtitles');
   }, [props.subtitles]);
 
-  // Update filtered subtitles when props.subtitles change
-  useEffect(() => {
-    if (!isSearching) {
-      // Show all subtitles in alphabetical order when not searching
-      const sorted = [...props.subtitles].sort((a, b) => a.name.localeCompare(b.name));
-      setFilteredSubtitles(sorted);
-    }
-  }, [props.subtitles, isSearching]);
-
-  const searchSubtitles = async (query: string): Promise<List[]> => {
-    if (!localSearch || !query.trim()) {
-      // Return all subtitles in alphabetical order when no query
+  const filteredSubtitles = useMemo(() => {
+    if (!localSearch || !searchQuery.trim()) {
       return [...props.subtitles].sort((a, b) => a.name.localeCompare(b.name));
     }
-
-    const searchResults = localSearch.search(query, 50);
-    return searchResults.map(result => result.item);
-  };
+    return localSearch.search(searchQuery, 50).map((result) => result.item);
+  }, [localSearch, props.subtitles, searchQuery]);
 
   return (
     <Box display="flex" gap={1} width={1} alignItems="center">
@@ -63,14 +49,11 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
         // Disable Material-UI's built-in filtering to preserve our search order
         filterOptions={(options) => options}
         loading={props.isLoading}
-        onInputChange={async (_, newInputValue) => {
-          const hasQuery = newInputValue.trim().length > 0;
-          setIsSearching(hasQuery);
-          const results = await searchSubtitles(newInputValue);
-          setFilteredSubtitles(results);
+        onInputChange={(_, newInputValue) => {
+          setSearchQuery(newInputValue);
         }}
         onBlur={() => {
-          if (!props.subtitle) {
+          if (props.required !== false && !props.subtitle) {
             props.setSubtitleError(true, 'You must select at least one subtitle');
           } else {
             props.setSubtitleError(false, '');
@@ -148,13 +131,23 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
         }
         renderInput={(params) => {
           const selectedSubtitle = props.subtitles.find((subtitle) => subtitle.name === props.subtitle);
+          const subtitleHasError = showError(props.subtitleError);
+          const subtitleHelperText = subtitleHasError ? getErrorMessage(props.subtitleError) : undefined;
           
           return (
             <TextField
               {...params}
-              required
-              error={showError(props.subtitleError)}
-              helperText={getErrorMessage(props.subtitleError)}
+              required={props.required !== false}
+              error={subtitleHasError}
+              helperText={subtitleHelperText}
+              sx={{
+                '& .MuiFormHelperText-root': {
+                  marginTop: subtitleHasError ? undefined : 0,
+                },
+                '& .MuiFormHelperText-root:empty': {
+                  display: 'none',
+                },
+              }}
               label="Subtitle"
               InputProps={{
                 ...params.InputProps,

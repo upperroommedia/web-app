@@ -28,6 +28,7 @@ const nextConfig = {
   compress: true,
   poweredByHeader: false,
   turbopack: {
+    root: __dirname,
   },
 };
 

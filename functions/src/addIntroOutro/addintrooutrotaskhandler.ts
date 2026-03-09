@@ -28,16 +28,18 @@ import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
 import { PROCESSED_SERMONS_BUCKET } from '../../../constants/storage_constants';
 import trim from './trim';
+import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 // import http from 'http';
 
 // These will remain constant between function invocations
-const ffmpeg = loadStaticFFMPEG();
+let ffmpeg: ReturnType<typeof loadStaticFFMPEG> | undefined;
 const bucket = firebaseAdmin.storage().bucket();
 const realtimeDB = firebaseAdmin.database();
 const db = firebaseAdmin.firestore();
 
 const mainFunction = async (
   cancelToken: CancelToken,
+  ffmpegClient: ReturnType<typeof loadStaticFFMPEG>,
   bucket: Bucket,
   realtimeDB: Database,
   db: Firestore,
@@ -123,7 +125,7 @@ const mainFunction = async (
         );
       }
       await trim(
-        ffmpeg,
+        ffmpegClient,
         cancelToken,
         bucket,
         audioSource.source,
@@ -136,7 +138,7 @@ const mainFunction = async (
       );
     } else {
       await trimAndTranscode(
-        ffmpeg,
+        ffmpegClient,
         cancelToken,
         bucket,
         audioSource,
@@ -189,7 +191,7 @@ const mainFunction = async (
       //merge files
       logger.log('Merging files', filePathsArray, 'to', outputFileName, '...');
       const mergedOutputFile = await mergeFiles(
-        ffmpeg,
+        ffmpegClient,
         cancelToken,
         bucket,
         filePathsArray,
@@ -252,13 +254,12 @@ const addintrooutrotaskhandler = onTaskDispatched(
     cpu: 1,
     concurrency: 1,
     retryConfig: {
-      maxAttempts: 2,
+      maxAttempts: 1,
     },
   },
   async (request: Request<AddIntroOutroInputType>): Promise<void> => {
-    // Setting the `keepAlive` option to `true` keeps
-    // connections open between function invocations
-    // new http.Agent({ keepAlive: false });
+    // Lazily initialize ffmpeg only when this task handler is actually invoked.
+    const ffmpegClient = (ffmpeg ??= loadStaticFFMPEG());
 
     const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
     // set timeout to 30 seconds less than timeoutSeconds then throw error if it takes longer than that
@@ -292,6 +293,7 @@ const addintrooutrotaskhandler = onTaskDispatched(
         () =>
           mainFunction(
             cancelToken,
+            ffmpegClient,
             bucket,
             realtimeDB,
             db,
@@ -309,6 +311,25 @@ const addintrooutrotaskhandler = onTaskDispatched(
         timeoutMillis
       );
     } catch (e) {
+      try {
+        await emitOperationalAlert({
+          alertCode: 'AUDIO_TASK_HANDLER_RUNTIME_FAILURE',
+          summary: 'addintrooutrotaskhandler failed while processing add-intro/outro task.',
+          error: e,
+          context: {
+            functionName: 'addintrooutrotaskhandler',
+            sermonId: data.id,
+            audioSourceType: audioSource.type,
+            audioSource: audioSource.source,
+            taskRoute: 'process-audio',
+          },
+        });
+      } catch (alertError) {
+        logger.error('Failed to emit operational alert for addintrooutrotaskhandler', {
+          alertError,
+          originalError: e,
+        });
+      }
       let message = 'Something Went Wrong';
       if (e instanceof HttpsError) {
         message = e.message;

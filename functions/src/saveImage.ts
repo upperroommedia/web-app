@@ -7,6 +7,7 @@ import fs, { existsSync, mkdirSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import handleError from './handleError';
+import { getFirebaseImagesBucket } from '../../shared/firebaseProjectConfig';
 export interface SaveImageInputType {
   url: string;
   name: string;
@@ -53,7 +54,7 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     // Upload your data
     // const bucket = storage().bucket();
     const destinationFilePath = `speaker-images/${request.data.name}`;
-    const bucket = firebaseAdmin.storage().bucket('urm-app-images');
+    const bucket = firebaseAdmin.storage().bucket(getFirebaseImagesBucket());
     await bucket.upload(tempFilePath, {
       destination: destinationFilePath,
     });

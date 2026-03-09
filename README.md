@@ -1,33 +1,82 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Upper Room Media Web App
 
-## Getting Started
+## Prerequisites
 
-First, run the development server (this will startup a local emulator):
+- Node `22` (see `.nvmrc`)
+- `pnpm`
+
+Use:
 
 ```bash
-pnpm run dev
+nvm use 22
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local Development
 
-You can start editing the page by modifying `pages/index.js`. The page auto-updates as you edit the file.
+Run the app:
 
-[API routes](https://nextjs.org/docs/api-routes/introduction) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.js`.
+```bash
+pnpm dev
+```
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/api-routes/introduction) instead of React pages.
+This starts the web app and local Firebase emulators used by the project workflow.
 
-## Learn More
+## Firebase Functions Codebases
 
-To learn more about Next.js, take a look at the following resources:
+Functions are split into isolated Firebase codebases to reduce cold-start load:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `functions-core`
+- `functions-media`
+- `functions-image`
+- `functions-integrations`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+Each codebase builds independently and is wired in `firebase.json`.
 
-## Deploy on Vercel
+Build all codebases:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+pnpm build-functions-codebases
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+Run startup-load guard (checks that `core` does not load heavy/media/client-sdk deps at module load time):
 
+```bash
+pnpm check:function-startup-loads
+```
+
+## Local Functions Test Examples
+
+Converter-focused test with Firestore emulator:
+
+```bash
+cd functions
+pnpm exec firebase emulators:exec --only firestore --config ../firebase.test.json "pnpm exec jest src/test/firestoreDataConverter.test.ts --runInBand"
+```
+
+Full functions tests that need auth + firestore:
+
+```bash
+cd functions
+pnpm exec firebase emulators:exec --only firestore,auth --config ../firebase.test.json "pnpm exec jest --forceExit"
+```
+
+## Release Branch Contract
+
+- Feature work merges into `staging`.
+- Production promotion must happen via PR from `staging` into `main`.
+- PRs into `main` from any non-`staging` branch are blocked by CI (`main-from-staging`).
+
+## Staging Deployment Pipeline
+
+- Pushes to `staging` run `.github/workflows/staging-selective-deploy.yml`.
+- Deploys are path-filtered and target Firebase project `urm-app-staging`.
+- App Hosting deploys use `apphosting.staging.yaml` (copied to `apphosting.yaml` in CI before deploy).
+- Use `workflow_dispatch` with `force_full_redeploy=true` for a full staging redeploy.
+
+## Required GitHub Secrets For Staging Deploys
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER` (Workload Identity Provider resource name)
+- `GCP_SERVICE_ACCOUNT_EMAIL` (service account used by GitHub OIDC auth)
+
+See [docs/STAGING_SETUP.md](docs/STAGING_SETUP.md) and [docs/STAGING_DEPLOY_ROLLBACK.md](docs/STAGING_DEPLOY_ROLLBACK.md) for setup and rollback procedures.

@@ -1,18 +1,26 @@
 // import Button from '@mui/material/Button';
 // import TextField from '@mui/material/TextField';
 import { useRouter } from 'next/router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useAuth from '../context/user/UserContext';
-// import AuthErrors from './AuthErrors';
 import PopUp from './PopUp';
 // import Alert from '@mui/material/Alert';
 // import Collapse from '@mui/material/Collapse';
 import { GoogleLoginButton, AppleLoginButton, MicrosoftLoginButton } from 'react-social-login-buttons';
-import { AuthErrorCodes, AuthError, UserCredential } from 'firebase/auth';
+import { AuthErrorCodes, AuthError, UserCredential, getAdditionalUserInfo } from 'firebase/auth';
+import { DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD, isDevelopment } from '../context/user/devAuth';
+import Button from '@mui/material/Button';
+import Alert from '@mui/material/Alert';
+import Snackbar from '@mui/material/Snackbar';
+import { resolveAuthCallbackDestination } from '../utils/authRedirect';
+
+const INVITE_CLAIM_AUTH_META_KEY = 'invite-claim-auth-meta';
+const INVITE_LOGIN_NOTICE_KEY = 'invite-claim-login-notice';
 
 const Login = () => {
   const router = useRouter();
-  const { loginWithGoogle,  loginWithApple, loginWithMicrosoft } = useAuth();
+  const { loginWithGoogle, loginWithApple, loginWithMicrosoft, login } = useAuth();
+  const [devLoginLoading, setDevLoginLoading] = useState(false);
 
   // const [data, setData] = useState({
   //   email: '',
@@ -21,6 +29,8 @@ const Login = () => {
   const [open, setOpen] = useState<boolean>(false);
   const [title, setTitle] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [inviteNotice, setInviteNotice] = useState('');
+  const [inviteNoticeOpen, setInviteNoticeOpen] = useState(false);
 
   // const [forgotPasswordPopup, setForgotPasswordPopup] = useState<boolean>(false);
   // const [forgotPasswordEmail, setForgotPasswordEmail] = useState<string>('');
@@ -59,16 +69,40 @@ const Login = () => {
   //   router.push(authResult.dest);
   // };
   // Type guard function
-function isAuthError(error: any): error is AuthError {
-  return error && 
-         typeof error.code === 'string' && 
-         error.code.startsWith('auth/') &&
-         typeof error.message === 'string';
-}
+  function isAuthError(error: unknown): error is AuthError {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const candidate = error as { code?: unknown; message?: unknown };
+    return (
+      typeof candidate.code === 'string' &&
+      candidate.code.startsWith('auth/') &&
+      typeof candidate.message === 'string'
+    );
+  }
+
+  const getCallbackDestination = () => {
+    return resolveAuthCallbackDestination(router.query.callbackurl, router.query.callbackUrl);
+  };
+
+  useEffect(() => {
+    if (!router.isReady || typeof window === 'undefined') {
+      return;
+    }
+    const notice = sessionStorage.getItem(INVITE_LOGIN_NOTICE_KEY);
+    if (!notice) {
+      return;
+    }
+    sessionStorage.removeItem(INVITE_LOGIN_NOTICE_KEY);
+    setInviteNotice(notice);
+    setInviteNoticeOpen(true);
+  }, [router.isReady]);
 
   const handleLogin = async (loginFunction: () => Promise<UserCredential>) => {
+    let credential: UserCredential | null = null;
     try {
-      await loginFunction();
+      credential = await loginFunction();
     } catch (error) {
       if (isAuthError(error)) {
         if (error.code === AuthErrorCodes.CREDENTIAL_ALREADY_IN_USE || error.code === AuthErrorCodes.NEED_CONFIRMATION) {
@@ -101,15 +135,28 @@ function isAuthError(error: any): error is AuthError {
         return;
       }
     }
-      
-      // Success - redirect user
-      const { callbackurl: possibleCallback } = router.query;
-      const callbackUrl = (possibleCallback as string) || '';
-      if (callbackUrl === '/login') {
-        router.push('/');
-      } else {
-        router.push(`/${callbackUrl}`);
+
+    const callbackDestination = getCallbackDestination();
+    if (callbackDestination.startsWith('/invite/claim')) {
+      const additionalInfo = credential ? getAdditionalUserInfo(credential) : null;
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(
+          INVITE_CLAIM_AUTH_META_KEY,
+          JSON.stringify({
+            uid: credential?.user.uid ?? null,
+            email: credential?.user.email ?? null,
+            isNewUser: additionalInfo?.isNewUser === true,
+            providerId: additionalInfo?.providerId ?? null,
+            capturedAtMs: Date.now(),
+          })
+        );
       }
+    } else if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(INVITE_CLAIM_AUTH_META_KEY);
+    }
+
+    // Success - redirect user
+    router.push(callbackDestination);
   };
 
   return (
@@ -183,6 +230,51 @@ function isAuthError(error: any): error is AuthError {
         <GoogleLoginButton onClick={() => handleLogin(loginWithGoogle)} />
         <MicrosoftLoginButton onClick={() => handleLogin(loginWithMicrosoft)} />
         <AppleLoginButton onClick={() => handleLogin(loginWithApple)} />
+        
+        {isDevelopment && (
+          <>
+            <div style={{ 
+              borderTop: '1px solid #ccc', 
+              margin: '20px 0', 
+              paddingTop: '20px',
+              textAlign: 'center'
+            }}>
+              <p style={{ color: '#666', fontSize: '12px', marginBottom: '10px' }}>
+                Development Mode Only
+              </p>
+              <Button
+                variant="contained"
+                color="warning"
+                fullWidth
+                disabled={devLoginLoading}
+                onClick={async () => {
+                  setDevLoginLoading(true);
+                  try {
+                    const result = await login({ email: DEV_ADMIN_EMAIL, password: DEV_ADMIN_PASSWORD });
+                    if (result) {
+                      // Error code returned
+                      setTitle('Dev Login Error');
+                      setErrorMessage(`Error: ${result}. Make sure to run: npx ts-node --skip-project scripts/create-dev-admin.ts`);
+                      setOpen(true);
+                    } else {
+                      // Success - redirect
+                      router.push(getCallbackDestination());
+                    }
+                  } catch (e: unknown) {
+                    const message = e instanceof Error ? e.message : 'Unknown error';
+                    setTitle('Dev Login Error');
+                    setErrorMessage(message);
+                    setOpen(true);
+                  } finally {
+                    setDevLoginLoading(false);
+                  }
+                }}
+              >
+                {devLoginLoading ? 'Logging in...' : '🔧 Dev Login (Admin)'}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
       {/* </form> */}
       {/* <PopUp open={forgotPasswordPopup} title="Forgot Password" setOpen={setForgotPasswordPopup}>
@@ -204,6 +296,16 @@ function isAuthError(error: any): error is AuthError {
       <PopUp title={title} open={open} setOpen={() => setOpen(false)}>
         {errorMessage}
       </PopUp>
+      <Snackbar
+        open={inviteNoticeOpen}
+        autoHideDuration={9000}
+        onClose={() => setInviteNoticeOpen(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setInviteNoticeOpen(false)} severity="warning" variant="filled" sx={{ width: '100%' }}>
+          {inviteNotice}
+        </Alert>
+      </Snackbar>
     </div>
   );
 };

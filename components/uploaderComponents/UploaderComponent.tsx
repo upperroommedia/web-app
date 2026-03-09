@@ -2,12 +2,11 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import editSermon from '../../pages/api/editSermon';
-import styles from '../../styles/Uploader.module.css';
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 
-import firestore, { collection, getDocs, query, where } from '../../firebase/firestore';
+import firestore, { collection, getDocs, query, where, doc, getDoc } from '../../firebase/firestore';
 import { createEmptySermon } from '../../types/Sermon';
 import { Sermon, sermonStatusType } from '../../types/SermonTypes';
 
@@ -17,13 +16,18 @@ import Button from '@mui/material/Button';
 import ImageViewer from '../ImageViewer';
 import { ImageSizeType, ImageType, isImageType } from '../../types/Image';
 import ListSelector from '../ListSelector';
+import SeriesSelector from '../SeriesSelector';
 import FormControl from '@mui/material/FormControl';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import YouTubeTrimmer from '../YouTubeTrimmer';
 import Typography from '@mui/material/Typography';
 import Head from 'next/head';
 import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from '../../types/List';
+import { Series, seriesConverter } from '../../types/Series';
 import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -38,7 +42,7 @@ import UploaderDatePicker from './UploaderDatePicker';
 import { UploaderFieldError, UploadProgress } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
 import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
-import { MAX_DURATION_SECONDS } from './consts';
+import { BIBLE_STUDIES_STRING, MAX_DURATION_SECONDS, SUNDAY_HOMILIES_STRING } from './consts';
 import BibleChapterSelector from './BibleChapterSelector';
 import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
@@ -58,6 +62,7 @@ interface UploaderProps extends VerifiedUserUploaderProps {
 const _fieldsToValidate = [
   'title',
   'subtitle',
+  'series',
   'description',
   'audioSource',
   'speakers',
@@ -78,22 +83,25 @@ const Uploader = (props: UploaderProps) => {
     (): FormErrors =>
       !props.existingSermon
         ? {
-            title: { error: true, message: createFormErrorMessage('title'), initialState: true },
-            description: { error: true, message: createFormErrorMessage('description'), initialState: true },
-            subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
-            speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
-            audioSource: {
-              error: true,
-              message: 'You must select an audio source before uploading',
-              initialState: true,
-            },
-            topics: { error: true, message: 'You must select at least one topic', initialState: true },
-          }
+          title: { error: true, message: createFormErrorMessage('title'), initialState: true },
+          description: { error: true, message: createFormErrorMessage('description'), initialState: true },
+          subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
+          series: { error: true, message: 'You must select a series', initialState: true },
+          speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
+          audioSource: {
+            error: true,
+            message: 'You must select an audio source before uploading',
+            initialState: true,
+          },
+          topics: { error: true, message: 'You must select at least one topic', initialState: true },
+        }
         : {},
     [props.existingSermon]
   );
   // ======================== START OF STATE ========================
   const router = useRouter();
+  // Track intentional navigation (after successful save) to bypass unsaved changes warning
+  const isIntentionalNavigation = useRef(false);
   const [sermon, setSermon] = useState<Sermon>(() => {
     if (props.existingSermon) {
       return props.existingSermon;
@@ -107,9 +115,12 @@ const Uploader = (props: UploaderProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [useYouTubeUrl, setUseYouTubeUrl] = useState(false);
+  const [uploadedSermon, setUploadedSermon] = useState<Sermon | null>(null);
+  const [isNavigatingToSermon, setIsNavigatingToSermon] = useState(false);
   const [subtitles, setSubtitles] = useState<List[]>([]);
   const [subtitlesLoading, setSubtitlesLoading] = useState(true);
   const [formErrors, setFormErrors] = useState<FormErrors>(getFormErrorInitialState());
+  const [showAdvancedListConfig, setShowAdvancedListConfig] = useState(false);
 
   // Bible Study Helpers
   const [selectedChapter, setSelectedChapter] = useState<List | null>(
@@ -136,6 +147,34 @@ const Uploader = (props: UploaderProps) => {
   });
   const [hasTrimmed, setHasTrimmed] = useState(false);
 
+  // Series selection (sermon can only be in one series)
+  const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
+  const [uploadAsSeries, setUploadAsSeries] = useState<boolean>(() => Boolean(props.existingSermon?.seriesId));
+
+  // Fetch series when editing existing sermon with seriesId
+  useEffect(() => {
+    const fetchSeriesForExistingSermon = async () => {
+      if (!props.existingSermon?.seriesId) return;
+
+      try {
+        const seriesDoc = await getDoc(doc(firestore, 'series', props.existingSermon.seriesId).withConverter(seriesConverter));
+
+        if (seriesDoc.exists()) {
+          setSelectedSeries(seriesDoc.data());
+        } else {
+          // Series was deleted - silently ignore, sermon's seriesId will be cleaned up on next save
+          console.warn(`Series ${props.existingSermon.seriesId} no longer exists`);
+        }
+      } catch (error) {
+        // Permission error or series doesn't exist - silently ignore
+        // The sermon's stale seriesId will be cleaned up when user saves
+        console.warn('Could not fetch series for sermon:', error);
+      }
+    };
+
+    fetchSeriesForExistingSermon();
+  }, [props.existingSermon?.seriesId]);
+
   // TODO: REFACTOR THESE INTO SERMON DATA
   const [date, setDate] = useState<Date>(() =>
     props.existingSermon ? new Date(props.existingSermon.dateMillis) : new Date()
@@ -152,6 +191,7 @@ const Uploader = (props: UploaderProps) => {
         sermon1.title === sermon2.title &&
         sermon1.subtitle === sermon2.subtitle &&
         sermon1.description === sermon2.description &&
+        sermon1.seriesId === sermon2.seriesId &&
         sermon1Date.getDate() === date?.getDate() &&
         sermon1Date.getMonth() === date?.getMonth() &&
         sermon1Date.getFullYear() === date?.getFullYear() &&
@@ -191,19 +231,22 @@ const Uploader = (props: UploaderProps) => {
         const subtitlesFromBundle = await getSubtitlesFromBundle();
         setSubtitles(subtitlesFromBundle);
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error('Error loading subtitles from bundle, falling back to Firestore:', error);
         // Fallback to manual fetch
+        // Note: We can't use != filter here because Firestore requires inequality fields to be first in orderBy
+        // Instead, we filter client-side after fetching
         const listQuery = query(
           collection(firestore, 'lists'),
           where('type', '==', ListType.CATEGORY_LIST)
         ).withConverter(listConverter);
         const listQuerySnapshot = await getDocs(listQuery);
         setSubtitles(
-          listQuerySnapshot.docs.map((doc) => {
-            const list = doc.data();
-            return list;
-          })
+          listQuerySnapshot.docs
+            .map((doc) => {
+              const list = doc.data();
+              return list;
+            })
+            .filter((list) => list.isMoreSermonsList !== true) // Exclude overflow lists (only filter if explicitly true)
         );
       } finally {
         setSubtitlesLoading(false);
@@ -232,10 +275,13 @@ const Uploader = (props: UploaderProps) => {
     const warningText = 'You have unsaved changes - are you sure you wish to leave this page?';
     const handleWindowClose = (e: BeforeUnloadEvent) => {
       if (!sermonEdited && !isUploading) return;
+      if (isIntentionalNavigation.current) return;
       e.preventDefault();
       return (e.returnValue = warningText);
     };
     const handleBrowseAway = () => {
+      // Skip warning if this is an intentional navigation (after successful save)
+      if (isIntentionalNavigation.current) return;
       if (!sermonEdited && !isUploading) return;
       if (window.confirm(warningText)) return;
       router.events.emit('routeChangeError');
@@ -322,6 +368,13 @@ const Uploader = (props: UploaderProps) => {
     [setFormErrorCallback]
   );
 
+  const setSeriesError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('series', error, message, initialState);
+    },
+    [setFormErrorCallback]
+  );
+
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setFormErrorCallback(
@@ -348,33 +401,97 @@ const Uploader = (props: UploaderProps) => {
   );
 
   const validateForm = useCallback((): boolean => {
-    setFormErrors((previousFormErrors) => {
-      const newFormErrors: FormErrors = {};
-      Object.entries(previousFormErrors).forEach(([key, uploaderFieldError]) => {
-        const newUploaderFieldError: UploaderFieldError = { ...uploaderFieldError, initialState: false };
-        newFormErrors[key as keyof FormErrors] = newUploaderFieldError;
-      });
+    const isEditingExistingSermon = Boolean(props.existingSermon);
+    const topicLists = sermonList.filter((list) => list.type === ListType.TOPIC_LIST);
+    const shouldRequireBibleChapter = !uploadAsSeries && sermon.subtitle === BIBLE_STUDIES_STRING;
+    const shouldRequireSundayMonth = !uploadAsSeries && sermon.subtitle === SUNDAY_HOMILIES_STRING;
+    const shouldRequireAudioSource = !isEditingExistingSermon;
 
+    const nextFormErrors: FormErrors = {
+      title: {
+        error: sermon.title.trim().length === 0,
+        message: createFormErrorMessage('title'),
+        initialState: false,
+      },
+      description: {
+        error: sermon.description.trim().length === 0,
+        message: createFormErrorMessage('description'),
+        initialState: false,
+      },
+      speakers: {
+        error: sermon.speakers.length === 0,
+        message: 'You must select at least one speaker',
+        initialState: false,
+      },
+      topics: {
+        error: topicLists.length === 0,
+        message: 'You must select at least one topic',
+        initialState: false,
+      },
+      subtitle: {
+        error: !uploadAsSeries && sermon.subtitle.trim().length === 0,
+        message: 'You must select a subtitle',
+        initialState: false,
+      },
+      series: {
+        error: uploadAsSeries && !selectedSeries,
+        message: 'You must select a series',
+        initialState: false,
+      },
+      audioSource: {
+        error: shouldRequireAudioSource && !audioSource,
+        message: 'You must select an audio source before uploading',
+        initialState: false,
+      },
+      bibleChapter: {
+        error: shouldRequireBibleChapter && !selectedChapter,
+        message: 'You must select a bible chapter',
+        initialState: false,
+      },
+      sundayHomiliesMonth: {
+        error: shouldRequireSundayMonth && !selectedSundayHomiliesMonth,
+        message: 'You must select a sunday homily month',
+        initialState: false,
+      },
+      durationSeconds: {
+        error: false,
+        message: '',
+        initialState: false,
+      },
+    };
+
+    if (audioSource) {
       if (sermon.durationSeconds <= 0) {
-        const newUploaderFieldError: UploaderFieldError = {
+        nextFormErrors.durationSeconds = {
           error: true,
           message: 'Sermon audio duration must be longer than 0 seconds',
           initialState: false,
         };
-        newFormErrors.durationSeconds = newUploaderFieldError;
       } else if (sermon.durationSeconds > MAX_DURATION_SECONDS) {
-        const newUploaderFieldError: UploaderFieldError = {
+        nextFormErrors.durationSeconds = {
           error: true,
           message: `Sermon audio duration must be shorter than ${MAX_DURATION_SECONDS / 3600} hours`,
           initialState: false,
         };
-        newFormErrors.durationSeconds = newUploaderFieldError;
       }
+    }
 
-      return newFormErrors;
-    });
-    return Object.values(formErrors).every(({ error }) => !error);
-  }, [formErrors, sermon.durationSeconds]);
+    setFormErrors(nextFormErrors);
+    return Object.values(nextFormErrors).every((uploaderFieldError) => !uploaderFieldError.error);
+  }, [
+    audioSource,
+    props.existingSermon,
+    selectedChapter,
+    selectedSeries,
+    selectedSundayHomiliesMonth,
+    sermon.description,
+    sermon.durationSeconds,
+    sermon.speakers,
+    sermon.subtitle,
+    sermon.title,
+    sermonList,
+    uploadAsSeries,
+  ]);
 
   // ======================== END OF ERROR HANDLING ========================
 
@@ -396,6 +513,41 @@ const Uploader = (props: UploaderProps) => {
     updateSermon('topics', topicNames);
   }, [sermonList, updateSermon]);
 
+  // Update sermon.seriesId when selectedSeries changes
+  useEffect(() => {
+    updateSermon('seriesId', selectedSeries?.id);
+  }, [selectedSeries, updateSermon]);
+
+  useEffect(() => {
+    if (!uploadAsSeries) return;
+    if (selectedSeries) {
+      setSeriesError(false, '');
+    }
+  }, [selectedSeries, setSeriesError, uploadAsSeries]);
+
+  const handleUploadTargetToggle = useCallback(
+    (isSeriesMode: boolean) => {
+      setUploadAsSeries(isSeriesMode);
+      if (isSeriesMode) {
+        updateSermon('subtitle', '');
+        setSubtitleError(false, '');
+        setSeriesError(false, '');
+        setSermonList((oldSermonList) =>
+          oldSermonList.filter(
+            (list) =>
+              list.type !== ListType.CATEGORY_LIST ||
+              Boolean(list.listTagAndPosition)
+          )
+        );
+      } else {
+        setSelectedSeries(null);
+        setSeriesError(false, '');
+        setSubtitleError(false, '');
+      }
+    },
+    [setSeriesError, setSubtitleError, updateSermon]
+  );
+
   const handleDateChange = useCallback(
     (newValue: Date) => {
       setDate(newValue);
@@ -407,7 +559,7 @@ const Uploader = (props: UploaderProps) => {
   const setTrimDuration = useCallback(
     (durationSeconds: number) => {
       updateSermon('durationSeconds', durationSeconds);
-      if (durationSeconds <= 0) {
+      if (durationSeconds <= 0 && audioSource) {
         setFormErrorCallback('durationSeconds', true, 'Sermon audio duration must be longer than 0 seconds');
       } else if (durationSeconds > MAX_DURATION_SECONDS) {
         setFormErrorCallback(
@@ -419,7 +571,7 @@ const Uploader = (props: UploaderProps) => {
         setFormErrorCallback('durationSeconds', false, '');
       }
     },
-    [updateSermon, setFormErrorCallback]
+    [updateSermon, setFormErrorCallback, audioSource]
   );
 
   const setTrimStartTime = useCallback(
@@ -436,14 +588,66 @@ const Uploader = (props: UploaderProps) => {
     setTrimStartTime(0);
   }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
-  const clearForm = () => {
+  const clearForm = useCallback(() => {
     setSermon(createEmptySermon(props.user.uid));
     setEmptyListWithLatest([]);
     setSermonList([]);
+    setSelectedSeries(null);
+    setUploadAsSeries(false);
     setDate(new Date());
     clearAudioTrimmer();
     setFormErrors(getFormErrorInitialState());
-  };
+  }, [props.user.uid, clearAudioTrimmer, getFormErrorInitialState]);
+
+  // Handle successful upload - store sermon for the success modal
+  const handleUploadSuccess = useCallback(
+    (_sermonId: string) => {
+      // Store the sermon data for the success modal
+      setUploadedSermon({ ...sermon });
+      setIsNavigatingToSermon(false);
+    },
+    [sermon]
+  );
+
+  useEffect(() => {
+    if (!uploadedSermon) return;
+    const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
+    router.prefetch(targetUrl).catch((error) => {
+      console.error('Failed to prefetch sermon details page:', error);
+    });
+  }, [uploadedSermon, router]);
+
+  // Navigate to sermon details when user clicks "View Sermon"
+  const navigateToSermon = useCallback(async () => {
+    if (!uploadedSermon || isNavigatingToSermon) return;
+
+    const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
+
+    // Mark navigation as intentional to skip unsaved changes warning
+    isIntentionalNavigation.current = true;
+    setIsNavigatingToSermon(true);
+
+    try {
+      const didNavigate = await router.push(targetUrl);
+      if (!didNavigate) {
+        isIntentionalNavigation.current = false;
+        setIsNavigatingToSermon(false);
+      }
+    } catch (error) {
+      console.error('Failed to navigate to sermon details:', error);
+      isIntentionalNavigation.current = false;
+      setIsNavigatingToSermon(false);
+    }
+  }, [uploadedSermon, isNavigatingToSermon, router]);
+
+  // Dismiss the upload modal and stay on page
+  const dismissUploadModal = useCallback(() => {
+    setIsNavigatingToSermon(false);
+    setIsUploading(false);
+    setUploadedSermon(null);
+    setUploadProgress({ error: false, percent: 0, message: '' });
+    clearForm();
+  }, [clearForm]);
 
   const handleNewImage = useCallback(
     (image: ImageType | ImageSizeType) => {
@@ -506,57 +710,32 @@ const Uploader = (props: UploaderProps) => {
             margin: 'auto',
             alignItems: 'center',
             justifyContent: 'center',
+            width: 1,
           }}
         >
-          <TextField
-            sx={{
-              display: 'block',
-              width: 1,
-            }}
-            fullWidth
-            id="title-input"
-            label="Title"
-            name="title"
-            variant="outlined"
-            value={sermon.title}
-            error={showError(formErrors.title)}
-            helperText={getErrorMessage(formErrors.title)}
-            onChange={handleChange}
-            onBlur={handleBlur}
-            required
-          />
-          <Box sx={{ display: 'flex', gap: '1ch', width: 1 }}>
-            <SubtitleSelector
-              subtitle={sermon.subtitle}
-              sermonList={sermonList}
-              setSermonList={setSermonList}
-              setSermon={setSermon}
-              subtitles={subtitles}
-              subtitleError={formErrors?.subtitle}
-              setSubtitleError={setSubtitleError}
-              isLoading={subtitlesLoading}
+          <Box sx={{ display: 'flex', gap: '1ch', width: 1, flexDirection: { xs: 'column', xl: 'row' } }}>
+            <TextField
+              sx={{
+                display: 'block',
+                width: 1,
+                flexGrow: 2,
+              }}
+              fullWidth
+              id="title-input"
+              label="Title"
+              name="title"
+              variant="outlined"
+              value={sermon.title}
+              error={showError(formErrors.title)}
+              helperText={getErrorMessage(formErrors.title)}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              required
             />
-            <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
+            <Box sx={{ flex: 1 }}>
+              <UploaderDatePicker date={date} handleDateChange={handleDateChange} />
+            </Box>
           </Box>
-          <BibleChapterSelector
-            sermonSubtitle={sermon.subtitle}
-            setSermonList={setSermonList}
-            selectedChapter={selectedChapter}
-            setSelectedChapter={setSelectedChapter}
-            bibleChapterError={formErrors?.bibleChapter}
-            setBibleChapterError={setBibleChapterError}
-          />
-          <SundayHomilyMonthSelector
-            sermonSubtitle={sermon.subtitle}
-            date={date}
-            setSermonList={setSermonList}
-            selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
-            setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
-            sundayHomiliesYear={sundayHomiliesYear}
-            setSundayHomiliesYear={setSundayHomiliesYear}
-            sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
-            setSundayHomiliesMonthError={setSundayHomiliesMonthError}
-          />
           <TextField
             sx={{
               display: 'block',
@@ -575,7 +754,7 @@ const Uploader = (props: UploaderProps) => {
             helperText={getErrorMessage(formErrors.description)}
             required
           />
-          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+          {/* <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <ListSelector
               sermonList={sermonList}
               setSermonList={setSermonList}
@@ -584,7 +763,78 @@ const Uploader = (props: UploaderProps) => {
                 sermon.subtitle !== '' ? subtitles.find((subtitle) => subtitle.name === sermon.subtitle) : undefined
               }
             />
-          </div>
+          </div> */}
+          <Box width={1} display="flex" justifyContent="flex-start" alignItems="center">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={uploadAsSeries}
+                  onChange={(_, checked) => handleUploadTargetToggle(checked)}
+                  name="uploadAsSeries"
+                  inputProps={{ 'aria-label': 'Upload to series toggle' }}
+                />
+              }
+              label="Upload to series"
+            />
+            <Tooltip
+              title="If your sermon is part of a series you should use the series toggle. If it is not you must add it to one of the categories. The subtitle of the sermon will automatically assigned to either the series name or the category."
+              enterTouchDelay={0}
+              leaveTouchDelay={3000}
+            >
+              <IconButton size="small" aria-label="Series vs category info">
+                <InfoOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          {uploadAsSeries ? (
+            <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+              <SeriesSelector
+                selectedSeries={selectedSeries}
+                setSelectedSeries={setSelectedSeries}
+                required={uploadAsSeries}
+                error={showError(formErrors.series)}
+                helperText={getErrorMessage(formErrors.series)}
+              />
+            </div>
+          ) : (
+            <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+              <SubtitleSelector
+                subtitle={sermon.subtitle}
+                sermonList={sermonList}
+                setSermonList={setSermonList}
+                setSermon={setSermon}
+                subtitles={subtitles}
+                subtitleError={formErrors?.subtitle}
+                setSubtitleError={setSubtitleError}
+                isLoading={subtitlesLoading}
+                required={!uploadAsSeries}
+              />
+            </div>
+          )}
+          {!uploadAsSeries &&
+            (sermon.subtitle === BIBLE_STUDIES_STRING || sermon.subtitle === SUNDAY_HOMILIES_STRING) && (
+            <Box sx={{ display: 'flex', gap: '1ch', width: 1, flexDirection: { xs: 'column', xl: 'row' } }}>
+              <BibleChapterSelector
+                sermonSubtitle={sermon.subtitle}
+                setSermonList={setSermonList}
+                selectedChapter={selectedChapter}
+                setSelectedChapter={setSelectedChapter}
+                bibleChapterError={formErrors?.bibleChapter}
+                setBibleChapterError={setBibleChapterError}
+              />
+              <SundayHomilyMonthSelector
+                sermonSubtitle={sermon.subtitle}
+                date={date}
+                setSermonList={setSermonList}
+                selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
+                setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
+                sundayHomiliesYear={sundayHomiliesYear}
+                setSundayHomiliesYear={setSundayHomiliesYear}
+                sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
+                setSundayHomiliesMonthError={setSundayHomiliesMonthError}
+              />
+            </Box>
+          )}
           <SpeakerSelector
             sermonSpeakers={sermon.speakers}
             sermonImages={sermon.images}
@@ -603,9 +853,30 @@ const Uploader = (props: UploaderProps) => {
               setError={setTopicsError}
             />
           </div>
-          <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
-            <ListSelector sermonList={sermonList} setSermonList={setSermonList} />
-          </div>
+          <Box width={1} display="flex" alignItems="center" gap={0.5}>
+            <Button
+              size="small"
+              variant="text"
+              sx={{ minWidth: 'auto', px: 0.5, textTransform: 'none' }}
+              onClick={() => setShowAdvancedListConfig((prev) => !prev)}
+            >
+              {showAdvancedListConfig ? 'Hide lists' : 'Advanced list config'}
+            </Button>
+            <Tooltip
+              title="You can add or remove the sermon from specific lists. The lists get populated automatically when filling out the rest of the form"
+              enterTouchDelay={0}
+              leaveTouchDelay={3000}
+            >
+              <IconButton size="small" aria-label="Advanced list config info">
+                <InfoOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          {showAdvancedListConfig && (
+            <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+              <ListSelector sermonList={sermonList} setSermonList={setSermonList} />
+            </div>
+          )}
         </Box>
         <Box sx={{ margin: 'auto' }} width={1} maxWidth={300} minWidth={200}>
           <ImageViewer
@@ -683,11 +954,13 @@ const Uploader = (props: UploaderProps) => {
                         outroUrl: outroRef,
                       };
                       promises.push(generateAddIntroOutroTask(data));
-                      promises.push(editSermon(pendingSermon, sermonList));
+                      promises.push(editSermon(pendingSermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
                       await Promise.all(promises);
                     }
-                    promises.push(editSermon(sermon, sermonList));
+                    promises.push(editSermon(sermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
                     setIsEditing(false);
+                    // Mark as intentional navigation to bypass unsaved changes warning
+                    isIntentionalNavigation.current = true;
                     props.setEditFormOpen?.(false);
                   }}
                   disabled={
@@ -701,7 +974,7 @@ const Uploader = (props: UploaderProps) => {
                 </Button>
               </div>
               {invalidFormMessage && (
-                <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
+                <Typography sx={{ textAlign: 'center', color: 'error.main' }}>{invalidFormMessage}</Typography>
               )}
             </Stack>
           ) : (
@@ -765,7 +1038,7 @@ const Uploader = (props: UploaderProps) => {
                 >
                   {getErrorMessage(formErrors.durationSeconds)}
                 </Typography>
-                <Box display="flex">
+                <Box display="flex" gap={2}>
                   <UploadButton
                     user={props.user}
                     sermon={sermon}
@@ -777,19 +1050,23 @@ const Uploader = (props: UploaderProps) => {
                     setUploadProgress={setUploadProgress}
                     setInvalidFormMessage={setInvalidFormMessage}
                     setIsUploading={setIsUploading}
-                    clearForm={clearForm}
+                    onUploadSuccess={handleUploadSuccess}
                   />
-                  <button type="button" className={styles.button} onClick={() => clearForm()}>
+                  <Button variant="outlined" color="secondary" onClick={() => clearForm()}>
                     Clear Form
-                  </button>
+                  </Button>
                 </Box>
                 {invalidFormMessage && (
-                  <Typography sx={{ textAlign: 'center', color: 'error.dark' }}>{invalidFormMessage}</Typography>
+                  <Typography sx={{ textAlign: 'center', color: 'error.main' }}>{invalidFormMessage}</Typography>
                 )}
                 <UploadProgressComponent
                   audioSource={audioSource}
                   isUploading={isUploading}
                   uploadProgress={uploadProgress}
+                  sermon={uploadedSermon || undefined}
+                  isNavigatingToSermon={isNavigatingToSermon}
+                  onNavigateToSermon={navigateToSermon}
+                  onDismiss={dismissUploadModal}
                 />
               </Box>
             </>

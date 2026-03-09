@@ -1,13 +1,9 @@
 import Box from '@mui/material/Box';
-import AdminLayout from '../../layout/adminLayout';
+import AppLayout from '../../layout/AppLayout';
 import Button from '@mui/material/Button';
 import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../firebase/firestore';
-// import { useCollection } from 'react-firebase-hooks/firestore';
-// import { sermonConverter } from '../../types/Sermon';
 import DeleteEntityPopup from '../../components/DeleteEntityPopup';
-import { useCallback, useEffect, useState } from 'react';
-// import { GetServerSideProps, GetServerSidePropsContext } from 'next';
-// import { adminProtected } from '../../utils/protectedRoutes';
+import { memo, useCallback, useEffect, useState } from 'react';
 import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
 import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
@@ -16,13 +12,18 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '../../functions/src/deleteSubsplashList';
 import Link from 'next/link';
-import MaterialList from '@mui/material/List';
+import Card from '@mui/material/Card';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import ListItemButton from '@mui/material/ListItemButton';
+import AddIcon from '@mui/icons-material/Add';
+import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
+import SearchIcon from '@mui/icons-material/Search';
+import Stack from '@mui/material/Stack';
+import Chip from '@mui/material/Chip';
+import InputAdornment from '@mui/material/InputAdornment';
 import { listConverter, List, ListType } from '../../types/List';
 import { algoliasearch, SearchResponse } from 'algoliasearch';
 import TextField from '@mui/material/TextField';
@@ -31,6 +32,7 @@ import MenuItem from '@mui/material/MenuItem';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 import useAuth from '../../context/user/UserContext';
+import { alpha, useTheme } from '@mui/material/styles';
 
 const HITSPERPAGE = 20;
 
@@ -39,7 +41,127 @@ const client =
     ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
 
+interface ListListItemRowProps {
+  list: List;
+  disableButtons: boolean;
+  onEdit: (list: List) => void;
+  onDelete: (list: List) => void;
+}
+
+const ListListItemRow = memo(function ListListItemRow({
+  list,
+  disableButtons,
+  onEdit,
+  onDelete,
+}: ListListItemRowProps) {
+  const theme = useTheme();
+  const listImage = list.images?.find((image) => image.type === 'square');
+  return (
+    <Box>
+      <Link href={`/admin/lists/${list.id}?count=${list.count || 20}`} style={{ textDecoration: 'none' }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            p: { xs: 2, sm: 2.5 },
+            gap: 2,
+            cursor: 'pointer',
+            transition: 'background-color 0.15s ease',
+            '&:hover': { bgcolor: 'action.hover' },
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+            <AvatarWithDefaultImage
+              image={listImage}
+              altName={`Image of List: ${list.name}`}
+              width={64}
+              height={64}
+              borderRadius={10}
+              sx={{ flexShrink: 0 }}
+            />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                variant="subtitle1"
+                fontWeight={600}
+                sx={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {list.name}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+                {list.count !== undefined && (
+                  <Typography variant="body2" color="text.secondary">
+                    {list.count} items
+                  </Typography>
+                )}
+                <Chip
+                  label={listTypeOptions[list.type] || list.type}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 22 }}
+                />
+              </Box>
+            </Box>
+          </Box>
+
+          <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+            <Tooltip title="Edit List">
+              <span>
+                <IconButton
+                  disabled={disableButtons}
+                  aria-label="edit list"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onEdit(list);
+                  }}
+                  sx={{
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.primary.main, 0.15),
+                      color: 'primary.main',
+                    },
+                  }}
+                >
+                  <EditIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Delete List">
+              <span>
+                <IconButton
+                  disabled={disableButtons}
+                  aria-label="delete list"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDelete(list);
+                  }}
+                  sx={{
+                    color: 'error.main',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.error.main, 0.15),
+                    },
+                  }}
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+        </Box>
+      </Link>
+    </Box>
+  );
+});
+
 const AdminList = () => {
+  // Exclude overflow lists (isMoreSermonsList: true) from admin list view
+  // Note: Firestore doesn't support != with undefined, so we use a compound query
+  // We'll filter client-side for isMoreSermonsList !== true
   const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
   const [firebaseList, loading, error] = useCollectionData(q);
   const [list, setList] = useState<List[]>([]);
@@ -87,11 +209,15 @@ const AdminList = () => {
               hitsPerPage: HITSPERPAGE,
               page: currentPage,
               ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
+              // Exclude overflow lists from search results
+              filters: 'NOT isMoreSermonsList:true',
             },
           });
-          if (res.hits.length > 0) {
+          // Also filter client-side as a safety measure
+          const filteredHits = res.hits.filter((list) => list.isMoreSermonsList !== true);
+          if (filteredHits.length > 0) {
             setNoMoreResults(false);
-            setSearchResults(res.hits);
+            setSearchResults(filteredHits);
           } else {
             setSearchResults([]);
             setNoMoreResults(true);
@@ -109,42 +235,80 @@ const AdminList = () => {
 
   useEffect(() => {
     if (firebaseList) {
-      setList(firebaseList);
+      // Filter out overflow lists (isMoreSermonsList: true) from admin view
+      setList(firebaseList.filter((list) => list.isMoreSermonsList !== true));
     }
   }, [firebaseList]);
 
   useEffect(() => {
+    if (searchQuery === '' && filter === '') {
+      setSearchResults(undefined);
+      return;
+    }
     const fetchData = async () => {
       await searchLists();
     };
     fetchData();
-  }, [currentPage, filter, searchLists]);
+  }, [currentPage, filter, searchLists, searchQuery]);
+
+  const handleEditList = useCallback((l: List) => {
+    setSelectedList(l);
+    setEditListPopup(true);
+  }, []);
+
+  const handleDeleteListClick = useCallback((l: List) => {
+    setSelectedList(l);
+    setDeleteListPopup(true);
+  }, []);
 
   return (
     <>
-      <Box display="flex" justifyContent="center" padding={3} width={1}>
+      <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
         {error ? (
-          <Typography color="red">{`Error: ${error.message}`}</Typography>
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography color="error">{`Error: ${error.message}`}</Typography>
+          </Box>
         ) : loading ? (
-          <CircularProgress />
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+            <CircularProgress />
+          </Box>
         ) : (
-          <Box display="flex" flexDirection="column" gap={1} width={1}>
-            <Box display="flex" justifyContent="center" gap={1}>
-              <Typography variant="h4">Manage List</Typography>
+          <>
+            {/* Header */}
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                justifyContent: 'space-between',
+                alignItems: { xs: 'flex-start', sm: 'center' },
+                gap: 2,
+                mb: 4,
+              }}
+            >
+              <Typography variant="h4" fontWeight={700}>
+                Manage Lists
+              </Typography>
               <Button
-                color="info"
                 variant="contained"
-                size="small"
-                onClick={() => {
-                  setNewListPopup(true);
-                }}
+                startIcon={<AddIcon />}
+                onClick={() => setNewListPopup(true)}
               >
                 Add List
               </Button>
             </Box>
-            <Box display="flex" width="100%" justifyContent="space-between">
+
+            {/* Filters */}
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                gap: 2,
+                mb: 3,
+              }}
+            >
               <TextField
-                placeholder="Search a for a list"
+                placeholder="Search lists by name..."
+                value={searchQuery}
                 onChange={async (e) => {
                   setSearchQuery(e.target.value);
                   setCurrentPage(0);
@@ -154,106 +318,105 @@ const AdminList = () => {
                     await searchLists(e.target.value);
                   }
                 }}
-                sx={{ width: '65%' }}
+                size="small"
+                sx={{ flex: 2 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="action" />
+                    </InputAdornment>
+                  ),
+                }}
               />
-              <Box sx={{ width: '34%' }}>
-                <FormControl fullWidth>
-                  <InputLabel id="list-type-select-label">Filter by list type</InputLabel>
-                  <Select
-                    value={filter}
-                    label="Filter by list type"
-                    labelId="list-type-select-label"
-                    id="list-type-select"
-                    onChange={(e) => {
-                      setCurrentPage(0);
-                      setFilter(e.target.value as ListType);
-                    }}
+              <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
+                <InputLabel id="list-type-select-label">Type</InputLabel>
+                <Select
+                  value={filter}
+                  label="Type"
+                  labelId="list-type-select-label"
+                  onChange={(e) => {
+                    setCurrentPage(0);
+                    setFilter(e.target.value as ListType);
+                  }}
+                >
+                  <MenuItem value="">All Types</MenuItem>
+                  {(Object.values(ListType) as Array<ListType>).map((listType) => {
+                    if (listType !== ListType.LATEST) {
+                      return (
+                        <MenuItem key={listType} value={listType}>
+                          {listTypeOptions[listType]}
+                        </MenuItem>
+                      );
+                    }
+                    return null;
+                  })}
+                </Select>
+              </FormControl>
+            </Box>
+
+            {/* Lists */}
+            {(searchResults || list).length === 0 ? (
+              <Card
+                sx={{
+                  textAlign: 'center',
+                  py: 6,
+                  px: 3,
+                  border: '2px dashed',
+                  borderColor: 'divider',
+                  bgcolor: 'transparent',
+                }}
+              >
+                <PlaylistPlayIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  {searchQuery || filter ? 'No lists found matching your filters' : 'No lists yet'}
+                </Typography>
+                <Typography variant="body2" color="text.disabled" sx={{ mb: 3 }}>
+                  {searchQuery || filter
+                    ? 'Try adjusting your search or filter'
+                    : 'Create your first list to organize your content'}
+                </Typography>
+                {!searchQuery && !filter && (
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setNewListPopup(true)}
                   >
-                    <MenuItem value={''}>None</MenuItem>
-                    {/* eslint-disable-next-line array-callback-return */}
-                    {(Object.values(ListType) as Array<ListType>).map((listType) => {
-                      if (listType !== ListType.LATEST) {
-                        return (
-                          <MenuItem key={listType} value={listType}>
-                            {listTypeOptions[listType]}
-                          </MenuItem>
-                        );
-                      }
-                    })}
-                  </Select>
-                </FormControl>
+                    Create Your First List
+                  </Button>
+                )}
+              </Card>
+            ) : (
+              <Card>
+                {(searchResults || list).map((l, index) => (
+                  <Box key={l.id}>
+                    <ListListItemRow
+                      list={l}
+                      disableButtons={disableButtons}
+                      onEdit={handleEditList}
+                      onDelete={handleDeleteListClick}
+                    />
+                    {index < (searchResults || list).length - 1 && <Divider />}
+                  </Box>
+                ))}
+              </Card>
+            )}
+
+            {/* Pagination */}
+            {((searchResults || list).length > 0 || currentPage > 0) && (
+              <Box display="flex" gap={2} justifyContent="center" mt={3}>
+                {currentPage > 0 && (
+                  <Button variant="outlined" onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>
+                    Previous Page
+                  </Button>
+                )}
+                {!noMoreResults && !(searchResults && searchResults.length < HITSPERPAGE) && (
+                  <Button variant="outlined" onClick={() => setCurrentPage((oldPage) => oldPage + 1)}>
+                    Next Page
+                  </Button>
+                )}
               </Box>
-            </Box>
-            <MaterialList>
-              {(searchResults || list).map((l) => {
-                return (
-                  <Link href={`/admin/lists/${l.id}?count=${l.count || 20}`} key={l.id}>
-                    <ListItemButton sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <AvatarWithDefaultImage
-                          image={l.images?.find((image) => image.type === 'square')}
-                          altName={`Image of List: ${l.name}`}
-                          width={50}
-                          height={50}
-                          borderRadius={5}
-                        />
-                        <Typography>{l.name}</Typography>
-                        {l.count !== undefined && <Typography>{`Count: ${l.count}`}</Typography>}
-                        <Typography>{`Type: ${l.type}`}</Typography>
-                      </Box>
-                      <Box>
-                        <Tooltip title="Edit List">
-                          <span>
-                            <IconButton
-                              disabled={disableButtons}
-                              aria-label="edit list"
-                              style={{ color: 'lightblue' }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setSelectedList(l);
-                                setEditListPopup(true);
-                              }}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                        <Tooltip title="Delete List From All Systems">
-                          <span>
-                            <IconButton
-                              disabled={disableButtons}
-                              aria-label="delete list"
-                              style={{ color: 'red' }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setSelectedList(l);
-                                setDeleteListPopup(true);
-                              }}
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </Box>
-                    </ListItemButton>
-                    <Divider />
-                  </Link>
-                );
-              })}
-            </MaterialList>
-            <Box display="flex" gap={2} justifyContent="center" width={'100%'}>
-              {currentPage > 0 && (
-                <Button onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>Previous Page</Button>
-              )}
-              {!noMoreResults && !(searchResults && searchResults.length < HITSPERPAGE) && (
-                <Button onClick={() => setCurrentPage((oldPage) => oldPage + 1)}>Next Page</Button>
-              )}
-              {!noMoreResults && searchResults && searchResults.length < HITSPERPAGE && (
-                <Typography alignSelf="center">{'No more results'}</Typography>
-              )}
-              {noMoreResults && <Typography alignSelf="center">No results found</Typography>}
-            </Box>
-          </Box>
+            )}
+          </>
         )}
       </Box>
       <DeleteEntityPopup
@@ -293,6 +456,6 @@ const ProtectedAdminList = () => {
   }
 };
 
-ProtectedAdminList.PageLayout = AdminLayout;
+ProtectedAdminList.PageLayout = AppLayout;
 
 export default ProtectedAdminList;

@@ -2,11 +2,12 @@ import { logger } from 'firebase-functions/v2';
 import { FirestoreDataConverter, Query } from 'firebase-admin/firestore';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { BundleConfig, BundleMetadata } from '../../../shared/bundleConfigs';
+import { getFirebaseStorageBucket } from '../../../shared/firebaseProjectConfig';
 
 const firestoreAdmin = firebaseAdmin.firestore();
 const storage = firebaseAdmin.storage();
 const database = firebaseAdmin.database();
-const BUNDLE_BUCKET = 'urm-app.appspot.com';
+const BUNDLE_BUCKET = getFirebaseStorageBucket();
 
 export interface BundleCreationConfig<T> {
     collectionName: string;
@@ -84,9 +85,10 @@ export async function generateAndStoreBundle<T>(
         logger.info(`Generating new ${config.displayName} bundle`);
 
         // Build query
+        const adminConverter = config.converter as unknown as FirestoreDataConverter<T>;
         let query: Query<T> = firestoreAdmin
             .collection(config.collectionName)
-            .withConverter(config.converter);
+            .withConverter(adminConverter);
 
         // Add where conditions if specified
         if (config.whereConditions) {

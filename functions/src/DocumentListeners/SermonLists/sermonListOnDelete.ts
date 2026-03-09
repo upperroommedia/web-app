@@ -6,6 +6,7 @@ import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
 import { SermonList } from '../../../../types/SermonList';
 import { removeFromList } from '../../removeFromList';
+import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
 
 const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{sermonListId}', async (event) => {
   const snapshot = event.data;
@@ -21,17 +22,38 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
 
   try {
     const sermonRef = firestoreDb.doc(`sermons/${sermonId}`).withConverter(firestoreAdminSermonConverter);
+    let didMutate = false;
 
     // First, try to remove from Subsplash if it was uploaded
+    // CRITICAL FIX: Set decrementListUploadedToValue based on uploadStatus, not Subsplash removal success
+    // The counter decrement should happen regardless of Subsplash removal outcome
     let decrementListUploadedToValue = 0;
     if (data.uploadStatus && data.uploadStatus.status === 'UPLOADED') {
+      // Set decrement value immediately - counter should be decremented regardless of Subsplash removal
+      decrementListUploadedToValue = -1;
       try {
-        await removeFromList([data.id], [data.uploadStatus.listItemId]);
-        decrementListUploadedToValue = -1;
-        logger.info(`Successfully removed sermon ${sermonId} from Subsplash list ${data.id}`);
+        // Get the sermon document to find the subsplashId (item ID)
+        const sermonDoc = await firestoreDb.doc(`sermons/${sermonId}`).withConverter(firestoreAdminSermonConverter).get();
+        const sermonData = sermonDoc.data();
+        const itemId = sermonData?.subsplashId || sermonId; // Fallback to sermonId if no subsplashId
+        
+        // Use subsplashId instead of data.id - removeFromList queries Firestore with subsplashId
+        // to enable proper overflow list traversal
+        if (!data.subsplashId) {
+          logger.warn(`Cannot remove sermon ${sermonId} from Subsplash list: missing subsplashId for list ${data.id}`);
+        } else {
+          await removeFromList(
+            [data.subsplashId], 
+            [data.uploadStatus.listItemId],
+            [itemId],
+            ['media-item']
+          );
+          logger.info(`Successfully removed sermon ${sermonId} from Subsplash list ${data.subsplashId}`);
+        }
       } catch (error) {
-        logger.error(`Failed to remove sermon ${sermonId} from Subsplash list ${data.id}:`, error);
+        logger.error(`Failed to remove sermon ${sermonId} from Subsplash list ${data.subsplashId || data.id}:`, error);
         // Continue with counter updates even if Subsplash removal fails
+        // decrementListUploadedToValue is already set to -1 above
       }
     }
 
@@ -43,6 +65,7 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
           numberOfLists: FieldValue.increment(-1),
           numberOfListsUploadedTo: FieldValue.increment(decrementListUploadedToValue),
         });
+        didMutate = true;
         logger.info(`Successfully decremented numberOfLists for sermon ${sermonId}`, {
           oldValues: {
             numberOfLists: sermonDoc.data()?.numberOfLists,
@@ -54,6 +77,10 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
         console.warn(`Sermon ${sermonId} does not exist, skipping counter updates`);
       }
     });
+
+    if (didMutate) {
+      await ensureSermonCountInvariant(sermonId);
+    }
   } catch (error) {
     console.error(`Error in sermonListOnDelete for sermon ${sermonId}:`, error);
     throw handleError(error);

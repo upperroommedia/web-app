@@ -4,7 +4,7 @@ import { onCall, CallableRequest } from 'firebase-functions/v2/https';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { ListTag, ListType, OverflowBehavior } from '../../../types/List';
 import { firestoreAdminListConverter } from '../firestoreDataConverter';
-import { ListData, SubsplashListRow } from '../helpers/addToListHelpers';
+import { SubsplashListRow } from '../types/Subsplash';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 
@@ -53,11 +53,10 @@ const tagItemsInList = onCall(
       let count = 0;
       await Promise.all(
         listRows.map(async (listRow) => {
-          const listId = listRow._embedded.list.id;
+          const listId = listRow._embedded.list?.id;
           if (!listId) {
             return;
           }
-          const embeddedList = listRow._embedded.list as ListData;
           const firestoreLists = firebaseAdmin
             .firestore()
             .collection('lists')
@@ -83,23 +82,29 @@ const tagItemsInList = onCall(
             });
             count++;
           } else {
+            // Fetch full list details from Subsplash API to get title and count
+            const listDetailsUrl = `https://core.subsplash.com/builder/v1/lists/${listId}`;
+            const listDetailsConfig = createAxiosConfig(listDetailsUrl, token, 'GET');
+            const listDetailsResponse = await axios(listDetailsConfig);
+            const listDetails = listDetailsResponse.data;
+            
             logger.log(`Creating list: ${listId}`);
             batch.set(
               firestoreLists.doc(listId),
               {
                 id: listId,
                 subsplashId: listId,
-                name: embeddedList.title,
-                count: embeddedList.list_rows_count,
+                name: listDetails.title || 'Untitled List',
+                count: listDetails.list_rows_count || 0,
                 overflowBehavior: OverflowBehavior.CREATENEWLIST,
                 type: ListType.SERIES,
                 createdAtMillis:
-                  new Date(listRow.created_at).getTime() ||
-                  new Date(listRow.updated_at).getTime() ||
+                  new Date(listDetails.created_at).getTime() ||
+                  new Date(listDetails.updated_at).getTime() ||
                   new Date().getTime(),
                 updatedAtMillis:
-                  new Date(listRow.updated_at).getTime() ||
-                  new Date(listRow.created_at).getTime() ||
+                  new Date(listDetails.updated_at).getTime() ||
+                  new Date(listDetails.created_at).getTime() ||
                   new Date().getTime(),
                 listTagAndPosition: listTagAndPosition,
               },

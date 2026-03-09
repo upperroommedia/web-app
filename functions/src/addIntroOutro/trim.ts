@@ -9,7 +9,7 @@ import { CustomMetadata } from './types';
 import { unlink } from 'fs/promises';
 
 const trimAndTranscode = async (
-  ffmpeg: typeof import('fluent-ffmpeg'),
+  ffmpeg: typeof import('@ts-ffmpeg/fluent-ffmpeg'),
   cancelToken: CancelToken,
   bucket: Bucket,
   storageFilePath: string,

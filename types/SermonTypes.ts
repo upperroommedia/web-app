@@ -43,4 +43,5 @@ export interface Sermon {
   createdAtMillis: number;
   editedAtMillis: number;
   youtubeUrl?: string;
+  seriesId?: string;  // Firestore series ID (not subsplashId) - sermon can only be in one series
 }

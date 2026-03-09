@@ -10,7 +10,7 @@ import firestore, {
   startAfter,
   onSnapshot,
 } from '../firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlgoliaImage, AspectRatio, ImageType } from '../types/Image';
 import Image from 'next/image';
 // import ImageList from '@mui/material/ImageList';
@@ -42,6 +42,7 @@ const ImageSelector = (props: {
   confirmSelecedImage: (image: ImageType) => void;
   setPopupTitle: (title: string) => void;
 }) => {
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [images, setImages] = useState<ImageType[]>([]);
   const [imageSearchResults, setImageSearchResults] = useState<AlgoliaImage[]>();
   const [imageSearchQuery, setImageQuery] = useState<string>('');
@@ -111,6 +112,13 @@ const ImageSelector = (props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const focusTimer = window.setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [props.selectedImageFromSpeakerDetails.id, props.selectedImageFromSpeakerDetails.type]);
+
   const saveImage = async (croppedImageData: CroppedImageData, name: string) => {
     try {
       setImageUploading(true);
@@ -161,6 +169,7 @@ const ImageSelector = (props: {
         <>
           <TextField
             autoFocus
+            inputRef={searchInputRef}
             value={imageSearchQuery}
             onChange={async (e) => {
               setImageQuery(e.target.value);
@@ -216,8 +225,8 @@ const ImageSelector = (props: {
                       style={{
                         height: '164px',
                         aspectRatio: AspectRatio[image.type],
-                        backgroundColor: image.averageColorHex || '#f3f1f1',
-                        boxShadow: props.newSelectedImage?.id === image.id ? ' 0 0 0 4px blue' : 'none',
+                        backgroundColor: image.averageColorHex || 'var(--placeholder-bg, #f1f5f9)',
+                        boxShadow: props.newSelectedImage?.id === image.id ? '0 0 0 4px var(--accent-primary, #f97316)' : 'none',
                       }}
                     >
                       <Image

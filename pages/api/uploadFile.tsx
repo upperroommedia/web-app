@@ -1,4 +1,4 @@
-import firestore, { deleteDoc, doc, writeBatch } from '../../firebase/firestore';
+import firestore, { deleteDoc, doc, writeBatch, getDocs, query, collection, orderBy, limit } from '../../firebase/firestore';
 import storage, { ref, uploadBytesResumable, UploadMetadata, deleteObject } from '../../firebase/storage';
 
 import { Dispatch, SetStateAction } from 'react';
@@ -11,6 +11,7 @@ import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
 import { UploadProgress } from '../../context/types';
+import { createOperationKey } from '../../utils/callableConcurrency';
 
 export type AudioSource =
   | {
@@ -35,15 +36,55 @@ const addFirestoreDocument = async (
   sermonList: List[],
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>
 ) => {
-  // add sermon to series
-  // note a firestore function document listener will take care of updating the series subcollection for the sermon
   const batch = writeBatch(firestore);
   batch.set(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), sermon);
+  
+  // Add sermon to list subcollections
   sermonList.forEach((list) => {
-    const seriesSermonRef = doc(firestore, 'lists', list.id, 'listItems', sermon.id);
-    batch.set(seriesSermonRef, sermon);
+    const listItemRef = doc(firestore, 'lists', list.id, 'listItems', sermon.id);
+    batch.set(listItemRef, sermon);
   });
+  
+  // Add sermon to series subcollection if seriesId is set
+  if (sermon.seriesId) {
+    const latestPositionSnapshot = await getDocs(
+      query(
+        collection(firestore, `series/${sermon.seriesId}/seriesItems`),
+        orderBy('position', 'desc'),
+        limit(1)
+      )
+    );
+    const latestPosition = latestPositionSnapshot.docs[0]?.data()?.position;
+    const newPosition = typeof latestPosition === 'number' ? latestPosition + 1 : 1;
+    const seriesItemRef = doc(firestore, 'series', sermon.seriesId, 'seriesItems', sermon.id);
+    batch.set(seriesItemRef, {
+      id: sermon.id,
+      position: newPosition,
+      publishedToSubsplash: false,
+      sermonSubsplashId: sermon.subsplashId || null,
+      addedAt: new Date(),
+    });
+  }
+  
   await batch.commit();
+  
+  // Update series item count after batch commit if sermon has seriesId
+  if (sermon.seriesId) {
+    try {
+      const { getDoc, updateDoc, increment } = await import('../../firebase/firestore');
+      const seriesRef = doc(firestore, 'series', sermon.seriesId);
+      const seriesDoc = await getDoc(seriesRef);
+      if (seriesDoc.exists()) {
+        await updateDoc(seriesRef, {
+          itemCount: increment(1),
+          updatedAt: new Date(),
+        });
+      }
+    } catch (err) {
+      console.error('Error updating series item count:', err);
+    }
+  }
+  
   setUploadProgress({ error: false, message: 'Uploading...', percent: 99 });
 };
 
@@ -87,7 +128,9 @@ const uploadFile = async (props: UploadFileProps) => {
         introUrl: introRef,
         outroUrl: outroRef,
       };
-      await generateAddIntroOutroTask(data);
+      await generateAddIntroOutroTask(data, {
+        metadata: { operationKey: createOperationKey('upload-file-add-intro-outro', props.sermon.id) },
+      });
       props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
     } catch (e) {
       // eslint-disable-next-line no-console
@@ -134,7 +177,9 @@ const uploadFile = async (props: UploadFileProps) => {
               introUrl: introRef,
               outroUrl: outroRef,
             };
-            await generateAddIntroOutroTask(data);
+            await generateAddIntroOutroTask(data, {
+              metadata: { operationKey: createOperationKey('upload-file-add-intro-outro', props.sermon.id) },
+            });
             props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
             resolve();
           } catch (e) {

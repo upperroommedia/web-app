@@ -1,4 +1,4 @@
-import { FunctionComponent, ReactNode, useEffect, useState, useMemo, type JSX } from 'react';
+import { FunctionComponent, ReactNode, useCallback, useEffect, useState, useMemo, type JSX } from 'react';
 import { algoliasearch, SearchClient } from 'algoliasearch';
 import { InstantSearch, useInstantSearch } from 'react-instantsearch';
 import Stack from '@mui/material/Stack';
@@ -19,58 +19,33 @@ import IconButton from '@mui/material/IconButton';
 import FilterIcon from '@mui/icons-material/FilterAlt';
 import AnimateHeight from 'react-animate-height';
 import { SxProps, Theme } from '@mui/system';
-interface SearchableAdminSermonListProps {}
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { isDevelopment } from '../firebase/firebase';
+import { createMockAlgoliaSearchClient } from '../utils/mockAlgoliaSearchClient';
 
-const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
-  const { user } = useAuth();
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState<boolean>(false);
-  
-  if (!user) {
-    throw new Error('User not found');
-  }
-  if (!user.role || user.role === 'user') {
-    throw new Error('User is not an admin or uploader');
-  }
+interface SearchableAdminSermonListProps { }
 
-  useEffect(() => {
-    const initApiKey = async () => {
-      if (!apiKey) {
-        if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
-          throw new Error('Missing Algolia Credentials');
-        }
-        
-        if (user.isAdmin()) {
-          setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
-        } else {
-          const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
-            'generatesecuredapikey'
-          );
-          const securedKey = await generateSecuredApiKey({ userId: user.uid });
-          setApiKey(securedKey);
-        }
-      }
-    };
-    initApiKey();
-  }, [apiKey, user]);
-
-  // Create search client with useMemo to prevent unnecessary recreations
-  const searchClient = useMemo((): SearchClient | null => {
-    if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
-      return null;
-    }
-    return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
-  }, [apiKey]);
-
-  const FilterButton = () => (
-    <IconButton onClick={() => setShowFilters((prev) => !prev)} sx={{ display: { xs: 'block', md: 'none' } }}>
+function FilterButton({ onToggle }: { onToggle: () => void }) {
+  return (
+    <IconButton onClick={onToggle} sx={{ display: { xs: 'block', md: 'none' } }} aria-label="Toggle filters">
       <FilterIcon />
     </IconButton>
   );
+}
 
-  const Filters = ({ sx }: { sx?: SxProps<Theme> }) => (
+function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
+  return (
     <Stack sx={{ flex: 1, alignItems: 'center', overflow: 'auto', ...sx }}>
-      <Stack gap={2} alignItems="start" border={{ xs: 1, md: 0 }} borderRadius={2} p={2} margin={2}>
+      <Stack
+        gap={{ xs: 1.5, md: 2 }}
+        alignItems="start"
+        border={{ xs: 1, md: 0 }}
+        borderRadius={2}
+        p={{ xs: 1.5, md: 2 }}
+        margin={{ xs: 1, md: 2 }}
+        width="100%"
+      >
         <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
         <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
         <CustomRefinementList
@@ -84,28 +59,89 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
       </Stack>
     </Stack>
   );
+}
+
+function MobileFilterSection({ onToggle }: { onToggle: () => void }) {
+  return <CustomSearchBox TextFieldEndAdornment={<FilterButton onToggle={onToggle} />} />;
+}
+
+function MobileFilterDrawer({ show }: { show: boolean }) {
+  return (
+    <Stack sx={{ display: { xs: 'block', md: 'none' } }} style={{ gridArea: 'filters' }}>
+      <AnimateHeight duration={250} height={show ? 'auto' : 0}>
+        <AdminSermonFilters />
+      </AnimateHeight>
+    </Stack>
+  );
+}
+
+const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
+  const { user } = useAuth();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [apiKey, setApiKey] = useState<string | null>(() => (isDevelopment ? 'mock-key' : null));
+  const [showFilters, setShowFilters] = useState<boolean>(false);
+  const userId = user?.uid ?? null;
+  const isAdminUser = user?.isAdmin() ?? false;
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+  if (!user.role || user.role === 'user') {
+    throw new Error('User is not an admin or uploader');
+  }
+
+  useEffect(() => {
+    const initApiKey = async () => {
+      if (isDevelopment || apiKey) {
+        return;
+      }
+      if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
+        throw new Error('Missing Algolia Credentials');
+      }
+      if (isAdminUser) {
+        setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
+      } else if (userId) {
+        const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
+          'generatesecuredapikey'
+        );
+        const securedKey = await generateSecuredApiKey({ userId });
+        setApiKey(securedKey);
+      }
+    };
+    initApiKey();
+  }, [apiKey, userId, isAdminUser]);
+
+  const searchClient = useMemo((): SearchClient | null => {
+    if (isDevelopment) {
+      return createMockAlgoliaSearchClient({
+        userId: userId ?? '',
+        isAdmin: isAdminUser,
+      });
+    }
+    if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
+      return null;
+    }
+    return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
+  }, [apiKey, userId, isAdminUser]);
+
+  const handleFilterToggle = useCallback(() => setShowFilters((prev) => !prev), []);
 
   return (
     <>
       {searchClient ? (
         <InstantSearch searchClient={searchClient} indexName="sermons" future={{ preserveSharedStateOnUnmount: true }}>
-          <Stack justifyContent="center" alignItems="center" gap={2}>
-            <CustomSearchBox TextFieldEndAdornment={<FilterButton />} />
+          <Stack justifyContent="center" alignItems="center" gap={{ xs: 0.5, sm: 1 }}>
+            <MobileFilterSection onToggle={handleFilterToggle} />
             <NoResultsBoundary fallback={<NoResults />}>
               <Box
                 display="grid"
                 gridTemplateAreas={{ xs: `"filters" "results"`, md: `"results filters"` }}
                 gridTemplateColumns={{ xs: '1fr', md: '1fr 300px' }}
                 width={1}
-                // sx={{ flexDirection: { xs: 'column' } }}
               >
                 <SearchResultSermonList gridArea="results" />
-                <Filters sx={{ display: { xs: 'none', md: 'block' } }} />
-                <Stack sx={{ display: { xs: 'block', md: 'none' } }}>
-                  <AnimateHeight duration={250} height={showFilters ? 'auto' : 0} style={{ gridArea: 'filters' }}>
-                    <Filters />
-                  </AnimateHeight>
-                </Stack>
+                {isMobile ? <MobileFilterDrawer show={showFilters} /> : <AdminSermonFilters />}
               </Box>
               <CustomPagination />
             </NoResultsBoundary>

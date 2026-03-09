@@ -1,0 +1,27 @@
+{
+  "name": "functions-image",
+  "private": true,
+  "main": "lib/functions-image/src/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "catalog:",
+    "@google-cloud/storage": "catalog:",
+    "axios": "catalog:",
+    "buffer-image-size": "^0.6.4",
+    "fast-average-color-node": "^3.1.0",
+    "firebase-admin": "catalog:",
+    "firebase-functions": "catalog:",
+    "mkdirp": "catalog:",
+    "node-vibrant": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

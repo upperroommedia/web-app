@@ -1,4 +1,4 @@
-import React, { Dispatch, SetStateAction, memo, useEffect, useState } from 'react';
+import React, { Dispatch, SetStateAction, memo, useEffect, useRef, useState } from 'react';
 import AvatarWithDefaultImage from '../AvatarWithDefaultImage';
 import ListItem from '@mui/material/ListItem';
 import { ISpeaker } from '../../types/Speaker';
@@ -8,14 +8,11 @@ import firestore, { collection, getDocs, query, where } from '../../firebase/fir
 import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import { List, ListType, listConverter } from '../../types/List';
-import dynamic from 'next/dynamic';
 import DOMPurify from 'dompurify';
 import { algoliasearch, SearchResponse } from 'algoliasearch';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { getErrorMessage, showError } from './utils';
-
-const DynamicPopUp = dynamic(() => import('../PopUp'), { ssr: false });
 
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
@@ -60,7 +57,6 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
         speakers.push(hit);
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Search error:', error);
     }
   }
@@ -81,9 +77,8 @@ function SpeakerSelector({
   setSermonList,
   setSpeakerError,
 }: SpeakerSelectorProps) {
-  const [timer, setTimer] = useState<NodeJS.Timeout>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
-  const [speakerHasNoListPopup, setSpeakerHasNoListPopup] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -91,6 +86,14 @@ function SpeakerSelector({
       setSpeakersArray(await fetchSpeakerResults('', 20, 0));
     };
     fetchData();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
   }, []);
 
   return (
@@ -119,8 +122,6 @@ function SpeakerSelector({
             setSermonList((previousList) => {
               return previousList.filter((prevList) => prevList.type !== ListType.SPEAKER_LIST);
             });
-          } else if (reason === 'selectOption' && !details?.option.listId) {
-            setSpeakerHasNoListPopup(true);
           }
 
           if (newValue !== null && newValue.length <= 3) {
@@ -148,6 +149,11 @@ function SpeakerSelector({
               
               if (querySnapshot.docs.length > 0) {
                 const list = querySnapshot.docs[0].data();
+                // Don't add overflow lists to the sermon list
+                if (list.isMoreSermonsList) {
+                  console.warn(`Attempted to add overflow list ${details.option.listId} - skipping`);
+                  return;
+                }
                 setSermonList((oldSermonList) => {
                   if (
                     oldSermonList.find((existingSermon) => {
@@ -159,57 +165,60 @@ function SpeakerSelector({
                   return [...oldSermonList, list];
                 });
               } else {
-                // eslint-disable-next-line no-console
                 console.warn(`No list found with id: ${details.option.listId}`);
-                setSpeakerHasNoListPopup(true);
               }
             }
           }
         }}
-        onInputChange={async (_, value) => {
-          clearTimeout(timer);
-          const newTimer = setTimeout(async () => {
+        onInputChange={(_, value) => {
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+          }
+          timerRef.current = setTimeout(async () => {
             setSpeakersArray(await fetchSpeakerResults(value, 25, 0));
           }, 300);
-          setTimer(newTimer);
         }}
         id="speaker-input"
         options={getSpeakersUnion(sermonSpeakers, speakersArray)}
         isOptionEqualToValue={(option, value) => value === undefined || option === undefined || option.id === value.id}
-        renderTags={(speakers, _) => {
-          return speakers.map((speaker) => (
-            <Chip
-              style={{ margin: '3px' }}
-              onDelete={() => {
-                setSpeakerError(false, '');
-                setSermon((previousSermon) => {
-                  const newImages = previousSermon.images.filter((img) => {
-                    return !speaker.images?.find((image) => image.id === img.id);
+        renderTags={(speakers, getTagProps) => {
+          return speakers.map((speaker, index) => {
+            const { key: _tagKey, ...tagProps } = getTagProps({ index });
+            return (
+              <Chip
+                {...tagProps}
+                onDelete={() => {
+                  setSpeakerError(false, '');
+                  setSermon((previousSermon) => {
+                    const newImages = previousSermon.images.filter((img) => {
+                      return !speaker.images?.find((image) => image.id === img.id);
+                    });
+                    updateSermon('images', newImages);
+                    const previousSpeakers = previousSermon.speakers;
+                    const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
+                    return {
+                      ...previousSermon,
+                      speakers: newSpeakers,
+                    };
                   });
-                  updateSermon('images', newImages);
-                  const previousSpeakers = previousSermon.speakers;
-                  const newSpeakers = previousSpeakers.filter((s) => s.id !== speaker.id);
-                  return {
-                    ...previousSermon,
-                    speakers: newSpeakers,
-                  };
-                });
-                setSermonList((oldSermonList) => oldSermonList.filter((list) => list.id !== speaker.listId));
-              }}
-              key={speaker.id}
-              label={speaker.name}
-              avatar={
-                <AvatarWithDefaultImage
-                  defaultImageURL="/props.user.png"
-                  altName={speaker.name}
-                  width={24}
-                  height={24}
-                  image={speaker.images?.find((image) => image.type === 'square')}
-                  borderRadius={12}
-                />
-              }
-            />
-          ));
+                  setSermonList((oldSermonList) => oldSermonList.filter((list) => list.id !== speaker.listId));
+                }}
+                key={speaker.id}
+                label={speaker.name}
+                sx={{ mr: 0.5, mb: 0.5 }}
+                avatar={
+                  <AvatarWithDefaultImage
+                    defaultImageURL="/props.user.png"
+                    altName={speaker.name}
+                    width={24}
+                    height={24}
+                    image={speaker.images?.find((image) => image.type === 'square')}
+                    borderRadius={12}
+                  />
+                }
+              />
+            );
+          });
         }}
         renderOption={(props, option: AlgoliaSpeaker) => (
           <ListItem {...props}>
@@ -243,9 +252,6 @@ function SpeakerSelector({
           );
         }}
       />
-      <DynamicPopUp title={'Warning'} open={speakerHasNoListPopup} setOpen={setSpeakerHasNoListPopup}>
-        Speaker has no associated list that this sermon will be added to
-      </DynamicPopUp>
     </>
   );
 }

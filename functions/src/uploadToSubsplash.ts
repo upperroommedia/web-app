@@ -1,12 +1,18 @@
 import { logger } from 'firebase-functions/v2';
-import { onCall, CallableRequest } from 'firebase-functions/v2/https';
+import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
 import axios, { AxiosResponse } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '../../types/Speaker';
 import { ImageType } from '../../types/Image';
 import { canUserRolePublish } from '../../types/User';
+import handleError from './handleError';
+import { withIdempotency } from './locks/withIdempotency';
+import { withSubsplashLocks } from './locks/withSubsplashLocks';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
+  operationKey: string;
+  lockKey: string;
   title: string;
   subtitle: string;
   speakers: ISpeaker[];
@@ -45,73 +51,100 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
 const uploadToSubsplash = onCall(async (request: CallableRequest<UPLOAD_TO_SUBSPLASH_INCOMING_DATA>): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
   if (!canUserRolePublish(request.auth?.token.role)) {
-    return { status: 'Not Authorized' };
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
   }
   if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-    return 'Email or Password are not set in .env file';
+    throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
   }
 
   const data = request.data;
+  if (!data || typeof data !== 'object') {
+    throw new HttpsError('invalid-argument', 'Request data is required.');
+  }
+  if (!data.operationKey || !data.operationKey.trim()) {
+    throw new HttpsError('invalid-argument', 'operationKey is required.');
+  }
+  if (!data.lockKey || !data.lockKey.trim()) {
+    throw new HttpsError('invalid-argument', 'lockKey is required.');
+  }
+  const operationKey = data.operationKey.trim();
+  const lockKey = data.lockKey.trim();
   logger.log('data', data);
   try {
-    const bearerToken = await authenticateSubsplash();
-    // create media item with title
-    let tags: string[] = [];
-    if (Array.isArray(data.speakers)) {
-      if (data.speakers.length > 3) {
-        throw new Error('Too many speakers: Max 3 speakers allowed');
-      }
-      tags = tags.concat(data.speakers.map((speaker) => `speaker:${speaker.name}`));
-    }
-    if (Array.isArray(data.topics)) {
-      if (data.topics.length > 10) {
-        throw new Error('Too many topics: Max 10 topics allowed');
-      }
-      tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
-    }
-    // Post the audio and retrieve the audio id
-    const audioId = await createAudioRef(data.audioTitle, bearerToken);
-    logger.info(`Audio ID: ${audioId}`);
-    // transcode the audio from a public url tagged to the audio id
-    const transcodeResponse = await transcodeAudio(data.audioUrl, audioId, bearerToken);
-    logger.info(`Transcode Statues: ${transcodeResponse.data.status}`);
-    // uploadToSubsplash with the audio id
-
-    const requestData = JSON.stringify({
-      app_key: '9XTSHD',
-      scriptures: [],
-      tags: tags,
-      title: data.title,
-      subtitle: data.subtitle,
-      summary: data.description,
-      date: data.date,
-      auto_publish: data.autoPublish ?? false,
-      _embedded: {
-        images: data.images.map((image) => {
-          if (image.subsplashId) {
-            return {
-              id: image.subsplashId,
-              type: image.type,
-            };
+    return await withIdempotency(operationKey, async () =>
+      withSubsplashLocks(
+        [`media-item:${lockKey}`],
+        async () => {
+          const bearerToken = await authenticateSubsplash();
+          // create media item with title
+          let tags: string[] = [];
+          if (Array.isArray(data.speakers)) {
+            if (data.speakers.length > 3) {
+              throw new Error('Too many speakers: Max 3 speakers allowed');
+            }
+            tags = tags.concat(data.speakers.map((speaker) => `speaker:${speaker.name}`));
           }
-          return;
-        }),
-        audio: { id: audioId },
-      },
-    });
-    logger.log('request data', requestData);
-    const config = createAxiosConfig(
-      'https://core.subsplash.com/media/v1/media-items',
-      bearerToken,
-      'POST',
-      requestData
+          if (Array.isArray(data.topics)) {
+            if (data.topics.length > 10) {
+              throw new Error('Too many topics: Max 10 topics allowed');
+            }
+            tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
+          }
+          // Post the audio and retrieve the audio id
+          const audioId = await createAudioRef(data.audioTitle, bearerToken);
+          logger.info(`Audio ID: ${audioId}`);
+          // transcode the audio from a public url tagged to the audio id
+          const transcodeResponse = await transcodeAudio(data.audioUrl, audioId, bearerToken);
+          logger.info(`Transcode Statues: ${transcodeResponse.data.status}`);
+          // uploadToSubsplash with the audio id
+
+          const requestData = JSON.stringify({
+            app_key: '9XTSHD',
+            scriptures: [],
+            tags: tags,
+            title: data.title,
+            subtitle: data.subtitle,
+            summary: data.description,
+            date: data.date,
+            auto_publish: data.autoPublish ?? false,
+            _embedded: {
+              images: data.images.map((image) => {
+                if (image.subsplashId) {
+                  return {
+                    id: image.subsplashId,
+                    type: image.type,
+                  };
+                }
+                return;
+              }),
+              audio: { id: audioId },
+            },
+          });
+          logger.log('request data', requestData);
+          const config = createAxiosConfig(
+            'https://core.subsplash.com/media/v1/media-items',
+            bearerToken,
+            'POST',
+            requestData
+          );
+          return (await axios(config)).data;
+        },
+        { operationKey }
+      )
     );
-    return (await axios(config)).data;
   } catch (error) {
     logger.error(error);
-    let message = 'Unknown Error';
-    if (error instanceof Error) message = error.message;
-    return message;
+    await emitOperationalAlert({
+      alertCode: 'PUBLISH_SUBSPLASH_UPLOAD_RUNTIME_FAILURE',
+      summary: 'uploadToSubsplash callable failed during publish upload flow.',
+      error,
+      context: {
+        functionName: 'uploadToSubsplash',
+        operationKey,
+        lockKey,
+      },
+    });
+    throw handleError(error);
   }
 });
 
