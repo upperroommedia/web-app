@@ -39,14 +39,33 @@ If access is not auto-granted:
 firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging
 ```
 
-## 4. Configure GitHub OIDC for staging deploy workflow
+## 4. Provision staging databases (one-time)
+
+Create Firestore default database:
+
+```bash
+gcloud firestore databases create --project=urm-app-staging --database='(default)' --location=us-central1 --type=firestore-native --quiet
+```
+
+Create Realtime Database instance (used by staging runtime config):
+
+```bash
+ACCESS_TOKEN=$(gcloud auth print-access-token)
+curl -X POST "https://firebasedatabase.googleapis.com/v1beta/projects/251680231116/locations/us-central1/instances?databaseId=urm-app-staging-815ca" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "x-goog-user-project: urm-app-staging" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"USER_DATABASE"}'
+```
+
+## 5. Configure GitHub OIDC for staging deploy workflow
 
 Create a Workload Identity Provider and service account with Firebase deploy permissions, then add these repository secrets:
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 
-## 5. Validate the pipeline
+## 6. Validate the pipeline
 
 1. Open a PR from any feature branch into `staging` and confirm `staging-selective-deploy` passes.
 2. Merge into `staging` and confirm selective deploy executes.
