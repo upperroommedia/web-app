@@ -39,6 +39,31 @@ If access is not auto-granted:
 firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging
 ```
 
+## 3b. Configure Cloud Functions secrets/env (staging)
+
+SoundCloud publishing uses a Functions secret, not App Hosting env vars:
+
+```bash
+firebase functions:secrets:set SOUNDCLOUD_ACCESS_TOKEN --project urm-app-staging
+```
+
+Notes:
+- `SOUNDCLOUD_ACCESS_TOKEN` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
+- App Hosting secrets in `apphosting.staging.yaml` do not automatically flow into Cloud Functions.
+
+## 3c. Enable Google Sign-In in staging Auth (one-time)
+
+If Google provider is not yet enabled in `urm-app-staging`, configure `google.com` default IdP config:
+
+```bash
+ACCESS_TOKEN=$(gcloud auth print-access-token)
+curl -X POST "https://identitytoolkit.googleapis.com/v2/projects/urm-app-staging/defaultSupportedIdpConfigs?idpId=google.com" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "x-goog-user-project: urm-app-staging" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"clientId":"<GOOGLE_OAUTH_CLIENT_ID>","clientSecret":"<GOOGLE_OAUTH_CLIENT_SECRET>"}'
+```
+
 ## 4. Provision staging databases (one-time)
 
 Create Firestore default database:
