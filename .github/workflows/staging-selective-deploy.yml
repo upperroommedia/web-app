@@ -170,6 +170,7 @@ jobs:
 
   deploy-or-skip:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     needs: detect-changes
     steps:
       - name: Publish planned deploy targets
@@ -274,43 +275,43 @@ jobs:
 
           if [[ "$DEPLOY_APPHOSTING" == "true" ]]; then
             cp apphosting.staging.yaml apphosting.yaml
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only apphosting --force
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only apphosting --force --non-interactive
             deployed_targets+=("apphosting:web-staging")
           fi
 
           if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
             deployed_targets+=("firestore:rules")
             deployed_targets+=("firestore:indexes")
           fi
 
           if [[ "$DEPLOY_DATABASE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database --non-interactive
             deployed_targets+=("database")
           fi
 
           if [[ "$DEPLOY_STORAGE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage --non-interactive
             deployed_targets+=("storage")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_CORE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive
             deployed_targets+=("functions:core")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_MEDIA" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive
             deployed_targets+=("functions:media")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_IMAGE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive
             deployed_targets+=("functions:image")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_INTEGRATIONS" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive
             deployed_targets+=("functions:integrations")
           fi
 
