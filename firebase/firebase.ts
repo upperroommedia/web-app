@@ -1,4 +1,3 @@
-/* eslint-disable import/export */
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import {
@@ -15,15 +14,32 @@ export const isDevelopment = process.env.NODE_ENV === 'development';
 const apps = getApps();
 let firebase: FirebaseApp;
 const projectId = getFirebaseProjectId();
+
+interface FirebaseDefaultsConfig {
+  apiKey?: string;
+  appId?: string;
+  messagingSenderId?: string;
+  measurementId?: string;
+}
+
+const getFirebaseDefaultsConfig = (): FirebaseDefaultsConfig => {
+  if (typeof globalThis === 'undefined') {
+    return {};
+  }
+
+  const defaults = (globalThis as { __FIREBASE_DEFAULTS__?: { config?: FirebaseDefaultsConfig } }).__FIREBASE_DEFAULTS__;
+  return defaults?.config ?? {};
+};
 if (!apps.length) {
+  const defaults = getFirebaseDefaultsConfig();
   firebase = initializeApp({
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || 'AIzaSyCJKArKBX02ItsUD1zDJVC6JRA4sho7PTo',
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || defaults.apiKey || '',
     authDomain: getFirebaseAuthDomain(),
     projectId,
     storageBucket: getFirebaseStorageBucket(),
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '747878690617',
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '1:747878690617:web:d29679a2961a60f31b82e8',
-    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || 'G-3PE6CE9N0H',
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || defaults.messagingSenderId || '',
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || defaults.appId || '',
+    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || defaults.measurementId,
     databaseURL: isDevelopment
       ? `http://127.0.0.1:9000/?ns=${projectId}-default-rtdb`
       : getFirebaseDatabaseUrl(),
