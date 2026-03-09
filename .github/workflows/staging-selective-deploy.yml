@@ -251,8 +251,6 @@ jobs:
       - name: Set up pnpm
         if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
         uses: pnpm/action-setup@v4
-        with:
-          version: 10.10.0
 
       - name: Install dependencies
         if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
