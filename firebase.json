@@ -102,6 +102,6 @@
     "singleProjectMode": true
   },
   "extensions": {
-    "firestore-send-email-6emo": "firebase/firestore-send-email@0.2.5"
+    "firestore-send-email-6emo": "firebase/firestore-send-email@0.2.6"
   }
 }
