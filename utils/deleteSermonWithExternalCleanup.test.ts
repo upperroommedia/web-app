@@ -1,9 +1,16 @@
 import { deleteSermonWithExternalCleanup } from './deleteSermonWithExternalCleanup';
 
-const createFunctionV2Mock = jest.fn();
+const createFunctionV2Mock = jest.fn((name: string) => {
+  void name;
+  return undefined as unknown;
+});
 const deleteFromSubsplashMock = jest.fn();
 const deleteFromSoundCloudMock = jest.fn();
-const createOperationKeyMock = jest.fn(() => 'operation-key-123');
+const createOperationKeyMock = jest.fn((scope: string, entityId: string) => {
+  void scope;
+  void entityId;
+  return 'operation-key-123';
+});
 const parseLockBusyDetailsMock = jest.fn((error: unknown) => {
   if (
     error &&
@@ -22,27 +29,38 @@ const formatLockBusyRetryMessageMock = jest.fn((fallbackMessage: string, details
   const retryInSeconds = Math.max(1, Math.ceil(details.retry_after_ms / 1000));
   return `${fallbackMessage} Retry in about ${retryInSeconds}s.`;
 });
-const deleteDocMock = jest.fn();
-const withConverterMock = jest.fn(() => 'sermon-doc-ref');
-const docMock = jest.fn(() => ({
-  withConverter: withConverterMock,
-}));
+const deleteDocMock = jest.fn((docRef: unknown) => {
+  void docRef;
+  return Promise.resolve();
+});
+const withConverterMock = jest.fn((converter: unknown) => {
+  void converter;
+  return 'sermon-doc-ref';
+});
+const docMock = jest.fn((firestore: unknown, collectionName: string, documentId: string) => {
+  void firestore;
+  void collectionName;
+  void documentId;
+  return {
+    withConverter: withConverterMock,
+  };
+});
 
 jest.mock('./createFunction', () => ({
-  createFunctionV2: (...args: unknown[]) => createFunctionV2Mock(...args),
+  createFunctionV2: (...args: Parameters<typeof createFunctionV2Mock>) => createFunctionV2Mock(...args),
 }));
 
 jest.mock('./callableConcurrency', () => ({
-  createOperationKey: (...args: unknown[]) => createOperationKeyMock(...args),
-  parseLockBusyDetails: (...args: unknown[]) => parseLockBusyDetailsMock(...args),
-  formatLockBusyRetryMessage: (...args: unknown[]) => formatLockBusyRetryMessageMock(...args),
+  createOperationKey: (...args: Parameters<typeof createOperationKeyMock>) => createOperationKeyMock(...args),
+  parseLockBusyDetails: (...args: Parameters<typeof parseLockBusyDetailsMock>) => parseLockBusyDetailsMock(...args),
+  formatLockBusyRetryMessage: (...args: Parameters<typeof formatLockBusyRetryMessageMock>) => formatLockBusyRetryMessageMock(...args),
 }));
 
 jest.mock('../firebase/firestore', () => ({
   __esModule: true,
   default: {},
-  deleteDoc: (...args: unknown[]) => deleteDocMock(...args),
-  doc: (...args: unknown[]) => docMock(...args),
+  deleteDoc: (...args: Parameters<typeof deleteDocMock>) => deleteDocMock(...args),
+  doc: (...args: Parameters<typeof docMock>) => docMock(...args),
 }));
 
 describe('deleteSermonWithExternalCleanup', () => {
