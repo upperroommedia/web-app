@@ -3,9 +3,33 @@ const DEFAULT_FUNCTIONS_REGION = 'us-central1';
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 
+type FirebaseConfigEnv = {
+  projectId?: string;
+  databaseURL?: string;
+  storageBucket?: string;
+};
+
+const parseFirebaseConfigEnv = (): FirebaseConfigEnv | null => {
+  const raw = process.env.FIREBASE_CONFIG;
+  if (!raw) return null;
+
+  if (raw.trim().startsWith('{')) {
+    try {
+      return JSON.parse(raw) as FirebaseConfigEnv;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+};
+
+const getFirebaseConfigFromEnv = (): FirebaseConfigEnv => parseFirebaseConfigEnv() ?? {};
+
 export const getFirebaseProjectId = (): string =>
   process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
   process.env.FIREBASE_PROJECT_ID ||
+  getFirebaseConfigFromEnv().projectId ||
   process.env.GCLOUD_PROJECT ||
   DEFAULT_FIREBASE_PROJECT_ID;
 
@@ -15,6 +39,7 @@ export const getFirebaseAuthDomain = (): string =>
 export const getFirebaseStorageBucket = (): string =>
   process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
   process.env.FIREBASE_STORAGE_BUCKET ||
+  getFirebaseConfigFromEnv().storageBucket ||
   `${getFirebaseProjectId()}.appspot.com`;
 
 export const getFirebaseImagesBucket = (): string =>
@@ -25,6 +50,7 @@ export const getFirebaseImagesBucket = (): string =>
 export const getFirebaseDatabaseUrl = (): string =>
   process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
   process.env.FIREBASE_DATABASE_URL ||
+  getFirebaseConfigFromEnv().databaseURL ||
   `https://${getFirebaseProjectId()}-default-rtdb.firebaseio.com/`;
 
 export const getFirebaseFunctionsRegion = (): string =>
