@@ -4,14 +4,6 @@ on:
   push:
     branches:
       - staging
-  pull_request:
-    branches:
-      - staging
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
   workflow_dispatch:
     inputs:
       force_full_redeploy:
@@ -53,10 +45,7 @@ jobs:
       - id: detect
         name: Detect deploy targets from changed files
         env:
-          EVENT_NAME: ${{ github.event_name }}
           BEFORE_SHA: ${{ github.event.before }}
-          BASE_SHA_PR: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA_PR: ${{ github.event.pull_request.head.sha }}
           HEAD_SHA: ${{ github.sha }}
           FORCE_FULL_REDEPLOY: ${{ github.event.inputs.force_full_redeploy || 'false' }}
         run: |
@@ -67,13 +56,8 @@ jobs:
             force_full="false"
           fi
 
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            base_sha="$BASE_SHA_PR"
-            head_sha="$HEAD_SHA_PR"
-          else
-            base_sha="$BEFORE_SHA"
-            head_sha="$HEAD_SHA"
-          fi
+          base_sha="$BEFORE_SHA"
+          head_sha="$HEAD_SHA"
 
           if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
             changed_files="$(git ls-files)"
@@ -211,17 +195,12 @@ jobs:
             echo '\`\`\`'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Skip deployments for PR validation
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "PR validation run only. Deployments execute on push to staging."
-
       - name: Checkout repository
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         uses: actions/checkout@v4
 
       - name: Validate GCP OIDC secrets
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         env:
           PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
@@ -237,28 +216,28 @@ jobs:
           fi
 
       - name: Authenticate to Google Cloud (OIDC)
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up Node.js
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Set up pnpm
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         uses: pnpm/action-setup@v4
 
       - name: Install dependencies
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Deploy selected staging targets
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         env:
           EVENT_NAME: ${{ github.event_name }}
           GITHUB_SHA: ${{ github.sha }}
@@ -389,5 +368,5 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: No-op for non-deployable changes
-        if: github.event_name != 'pull_request' && needs.detect-changes.outputs.anything_to_deploy != 'true'
+        if: needs.detect-changes.outputs.anything_to_deploy != 'true'
         run: echo "No deployable changes detected for staging."
