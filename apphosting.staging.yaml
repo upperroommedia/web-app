@@ -1,0 +1,98 @@
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+  minInstances: 0
+  maxInstances: 20
+  concurrency: 80
+
+env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: urm-app-staging
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: urm-app-staging.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: urm-app-staging.appspot.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_DATABASE_URL
+    value: https://urm-app-staging-default-rtdb.firebaseio.com/
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_FUNCTIONS_URL
+    value: https://us-central1-urm-app-staging.cloudfunctions.net
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_IMAGES_BUCKET
+    value: urm-app-staging-images
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: FIREBASE_PROJECT_ID
+    value: urm-app-staging
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_STORAGE_BUCKET
+    value: urm-app-staging.appspot.com
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_DATABASE_URL
+    value: https://urm-app-staging-default-rtdb.firebaseio.com/
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_IMAGES_BUCKET
+    value: urm-app-staging-images
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_FUNCTIONS_REGION
+    value: us-central1
+    availability:
+      - RUNTIME
+
+  - variable: ROLE_REQUEST_RECIPIENTS
+    secret: ROLE_REQUEST_RECIPIENTS_STAGING
+    availability:
+      - RUNTIME
+  - variable: RUNTIME_ALERT_RECIPIENTS
+    secret: RUNTIME_ALERT_RECIPIENTS_STAGING
+    availability:
+      - RUNTIME
+  - variable: ADMIN_BASE_URL
+    secret: ADMIN_BASE_URL_STAGING
+    availability:
+      - RUNTIME
+  - variable: EMAIL
+    secret: SUBSPLASH_EMAIL_STAGING
+    availability:
+      - RUNTIME
+  - variable: PASSWORD
+    secret: SUBSPLASH_PASSWORD_STAGING
+    availability:
+      - RUNTIME
+  - variable: DOLBY_API_KEY
+    secret: DOLBY_API_KEY_STAGING
+    availability:
+      - RUNTIME
+  - variable: DOLBY_API_SECRET
+    secret: DOLBY_API_SECRET_STAGING
+    availability:
+      - RUNTIME
+  - variable: CLERK_SECRET_KEY
+    secret: CLERK_SECRET_KEY_STAGING
+    availability:
+      - RUNTIME

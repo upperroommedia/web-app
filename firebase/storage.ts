@@ -2,9 +2,10 @@
 /* eslint-disable import/export */
 import { connectStorageEmulator, getStorage } from 'firebase/storage';
 import firebase, { isDevelopment } from './firebase';
+import { getFirebaseImagesBucket } from '../shared/firebaseProjectConfig';
 
 const storage = getStorage(firebase);
-export const imageStorage = getStorage(firebase, 'urm-app-images');
+export const imageStorage = getStorage(firebase, getFirebaseImagesBucket());
 
 if (isDevelopment) {
   console.log('Connecting to Storage emulator');

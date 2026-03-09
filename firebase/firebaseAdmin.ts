@@ -1,6 +1,12 @@
 import * as firebaseAdmin from 'firebase-admin';
+import {
+  getFirebaseDatabaseUrl,
+  getFirebaseProjectId,
+  getFirebaseStorageBucket,
+} from '../shared/firebaseProjectConfig';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
+const projectId = getFirebaseProjectId();
 
 if (!firebaseAdmin.apps.length) {
   if (isDevelopment) {
@@ -9,8 +15,9 @@ if (!firebaseAdmin.apps.length) {
   }
 
   firebaseAdmin.initializeApp({
-    storageBucket: 'urm-app.appspot.com',
-    databaseURL: 'https://urm-app-default-rtdb.firebaseio.com/',
+    projectId,
+    storageBucket: getFirebaseStorageBucket(),
+    databaseURL: getFirebaseDatabaseUrl(),
   });
 }
 export default firebaseAdmin;

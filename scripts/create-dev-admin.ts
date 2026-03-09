@@ -7,6 +7,7 @@
 
 /* eslint-disable no-console */
 import admin from 'firebase-admin';
+import { getFirebaseProjectId } from '../shared/firebaseProjectConfig';
 
 // Set emulator host BEFORE initializing
 process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
@@ -14,7 +15,7 @@ process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 // Initialize without credentials (emulator doesn't need them)
 if (!admin.apps.length) {
   admin.initializeApp({
-    projectId: 'urm-app',
+    projectId: getFirebaseProjectId(),
   });
 }
 

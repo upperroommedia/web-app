@@ -1,5 +1,6 @@
 import functions, { httpsCallable, httpsCallableFromURL } from '../firebase/functions';
 import { isDevelopment } from '../firebase/firebase';
+import { getFirebaseFunctionsBaseUrl, getFirebaseFunctionsEmulatorBaseUrl } from '../shared/firebaseProjectConfig';
 
 export const createFunction = <T = any, R = any>(name: string): ((data: T) => Promise<R>) => {
   const callable = httpsCallable<T, R>(functions, name);
@@ -37,8 +38,8 @@ export const createFunctionV2 = <T = any, R = any, M extends object = CallableMu
   name: string
 ): ((data: T, options?: CallableCallOptions<M>) => Promise<R>) => {
   const url = isDevelopment
-    ? `http://127.0.0.1:5001/urm-app/us-central1/${name}`
-    : `https://${name}-yshbijirxq-uc.a.run.app`;
+    ? `${getFirebaseFunctionsEmulatorBaseUrl()}/${name}`
+    : `${getFirebaseFunctionsBaseUrl()}/${name}`;
   const callable = httpsCallableFromURL<T, R>(functions, url);
   return async (data: T, options?: CallableCallOptions<M>) => {
     const payload = mergeCallableDataWithMetadata(data, options);

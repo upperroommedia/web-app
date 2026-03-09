@@ -63,6 +63,17 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "apphosting": {
+    "backendId": "web-staging",
+    "rootDir": ".",
+    "ignore": [
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      ".next/cache"
+    ]
+  },
   "emulators": {
     "auth": {
       "port": 9099

@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "urm-app"
+    "default": "urm-app",
+    "prod": "urm-app",
+    "staging": "urm-app-staging"
   }
 }

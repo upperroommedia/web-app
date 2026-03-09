@@ -45,7 +45,9 @@ firestore-coverage.html
 .cursor
 .turbo
 .agents
-.github
+.github/*
+!.github/workflows/
+!.github/workflows/*.yml
 
 test-results/
 output/
