@@ -11,7 +11,10 @@
     "test:verbose": "VERBOSE=1 firebase emulators:exec --only auth,firestore,database --config ../firebase.test.json 'pnpm exec jest --forceExit'",
     "test:series-locking:long": "firebase emulators:exec --only auth,firestore,database --config ../firebase.test.json 'pnpm exec jest --forceExit --runInBand --testTimeout=240000 src/test/series/reorderSeriesItems.test.ts src/test/series/bulkAddToSeries.crossCallableLocking.test.ts'",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "build:ci": "pnpm run build",
+    "lint:ci": "pnpm run lint",
+    "test:ci": "pnpm run test"
   },
   "engines": {
     "node": "22"

@@ -6,7 +6,8 @@
     "node": "22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build"
   },
   "dependencies": {
     "@google-cloud/functions-framework": "catalog:",
