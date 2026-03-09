@@ -274,7 +274,7 @@ jobs:
 
           if [[ "$DEPLOY_APPHOSTING" == "true" ]]; then
             cp apphosting.staging.yaml apphosting.yaml
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only apphosting
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only apphosting --force
             deployed_targets+=("apphosting:web-staging")
           fi
 
