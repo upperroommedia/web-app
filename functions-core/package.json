@@ -10,24 +10,24 @@
     "build:ci": "pnpm run build"
   },
   "dependencies": {
-    "@google-cloud/functions-framework": "catalog:",
-    "@google-cloud/storage": "catalog:",
-    "axios": "catalog:",
-    "firebase-admin": "catalog:",
-    "firebase-functions": "catalog:",
-    "form-data": "catalog:",
-    "google-auth-library": "catalog:",
-    "headers": "catalog:",
-    "https-proxy-agent": "catalog:",
-    "image-size": "catalog:",
-    "lodash": "catalog:",
-    "mkdirp": "catalog:",
-    "node-fetch": "catalog:",
-    "p-limit": "catalog:",
+    "@google-cloud/functions-framework": "^3.2.0",
+    "@google-cloud/storage": "7.19.0",
+    "axios": "^1.13.6",
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.1.0",
+    "form-data": "^4.0.0",
+    "google-auth-library": "^9.15.1",
+    "headers": "^0.9.6",
+    "https-proxy-agent": "^7.0.4",
+    "image-size": "^1.1.1",
+    "lodash": "^4.17.23",
+    "mkdirp": "^2.1.6",
+    "node-fetch": "3.3.0",
+    "p-limit": "^6.2.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@types/node": "^18.19.7",
+    "typescript": "^5.9.3"
   }
 }

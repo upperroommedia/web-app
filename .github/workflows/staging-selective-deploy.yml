@@ -357,22 +357,22 @@ jobs:
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_CORE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive --force
             deployed_targets+=("functions:core")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_MEDIA" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive --force
             deployed_targets+=("functions:media")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_IMAGE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive --force
             deployed_targets+=("functions:image")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_INTEGRATIONS" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive
+            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive --force
             deployed_targets+=("functions:integrations")
           fi
 
