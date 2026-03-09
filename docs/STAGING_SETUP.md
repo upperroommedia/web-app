@@ -31,6 +31,7 @@ firebase apphosting:secrets:set SUBSPLASH_PASSWORD_STAGING --project urm-app-sta
 firebase apphosting:secrets:set DOLBY_API_KEY_STAGING --project urm-app-staging
 firebase apphosting:secrets:set DOLBY_API_SECRET_STAGING --project urm-app-staging
 firebase apphosting:secrets:set CLERK_SECRET_KEY_STAGING --project urm-app-staging
+firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY_STAGING --project urm-app-staging
 ```
 
 If access is not auto-granted:

@@ -102,6 +102,11 @@
     "singleProjectMode": true
   },
   "extensions": {
+    "images-index": "algolia/firestore-algolia-search@0.5.14",
+    "lists-index": "algolia/firestore-algolia-search@0.5.14",
+    "sermons-index": "algolia/firestore-algolia-search@0.5.14",
+    "speakers-index": "algolia/firestore-algolia-search@0.5.14",
+    "users-index": "algolia/firestore-algolia-search@0.5.14",
     "firestore-send-email-6emo": "firebase/firestore-send-email@0.2.6"
   }
 }

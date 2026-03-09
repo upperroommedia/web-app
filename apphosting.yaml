@@ -57,6 +57,16 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: NEXT_PUBLIC_ALGOLIA_APP_ID
+    value: PRYE69L8IB
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_ALGOLIA_API_KEY
+    secret: ALGOLIA_SEARCH_API_KEY_STAGING
+    availability:
+      - BUILD
+      - RUNTIME
 
   - variable: FIREBASE_PROJECT_ID
     value: urm-app-staging
@@ -111,3 +121,5 @@ env:
     secret: CLERK_SECRET_KEY_STAGING
     availability:
       - RUNTIME
+  - variable: ALGOLIA_SEARCH_API_KEY_STAGING
+    secret: ALGOLIA_SEARCH_API_KEY_STAGING
