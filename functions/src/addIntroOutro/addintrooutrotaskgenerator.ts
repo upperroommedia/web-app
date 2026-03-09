@@ -10,6 +10,34 @@ import { sermonStatusType } from '../../../types/SermonTypes';
 import { getAudioSource, validateAddIntroOutroData } from './utils';
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 
+const PROCESS_AUDIO_TARGETS = {
+  prod: 'https://process-audio-yshbijirxq-uc.a.run.app/process-audio',
+  staging: 'https://process-audio-staging-pvaq33fxyq-uc.a.run.app/process-audio',
+  local: 'http://127.0.0.1:8080/process-audio',
+};
+
+const getProcessAudioTargetUri = (): string => {
+  if (process.env.FUNCTIONS_EMULATOR === 'true') {
+    logger.debug('Running in development mode');
+    return PROCESS_AUDIO_TARGETS.local;
+  }
+
+  const configuredTarget =
+    process.env.PROCESS_AUDIO_TASK_TARGET_URI ||
+    process.env.PROCESS_AUDIO_SERVICE_URL ||
+    process.env.NEXT_PUBLIC_PROCESS_AUDIO_SERVICE_URL;
+  if (configuredTarget) {
+    return configuredTarget;
+  }
+
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;
+  if (projectId === 'urm-app-staging') {
+    return PROCESS_AUDIO_TARGETS.staging;
+  }
+
+  return PROCESS_AUDIO_TARGETS.prod;
+};
+
 // let auth: GoogleAuth | undefined;
 // /**
 //  * Get the URL of a given v2 cloud function.
@@ -75,15 +103,11 @@ const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddInt
 
     await docRef.update({ 'status.audioStatus': sermonStatusType.PENDING });
     const queue = getFunctions().taskQueue('addintrooutrotaskhandler');
-
-    let targetUri: string;
-
-    if (process.env.FUNCTIONS_EMULATOR === 'true') {
-      logger.debug('Running in development mode');
-      targetUri = 'http://127.0.0.1:8080/process-audio';
-    } else {
-      targetUri = 'https://process-audio-yshbijirxq-uc.a.run.app/process-audio';
-    }
+    const targetUri = getProcessAudioTargetUri();
+    logger.info('Enqueueing add-intro/outro task', {
+      targetUri,
+      projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID,
+    });
 
     const taskOptions: TaskOptions = {
       dispatchDeadlineSeconds: TIMEOUT_SECONDS,
