@@ -71,7 +71,8 @@ pnpm exec firebase emulators:exec --only firestore,auth --config ../firebase.tes
 
 - Pushes to `staging` run `.github/workflows/staging-selective-deploy.yml`.
 - Deploys are path-filtered and target Firebase project `urm-app-staging`.
-- App Hosting deploys use `apphosting.staging.yaml` (copied to `apphosting.yaml` in CI before deploy).
+- App Hosting rollouts are manually triggered by the workflow when app-related paths change.
+- Keep App Hosting automatic rollouts disabled for `web-staging` so staging pushes do not trigger duplicate App Hosting builds.
 - Use `workflow_dispatch` with `force_full_redeploy=true` for a full staging redeploy.
 
 ## Required GitHub Secrets For Staging Deploys

@@ -35,6 +35,7 @@ jobs:
       deploy_functions_media: ${{ steps.detect.outputs.deploy_functions_media }}
       deploy_functions_image: ${{ steps.detect.outputs.deploy_functions_image }}
       deploy_functions_integrations: ${{ steps.detect.outputs.deploy_functions_integrations }}
+      anything_to_run: ${{ steps.detect.outputs.anything_to_run }}
       anything_to_deploy: ${{ steps.detect.outputs.anything_to_deploy }}
       changed_files: ${{ steps.detect.outputs.changed_files }}
     steps:
@@ -102,7 +103,7 @@ jobs:
             deploy_functions_image=true
             deploy_functions_integrations=true
           else
-            if contains_path '^(apphosting\.staging\.yaml|apphosting\.yaml|firebase\.json|next\.config\.js|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|tsconfig\.json|playwright\.config\.ts|components/|pages/|public/|styles/|layout/|context/|hooks/|reducers/|constants/|utils/|extensions/|firebase/|shared/|scripts/|docs/)'; then
+            if contains_path '^(apphosting\.staging\.yaml|apphosting\.yaml|firebase\.json|next\.config\.js|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|tsconfig\.json|playwright\.config\.ts|components/|pages/|public/|styles/|layout/|context/|hooks/|reducers/|constants/|utils/|extensions/|firebase/|shared/|scripts/)'; then
               deploy_apphosting=true
             fi
 
@@ -143,10 +144,12 @@ jobs:
           fi
 
           anything_to_deploy=false
-          # App Hosting rollout is handled by the Firebase App Hosting GitHub app.
-          # This workflow only deploys non-App-Hosting Firebase targets.
+          anything_to_run=false
           if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
             anything_to_deploy=true
+          fi
+          if [[ "$deploy_apphosting" == "true" || "$anything_to_deploy" == "true" ]]; then
+            anything_to_run=true
           fi
 
           {
@@ -158,6 +161,7 @@ jobs:
             echo "deploy_functions_media=$deploy_functions_media"
             echo "deploy_functions_image=$deploy_functions_image"
             echo "deploy_functions_integrations=$deploy_functions_integrations"
+            echo "anything_to_run=$anything_to_run"
             echo "anything_to_deploy=$anything_to_deploy"
             echo "changed_files<<EOF"
             echo "$changed_files"
@@ -180,6 +184,7 @@ jobs:
           DEPLOY_FUNCTIONS_MEDIA: ${{ needs.detect-changes.outputs.deploy_functions_media }}
           DEPLOY_FUNCTIONS_IMAGE: ${{ needs.detect-changes.outputs.deploy_functions_image }}
           DEPLOY_FUNCTIONS_INTEGRATIONS: ${{ needs.detect-changes.outputs.deploy_functions_integrations }}
+          ANYTHING_TO_RUN: ${{ needs.detect-changes.outputs.anything_to_run }}
           ANYTHING_TO_DEPLOY: ${{ needs.detect-changes.outputs.anything_to_deploy }}
           CHANGED_FILES: ${{ needs.detect-changes.outputs.changed_files }}
         run: |
@@ -187,7 +192,7 @@ jobs:
             echo "## Staging Selective Deploy"
             echo ""
             echo "- Event: \`$EVENT_NAME\`"
-            echo "- App Hosting (auto-rollout via Firebase app): \`$DEPLOY_APPHOSTING\`"
+            echo "- App Hosting (manual rollout from this workflow): \`$DEPLOY_APPHOSTING\`"
             echo "- Firestore rules/indexes: \`$DEPLOY_FIRESTORE\`"
             echo "- Realtime Database rules: \`$DEPLOY_DATABASE\`"
             echo "- Storage rules: \`$DEPLOY_STORAGE\`"
@@ -195,7 +200,8 @@ jobs:
             echo "- Functions media: \`$DEPLOY_FUNCTIONS_MEDIA\`"
             echo "- Functions image: \`$DEPLOY_FUNCTIONS_IMAGE\`"
             echo "- Functions integrations: \`$DEPLOY_FUNCTIONS_INTEGRATIONS\`"
-            echo "- Anything to deploy from this workflow (excludes App Hosting): \`$ANYTHING_TO_DEPLOY\`"
+            echo "- Any workflow action needed: \`$ANYTHING_TO_RUN\`"
+            echo "- Firebase deploy targets (excludes App Hosting rollout): \`$ANYTHING_TO_DEPLOY\`"
             echo ""
             echo "### Changed Files"
             echo '\`\`\`'
@@ -208,11 +214,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout repository
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: actions/checkout@v4
 
       - name: Validate GCP OIDC secrets
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         env:
           PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
@@ -228,25 +234,31 @@ jobs:
           fi
 
       - name: Authenticate to Google Cloud (OIDC)
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up Node.js
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Set up pnpm
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: pnpm/action-setup@v4
 
       - name: Install dependencies
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         run: pnpm install --frozen-lockfile
+
+      - name: Trigger App Hosting rollout
+        if: needs.detect-changes.outputs.deploy_apphosting == 'true'
+        run: |
+          set -euo pipefail
+          pnpm exec firebase apphosting:rollouts:create web-staging --project "$FIREBASE_PROJECT" --git-commit "$GITHUB_SHA" --force
 
       - name: Deploy selected staging targets
         if: needs.detect-changes.outputs.anything_to_deploy == 'true'
@@ -313,5 +325,5 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: No-op for non-deployable changes
-        if: needs.detect-changes.outputs.anything_to_deploy != 'true'
+        if: needs.detect-changes.outputs.anything_to_run != 'true'
         run: echo "No deployable changes detected for staging."
