@@ -18,6 +18,13 @@ firebase apphosting:backends:create --project urm-app-staging --location us-cent
 
 When prompted, set backend id to `web-staging` and root dir to repository root (`.`).
 
+## 2b. Disable automatic App Hosting rollouts (required)
+
+Disable automatic rollouts for backend `web-staging` in Firebase Console so App Hosting only deploys when the staging workflow explicitly triggers a rollout:
+
+- Open App Hosting backend settings for `web-staging`.
+- Turn off automatic rollouts.
+
 ## 3. Configure App Hosting secrets for `apphosting.staging.yaml`
 
 Create/grant each secret in `urm-app-staging`:
@@ -112,5 +119,6 @@ Create a Workload Identity Provider and service account with Firebase deploy per
 
 1. Open a PR from any feature branch into `staging` and confirm `staging-selective-deploy` passes.
 2. Merge into `staging` and confirm selective deploy executes.
-3. Open PR `staging -> main` and confirm `main-from-staging` passes.
-4. Open PR `feature -> main` and confirm `main-from-staging` fails.
+3. Confirm App Hosting rollout is triggered only when app-related files change.
+4. Open PR `staging -> main` and confirm `main-from-staging` passes.
+5. Open PR `feature -> main` and confirm `main-from-staging` fails.
