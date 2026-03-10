@@ -1,6 +1,6 @@
 type RequiredEnvVar = 'ROLE_REQUEST_RECIPIENTS' | 'RUNTIME_ALERT_RECIPIENTS' | 'ADMIN_BASE_URL';
 const STAGING_PROJECT_ID = 'urm-app-staging';
-const STAGING_ADMIN_BASE_URL = 'https://web-staging--urm-app-staging.us-central1.hosted.app';
+const STAGING_ADMIN_BASE_URL = 'https://staging.uploader.upperroommedia.org';
 
 export type AppEnv = {
   roleRequestRecipients: string[];

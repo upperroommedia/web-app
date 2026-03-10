@@ -37,7 +37,7 @@ firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY_STAGING --project urm-app
 If access is not auto-granted:
 
 ```bash
-firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging
+firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging --backend web-staging
 ```
 
 ## 3b. Configure Cloud Functions secrets/env (staging)
