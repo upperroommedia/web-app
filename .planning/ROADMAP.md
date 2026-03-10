@@ -7,7 +7,7 @@ This roadmap tracks active GSD-managed work on top of an already substantial bro
 ## Milestones
 
 - ✅ **Pre-GSD Product Foundation** - Existing platform capabilities established before current planning cycle
-- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-4 (in progress)
+- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-5 (in progress)
 - 📋 **v1.1 Platform Hardening (Candidate)** - Security/reliability simplification work to be phased next
 
 ## Phases
@@ -67,6 +67,7 @@ Plans:
 | 2. Dev External API Mocking | 0/1 | In progress | - |
 | 3. Subsplash alpha-lock concurrency control | 7/7 | Complete | 2026-03-08 |
 | 4. Role-based invite onboarding and operational notification routing | 5/5 | Complete | 2026-03-01 |
+| 5. Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association | 1/2 | In progress | - |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 
@@ -125,5 +126,5 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Implement backend `managespeaker` callable CRUD with optional speaker-list association and square-image contract tests
+- [x] 05-01-PLAN.md — Implement backend `createspeaker`/`updatespeaker`/`deletespeaker` callables with optional speaker-list association and square-image contract tests
 - [ ] 05-02-PLAN.md — Add admin Speakers top-button popup flow, callable wiring, and exact success popup link/instruction contract

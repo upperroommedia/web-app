@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
-current_phase: 03-subsplash-alpha-lock-concurrency-control
-status: planning
-last_updated: "2026-03-08T00:44:25.997Z"
-last_activity: 2026-03-08 - Completed phase 03 plan 07 caller lock-busy cleanup contract + LOCK traceability closure
+current_phase: 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
+status: executing
+last_updated: "2026-03-10T04:19:27Z"
+last_activity: 2026-03-10 - Completed phase 05 plan 01 backend speaker CRUD callables + regression coverage
 progress:
-  total_phases: 3
+  total_phases: 5
   completed_phases: 3
-  total_plans: 14
-  completed_plans: 14
+  total_plans: 18
+  completed_plans: 15
 ---
 
 # Session State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Resume Phase 02 execution (`02-01`) now that Phase 03 lock-concurrency verification closure is complete.
+**Current focus:** Continue Phase 05 execution with `05-02` after completing backend speaker CRUD callables and regression tests in `05-01`.
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
-**Current phase:** 03-subsplash-alpha-lock-concurrency-control
-**Status:** Ready to plan
-**Last activity:** 2026-03-08 - Completed phase 03 plan 07 caller lock-busy cleanup contract + LOCK traceability closure
+**Current phase:** 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
+**Status:** Executing
+**Last activity:** 2026-03-10 - Completed phase 05 plan 01 backend speaker CRUD callables + regression coverage
 
 ## Decisions
 
@@ -70,6 +70,9 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: Series-list delete callables now include deterministic operationKey payloads and lock-busy retry guidance.
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: deleteSermonWithExternalCleanup now fails fast and preserves callable code/details via ExternalCleanupError for UI contention handling.
 - [Phase 03-subsplash-alpha-lock-concurrency-control]: LOCK-01..LOCK-05 definitions and traceability rows are restored as complete in REQUIREMENTS.md.
+- [Phase 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association]: Speaker CRUD uses separate createspeaker/updatespeaker/deletespeaker callables with shared validation/mutation helpers.
+- [Phase 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association]: List side effects are explicit booleans only: createSpeakerList for create/update and deleteAssociatedList for delete.
+- [Phase 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association]: Speaker-list creation reuses createNewSubsplashList and persists Firestore ListType.SPEAKER_LIST linked via speaker.listId.
 
 ## Accumulated Context
 
@@ -110,3 +113,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-01: Completed 04-role-based-invite-onboarding-and-operational-notification-routing/04-04 with callable export wiring, admin invite UX, and invite claim onboarding routes.
 - 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-06 with bulkAddToSeries lock/idempotency migration, stale-snapshot guard, and caller intent-scoped retry keys.
 - 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-07 with delete caller operation-key adoption, lock-busy retry UX wiring, and LOCK requirements traceability restoration.
+- 2026-03-10: Completed 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association/05-01 with separate createspeaker/updatespeaker/deletespeaker callables, shared speaker mutation orchestration, and emulator CRUD regression coverage.
