@@ -6,13 +6,13 @@
 
 ## Summary
 
-This phase should be planned as one new backend callable command surface plus one new admin popup flow on `pages/admin/speakers.tsx`. The codebase already has speaker read/listing UI, image selection/upload UX (`ImageViewer` + `ImageSelector`), list creation primitives (`createNewSubsplashList`), and lock/idempotency utilities (`withSubsplashLocks`, `withIdempotency`). The missing piece is a consistent mutation boundary for speaker create/update/delete and optional list association.
+This phase should be planned as three backend callable endpoints (`createspeaker`, `updatespeaker`, `deletespeaker`) plus one new admin popup flow on `pages/admin/speakers.tsx`. The codebase already has speaker read/listing UI, image selection/upload UX (`ImageViewer` + `ImageSelector`), list creation primitives (`createNewSubsplashList`), and lock/idempotency utilities (`withSubsplashLocks`, `withIdempotency`). The missing piece is a consistent mutation boundary for speaker create/update/delete and optional list association.
 
-The safest approach is to make a single callable (command-style CRUD) the source of truth for mutations, and stop adding direct client writes for new speaker lifecycle paths. For optional speaker-list association, reuse existing list creation behavior and set `ListType.SPEAKER_LIST`, storing `speaker.listId` and `list.subsplashId` together in one transactional flow where possible.
+The safest approach is to make separate create/update/delete callables the source of truth for mutations, and stop adding direct client writes for new speaker lifecycle paths. For optional speaker-list association, reuse existing list creation behavior and set `ListType.SPEAKER_LIST`, storing `speaker.listId` and `list.subsplashId` together in one transactional flow where possible.
 
 A strict UX requirement from scope must be treated as contract-level acceptance criteria: when a speaker list is created, show a success popup containing the exact provided URL and instruction text (verbatim, including spelling).
 
-**Primary recommendation:** Implement `managespeaker` callable commands (`create`, `update`, `delete`) with idempotency + lock metadata support, wire a new `Create Speaker` popup at the top of `/admin/speakers`, and keep the optional list-association + success-popup copy as explicit non-negotiable output behavior.
+**Primary recommendation:** Implement `createspeaker`, `updatespeaker`, and `deletespeaker` callables with idempotency + lock metadata support, wire a new `Create Speaker` popup at the top of `/admin/speakers`, and keep the optional list-association + success-popup copy as explicit non-negotiable output behavior.
 
 ## Standard Stack
 
@@ -35,7 +35,7 @@ A strict UX requirement from scope must be treated as contract-level acceptance 
 ### Alternatives Considered
 | Instead of | Could Use | Tradeoff |
 |------------|-----------|----------|
-| Single command callable (`managespeaker`) | Separate callables (`createspeaker`, `updatespeaker`, `deletespeaker`) | Separate endpoints are simpler to reason about, but the prompt explicitly asks for CRUD commands; command API matches requirement wording |
+| Single command callable (`managespeaker`) | Separate callables (`createspeaker`, `updatespeaker`, `deletespeaker`) | Separate endpoints align better with established convention for explicit CRUD boundaries |
 | Backend mutations (selected) | Keep direct client `updateDoc` writes | Client-direct writes are harder to enforce for cross-resource operations (speaker + list + optional Subsplash side effects) |
 | Reuse existing popup/image primitives (selected) | Build new custom modal/image flow | Adds UI debt and duplicates behavior already used in lists/speaker details |
 
@@ -50,10 +50,12 @@ A strict UX requirement from scope must be treated as contract-level acceptance 
 ```text
 functions/src/
 ├── speakers/
-│   ├── manageSpeaker.ts            # onCall command handler (create/update/delete)
-│   ├── speakerTypes.ts             # command payload/result types
+│   ├── createSpeaker.ts            # onCall create handler
+│   ├── updateSpeaker.ts            # onCall update handler
+│   ├── deleteSpeaker.ts            # onCall delete handler
+│   ├── createSpeakerTypes.ts       # shared payload/result types
 │   └── speakerMutations.ts         # Firestore + optional list/subsplash orchestration
-└── index.ts                        # exports.managespeaker = managespeaker
+└── index.ts                        # exports.createspeaker / exports.updatespeaker / exports.deletespeaker
 
 components/
 ├── CreateSpeakerPopup.tsx          # new popup with speaker form + optional create-list toggle
@@ -63,8 +65,8 @@ pages/admin/
 └── speakers.tsx                    # owns popup open/close and list refresh
 ```
 
-### Pattern 1: Command-Style Callable Contract
-**What:** One callable with discriminated command payloads (`create`/`update`/`delete`).
+### Pattern 1: Separate Callable Contracts by Operation
+**What:** Individual callables for create/update/delete with shared validation helpers.
 **When to use:** All speaker mutations from admin page.
 **Example:**
 ```typescript
@@ -72,33 +74,27 @@ pages/admin/
 // https://firebase.google.com/docs/functions/callable
 // Source pattern in repo: functions/src/createSeries.ts
 
-type ManageSpeakerCommand =
-  | {
-      command: 'create';
-      speaker: {
-        name: string;
-        images: ImageType[];
-        sermonCount?: number;
-      };
-      createSpeakerList?: boolean;
-      operationKey?: string;
-    }
-  | {
-      command: 'update';
-      speakerId: string;
-      patch: Partial<Pick<ISpeaker, 'name' | 'images' | 'listId'>>;
-      operationKey?: string;
-    }
-  | {
-      command: 'delete';
-      speakerId: string;
-      deleteAssociatedList?: boolean;
-      operationKey?: string;
-    };
+interface CreateSpeakerInput {
+  speaker: { name: string; images: ImageType[]; sermonCount?: number };
+  createSpeakerList?: boolean;
+  operationKey?: string;
+}
+
+interface UpdateSpeakerInput {
+  speakerId: string;
+  patch: Partial<Pick<ISpeaker, 'name' | 'images' | 'listId'>>;
+  operationKey?: string;
+}
+
+interface DeleteSpeakerInput {
+  speakerId: string;
+  deleteAssociatedList?: boolean;
+  operationKey?: string;
+}
 ```
 
 ### Pattern 2: Single Create Flow With Optional List Association
-**What:** For `create` command, write speaker record and (if selected) create list + attach `listId` in same logical operation.
+**What:** In `createspeaker`, write speaker record and (if selected) create list + attach `listId` in same logical operation.
 **When to use:** Admin creates a new speaker from popup.
 **Example:**
 ```typescript
@@ -124,7 +120,7 @@ if (input.createSpeakerList) {
 
 ### Pattern 3: Strict UI Contract for Success Popup
 **What:** Show exact URL + exact instruction string when list is created.
-**When to use:** Create command returns `speakerListCreated === true`.
+**When to use:** `createspeaker` returns `speakerListCreated === true`.
 **Example:**
 ```typescript
 const SUBSPLASH_LIST_LINK =
@@ -136,7 +132,7 @@ const INSTRUCTION =
 
 ### Pattern 4: Reuse Existing Lock/Idempotency Metadata Path
 **What:** Accept `operationKey` and pass into lock/idempotency wrappers when remote list operations occur.
-**When to use:** Create/update/delete commands that call Subsplash endpoints.
+**When to use:** `createspeaker`, `updatespeaker`, and `deletespeaker` when they call Subsplash endpoints.
 **Example:**
 ```typescript
 // Source pattern in repo: functions/src/createSeries.ts, functions/src/createNewSubsplashList.ts
@@ -185,7 +181,7 @@ return withIdempotency(operationKey, async () =>
 ### Pitfall 4: No Regression Coverage for Speaker Admin Flow
 **What goes wrong:** CRUD behavior regresses silently (especially optional list path).
 **Why it happens:** Current repo has no meaningful speaker-specific test coverage.
-**How to avoid:** Add new function tests for each command path and at least one UI integration test for popup create flow.
+**How to avoid:** Add new function tests for each callable path and at least one UI integration test for popup create flow.
 **Warning signs:** Manual-only validation and repeated break/fix cycles.
 
 ### Pitfall 5: Hidden Contract Drift in Success Popup Copy
@@ -198,7 +194,7 @@ return withIdempotency(operationKey, async () =>
 
 Verified patterns from official and repo sources:
 
-### Callable Command Wrapper (v2)
+### Callable Endpoint Wrapper (v2)
 ```typescript
 // Source: https://firebase.google.com/docs/functions/callable
 // Source: functions/src/createSeries.ts
@@ -209,21 +205,8 @@ export default onCall(async (request) => {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
   }
 
-  const data = request.data;
-  if (!data?.command) {
-    throw new HttpsError('invalid-argument', 'command is required.');
-  }
-
-  switch (data.command) {
-    case 'create':
-      return handleCreate(data);
-    case 'update':
-      return handleUpdate(data);
-    case 'delete':
-      return handleDelete(data);
-    default:
-      throw new HttpsError('invalid-argument', `Unsupported command: ${data.command}`);
-  }
+  const data = request.data as CreateSpeakerInput;
+  return handleCreate(data);
 });
 ```
 
@@ -259,7 +242,7 @@ await firestore.runTransaction(async (tx) => {
 
 | Old Approach | Current Approach | When Changed | Impact |
 |--------------|------------------|--------------|--------|
-| Speaker mutations done directly from client Firestore writes (`updateDoc` in table/details flows) | Server-owned callable mutation boundary with command semantics | Phase 5 target | Better consistency, auditability, and multi-resource safety |
+| Speaker mutations done directly from client Firestore writes (`updateDoc` in table/details flows) | Server-owned callable mutation boundary with separate create/update/delete endpoints | Phase 5 target | Better consistency, auditability, and multi-resource safety |
 | Speaker list link behavior mostly inherited from imported Subsplash data | Explicit optional list creation during speaker create | Phase 5 target | Predictable onboarding for new speakers |
 | Ad hoc admin alerts for side effects | Structured create response + required success popup contract | Phase 5 target | Clear operator guidance and deterministic UX |
 
