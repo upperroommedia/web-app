@@ -67,7 +67,7 @@ Plans:
 | 2. Dev External API Mocking | 0/1 | In progress | - |
 | 3. Subsplash alpha-lock concurrency control | 7/7 | Complete | 2026-03-08 |
 | 4. Role-based invite onboarding and operational notification routing | 5/5 | Complete | 2026-03-01 |
-| 5. Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association | 1/2 | In progress | - |
+| 5. Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association | 2/2 | Complete | 2026-03-10 |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 
@@ -127,4 +127,4 @@ Plans:
 
 Plans:
 - [x] 05-01-PLAN.md — Implement backend `createspeaker`/`updatespeaker`/`deletespeaker` callables with optional speaker-list association and square-image contract tests
-- [ ] 05-02-PLAN.md — Add admin Speakers top-button popup flow, callable wiring, and exact success popup link/instruction contract
+- [x] 05-02-PLAN.md — Add admin Speakers top-button popup flow, callable wiring, and exact success popup link/instruction contract

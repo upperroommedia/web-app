@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
 status: executing
-last_updated: "2026-03-10T04:19:27Z"
-last_activity: 2026-03-10 - Completed phase 05 plan 01 backend speaker CRUD callables + regression coverage
+last_updated: "2026-03-10T04:28:59.206Z"
+last_activity: 2026-03-10 - Completed phase 05 plan 02 admin speaker popup create flow + callable wiring
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 18
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Session State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Continue Phase 05 execution with `05-02` after completing backend speaker CRUD callables and regression tests in `05-01`.
+**Current focus:** Phase 05 complete; continue milestone execution from remaining open work.
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
 **Status:** Executing
-**Last activity:** 2026-03-10 - Completed phase 05 plan 01 backend speaker CRUD callables + regression coverage
+**Last activity:** 2026-03-10 - Completed phase 05 plan 02 admin speaker popup create flow + callable wiring
 
 ## Decisions
 
@@ -73,6 +73,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association]: Speaker CRUD uses separate createspeaker/updatespeaker/deletespeaker callables with shared validation/mutation helpers.
 - [Phase 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association]: List side effects are explicit booleans only: createSpeakerList for create/update and deleteAssociatedList for delete.
 - [Phase 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association]: Speaker-list creation reuses createNewSubsplashList and persists Firestore ListType.SPEAKER_LIST linked via speaker.listId.
+- [Phase 05]: Use createFunctionV2('createspeaker') from pages/admin/speakers.tsx and keep popup as a reusable form component.
+- [Phase 05]: Treat required speaker-list success copy/link as constants exported from a single helper and reuse those in UI.
 
 ## Accumulated Context
 
@@ -114,3 +116,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-06 with bulkAddToSeries lock/idempotency migration, stale-snapshot guard, and caller intent-scoped retry keys.
 - 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-07 with delete caller operation-key adoption, lock-busy retry UX wiring, and LOCK requirements traceability restoration.
 - 2026-03-10: Completed 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association/05-01 with separate createspeaker/updatespeaker/deletespeaker callables, shared speaker mutation orchestration, and emulator CRUD regression coverage.
+- 2026-03-10: Completed 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association/05-02 with admin add-speaker popup create flow, createspeaker callable wiring, and required list-success copy/link contract enforcement.
