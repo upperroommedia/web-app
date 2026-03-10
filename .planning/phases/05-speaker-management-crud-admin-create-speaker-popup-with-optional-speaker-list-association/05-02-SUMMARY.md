@@ -60,6 +60,8 @@ Each task was committed atomically:
 2. **Task 2: Implement Create Speaker popup component with full speaker inputs and optional list association** - `3ef6e9dc` (feat)
 3. **Task 3: Wire Add Speaker top-button flow, callable submit, local state refresh, and success popup** - `50432c66` (feat)
 
+**Plan metadata:** `8e38620a` (docs)
+
 ## Files Created/Modified
 - `utils/speakers/createSpeakerClient.ts` - Exposes exact required success link/copy constants plus payload/response helpers.
 - `utils/speakers/createSpeakerClient.test.ts` - Locks exact required copy/link and payload mapping contract with Jest coverage.
