@@ -77,6 +77,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 - Phase 3 added: Subsplash alpha-lock concurrency control
 - Phase 4 added: Role-based invite onboarding and operational notification routing
+- Phase 5 added: Speaker management CRUD + admin create speaker popup with optional speaker list association
 
 ## Blockers
 
