@@ -1,5 +1,9 @@
 import Box from '@mui/material/Box';
+import Link from '@mui/material/Link';
+import Typography from '@mui/material/Typography';
 import { ChangeEvent, useEffect, useState } from 'react';
+import CreateSpeakerPopup, { CreateSpeakerFormValues } from '../../components/CreateSpeakerPopup';
+import PopUp from '../../components/PopUp';
 import SpeakerTable from '../../components/SpeakerTable';
 import { Order } from '../../context/types';
 import firestore, {
@@ -18,6 +22,21 @@ import AppLayout from '../../layout/AppLayout';
 import { ISpeaker, speakerConverter } from '../../types/Speaker';
 import useAuth from '../../context/user/UserContext';
 import { fetchSpeakerResults } from '../../components/uploaderComponents/SpeakerSelector';
+import { createFunctionV2 } from '../../utils/createFunction';
+import {
+  buildCreateSpeakerPayload,
+  SPEAKER_LIST_SUCCESS_INSTRUCTION,
+  SUBSPLASH_SPEAKER_LIST_LINK,
+  shouldShowSpeakerListSuccess,
+} from '../../utils/speakers/createSpeakerClient';
+import {
+  CreateSpeakerCallableInputType,
+  CreateSpeakerCallableOutputType,
+} from '../../functions/src/speakers/createSpeakerTypes';
+
+const createSpeakerCallable = createFunctionV2<CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType>(
+  'createspeaker'
+);
 
 const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
@@ -29,6 +48,8 @@ const AdminSpeakers = () => {
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
   const [queryState, setQueryState] = useState<Query<DocumentData>>();
   const [totalSpeakers, setTotalSpeakers] = useState<number>(0);
+  const [createSpeakerPopupOpen, setCreateSpeakerPopupOpen] = useState<boolean>(false);
+  const [speakerListSuccessPopupOpen, setSpeakerListSuccessPopupOpen] = useState<boolean>(false);
 
   const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
@@ -166,6 +187,27 @@ const AdminSpeakers = () => {
     setTimer(newTimer);
   };
 
+  const handleCreateSpeaker = async (values: CreateSpeakerFormValues) => {
+    const payload = buildCreateSpeakerPayload({
+      name: values.name,
+      sermonCount: values.sermonCount,
+      images: values.images,
+      createSpeakerList: values.createSpeakerList,
+    });
+
+    const response = await createSpeakerCallable(payload);
+    setSpeakers((oldSpeakers) => [response.speaker, ...oldSpeakers.filter((speaker) => speaker.id !== response.speaker.id)]);
+    setTotalSpeakers((oldTotalSpeakers) => oldTotalSpeakers + 1);
+    setSpeakerInput('');
+    setPage(0);
+    setVisitedPages([0]);
+    setLastSpeaker(undefined);
+
+    if (shouldShowSpeakerListSuccess(response)) {
+      setSpeakerListSuccessPopupOpen(true);
+    }
+  };
+
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
       <SpeakerTable
@@ -185,8 +227,22 @@ const AdminSpeakers = () => {
         setSortProperty={setSortProperty}
         searchValue={speakerInput}
         onSearchChange={handleSearchChange}
+        onAddSpeaker={() => setCreateSpeakerPopupOpen(true)}
         loading={speakersLoading}
       />
+      <CreateSpeakerPopup
+        open={createSpeakerPopupOpen}
+        setOpen={setCreateSpeakerPopupOpen}
+        onSubmit={handleCreateSpeaker}
+      />
+      <PopUp title="Speaker list created" open={speakerListSuccessPopupOpen} setOpen={setSpeakerListSuccessPopupOpen}>
+        <Box display="flex" flexDirection="column" gap={2} sx={{ py: 1 }}>
+          <Typography>{SPEAKER_LIST_SUCCESS_INSTRUCTION}</Typography>
+          <Link href={SUBSPLASH_SPEAKER_LIST_LINK} target="_blank" rel="noreferrer">
+            {SUBSPLASH_SPEAKER_LIST_LINK}
+          </Link>
+        </Box>
+      </PopUp>
     </Box>
   );
 };

@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { ChangeEvent, useEffect, useState, Dispatch, SetStateAction, useCallback } from 'react';
+import { ChangeEvent, useState, Dispatch, SetStateAction, useCallback, MouseEvent } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -17,6 +17,8 @@ import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
 import SearchIcon from '@mui/icons-material/Search';
 import CircularProgress from '@mui/material/CircularProgress';
+import Button from '@mui/material/Button';
+import AddIcon from '@mui/icons-material/Add';
 import { ISpeaker, speakerConverter } from '../types/Speaker';
 import { visuallyHidden } from '@mui/utils';
 // import FormGroup from '@mui/material/FormGroup';
@@ -66,7 +68,7 @@ const headCells: readonly HeadCell[] = [
 ];
 
 interface SpeakerTableProps {
-  onRequestSort: (event: any, property: keyof ISpeaker) => void;
+  onRequestSort: (event: MouseEvent<HTMLElement>, property: keyof ISpeaker) => void;
   order: Order;
   orderBy: string;
   rowCount: number;
@@ -74,7 +76,7 @@ interface SpeakerTableProps {
 
 const SpeakerTableHead = (props: SpeakerTableProps) => {
   const { order, orderBy, onRequestSort } = props;
-  const createSortHandler = (property: keyof ISpeaker) => (event: any) => {
+  const createSortHandler = (property: keyof ISpeaker) => (event: MouseEvent<HTMLElement>) => {
     onRequestSort(event, property);
   };
 
@@ -127,9 +129,10 @@ export interface Filters {
 interface SpeakerTableToolbarProps {
   searchValue: string;
   onSearchChange: (value: string) => void;
+  onAddSpeaker: () => void;
 }
 
-const SpeakerTableToolbar = ({ searchValue, onSearchChange }: SpeakerTableToolbarProps) => {
+const SpeakerTableToolbar = ({ searchValue, onSearchChange, onAddSpeaker }: SpeakerTableToolbarProps) => {
   return (
     <Toolbar
       sx={{
@@ -156,6 +159,9 @@ const SpeakerTableToolbar = ({ searchValue, onSearchChange }: SpeakerTableToolba
           ),
         }}
       />
+      <Button variant="contained" startIcon={<AddIcon />} onClick={onAddSpeaker}>
+        Add Speaker
+      </Button>
     </Toolbar>
   );
 };
@@ -179,11 +185,9 @@ const SpeakerTable = (props: {
   setSortProperty: Dispatch<SetStateAction<keyof ISpeaker>>;
   searchValue: string;
   onSearchChange: (value: string) => void;
+  onAddSpeaker: () => void;
   loading?: boolean;
 }) => {
-  const [filteredSpeakers, setFilteredSpeakers] = useState<ISpeaker[]>(props.speakers);
-  // const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
-
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
 
   const [speakerDetailsPopup, setSpeakerDetailsPopup] = useState<boolean>(false);
@@ -288,7 +292,7 @@ const SpeakerTable = (props: {
     [removeImage, setSpeakerImage]
   );
 
-  const handleRequestSort = async (_: any, property: keyof ISpeaker) => {
+  const handleRequestSort = async (_: MouseEvent<HTMLElement>, property: keyof ISpeaker) => {
     const isAsc = props.sortOrder === 'asc';
     props.setSortOrder(isAsc ? 'desc' : 'asc');
     props.setSortProperty(property);
@@ -333,10 +337,6 @@ const SpeakerTable = (props: {
     setSpeakerDetailsPopup(true);
   };
 
-  useEffect(() => {
-    setFilteredSpeakers(props.speakers);
-  }, [props.speakers]);
-
   // useEffect(() => {
   //   handleRequestFilter();
   // }, [filters]);
@@ -345,14 +345,18 @@ const SpeakerTable = (props: {
     <>
       <Box width={1} display="flex" justifyContent="center">
         <Card sx={{ width: 1 }}>
-          <SpeakerTableToolbar searchValue={props.searchValue} onSearchChange={props.onSearchChange} />
+          <SpeakerTableToolbar
+            searchValue={props.searchValue}
+            onSearchChange={props.onSearchChange}
+            onAddSpeaker={props.onAddSpeaker}
+          />
           <TableContainer>
             <Table sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={'medium'}>
               <SpeakerTableHead
                 order={props.sortOrder}
                 orderBy={props.sortProperty}
                 onRequestSort={handleRequestSort}
-                rowCount={filteredSpeakers.length}
+                rowCount={props.speakers.length}
               />
               <TableBody>
                 {props.loading ? (
