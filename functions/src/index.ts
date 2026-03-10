@@ -58,6 +58,9 @@ import claiminvite from './invites/claimInvite';
 import listinvites from './invites/listInvites';
 import revokeinvite from './invites/revokeInvite';
 import resendinvite from './invites/resendInvite';
+import createspeaker from './speakers/createSpeaker';
+import updatespeaker from './speakers/updateSpeaker';
+import deletespeaker from './speakers/deleteSpeaker';
 
 // Series functions
 import createseries from './createSeries';
@@ -127,6 +130,9 @@ exports.claiminvite = claiminvite;
 exports.listinvites = listinvites;
 exports.revokeinvite = revokeinvite;
 exports.resendinvite = resendinvite;
+exports.createspeaker = createspeaker;
+exports.updatespeaker = updatespeaker;
+exports.deletespeaker = deletespeaker;
 
 // Series exports
 exports.createseries = createseries;
