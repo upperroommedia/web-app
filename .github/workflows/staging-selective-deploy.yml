@@ -258,7 +258,25 @@ jobs:
         if: needs.detect-changes.outputs.deploy_apphosting == 'true'
         run: |
           set -euo pipefail
-          pnpm exec firebase apphosting:rollouts:create web-staging --project "$FIREBASE_PROJECT" --git-commit "$GITHUB_SHA" --force
+          set +e
+          rollout_output="$(pnpm exec firebase apphosting:rollouts:create web-staging --project "$FIREBASE_PROJECT" --git-commit "$GITHUB_SHA" --force 2>&1)"
+          rollout_status=$?
+          set -e
+
+          echo "$rollout_output"
+
+          if [[ $rollout_status -eq 0 ]]; then
+            exit 0
+          fi
+
+          # If automatic App Hosting rollout has already started for this commit,
+          # avoid failing CI on duplicate rollout creation attempts.
+          if echo "$rollout_output" | grep -Eiq '(unable to queue the operation|already.*operation|HTTP Error: 409)'; then
+            echo "An App Hosting rollout is already in progress. Continuing without failing."
+            exit 0
+          fi
+
+          exit $rollout_status
 
       - name: Deploy selected staging targets
         if: needs.detect-changes.outputs.anything_to_deploy == 'true'
