@@ -50,7 +50,7 @@ export default function BibleChapterSelector({
           const search = new LocalSearch(chaptersFromBundle, 'name', 'bible chapters');
           setBibleChapterSearch(search);
         } catch (error) {
-          // eslint-disable-next-line no-console
+           
           console.error('Error loading bible chapters from bundle, falling back to Firestore:', error);
           // Fallback to original Firestore query
           const bibleChapterQuery = query(

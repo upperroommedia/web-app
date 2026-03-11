@@ -191,7 +191,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               facets: facetStats,
             } as SearchResponse<T>;
           } catch (error) {
-            // eslint-disable-next-line no-console
+             
             console.error('Mock Algolia search error:', error);
             return {
               hits: [],
@@ -263,7 +263,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
         }
 
         // Filter by facetQuery if provided
-        let facetHits = Array.from(facetMap.entries())
+        const facetHits = Array.from(facetMap.entries())
           .map(([value, count]) => ({
             value,
             highlighted: value,
@@ -281,7 +281,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
           exhaustiveFacetsCount: true,
         } as SearchForFacetValuesResponse;
       } catch (error) {
-        // eslint-disable-next-line no-console
+         
         console.error('Mock Algolia searchForFacetValues error:', error);
         return {
           facetHits: [],

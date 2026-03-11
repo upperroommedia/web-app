@@ -197,7 +197,7 @@ const NewListPopup = (props: NewListPopupProps) => {
                 setUserHasTypedInList(false);
               }
             } catch (error) {
-              // eslint-disable-next-line no-console
+               
               console.error(error);
               setNewListError({ error: true, message: JSON.stringify(error) });
             }
@@ -255,7 +255,7 @@ const NewListPopup = (props: NewListPopupProps) => {
                 setNewList((oldList) => ({ ...oldList, type: e.target.value as ListType }));
               }}
             >
-              {/* eslint-disable-next-line array-callback-return */}
+              { }
               {(Object.values(ListType) as Array<ListType>).map((listType) => {
                 if (listType !== ListType.LATEST) {
                   return (

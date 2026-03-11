@@ -70,7 +70,7 @@ function SundayHomilyMonthSelector({
         );
         setSundayHomiliesMonths(filteredByYear);
       } catch (error) {
-        // eslint-disable-next-line no-console
+         
         console.error('Error loading sunday homilies from bundle, falling back to Firestore:', error);
         // Fallback to original Firestore query
         const sundayHomiliesMonthsQuery = query(
