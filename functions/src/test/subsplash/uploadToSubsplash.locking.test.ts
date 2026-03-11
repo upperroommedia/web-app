@@ -64,8 +64,8 @@ const buildValidPayload = () => ({
 describe('uploadToSubsplash lock contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.EMAIL = 'test@example.com';
-    process.env.PASSWORD = 'test-password';
+    process.env.SUBSPLASH_EMAIL = 'test@example.com';
+    process.env.SUBSPLASH_PASSWORD = 'test-password';
     mockAxios.mockResolvedValue({ data: { id: 'media-item-1' } } as never);
     mockAuthenticateSubsplash.mockResolvedValue('fake-token');
     mockWithIdempotency.mockImplementation(async (_operationKey, run) => run());

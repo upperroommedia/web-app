@@ -86,14 +86,14 @@ function printHelp(): void {
   console.log('  --limit=<number>        Limit number of series processed');
   console.log('  --help, -h              Show this help');
   console.log('');
-  console.log('Required env vars for Subsplash auth: EMAIL, PASSWORD');
+  console.log('Required env vars for Subsplash auth: SUBSPLASH_EMAIL, SUBSPLASH_PASSWORD');
 }
 
 async function authenticateSubsplash(): Promise<string> {
-  const email = process.env.EMAIL;
-  const password = process.env.PASSWORD;
+  const email = process.env.SUBSPLASH_EMAIL;
+  const password = process.env.SUBSPLASH_PASSWORD;
   if (!email || !password) {
-    throw new Error('Missing EMAIL or PASSWORD environment variable for Subsplash authentication.');
+    throw new Error('Missing SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD environment variable for Subsplash authentication.');
   }
 
   const formData = new FormData();

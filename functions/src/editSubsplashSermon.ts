@@ -20,8 +20,8 @@ const editSubsplashSermon = onCall(
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
     }
-    if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-      throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
+    if (process.env.SUBSPLASH_EMAIL == undefined || process.env.SUBSPLASH_PASSWORD == undefined) {
+      throw new HttpsError('failed-precondition', 'SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD is not set.');
     }
 
     const data = request.data;

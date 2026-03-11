@@ -246,8 +246,8 @@ const buildAddIntroOutroPayload = () => ({
 describe('runtime alert taxonomy contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.EMAIL = 'test@example.com';
-    process.env.PASSWORD = 'test-password';
+    process.env.SUBSPLASH_EMAIL = 'test@example.com';
+    process.env.SUBSPLASH_PASSWORD = 'test-password';
 
     mockAxios.mockResolvedValue({ status: 200, data: { id: 'media-item-1' } } as never);
     mockWithIdempotency.mockImplementation(async (_operationKey, run) => run());
