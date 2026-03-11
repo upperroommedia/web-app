@@ -22,7 +22,6 @@ export type ListItem<T extends ListItemType> = CommonFields &
     : T extends List
     ? { type: 'list'; mediaItem: List }
     : never);
-
 export const emptyListItem: ListItem<ListItemType> = {
   id: '',
   name: '',
@@ -39,15 +38,18 @@ export const ListItemConverter: FirestoreDataConverter<ListItem<ListItemType>> =
     // handle converting the media item to the correct firestore type
     switch (listItem.type) {
       case 'sermon':
-        listItem.mediaItem = sermonConverter.toFirestore(listItem.mediaItem as Sermon) as any;
-        break;
+        return {
+          ...listItem,
+          mediaItem: sermonConverter.toFirestore(listItem.mediaItem as Sermon) as unknown as Sermon,
+        };
       case 'list':
-        listItem.mediaItem = listConverter.toFirestore(listItem.mediaItem as List) as any;
-        break;
+        return {
+          ...listItem,
+          mediaItem: listConverter.toFirestore(listItem.mediaItem as List) as unknown as List,
+        };
       default:
-        break;
+        return listItem;
     }
-    return listItem;
   },
 
   fromFirestore: (snapshot: QueryDocumentSnapshot<ListItem<ListItemType>>): ListItem<ListItemType> => {

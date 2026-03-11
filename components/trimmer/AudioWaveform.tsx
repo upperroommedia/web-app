@@ -104,7 +104,13 @@ function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
         if (cancelled) return;
 
         // Decode audio
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const AudioContextCtor =
+          window.AudioContext ||
+          (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioContextCtor) {
+          throw new Error('Web Audio API is not supported in this browser');
+        }
+        const audioContext = new AudioContextCtor();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         if (cancelled) return;
 

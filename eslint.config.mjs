@@ -40,6 +40,12 @@ export default defineConfig([
     'out/**',
     'output/**',
     'build/**',
+    'archivedPages/**',
+    'functions/**',
+    'functions-core/**',
+    'functions-media/**',
+    'functions-image/**',
+    'functions-integrations/**',
     'next-env.d.ts',
   ]),
 ]);

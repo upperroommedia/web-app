@@ -133,7 +133,7 @@ const uploadFile = async (props: UploadFileProps) => {
       });
       props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
     } catch (e) {
-      // eslint-disable-next-line no-console
+       
       console.error('Error generatingAddIntroOutroTask', e);
       props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
       await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);
@@ -154,7 +154,7 @@ const uploadFile = async (props: UploadFileProps) => {
           }
         },
         async (error) => {
-          // eslint-disable-next-line no-console
+           
           console.error(error);
           props.setUploadProgress({
             error: true,
@@ -183,7 +183,7 @@ const uploadFile = async (props: UploadFileProps) => {
             props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
             resolve();
           } catch (e) {
-            // eslint-disable-next-line no-console
+             
             console.error('Error generatingAddIntroOutroTask', e);
             props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
             await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);

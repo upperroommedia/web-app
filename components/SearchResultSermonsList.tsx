@@ -4,7 +4,6 @@
 
 import SearchResultSermonListCard from './SearchResultSermonListCard';
 import { useHits, useInstantSearch } from 'react-instantsearch';
-import { useEffect, useState } from 'react';
 
 // import { Sermon } from '../types/SermonTypes';
 
@@ -23,13 +22,7 @@ const SearchResultSermonList = (props: BoxProps) => {
   const { status, results } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
   const playing = useMediaState('playing');
-  const [hasSettledResults, setHasSettledResults] = useState(false);
-
-  useEffect(() => {
-    if (!results.__isArtificial && status === 'idle') {
-      setHasSettledResults(true);
-    }
-  }, [results.__isArtificial, status]);
+  const hasSettledResults = !results.__isArtificial && status === 'idle';
 
   const isLoadingState = !hasSettledResults && (results.__isArtificial || status === 'loading' || status === 'stalled');
   const shouldRenderHits = hasSettledResults || (!results.__isArtificial && status === 'idle');

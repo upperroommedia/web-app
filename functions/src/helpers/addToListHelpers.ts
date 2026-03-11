@@ -119,13 +119,26 @@ export async function patchListRows(
     id: listId,
     _embedded: {
       // Preserve existing display-options if they exist
-      ...(currentList._embedded['display-options'] && {
-        'display-options': currentList._embedded['display-options'].map((opt: { id: string }) => ({ id: opt.id }))
-      }),
+      ...(
+        currentList._embedded['display-options']
+          ? {
+              'display-options': currentList._embedded['display-options'].map((opt: { id: string }) => ({
+                id: opt.id,
+              })),
+            }
+          : {}
+      ),
       // Preserve existing images if they exist
-      ...(currentList._embedded.images && {
-        'images': currentList._embedded.images.map((img: { id: string; type: string }) => ({ id: img.id, type: img.type }))
-      }),
+      ...(
+        currentList._embedded.images
+          ? {
+              images: currentList._embedded.images.map((img: { id: string; type: string }) => ({
+                id: img.id,
+                type: img.type,
+              })),
+            }
+          : {}
+      ),
       'list-rows': reindexedRows,
     },
   };

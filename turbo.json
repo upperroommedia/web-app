@@ -4,7 +4,13 @@
     "app-dev": {
       "cache": false,
       "persistent": true,
-      "with": ["web-app#emulators", "functions#build-watch"]
+      "with": [
+        "web-app#emulators",
+        "functions-core#build-watch",
+        "functions-media#build-watch",
+        "functions-image#build-watch",
+        "functions-integrations#build-watch"
+      ]
     },
     "emulators": {
       "cache": false,

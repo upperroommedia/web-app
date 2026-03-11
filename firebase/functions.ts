@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-/* eslint-disable import/export */
+ 
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 import firebase, { isDevelopment } from './firebase';
 

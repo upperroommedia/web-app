@@ -66,7 +66,7 @@ const AdminSermonsListWithUser: FunctionComponent<AdminSermonsListWithUserProps>
     snapshotListenOptions: { includeMetadataChanges: true },
   });
   if (error) {
-    // eslint-disable-next-line no-console
+     
     console.error(error);
   }
   // const [searchQuery, setSearchQuery] = useState('');

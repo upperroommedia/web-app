@@ -14,6 +14,20 @@ pnpm install
 
 ## Local Development
 
+Create `.env` from template (once):
+
+```bash
+pnpm run setup:env
+```
+
+If `.env` does not exist, `setup:env` prompts for a Firebase project (from `.firebaserc`) and bootstraps env values from that project (web app config + App Hosting secrets).
+The default project selection is `urm-app` when available.
+If `.env` already exists, `setup:env` does not pull from Firebase again.
+You can also bypass the prompt and choose directly: `pnpm run setup:env -- --project urm-app-staging`.
+
+`pnpm dev` reads from `.env`/`.env.local` only and does not fetch from Firebase.
+Any value can be overridden locally in `.env` or `.env.local` (for example `ADMIN_BASE_URL`).
+
 Run the app:
 
 ```bash
@@ -21,6 +35,13 @@ pnpm dev
 ```
 
 This starts the web app and local Firebase emulators used by the project workflow.
+By default this runs `auth,functions,firestore,database,storage,tasks` emulators (not `extensions` or `apphosting`).
+Enable optional emulators when needed:
+
+```bash
+EMULATE_EXTENSIONS=1 pnpm dev
+EMULATE_APPHOSTING=1 pnpm dev
+```
 
 ## Firebase Functions Codebases
 

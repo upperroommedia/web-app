@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useState } from 'react';
 import { FileRejection, useDropzone } from 'react-dropzone';
 import styles from '../styles/DropZone.module.css';
 import { AudioSource } from '../pages/api/uploadFile';
@@ -25,9 +25,9 @@ function fileTypeValidator(file: File) {
   return null;
 }
 
-let Url: any;
+let Url: typeof URL | null = null;
 if (typeof window !== 'undefined') {
-  Url = window.URL || window.webkitURL;
+  Url = window.URL || (window as Window & { webkitURL?: typeof URL }).webkitURL || null;
 }
 const DropZone = ({ setAudioSource, audioSourceError, setAudioSourceError }: DropZoneProps) => {
   const [fileRejections, setFileRejections] = useState<FileRejection[]>([]);
@@ -40,6 +40,10 @@ const DropZone = ({ setAudioSource, audioSourceError, setAudioSourceError }: Dro
         return;
       }
       setAudioSourceError(false, '');
+      if (!Url) {
+        setAudioSourceError(true, 'Unable to access browser URL API for file preview');
+        return;
+      }
       const mappedAccepted = {
         file: acceptedFiles[0],
         preview: Url.createObjectURL(acceptedFiles[0]),
@@ -56,11 +60,7 @@ const DropZone = ({ setAudioSource, audioSourceError, setAudioSourceError }: Dro
     multiple: false,
   });
 
-  useEffect(() => {
-    if (!isFocused) {
-      setFileRejections([]);
-    }
-  }, [isFocused]);
+  const visibleFileRejections = isFocused ? fileRejections : [];
 
   return (
     <div className={styles.dropzoneContainer}>
@@ -72,7 +72,7 @@ const DropZone = ({ setAudioSource, audioSourceError, setAudioSourceError }: Dro
         <p>Drag & drop audio files here, or click to select files</p>
       </div>
       {showError(audioSourceError) && <p className={styles.errorMessage}>{getErrorMessage(audioSourceError)}</p>}
-      {fileRejections.map((fileRejection) => {
+      {visibleFileRejections.map((fileRejection) => {
         return (
           <p className={styles.errorMessage} key={fileRejection.file.name}>
             {fileRejection.file.name} - {fileRejection.errors[0].message}

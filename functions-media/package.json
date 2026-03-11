@@ -7,7 +7,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "build:ci": "pnpm run build"
+    "build:ci": "pnpm run build",
+    "build-watch": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
     "@google-cloud/functions-framework": "^3.2.0",

@@ -7,6 +7,36 @@ import { List, ListType } from '../../../types/List';
 import { ISpeaker } from '../../../types/Speaker';
 import { createAxiosConfig } from '../subsplashUtils';
 import populateImages from './populateImagesHelper';
+import { SubsplashImage } from '../types/Subsplash';
+
+interface SubsplashSpeakerTag {
+  id: string;
+  title: string;
+  tagging_count: number;
+}
+
+interface SubsplashTagsResponse {
+  count: number;
+  total: number;
+  _embedded: {
+    tags: SubsplashSpeakerTag[];
+  };
+}
+
+interface SubsplashSpeakerTaggingsResponse {
+  _embedded?: {
+    taggings?: Array<{
+      _embedded?: {
+        'media-item'?: {
+          title?: string;
+          _embedded?: {
+            images?: SubsplashImage[];
+          };
+        };
+      };
+    }>;
+  };
+}
 
 async function populateSpeakers(
   db: Firestore,
@@ -34,7 +64,7 @@ async function populateSpeakers(
       { 'collection-total': 'include' }
     );
 
-    const response = (await axios(axiosConfig)).data;
+    const response: SubsplashTagsResponse = (await axios(axiosConfig)).data;
     current += response.count;
     logger.log(`Retrieved ${current} of ${response.total} speaker tags`);
     pageNumber += 1;
@@ -45,16 +75,16 @@ async function populateSpeakers(
     // get first sermon for each speaker
     // push promises to array to make the rest of the calls asyncronously
     const batch = db.batch();
-    speakers.forEach((speaker: any) => {
+    speakers.forEach((speaker) => {
       const speakerId = speaker.id;
       const speakerName = speaker.title;
       const speakerSermonCount = speaker.tagging_count;
       const listId = listNameToId.get(speakerName);
       const imageIds = listId ? listIdToImageIdMap.get(listId) : [];
       const images = imageIds
-        ? (imageIds
+        ? imageIds
             .map((imageId) => firestoreImagesMap.get(imageId))
-            .filter((image) => image !== undefined) as ImageType[])
+            .filter((image): image is ImageType => image !== undefined)
         : [];
 
       const speakerData: ISpeaker = {
@@ -81,7 +111,7 @@ async function populateSpeakers(
 
   // get images for remaining speakers
   logger.log(`Getting Images for ${speakersWithNoListImages.length} speakers with no list images`);
-  const remainingSpeakerImages = new Map<string, { imageName: string; image: any }>();
+  const remainingSpeakerImages = new Map<string, { imageName: string; image: SubsplashImage }>();
   const speakerIdToImagesMap = new Map<string, string[]>();
   await Promise.all(
     speakersWithNoListImages.map(async (speakerData) => {
@@ -91,31 +121,32 @@ async function populateSpeakers(
         'GET'
       );
       // get images from sermon
-      const data = await (await axios(getSermonItemAxiosConfig)).data;
+      const data: SubsplashSpeakerTaggingsResponse = (await axios(getSermonItemAxiosConfig)).data;
       if (!data) {
         logger.log(`No data found for ${speakerData.id}, ${speakerData.name}`);
         return;
       }
-      const sermonTitle = data._embedded?.taggings[0]?._embedded['media-item']?.title;
+      const firstTagging = data._embedded?.taggings?.[0];
+      const sermonTitle = firstTagging?._embedded?.['media-item']?.title;
       logger.log(`Getting Images for ${speakerData.name} from ${sermonTitle}`);
-      const images = data._embedded?.taggings[0]?._embedded['media-item']?._embedded?.images;
+      const images = firstTagging?._embedded?.['media-item']?._embedded?.images;
       if (!images) {
         logger.log(`No images found for ${speakerData.id}, ${speakerData.name}`);
         return;
       }
-      images.forEach((image: any) => {
+      images.forEach((image) => {
         if (image.id) {
           remainingSpeakerImages.set(image.id, { imageName: speakerData.name, image });
         }
       });
       speakerIdToImagesMap.set(
         speakerData.id,
-        images.map((image: any) => image.id)
+        images.map((image) => image.id)
       );
     })
   );
 
-  const subsplashImagesInput: { imageName: string; image: any }[] = [];
+  const subsplashImagesInput: { imageName: string; image: SubsplashImage }[] = [];
   remainingSpeakerImages.forEach((value) => subsplashImagesInput.push(value));
   await populateImages(bucket, imageIds, db, subsplashImagesInput, firestoreImagesMap);
 
@@ -126,9 +157,9 @@ async function populateSpeakers(
     chunk.forEach((speaker) => {
       const imageIds = speakerIdToImagesMap.get(speaker.id) || [];
       const images = imageIds
-        ? (imageIds
+        ? imageIds
             .map((imageId) => firestoreImagesMap.get(imageId))
-            .filter((image) => image !== undefined) as ImageType[])
+            .filter((image): image is ImageType => image !== undefined)
         : [];
       batch.set(firestoreSpeakers.doc(speaker.id), { ...speaker, ...(images && { images: images }) }, { merge: true });
       if (speaker.listId) {

@@ -85,7 +85,7 @@ const ImageSelector = (props: {
           images.push(hit);
         });
       } catch (error) {
-        // eslint-disable-next-line no-console
+         
         console.error('Search error:', error);
       }
     }

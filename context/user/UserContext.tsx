@@ -19,22 +19,27 @@ import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleT
 import Stack from '@mui/material/Stack';
 import Image from 'next/image';
 
+const getAuthErrorCode = (error: unknown): string | undefined =>
+  typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+
 interface Context {
   user: User | undefined;
   loading: boolean;
-  login: (loginForm: userCredentials) => Promise<any>;
+  login: (loginForm: userCredentials) => Promise<string | void>;
   loginWithGoogle: () => Promise<UserCredential>;
   // loginWithFacebook: () => Promise<any>;
   loginWithApple: () => Promise<UserCredential>;
   loginWithMicrosoft: () => Promise<UserCredential>;
-  signup: (loginForm: SignupForm) => Promise<any>;
+  signup: (loginForm: SignupForm) => Promise<string | void>;
   logoutUser: () => Promise<void>;
-  resetPassword: (email: string) => Promise<any>;
+  resetPassword: (email: string) => Promise<unknown>;
 }
 
 const UserContext = createContext<Context | null>(null);
 
-export const UserProvider = ({ children }: any) => {
+export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User>();
   const [artificalLoading, setArtificalLoading] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
@@ -42,7 +47,7 @@ export const UserProvider = ({ children }: any) => {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      (window as any).nookies = nookies;
+      (window as Window & { nookies?: typeof nookies }).nookies = nookies;
     }
     const unsubscribe = onIdTokenChanged(auth, async (user) => {
       if (!authHydratedRef.current) {
@@ -95,8 +100,8 @@ export const UserProvider = ({ children }: any) => {
   const login = async (loginForm: userCredentials) => {
     try {
       await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
-    } catch (error: any) {
-      return error.code;
+    } catch (error: unknown) {
+      return getAuthErrorCode(error);
     }
   };
 
@@ -127,8 +132,8 @@ export const UserProvider = ({ children }: any) => {
   const signup = async (loginForm: SignupForm) => {
     try {
       await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
-    } catch (error: any) {
-      return error.code;
+    } catch (error: unknown) {
+      return getAuthErrorCode(error);
     }
   };
 
@@ -139,7 +144,7 @@ export const UserProvider = ({ children }: any) => {
   const resetPassword = async (email: string) => {
     try {
       await sendPasswordResetEmail(auth, email);
-    } catch (error: any) {
+    } catch (error: unknown) {
       return error;
     }
   };

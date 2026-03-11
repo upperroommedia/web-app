@@ -10,8 +10,8 @@ def authenticateSubsplash():
     """Authenticate to Subsplash API"""
     # Get the API key
 
-    subsplash_email = os.environ.get('EMAIL')
-    subsplash_password = os.environ.get('PASSWORD')
+    subsplash_email = os.environ.get('SUBSPLASH_EMAIL')
+    subsplash_password = os.environ.get('SUBSPLASH_PASSWORD')
     url = "https://core.subsplash.com/accounts/v1/oauth/token?grant_type=password"
 
     payload={'grant_type': 'password',

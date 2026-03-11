@@ -7,10 +7,38 @@ import populateImages from './populateImagesHelper';
 import { Bucket } from '@google-cloud/storage';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { CollectionReference, Firestore } from 'firebase-admin/firestore';
+import { SubsplashImage, SubsplashList } from '../types/Subsplash';
+
+interface SubsplashCategoriesResponse {
+  _embedded: {
+    'list-rows': Array<{
+      _embedded: {
+        list: {
+          id: string;
+          title: string;
+        };
+      };
+    }>;
+  };
+}
+
+type SubsplashListWithImages = Omit<SubsplashList, '_embedded'> & {
+  _embedded: {
+    images: SubsplashImage[];
+  };
+};
+
+interface SubsplashListsResponse {
+  count: number;
+  total: number;
+  _embedded: {
+    lists: SubsplashListWithImages[];
+  };
+}
 
 async function updateCategories(db: Firestore, bearerToken: string, firestoreLists: CollectionReference<List>) {
   // update categories lists from subsplash categories list
-  const categoriesResponse = (
+  const categoriesResponse: SubsplashCategoriesResponse = (
     await axios(
       createAxiosConfig(
         'https://core.subsplash.com/builder/v1/list-rows?filter%5Bapp_key%5D=9XTSHD&filter%5Bsource_list%5D=c305f7c7-f299-4db9-bf4a-936e79061739&include=images&page%5Bnumber%5D=1&page%5Bsize%5D=100&sort=position',
@@ -22,7 +50,7 @@ async function updateCategories(db: Firestore, bearerToken: string, firestoreLis
   ).data;
   const listRows = categoriesResponse._embedded['list-rows'];
   const batch = db.batch();
-  listRows.forEach((listRow: any) => {
+  listRows.forEach((listRow) => {
     const listId = listRow._embedded.list.id;
     if (!listId) {
       throw new Error("ListId for category doesn't exist");
@@ -61,7 +89,7 @@ async function populateLists(
   }
   while (loop) {
     logger.log(`Getting Lists for page ${pageNumber}`);
-    const listResponse = (
+    const listResponse: SubsplashListsResponse = (
       await axios(
         createAxiosConfig(
           `https://core.subsplash.com/builder/v1/lists?filter%5Bapp_key%5D=9XTSHD&filter%5Bgenerated%5D=false&filter%5Btype%5D=standard&page%5Bnumber%5D=${pageNumber}&page%5Bsize%5D=${pageSize}&sort=title`,
@@ -79,12 +107,12 @@ async function populateLists(
     }
     logger.log(`Found ${listResponse._embedded.lists.length} lists`);
 
-    const allSubsplashListImages = new Map<string, { imageName: string; image: any }>();
+    const allSubsplashListImages = new Map<string, { imageName: string; image: SubsplashImage }>();
 
-    listResponse._embedded.lists.forEach((list: any) => {
+    listResponse._embedded.lists.forEach((list) => {
       if (list._embedded) {
         const subsplashImages = list._embedded.images;
-        subsplashImages.forEach((image: any) => {
+        subsplashImages.forEach((image) => {
           if (image.id) {
             allSubsplashListImages.set(image.id, { imageName: list.title, image });
           }
@@ -92,7 +120,7 @@ async function populateLists(
       }
     });
 
-    const subsplashImagesInput: { imageName: string; image: any }[] = [];
+    const subsplashImagesInput: { imageName: string; image: SubsplashImage }[] = [];
     allSubsplashListImages.forEach((value) => subsplashImagesInput.push(value));
 
     await populateImages(bucket, imageIds, db, subsplashImagesInput, firestoreImagesMap);
@@ -100,14 +128,13 @@ async function populateLists(
     logger.log(`${firestoreImagesMap.size} images metadata in memory`);
 
     const batch = db.batch();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    listResponse._embedded.lists.forEach(async (list: any, index: number) => {
+    listResponse._embedded.lists.forEach((list, index: number) => {
       if (list.status === 'published' && list.list_rows_count > 0) {
         let images: ImageType[] = [];
         if (list._embedded) {
           images = list._embedded.images
-            .map((image: any) => firestoreImagesMap.get(image.id))
-            .filter((image: any) => image !== undefined);
+            .map((image) => firestoreImagesMap.get(image.id))
+            .filter((image): image is ImageType => image !== undefined);
 
           listIdToImageIdMap.set(
             list.id,

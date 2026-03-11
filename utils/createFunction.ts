@@ -2,7 +2,7 @@ import functions, { httpsCallable, httpsCallableFromURL } from '../firebase/func
 import { isDevelopment } from '../firebase/firebase';
 import { getFirebaseFunctionsBaseUrl, getFirebaseFunctionsEmulatorBaseUrl } from '../shared/firebaseProjectConfig';
 
-export const createFunction = <T = any, R = any>(name: string): ((data: T) => Promise<R>) => {
+export const createFunction = <T = unknown, R = unknown>(name: string): ((data: T) => Promise<R>) => {
   const callable = httpsCallable<T, R>(functions, name);
   return async (data: T) => (await callable(data)).data;
 };
@@ -34,7 +34,7 @@ const mergeCallableDataWithMetadata = <T, M extends object>(
   } as T;
 };
 
-export const createFunctionV2 = <T = any, R = any, M extends object = CallableMutationMetadata>(
+export const createFunctionV2 = <T = unknown, R = unknown, M extends object = CallableMutationMetadata>(
   name: string
 ): ((data: T, options?: CallableCallOptions<M>) => Promise<R>) => {
   const url = isDevelopment

@@ -32,6 +32,13 @@ import { SermonURL } from '../../../../components/EditSermonForm';
 
 const storage = getStorage(firebase);
 
+const getErrorMessage = (error: unknown, fallbackMessage: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallbackMessage;
+};
+
 const EditSermonPage = () => {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -87,9 +94,9 @@ const EditSermonPage = () => {
       }
 
       setSermon(sermonData);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching sermon:', err);
-      setError(err.message || 'Failed to fetch sermon');
+      setError(getErrorMessage(err, 'Failed to fetch sermon'));
     }
 
     setLoading(false);
@@ -111,8 +118,12 @@ const EditSermonPage = () => {
 
   useEffect(() => {
     if (!authLoading && user) {
-      fetchSermonData();
+      const timer = window.setTimeout(() => {
+        void fetchSermonData();
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
+    return undefined;
   }, [fetchSermonData, authLoading, user]);
 
   // Redirect if not authenticated

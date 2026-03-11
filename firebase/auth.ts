@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-/* eslint-disable import/export */
+ 
 import { connectAuthEmulator, getAuth } from 'firebase/auth';
 import firebase, { isDevelopment } from './firebase';
 

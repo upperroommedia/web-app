@@ -3,11 +3,22 @@ import { FirestoreDataConverter, Query } from 'firebase-admin/firestore';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { BundleConfig, BundleMetadata } from '../../../shared/bundleConfigs';
 import { getFirebaseStorageBucket } from '../../../shared/firebaseProjectConfig';
+import { Writable } from 'stream';
 
 const firestoreAdmin = firebaseAdmin.firestore();
 const storage = firebaseAdmin.storage();
 const database = firebaseAdmin.database();
 const BUNDLE_BUCKET = getFirebaseStorageBucket();
+
+type BundleErrorResponse = {
+    json: (body: { error: string }) => void;
+};
+
+interface BundleHttpResponse extends Writable {
+    set: (field: string, value: string) => BundleHttpResponse;
+    send: (body: unknown) => void;
+    status: (code: number) => BundleErrorResponse;
+}
 
 export interface BundleCreationConfig<T> {
     collectionName: string;
@@ -19,12 +30,12 @@ export interface BundleCreationConfig<T> {
     countFieldName: string;
     displayName: string;
     orderByField?: string;
-    whereConditions?: Array<{ field: string; operator: any; value: any }>;
+    whereConditions?: Array<{ field: string; operator: unknown; value: unknown }>;
 }
 
 export async function serveBundleFromStorage<T>(
     config: BundleConfig<T>,
-    response: any
+    response: BundleHttpResponse
 ): Promise<boolean> {
     const bucket = storage.bucket(BUNDLE_BUCKET);
     const bundleFile = bucket.file(config.bundlePath);
@@ -79,7 +90,7 @@ export async function serveBundleFromStorage<T>(
 
 export async function generateAndStoreBundle<T>(
     config: BundleConfig<T>,
-    response?: any
+    response?: BundleHttpResponse
 ): Promise<number> {
     try {
         logger.info(`Generating new ${config.displayName} bundle`);
@@ -159,8 +170,8 @@ export async function generateAndStoreBundle<T>(
 
 export async function createBundleHandler<T>(
     config: BundleConfig<T>,
-    request: any,
-    response: any
+    _request: unknown,
+    response: BundleHttpResponse
 ): Promise<void> {
     try {
         logger.info(`Serving ${config.displayName} bundle`);

@@ -2,7 +2,7 @@
  * SoundCloud API client for upload, update, and delete of tracks.
  * Uses OAuth 2.1 access token (Authorization: OAuth <token>).
  *
- * Secrets (Option A): Store SOUNDCLOUD_ACCESS_TOKEN in Firebase Secret Manager.
+ * Secrets (Option A): Store SOUNDCLOUD_CLIENT_SECRET in Firebase Secret Manager.
  * Obtain via one-time SoundCloud OAuth Authorization Code flow.
  */
 
@@ -14,8 +14,8 @@ const SOUNDCLOUD_API_BASE = 'https://api.soundcloud.com';
 
 function authHeaders(accessToken: string): Record<string, string> {
   return {
-    'Authorization': `OAuth ${accessToken}`,
-    'Accept': 'application/json; charset=utf-8',
+    Authorization: `OAuth ${accessToken}`,
+    Accept: 'application/json; charset=utf-8',
   };
 }
 
@@ -39,10 +39,7 @@ function formatTagList(tags: string[]): string {
  * Upload a track to SoundCloud. Downloads audio (and optional image) from
  * Firebase Storage, then POSTs multipart/form-data to SoundCloud.
  */
-export async function uploadTrack(
-  accessToken: string,
-  params: UploadTrackParams
-): Promise<string> {
+export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<string> {
   const [audioBuf] = await params.bucket.file(params.audioStoragePath).download();
   const form = new FormData();
   form.append('track[title]', params.title);
@@ -89,11 +86,7 @@ export interface UpdateTrackParams {
  * Update track metadata. Uses JSON body when no image; uses multipart when
  * imageStoragePath and bucket are provided.
  */
-export async function updateTrack(
-  accessToken: string,
-  trackId: string,
-  params: UpdateTrackParams
-): Promise<void> {
+export async function updateTrack(accessToken: string, trackId: string, params: UpdateTrackParams): Promise<void> {
   const hasArtwork = params.imageStoragePath && params.bucket;
   if (hasArtwork) {
     const form = new FormData();
@@ -118,12 +111,16 @@ export async function updateTrack(
     if (params.title != null) body.title = params.title;
     if (params.description != null) body.description = params.description;
     if (params.tags != null) body.tag_list = formatTagList(params.tags);
-    await axios.put(`${SOUNDCLOUD_API_BASE}/tracks/${trackId}`, { track: body }, {
-      headers: {
-        ...authHeaders(accessToken),
-        'Content-Type': 'application/json',
-      },
-    });
+    await axios.put(
+      `${SOUNDCLOUD_API_BASE}/tracks/${trackId}`,
+      { track: body },
+      {
+        headers: {
+          ...authHeaders(accessToken),
+          'Content-Type': 'application/json',
+        },
+      }
+    );
   }
 }
 

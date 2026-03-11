@@ -9,7 +9,7 @@ export interface SignupForm {
   firstName: string;
   lastName: string;
 }
-export type CustomClaims = { [key: string]: any };
+export type CustomClaims = { [key: string]: unknown };
 
 export const ROLES = ['user', 'admin', 'uploader', 'publisher'];
 export type Order = 'asc' | 'desc';

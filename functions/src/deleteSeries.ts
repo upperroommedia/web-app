@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
+import type { WriteBatch, WriteResult } from 'firebase-admin/firestore';
 import { authenticateSubsplash } from './subsplashUtils';
 import {
   deleteSubsplashSeries,
@@ -58,7 +59,7 @@ const cleanupLocalSeriesData = async (
   const seriesItemsSnapshot = await seriesRef.collection('seriesItems').get();
   const sermonsSnapshot = await firestoreDB.collection('sermons').where('seriesId', '==', firestoreId).get();
 
-  const commitPromises: Array<Promise<FirebaseFirestore.WriteResult[]>> = [];
+  const commitPromises: Array<Promise<WriteResult[]>> = [];
   let batch = firestoreDB.batch();
   let operationCount = 0;
 
@@ -71,7 +72,7 @@ const cleanupLocalSeriesData = async (
     operationCount = 0;
   };
 
-  const enqueueOperation = (operation: (currentBatch: FirebaseFirestore.WriteBatch) => void) => {
+  const enqueueOperation = (operation: (currentBatch: WriteBatch) => void) => {
     if (operationCount >= FIRESTORE_BATCH_OP_LIMIT) {
       commitBatchIfNeeded();
     }

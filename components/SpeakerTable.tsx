@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { ChangeEvent, useEffect, useState, Dispatch, SetStateAction, useCallback } from 'react';
+import { ChangeEvent, useState, Dispatch, SetStateAction, useCallback, MouseEvent } from 'react';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Table from '@mui/material/Table';
@@ -66,7 +66,7 @@ const headCells: readonly HeadCell[] = [
 ];
 
 interface SpeakerTableProps {
-  onRequestSort: (event: any, property: keyof ISpeaker) => void;
+  onRequestSort: (event: MouseEvent<HTMLElement>, property: keyof ISpeaker) => void;
   order: Order;
   orderBy: string;
   rowCount: number;
@@ -74,7 +74,7 @@ interface SpeakerTableProps {
 
 const SpeakerTableHead = (props: SpeakerTableProps) => {
   const { order, orderBy, onRequestSort } = props;
-  const createSortHandler = (property: keyof ISpeaker) => (event: any) => {
+  const createSortHandler = (property: keyof ISpeaker) => (event: MouseEvent<HTMLElement>) => {
     onRequestSort(event, property);
   };
 
@@ -181,7 +181,7 @@ const SpeakerTable = (props: {
   onSearchChange: (value: string) => void;
   loading?: boolean;
 }) => {
-  const [filteredSpeakers, setFilteredSpeakers] = useState<ISpeaker[]>(props.speakers);
+  const filteredSpeakers = props.speakers;
   // const [initialTotalSpeakers] = useState<number>(props.totalSpeakers);
 
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
@@ -288,7 +288,7 @@ const SpeakerTable = (props: {
     [removeImage, setSpeakerImage]
   );
 
-  const handleRequestSort = async (_: any, property: keyof ISpeaker) => {
+  const handleRequestSort = async (_: MouseEvent<HTMLElement>, property: keyof ISpeaker) => {
     const isAsc = props.sortOrder === 'asc';
     props.setSortOrder(isAsc ? 'desc' : 'asc');
     props.setSortProperty(property);
@@ -332,10 +332,6 @@ const SpeakerTable = (props: {
     setSelectedSpeaker(speaker);
     setSpeakerDetailsPopup(true);
   };
-
-  useEffect(() => {
-    setFilteredSpeakers(props.speakers);
-  }, [props.speakers]);
 
   // useEffect(() => {
   //   handleRequestFilter();

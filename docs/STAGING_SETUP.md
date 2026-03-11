@@ -30,15 +30,15 @@ Disable automatic rollouts for backend `web-staging` in Firebase Console so App 
 Create/grant each secret in `urm-app-staging`:
 
 ```bash
-firebase apphosting:secrets:set ROLE_REQUEST_RECIPIENTS_STAGING --project urm-app-staging
-firebase apphosting:secrets:set RUNTIME_ALERT_RECIPIENTS_STAGING --project urm-app-staging
-firebase apphosting:secrets:set ADMIN_BASE_URL_STAGING --project urm-app-staging
-firebase apphosting:secrets:set SUBSPLASH_EMAIL_STAGING --project urm-app-staging
-firebase apphosting:secrets:set SUBSPLASH_PASSWORD_STAGING --project urm-app-staging
-firebase apphosting:secrets:set DOLBY_API_KEY_STAGING --project urm-app-staging
-firebase apphosting:secrets:set DOLBY_API_SECRET_STAGING --project urm-app-staging
-firebase apphosting:secrets:set CLERK_SECRET_KEY_STAGING --project urm-app-staging
-firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY_STAGING --project urm-app-staging
+firebase apphosting:secrets:set ROLE_REQUEST_RECIPIENTS --project urm-app-staging
+firebase apphosting:secrets:set RUNTIME_ALERT_RECIPIENTS --project urm-app-staging
+firebase apphosting:secrets:set ADMIN_BASE_URL --project urm-app-staging
+firebase apphosting:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
+firebase apphosting:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
+firebase apphosting:secrets:set DOLBY_API_KEY --project urm-app-staging
+firebase apphosting:secrets:set DOLBY_API_SECRET --project urm-app-staging
+firebase apphosting:secrets:set CLERK_SECRET_KEY --project urm-app-staging
+firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
 ```
 
 If access is not auto-granted:
@@ -52,11 +52,12 @@ firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging 
 SoundCloud publishing uses a Functions secret, not App Hosting env vars:
 
 ```bash
-firebase functions:secrets:set SOUNDCLOUD_ACCESS_TOKEN --project urm-app-staging
+firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app-staging
 ```
 
 Notes:
-- `SOUNDCLOUD_ACCESS_TOKEN` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
+
+- `SOUNDCLOUD_CLIENT_SECRET` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
 - App Hosting secrets in `apphosting.staging.yaml` do not automatically flow into Cloud Functions.
 
 ## 3c. Enable Google Sign-In in staging Auth (one-time)

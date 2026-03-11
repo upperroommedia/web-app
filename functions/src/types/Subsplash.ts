@@ -21,12 +21,17 @@ export interface SubsplashImageLinks {
 export interface SubsplashImage {
   id: string;
   type: 'wide' | 'square' | 'banner';
+  width?: number;
+  height?: number;
+  average_color_hex?: string;
+  vibrant_color_hex?: string;
+  content_type?: string;
   _links?: SubsplashImageLinks;
 }
 
 export interface SubsplashEmbedResource {
   id: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface SubsplashMediaItem {
@@ -60,9 +65,10 @@ export interface SubsplashListLinks {
 }
 
 export interface SubsplashListEmbedded {
+  'display-options'?: Array<{ id: string }>;
   images?: SubsplashImage[];
   'list-rows'?: SubsplashListRow[];
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface SubsplashList {

@@ -58,6 +58,13 @@ const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => 
   return formatLockBusyRetryMessage(fallbackMessage, lockBusyDetails);
 };
 
+const getErrorMessage = (error: unknown, fallbackMessage: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallbackMessage;
+};
+
 interface SeriesListItemRowProps {
   series: Series;
   isAdmin: boolean;
@@ -239,9 +246,9 @@ const AdminSeriesPage = () => {
       const snapshot = await getDocs(seriesQuery);
       const allSeries = snapshot.docs.map((doc) => doc.data());
       setSeriesList(allSeries);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching series:', err);
-      setError(err.message || 'Failed to fetch series');
+      setError(getErrorMessage(err, 'Failed to fetch series'));
     }
 
     setLoading(false);
@@ -266,9 +273,9 @@ const AdminSeriesPage = () => {
 
       setSeriesList((prev) => prev.filter((s) => s.id !== selectedSeries.id));
       setDeleteSeriesPopup(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error deleting series:', err);
-      const fallbackMessage = `Error deleting series: ${err.message || 'Unknown error'}`;
+      const fallbackMessage = `Error deleting series: ${getErrorMessage(err, 'Unknown error')}`;
       alert(getLockBusyMessage(err, fallbackMessage));
     } finally {
       setIsDeleting(false);

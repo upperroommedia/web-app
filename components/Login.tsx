@@ -254,7 +254,7 @@ const Login = () => {
                     if (result) {
                       // Error code returned
                       setTitle('Dev Login Error');
-                      setErrorMessage(`Error: ${result}. Make sure to run: npx ts-node --skip-project scripts/create-dev-admin.ts`);
+                      setErrorMessage(`Error: ${result}. Make sure to run: pnpm run create-dev-admin`);
                       setOpen(true);
                     } else {
                       // Success - redirect

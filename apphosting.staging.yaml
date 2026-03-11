@@ -63,7 +63,7 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_ALGOLIA_API_KEY
-    secret: ALGOLIA_SEARCH_API_KEY_STAGING
+    secret: ALGOLIA_SEARCH_API_KEY
     availability:
       - BUILD
       - RUNTIME
@@ -86,38 +86,5 @@ env:
       - RUNTIME
   - variable: FIREBASE_FUNCTIONS_REGION
     value: us-central1
-    availability:
-      - RUNTIME
-
-  - variable: ROLE_REQUEST_RECIPIENTS
-    secret: ROLE_REQUEST_RECIPIENTS_STAGING
-    availability:
-      - RUNTIME
-  - variable: RUNTIME_ALERT_RECIPIENTS
-    secret: RUNTIME_ALERT_RECIPIENTS_STAGING
-    availability:
-      - RUNTIME
-  - variable: ADMIN_BASE_URL
-    secret: ADMIN_BASE_URL_STAGING
-    availability:
-      - RUNTIME
-  - variable: EMAIL
-    secret: SUBSPLASH_EMAIL_STAGING
-    availability:
-      - RUNTIME
-  - variable: PASSWORD
-    secret: SUBSPLASH_PASSWORD_STAGING
-    availability:
-      - RUNTIME
-  - variable: DOLBY_API_KEY
-    secret: DOLBY_API_KEY_STAGING
-    availability:
-      - RUNTIME
-  - variable: DOLBY_API_SECRET
-    secret: DOLBY_API_SECRET_STAGING
-    availability:
-      - RUNTIME
-  - variable: CLERK_SECRET_KEY
-    secret: CLERK_SECRET_KEY_STAGING
     availability:
       - RUNTIME
