@@ -39,7 +39,7 @@ jobs:
       anything_to_deploy: ${{ steps.detect.outputs.anything_to_deploy }}
       changed_files: ${{ steps.detect.outputs.changed_files }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -215,7 +215,7 @@ jobs:
 
       - name: Checkout repository
         if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate GCP OIDC secrets
         if: needs.detect-changes.outputs.anything_to_run == 'true'
