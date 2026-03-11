@@ -117,6 +117,8 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   const [isIframeVisible, setIsIframeVisible] = useState(false);
   const [playheadTime, setPlayheadTime] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(0);
+  const [pausedAttr, setPausedAttr] = useState(true);
+  const [bufferingAttr, setBufferingAttr] = useState(false);
 
   const playerShellRef = useRef<HTMLDivElement | null>(null);
   const playerHostRef = useRef<HTMLDivElement | null>(null);
@@ -210,6 +212,8 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
         lastIsPlayingRef.current = isPlaying;
         storeState.setIsPlaying(isPlaying);
       }
+      setPausedAttr((prev) => (prev === snapshot.paused ? prev : snapshot.paused));
+      setBufferingAttr((prev) => (prev === snapshot.buffering ? prev : snapshot.buffering));
 
       if (snapshot.muted !== lastMutedRef.current) {
         lastMutedRef.current = snapshot.muted;
@@ -252,7 +256,9 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   ]);
 
   useEffect(() => {
-    setHasUserTappedToLoad(false);
+    queueMicrotask(() => {
+      setHasUserTappedToLoad(false);
+    });
   }, [videoId]);
 
   useEffect(() => {
@@ -310,11 +316,13 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   useEffect(() => {
     if (!debouncedInput.trim() || !videoId) {
       setAudioSource(undefined);
-      setHasUserTappedToLoad(false);
-      setIsMuted(false);
-      setPlayheadTime(0);
-      setMediaDuration(0);
-      setIsIframeVisible(false);
+      queueMicrotask(() => {
+        setHasUserTappedToLoad(false);
+        setIsMuted(false);
+        setPlayheadTime(0);
+        setMediaDuration(0);
+        setIsIframeVisible(false);
+      });
       setStoreIsReady(false);
       setStoreIsLoading(false);
       setBufferedEnd(0);
@@ -352,7 +360,9 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
     setStoreIsLoading(true);
     setStoreIsReady(false);
-    setIsIframeVisible(false);
+    queueMicrotask(() => {
+      setIsIframeVisible(false);
+    });
     setAudioSource({ source: debouncedInputRef.current, type: 'YoutubeUrl' });
     setAudioSourceError(false, '');
 
@@ -363,7 +373,9 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
   useEffect(() => {
     if (!shouldLoad || !isReady) {
-      setIsIframeVisible(false);
+      queueMicrotask(() => {
+        setIsIframeVisible(false);
+      });
       return;
     }
 
@@ -517,8 +529,6 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
   const showPlayer = Boolean(videoId);
   const showTapToLoadOverlay = showPlayer && isIOS() && !hasUserTappedToLoad;
-  const pausedAttr = latestSnapshotRef.current?.paused ?? true;
-  const bufferingAttr = latestSnapshotRef.current?.buffering ?? false;
   const showLoading = showPlayer && !showTapToLoadOverlay && (!isIframeVisible || isLoading);
 
   return (

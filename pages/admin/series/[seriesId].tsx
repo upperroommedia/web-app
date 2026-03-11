@@ -107,6 +107,20 @@ const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => 
   return `${fallbackMessage} Another publishing action is in progress.${lockedKeys} Retry in about ${retryInSeconds}s.`;
 };
 
+const getErrorField = (error: unknown, field: 'code' | 'message'): string | undefined => {
+  if (field === 'message' && error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error !== 'object' || error === null || !(field in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === 'string' ? value : undefined;
+};
+
+const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
+  getErrorField(error, 'message') || fallbackMessage;
+
 const cloneSeriesItems = (source: SeriesItemWithSermon[]): SeriesItemWithSermon[] =>
   source.map((item) => ({
     ...item,
@@ -416,9 +430,9 @@ const SeriesDetailsPage = () => {
       setItems(itemsWithSermons);
       // Store original order for revert functionality
       originalItemsRef.current = cloneSeriesItems(itemsWithSermons);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching series:', err);
-      setError(err.message || 'Failed to fetch series');
+      setError(getErrorMessage(err, 'Failed to fetch series'));
     }
 
     setLoading(false);
@@ -702,7 +716,7 @@ const SeriesDetailsPage = () => {
 
       try {
         await reorderPublishedItemsInSubsplash(seriesItem.id, confirmedMediaItemId);
-      } catch (reorderError: any) {
+      } catch (reorderError: unknown) {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         try {
           await removeFromSeriesFunction({
@@ -712,15 +726,15 @@ const SeriesDetailsPage = () => {
           await syncSeriesItemPublishedState(seriesItem.id, {
             publishedToSubsplash: false,
           });
-          throw new Error(reorderError?.message || 'Series reorder failed after publish.');
-        } catch (rollbackError: any) {
+          throw new Error(getErrorMessage(reorderError, 'Series reorder failed after publish.'));
+        } catch (rollbackError: unknown) {
           // Rollback failure means item likely remains published in Subsplash.
           await syncSeriesItemPublishedState(seriesItem.id, {
             publishedToSubsplash: true,
             sermonSubsplashId: confirmedMediaItemId,
           });
           const partialFailureMessage =
-            `Series reorder failed and rollback failed. ${seriesItem.sermon?.title || 'This sermon'} remains published in Subsplash and has been kept published locally. Reorder error: ${reorderError?.message || 'Unknown'}; rollback error: ${rollbackError?.message || 'Unknown'}.`;
+            `Series reorder failed and rollback failed. ${seriesItem.sermon?.title || 'This sermon'} remains published in Subsplash and has been kept published locally. Reorder error: ${getErrorMessage(reorderError, 'Unknown')}; rollback error: ${getErrorMessage(rollbackError, 'Unknown')}.`;
           console.error(partialFailureMessage);
           if (!options?.suppressAlert) {
             alert(partialFailureMessage);
@@ -730,10 +744,10 @@ const SeriesDetailsPage = () => {
       }
 
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error publishing series item:', err);
       if (!options?.suppressAlert) {
-        alert(`Error publishing item to series: ${getLockBusyMessage(err, err?.message || 'Unknown error')}`);
+        alert(`Error publishing item to series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
       }
       return false;
     } finally {
@@ -768,9 +782,9 @@ const SeriesDetailsPage = () => {
           ? { ...item, publishedToSubsplash: false, sermonSubsplashId: undefined }
           : item
       ));
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error unpublishing series item:', err);
-      alert(`Error unpublishing item from series: ${getLockBusyMessage(err, err?.message || 'Unknown error')}`);
+      alert(`Error unpublishing item from series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     } finally {
       setUnpublishingItemId(null);
       setUnpublishTarget(null);
@@ -875,9 +889,9 @@ const SeriesDetailsPage = () => {
           const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.id);
           try {
             await updateDoc(itemRef, { position: items.length - index });
-          } catch (err: any) {
+          } catch (err: unknown) {
             // Item might have been deleted by another user - skip it
-            if (err?.code === 'not-found' || err?.message?.includes('NOT_FOUND')) {
+            if (getErrorField(err, 'code') === 'not-found' || getErrorMessage(err, '').includes('NOT_FOUND')) {
               console.warn(`SeriesItem ${item.id} not found - may have been removed`);
             } else {
               throw err;
@@ -888,10 +902,10 @@ const SeriesDetailsPage = () => {
 
       // Update original order reference after successful save
       originalItemsRef.current = cloneSeriesItems(items);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error saving order:', err);
       setItems(previousItems);
-      alert(`Error saving order. Reverted to last synced state.\n${getLockBusyMessage(err, err.message || 'Unknown error')}`);
+      alert(`Error saving order. Reverted to last synced state.\n${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     } finally {
       setIsSaving(false);
     }
@@ -912,8 +926,8 @@ const SeriesDetailsPage = () => {
             mediaItemId,
             operationKey: createOperationKey('series-admin-remove-item', removeTarget.id),
           });
-        } catch (removeErr: any) {
-          if (removeErr?.code !== 'functions/not-found') {
+        } catch (removeErr: unknown) {
+          if (getErrorField(removeErr, 'code') !== 'functions/not-found') {
             throw removeErr;
           }
         }
@@ -925,8 +939,8 @@ const SeriesDetailsPage = () => {
         await updateDoc(doc(firestore, 'sermons', removeTarget.id), {
           seriesId: null,
         });
-      } catch (sermonErr: any) {
-        if (sermonErr?.code === 'not-found' || sermonErr?.message?.includes('NOT_FOUND')) {
+      } catch (sermonErr: unknown) {
+        if (getErrorField(sermonErr, 'code') === 'not-found' || getErrorMessage(sermonErr, '').includes('NOT_FOUND')) {
           console.warn(`Sermon ${removeTarget.id} not found - may have been deleted`);
         } else {
           throw sermonErr;
@@ -946,9 +960,9 @@ const SeriesDetailsPage = () => {
       setItems(updatedItems);
       originalItemsRef.current = cloneSeriesItems(updatedItems);
       setRemoveTarget(null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error removing item:', err);
-      alert(`Error removing item: ${getLockBusyMessage(err, err.message || 'Unknown error')}`);
+      alert(`Error removing item: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     } finally {
       setIsRemovingItem(false);
     }
@@ -1033,9 +1047,9 @@ const SeriesDetailsPage = () => {
       }
 
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error adding item:', err);
-      alert(`Error adding item: ${err.message || 'Unknown error'}`);
+      alert(`Error adding item: ${getErrorMessage(err, 'Unknown error')}`);
       return false;
     }
   }, [isSermonPublishedToSubsplash, items, publishItemToSeries, router, seriesId]);
@@ -1326,9 +1340,9 @@ const SeriesDetailsPage = () => {
         setSelectedSermonIds(new Set());
         setAddItemPopup(false);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error adding selected sermons:', err);
-      alert(`Error adding selected sermons: ${getLockBusyMessage(err, err?.message || 'Unknown error')}`);
+      alert(`Error adding selected sermons: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     } finally {
       setActiveAddingSermonId(null);
       setIsAddingSelectedSermons(false);
@@ -1359,9 +1373,9 @@ const SeriesDetailsPage = () => {
         operationKey: createOperationKey('series-admin-delete-series', seriesId),
       });
       router.push('/admin/series');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error deleting series:', err);
-      alert(`Error deleting series: ${getLockBusyMessage(err, err.message || 'Unknown error')}`);
+      alert(`Error deleting series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     }
     setIsDeleting(false);
   };

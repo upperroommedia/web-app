@@ -7,6 +7,10 @@ interface MockAlgoliaClientOptions {
   isAdmin: boolean;
 }
 
+type QueryRequestParamContainer = Record<string, unknown> & {
+  params?: Record<string, unknown> | string;
+};
+
 /**
  * Creates a mock Algolia SearchClient that queries Firestore instead of Algolia.
  * This is used in development mode when the emulator is running.
@@ -16,7 +20,7 @@ interface MockAlgoliaClientOptions {
 export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions): SearchClient {
   const { userId, isAdmin } = options;
   return {
-    search: async <T = Record<string, any>>(
+    search: async <T = Record<string, unknown>>(
       searchMethodParams: SearchMethodParams | LegacySearchMethodProps
     ): Promise<SearchResponses<T>> => {
       // Handle both SearchMethodParams (has requests array) and LegacySearchMethodProps (is array of queries)
@@ -28,15 +32,35 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
         queries.map(async (queryRequest) => {
           // In algoliasearch v5, SearchQuery properties are directly on the object
           // Handle both SearchParamsObject (direct properties) and SearchParamsString (params string) formats
-          const queryObj = queryRequest as any;
-          const getParam = (key: string) => {
+          const queryObj = queryRequest as unknown as QueryRequestParamContainer;
+          const getParam = (key: string): unknown => {
             // Try direct property first (SearchParamsObject format)
             if (queryObj[key] !== undefined) return queryObj[key];
             // Fall back to params object if it exists (legacy format)
-            if (queryObj.params && typeof queryObj.params === 'object' && queryObj.params[key] !== undefined) {
+            if (
+              queryObj.params &&
+              typeof queryObj.params === 'object' &&
+              !Array.isArray(queryObj.params) &&
+              queryObj.params[key] !== undefined
+            ) {
               return queryObj.params[key];
             }
             return undefined;
+          };
+          const getStringParam = (key: string, fallback = ''): string => {
+            const value = getParam(key);
+            if (typeof value === 'string') return value;
+            if (value === undefined || value === null) return fallback;
+            return String(value);
+          };
+          const getNumberParam = (key: string, fallback: number): number => {
+            const value = getParam(key);
+            if (typeof value === 'number' && Number.isFinite(value)) return value;
+            if (typeof value === 'string' && value.trim() !== '') {
+              const parsed = Number(value);
+              if (Number.isFinite(parsed)) return parsed;
+            }
+            return fallback;
           };
 
           if (queryRequest.indexName !== 'sermons') {
@@ -46,19 +70,20 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               nbHits: 0,
               page: 0,
               nbPages: 0,
-              hitsPerPage: getParam('hitsPerPage') || 20,
+              hitsPerPage: getNumberParam('hitsPerPage', 20),
               processingTimeMS: 0,
-              query: getParam('query') || '',
+              query: getStringParam('query'),
               params: '',
             } as SearchResponse<T>;
           }
 
           try {
-            const searchQuery = getParam('query') || '';
-            const hitsPerPage = getParam('hitsPerPage') || 20;
-            const page = getParam('page') || 0;
-            const filters = getParam('filters') || '';
-            const facetFilters = getParam('facetFilters') || [];
+            const searchQuery = getStringParam('query');
+            const hitsPerPage = getNumberParam('hitsPerPage', 20);
+            const page = getNumberParam('page', 0);
+            const filters = getStringParam('filters');
+            const facetFiltersRaw = getParam('facetFilters');
+            const facetFilters = Array.isArray(facetFiltersRaw) ? facetFiltersRaw : [];
 
             // Build Firestore query constraints
             const constraints: QueryConstraint[] = [];
@@ -90,6 +115,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               for (const facetFilterGroup of facetFilters) {
                 if (Array.isArray(facetFilterGroup)) {
                   for (const filter of facetFilterGroup) {
+                    if (typeof filter !== 'string') continue;
                     const [field, value] = filter.split(':');
                     if (field === 'status.subsplash') {
                       constraints.push(where('status.subsplash', '==', value));
@@ -100,7 +126,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
                       speakerFilters.push(value);
                     }
                   }
-                } else {
+                } else if (typeof facetFilterGroup === 'string') {
                   const [field, value] = facetFilterGroup.split(':');
                   if (field === 'status.subsplash') {
                     constraints.push(where('status.subsplash', '==', value));
@@ -198,9 +224,9 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               nbHits: 0,
               page: 0,
               nbPages: 0,
-              hitsPerPage: getParam('hitsPerPage') || 20,
+              hitsPerPage: getNumberParam('hitsPerPage', 20),
               processingTimeMS: 0,
-              query: getParam('query') || '',
+              query: getStringParam('query'),
               params: '',
             } as SearchResponse<T>;
           }
@@ -291,4 +317,3 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
     },
   } as SearchClient;
 }
-

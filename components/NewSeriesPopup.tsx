@@ -24,7 +24,7 @@ interface NewSeriesPopupProps {
   open: boolean;
   setOpen: Dispatch<SetStateAction<boolean>>;
   onSeriesCreated?: (series: Series) => void;
-  existingSeries?: Series;  // For editing existing series
+  existingSeries?: Series; // For editing existing series
 }
 
 const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
@@ -44,27 +44,19 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [nameError, setNameError] = useState<string | null>(null);
 
   // Reset form when existing series changes
   useEffect(() => {
     if (props.existingSeries) {
-      setFormData({
-        name: props.existingSeries.name,
-        summary: props.existingSeries.summary ?? '',
-        images: props.existingSeries.images,
+      queueMicrotask(() => {
+        setFormData({
+          name: props.existingSeries?.name ?? '',
+          summary: props.existingSeries?.summary ?? '',
+          images: props.existingSeries?.images ?? [],
+        });
       });
     }
   }, [props.existingSeries]);
-
-  // Validate name
-  useEffect(() => {
-    if (!formData.name.trim()) {
-      setNameError('Name is required');
-    } else {
-      setNameError(null);
-    }
-  }, [formData.name]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -80,9 +72,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         const castedImage = image as ImageType;
         let newImages: ImageType[];
         if (prev.images.find((img) => img.type === castedImage.type)) {
-          newImages = prev.images.map((img) => 
-            img.type === castedImage.type ? castedImage : img
-          );
+          newImages = prev.images.map((img) => (img.type === castedImage.type ? castedImage : img));
         } else {
           newImages = [...prev.images, castedImage];
         }
@@ -104,7 +94,6 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     }
 
     if (!formData.name.trim()) {
-      setNameError('Name is required');
       return;
     }
 
@@ -139,7 +128,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
           title: formData.name.trim(),
           summary: formData.summary.trim() || undefined,
           ownerId: user.uid,
-          skipSubsplash: true,  // Only create in Firestore at upload time
+          skipSubsplash: true, // Only create in Firestore at upload time
           images: formData.images,
         });
 
@@ -153,13 +142,13 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
             summary: formData.summary.trim() || undefined,
             images: formData.images,
             ownerId: user.uid,
-            subsplashId: '',  // Not yet published
+            subsplashId: '', // Not yet published
             status: 'draft',
           };
 
           props.onSeriesCreated?.(newSeries);
           props.setOpen(false);
-          
+
           // Reset form
           setFormData({
             name: '',
@@ -170,9 +159,10 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
           setError(result.error || 'Failed to create series');
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error saving series:', err);
-      setError(err.message || 'An unexpected error occurred');
+      const message = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setError(message);
     }
 
     setSubmitting(false);
@@ -194,9 +184,9 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
       });
     }
     setError(null);
-    setNameError(null);
   };
 
+  const nameError = formData.name.trim() ? null : 'Name is required';
   const isValid = formData.name.trim() !== '' && formData.images.length > 0;
 
   return (
@@ -221,7 +211,6 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
             {error}
           </Alert>
         )}
-        
         <TextField
           autoFocus
           inputRef={nameInputRef}
@@ -243,11 +232,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         />
 
         <Box>
-          <ImageViewer 
-            images={formData.images} 
-            newImageCallback={handleImageChange} 
-            vertical={false} 
-          />
+          <ImageViewer images={formData.images} newImageCallback={handleImageChange} vertical={false} />
           {formData.images.length === 0 && (
             <Alert severity="info" sx={{ mt: 1 }}>
               Please add at least one image for the series

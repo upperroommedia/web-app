@@ -20,7 +20,7 @@ const normalizeLabel = (label: string) => {
     })
     .join(' ');
 };
-const CustomRefinementList = (
+  const CustomRefinementList = (
   props: UseRefinementListProps & { title: string; searchable?: boolean; searchablePlaceholder?: string; }
 ) => {
   const { status, results } = useInstantSearch();
@@ -29,7 +29,9 @@ const CustomRefinementList = (
 
   useEffect(() => {
     if (items.length > 0) {
-      setStableItems(items);
+      queueMicrotask(() => {
+        setStableItems(items);
+      });
     }
   }, [items]);
 
@@ -76,10 +78,10 @@ const CustomRefinementList = (
           onChange={(e) => searchForItems(e.currentTarget.value)}
         />
       )}
-      {renderedItems.map((item) => (
+      {renderedItems.map((item, index) => (
         <FormControlLabel
           sx={{ py: 0, pl: 1 }}
-          key={item.label}
+          key={`${String(item.value)}-${index}`}
           control={<Checkbox sx={{ p: 0 }} disableRipple onChange={() => refine(item.value)} />}
           label={
             <Box display="flex" alignItems="baseline" gap={1}>

@@ -88,7 +88,6 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           topics = topics.filter((topic) => topic.listId !== undefined);
           topics = topics.map((topic) => ({ ...topic, id: topic.listId } as Topic));
          
-          
           // Convert topics to the format expected by ListSelector
           const topicLists = topics.map(topicToListWithHighlight);
           setAllListArray(topicLists);
@@ -120,7 +119,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
         return cachedTopics.map(topicToListWithHighlight);
       }
       const searchResults = localTopicSearch.search(query);
-      return searchResults.map(result => topicToListWithHighlight(result.item));
+      return searchResults.map((result) => topicToListWithHighlight(result.item));
     } catch (error) {
       console.error('Error searching topics locally:', error);
       return [];
@@ -216,8 +215,10 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
             setIsSearching(hasQuery);
             setAllListArray(await searchTopicsLocally(newInputValue));
           }}
-          renderOption={(props, option: ListWithHighlight) => (
-            <ListItem {...props} key={option.id} dense>
+          renderOption={(props, option: ListWithHighlight) => {
+            const { key: _key, ...optionProps } = props;
+            return (
+            <ListItem key={option.id} {...optionProps} dense>
               <AvatarWithDefaultImage
                 defaultImageURL="/user.png"
                 altName={option.name}
@@ -233,7 +234,8 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
                 <div>{option.name}</div>
               )}
             </ListItem>
-          )}
+            );
+          }}
           getOptionLabel={(option: ListWithHighlight) => option.name}
           isOptionEqualToValue={(option, value) =>
             value.name === undefined || option.name === undefined || option.id === value.id

@@ -199,8 +199,10 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           onInputChange={async (_, newInputValue) => {
             setAllListArray(await queryAlgolia(newInputValue));
           }}
-          renderOption={(props, option: ListWithHighlight) => (
-            <ListItem {...props} key={option.id}>
+          renderOption={(props, option: ListWithHighlight) => {
+            const { key: _key, ...optionProps } = props;
+            return (
+            <ListItem key={option.id} {...optionProps}>
               <AvatarWithDefaultImage
                 defaultImageURL="/user.png"
                 altName={option.name}
@@ -216,7 +218,8 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
                 <div>{option.name}</div>
               )}
             </ListItem>
-          )}
+            );
+          }}
           getOptionLabel={(option: ListWithHighlight) => option.name}
           isOptionEqualToValue={(option, value) =>
             value.name === undefined || option.name === undefined || option.id === value.id

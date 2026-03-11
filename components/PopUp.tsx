@@ -8,9 +8,9 @@ import { ReactElement } from 'react';
 interface PopUpInfo {
   title?: string;
   open: boolean;
-  children: string | ReactElement<any>;
+  children: string | ReactElement;
   setOpen: (setOpen: boolean) => void;
-  button?: ReactElement<any>;
+  button?: ReactElement;
   disabled?: boolean;
   onClose?: () => void;
   // optional props to pass to Dialog

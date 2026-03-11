@@ -275,7 +275,7 @@ jest.mock('axios', () => {
       
       // Row not found - return 404 in axios error format
       // Axios errors have a specific structure that axios checks with isAxiosError
-      const axiosError: any = {
+      const axiosError = {
         message: 'Request failed with status code 404',
         name: 'AxiosError',
         code: 'ERR_BAD_REQUEST',

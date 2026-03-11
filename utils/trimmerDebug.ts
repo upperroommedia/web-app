@@ -6,6 +6,11 @@ interface TrimmerDebugEvent {
   payload: TrimmerDebugPayload;
 }
 
+type TrimmerDebugWindow = Window & {
+  __TRIMMER_DEBUG__?: boolean;
+  __TRIMMER_DEBUG_BUFFER__?: TrimmerDebugEvent[];
+};
+
 function isServerLoggingEnabled(): boolean {
   if (typeof window === 'undefined') {
     return process.env.TRIMMER_DEBUG_API === '1';
@@ -21,7 +26,8 @@ function isDebugEnabled(): boolean {
   }
 
   if (process.env.NEXT_PUBLIC_TRIMMER_DEBUG === '1') return true;
-  if ((window as any).__TRIMMER_DEBUG__ === true) return true;
+  const debugWindow = window as TrimmerDebugWindow;
+  if (debugWindow.__TRIMMER_DEBUG__ === true) return true;
   try {
     return window.localStorage.getItem('trimmerDebug') === '1';
   } catch {
@@ -56,15 +62,15 @@ export function logTrimmerDebug(event: string, payload: TrimmerDebugPayload = {}
     },
   };
 
-  console.debug('[TRIMMER_DEBUG]', entry);
+  console.warn('[TRIMMER_DEBUG]', entry);
 
   if (typeof window !== 'undefined') {
     try {
-      const g = window as any;
-      if (!Array.isArray(g.__TRIMMER_DEBUG_BUFFER__)) g.__TRIMMER_DEBUG_BUFFER__ = [];
-      g.__TRIMMER_DEBUG_BUFFER__.push(entry);
-      if (g.__TRIMMER_DEBUG_BUFFER__.length > 500) {
-        g.__TRIMMER_DEBUG_BUFFER__.splice(0, g.__TRIMMER_DEBUG_BUFFER__.length - 500);
+      const debugWindow = window as TrimmerDebugWindow;
+      if (!Array.isArray(debugWindow.__TRIMMER_DEBUG_BUFFER__)) debugWindow.__TRIMMER_DEBUG_BUFFER__ = [];
+      debugWindow.__TRIMMER_DEBUG_BUFFER__.push(entry);
+      if (debugWindow.__TRIMMER_DEBUG_BUFFER__.length > 500) {
+        debugWindow.__TRIMMER_DEBUG_BUFFER__.splice(0, debugWindow.__TRIMMER_DEBUG_BUFFER__.length - 500);
       }
     } catch {
       // ignore buffer failures

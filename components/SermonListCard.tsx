@@ -254,28 +254,36 @@ const SermonListCard: FunctionComponent<Props> = ({
   useEffect(() => {
     const uid = currentSermon.uploaderId;
     if (!uid) {
-      setUploader(undefined);
-      setUploaderLoading(false);
+      queueMicrotask(() => {
+        setUploader(undefined);
+        setUploaderLoading(false);
+      });
       return;
     }
 
     const cachedUser = uploaderCache.get(uid);
     if (cachedUser) {
-      setUploader(cachedUser);
-      setUploaderLoading(false);
+      queueMicrotask(() => {
+        setUploader(cachedUser);
+        setUploaderLoading(false);
+      });
       return;
     }
 
     // Non-admin uploader view only shows their own sermons; avoid backend lookup when it is the signed-in user.
     if (user?.uid === uid) {
       uploaderCache.set(uid, user);
-      setUploader(user);
-      setUploaderLoading(false);
+      queueMicrotask(() => {
+        setUploader(user);
+        setUploaderLoading(false);
+      });
       return;
     }
 
     let cancelled = false;
-    setUploaderLoading(true);
+    queueMicrotask(() => {
+      setUploaderLoading(true);
+    });
     requestUploaderInBatch(uid)
       .then((lookupUser) => {
         if (cancelled) {
@@ -298,13 +306,17 @@ const SermonListCard: FunctionComponent<Props> = ({
     let cancelled = false;
     const seriesId = currentSermon.seriesId;
     if (!seriesId) {
-      setSeries(null);
+      queueMicrotask(() => {
+        setSeries(null);
+      });
       return;
     }
 
     const cachedSeries = seriesCache.get(seriesId);
     if (cachedSeries !== undefined) {
-      setSeries(cachedSeries);
+      queueMicrotask(() => {
+        setSeries(cachedSeries);
+      });
       return;
     }
 
@@ -362,7 +374,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
   const seriesImage = series?.images?.find((img) => img.type === 'square');
 
-  const UploaderAvatar = () => (
+  const renderUploaderAvatar = () => (
     <Tooltip
       open={showUploaderTooltip}
       onOpen={() => setShowUploaderTooltip(true)}
@@ -382,7 +394,7 @@ const SermonListCard: FunctionComponent<Props> = ({
     </Tooltip>
   );
 
-  const PlayButton = () => (
+  const renderPlayButton = () => (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
       <IconButton
         onClick={handlePlayPause}
@@ -401,7 +413,7 @@ const SermonListCard: FunctionComponent<Props> = ({
     </Box>
   );
 
-  const SubsplashStatus = () => (
+  const renderSubsplashStatus = () => (
     <Tooltip title={`Published to ${subsplashUploaded} of ${subsplashTotal} lists`}>
       <Chip
         icon={<CollectionsIcon sx={{ fontSize: 13 }} />}
@@ -421,7 +433,7 @@ const SermonListCard: FunctionComponent<Props> = ({
     </Tooltip>
   );
 
-  const SoundCloudStatus = () => (
+  const renderSoundCloudStatus = () => (
     <Tooltip title={isSoundCloudUploaded ? 'Published to SoundCloud' : 'Not on SoundCloud'}>
       <Chip
         icon={<CloudIcon sx={{ fontSize: 13 }} />}
@@ -441,24 +453,24 @@ const SermonListCard: FunctionComponent<Props> = ({
     </Tooltip>
   );
   // Mobile Actions Component (stacked vertically on right)
-  const MobileActions = () => (
+  const renderMobileActions = () => (
     <Box sx={{ display: 'flex', flexDirection: 'row', gap: 0.5 }}>
       {/* Publishing Status */}
       {isProcessed && canPublish && (
         <>
-          <SoundCloudStatus />
-          <SubsplashStatus />
+          {renderSoundCloudStatus()}
+          {renderSubsplashStatus()}
         </>
       )}
       {/* Play Button */}
       {isProcessed && (
-        <PlayButton />
+        renderPlayButton()
       )}
     </Box>
   );
 
   // Desktop Actions Component (horizontal bottom row)
-  const DesktopActions = () => (
+  const renderDesktopActions = () => (
     <Stack
       direction="row"
       spacing={0.5}
@@ -468,8 +480,8 @@ const SermonListCard: FunctionComponent<Props> = ({
     >
       {isProcessed && canPublish && (
         <Stack direction="row" spacing={0.5} alignItems="center">
-          <SoundCloudStatus />
-          <SubsplashStatus />
+          {renderSoundCloudStatus()}
+          {renderSubsplashStatus()}
           {isError && onRefresh && (
             <Tooltip title="Retry processing">
               <IconButton
@@ -590,7 +602,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                   </Typography>
                 )}
               </Stack>
-              <UploaderAvatar />
+              {renderUploaderAvatar()}
             </Box>
             {isDesktop && (
               <Typography
@@ -614,7 +626,7 @@ const SermonListCard: FunctionComponent<Props> = ({
             <Box sx={{ display: 'flex', flexDirection: 'row', gap: 0.5, flexShrink: 0 }}>
               <Stack direction="row" spacing={0.5} alignItems="center" flex={1} sx={{ mt: 0.25, overflow: 'hidden', minWidth: 0 }}>
                 {isProcessed && isTablet && (
-                  <PlayButton />
+                  renderPlayButton()
                 )}
                 <Typography
                   variant="caption"
@@ -701,8 +713,8 @@ const SermonListCard: FunctionComponent<Props> = ({
                 )}
               </Stack>
               <Stack direction="column" spacing={0.5} justifyContent="space-between" alignItems="center" flexShrink={0}>
-                {!isTablet && <MobileActions />}
-                {isTablet && <DesktopActions />}
+                {!isTablet && renderMobileActions()}
+                {isTablet && renderDesktopActions()}
               </Stack>
             </Box>
 

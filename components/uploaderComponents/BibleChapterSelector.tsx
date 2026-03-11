@@ -124,11 +124,14 @@ export default function BibleChapterSelector({
             id="bible-chapter-input"
             options={getFilteredOptions()}
             getOptionLabel={(option: List) => option.name}
-            renderOption={(props, option: List) => (
-              <ListItem {...props} key={option.id}>
+            renderOption={(props, option: List) => {
+              const { key: _key, ...optionProps } = props;
+              return (
+              <ListItem key={option.id} {...optionProps}>
                 {option.name}
               </ListItem>
-            )}
+              );
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}

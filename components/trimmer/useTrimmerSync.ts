@@ -185,14 +185,13 @@ export function useAudioTrimmerSync(
     audioRef.current?.pause();
   }, [audioRef]);
 
-  // ref is stable; omitted from deps per React convention (react-hooks/exhaustive-deps doesn't recognize ref params)
-  const togglePlayPause = useCallback(() => {
+  const togglePlayPause = () => {
     if (audioRef.current?.paused) {
       play();
     } else {
       pause();
     }
-  }, [play, pause]); // eslint-disable-line react-hooks/exhaustive-deps -- audioRef is a ref (stable)
+  };
 
   return {
     seek,
@@ -348,15 +347,14 @@ export function useVidstackTrimmerSync(
     }
   }, [playerRef, remote]);
 
-  // ref is stable; omitted from deps per React convention (react-hooks/exhaustive-deps doesn't recognize ref params)
-  const togglePlayPause = useCallback(() => {
+  const togglePlayPause = () => {
     const player = playerRef.current;
     if (player?.paused) {
       play();
     } else {
       pause();
     }
-  }, [play, pause]); // eslint-disable-line react-hooks/exhaustive-deps -- playerRef is a ref (stable)
+  };
 
   // Initialize with duration when available
   const handleDurationChange = useCallback(

@@ -93,6 +93,20 @@ const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => 
   return `${fallbackMessage} Another publishing action is in progress.${lockedKeys} Retry in about ${retryInSeconds}s.`;
 };
 
+const getErrorField = (error: unknown, field: 'code' | 'details' | 'message'): string | undefined => {
+  if (field === 'message' && error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error !== 'object' || error === null || !(field in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === 'string' ? value : undefined;
+};
+
+const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
+  getErrorField(error, 'message') || fallbackMessage;
+
 const SermonDetailsPage = () => {
   const router = useRouter();
   const { user } = useAuth();
@@ -270,9 +284,9 @@ const SermonDetailsPage = () => {
         soundCloudTrackId: result.soundCloudTrackId,
         status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error uploading to SoundCloud:', error);
-      alert(error.message || 'Failed to upload to SoundCloud');
+      alert(getErrorMessage(error, 'Failed to upload to SoundCloud'));
     } finally {
       setIsUploadingToSoundCloud(false);
     }
@@ -301,15 +315,15 @@ const SermonDetailsPage = () => {
         soundCloudTrackId: deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
-    } catch (error: any) {
-      if (error.details?.includes('Invalid track id')) {
+    } catch (error: unknown) {
+      if (getErrorField(error, 'details')?.includes('Invalid track id')) {
         await updateDoc(sermonRef, {
           soundCloudTrackId: deleteField(),
           status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
         });
       } else {
         console.error('Error deleting from SoundCloud:', error);
-        alert(error.message || 'Failed to remove from SoundCloud');
+        alert(getErrorMessage(error, 'Failed to remove from SoundCloud'));
       }
     } finally {
       setIsUploadingToSoundCloud(false);
@@ -473,8 +487,8 @@ const SermonDetailsPage = () => {
         status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
       });
       await batch.commit();
-    } catch (error: any) {
-      if (error.code === 'functions/not-found') {
+    } catch (error: unknown) {
+      if (getErrorField(error, 'code') === 'functions/not-found') {
         const batch = writeBatch(firestore);
         if (sermon.seriesId) {
           const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
@@ -493,7 +507,7 @@ const SermonDetailsPage = () => {
         await batch.commit();
       } else {
         console.error('Error deleting from Subsplash:', error);
-        alert(getLockBusyMessage(error, error.message || 'Failed to delete from Subsplash'));
+        alert(getLockBusyMessage(error, getErrorMessage(error, 'Failed to delete from Subsplash')));
       }
     } finally {
       setIsUploadingToSubsplash(false);
@@ -608,7 +622,7 @@ const SermonDetailsPage = () => {
       if (reorderResult.status !== 'success') {
         throw new Error(reorderResult.message || 'Subsplash reorder failed.');
       }
-    } catch (reorderError: any) {
+    } catch (reorderError: unknown) {
       const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
       try {
         await removeFromSeriesFunction({
@@ -623,8 +637,8 @@ const SermonDetailsPage = () => {
           },
           { merge: true }
         );
-        throw new Error(reorderError?.message || 'Subsplash reorder failed.');
-      } catch (rollbackError: any) {
+        throw new Error(getErrorMessage(reorderError, 'Subsplash reorder failed.'));
+      } catch (rollbackError: unknown) {
         await setDoc(
           doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id),
           {
@@ -634,7 +648,7 @@ const SermonDetailsPage = () => {
           { merge: true }
         );
         throw new Error(
-          `Series reorder failed and rollback failed. ${sermon.title} remains published in Subsplash and has been kept published locally. Reorder error: ${reorderError?.message || 'Unknown'}; rollback error: ${rollbackError?.message || 'Unknown'}.`
+          `Series reorder failed and rollback failed. ${sermon.title} remains published in Subsplash and has been kept published locally. Reorder error: ${getErrorMessage(reorderError, 'Unknown')}; rollback error: ${getErrorMessage(rollbackError, 'Unknown')}.`
         );
       }
     }
@@ -650,9 +664,9 @@ const SermonDetailsPage = () => {
     setSeriesPublishAction('publish');
     try {
       await publishToSeriesForSeries(series);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error publishing sermon to series:', err);
-      alert(getLockBusyMessage(err, err?.message || 'Failed to publish sermon to series'));
+      alert(getLockBusyMessage(err, getErrorMessage(err, 'Failed to publish sermon to series')));
     } finally {
       setSeriesPublishAction(null);
     }
@@ -683,9 +697,9 @@ const SermonDetailsPage = () => {
       if (ownedSeries.length === 1) {
         setSelectedOwnedSeriesId(ownedSeries[0].id);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error loading owned series:', err);
-      alert(err?.message || 'Failed to load your series');
+      alert(getErrorMessage(err, 'Failed to load your series'));
     } finally {
       setLoadingOwnedSeries(false);
     }
@@ -738,11 +752,11 @@ const SermonDetailsPage = () => {
         setSeriesPublishAction('publish');
         try {
           await publishToSeriesForSeries(selectedSeries);
-        } catch (publishErr: any) {
+        } catch (publishErr: unknown) {
           await deleteDoc(doc(firestore, `series/${selectedSeries.id}/seriesItems`, sermon.id));
           await updateDoc(doc(firestore, 'sermons', sermon.id), { seriesId: null });
           throw new Error(
-            publishErr?.message || 'Automatic series publish failed. Sermon was not added to series.'
+            getErrorMessage(publishErr, 'Automatic series publish failed. Sermon was not added to series.')
           );
         } finally {
           setSeriesPublishAction(null);
@@ -753,9 +767,9 @@ const SermonDetailsPage = () => {
       setAddToSeriesDialogOpen(false);
       setSelectedOwnedSeriesId('');
       setOwnedSeriesSearchQuery('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error adding sermon to selected series:', err);
-      alert(err?.message || 'Failed to add sermon to series');
+      alert(getErrorMessage(err, 'Failed to add sermon to series'));
     } finally {
       setIsAddingToSeries(false);
     }
@@ -789,9 +803,9 @@ const SermonDetailsPage = () => {
       );
       await refreshSeriesState(series.id);
       setConfirmSeriesUnpublishOpen(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error unpublishing sermon from series:', err);
-      alert(getLockBusyMessage(err, err?.message || 'Failed to unpublish sermon from series'));
+      alert(getLockBusyMessage(err, getErrorMessage(err, 'Failed to unpublish sermon from series')));
     } finally {
       setSeriesPublishAction(null);
     }

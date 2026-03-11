@@ -28,7 +28,7 @@ interface EditSermonOptions {
 }
 
 const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSermonOptions) => {
-  const promises: Promise<any>[] = [];
+  const promises: Promise<unknown>[] = [];
   if (sermon.subsplashId) {
     const editSubsplashSermon = createFunctionV2<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
     const input: EDIT_SUBSPLASH_SERMON_INCOMING_DATA = {

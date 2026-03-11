@@ -44,6 +44,10 @@ interface SeriesItemData {
   sermonSubsplashId?: string | null;
 }
 
+const print = (message: string): void => {
+  process.stdout.write(`${message}\n`);
+};
+
 function parseArgs(argv: string[]): Args {
   const args: Args = {
     apply: false,
@@ -75,18 +79,18 @@ function parseArgs(argv: string[]): Args {
 }
 
 function printHelp(): void {
-  console.log('Backfill series published flags');
-  console.log('');
-  console.log('Usage:');
-  console.log('  npx ts-node --skip-project scripts/backfillSeriesPublishedFlags.ts [options]');
-  console.log('');
-  console.log('Options:');
-  console.log('  --apply                 Persist changes to Firestore (default is dry-run)');
-  console.log('  --series-id=<id>        Limit to a single Firestore series document');
-  console.log('  --limit=<number>        Limit number of series processed');
-  console.log('  --help, -h              Show this help');
-  console.log('');
-  console.log('Required env vars for Subsplash auth: SUBSPLASH_EMAIL, SUBSPLASH_PASSWORD');
+  print('Backfill series published flags');
+  print('');
+  print('Usage:');
+  print('  npx ts-node --skip-project scripts/backfillSeriesPublishedFlags.ts [options]');
+  print('');
+  print('Options:');
+  print('  --apply                 Persist changes to Firestore (default is dry-run)');
+  print('  --series-id=<id>        Limit to a single Firestore series document');
+  print('  --limit=<number>        Limit number of series processed');
+  print('  --help, -h              Show this help');
+  print('');
+  print('Required env vars for Subsplash auth: SUBSPLASH_EMAIL, SUBSPLASH_PASSWORD');
 }
 
 async function authenticateSubsplash(): Promise<string> {
@@ -191,8 +195,8 @@ async function run(): Promise<void> {
     seriesDocs = snapshot.docs;
   }
 
-  console.log(`Mode: ${args.apply ? 'APPLY' : 'DRY-RUN'}`);
-  console.log(`Series to scan: ${seriesDocs.length}`);
+  print(`Mode: ${args.apply ? 'APPLY' : 'DRY-RUN'}`);
+  print(`Series to scan: ${seriesDocs.length}`);
 
   let batch = firestore.batch();
   let batchedWrites = 0;
@@ -257,11 +261,12 @@ async function run(): Promise<void> {
           batchedWrites = 0;
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       counters.errors += 1;
+      const errorMessage = error instanceof Error ? error.message : error;
       console.error(
         `Error processing series ${seriesId} (${seriesData.name || 'Unnamed Series'}):`,
-        error?.message || error
+        errorMessage
       );
     }
   }
@@ -277,8 +282,8 @@ async function run(): Promise<void> {
     preview: changePreview,
   };
 
-  console.log('Backfill summary:');
-  console.log(JSON.stringify(summary, null, 2));
+  print('Backfill summary:');
+  print(JSON.stringify(summary, null, 2));
 }
 
 run().catch((error) => {

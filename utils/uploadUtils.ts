@@ -6,10 +6,10 @@ export async function getIntroAndOutro(sermon: Sermon): Promise<{ introRef: stri
   let outroRef = '';
   try {
     introRef = await getDownloadURL(ref(storage, `intros/${sermon.subtitle}_intro.mp3`));
-  } catch (error) {
+  } catch (_error) {
     try {
       introRef = await getDownloadURL(ref(storage, `intros/default_intro.mp3`));
-    } catch (error) {
+    } catch (_error) {
       throw new Error(
         'Could not find intro audio for sermon: you must have a file called "default_intro.mp3" in your storage bucket'
       );
@@ -17,10 +17,10 @@ export async function getIntroAndOutro(sermon: Sermon): Promise<{ introRef: stri
   }
   try {
     outroRef = await getDownloadURL(ref(storage, `outros/${sermon.subtitle}_outro.mp3`));
-  } catch (error) {
+  } catch (_error) {
     try {
       outroRef = await getDownloadURL(ref(storage, `outros/default_outro.mp3`));
-    } catch (error) {
+    } catch (_error) {
       throw new Error(
         'Could not find outro audio for sermon: you must have a file called "default_outro.mp3" in your storage bucket'
       );

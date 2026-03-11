@@ -19,15 +19,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    if (!sermonId && !sermonUrl) {
-      setSrc('');
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (sermonUrl) {
-      setSrc((prevSrc) => (prevSrc === sermonUrl ? prevSrc : sermonUrl));
+    if (!sermonId || sermonUrl) {
       return () => {
         cancelled = true;
       };
@@ -54,13 +46,15 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
     };
   }, [sermonId, sermonUrl]);
 
+  const resolvedSrc = sermonUrl || (sermonId ? src : '');
+
   return (
     <MediaPlayer
       load="eager"
       autoplay
       title={currentSermon?.title}
       style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}
-      src={src ? { src, type: 'audio/mpeg' } : undefined}
+      src={resolvedSrc ? { src: resolvedSrc, type: 'audio/mpeg' } : undefined}
     >
       {children}
       {router.pathname.startsWith('/admin') && currentSermon && <DynamicBottomAudioBar />}

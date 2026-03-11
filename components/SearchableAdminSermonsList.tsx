@@ -24,8 +24,6 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { isDevelopment } from '../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../utils/mockAlgoliaSearchClient';
 
-interface SearchableAdminSermonListProps { }
-
 function FilterButton({ onToggle }: { onToggle: () => void }) {
   return (
     <IconButton onClick={onToggle} sx={{ display: { xs: 'block', md: 'none' } }} aria-label="Toggle filters">
@@ -75,7 +73,7 @@ function MobileFilterDrawer({ show }: { show: boolean }) {
   );
 }
 
-const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
+const SearchableAdminSermonList: FunctionComponent = () => {
   const { user } = useAuth();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));

@@ -111,20 +111,23 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
             />
           ));
         }}
-        renderOption={(props, option: ListWithHighlight) => (
-          <ListItem {...props} key={option.id}>
-            <AvatarWithDefaultImage
-              defaultImageURL="/user.png"
-              altName={option.name}
-              width={30}
-              height={30}
-              image={option.images?.find((image) => image.type === 'square')}
-              borderRadius={5}
-              sx={{ marginRight: '15px' }}
-            />
-            <div>{option.name}</div>
-          </ListItem>
-        )}
+        renderOption={(props, option: ListWithHighlight) => {
+          const { key: _key, ...optionProps } = props;
+          return (
+            <ListItem key={option.id} {...optionProps}>
+              <AvatarWithDefaultImage
+                defaultImageURL="/user.png"
+                altName={option.name}
+                width={30}
+                height={30}
+                image={option.images?.find((image) => image.type === 'square')}
+                borderRadius={5}
+                sx={{ marginRight: '15px' }}
+              />
+              <div>{option.name}</div>
+            </ListItem>
+          );
+        }}
         getOptionLabel={(option: ListWithHighlight) => option.name}
         isOptionEqualToValue={(option, value) =>
           value.name === undefined || option.name === undefined || option.id === value.id
@@ -133,7 +136,7 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
           const selectedSubtitle = props.subtitles.find((subtitle) => subtitle.name === props.subtitle);
           const subtitleHasError = showError(props.subtitleError);
           const subtitleHelperText = subtitleHasError ? getErrorMessage(props.subtitleError) : undefined;
-          
+
           return (
             <TextField
               {...params}

@@ -26,7 +26,7 @@ async function openYouTubeTrimmer(page: import('@playwright/test').Page, url: st
   await expect(page.getByTestId('trim-slider')).toBeVisible({ timeout: 30000 });
 }
 
-async function dragHandle(page: import('@playwright/test').Page, selector: string, deltaX: number) {
+async function _dragHandle(page: import('@playwright/test').Page, selector: string, deltaX: number) {
   const handle = page.locator(selector);
   const box = await handle.boundingBox();
   if (!box) throw new Error(`Missing handle: ${selector}`);
