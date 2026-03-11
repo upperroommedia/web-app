@@ -13,6 +13,7 @@ on:
         type: boolean
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -38,6 +39,9 @@ jobs:
       anything_to_run: ${{ steps.detect.outputs.anything_to_run }}
       anything_to_deploy: ${{ steps.detect.outputs.anything_to_deploy }}
       changed_files: ${{ steps.detect.outputs.changed_files }}
+      diff_base_sha: ${{ steps.detect.outputs.diff_base_sha }}
+      diff_head_sha: ${{ steps.detect.outputs.diff_head_sha }}
+      diff_source: ${{ steps.detect.outputs.diff_source }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -49,6 +53,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BEFORE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_FILE: staging-selective-deploy.yml
+          GITHUB_TOKEN: ${{ github.token }}
           FORCE_FULL_REDEPLOY: ${{ github.event.inputs.force_full_redeploy || 'false' }}
         run: |
           set -euo pipefail
@@ -60,8 +67,30 @@ jobs:
 
           base_sha="$BEFORE_SHA"
           head_sha="$HEAD_SHA"
+          diff_source="event.before"
+
+          last_success_sha=""
+          set +e
+          last_success_sha="$(curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPOSITORY}/actions/workflows/${WORKFLOW_FILE}/runs?branch=staging&status=success&exclude_pull_requests=true&per_page=1" \
+            | jq -r '.workflow_runs[0].head_sha // empty')"
+          lookup_status=$?
+          set -e
+          if [[ "$lookup_status" -ne 0 ]]; then
+            echo "::warning::Unable to resolve last successful workflow run SHA. Falling back to event.before."
+          fi
+
+          if [[ -n "$last_success_sha" ]] && git cat-file -e "${last_success_sha}^{commit}" >/dev/null 2>&1; then
+            if git merge-base --is-ancestor "$last_success_sha" "$head_sha"; then
+              base_sha="$last_success_sha"
+              diff_source="last_successful_workflow_run"
+            fi
+          fi
 
           if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+            diff_source="bootstrap_fallback"
             if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
               if git rev-parse "${head_sha}^" >/dev/null 2>&1; then
                 base_sha="$(git rev-parse "${head_sha}^")"
@@ -163,6 +192,9 @@ jobs:
             echo "deploy_functions_integrations=$deploy_functions_integrations"
             echo "anything_to_run=$anything_to_run"
             echo "anything_to_deploy=$anything_to_deploy"
+            echo "diff_base_sha=$base_sha"
+            echo "diff_head_sha=$head_sha"
+            echo "diff_source=$diff_source"
             echo "changed_files<<EOF"
             echo "$changed_files"
             echo "EOF"
@@ -186,12 +218,17 @@ jobs:
           DEPLOY_FUNCTIONS_INTEGRATIONS: ${{ needs.detect-changes.outputs.deploy_functions_integrations }}
           ANYTHING_TO_RUN: ${{ needs.detect-changes.outputs.anything_to_run }}
           ANYTHING_TO_DEPLOY: ${{ needs.detect-changes.outputs.anything_to_deploy }}
+          DIFF_BASE_SHA: ${{ needs.detect-changes.outputs.diff_base_sha }}
+          DIFF_HEAD_SHA: ${{ needs.detect-changes.outputs.diff_head_sha }}
+          DIFF_SOURCE: ${{ needs.detect-changes.outputs.diff_source }}
           CHANGED_FILES: ${{ needs.detect-changes.outputs.changed_files }}
         run: |
           {
             echo "## Staging Selective Deploy"
             echo ""
             echo "- Event: \`$EVENT_NAME\`"
+            echo "- Diff source: \`$DIFF_SOURCE\`"
+            echo "- Diff range: \`$DIFF_BASE_SHA..$DIFF_HEAD_SHA\`"
             echo "- App Hosting (manual rollout from this workflow): \`$DEPLOY_APPHOSTING\`"
             echo "- Firestore rules/indexes: \`$DEPLOY_FIRESTORE\`"
             echo "- Realtime Database rules: \`$DEPLOY_DATABASE\`"
