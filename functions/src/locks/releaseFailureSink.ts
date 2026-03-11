@@ -37,7 +37,7 @@ const toSerializableError = (error: unknown): SerializableError => {
       message: 'Unknown lock release error',
       raw: JSON.stringify(error),
     };
-  } catch (_jsonError) {
+  } catch {
     return {
       message: 'Unknown lock release error',
       raw: String(error),

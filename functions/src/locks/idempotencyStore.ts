@@ -1,5 +1,6 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
+import type { DocumentData } from 'firebase-admin/firestore';
 import { IdempotencyRecord } from './lockTypes';
 
 const IDEMPOTENCY_COLLECTION = 'subsplashOperationKeys';
@@ -10,7 +11,7 @@ const getIdempotencyRef = (operationKey: string): ReturnType<ReturnType<typeof f
 
 const parseIdempotencyRecord = (
   operationKey: string,
-  value: FirebaseFirestore.DocumentData | undefined
+  value: DocumentData | undefined
 ): IdempotencyRecord | null => {
   if (!value || typeof value !== 'object') {
     return null;

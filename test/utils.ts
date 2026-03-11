@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 /**
  * The FIRESTORE_EMULATOR_HOST environment variable is set automatically
  * by "firebase emulators:exec", but if you want to provide the host and port manually
@@ -15,9 +17,22 @@ export function parseHostAndPort(hostAndPort: string | undefined): { host: strin
 }
 
 export function getFirestoreCoverageMeta(projectId: string, firebaseJsonPath: string) {
-  const { emulators } = require(firebaseJsonPath);
+  const { emulators } = JSON.parse(fs.readFileSync(firebaseJsonPath, 'utf8')) as {
+    emulators?: {
+      firestore?: {
+        host?: string;
+        port?: number;
+      };
+    };
+  };
   const hostAndPort = parseHostAndPort(`127.0.0.1:8080`);
-  const { host, port } = hostAndPort !== undefined ? hostAndPort : emulators.firestore!;
+  const fallback = emulators?.firestore;
+  const { host, port } = hostAndPort !== undefined
+    ? hostAndPort
+    : {
+      host: fallback?.host ?? '127.0.0.1',
+      port: fallback?.port ?? 8080,
+    };
   const coverageUrl = `http://${host}:${port}/emulator/v1/projects/${projectId}:ruleCoverage.html`;
   return {
     host,

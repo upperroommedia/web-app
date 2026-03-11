@@ -384,7 +384,7 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
           payload.position
         );
         return Promise.resolve({ data: item, status: 200 });
-      } catch (error) {
+      } catch {
         return Promise.reject({ response: { status: 404, data: { error: 'Media item not found' } } });
       }
     }

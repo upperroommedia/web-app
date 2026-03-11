@@ -9,9 +9,9 @@ describe('shared firebase-function mock contracts', () => {
     let optionsCallable: ((request: unknown) => Promise<unknown>) | undefined;
     let seriesError: { details?: unknown } | undefined;
 
-    jest.isolateModules(() => {
-      require('../series/mocks');
-      const { onCall, HttpsError } = require('firebase-functions/v2/https');
+    await jest.isolateModulesAsync(async () => {
+      await import('../series/mocks');
+      const { onCall, HttpsError } = await import('firebase-functions/v2/https');
 
       singleArgCallable = onCall(async () => 'single-signature');
       optionsCallable = onCall({ enforceAppCheck: false }, async () => 'options-signature');
@@ -32,9 +32,9 @@ describe('shared firebase-function mock contracts', () => {
     let optionsCallable: ((request: unknown) => Promise<unknown>) | undefined;
     let soundcloudError: { details?: unknown } | undefined;
 
-    jest.isolateModules(() => {
-      require('../soundcloud/mocks');
-      const { onCall, HttpsError } = require('firebase-functions/v2/https');
+    await jest.isolateModulesAsync(async () => {
+      await import('../soundcloud/mocks');
+      const { onCall, HttpsError } = await import('firebase-functions/v2/https');
 
       singleArgCallable = onCall(async () => 'single-signature');
       optionsCallable = onCall({ enforceAppCheck: false }, async () => 'options-signature');
