@@ -17,6 +17,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
+import { subsplashSecrets } from './subsplashSecrets';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -44,6 +45,7 @@ export interface CreateSeriesOutputType {
 }
 
 const createSeries = onCall(
+  { secrets: subsplashSecrets },
   async (request: CallableRequest<CreateSeriesInputType>): Promise<CreateSeriesOutputType> => {
     logger.log('createSeries');
 

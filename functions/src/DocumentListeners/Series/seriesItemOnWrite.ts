@@ -6,10 +6,11 @@ import { authenticateSubsplash } from '../../subsplashUtils';
 import { deriveSeriesMetadata, patchSeriesMetadata } from '../../helpers/seriesHelpers';
 import handleError from '../../handleError';
 import { withSubsplashLocks } from '../../locks/withSubsplashLocks';
+import { subsplashSecrets } from '../../subsplashSecrets';
 
 const firestore = firebaseAdmin.firestore();
 
-const seriesItemOnWrite = onDocumentWritten('series/{seriesId}/seriesItems/{itemId}', async (event) => {
+const seriesItemOnWrite = onDocumentWritten({ document: 'series/{seriesId}/seriesItems/{itemId}', secrets: subsplashSecrets }, async (event) => {
   const { seriesId } = event.params;
 
   try {

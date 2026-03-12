@@ -20,6 +20,7 @@ import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
 import { getFirebaseImagesBucket } from '../../shared/firebaseProjectConfig';
+import { subsplashSecrets } from './subsplashSecrets';
 // import { resize } from 'imagemagick';
 
 // const adminImageConvertor = {
@@ -81,6 +82,7 @@ const handleImageUpload = onObjectFinalized(
     bucket: getFirebaseImagesBucket(),
     timeoutSeconds: 300,
     memory: '1GiB',
+    secrets: subsplashSecrets,
   },
   async (storageEvent): Promise<void> => {
     const object = storageEvent.data;

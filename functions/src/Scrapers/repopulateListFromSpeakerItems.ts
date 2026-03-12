@@ -5,6 +5,7 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import handleError from '../handleError';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import { withSubsplashLocks } from '../locks/withSubsplashLocks';
+import { subsplashSecrets } from '../subsplashSecrets';
 
 const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list'] as const;
 type MediaType = (typeof mediaTypes)[number];
@@ -152,6 +153,7 @@ async function getSpeakerItems(speakerId: string, token: string): Promise<MediaI
 }
 
 const repopulateListFromSpeakerItems = onCall(
+  { secrets: subsplashSecrets },
   async (request: CallableRequest<repopulateListFromSpeakerItemsInputType>): Promise<void> => {
     // logger.log('repopulateListFromSpeakerItems', request);
     if (request.auth?.token.role !== 'admin') {

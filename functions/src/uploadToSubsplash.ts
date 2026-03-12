@@ -9,6 +9,7 @@ import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { subsplashSecrets } from './subsplashSecrets';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   operationKey: string;
@@ -48,7 +49,7 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
   return await axios(axiosConfig);
 };
 
-const uploadToSubsplash = onCall(async (request: CallableRequest<UPLOAD_TO_SUBSPLASH_INCOMING_DATA>): Promise<unknown> => {
+const uploadToSubsplash = onCall({ secrets: subsplashSecrets }, async (request: CallableRequest<UPLOAD_TO_SUBSPLASH_INCOMING_DATA>): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
   if (!canUserRolePublish(request.auth?.token.role)) {
     throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');

@@ -7,6 +7,7 @@ import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
+import { subsplashSecrets } from './subsplashSecrets';
 
 export interface DeleteSubsplashListInputType {
   listId: string;
@@ -20,6 +21,7 @@ const getOperationKey = (operationKey?: string): string | undefined => {
 };
 
 const deleteSubsplashList = onCall(
+  { secrets: subsplashSecrets },
   async (request: CallableRequest<DeleteSubsplashListInputType>): Promise<DeleteSubsplashListOutputType> => {
     logger.log('deleteSubsplashList', request);
     if (!canUserRolePublish(request.auth?.token.role)) {

@@ -8,6 +8,7 @@ import {
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 import { getAdminBaseUrl, getRoleRequestRecipients } from '../notifications/notificationParams';
 import {
+  adminBaseUrlSecret,
   roleRequestRecipientsSecret,
   runtimeAlertRecipientsSecret,
 } from '../notifications/notificationSecrets';
@@ -97,7 +98,7 @@ const listExistingRoleRequests = async (
 };
 
 const createRoleRequest = onCall(
-  { secrets: [roleRequestRecipientsSecret, runtimeAlertRecipientsSecret] },
+  { secrets: [roleRequestRecipientsSecret, runtimeAlertRecipientsSecret, adminBaseUrlSecret] },
   async (request: CallableRequest<CreateRoleRequestInputType>): Promise<CreateRoleRequestOutputType> => {
     const requesterUid = request.auth?.uid;
     if (!requesterUid) {

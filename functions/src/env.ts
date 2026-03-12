@@ -1,6 +1,4 @@
 type RequiredEnvVar = 'ROLE_REQUEST_RECIPIENTS' | 'RUNTIME_ALERT_RECIPIENTS' | 'ADMIN_BASE_URL';
-const STAGING_PROJECT_ID = 'urm-app-staging';
-const STAGING_ADMIN_BASE_URL = 'https://staging.uploader.upperroommedia.org';
 
 export type AppEnv = {
   roleRequestRecipients: string[];
@@ -15,17 +13,9 @@ let cachedAdminBaseUrl: string | null = null;
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 
-const getProjectId = (): string =>
-  process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || '';
-
-const isStagingProject = (): boolean => getProjectId() === STAGING_PROJECT_ID;
-
 const readRequiredEnvVar = (name: RequiredEnvVar): string => {
   const value = process.env[name]?.trim();
   if (!value) {
-    if (name === 'ADMIN_BASE_URL' && isStagingProject()) {
-      return STAGING_ADMIN_BASE_URL;
-    }
     throw new Error(
       `[env] Missing required environment variable: ${name}. ` +
         'Run `pnpm run setup:env` and then update `.env` with real values.'

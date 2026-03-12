@@ -49,14 +49,22 @@ firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging 
 
 ## 3b. Configure Cloud Functions secrets/env (staging)
 
-SoundCloud publishing uses a Functions secret, not App Hosting env vars:
+Functions that send invite/role-request emails now read `ADMIN_BASE_URL` from Functions Secret Manager.
+Set/update Functions secrets in staging:
 
 ```bash
+firebase functions:secrets:set ADMIN_BASE_URL --project urm-app-staging
+firebase functions:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
+firebase functions:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
+firebase functions:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app-staging
 ```
 
 Notes:
 
+- `ADMIN_BASE_URL` is consumed by invite and role-request email link builders.
+- `SUBSPLASH_EMAIL` and `SUBSPLASH_PASSWORD` are consumed by Subsplash publish/sync functions and related triggers.
+- `ALGOLIA_SEARCH_API_KEY` is consumed by `generateSecuredApiKey`.
 - `SOUNDCLOUD_CLIENT_SECRET` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
 - App Hosting secrets in `apphosting.staging.yaml` do not automatically flow into Cloud Functions.
 

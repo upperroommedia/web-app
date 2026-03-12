@@ -7,6 +7,7 @@ import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { subsplashSecrets } from './subsplashSecrets';
 
 export interface DeleteFromSubsplashInputType {
   operationKey: string;
@@ -15,7 +16,7 @@ export interface DeleteFromSubsplashInputType {
 
 export type DeleteFromSubsplashReturnType = void;
 
-const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSubsplashInputType>): Promise<DeleteFromSubsplashReturnType> => {
+const deleteFromSubsplash = onCall({ secrets: subsplashSecrets }, async (request: CallableRequest<DeleteFromSubsplashInputType>): Promise<DeleteFromSubsplashReturnType> => {
   logger.log('deleteFromSubsplash', request);
 
   // Authentication check
