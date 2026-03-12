@@ -28,7 +28,6 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      deploy_apphosting: ${{ steps.detect.outputs.deploy_apphosting }}
       deploy_firestore: ${{ steps.detect.outputs.deploy_firestore }}
       deploy_database: ${{ steps.detect.outputs.deploy_database }}
       deploy_storage: ${{ steps.detect.outputs.deploy_storage }}
@@ -105,8 +104,7 @@ jobs:
                 [
                   .jobs[]?.steps[]?
                   | select(
-                      ((.name == "Deploy selected staging targets")
-                      or (.name == "Trigger App Hosting rollout"))
+                      (.name == "Deploy selected staging targets")
                       and .conclusion == "success"
                     )
                 ] | length > 0
@@ -151,7 +149,6 @@ jobs:
             return 1
           }
 
-          deploy_apphosting=false
           deploy_firestore=false
           deploy_database=false
           deploy_storage=false
@@ -161,7 +158,6 @@ jobs:
           deploy_functions_integrations=false
 
           if [[ "$force_full" == "true" ]]; then
-            deploy_apphosting=true
             deploy_firestore=true
             deploy_database=true
             deploy_storage=true
@@ -170,10 +166,6 @@ jobs:
             deploy_functions_image=true
             deploy_functions_integrations=true
           else
-            if contains_path '^(apphosting\.staging\.yaml|apphosting\.yaml|firebase\.json|next\.config\.js|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|tsconfig\.json|playwright\.config\.ts|components/|pages/|public/|styles/|layout/|context/|hooks/|reducers/|constants/|utils/|extensions/|firebase/|shared/|scripts/)'; then
-              deploy_apphosting=true
-            fi
-
             if contains_path '^firestore\.rules$|^firestore\.indexes\.json$'; then
               deploy_firestore=true
             fi
@@ -215,12 +207,11 @@ jobs:
           if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
             anything_to_deploy=true
           fi
-          if [[ "$deploy_apphosting" == "true" || "$anything_to_deploy" == "true" ]]; then
+          if [[ "$anything_to_deploy" == "true" ]]; then
             anything_to_run=true
           fi
 
           {
-            echo "deploy_apphosting=$deploy_apphosting"
             echo "deploy_firestore=$deploy_firestore"
             echo "deploy_database=$deploy_database"
             echo "deploy_storage=$deploy_storage"
@@ -246,7 +237,6 @@ jobs:
       - name: Publish planned deploy targets
         env:
           EVENT_NAME: ${{ github.event_name }}
-          DEPLOY_APPHOSTING: ${{ needs.detect-changes.outputs.deploy_apphosting }}
           DEPLOY_FIRESTORE: ${{ needs.detect-changes.outputs.deploy_firestore }}
           DEPLOY_DATABASE: ${{ needs.detect-changes.outputs.deploy_database }}
           DEPLOY_STORAGE: ${{ needs.detect-changes.outputs.deploy_storage }}
@@ -267,7 +257,6 @@ jobs:
             echo "- Event: \`$EVENT_NAME\`"
             echo "- Diff source: \`$DIFF_SOURCE\`"
             echo "- Diff range: \`$DIFF_BASE_SHA..$DIFF_HEAD_SHA\`"
-            echo "- App Hosting (manual rollout from this workflow): \`$DEPLOY_APPHOSTING\`"
             echo "- Firestore rules/indexes: \`$DEPLOY_FIRESTORE\`"
             echo "- Realtime Database rules: \`$DEPLOY_DATABASE\`"
             echo "- Storage rules: \`$DEPLOY_STORAGE\`"
@@ -276,7 +265,7 @@ jobs:
             echo "- Functions image: \`$DEPLOY_FUNCTIONS_IMAGE\`"
             echo "- Functions integrations: \`$DEPLOY_FUNCTIONS_INTEGRATIONS\`"
             echo "- Any workflow action needed: \`$ANYTHING_TO_RUN\`"
-            echo "- Firebase deploy targets (excludes App Hosting rollout): \`$ANYTHING_TO_DEPLOY\`"
+            echo "- Firebase backend deploy targets: \`$ANYTHING_TO_DEPLOY\`"
             echo ""
             echo "### Changed Files"
             echo '\`\`\`'
@@ -329,30 +318,6 @@ jobs:
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Trigger App Hosting rollout
-        if: needs.detect-changes.outputs.deploy_apphosting == 'true'
-        run: |
-          set -euo pipefail
-          set +e
-          rollout_output="$(pnpm exec firebase apphosting:rollouts:create web-staging --project "$FIREBASE_PROJECT" --git-commit "$GITHUB_SHA" --force 2>&1)"
-          rollout_status=$?
-          set -e
-
-          echo "$rollout_output"
-
-          if [[ $rollout_status -eq 0 ]]; then
-            exit 0
-          fi
-
-          # If automatic App Hosting rollout has already started for this commit,
-          # avoid failing CI on duplicate rollout creation attempts.
-          if echo "$rollout_output" | grep -Eiq '(unable to queue the operation|already.*operation|HTTP Error: 409)'; then
-            echo "An App Hosting rollout is already in progress. Continuing without failing."
-            exit 0
-          fi
-
-          exit $rollout_status
-
       - name: Deploy selected staging targets
         if: needs.detect-changes.outputs.anything_to_deploy == 'true'
         env:
@@ -368,6 +333,18 @@ jobs:
           set -euo pipefail
 
           deployed_targets=()
+          failed_targets=()
+
+          run_function_deploy() {
+            local codebase="$1"
+            local log_file="$2"
+            local __pid_var="$3"
+            (
+              set -euo pipefail
+              pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only "$codebase" --non-interactive
+            ) >"$log_file" 2>&1 &
+            printf -v "$__pid_var" '%s' "$!"
+          }
 
           if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
             pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
@@ -385,24 +362,61 @@ jobs:
             deployed_targets+=("storage")
           fi
 
+          function_names=()
+          function_pids=()
+          function_logs=()
+
           if [[ "$DEPLOY_FUNCTIONS_CORE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive --force
-            deployed_targets+=("functions:core")
+            function_names+=("functions:core")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:core" "$log_file" pid
+            function_pids+=("$pid")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_MEDIA" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive --force
-            deployed_targets+=("functions:media")
+            function_names+=("functions:media")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:media" "$log_file" pid
+            function_pids+=("$pid")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_IMAGE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive --force
-            deployed_targets+=("functions:image")
+            function_names+=("functions:image")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:image" "$log_file" pid
+            function_pids+=("$pid")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_INTEGRATIONS" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive --force
-            deployed_targets+=("functions:integrations")
+            function_names+=("functions:integrations")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:integrations" "$log_file" pid
+            function_pids+=("$pid")
+          fi
+
+          for i in "${!function_pids[@]}"; do
+            name="${function_names[$i]}"
+            pid="${function_pids[$i]}"
+            log_file="${function_logs[$i]}"
+
+            if wait "$pid"; then
+              deployed_targets+=("$name")
+              cat "$log_file"
+            else
+              failed_targets+=("$name")
+              echo "::error::Deploy failed for $name"
+              cat "$log_file"
+            fi
+            rm -f "$log_file"
+          done
+
+          if [[ "${#failed_targets[@]}" -gt 0 ]]; then
+            echo "::error::Failed backend deploy targets: ${failed_targets[*]}"
+            exit 1
           fi
 
           {
