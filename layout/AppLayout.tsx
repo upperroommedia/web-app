@@ -37,7 +37,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
     return (
       <Stack
         sx={{
-          justifyContent: 'center',
+          justifyContent: 'flex-start',
           alignItems: 'stretch',
           minHeight: '100vh',
           bgcolor: 'background.default',
