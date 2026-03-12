@@ -38,29 +38,31 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
       <Stack
         sx={{
           justifyContent: 'center',
-          alignItems: 'center',
+          alignItems: 'stretch',
           minHeight: '100vh',
           bgcolor: 'background.default',
-          p: 4,
+          px: { xs: 2, sm: 3, md: 4 },
+          py: { xs: 3, sm: 4, md: 6 },
         }}
       >
         <Stack
           sx={{
-            justifyContent: 'center',
-            alignItems: 'center',
-            textAlign: 'center',
+            width: '100%',
+            maxWidth: 960,
+            mx: 'auto',
             gap: 2,
-            maxWidth: 500,
           }}
         >
-          <Typography variant="h4" color="text.primary">
-            Access Restricted
-          </Typography>
-          <Typography color="text.secondary">
-            You don&apos;t have permission to access the admin area.
-            If you think you should have admin privileges, please request permission below.
-          </Typography>
-          <Box sx={{ mt: 2 }}>
+          <Stack alignItems="center" textAlign="center" spacing={1}>
+            <Typography variant="h4" color="text.primary">
+              Access Restricted
+            </Typography>
+            <Typography color="text.secondary" sx={{ maxWidth: 680 }}>
+              You don&apos;t have permission to access the admin area.
+              If you think you should have admin privileges, please request permission below.
+            </Typography>
+          </Stack>
+          <Box sx={{ mt: 2, width: '100%' }}>
             <RequestRoleChange />
           </Box>
         </Stack>

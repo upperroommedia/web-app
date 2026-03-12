@@ -102,8 +102,12 @@ const RequestRoleChange = () => {
   };
 
   return (
-    <Stack spacing={2} sx={{ width: 1, maxWidth: 800 }}>
-      <FormControl component="form" onSubmit={handleSubmit} sx={{ display: 'flex', gap: 2, width: 1, maxWidth: 600 }}>
+    <Stack spacing={2} sx={{ width: 1, maxWidth: 900, mx: 'auto' }}>
+      <FormControl
+        component="form"
+        onSubmit={handleSubmit}
+        sx={{ display: 'flex', gap: 2, width: 1, maxWidth: 720 }}
+      >
         <InputLabel id="role-select-label">Role</InputLabel>
         <Select
           defaultValue={defaultValue}
