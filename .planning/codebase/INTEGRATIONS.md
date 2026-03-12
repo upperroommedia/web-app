@@ -112,7 +112,7 @@
 - Audio task generator hardcodes production Cloud Run URI (`functions/src/addIntroOutro/addintrooutrotaskgenerator.ts`), so environment portability depends on manual code edits.
 - Firestore rules expose public reads for `/metadata/*` in `firestore.rules`; intended for bundle timestamps, but still expands anonymous read surface.
 - `firebase/firebase.ts` embeds full Firebase web config inline; normal for client apps, but it reinforces need for strict backend rules.
-- `.env` includes keys (for example Clerk-related names) that are not reflected in active package deps, indicating possible stale config surface and operator confusion risk.
+- `.env` includes keys that are not reflected in active package deps, indicating possible stale config surface and operator confusion risk.
 
 ## Secondary/Tooling Integrations
 

@@ -25,7 +25,7 @@ Disable automatic rollouts for backend `web-staging` in Firebase Console so App 
 - Open App Hosting backend settings for `web-staging`.
 - Turn off automatic rollouts.
 
-## 3. Configure App Hosting secrets for `apphosting.staging.yaml`
+## 3. Configure App Hosting secrets for `apphosting.yaml`
 
 Create/grant each secret in `urm-app-staging`:
 
@@ -35,9 +35,6 @@ firebase apphosting:secrets:set RUNTIME_ALERT_RECIPIENTS --project urm-app-stagi
 firebase apphosting:secrets:set ADMIN_BASE_URL --project urm-app-staging
 firebase apphosting:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
 firebase apphosting:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
-firebase apphosting:secrets:set DOLBY_API_KEY --project urm-app-staging
-firebase apphosting:secrets:set DOLBY_API_SECRET --project urm-app-staging
-firebase apphosting:secrets:set CLERK_SECRET_KEY --project urm-app-staging
 firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
 ```
 
@@ -66,7 +63,7 @@ Notes:
 - `SUBSPLASH_EMAIL` and `SUBSPLASH_PASSWORD` are consumed by Subsplash publish/sync functions and related triggers.
 - `ALGOLIA_SEARCH_API_KEY` is consumed by `generateSecuredApiKey`.
 - `SOUNDCLOUD_CLIENT_SECRET` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
-- App Hosting secrets in `apphosting.staging.yaml` do not automatically flow into Cloud Functions.
+- App Hosting secrets in `apphosting.yaml` do not automatically flow into Cloud Functions.
 
 ## 3c. Enable Google Sign-In in staging Auth (one-time)
 
