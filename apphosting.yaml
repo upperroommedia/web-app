@@ -48,7 +48,7 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_DATABASE_URL
-    value: https://urm-app-staging-815ca.firebaseio.com/
+    value: https://urm-app-staging-default-rtdb.firebaseio.com/
     availability:
       - BUILD
       - RUNTIME
@@ -82,7 +82,7 @@ env:
     availability:
       - RUNTIME
   - variable: FIREBASE_DATABASE_URL
-    value: https://urm-app-staging-815ca.firebaseio.com/
+    value: https://urm-app-staging-default-rtdb.firebaseio.com/
     availability:
       - RUNTIME
   - variable: FIREBASE_IMAGES_BUCKET

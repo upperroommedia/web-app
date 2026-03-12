@@ -8,7 +8,7 @@
     "urm-app-staging": {
       "database": {
         "rtdb": [
-          "urm-app-staging-815ca"
+          "urm-app-staging-default-rtdb"
         ]
       },
       "storage": {

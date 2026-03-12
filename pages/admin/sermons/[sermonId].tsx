@@ -72,7 +72,7 @@ import { CreateSeriesInputType, CreateSeriesOutputType } from '../../../function
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
 import UserAvatar from '../../../components/UserAvatar';
 import { User } from '../../../types/User';
-import { GetUserInputType, GetUserOutputType } from '../../../functions/src/getUser';
+import { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '../../../functions/src/getUsersByIds';
 import { getSquareImageStoragePath } from '../../../utils/utils';
 import { isDevelopment } from '../../../firebase/firebase';
 import { useCollectionData, useDocument } from 'react-firebase-hooks/firestore';
@@ -196,16 +196,20 @@ const SermonDetailsPage = () => {
     }
 
     if (sermon.uploaderId) {
-      const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
-      getUser({ uid: sermon.uploaderId })
-        .then((result) => {
-          if (result.status === 'success') {
-            setUploader(result.data);
-          }
-        })
-        .catch((err) => {
-          console.error('Error fetching uploader:', err);
-        });
+      if (user?.uid === sermon.uploaderId) {
+        setUploader(user);
+      } else {
+        const getUsersByIds = createFunctionV2<GetUsersByIdsInputType, GetUsersByIdsOutputType>('getusersbyids');
+        getUsersByIds({ uids: [sermon.uploaderId] })
+          .then((result) => {
+            if (result.status === 'success') {
+              setUploader(result.data[0]);
+            }
+          })
+          .catch((err) => {
+            console.error('Error fetching uploader:', err);
+          });
+      }
     } else {
       setUploader(undefined);
     }

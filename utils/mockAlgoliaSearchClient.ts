@@ -4,7 +4,7 @@ import { sermonConverter } from '../types/Sermon';
 
 interface MockAlgoliaClientOptions {
   userId: string;
-  isAdmin: boolean;
+  canSearchAllSermons: boolean;
 }
 
 type QueryRequestParamContainer = Record<string, unknown> & {
@@ -15,10 +15,10 @@ type QueryRequestParamContainer = Record<string, unknown> & {
  * Creates a mock Algolia SearchClient that queries Firestore instead of Algolia.
  * This is used in development mode when the emulator is running.
  * @param options.userId - The current user's ID
- * @param options.isAdmin - Whether the current user is an admin
+ * @param options.canSearchAllSermons - Whether the current user can search across all sermons
  */
 export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions): SearchClient {
-  const { userId, isAdmin } = options;
+  const { userId, canSearchAllSermons } = options;
   return {
     search: async <T = Record<string, unknown>>(
       searchMethodParams: SearchMethodParams | LegacySearchMethodProps
@@ -88,8 +88,8 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
             // Build Firestore query constraints
             const constraints: QueryConstraint[] = [];
 
-            // For non-admin users, filter by uploaderId to show only their own sermons
-            if (!isAdmin) {
+            // Uploaders are restricted to their own sermons. Admins and publishers can search all sermons.
+            if (!canSearchAllSermons) {
               constraints.push(where('uploaderId', '==', userId));
             }
 
@@ -252,8 +252,8 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
         // Build query constraints for facet values
         const facetConstraints: QueryConstraint[] = [];
         
-        // For non-admin users, filter by uploaderId to show only their own sermons
-        if (!isAdmin) {
+        // Uploaders are restricted to their own sermons. Admins and publishers can search all sermons.
+        if (!canSearchAllSermons) {
           facetConstraints.push(where('uploaderId', '==', userId));
         }
         facetConstraints.push(orderBy('createdAtMillis', 'desc'));

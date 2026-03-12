@@ -137,12 +137,12 @@ const handleImageUpload = onObjectFinalized(
       await remoteFile.download({ destination: originalFile });
       logger.log(`Downloaded image file: '${filePath}' to '${originalFile}'`);
 
-      // uploading to subsplash
-      const publicUrl = bucket.file(object.name).publicUrl();
+      await remoteFile.makePublic();
+      const publicUrl = remoteFile.publicUrl();
       logger.log('uploading to subsplash');
       const [subsplashImageId, computedImageMetadata] = await Promise.all([
         uploadImageToSubsplash(imageName, originalFile),
-        computeMetadataForImage(publicUrl),
+        computeMetadataForImage(originalFile),
       ]);
 
       // uploading to firestore
