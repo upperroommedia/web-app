@@ -81,8 +81,6 @@ const SearchableAdminSermonList: FunctionComponent = () => {
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const userId = user?.uid ?? null;
   const isAdminUser = user?.isAdmin() ?? false;
-  const canPublishUser = user?.canPublish() ?? false;
-  const canSearchAllSermons = isAdminUser || canPublishUser;
 
   if (!user) {
     throw new Error('User not found');
@@ -99,7 +97,7 @@ const SearchableAdminSermonList: FunctionComponent = () => {
       if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
         throw new Error('Missing Algolia Credentials');
       }
-      if (canSearchAllSermons) {
+      if (isAdminUser) {
         setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
       } else if (userId) {
         const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
@@ -110,20 +108,20 @@ const SearchableAdminSermonList: FunctionComponent = () => {
       }
     };
     initApiKey();
-  }, [apiKey, userId, canSearchAllSermons]);
+  }, [apiKey, userId, isAdminUser]);
 
   const searchClient = useMemo((): SearchClient | null => {
     if (isDevelopment) {
       return createMockAlgoliaSearchClient({
         userId: userId ?? '',
-        canSearchAllSermons,
+        canSearchAllSermons: isAdminUser,
       });
     }
     if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
       return null;
     }
     return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
-  }, [apiKey, userId, canSearchAllSermons]);
+  }, [apiKey, userId, isAdminUser]);
 
   const handleFilterToggle = useCallback(() => setShowFilters((prev) => !prev), []);
 
