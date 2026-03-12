@@ -4,7 +4,7 @@ import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
-import addNewList from '../pages/api/addNewList';
+import addNewList from '../utils/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import MenuItem from '@mui/material/MenuItem';

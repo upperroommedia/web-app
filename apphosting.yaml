@@ -12,6 +12,11 @@ env:
       - BUILD
       - RUNTIME
 
+  - variable: NPM_CONFIG_RECURSIVE_INSTALL
+    value: 'false'
+    availability:
+      - BUILD
+
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     value: urm-app-staging
     availability:

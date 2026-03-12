@@ -168,9 +168,6 @@ importers:
       firebase-admin:
         specifier: 'catalog:'
         version: 13.7.0(encoding@0.1.13)
-      firebase-tools:
-        specifier: ^15.9.0
-        version: 15.9.0(@types/node@18.19.130)(encoding@0.1.13)(typescript@5.9.3)
       fuse.js:
         specifier: ^7.0.0
         version: 7.1.0
@@ -334,6 +331,9 @@ importers:
       eslint-plugin-react-hooks:
         specifier: ^5.2.0
         version: 5.2.0(eslint@9.39.4)
+      firebase-tools:
+        specifier: ^15.9.0
+        version: 15.9.0(@types/node@18.19.130)(encoding@0.1.13)(typescript@5.9.3)
       jest:
         specifier: 'catalog:'
         version: 29.7.0(@types/node@18.19.130)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@types/node@18.19.130)(typescript@5.9.3))
