@@ -256,7 +256,7 @@ const AdminSpeakers = () => {
         <Box display="flex" flexDirection="column" gap={2} sx={{ py: 1 }}>
           <Typography>{SPEAKER_LIST_SUCCESS_INSTRUCTION}</Typography>
           <Link href={SUBSPLASH_SPEAKER_LIST_LINK} target="_blank" rel="noreferrer">
-            {SUBSPLASH_SPEAKER_LIST_LINK}
+            Subsplash Speaker List
           </Link>
         </Box>
       </PopUp>
