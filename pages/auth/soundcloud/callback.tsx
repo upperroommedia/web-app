@@ -1,5 +1,5 @@
-import type { ReactElement } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import type { NextPage } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -17,7 +17,7 @@ import type {
   ExchangeSoundCloudAuthCodeReturnType,
 } from '../../../functions/src/exchangeSoundCloudAuthCode';
 
-const SoundCloudCallbackPage = () => {
+const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
   const router = useRouter();
   const [statusText, setStatusText] = useState('Finalizing SoundCloud authorization...');
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -161,6 +161,6 @@ const SoundCloudCallbackPage = () => {
   );
 };
 
-SoundCloudCallbackPage.getLayout = (page: ReactElement) => <AppLayout>{page}</AppLayout>;
+SoundCloudCallbackPage.PageLayout = AppLayout;
 
 export default SoundCloudCallbackPage;

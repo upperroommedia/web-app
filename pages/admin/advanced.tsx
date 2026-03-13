@@ -1,5 +1,5 @@
-import type { ReactElement } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { NextPage } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -42,7 +42,7 @@ const formatTimestamp = (value?: number): string => {
   }).format(new Date(value));
 };
 
-const AdvancedAdminPage = () => {
+const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
   const router = useRouter();
   const { user } = useAuth();
   const [status, setStatus] = useState<GetSoundCloudAuthStatusReturnType | null>(null);
@@ -259,6 +259,6 @@ const AdvancedAdminPage = () => {
   );
 };
 
-AdvancedAdminPage.getLayout = (page: ReactElement) => <AppLayout>{page}</AppLayout>;
+AdvancedAdminPage.PageLayout = AppLayout;
 
 export default AdvancedAdminPage;
