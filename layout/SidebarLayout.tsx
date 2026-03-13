@@ -35,6 +35,7 @@ import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver';
 import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import CollectionsIcon from '@mui/icons-material/Collections';
+import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
 import LogoutIcon from '@mui/icons-material/Logout';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
@@ -63,6 +64,7 @@ const adminOnlyNavItems: NavItem[] = [
   { label: 'Speakers', path: '/admin/speakers', icon: <RecordVoiceOverIcon /> },
   { label: 'Lists', path: '/admin/lists', icon: <PlaylistPlayIcon /> },
   { label: 'Topics', path: '/admin/topics', icon: <LocalOfferIcon /> },
+  { label: 'Advanced', path: '/admin/advanced', icon: <SettingsSuggestIcon /> },
 ];
 
 interface SidebarLayoutProps {

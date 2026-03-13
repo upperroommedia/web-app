@@ -3,9 +3,10 @@ import {
   buildProfessionalEmailHtml,
   formatEmailDateTime,
 } from './emailTemplates';
-import { getRuntimeAlertRecipients } from './notificationParams';
+import { getAdminBaseUrl, getRuntimeAlertRecipients } from './notificationParams';
 import { OperationalAlertPayload } from './notificationTypes';
 import { queueEmail } from './queueEmail';
+import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../../shared/soundcloudAuth';
 
 const OPERATIONAL_ALERT_EMITTED = Symbol.for('urm.operationalAlertEmitted');
 
@@ -58,6 +59,23 @@ const buildAlertPayload = (input: EmitOperationalAlertInput, occurredAtMs: numbe
   };
 };
 
+const isSoundCloudReconnectAlert = (payload: OperationalAlertPayload): boolean => {
+  if (!payload.alertCode.startsWith('PUBLISH_SOUNDCLOUD_')) {
+    return false;
+  }
+
+  if (payload.errorMessage.includes('SoundCloud authorization')) {
+    return true;
+  }
+
+  const contextCode =
+    typeof payload.context?.soundCloudRecoveryCode === 'string' ? payload.context.soundCloudRecoveryCode : null;
+
+  return contextCode === SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE;
+};
+
+const getSoundCloudReconnectActionUrl = (): string => `${getAdminBaseUrl().replace(/\/+$/, '')}${SOUNDCLOUD_ADVANCED_PATH}`;
+
 const buildAlertMessageText = (payload: OperationalAlertPayload): string =>
   [
     'UpperRoom Media runtime alert',
@@ -69,6 +87,9 @@ const buildAlertMessageText = (payload: OperationalAlertPayload): string =>
     payload.errorName ? `Error name: ${payload.errorName}` : null,
     payload.errorStack ? `Error stack: ${payload.errorStack}` : null,
     payload.context ? `Context: ${JSON.stringify(payload.context, null, 2)}` : null,
+    isSoundCloudReconnectAlert(payload)
+      ? `Recovery: Open ${getSoundCloudReconnectActionUrl()} and use the SoundCloud section on the Advanced page to reconnect the account. After reconnecting, retry the failed SoundCloud publish action.`
+      : null,
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n');
@@ -85,6 +106,14 @@ const buildAlertMessageHtml = (payload: OperationalAlertPayload): string =>
       ...(payload.errorStack ? [{ label: 'Error stack', value: payload.errorStack }] : []),
       ...(payload.context ? [{ label: 'Context', value: JSON.stringify(payload.context, null, 2) }] : []),
     ],
+    ...(isSoundCloudReconnectAlert(payload)
+      ? {
+          actionLabel: 'Open Advanced Settings',
+          actionUrl: getSoundCloudReconnectActionUrl(),
+          actionHint:
+            'Open the Advanced page, reconnect SoundCloud in the SoundCloud section, then retry the failed publish action.',
+        }
+      : {}),
     footer: 'UpperRoom Media operational alert',
   });
 

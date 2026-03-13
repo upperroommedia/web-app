@@ -1,11 +1,12 @@
 import handleError from './handleError';
 import { deleteTrack, normalizeSoundCloudApiError } from './soundcloudClient';
-import { getSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
+import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '../../types/User';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { isAxiosError } from 'axios';
+import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
 
 export interface DeleteFromSoundCloudInputType {
   soundCloudTrackId: string;
@@ -20,13 +21,21 @@ const deleteFromSoundCloud = onCall(
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
-    const token = getSoundCloudAccessToken();
     try {
       logger.log('Attempting to delete from SoundCloud', request.data);
-      await deleteTrack(token, request.data.soundCloudTrackId);
+      await runWithSoundCloudAccessToken((token) => deleteTrack(token, request.data.soundCloudTrackId));
       logger.log('Track deleted from SoundCloud');
     } catch (error) {
       if (error instanceof HttpsError) {
+        await emitSoundCloudReconnectAlertIfNeeded({
+          error,
+          alertCode: 'PUBLISH_SOUNDCLOUD_DELETE_RUNTIME_FAILURE',
+          summary: 'deleteFromSoundCloud callable requires SoundCloud re-authorization.',
+          context: {
+            functionName: 'deleteFromSoundCloud',
+            soundCloudTrackId: request.data.soundCloudTrackId,
+          },
+        });
         throw error;
       }
 

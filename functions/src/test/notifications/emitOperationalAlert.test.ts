@@ -2,6 +2,7 @@ import firebaseAdmin from '../../../../firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { emitOperationalAlert } from '../../notifications/emitOperationalAlert';
 import * as queueEmailModule from '../../notifications/queueEmail';
+import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../../../shared/soundcloudAuth';
 
 jest.setTimeout(45_000);
 
@@ -28,6 +29,7 @@ describe('emitOperationalAlert', () => {
 
   it('logs structured metadata and enqueues an alert email for each invocation', async () => {
     const loggerSpy = jest.spyOn(logger, 'error').mockImplementation(() => {});
+    const initialCount = (await firestore.collection('mail').get()).size;
 
     await emitOperationalAlert({
       alertCode: 'AUDIO_PIPELINE_FAILURE',
@@ -56,8 +58,8 @@ describe('emitOperationalAlert', () => {
     ]);
 
     const snapshot = await firestore.collection('mail').get();
-    expect(snapshot.size).toBe(1);
-    expect(snapshot.docs[0].data()).toMatchObject({
+    expect(snapshot.size).toBe(initialCount + 1);
+    expect(snapshot.docs[snapshot.docs.length - 1].data()).toMatchObject({
       meta: {
         source: 'runtime-alert',
         alertType: 'runtime-error',
@@ -70,6 +72,8 @@ describe('emitOperationalAlert', () => {
   });
 
   it('does not dedupe repeated runtime errors and enqueues each occurrence', async () => {
+    const initialCount = (await firestore.collection('mail').get()).size;
+
     await emitOperationalAlert({
       alertCode: 'UPLOAD_RUNTIME_FAILURE',
       summary: 'Upload failed.',
@@ -85,7 +89,30 @@ describe('emitOperationalAlert', () => {
     });
 
     const snapshot = await firestore.collection('mail').get();
-    expect(snapshot.size).toBe(2);
+    expect(snapshot.size).toBe(initialCount + 2);
+  });
+
+  it('includes Advanced page recovery instructions for SoundCloud reconnect alerts', async () => {
+    const initialCount = (await firestore.collection('mail').get()).size;
+
+    await emitOperationalAlert({
+      alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
+      summary: 'SoundCloud upload needs re-authorization.',
+      error: new Error('SoundCloud authorization is missing or expired.'),
+      context: {
+        functionName: 'uploadToSoundCloud',
+        audioStoragePath: 'intro-outro-sermons/sermon-123',
+        soundCloudRecoveryCode: SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE,
+      },
+    });
+
+    const snapshot = await firestore.collection('mail').get();
+    expect(snapshot.size).toBe(initialCount + 1);
+    const mail = snapshot.docs[snapshot.docs.length - 1].data();
+    expect(mail.message.text).toContain(`http://localhost:3000${SOUNDCLOUD_ADVANCED_PATH}`);
+    expect(mail.message.text).toContain('reconnect the account');
+    expect(mail.message.html).toContain(`http://localhost:3000${SOUNDCLOUD_ADVANCED_PATH}`);
+    expect(mail.message.html).toContain('Open Advanced Settings');
   });
 
   it('logs delivery failures instead of swallowing the original runtime path', async () => {

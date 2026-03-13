@@ -1,11 +1,12 @@
 import handleError from './handleError';
 import { normalizeSoundCloudApiError, uploadTrack } from './soundcloudClient';
-import { getSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
+import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '../../types/User';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
 
 export interface UploadToSoundCloudInputType {
   audioStoragePath: string;
@@ -29,18 +30,19 @@ const uploadToSoundCloudCall = onCall(
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
-    const token = getSoundCloudAccessToken();
     const data = request.data;
     const bucket = firebaseAdmin.storage().bucket();
     try {
-      const uploadResult = await uploadTrack(token, {
-        bucket,
-        audioStoragePath: data.audioStoragePath,
-        imageSource: data.imageSource ?? data.imageStoragePath,
-        title: data.title,
-        tags: data.tags,
-        description: data.description,
-      });
+      const uploadResult = await runWithSoundCloudAccessToken((token) =>
+        uploadTrack(token, {
+          bucket,
+          audioStoragePath: data.audioStoragePath,
+          imageSource: data.imageSource ?? data.imageStoragePath,
+          title: data.title,
+          tags: data.tags,
+          description: data.description,
+        })
+      );
       const soundCloudTrackId = uploadResult.trackIdentifier;
       logger.log('SoundCloud upload response track id', soundCloudTrackId);
       return {
@@ -49,6 +51,15 @@ const uploadToSoundCloudCall = onCall(
       };
     } catch (error) {
       if (error instanceof HttpsError) {
+        await emitSoundCloudReconnectAlertIfNeeded({
+          error,
+          alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
+          summary: 'uploadToSoundCloud callable requires SoundCloud re-authorization.',
+          context: {
+            functionName: 'uploadToSoundCloud',
+            audioStoragePath: data.audioStoragePath,
+          },
+        });
         throw error;
       }
 

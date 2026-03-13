@@ -10,6 +10,8 @@ import editSoundCloudSermon from '../../editSoundCloudSermon';
 import deleteFromSoundCloud from '../../deleteFromSoundCloud';
 import addintrooutrotaskgenerator from '../../addIntroOutro/addintrooutrotaskgenerator';
 import addintrooutrotaskhandler from '../../addIntroOutro/addintrooutrotaskhandler';
+import { HttpsError } from 'firebase-functions/v2/https';
+import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../../../shared/soundcloudAuth';
 
 const mockUploadTrack = jest.fn();
 const mockUpdateTrack = jest.fn();
@@ -57,7 +59,10 @@ jest.mock('../../soundcloudClient', () => ({
 }));
 jest.mock('../../soundcloudSecrets', () => ({
   getSoundCloudAccessToken: () => 'fake-soundcloud-token',
+  refreshSoundCloudAccessToken: () => 'fake-soundcloud-token',
+  runWithSoundCloudAccessToken: (operation: (token: string) => unknown) => operation('fake-soundcloud-token'),
   soundcloudSecretsWithRuntimeAlerts: [],
+  soundcloudOAuthSecrets: [],
 }));
 jest.mock('../../addIntroOutro/utils', () => ({
   logMemoryUsage: (...args: unknown[]) => mockLogMemoryUsage(...args),
@@ -440,6 +445,41 @@ describe('runtime alert taxonomy contract', () => {
         context: expect.objectContaining({
           functionName: 'deleteFromSoundCloud',
           soundCloudTrackId: 'sc-track-99',
+        }),
+      })
+    );
+  });
+
+  it('emits reconnect alert when SoundCloud upload requires re-authorization', async () => {
+    mockUploadTrack.mockRejectedValueOnce(
+      new HttpsError('failed-precondition', 'SoundCloud authorization is missing or expired.', {
+        code: SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE,
+      })
+    );
+
+    await expect(
+      uploadToSoundCloudHandler({
+        auth: adminAuth,
+        data: {
+          audioStoragePath: 'intro-outro-sermons/sermon-reauth',
+          title: 'Reconnect',
+          speakers: [],
+          tags: [],
+          description: '',
+        },
+      })
+    ).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'SoundCloud authorization is missing or expired.',
+    });
+
+    expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
+        context: expect.objectContaining({
+          functionName: 'uploadToSoundCloud',
+          audioStoragePath: 'intro-outro-sermons/sermon-reauth',
+          soundCloudRecoveryCode: SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE,
         }),
       })
     );

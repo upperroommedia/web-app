@@ -15,7 +15,10 @@ jest.mock('../../soundcloudClient', () => ({
 
 jest.mock('../../soundcloudSecrets', () => ({
   getSoundCloudAccessToken: () => mockTokenValue,
+  refreshSoundCloudAccessToken: () => mockTokenValue,
+  runWithSoundCloudAccessToken: (operation: (token: string) => unknown) => operation(mockTokenValue),
   soundcloudSecretsWithRuntimeAlerts: [],
+  soundcloudOAuthSecrets: [],
 }));
 
 jest.mock('../../../../firebase/firebaseAdmin', () => ({

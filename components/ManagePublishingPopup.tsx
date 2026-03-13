@@ -25,7 +25,7 @@ import CollectionsIcon from '@mui/icons-material/Collections';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField, setDoc, query, orderBy } from '../firebase/firestore';
-import { FunctionComponent, useCallback, useEffect, useState } from 'react';
+import { FunctionComponent, ReactNode, useCallback, useEffect, useState } from 'react';
 import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
 import { RemoveFromListInputType, RemoveFromListOutputType } from '../functions/src/removeFromList';
 import {
@@ -54,6 +54,7 @@ import Link from 'next/link';
 import { getSquareImageDownloadLink } from '../utils/utils';
 import { alpha, useTheme } from '@mui/material/styles';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../utils/seriesPublishUtils';
+import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../utils/soundcloudAuthRecovery';
 
 interface ManagePublishingPopupProps {
   sermon: Sermon;
@@ -113,7 +114,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
 
   // SoundCloud state
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
-  const [soundCloudError, setSoundCloudError] = useState<string | null>(null);
+  const [soundCloudError, setSoundCloudError] = useState<ReactNode | null>(null);
 
   // Subsplash state
   const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
@@ -197,11 +198,15 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       onUpdate?.();
     } catch (error: unknown) {
       console.error('Error uploading to SoundCloud:', error);
-      setSoundCloudError(getErrorMessage(error, 'Failed to upload to SoundCloud'));
+      setSoundCloudError(
+        isSoundCloudReconnectRequiredClientError(error)
+          ? getSoundCloudRecoveryMessage(user?.isAdmin() ?? false)
+          : getErrorMessage(error, 'Failed to upload to SoundCloud')
+      );
     } finally {
       setIsUploadingToSoundCloud(false);
     }
-  }, [sermon, onUpdate]);
+  }, [sermon, onUpdate, user]);
 
   const deleteFromSoundCloud = useCallback(async () => {
     setIsUploadingToSoundCloud(true);
@@ -240,12 +245,16 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         onUpdate?.();
       } else {
         console.error('Error deleting from SoundCloud:', error);
-        setSoundCloudError(getErrorMessage(error, 'Failed to remove from SoundCloud'));
+        setSoundCloudError(
+          isSoundCloudReconnectRequiredClientError(error)
+            ? getSoundCloudRecoveryMessage(user?.isAdmin() ?? false)
+            : getErrorMessage(error, 'Failed to remove from SoundCloud')
+        );
       }
     } finally {
       setIsUploadingToSoundCloud(false);
     }
-  }, [sermon, onUpdate]);
+  }, [sermon, onUpdate, user]);
 
   // ==================== Subsplash Functions ====================
   const deleteFromSubsplash = useCallback(async () => {

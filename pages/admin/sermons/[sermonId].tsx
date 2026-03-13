@@ -6,7 +6,7 @@
  * - Inline publishing status (no popup)
  * - Edit and Delete actions
  */
-import { useCallback, useEffect, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Box from '@mui/material/Box';
@@ -86,6 +86,7 @@ import UploadStatusList from '../../../components/UploadStatusList';
 import LinearProgress from '@mui/material/LinearProgress';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
+import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../../../utils/soundcloudAuthRecovery';
 
 const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
   const busyDetails = parseLockBusyDetails(error);
@@ -132,6 +133,7 @@ const SermonDetailsPage = () => {
 
   // Publishing state
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
+  const [soundCloudError, setSoundCloudError] = useState<ReactNode | null>(null);
   const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
   const [seriesPublishAction, setSeriesPublishAction] = useState<'publish' | 'unpublish' | null>(null);
   const [confirmSeriesUnpublishOpen, setConfirmSeriesUnpublishOpen] = useState(false);
@@ -277,6 +279,7 @@ const SermonDetailsPage = () => {
   const uploadToSoundCloud = useCallback(async () => {
     if (!sermon) return;
     setIsUploadingToSoundCloud(true);
+    setSoundCloudError(null);
 
     const uploadToSoundCloudFn = createFunctionV2<UploadToSoundCloudInputType, UploadToSoundCloudReturnType>('uploadtosoundcloud');
     const data: UploadToSoundCloudInputType = {
@@ -298,15 +301,20 @@ const SermonDetailsPage = () => {
       });
     } catch (error: unknown) {
       console.error('Error uploading to SoundCloud:', error);
-      alert(getErrorMessage(error, 'Failed to upload to SoundCloud'));
+      setSoundCloudError(
+        isSoundCloudReconnectRequiredClientError(error)
+          ? getSoundCloudRecoveryMessage(user?.isAdmin() ?? false)
+          : getErrorMessage(error, 'Failed to upload to SoundCloud')
+      );
     } finally {
       setIsUploadingToSoundCloud(false);
     }
-  }, [sermon]);
+  }, [sermon, user]);
 
   const deleteFromSoundCloud = useCallback(async () => {
     if (!sermon) return;
     setIsUploadingToSoundCloud(true);
+    setSoundCloudError(null);
 
     const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
 
@@ -338,12 +346,16 @@ const SermonDetailsPage = () => {
         });
       } else {
         console.error('Error deleting from SoundCloud:', error);
-        alert(getErrorMessage(error, 'Failed to remove from SoundCloud'));
+        setSoundCloudError(
+          isSoundCloudReconnectRequiredClientError(error)
+            ? getSoundCloudRecoveryMessage(user?.isAdmin() ?? false)
+            : getErrorMessage(error, 'Failed to remove from SoundCloud')
+        );
       }
     } finally {
       setIsUploadingToSoundCloud(false);
     }
-  }, [sermon]);
+  }, [sermon, user]);
 
   // Subsplash functions
   const uploadToSubsplash = useCallback(async (listsToUploadTo: SermonList[]): Promise<string | undefined> => {
@@ -1275,6 +1287,7 @@ const SermonDetailsPage = () => {
                         </Button>
                       )}
                     </Stack>
+                    {soundCloudError ? <Alert severity="error" sx={{ mt: 2 }}>{soundCloudError}</Alert> : null}
                   </Card>
 
                   {/* Subsplash Lists */}

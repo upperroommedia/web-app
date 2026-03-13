@@ -2,14 +2,14 @@
  * SoundCloud API client for upload, update, and delete of tracks.
  * Uses OAuth 2.1 access token (Authorization: OAuth <token>).
  *
- * Secrets (Option A): Store SOUNDCLOUD_ACCESS_TOKEN in Firebase Secret Manager.
- * Obtain the token via SoundCloud OAuth Authorization Code flow.
+ * OAuth access tokens are managed by the SoundCloud auth helpers, which store
+ * refresh state server-side and refresh access tokens automatically.
  */
 
 import axios, { AxiosError, isAxiosError } from 'axios';
 import FormData from 'form-data';
 import { Bucket } from '@google-cloud/storage';
-import { HttpsError } from 'firebase-functions/v2/https';
+import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
 
 const SOUNDCLOUD_API_BASE = 'https://api.soundcloud.com';
 
@@ -43,10 +43,8 @@ export interface SoundCloudTrackResult {
 
 export const normalizeSoundCloudApiError = (error: unknown): never => {
   if (isAxiosError(error) && error.response?.status === 401) {
-    throw new HttpsError(
-      'failed-precondition',
-      'SoundCloud rejected the configured OAuth access token. Update the SOUNDCLOUD_ACCESS_TOKEN secret. ' +
-        'If you still only have SOUNDCLOUD_CLIENT_SECRET configured, that value is likely the wrong credential.'
+    throw createSoundCloudReconnectRequiredError(
+      'SoundCloud authorization is missing or expired. Reconnect SoundCloud from Admin > Advanced and try again.'
     );
   }
 
