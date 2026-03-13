@@ -2,12 +2,12 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { canUserRolePublish } from '../../../types/User';
 import handleError from '../handleError';
-import { subsplashSecrets } from '../subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import { UpdateSpeakerCallableInputType, UpdateSpeakerCallableOutputType } from './createSpeakerTypes';
 import { parseUpdateSpeakerInput, updateSpeakerMutation } from './speakerMutations';
 
 const updatespeaker = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<UpdateSpeakerCallableInputType>): Promise<UpdateSpeakerCallableOutputType> => {
     logger.log('updatespeaker', {
       uid: request.auth?.uid,

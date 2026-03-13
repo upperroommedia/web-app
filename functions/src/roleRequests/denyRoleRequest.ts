@@ -1,6 +1,6 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
-import { adminBaseUrlSecret } from '../notifications/notificationSecrets';
+import { adminBaseUrlSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
 import handleError from '../handleError';
 import {
   DenyRoleRequestInputType,
@@ -120,6 +120,6 @@ export const denyRoleRequestHandler = async (
   }
 };
 
-const denyrolerequest = onCall({ secrets: [adminBaseUrlSecret] }, denyRoleRequestHandler);
+const denyrolerequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, denyRoleRequestHandler);
 
 export default denyrolerequest;

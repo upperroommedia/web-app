@@ -13,7 +13,7 @@ import {
   DEFAULT_LOCK_WAIT_TIMEOUT_MS,
   SUBSPLASH_LOCK_BUSY_CODE,
 } from './locks/lockTypes';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 export interface RemoveFromListInputType {
   listIds: string[];
@@ -264,7 +264,7 @@ export const removeFromList = async (
   }
 };
 const removeFromListCallable = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<RemoveFromListInputType>): Promise<RemoveFromListOutputType> => {
     logger.log('removeFromList');
 

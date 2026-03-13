@@ -1,6 +1,6 @@
 import { algoliasearch } from 'algoliasearch';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
-import { algoliaSearchApiKeySecret } from './algoliaSecrets';
+import { algoliaSecretsWithRuntimeAlerts } from './algoliaSecrets';
 import handleError from './handleError';
 
 export interface GenerateSecuredApiKeyInputType {
@@ -9,7 +9,7 @@ export interface GenerateSecuredApiKeyInputType {
 export type GenerateSecuredApiKeyOutputType = string;
 
 const generateSecuredApiKey = onCall(
-  { secrets: [algoliaSearchApiKeySecret] },
+  { secrets: algoliaSecretsWithRuntimeAlerts },
   (request: CallableRequest<GenerateSecuredApiKeyInputType>): GenerateSecuredApiKeyOutputType => {
     try {
       // Algolia secure API keys are derived from the parent key + restrictions.

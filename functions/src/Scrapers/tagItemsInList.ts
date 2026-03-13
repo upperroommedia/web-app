@@ -7,7 +7,7 @@ import { firestoreAdminListConverter } from '../firestoreDataConverter';
 import { SubsplashListRow } from '../types/Subsplash';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
-import { subsplashSecrets } from '../subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import handleError from '../handleError';
 
 type TAG_ITEMS_IN_LIST_INCOMING_DATA =
@@ -22,7 +22,7 @@ type TAG_ITEMS_IN_LIST_INCOMING_DATA =
   };
 
 const tagItemsInList = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<TAG_ITEMS_IN_LIST_INCOMING_DATA>): Promise<HttpsError | number> => {
     const data = request.data;
     try {

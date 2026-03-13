@@ -20,7 +20,7 @@ import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
 import { getFirebaseImagesBucket } from '../../shared/firebaseProjectConfig';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { ensureFirebaseDownloadUrl } from './storageDownloadUrl';
 import handleError from './handleError';
 // import { resize } from 'imagemagick';
@@ -84,7 +84,7 @@ const handleImageUpload = onObjectFinalized(
     bucket: getFirebaseImagesBucket(),
     timeoutSeconds: 300,
     memory: '1GiB',
-    secrets: subsplashSecrets,
+    secrets: subsplashSecretsWithRuntimeAlerts,
   },
   async (storageEvent): Promise<void> => {
     const object = storageEvent.data;

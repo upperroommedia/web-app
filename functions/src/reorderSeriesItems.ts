@@ -13,7 +13,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -36,7 +36,7 @@ export interface ReorderSeriesItemsOutputType {
 }
 
 const reorderSeriesItems = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<ReorderSeriesItemsInputType>): Promise<ReorderSeriesItemsOutputType> => {
     logger.log('reorderSeriesItems');
 

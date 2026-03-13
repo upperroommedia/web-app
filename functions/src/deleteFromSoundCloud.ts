@@ -1,6 +1,6 @@
 import handleError from './handleError';
 import { deleteTrack } from './soundcloudClient';
-import { soundcloudAccessToken } from './soundcloudSecrets';
+import { soundcloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '../../types/User';
@@ -14,7 +14,7 @@ export interface DeleteFromSoundCloudInputType {
 export type DeleteFromSoundCloudReturnType = void;
 
 const deleteFromSoundCloud = onCall(
-  { secrets: [soundcloudAccessToken] },
+  { secrets: soundcloudSecretsWithRuntimeAlerts },
   async (request: CallableRequest<DeleteFromSoundCloudInputType>): Promise<DeleteFromSoundCloudReturnType> => {
     logger.log('deleteFromSoundCloud', request);
     if (!canUserRolePublish(request.auth?.token.role)) {

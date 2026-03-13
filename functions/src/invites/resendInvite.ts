@@ -2,7 +2,7 @@ import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { buildInviteClaimUrl, queueInviteEmail } from './inviteEmail';
 import { createInviteTokenArtifact } from './inviteToken';
-import { adminBaseUrlSecret } from '../notifications/notificationSecrets';
+import { adminBaseUrlSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
 import handleError from '../handleError';
 import {
   INVITE_EXPIRY_MS,
@@ -143,6 +143,6 @@ export const resendInviteHandler = async (
   }
 };
 
-const resendinvite = onCall({ secrets: [adminBaseUrlSecret] }, resendInviteHandler);
+const resendinvite = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, resendInviteHandler);
 
 export default resendinvite;

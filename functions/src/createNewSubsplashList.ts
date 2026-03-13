@@ -8,7 +8,7 @@ import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 export interface CreateNewSubsplashListInputType {
   title: string;
@@ -38,7 +38,7 @@ const getCreateLockKey = (title: string): string => {
 };
 
 const createNewSubsplashListCallable = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<CreateNewSubsplashListInputType>): Promise<CreateNewSubsplashListOutputType> => {
     logger.log('createNewSubsplashList', request);
     if (!canUserRolePublish(request.auth?.token.role)) {

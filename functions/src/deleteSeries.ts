@@ -19,7 +19,7 @@ import handleError from './handleError';
 import { runWithConcurrency } from './utils/runWithConcurrency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -107,7 +107,7 @@ const cleanupLocalSeriesData = async (
 };
 
 const deleteSeries = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<DeleteSeriesInputType>): Promise<DeleteSeriesOutputType> => {
     logger.log('deleteSeries');
 

@@ -7,7 +7,7 @@ import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '../../types/User';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 export interface EditSubsplashListInputType {
   listId: string;
@@ -24,7 +24,7 @@ const getOperationKey = (operationKey?: string): string | undefined => {
 };
 
 const editSubpslashList = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<EditSubsplashListInputType>): Promise<EditSubsplashListOutputType> => {
     logger.log('editSubsplashList', request);
     if (!canUserRolePublish(request.auth?.token.role)) {

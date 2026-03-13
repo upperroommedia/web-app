@@ -15,7 +15,7 @@ import { getSeriesItems, patchMediaItemSeries, patchSeriesItemPositions } from '
 import { runWithConcurrency } from './utils/runWithConcurrency';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 type AddStatus = 'success' | 'error';
 
@@ -166,7 +166,7 @@ const rollbackAddedItems = async (
 };
 
 const bulkAddToSeries = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<BulkAddToSeriesInputType>): Promise<BulkAddToSeriesOutputType> => {
     logger.log('bulkAddToSeries');
 

@@ -12,7 +12,7 @@ import handleError from './handleError';
 import axios from 'axios';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
-import { subsplashSecrets } from './subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -395,7 +395,7 @@ async function processListStep(
   return { listItemId };
 }
 
-const addToList = onCall({ secrets: subsplashSecrets }, async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
+const addToList = onCall({ secrets: subsplashSecretsWithRuntimeAlerts }, async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
   logger.log('addToList');
 
   if (!canUserRolePublish(request.auth?.token.role)) {

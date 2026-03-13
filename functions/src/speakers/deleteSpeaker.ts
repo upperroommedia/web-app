@@ -2,12 +2,12 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { isUserRoleAdmin } from '../../../types/User';
 import handleError from '../handleError';
-import { subsplashSecrets } from '../subsplashSecrets';
+import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import { DeleteSpeakerCallableInputType, DeleteSpeakerCallableOutputType } from './createSpeakerTypes';
 import { deleteSpeakerMutation, parseDeleteSpeakerInput } from './speakerMutations';
 
 const deletespeaker = onCall(
-  { secrets: subsplashSecrets },
+  { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<DeleteSpeakerCallableInputType>): Promise<DeleteSpeakerCallableOutputType> => {
     logger.log('deletespeaker', {
       uid: request.auth?.uid,
