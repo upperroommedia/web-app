@@ -22,6 +22,19 @@ const nextConfig = {
     locales: ['en'],
     defaultLocale: 'en',
   },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'X-Robots-Tag',
+            value: 'noindex, nofollow, noarchive, nosnippet, noimageindex',
+          },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [{ source: '/admin', destination: '/admin/sermons', permanent: true }];
   },
