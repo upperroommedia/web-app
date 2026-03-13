@@ -111,6 +111,7 @@ export const denyRoleRequestHandler = async (
     handleError(error, {
       alertCode: 'DENY_ROLE_REQUEST_RUNTIME_FAILURE',
       summary: 'denyRoleRequest failed while resolving a role request.',
+      request,
       context: { functionName: 'denyRoleRequest', roleRequestId },
     });
     if (error instanceof Error) {

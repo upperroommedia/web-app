@@ -130,6 +130,7 @@ export const listInvitesHandler = async (
     handleError(error, {
       alertCode: 'LIST_INVITES_RUNTIME_FAILURE',
       summary: 'listInvites failed while loading invite state.',
+      request,
       context: { functionName: 'listInvites', limit: request.data?.limit ?? null },
     });
     return {

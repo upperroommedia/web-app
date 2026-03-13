@@ -78,6 +78,7 @@ export const revokeInviteHandler = async (
     handleError(error, {
       alertCode: 'REVOKE_INVITE_RUNTIME_FAILURE',
       summary: 'revokeInvite failed while revoking an invite.',
+      request,
       context: { functionName: 'revokeInvite', inviteId: request.data?.inviteId ?? null },
     });
     return {

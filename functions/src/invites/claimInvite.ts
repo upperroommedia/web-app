@@ -180,6 +180,7 @@ export const claimInviteHandler = async (
     handleError(error, {
       alertCode: 'CLAIM_INVITE_VALIDATION_RUNTIME_FAILURE',
       summary: 'claimInvite failed while validating an invite claim.',
+      request,
       context: { functionName: 'claimInvite', claimantUid },
     });
     return {
@@ -242,6 +243,7 @@ export const claimInviteHandler = async (
     handleError(error, {
       alertCode: 'CLAIM_INVITE_ROLE_ASSIGNMENT_RUNTIME_FAILURE',
       summary: 'claimInvite failed while assigning the invited role.',
+      request,
       context: { functionName: 'claimInvite', claimantUid, inviteId: pendingClaim.inviteId },
     });
 

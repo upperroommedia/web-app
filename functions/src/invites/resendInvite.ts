@@ -134,6 +134,7 @@ export const resendInviteHandler = async (
     handleError(error, {
       alertCode: 'RESEND_INVITE_RUNTIME_FAILURE',
       summary: 'resendInvite failed while issuing a replacement invite.',
+      request,
       context: { functionName: 'resendInvite', inviteId: request.data?.inviteId ?? null },
     });
     return {
