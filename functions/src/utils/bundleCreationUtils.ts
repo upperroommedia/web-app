@@ -4,6 +4,7 @@ import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { BundleConfig, BundleMetadata } from '../../../shared/bundleConfigs';
 import { getFirebaseStorageBucket } from '../../../shared/firebaseProjectConfig';
 import { Writable } from 'stream';
+import handleError from '../handleError';
 
 const firestoreAdmin = firebaseAdmin.firestore();
 const storage = firebaseAdmin.storage();
@@ -189,6 +190,15 @@ export async function createBundleHandler<T>(
         }
 
     } catch (error) {
+        handleError(error, {
+            alertCode: 'BUNDLE_SERVE_RUNTIME_FAILURE',
+            summary: `createBundleHandler failed while serving ${config.displayName} bundle.`,
+            context: {
+                bundleType: config.bundleType,
+                displayName: config.displayName,
+                metadataPath: config.metadataDocPath,
+            },
+        });
         logger.error(`Error serving ${config.displayName} bundle:`, error);
         response.status(500).json({ error: `Failed to serve ${config.displayName} bundle` });
     }

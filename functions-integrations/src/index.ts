@@ -1,3 +1,5 @@
+import { setGlobalOptions } from 'firebase-functions/v2';
+import { runtimeAlertRecipientsSecret } from '../../functions/src/notifications/notificationSecrets';
 import generatesecuredapikey from '../../functions/src/generateAlgoliaSecureApiKey';
 import uploadToSubsplash from '../../functions/src/uploadToSubsplash';
 import deleteFromSubsplash from '../../functions/src/deleteFromSubsplash';
@@ -13,6 +15,10 @@ import repopulatelistfromspeakeritems from '../../functions/src/Scrapers/repopul
 import tagitemsinlist from '../../functions/src/Scrapers/tagItemsInList';
 import { fixPhantomListItems } from '../../functions/src/Scrapers/fixPhantomListItems';
 import { updateSubsplashTag } from '../../functions/src/Scrapers/updateSubsplashTag';
+
+setGlobalOptions({
+  secrets: [runtimeAlertRecipientsSecret],
+});
 
 exports.generatesecuredapikey = generatesecuredapikey;
 exports.uploadToSubsplash = uploadToSubsplash;

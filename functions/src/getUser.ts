@@ -4,6 +4,7 @@ import { CallableRequest } from 'firebase-functions/v2/https';
 import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User } from '../../types/User';
 import { IdTokenResult } from 'firebase/auth';
 import { FunctionOutputType } from '../../types/Function';
+import handleError from './handleError';
 export interface GetUserInputType {
   uid: string;
 }
@@ -57,6 +58,11 @@ const getUser = https.onCall(async (request: CallableRequest<GetUserInputType>):
     };
     return { status: 'success', data: userOutput };
   } catch (error) {
+    handleError(error, {
+      alertCode: 'GET_USER_RUNTIME_FAILURE',
+      summary: 'getUser failed while loading a Firebase Auth user.',
+      context: { functionName: 'getUser', uid: request.data.uid },
+    });
     logger.error('Error listing users', error);
     return { status: 'error', error: `Error listing users ${error}` };
   }

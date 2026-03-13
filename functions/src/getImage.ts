@@ -1,6 +1,7 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import axios, { isAxiosError, AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig } from 'axios';
+import handleError from './handleError';
 export interface GetImageInputType {
   url: string;
 }
@@ -35,20 +36,12 @@ const getimage = onCall(async (request: CallableRequest<GetImageInputType>): Pro
     const imageBuffer = Buffer.from(axiosResponse.data).toJSON();
     return { buffer: imageBuffer };
   } catch (error) {
-    if (error instanceof HttpsError) {
-      logger.error('HttpsError', error);
-      throw error;
-    }
-    if (isAxiosError(error)) {
-      logger.error('AxiosError', error);
-      throw new HttpsError('internal', error.message, error.name);
-    }
-    if (error instanceof Error) {
-      logger.error('Error', error);
-      throw new HttpsError('internal', error.message);
-    }
-    logger.error('Unknown Error', error);
-    throw new HttpsError('internal', 'Unknown error');
+    logger.error('getImage failed', error);
+    throw handleError(error, {
+      alertCode: 'GET_IMAGE_RUNTIME_FAILURE',
+      summary: 'getImage failed while fetching a remote image.',
+      context: { functionName: 'getImage', url: data.url },
+    });
   }
 });
 

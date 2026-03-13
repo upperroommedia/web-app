@@ -1,5 +1,6 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
+import handleError from '../handleError';
 import {
   InviteClaimStatus,
   InviteDocument,
@@ -38,92 +39,104 @@ const isAdmin = (request: CallableRequest<unknown>): boolean =>
 export const listInvitesHandler = async (
   request: CallableRequest<ListInvitesInputType>
 ): Promise<ListInvitesOutputType> => {
-  if (!isAdmin(request)) {
-    return { status: 'error', error: 'Not Authorized' };
-  }
+  try {
+    if (!isAdmin(request)) {
+      return { status: 'error', error: 'Not Authorized' };
+    }
 
-  const limit = resolveLimit(request.data?.limit);
-  const nowMs = Date.now();
-  const snapshot = await firebaseAdmin
-    .firestore()
-    .collection(ROLE_INVITES_COLLECTION)
-    .orderBy('createdAtMs', 'desc')
-    .limit(limit)
-    .get();
+    const limit = resolveLimit(request.data?.limit);
+    const nowMs = Date.now();
+    const snapshot = await firebaseAdmin
+      .firestore()
+      .collection(ROLE_INVITES_COLLECTION)
+      .orderBy('createdAtMs', 'desc')
+      .limit(limit)
+      .get();
 
-  const queueMailIds = Array.from(
-    new Set(
-      snapshot.docs
-        .map((doc) => (doc.data() as InviteDocument).email?.queueMailId)
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    )
-  );
+    const queueMailIds = Array.from(
+      new Set(
+        snapshot.docs
+          .map((doc) => (doc.data() as InviteDocument).email?.queueMailId)
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      )
+    );
 
-  const mailDeliveryStateById = new Map<string, string>();
-  if (queueMailIds.length > 0) {
-    const mailRefs = queueMailIds.map((mailId) => firebaseAdmin.firestore().collection(MAIL_COLLECTION).doc(mailId));
-    const mailSnapshots = await firebaseAdmin.firestore().getAll(...mailRefs);
-    for (const mailSnapshot of mailSnapshots) {
-      if (!mailSnapshot.exists) {
-        continue;
+    const mailDeliveryStateById = new Map<string, string>();
+    if (queueMailIds.length > 0) {
+      const mailRefs = queueMailIds.map((mailId) => firebaseAdmin.firestore().collection(MAIL_COLLECTION).doc(mailId));
+      const mailSnapshots = await firebaseAdmin.firestore().getAll(...mailRefs);
+      for (const mailSnapshot of mailSnapshots) {
+        if (!mailSnapshot.exists) {
+          continue;
+        }
+        const deliveryState = mailSnapshot.get('delivery.state');
+        if (typeof deliveryState === 'string') {
+          mailDeliveryStateById.set(mailSnapshot.id, deliveryState);
+        }
       }
-      const deliveryState = mailSnapshot.get('delivery.state');
-      if (typeof deliveryState === 'string') {
-        mailDeliveryStateById.set(mailSnapshot.id, deliveryState);
+    }
+
+    const invites = snapshot.docs.flatMap((doc) => {
+      const invite = doc.data() as InviteDocument;
+      const invitedRole = normalizeInviteRole(invite.invitedRole ?? '');
+      if (!invitedRole || typeof invite.invitedEmail !== 'string') {
+        return [];
       }
-    }
-  }
 
-  const invites = snapshot.docs.flatMap((doc) => {
-    const invite = doc.data() as InviteDocument;
-    const invitedRole = normalizeInviteRole(invite.invitedRole ?? '');
-    if (!invitedRole || typeof invite.invitedEmail !== 'string') {
-      return [];
-    }
+      let lifecycleStatus = getInviteLifecycleStatus(invite, nowMs);
+      const queueMailId = invite.email?.queueMailId;
+      if (
+        lifecycleStatus === InviteLifecycleStatus.SENT &&
+        typeof queueMailId === 'string' &&
+        mailDeliveryStateById.get(queueMailId) === 'ERROR'
+      ) {
+        lifecycleStatus = InviteLifecycleStatus.SEND_FAILED;
+      }
 
-    let lifecycleStatus = getInviteLifecycleStatus(invite, nowMs);
-    const queueMailId = invite.email?.queueMailId;
-    if (
-      lifecycleStatus === InviteLifecycleStatus.SENT &&
-      typeof queueMailId === 'string' &&
-      mailDeliveryStateById.get(queueMailId) === 'ERROR'
-    ) {
-      lifecycleStatus = InviteLifecycleStatus.SEND_FAILED;
-    }
+      return [
+        {
+          inviteId: doc.id,
+          invitedEmail: invite.invitedEmail,
+          invitedRole,
+          createdAtMs: invite.createdAtMs ?? 0,
+          createdByEmail: invite.createdByEmail,
+          expiresAtMs: invite.expiresAtMs ?? 0,
+          claimStatus: invite.claimStatus ?? InviteClaimStatus.PENDING,
+          lifecycleStatus,
+          emailStatus: getInviteEmailStatus(invite),
+          claimedByEmail: invite.claimedByEmail,
+          claimedAtMs: invite.claimedAtMs,
+          revokedAtMs: invite.revokedAtMs,
+          canRevoke:
+            lifecycleStatus === InviteLifecycleStatus.OPEN ||
+            lifecycleStatus === InviteLifecycleStatus.SENT ||
+            lifecycleStatus === InviteLifecycleStatus.SEND_FAILED ||
+            lifecycleStatus === InviteLifecycleStatus.CLAIMING ||
+            lifecycleStatus === InviteLifecycleStatus.CLAIM_FAILED,
+          canResend:
+            lifecycleStatus === InviteLifecycleStatus.EXPIRED ||
+            lifecycleStatus === InviteLifecycleStatus.SEND_FAILED,
+        },
+      ];
+    });
 
-    return [
-      {
-        inviteId: doc.id,
-        invitedEmail: invite.invitedEmail,
-        invitedRole,
-        createdAtMs: invite.createdAtMs ?? 0,
-        createdByEmail: invite.createdByEmail,
-        expiresAtMs: invite.expiresAtMs ?? 0,
-        claimStatus: invite.claimStatus ?? InviteClaimStatus.PENDING,
-        lifecycleStatus,
-        emailStatus: getInviteEmailStatus(invite),
-        claimedByEmail: invite.claimedByEmail,
-        claimedAtMs: invite.claimedAtMs,
-        revokedAtMs: invite.revokedAtMs,
-        canRevoke:
-          lifecycleStatus === InviteLifecycleStatus.OPEN ||
-          lifecycleStatus === InviteLifecycleStatus.SENT ||
-          lifecycleStatus === InviteLifecycleStatus.SEND_FAILED ||
-          lifecycleStatus === InviteLifecycleStatus.CLAIMING ||
-          lifecycleStatus === InviteLifecycleStatus.CLAIM_FAILED,
-        canResend:
-          lifecycleStatus === InviteLifecycleStatus.EXPIRED ||
-          lifecycleStatus === InviteLifecycleStatus.SEND_FAILED,
+    return {
+      status: 'success',
+      data: {
+        invites,
       },
-    ];
-  });
-
-  return {
-    status: 'success',
-    data: {
-      invites,
-    },
-  };
+    };
+  } catch (error) {
+    handleError(error, {
+      alertCode: 'LIST_INVITES_RUNTIME_FAILURE',
+      summary: 'listInvites failed while loading invite state.',
+      context: { functionName: 'listInvites', limit: request.data?.limit ?? null },
+    });
+    return {
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
 };
 
 const listinvites = onCall(listInvitesHandler);

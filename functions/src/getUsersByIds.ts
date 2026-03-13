@@ -4,6 +4,7 @@ import { CallableRequest } from 'firebase-functions/v2/https';
 import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '../../types/User';
 import { IdTokenResult } from 'firebase/auth';
 import { FunctionOutputType } from '../../types/Function';
+import handleError from './handleError';
 
 export interface GetUsersByIdsInputType {
   uids: string[];
@@ -97,6 +98,11 @@ const getUsersByIds = https.onCall(async (request: CallableRequest<GetUsersByIds
 
     return { status: 'success', data: users };
   } catch (error) {
+    handleError(error, {
+      alertCode: 'GET_USERS_BY_IDS_RUNTIME_FAILURE',
+      summary: 'getUsersByIds failed while loading Firebase Auth users.',
+      context: { functionName: 'getUsersByIds', requestedCount: requestedUids.length },
+    });
     logger.error('Error fetching users by ids', error);
     return { status: 'error', error: `Error fetching users by ids ${error}` };
   }

@@ -8,6 +8,7 @@ import { emptyList } from '../../../types/List';
 import updateSubsplashSermonTopics from '../helpers/updateSubsplashTagsHelper';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { subsplashSecrets } from '../subsplashSecrets';
+import handleError from '../handleError';
 
 export const fixPhantomListItems = onRequest({ cors: true, secrets: subsplashSecrets }, async (req, res) => {
     const db = firebaseAdmin.firestore();
@@ -210,6 +211,11 @@ export const fixPhantomListItems = onRequest({ cors: true, secrets: subsplashSec
         res.status(200).json(result);
 
     } catch (error) {
+        handleError(error, {
+            alertCode: 'FIX_PHANTOM_LIST_ITEMS_RUNTIME_FAILURE',
+            summary: 'fixPhantomListItems failed during cleanup.',
+            context: { functionName: 'fixPhantomListItems', updateSubsplash },
+        });
         logger.error('Error during phantom listItems cleanup:', error);
         res.status(500).json({
             success: false,

@@ -62,7 +62,11 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     // Delete the temporary file (crucial)
     return { status: 'success' };
   } catch (error) {
-    handleError(error);
+    handleError(error, {
+      alertCode: 'SAVE_IMAGE_RUNTIME_FAILURE',
+      summary: 'saveImage failed while downloading or uploading an image.',
+      context: { functionName: 'saveImage', url: request.data.url, name: request.data.name },
+    });
     return 'Error saving image';
   } finally {
     const promises: Promise<void>[] = [];

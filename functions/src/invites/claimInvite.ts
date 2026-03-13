@@ -14,6 +14,7 @@ import {
   normalizeInviteEmail,
   normalizeInviteRole,
 } from './inviteTypes';
+import handleError from '../handleError';
 
 type ClaimInviteOutputType = { status: 'success'; data: ClaimInviteResultData } | { status: 'error'; error: string };
 
@@ -176,6 +177,11 @@ export const claimInviteHandler = async (
       claimantEmail,
       error: error instanceof Error ? error.message : String(error),
     });
+    handleError(error, {
+      alertCode: 'CLAIM_INVITE_VALIDATION_RUNTIME_FAILURE',
+      summary: 'claimInvite failed while validating an invite claim.',
+      context: { functionName: 'claimInvite', claimantUid },
+    });
     return {
       status: 'error',
       error: error instanceof Error ? error.message : 'Failed to validate invite.',
@@ -232,6 +238,11 @@ export const claimInviteHandler = async (
       claimantEmail,
       inviteId: pendingClaim.inviteId,
       roleFailureMessage,
+    });
+    handleError(error, {
+      alertCode: 'CLAIM_INVITE_ROLE_ASSIGNMENT_RUNTIME_FAILURE',
+      summary: 'claimInvite failed while assigning the invited role.',
+      context: { functionName: 'claimInvite', claimantUid, inviteId: pendingClaim.inviteId },
     });
 
     await inviteRef.update({

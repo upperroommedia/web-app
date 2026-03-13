@@ -1,6 +1,7 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { adminBaseUrlSecret } from '../notifications/notificationSecrets';
+import handleError from '../handleError';
 import {
   DenyRoleRequestInputType,
   DenyRoleRequestOutputType,
@@ -107,6 +108,11 @@ export const denyRoleRequestHandler = async (
       },
     };
   } catch (error) {
+    handleError(error, {
+      alertCode: 'DENY_ROLE_REQUEST_RUNTIME_FAILURE',
+      summary: 'denyRoleRequest failed while resolving a role request.',
+      context: { functionName: 'denyRoleRequest', roleRequestId },
+    });
     if (error instanceof Error) {
       return { status: 'error', error: error.message };
     }

@@ -1,5 +1,6 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
+import handleError from '../handleError';
 import {
   ListRoleRequestsInputType,
   ListRoleRequestsOutputType,
@@ -93,72 +94,88 @@ const resolveTargetRequesterUid = (
 export const listRoleRequestsHandler = async (
   request: CallableRequest<ListRoleRequestsInputType>
 ): Promise<ListRoleRequestsOutputType> => {
-  const access = resolveTargetRequesterUid(request);
-  if (!access) {
-    return { status: 'error', error: 'Not Authorized' };
-  }
-
-  const limit = resolveLimit(request.data?.limit);
-  const collection = firebaseAdmin.firestore().collection(ROLE_REQUESTS_COLLECTION);
-  const requesterScope = access.requesterUid;
-  const parsedCursor = decodeCursor(request.data?.pageToken);
-  if (request.data?.pageToken && !parsedCursor) {
-    return { status: 'error', error: 'Invalid page token.' };
-  }
-  if (parsedCursor && parsedCursor.requesterUid !== requesterScope) {
-    return { status: 'error', error: 'Page token does not match request scope.' };
-  }
-
-  let query =
-    access.isAdmin && requesterScope.length === 0
-      ? collection.orderBy('createdAtMs', 'desc')
-      : collection.where('requesterUid', '==', requesterScope).orderBy('createdAtMs', 'desc');
-
-  if (parsedCursor) {
-    const cursorSnapshot = await collection.doc(parsedCursor.lastDocId).get();
-    if (!cursorSnapshot.exists) {
-      return {
-        status: 'success',
-        data: {
-          roleRequests: [],
-        },
-      };
+  try {
+    const access = resolveTargetRequesterUid(request);
+    if (!access) {
+      return { status: 'error', error: 'Not Authorized' };
     }
-    query = query.startAfter(cursorSnapshot);
+
+    const limit = resolveLimit(request.data?.limit);
+    const collection = firebaseAdmin.firestore().collection(ROLE_REQUESTS_COLLECTION);
+    const requesterScope = access.requesterUid;
+    const parsedCursor = decodeCursor(request.data?.pageToken);
+    if (request.data?.pageToken && !parsedCursor) {
+      return { status: 'error', error: 'Invalid page token.' };
+    }
+    if (parsedCursor && parsedCursor.requesterUid !== requesterScope) {
+      return { status: 'error', error: 'Page token does not match request scope.' };
+    }
+
+    let query =
+      access.isAdmin && requesterScope.length === 0
+        ? collection.orderBy('createdAtMs', 'desc')
+        : collection.where('requesterUid', '==', requesterScope).orderBy('createdAtMs', 'desc');
+
+    if (parsedCursor) {
+      const cursorSnapshot = await collection.doc(parsedCursor.lastDocId).get();
+      if (!cursorSnapshot.exists) {
+        return {
+          status: 'success',
+          data: {
+            roleRequests: [],
+          },
+        };
+      }
+      query = query.startAfter(cursorSnapshot);
+    }
+
+    const snapshot = await query.limit(limit + 1).get();
+    const hasNextPage = snapshot.docs.length > limit;
+    const selectedDocs = hasNextPage ? snapshot.docs.slice(0, limit) : snapshot.docs;
+    const selectedDocuments = selectedDocs.map((doc) => ({ id: doc.id, data: doc.data() as PersistedRoleRequestDocument }));
+
+    return {
+      status: 'success',
+      data: {
+        roleRequests: selectedDocuments.map(({ id, data }) => ({
+          roleRequestId: id,
+          requesterUid: data.requesterUid,
+          requesterEmail: data.requesterEmail,
+          requesterDisplayName: data.requesterDisplayName,
+          requestedRole: data.requestedRole,
+          reason: data.reason,
+          status: data.status,
+          createdAtMs: data.createdAtMs,
+          updatedAtMs: data.updatedAtMs,
+          notificationStatus: data.notification.status,
+          notificationAttemptedAtMs: data.notification.attemptedAtMs,
+        })),
+        ...(hasNextPage && selectedDocuments.length > 0
+          ? {
+              nextPageToken: encodeCursor({
+                v: PAGE_TOKEN_VERSION,
+                requesterUid: requesterScope,
+                lastDocId: selectedDocuments[selectedDocuments.length - 1].id,
+              }),
+            }
+          : {}),
+      },
+    };
+  } catch (error) {
+    handleError(error, {
+      alertCode: 'LIST_ROLE_REQUESTS_RUNTIME_FAILURE',
+      summary: 'listRoleRequests failed while loading role request history.',
+      context: {
+        functionName: 'listRoleRequests',
+        limit: request.data?.limit ?? null,
+        requesterUid: request.data?.requesterUid ?? null,
+      },
+    });
+    return {
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
-
-  const snapshot = await query.limit(limit + 1).get();
-  const hasNextPage = snapshot.docs.length > limit;
-  const selectedDocs = hasNextPage ? snapshot.docs.slice(0, limit) : snapshot.docs;
-  const selectedDocuments = selectedDocs.map((doc) => ({ id: doc.id, data: doc.data() as PersistedRoleRequestDocument }));
-
-  return {
-    status: 'success',
-    data: {
-      roleRequests: selectedDocuments.map(({ id, data }) => ({
-        roleRequestId: id,
-        requesterUid: data.requesterUid,
-        requesterEmail: data.requesterEmail,
-        requesterDisplayName: data.requesterDisplayName,
-        requestedRole: data.requestedRole,
-        reason: data.reason,
-        status: data.status,
-        createdAtMs: data.createdAtMs,
-        updatedAtMs: data.updatedAtMs,
-        notificationStatus: data.notification.status,
-        notificationAttemptedAtMs: data.notification.attemptedAtMs,
-      })),
-      ...(hasNextPage && selectedDocuments.length > 0
-        ? {
-            nextPageToken: encodeCursor({
-              v: PAGE_TOKEN_VERSION,
-              requesterUid: requesterScope,
-              lastDocId: selectedDocuments[selectedDocuments.length - 1].id,
-            }),
-          }
-        : {}),
-    },
-  };
 };
 
 const listrolerequests = onCall(listRoleRequestsHandler);

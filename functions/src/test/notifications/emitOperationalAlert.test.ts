@@ -88,7 +88,7 @@ describe('emitOperationalAlert', () => {
     expect(snapshot.size).toBe(2);
   });
 
-  it('surfaces queue errors instead of swallowing alert enqueue failures', async () => {
+  it('logs delivery failures instead of swallowing the original runtime path', async () => {
     const loggerSpy = jest.spyOn(logger, 'error').mockImplementation(() => {});
     jest.spyOn(queueEmailModule, 'queueEmail').mockRejectedValue(new Error('mail queue unavailable'));
 
@@ -99,8 +99,16 @@ describe('emitOperationalAlert', () => {
         error: new Error('upstream provider unavailable'),
         context: { functionName: 'createRoleRequest', requestId: 'req-123' },
       })
-    ).rejects.toThrow('mail queue unavailable');
+    ).resolves.toBeUndefined();
 
-    expect(loggerSpy).toHaveBeenCalledTimes(1);
+    expect(loggerSpy).toHaveBeenCalledTimes(2);
+    expect(loggerSpy.mock.calls[1]).toMatchObject([
+      'failed to deliver operational alert',
+      expect.objectContaining({
+        alertCode: 'ROLE_REQUEST_EMAIL_ENQUEUE_FAILED',
+        deliveryErrorMessage: 'mail queue unavailable',
+        originalErrorMessage: 'upstream provider unavailable',
+      }),
+    ]);
   });
 });

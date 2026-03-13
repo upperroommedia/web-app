@@ -1,6 +1,7 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { adminBaseUrlSecret } from '../notifications/notificationSecrets';
+import handleError from '../handleError';
 import {
   AcceptRoleRequestInputType,
   AcceptRoleRequestOutputType,
@@ -116,6 +117,11 @@ export const acceptRoleRequestHandler = async (
       },
     };
   } catch (error) {
+    handleError(error, {
+      alertCode: 'ACCEPT_ROLE_REQUEST_RUNTIME_FAILURE',
+      summary: 'acceptRoleRequest failed while resolving a role request.',
+      context: { functionName: 'acceptRoleRequest', roleRequestId },
+    });
     if (error instanceof Error) {
       return { status: 'error', error: error.message };
     }

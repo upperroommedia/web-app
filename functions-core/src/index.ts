@@ -1,3 +1,5 @@
+import { setGlobalOptions } from 'firebase-functions/v2';
+import { runtimeAlertRecipientsSecret } from '../../functions/src/notifications/notificationSecrets';
 import setuserrole from '../../functions/src/setUserRole';
 import listusers from '../../functions/src/listUsers';
 import getuser from '../../functions/src/getUser';
@@ -43,6 +45,10 @@ import addtoseries from '../../functions/src/addToSeries';
 import removefromseries from '../../functions/src/removeFromSeries';
 import reorderseriesitems from '../../functions/src/reorderSeriesItems';
 import bulkaddtoseries from '../../functions/src/bulkAddToSeries';
+
+setGlobalOptions({
+  secrets: [runtimeAlertRecipientsSecret],
+});
 
 exports.setuserrole = setuserrole;
 exports.listusers = listusers;

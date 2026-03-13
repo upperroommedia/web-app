@@ -8,6 +8,7 @@ import { SubsplashListRow } from '../types/Subsplash';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { subsplashSecrets } from '../subsplashSecrets';
+import handleError from '../handleError';
 
 type TAG_ITEMS_IN_LIST_INCOMING_DATA =
   | {
@@ -124,7 +125,11 @@ const tagItemsInList = onCall(
 
       return count;
     } catch (error) {
-      const httpsError = new HttpsError('unknown', `${error}`);
+      const httpsError = handleError(error, {
+        alertCode: 'TAG_ITEMS_IN_LIST_RUNTIME_FAILURE',
+        summary: 'tagItemsInList failed while syncing tag metadata.',
+        context: { functionName: 'tagItemsInList', listId: data.listId, tag: data.tag },
+      });
       logger.error(httpsError);
       throw httpsError;
     }

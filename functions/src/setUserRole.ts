@@ -3,6 +3,7 @@ import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { https, logger } from 'firebase-functions/v2';
 import { CallableRequest } from 'firebase-functions/v2/https';
 import { FunctionOutputType } from '../../types/Function';
+import handleError from './handleError';
 export interface SetUserRoleInputType {
   uid: string;
   role: string;
@@ -31,6 +32,11 @@ const setUserRole = https.onCall(
         return { status: 'success', data: 'success' };
       }
     } catch (e) {
+      handleError(e, {
+        alertCode: 'SET_USER_ROLE_RUNTIME_FAILURE',
+        summary: 'setUserRole failed while updating custom claims.',
+        context: { functionName: 'setUserRole', uid: request.data.uid, role: request.data.role },
+      });
       if (e instanceof Error) {
         return { status: 'error', error: e.message };
       }

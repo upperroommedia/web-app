@@ -6,6 +6,7 @@ import { ListType } from '../../../types/List';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { subsplashSecrets } from '../subsplashSecrets';
+import handleError from '../handleError';
 
 // Import retry IDs
 const retryIdsSet = new Set([
@@ -437,6 +438,11 @@ export const updateSubsplashTag = onRequest({
         res.status(200).json(result);
 
     } catch (error) {
+        handleError(error, {
+            alertCode: 'UPDATE_SUBSPLASH_TAG_RUNTIME_FAILURE',
+            summary: 'updateSubsplashTag failed while syncing sermon topics.',
+            context: { functionName: 'updateSubsplashTag' },
+        });
         logger.error('Error during sermon topics update:', error);
         res.status(500).json({
             success: false,

@@ -4,6 +4,7 @@
     "noImplicitReturns": true,
     "noUnusedLocals": true,
     "outDir": "lib",
+    "rootDir": "..",
     "sourceMap": true,
     "strict": true,
     "target": "es2017",
@@ -16,6 +17,7 @@
   },
   "compileOnSave": true,
   "include": [
-    "src"
+    "src",
+    "../shared/**/*.ts"
   ]
 }
