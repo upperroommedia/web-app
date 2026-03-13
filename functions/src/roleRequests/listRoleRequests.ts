@@ -165,6 +165,7 @@ export const listRoleRequestsHandler = async (
     handleError(error, {
       alertCode: 'LIST_ROLE_REQUESTS_RUNTIME_FAILURE',
       summary: 'listRoleRequests failed while loading role request history.',
+      request,
       context: {
         functionName: 'listRoleRequests',
         limit: request.data?.limit ?? null,

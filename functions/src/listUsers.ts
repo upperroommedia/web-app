@@ -71,6 +71,7 @@ const listUsers = https.onCall(async (request: CallableRequest<ListUsersInputTyp
       handleError(error, {
         alertCode: 'LIST_USERS_RUNTIME_FAILURE',
         summary: 'listUsers failed while paging Firebase Auth users.',
+        request,
         context: { functionName: 'listUsers' },
       });
       logger.error('Error listing users', error);

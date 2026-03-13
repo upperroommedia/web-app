@@ -101,6 +101,7 @@ const getUsersByIds = https.onCall(async (request: CallableRequest<GetUsersByIds
     handleError(error, {
       alertCode: 'GET_USERS_BY_IDS_RUNTIME_FAILURE',
       summary: 'getUsersByIds failed while loading Firebase Auth users.',
+      request,
       context: { functionName: 'getUsersByIds', requestedCount: requestedUids.length },
     });
     logger.error('Error fetching users by ids', error);

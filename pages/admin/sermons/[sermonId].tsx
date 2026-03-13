@@ -24,6 +24,7 @@ import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import ListItem from '@mui/material/ListItem';
 import InputAdornment from '@mui/material/InputAdornment';
+import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -120,6 +121,7 @@ const SermonDetailsPage = () => {
   const [series, setSeries] = useState<Series | null>(null);
   const [uploader, setUploader] = useState<User | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [showStatusTooltip, setShowStatusTooltip] = useState(false);
   const [deletePopup, setDeletePopup] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -971,15 +973,38 @@ const SermonDetailsPage = () => {
                 {/* Status chip */}
                 {statusInfo && sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
                   <Box sx={{ mb: 2 }}>
-                    <Chip
-                      icon={statusInfo.icon}
-                      label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0
-                        ? `${statusInfo.label} (${processingProgress}%)`
-                        : statusInfo.label}
-                      size="small"
-                      color={statusInfo.color}
-                      variant="outlined"
-                    />
+                    {sermon.status.audioStatus === sermonStatusType.ERROR ? (
+                      <Tooltip
+                        open={showStatusTooltip}
+                        onOpen={() => setShowStatusTooltip(true)}
+                        onClose={() => setShowStatusTooltip(false)}
+                        placement="top"
+                        title={sermon.status.message || 'Error'}
+                      >
+                        <Box
+                          onClick={() => setShowStatusTooltip((previousOpen) => !previousOpen)}
+                          sx={{ display: 'inline-flex', cursor: 'pointer' }}
+                        >
+                          <Chip
+                            icon={statusInfo.icon}
+                            label={statusInfo.label}
+                            size="small"
+                            color={statusInfo.color}
+                            variant="outlined"
+                          />
+                        </Box>
+                      </Tooltip>
+                    ) : (
+                      <Chip
+                        icon={statusInfo.icon}
+                        label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0
+                          ? `${statusInfo.label} (${processingProgress}%)`
+                          : statusInfo.label}
+                        size="small"
+                        color={statusInfo.color}
+                        variant="outlined"
+                      />
+                    )}
                     {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0 && (
                       <LinearProgress
                         variant="determinate"

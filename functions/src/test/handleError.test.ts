@@ -15,6 +15,16 @@ describe('handleError', () => {
       alertCode: 'TEST_UNHANDLED_RUNTIME_ERROR',
       summary: 'Test summary',
       context: { functionName: 'testHandler' },
+      request: {
+        auth: {
+          uid: 'user-123',
+          token: {
+            email: 'Tester@Example.org',
+            name: 'Test User',
+            role: 'admin',
+          },
+        },
+      } as never,
     });
 
     expect(normalized).toBeInstanceOf(HttpsError);
@@ -26,6 +36,12 @@ describe('handleError', () => {
       context: {
         functionName: 'testHandler',
         normalizedErrorCode: 'internal',
+        triggeringUser: {
+          uid: 'user-123',
+          email: 'tester@example.org',
+          displayName: 'Test User',
+          role: 'admin',
+        },
       },
     });
   });

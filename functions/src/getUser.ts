@@ -61,6 +61,7 @@ const getUser = https.onCall(async (request: CallableRequest<GetUserInputType>):
     handleError(error, {
       alertCode: 'GET_USER_RUNTIME_FAILURE',
       summary: 'getUser failed while loading a Firebase Auth user.',
+      request,
       context: { functionName: 'getUser', uid: request.data.uid },
     });
     logger.error('Error listing users', error);

@@ -120,6 +120,7 @@ export const acceptRoleRequestHandler = async (
     handleError(error, {
       alertCode: 'ACCEPT_ROLE_REQUEST_RUNTIME_FAILURE',
       summary: 'acceptRoleRequest failed while resolving a role request.',
+      request,
       context: { functionName: 'acceptRoleRequest', roleRequestId },
     });
     if (error instanceof Error) {

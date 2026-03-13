@@ -35,6 +35,7 @@ const setUserRole = https.onCall(
       handleError(e, {
         alertCode: 'SET_USER_ROLE_RUNTIME_FAILURE',
         summary: 'setUserRole failed while updating custom claims.',
+        request,
         context: { functionName: 'setUserRole', uid: request.data.uid, role: request.data.role },
       });
       if (e instanceof Error) {

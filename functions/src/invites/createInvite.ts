@@ -86,6 +86,7 @@ export const createInviteHandler = async (
     handleError(error, {
       alertCode: 'CREATE_INVITE_RUNTIME_FAILURE',
       summary: 'createInvite failed while creating or emailing an invite.',
+      request,
       context: {
         functionName: 'createInvite',
         invitedEmail: request.data?.email ?? null,
