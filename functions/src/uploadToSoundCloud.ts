@@ -13,6 +13,7 @@ export interface UploadToSoundCloudInputType {
   speakers: string[];
   tags: string[];
   description: string;
+  imageSource?: string;
   imageStoragePath?: string;
 }
 
@@ -37,7 +38,7 @@ const uploadToSoundCloudCall = onCall(
       const soundCloudTrackId = await uploadTrack(token, {
         bucket,
         audioStoragePath: data.audioStoragePath,
-        imageStoragePath: data.imageStoragePath,
+        imageSource: data.imageSource ?? data.imageStoragePath,
         title: data.title,
         tags: data.tags,
         description: data.description,

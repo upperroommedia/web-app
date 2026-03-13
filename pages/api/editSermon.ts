@@ -18,7 +18,7 @@ import { Sermon } from '../../types/SermonTypes';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
 import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
-import { getSquareImageStoragePath } from '../../utils/utils';
+import { getSquareImageDownloadLink } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
 import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
 import { createOperationKey, parseLockBusyDetails } from '../../utils/callableConcurrency';
@@ -53,7 +53,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       description: sermon.description,
       tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
-      imageStoragePath: getSquareImageStoragePath(sermon),
+      imageSource: getSquareImageDownloadLink(sermon),
     };
     promises.push(editSoundCloudSermon(data));
   }

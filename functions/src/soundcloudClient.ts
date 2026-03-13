@@ -22,7 +22,7 @@ function authHeaders(accessToken: string): Record<string, string> {
 export interface UploadTrackParams {
   bucket: Bucket;
   audioStoragePath: string;
-  imageStoragePath?: string;
+  imageSource?: string;
   title: string;
   tags: string[];
   description: string;
@@ -33,6 +33,16 @@ export interface UploadTrackParams {
  */
 function formatTagList(tags: string[]): string {
   return tags.map((t) => (t.includes(' ') ? `"${t}"` : t)).join(' ');
+}
+
+async function downloadImageSource(bucket: Bucket, source: string): Promise<Buffer> {
+  if (/^https?:\/\//i.test(source)) {
+    const response = await axios.get(source, { responseType: 'arraybuffer' });
+    return Buffer.from(response.data);
+  }
+
+  const [imageBuffer] = await bucket.file(source).download();
+  return imageBuffer;
 }
 
 /**
@@ -50,8 +60,8 @@ export async function uploadTrack(accessToken: string, params: UploadTrackParams
   form.append('track[tag_list]', formatTagList(params.tags));
   form.append('track[description]', params.description);
 
-  if (params.imageStoragePath) {
-    const [imgBuf] = await params.bucket.file(params.imageStoragePath).download();
+  if (params.imageSource) {
+    const imgBuf = await downloadImageSource(params.bucket, params.imageSource);
     form.append('track[artwork_data]', imgBuf, {
       filename: 'artwork.jpg',
       contentType: 'image/jpeg',
@@ -78,22 +88,22 @@ export interface UpdateTrackParams {
   title?: string;
   description?: string;
   tags?: string[];
-  imageStoragePath?: string;
+  imageSource?: string;
   bucket?: Bucket;
 }
 
 /**
  * Update track metadata. Uses JSON body when no image; uses multipart when
- * imageStoragePath and bucket are provided.
+ * imageSource and bucket are provided.
  */
 export async function updateTrack(accessToken: string, trackId: string, params: UpdateTrackParams): Promise<void> {
-  const hasArtwork = params.imageStoragePath && params.bucket;
+  const hasArtwork = params.imageSource && params.bucket;
   if (hasArtwork) {
     const form = new FormData();
     if (params.title != null) form.append('track[title]', params.title);
     if (params.description != null) form.append('track[description]', params.description);
     if (params.tags != null) form.append('track[tag_list]', formatTagList(params.tags));
-    const [imgBuf] = await params.bucket!.file(params.imageStoragePath!).download();
+    const imgBuf = await downloadImageSource(params.bucket!, params.imageSource!);
     form.append('track[artwork_data]', imgBuf, {
       filename: 'artwork.jpg',
       contentType: 'image/jpeg',

@@ -35,6 +35,24 @@ describe('editSoundCloudSermon', () => {
     );
   });
 
+  it('passes imageSource through when provided', async () => {
+    await handler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        trackId: 'sc-456',
+        imageSource: 'https://storage.googleapis.com/urm-app-prod.firebasestorage.app/speaker-images/image-square.jpeg',
+      },
+    });
+
+    expect(mockUpdateTrack).toHaveBeenCalledWith(
+      'fake-soundcloud-token',
+      'sc-456',
+      expect.objectContaining({
+        imageSource: 'https://storage.googleapis.com/urm-app-prod.firebasestorage.app/speaker-images/image-square.jpeg',
+      })
+    );
+  });
+
   it('throws permission-denied when role cannot publish', async () => {
     await expect(
       handler({

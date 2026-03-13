@@ -50,7 +50,7 @@ import UploadStatusList from './UploadStatusList';
 import { isDevelopment } from '../firebase/firebase';
 import CountOfUploadsCircularProgress from './CountOfUploadsCircularProgress';
 import Link from 'next/link';
-import { getSquareImageStoragePath } from '../utils/utils';
+import { getSquareImageDownloadLink } from '../utils/utils';
 import { alpha, useTheme } from '@mui/material/styles';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../utils/seriesPublishUtils';
 
@@ -182,7 +182,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
       audioStoragePath: `intro-outro-sermons/${sermon.id}`,
-      imageStoragePath: getSquareImageStoragePath(sermon),
+      imageSource: getSquareImageDownloadLink(sermon),
     };
     
     try {

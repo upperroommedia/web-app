@@ -24,16 +24,17 @@ const editOnSoundCloud = onCall(
       throw new HttpsError('failed-precondition', 'SOUNDCLOUD_CLIENT_SECRET is not set.');
     }
     const data = request.data;
-    const bucket = data.imageStoragePath ? firebaseAdmin.storage().bucket() : undefined;
+    const imageSource = data.imageSource ?? data.imageStoragePath;
+    const bucket = imageSource ? firebaseAdmin.storage().bucket() : undefined;
     logger.log('editOnSoundCloud', { trackId: data.trackId });
     try {
       await updateTrack(token, data.trackId, {
         ...(data.title != null && { title: data.title }),
         ...(data.description != null && { description: data.description }),
         ...(data.tags != null && { tags: data.tags }),
-        ...(data.imageStoragePath != null &&
+        ...(imageSource != null &&
           bucket != null && {
-            imageStoragePath: data.imageStoragePath,
+            imageSource,
             bucket,
           }),
       });

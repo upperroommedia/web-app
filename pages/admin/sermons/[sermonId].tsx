@@ -73,7 +73,7 @@ import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../..
 import UserAvatar from '../../../components/UserAvatar';
 import { User } from '../../../types/User';
 import { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '../../../functions/src/getUsersByIds';
-import { getSquareImageStoragePath } from '../../../utils/utils';
+import { getSquareImageDownloadLink } from '../../../utils/utils';
 import { isDevelopment } from '../../../firebase/firebase';
 import { useCollectionData, useDocument } from 'react-firebase-hooks/firestore';
 import { useObject } from 'react-firebase-hooks/database';
@@ -278,7 +278,7 @@ const SermonDetailsPage = () => {
       tags: [sermon.subtitle, ...sermon.topics],
       speakers: sermon.speakers.map((speaker) => speaker.name),
       audioStoragePath: `intro-outro-sermons/${sermon.id}`,
-      imageStoragePath: getSquareImageStoragePath(sermon),
+      imageSource: getSquareImageDownloadLink(sermon),
     };
 
     try {

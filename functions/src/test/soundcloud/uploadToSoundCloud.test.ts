@@ -39,7 +39,7 @@ describe('uploadToSoundCloud', () => {
     );
   });
 
-  it('includes imageStoragePath when provided', async () => {
+  it('includes imageSource when provided', async () => {
     await handler({
       auth: { token: { role: 'admin' } },
       data: {
@@ -48,12 +48,14 @@ describe('uploadToSoundCloud', () => {
         speakers: [],
         tags: [],
         description: '',
-        imageStoragePath: 'speaker-images/some.jpg',
+        imageSource: 'https://firebasestorage.googleapis.com/v0/b/urm-app-prod.firebasestorage.app/o/speaker-images%2Fsome.jpg?alt=media&token=abc',
       },
     });
     expect(mockUploadTrack).toHaveBeenCalledWith(
       'fake-soundcloud-token',
-      expect.objectContaining({ imageStoragePath: 'speaker-images/some.jpg' })
+      expect.objectContaining({
+        imageSource: 'https://firebasestorage.googleapis.com/v0/b/urm-app-prod.firebasestorage.app/o/speaker-images%2Fsome.jpg?alt=media&token=abc',
+      })
     );
   });
 
