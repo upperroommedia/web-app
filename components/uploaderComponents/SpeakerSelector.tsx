@@ -9,10 +9,12 @@ import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import { List, ListType, listConverter } from '../../types/List';
 import DOMPurify from 'dompurify';
-import { algoliasearch, SearchResponse } from 'algoliasearch';
+import { algoliasearch, SearchClient, SearchResponse } from 'algoliasearch';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { getErrorMessage, showError } from './utils';
+import { isDevelopment } from '../../firebase/firebase';
+import { createMockAlgoliaSearchClient } from '../../utils/mockAlgoliaSearchClient';
 
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
@@ -36,33 +38,37 @@ interface SpeakerSelectorProps {
   setSpeakerError: (error: boolean, message: string) => void;
 }
 
-const client =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
+const client: SearchClient | undefined = isDevelopment
+  ? createMockAlgoliaSearchClient({
+      userId: '',
+      canSearchAllSermons: true,
+    })
+  : process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
     ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
 
 export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number): Promise<AlgoliaSpeaker[]> => {
-  const speakers: AlgoliaSpeaker[] = [];
   if (client) {
     try {
-      const response: SearchResponse<AlgoliaSpeaker> = await client.searchSingleIndex({
-        indexName: 'speakers',
-        searchParams: {
-          query,
-          hitsPerPage,
-          page,
-        }
+      const response = await client.search<AlgoliaSpeaker>({
+        requests: [
+          {
+            indexName: 'speakers',
+            query,
+            hitsPerPage,
+            page,
+          },
+        ],
       });
-      response.hits.forEach((hit) => {
-        speakers.push(hit);
-      });
+      const speakerResults = response.results[0] as SearchResponse<AlgoliaSpeaker> | undefined;
+      return speakerResults?.hits ?? [];
     } catch (error) {
       console.error('Search error:', error);
     }
   } else {
     console.warn('Algolia client not initialized. Returning empty speaker list.');
   }
-  return speakers;
+  return [];
 };
 
 const getSpeakersUnion = (array1: AlgoliaSpeaker[], array2: AlgoliaSpeaker[]) => {

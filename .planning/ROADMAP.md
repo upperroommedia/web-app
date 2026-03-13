@@ -7,7 +7,7 @@ This roadmap tracks active GSD-managed work on top of an already substantial bro
 ## Milestones
 
 - ✅ **Pre-GSD Product Foundation** - Existing platform capabilities established before current planning cycle
-- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-4 (in progress)
+- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-5 (in progress)
 - 📋 **v1.1 Platform Hardening (Candidate)** - Security/reliability simplification work to be phased next
 
 ## Phases
@@ -67,6 +67,7 @@ Plans:
 | 2. Dev External API Mocking | 0/1 | In progress | - |
 | 3. Subsplash alpha-lock concurrency control | 7/7 | Complete | 2026-03-08 |
 | 4. Role-based invite onboarding and operational notification routing | 5/5 | Complete | 2026-03-01 |
+| 5. Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association | 2/2 | Complete | 2026-03-10 |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 
@@ -109,3 +110,21 @@ Plans:
 - [x] 04-03-PLAN.md — Implement secure invite issue/claim backend with hashed tokens and no-downgrade role assignment
 - [x] 04-04-PLAN.md — Wire new callables into exports and UI flows (admin invite, request form, invite claim/success routes)
 - [x] 04-05-PLAN.md — Roll out runtime alert emission across publish and add-intro/outro catch paths with regression tests
+
+### Phase 5: Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association
+
+**Goal:** Deliver backend speaker CRUD commands plus an admin add-speaker popup flow with optional speaker-list creation and exact success guidance.
+**Requirements**: [SPK-01, SPK-02, SPK-03, SPK-04, SPK-05, SPK-06, SPK-07]
+**Depends on:** Phase 4
+**Success Criteria** (what must be TRUE):
+  1. Admin speaker management is available through backend callable command(s) that support create, update, and delete.
+  2. `/admin/speakers` shows a top-level Add Speaker button.
+  3. Clicking Add Speaker opens a popup with complete speaker info inputs and image selection.
+  4. Popup submit supports optional speaker-list creation and speaker/list association in one flow.
+  5. Selected images are passed through and square image is used for both speaker tag and speaker list payloads.
+  6. When speaker list creation succeeds, UI shows the exact Subsplash link and exact required instruction copy.
+**Plans:** 2 plans
+
+Plans:
+- [x] 05-01-PLAN.md — Implement backend `createspeaker`/`updatespeaker`/`deletespeaker` callables with optional speaker-list association and square-image contract tests
+- [x] 05-02-PLAN.md — Add admin Speakers top-button popup flow, callable wiring, and exact success popup link/instruction contract

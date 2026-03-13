@@ -6,6 +6,8 @@ export interface ISpeaker {
   listId?: string;
   tagId?: string;
   name: string;
+  shortDescription?: string;
+  description?: string;
   images: ImageType[];
   sermonCount: number;
 }
@@ -13,6 +15,8 @@ export interface ISpeaker {
 export const emptySpeaker: ISpeaker = {
   id: '',
   name: '',
+  shortDescription: '',
+  description: '',
   sermonCount: 0,
   images: [],
 };
