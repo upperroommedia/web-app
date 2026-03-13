@@ -1,11 +1,11 @@
 ---
-status: issues_found
+status: complete
 phase: 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
 source:
   - 05-01-SUMMARY.md
   - 05-02-SUMMARY.md
 started: 2026-03-13T04:57:27Z
-updated: 2026-03-13T05:14:30Z
+updated: 2026-03-13T07:05:00Z
 ---
 
 ## Current Test
@@ -14,7 +14,7 @@ updated: 2026-03-13T05:14:30Z
 complete: true
 result: verification complete
 note: |
-  UAT finished for phase 05. One issue remains: speaker-list creation does not pass through the selected banner and wide images to the Subsplash list.
+  UAT finished for phase 05. All tests passed after follow-up fixes for speaker list image sync and dedicated speaker details management.
 
 ## Tests
 
@@ -36,9 +36,7 @@ result: pass
 
 ### 5. Speaker Details Tag Link
 expected: Opening speaker details for a speaker with a tag shows a Subsplash Tag link under the images on the left, and the link opens the expected Subsplash speaker tag page.
-result: issue
-reported: "sorry one thing thats missing may have been the previous comment is the banner and wide images from the speaker list on subsplash are not passed through"
-severity: major
+result: pass
 
 ### 6. Delete Speaker Confirmation
 expected: Speaker details includes a Delete Speaker action. Clicking it opens a confirmation popup explaining the destructive effects before deletion occurs.
@@ -55,19 +53,7 @@ result: pass
 ## Summary
 
 total: 8
-passed: 7
-issues: 1
+passed: 8
+issues: 0
 pending: 0
 skipped: 0
-
-## Gaps
-
-- truth: "Speaker create/list sync passes through the expected selected images to the Subsplash speaker list"
-  status: failed
-  reason: "User reported: sorry one thing thats missing may have been the previous comment is the banner and wide images from the speaker list on subsplash are not passed through"
-  severity: major
-  test: 5
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
