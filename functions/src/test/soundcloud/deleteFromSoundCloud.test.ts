@@ -1,4 +1,4 @@
-import { mockDeleteTrack } from './mocks';
+import { mockDeleteTrack, mockNormalizeSoundCloudApiError } from './mocks';
 import deleteFromSoundCloud from '../../deleteFromSoundCloud';
 import type { DeleteFromSoundCloudInputType } from '../../deleteFromSoundCloud';
 
@@ -11,6 +11,9 @@ describe('deleteFromSoundCloud', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockDeleteTrack.mockResolvedValue(undefined);
+    mockNormalizeSoundCloudApiError.mockImplementation((error: unknown) => {
+      throw error;
+    });
   });
 
   it('calls deleteTrack with soundCloudTrackId when authenticated', async () => {
@@ -40,5 +43,24 @@ describe('deleteFromSoundCloud', () => {
       })
     ).rejects.toMatchObject({ code: 'unauthenticated' });
     expect(mockDeleteTrack).not.toHaveBeenCalled();
+  });
+
+  it('normalizes invalid SoundCloud credentials', async () => {
+    mockDeleteTrack.mockRejectedValue(new Error('Request failed with status code 401'));
+    mockNormalizeSoundCloudApiError.mockImplementation(() => {
+      throw Object.assign(new Error('Invalid SoundCloud token'), { code: 'failed-precondition' });
+    });
+
+    await handler({
+      auth: { token: { role: 'admin' } },
+      data: { soundCloudTrackId: 'sc-789' },
+    })
+      .then(() => {
+        throw new Error('Expected handler to reject');
+      })
+      .catch((error: { code?: string; message?: string }) => {
+        expect(error.code).toBe('internal');
+        expect(error.message).toBe('Invalid SoundCloud token');
+      });
   });
 });

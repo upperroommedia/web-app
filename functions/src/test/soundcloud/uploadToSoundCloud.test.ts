@@ -1,5 +1,6 @@
 import {
   mockUploadTrack,
+  mockNormalizeSoundCloudApiError,
 } from './mocks';
 import uploadToSoundCloud from '../../uploadToSoundCloud';
 import type { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../../uploadToSoundCloud';
@@ -12,7 +13,13 @@ const handler = uploadToSoundCloud as unknown as (req: {
 describe('uploadToSoundCloud', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockUploadTrack.mockResolvedValue('sc-track-123');
+    mockUploadTrack.mockResolvedValue({
+      trackIdentifier: 'sc-track-123',
+      permalinkUrl: 'https://soundcloud.com/upper-room-media/test-sermon',
+    });
+    mockNormalizeSoundCloudApiError.mockImplementation((error: unknown) => {
+      throw error;
+    });
   });
 
   it('returns soundCloudTrackId when authenticated and upload succeeds', async () => {
@@ -26,7 +33,10 @@ describe('uploadToSoundCloud', () => {
         description: 'A test.',
       },
     });
-    expect(result).toEqual({ soundCloudTrackId: 'sc-track-123' });
+    expect(result).toEqual({
+      soundCloudTrackId: 'sc-track-123',
+      soundCloudTrackUrl: 'https://soundcloud.com/upper-room-media/test-sermon',
+    });
     expect(mockUploadTrack).toHaveBeenCalledTimes(1);
     expect(mockUploadTrack).toHaveBeenCalledWith(
       'fake-soundcloud-token',
@@ -89,5 +99,30 @@ describe('uploadToSoundCloud', () => {
       })
     ).rejects.toMatchObject({ code: 'unauthenticated' });
     expect(mockUploadTrack).not.toHaveBeenCalled();
+  });
+
+  it('surfaces invalid SoundCloud credentials as failed-precondition', async () => {
+    mockUploadTrack.mockRejectedValue(new Error('Request failed with status code 401'));
+    mockNormalizeSoundCloudApiError.mockImplementation(() => {
+      throw Object.assign(new Error('Invalid SoundCloud token'), { code: 'failed-precondition' });
+    });
+
+    await handler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        audioStoragePath: 'intro-outro-sermons/sermon-1',
+        title: 'Test',
+        speakers: [],
+        tags: [],
+        description: '',
+      },
+      })
+      .then(() => {
+        throw new Error('Expected handler to reject');
+      })
+      .catch((error: { code?: string; message?: string }) => {
+        expect(error.code).toBe('internal');
+        expect(error.message).toBe('Invalid SoundCloud token');
+      });
   });
 });

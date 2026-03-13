@@ -1,6 +1,6 @@
 import handleError from './handleError';
-import { updateTrack } from './soundcloudClient';
-import { soundcloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
+import { normalizeSoundCloudApiError, updateTrack } from './soundcloudClient';
+import { getSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { UploadToSoundCloudInputType } from './uploadToSoundCloud';
 import { logger } from 'firebase-functions/v2';
@@ -13,22 +13,23 @@ export interface EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA
   trackId: string;
 }
 
+export interface EditSoundCloudSermonReturnType {
+  soundCloudTrackUrl?: string;
+}
+
 const editOnSoundCloud = onCall(
   { secrets: soundcloudSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>): Promise<void> => {
+  async (request: CallableRequest<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>): Promise<EditSoundCloudSermonReturnType> => {
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('permission-denied', 'You do not have the correct permissions for this action.');
     }
-    const token = soundcloudAccessToken.value();
-    if (!token) {
-      throw new HttpsError('failed-precondition', 'SOUNDCLOUD_CLIENT_SECRET is not set.');
-    }
+    const token = getSoundCloudAccessToken();
     const data = request.data;
     const imageSource = data.imageSource ?? data.imageStoragePath;
     const bucket = imageSource ? firebaseAdmin.storage().bucket() : undefined;
     logger.log('editOnSoundCloud', { trackId: data.trackId });
     try {
-      await updateTrack(token, data.trackId, {
+      const updateResult = await updateTrack(token, data.trackId, {
         ...(data.title != null && { title: data.title }),
         ...(data.description != null && { description: data.description }),
         ...(data.tags != null && { tags: data.tags }),
@@ -38,16 +39,35 @@ const editOnSoundCloud = onCall(
             bucket,
           }),
       });
+      return {
+        ...(updateResult?.permalinkUrl ? { soundCloudTrackUrl: updateResult.permalinkUrl } : {}),
+      };
     } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
       await emitOperationalAlert({
         alertCode: 'PUBLISH_SOUNDCLOUD_EDIT_RUNTIME_FAILURE',
         summary: 'editSoundCloudSermon callable failed during publish edit flow.',
-        error,
+        error: (() => {
+          try {
+            normalizeSoundCloudApiError(error);
+          } catch (normalizedError) {
+            return normalizedError;
+          }
+          return error;
+        })(),
         context: {
           functionName: 'editSoundCloudSermon',
           trackId: data.trackId,
         },
       });
+      try {
+        normalizeSoundCloudApiError(error);
+      } catch (normalizedError) {
+        throw handleError(normalizedError);
+      }
       throw handleError(error);
     }
   }

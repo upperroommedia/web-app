@@ -51,11 +51,13 @@ jest.mock('../../soundcloudClient', () => ({
   uploadTrack: (...args: unknown[]) => mockUploadTrack(...args),
   updateTrack: (...args: unknown[]) => mockUpdateTrack(...args),
   deleteTrack: (...args: unknown[]) => mockDeleteTrack(...args),
+  normalizeSoundCloudApiError: (error: unknown) => {
+    throw error;
+  },
 }));
 jest.mock('../../soundcloudSecrets', () => ({
-  soundcloudAccessToken: {
-    value: () => 'fake-soundcloud-token',
-  },
+  getSoundCloudAccessToken: () => 'fake-soundcloud-token',
+  soundcloudSecretsWithRuntimeAlerts: [],
 }));
 jest.mock('../../addIntroOutro/utils', () => ({
   logMemoryUsage: (...args: unknown[]) => mockLogMemoryUsage(...args),
@@ -251,8 +253,14 @@ describe('runtime alert taxonomy contract', () => {
 
     mockAxios.mockResolvedValue({ status: 200, data: { id: 'media-item-1' } } as never);
     mockWithIdempotency.mockImplementation(async (_operationKey, run) => run());
-    mockUploadTrack.mockResolvedValue('sc-track-1');
-    mockUpdateTrack.mockResolvedValue(undefined);
+    mockUploadTrack.mockResolvedValue({
+      trackIdentifier: 'sc-track-1',
+      permalinkUrl: 'https://soundcloud.com/upper-room-media/sermon-1',
+    });
+    mockUpdateTrack.mockResolvedValue({
+      trackIdentifier: 'sc-track-1',
+      permalinkUrl: 'https://soundcloud.com/upper-room-media/sermon-1',
+    });
     mockDeleteTrack.mockResolvedValue(undefined);
     mockSermonDocUpdate.mockResolvedValue(undefined);
     mockStorageFileExists.mockResolvedValue([true]);

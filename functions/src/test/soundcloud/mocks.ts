@@ -2,17 +2,20 @@ export const mockUploadTrack = jest.fn();
 export const mockUpdateTrack = jest.fn();
 export const mockDeleteTrack = jest.fn();
 export const mockTokenValue = 'fake-soundcloud-token';
+export const mockNormalizeSoundCloudApiError = jest.fn((error: unknown) => {
+  throw error;
+});
 
 jest.mock('../../soundcloudClient', () => ({
   uploadTrack: (...args: unknown[]) => mockUploadTrack(...args),
   updateTrack: (...args: unknown[]) => mockUpdateTrack(...args),
   deleteTrack: (...args: unknown[]) => mockDeleteTrack(...args),
+  normalizeSoundCloudApiError: (error: unknown) => mockNormalizeSoundCloudApiError(error),
 }));
 
 jest.mock('../../soundcloudSecrets', () => ({
-  soundcloudAccessToken: {
-    value: () => mockTokenValue,
-  },
+  getSoundCloudAccessToken: () => mockTokenValue,
+  soundcloudSecretsWithRuntimeAlerts: [],
 }));
 
 jest.mock('../../../../firebase/firebaseAdmin', () => ({

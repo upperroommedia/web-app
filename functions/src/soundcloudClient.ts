@@ -2,13 +2,14 @@
  * SoundCloud API client for upload, update, and delete of tracks.
  * Uses OAuth 2.1 access token (Authorization: OAuth <token>).
  *
- * Secrets (Option A): Store SOUNDCLOUD_CLIENT_SECRET in Firebase Secret Manager.
- * Obtain via one-time SoundCloud OAuth Authorization Code flow.
+ * Secrets (Option A): Store SOUNDCLOUD_ACCESS_TOKEN in Firebase Secret Manager.
+ * Obtain the token via SoundCloud OAuth Authorization Code flow.
  */
 
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, isAxiosError } from 'axios';
 import FormData from 'form-data';
 import { Bucket } from '@google-cloud/storage';
+import { HttpsError } from 'firebase-functions/v2/https';
 
 const SOUNDCLOUD_API_BASE = 'https://api.soundcloud.com';
 
@@ -26,6 +27,58 @@ export interface UploadTrackParams {
   title: string;
   tags: string[];
   description: string;
+}
+
+type SoundCloudTrackResponse = {
+  urn?: string;
+  id?: string | number;
+  id_str?: string;
+  permalink_url?: string;
+};
+
+export interface SoundCloudTrackResult {
+  trackIdentifier: string;
+  permalinkUrl?: string;
+}
+
+export const normalizeSoundCloudApiError = (error: unknown): never => {
+  if (isAxiosError(error) && error.response?.status === 401) {
+    throw new HttpsError(
+      'failed-precondition',
+      'SoundCloud rejected the configured OAuth access token. Update the SOUNDCLOUD_ACCESS_TOKEN secret. ' +
+        'If you still only have SOUNDCLOUD_CLIENT_SECRET configured, that value is likely the wrong credential.'
+    );
+  }
+
+  throw error;
+};
+
+function encodeTrackIdentifier(trackIdentifier: string): string {
+  return encodeURIComponent(trackIdentifier);
+}
+
+function getTrackIdentifier(track: SoundCloudTrackResponse | undefined): string | null {
+  if (!track) {
+    return null;
+  }
+
+  if (typeof track.urn === 'string' && track.urn.trim().length > 0) {
+    return track.urn.trim();
+  }
+
+  if (typeof track.id_str === 'string' && track.id_str.trim().length > 0) {
+    return track.id_str.trim();
+  }
+
+  if (typeof track.id === 'number') {
+    return String(track.id);
+  }
+
+  if (typeof track.id === 'string' && track.id.trim().length > 0) {
+    return track.id.trim();
+  }
+
+  return null;
 }
 
 /**
@@ -49,7 +102,7 @@ async function downloadImageSource(bucket: Bucket, source: string): Promise<Buff
  * Upload a track to SoundCloud. Downloads audio (and optional image) from
  * Firebase Storage, then POSTs multipart/form-data to SoundCloud.
  */
-export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<string> {
+export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
   const [audioBuf] = await params.bucket.file(params.audioStoragePath).download();
   const form = new FormData();
   form.append('track[title]', params.title);
@@ -77,11 +130,16 @@ export async function uploadTrack(accessToken: string, params: UploadTrackParams
     maxContentLength: Infinity,
   });
 
-  const id = resp.data?.id ?? resp.data?.id_str;
-  if (id == null) {
-    throw new Error('SoundCloud upload response missing track id');
+  const trackIdentifier = getTrackIdentifier(resp.data);
+  if (trackIdentifier == null) {
+    throw new Error('SoundCloud upload response missing track identifier');
   }
-  return String(id);
+  return {
+    trackIdentifier,
+    ...(typeof resp.data?.permalink_url === 'string' && resp.data.permalink_url.trim().length > 0
+      ? { permalinkUrl: resp.data.permalink_url.trim() }
+      : {}),
+  };
 }
 
 export interface UpdateTrackParams {
@@ -96,7 +154,12 @@ export interface UpdateTrackParams {
  * Update track metadata. Uses JSON body when no image; uses multipart when
  * imageSource and bucket are provided.
  */
-export async function updateTrack(accessToken: string, trackId: string, params: UpdateTrackParams): Promise<void> {
+export async function updateTrack(
+  accessToken: string,
+  trackId: string,
+  params: UpdateTrackParams
+): Promise<SoundCloudTrackResult | undefined> {
+  const trackIdentifier = trackId.trim();
   const hasArtwork = params.imageSource && params.bucket;
   if (hasArtwork) {
     const form = new FormData();
@@ -108,7 +171,7 @@ export async function updateTrack(accessToken: string, trackId: string, params: 
       filename: 'artwork.jpg',
       contentType: 'image/jpeg',
     });
-    await axios.put(`${SOUNDCLOUD_API_BASE}/tracks/${trackId}`, form, {
+    const response = await axios.put(`${SOUNDCLOUD_API_BASE}/tracks/${encodeTrackIdentifier(trackId)}`, form, {
       headers: {
         ...authHeaders(accessToken),
         ...form.getHeaders(),
@@ -116,13 +179,19 @@ export async function updateTrack(accessToken: string, trackId: string, params: 
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
     });
+    return {
+      trackIdentifier,
+      ...(typeof response.data?.permalink_url === 'string' && response.data.permalink_url.trim().length > 0
+        ? { permalinkUrl: response.data.permalink_url.trim() }
+        : {}),
+    };
   } else {
     const body: Record<string, unknown> = {};
     if (params.title != null) body.title = params.title;
     if (params.description != null) body.description = params.description;
     if (params.tags != null) body.tag_list = formatTagList(params.tags);
-    await axios.put(
-      `${SOUNDCLOUD_API_BASE}/tracks/${trackId}`,
+    const response = await axios.put(
+      `${SOUNDCLOUD_API_BASE}/tracks/${encodeTrackIdentifier(trackId)}`,
       { track: body },
       {
         headers: {
@@ -131,6 +200,12 @@ export async function updateTrack(accessToken: string, trackId: string, params: 
         },
       }
     );
+    return {
+      trackIdentifier,
+      ...(typeof response.data?.permalink_url === 'string' && response.data.permalink_url.trim().length > 0
+        ? { permalinkUrl: response.data.permalink_url.trim() }
+        : {}),
+    };
   }
 }
 
@@ -138,7 +213,7 @@ export async function updateTrack(accessToken: string, trackId: string, params: 
  * Delete a track by id.
  */
 export async function deleteTrack(accessToken: string, trackId: string): Promise<void> {
-  await axios.delete(`${SOUNDCLOUD_API_BASE}/tracks/${trackId}`, {
+  await axios.delete(`${SOUNDCLOUD_API_BASE}/tracks/${encodeTrackIdentifier(trackId)}`, {
     headers: authHeaders(accessToken),
   });
 }

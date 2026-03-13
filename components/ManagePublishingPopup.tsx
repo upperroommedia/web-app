@@ -22,6 +22,7 @@ import CloudIcon from '@mui/icons-material/Cloud';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CollectionsIcon from '@mui/icons-material/Collections';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField, setDoc, query, orderBy } from '../firebase/firestore';
 import { FunctionComponent, useCallback, useEffect, useState } from 'react';
@@ -190,6 +191,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       await updateDoc(sermonRef, {
         soundCloudTrackId: result.soundCloudTrackId,
+        soundCloudTrackUrl: result.soundCloudTrackUrl ?? deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
       });
       onUpdate?.();
@@ -210,6 +212,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
     if (!sermon.soundCloudTrackId) {
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
+        soundCloudTrackUrl: deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
       setIsUploadingToSoundCloud(false);
@@ -223,6 +226,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       await deleteFromSoundCloudFn({ soundCloudTrackId: sermon.soundCloudTrackId });
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
+        soundCloudTrackUrl: deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
       onUpdate?.();
@@ -230,6 +234,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       if (getErrorField(error, 'details')?.includes('Invalid track id')) {
         await updateDoc(sermonRef, {
           soundCloudTrackId: deleteField(),
+          soundCloudTrackUrl: deleteField(),
           status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
         });
         onUpdate?.();
@@ -840,9 +845,25 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                       {isSoundCloudUploaded ? 'Published to SoundCloud' : 'Not Published'}
                     </Typography>
                     {sermon.soundCloudTrackId && (
-                      <Typography variant="caption" color="text.secondary">
-                        Track ID: {sermon.soundCloudTrackId}
-                      </Typography>
+                      <Stack spacing={0.25}>
+                        <Typography variant="caption" color="text.secondary">
+                          Track ID: {sermon.soundCloudTrackId}
+                        </Typography>
+                        {sermon.soundCloudTrackUrl && (
+                          <Button
+                            component="a"
+                            href={sermon.soundCloudTrackUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            size="small"
+                            color="inherit"
+                            endIcon={<OpenInNewIcon fontSize="inherit" />}
+                            sx={{ alignSelf: 'flex-start', px: 0, minWidth: 0 }}
+                          >
+                            View on SoundCloud
+                          </Button>
+                        )}
+                      </Stack>
                     )}
                   </Box>
                 </Box>

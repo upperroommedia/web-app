@@ -38,6 +38,7 @@ export interface Sermon {
   numberOfListsUploadedTo?: number;
   subsplashId?: string;
   soundCloudTrackId?: string;
+  soundCloudTrackUrl?: string;
   uploaderId?: string;
   approverId?: string;
   createdAtMillis: number;

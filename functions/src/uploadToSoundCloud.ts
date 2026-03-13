@@ -1,6 +1,6 @@
 import handleError from './handleError';
-import { uploadTrack } from './soundcloudClient';
-import { soundcloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
+import { normalizeSoundCloudApiError, uploadTrack } from './soundcloudClient';
+import { getSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
@@ -19,6 +19,7 @@ export interface UploadToSoundCloudInputType {
 
 export type UploadToSoundCloudReturnType = {
   soundCloudTrackId: string;
+  soundCloudTrackUrl?: string;
 };
 
 const uploadToSoundCloudCall = onCall(
@@ -28,14 +29,11 @@ const uploadToSoundCloudCall = onCall(
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
-    const token = soundcloudAccessToken.value();
-    if (!token) {
-      throw new HttpsError('failed-precondition', 'SOUNDCLOUD_CLIENT_SECRET is not set.');
-    }
+    const token = getSoundCloudAccessToken();
     const data = request.data;
     const bucket = firebaseAdmin.storage().bucket();
     try {
-      const soundCloudTrackId = await uploadTrack(token, {
+      const uploadResult = await uploadTrack(token, {
         bucket,
         audioStoragePath: data.audioStoragePath,
         imageSource: data.imageSource ?? data.imageStoragePath,
@@ -43,18 +41,38 @@ const uploadToSoundCloudCall = onCall(
         tags: data.tags,
         description: data.description,
       });
+      const soundCloudTrackId = uploadResult.trackIdentifier;
       logger.log('SoundCloud upload response track id', soundCloudTrackId);
-      return { soundCloudTrackId };
+      return {
+        soundCloudTrackId,
+        ...(uploadResult.permalinkUrl ? { soundCloudTrackUrl: uploadResult.permalinkUrl } : {}),
+      };
     } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
       await emitOperationalAlert({
         alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
         summary: 'uploadToSoundCloud callable failed during publish upload flow.',
-        error,
+        error: (() => {
+          try {
+            normalizeSoundCloudApiError(error);
+          } catch (normalizedError) {
+            return normalizedError;
+          }
+          return error;
+        })(),
         context: {
           functionName: 'uploadToSoundCloud',
           audioStoragePath: data.audioStoragePath,
         },
       });
+      try {
+        normalizeSoundCloudApiError(error);
+      } catch (normalizedError) {
+        throw handleError(normalizedError);
+      }
       throw handleError(error);
     }
   }

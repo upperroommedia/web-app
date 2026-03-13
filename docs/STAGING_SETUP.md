@@ -54,7 +54,7 @@ firebase functions:secrets:set ADMIN_BASE_URL --project urm-app-staging
 firebase functions:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
 firebase functions:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
 firebase functions:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
-firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app-staging
+firebase functions:secrets:set SOUNDCLOUD_ACCESS_TOKEN --project urm-app-staging
 ```
 
 Notes:
@@ -62,7 +62,8 @@ Notes:
 - `ADMIN_BASE_URL` is consumed by invite and role-request email link builders.
 - `SUBSPLASH_EMAIL` and `SUBSPLASH_PASSWORD` are consumed by Subsplash publish/sync functions and related triggers.
 - `ALGOLIA_SEARCH_API_KEY` is consumed by `generateSecuredApiKey`.
-- `SOUNDCLOUD_CLIENT_SECRET` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
+- `SOUNDCLOUD_ACCESS_TOKEN` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
+- `SOUNDCLOUD_CLIENT_SECRET` is only a legacy fallback during migration and should not be used for new deployments.
 - App Hosting secrets in `apphosting.yaml` do not automatically flow into Cloud Functions.
 
 ## 3c. Enable Google Sign-In in staging Auth (one-time)

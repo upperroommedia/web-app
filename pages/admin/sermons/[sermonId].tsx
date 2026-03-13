@@ -43,6 +43,7 @@ import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import UploadIcon from '@mui/icons-material/Upload';
 import AddIcon from '@mui/icons-material/Add';
@@ -292,6 +293,7 @@ const SermonDetailsPage = () => {
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
       await updateDoc(sermonRef, {
         soundCloudTrackId: result.soundCloudTrackId,
+        soundCloudTrackUrl: result.soundCloudTrackUrl ?? deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
       });
     } catch (error: unknown) {
@@ -311,6 +313,7 @@ const SermonDetailsPage = () => {
     if (!sermon.soundCloudTrackId) {
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
+        soundCloudTrackUrl: deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
       setIsUploadingToSoundCloud(false);
@@ -323,12 +326,14 @@ const SermonDetailsPage = () => {
       await deleteFromSoundCloudFn({ soundCloudTrackId: sermon.soundCloudTrackId });
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
+        soundCloudTrackUrl: deleteField(),
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
     } catch (error: unknown) {
       if (getErrorField(error, 'details')?.includes('Invalid track id')) {
         await updateDoc(sermonRef, {
           soundCloudTrackId: deleteField(),
+          soundCloudTrackUrl: deleteField(),
           status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
         });
       } else {
@@ -1242,6 +1247,20 @@ const SermonDetailsPage = () => {
                           <Typography variant="body2" color="text.secondary">
                             {isSoundCloudUploaded ? 'Published' : 'Not Published'}
                           </Typography>
+                          {sermon.soundCloudTrackUrl && (
+                            <Button
+                              component="a"
+                              href={sermon.soundCloudTrackUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              size="small"
+                              color="inherit"
+                              endIcon={<OpenInNewIcon fontSize="inherit" />}
+                              sx={{ mt: 0.5, px: 0, minWidth: 0 }}
+                            >
+                              Open SoundCloud
+                            </Button>
+                          )}
                         </Box>
                       </Stack>
                       {isUploadingToSoundCloud ? (

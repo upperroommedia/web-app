@@ -17,7 +17,10 @@ import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
-import { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA } from '../../functions/src/editSoundCloudSermon';
+import {
+  EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA,
+  EditSoundCloudSermonReturnType,
+} from '../../functions/src/editSoundCloudSermon';
 import { getSquareImageDownloadLink } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
 import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
@@ -29,6 +32,7 @@ interface EditSermonOptions {
 
 const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSermonOptions) => {
   const promises: Promise<unknown>[] = [];
+  const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
   if (sermon.subsplashId) {
     const editSubsplashSermon = createFunctionV2<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
     const input: EDIT_SUBSPLASH_SERMON_INCOMING_DATA = {
@@ -46,7 +50,10 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
   }
 
   if (sermon.soundCloudTrackId) {
-    const editSoundCloudSermon = createFunctionV2<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>('editSoundCloudSermon');
+    const editSoundCloudSermon = createFunctionV2<
+      EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA,
+      EditSoundCloudSermonReturnType
+    >('editSoundCloudSermon');
     const data: EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA = {
       trackId: sermon.soundCloudTrackId,
       title: sermon.title,
@@ -55,10 +62,15 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       speakers: sermon.speakers.map((speaker) => speaker.name),
       imageSource: getSquareImageDownloadLink(sermon),
     };
-    promises.push(editSoundCloudSermon(data));
+    promises.push(
+      editSoundCloudSermon(data).then((result) => {
+        if (result?.soundCloudTrackUrl) {
+          return updateDoc(sermonRef, { soundCloudTrackUrl: result.soundCloudTrackUrl });
+        }
+        return undefined;
+      })
+    );
   }
-
-  const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
   promises.push(updateDoc(sermonRef, buildEditableSermonPatch(sermon)));
   const results = await Promise.allSettled(promises);
   for (const result of results) {

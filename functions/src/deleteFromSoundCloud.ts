@@ -1,6 +1,6 @@
 import handleError from './handleError';
-import { deleteTrack } from './soundcloudClient';
-import { soundcloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
+import { deleteTrack, normalizeSoundCloudApiError } from './soundcloudClient';
+import { getSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '../../types/User';
@@ -20,26 +20,34 @@ const deleteFromSoundCloud = onCall(
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
-    const token = soundcloudAccessToken.value();
-    if (!token) {
-      throw new HttpsError('failed-precondition', 'SOUNDCLOUD_CLIENT_SECRET is not set.');
-    }
+    const token = getSoundCloudAccessToken();
     try {
       logger.log('Attempting to delete from SoundCloud', request.data);
       await deleteTrack(token, request.data.soundCloudTrackId);
       logger.log('Track deleted from SoundCloud');
     } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
       if (isAxiosError(error) && error.response?.status === 404) {
         logger.warn(`SoundCloud track not found (already deleted): ${request.data.soundCloudTrackId}`);
         return;
       }
 
-      logger.error(error);
+      let normalizedError: unknown = error;
+      try {
+        normalizeSoundCloudApiError(error);
+      } catch (caughtError) {
+        normalizedError = caughtError;
+      }
+
+      logger.error(normalizedError);
       try {
         await emitOperationalAlert({
           alertCode: 'PUBLISH_SOUNDCLOUD_DELETE_RUNTIME_FAILURE',
           summary: 'deleteFromSoundCloud callable failed during publish delete flow.',
-          error,
+          error: normalizedError,
           context: {
             functionName: 'deleteFromSoundCloud',
             soundCloudTrackId: request.data.soundCloudTrackId,
@@ -51,7 +59,7 @@ const deleteFromSoundCloud = onCall(
           alertError,
         });
       }
-      throw handleError(error);
+      throw handleError(normalizedError);
     }
   }
 );
