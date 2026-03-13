@@ -2,6 +2,10 @@
 // To test functions: npm run-script serve
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { runtimeAlertRecipientsSecret } from './notifications/notificationSecrets';
+setGlobalOptions({
+  secrets: [runtimeAlertRecipientsSecret],
+});
+
 import generatesecuredapikey from './generateAlgoliaSecureApiKey';
 import tagitemsinlist from './Scrapers/tagItemsInList';
 import updatecreatedandeditedatmillis from './updateCreatedAndEditedAtMillis';
@@ -71,10 +75,6 @@ import addtoseries from './addToSeries';
 import removefromseries from './removeFromSeries';
 import reorderseriesitems from './reorderSeriesItems';
 import bulkaddtoseries from './bulkAddToSeries';
-
-setGlobalOptions({
-  secrets: [runtimeAlertRecipientsSecret],
-});
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
