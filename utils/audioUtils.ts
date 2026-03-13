@@ -9,12 +9,12 @@ export function convertToHMS(sec: number): {
   return { hours, minutes, seconds };
 }
 
-export function formatTime(sec: number): String {
+export function formatTime(sec: number): string {
   const { hours, minutes, seconds } = convertToHMS(sec);
   return (hours > 0 ? hours + ':' : '') + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0'); // Return is HH : MM : SS
 }
 
-export function formatRemainingTime(sec: number): String {
+export function formatRemainingTime(sec: number): string {
   const { hours, minutes, seconds } = convertToHMS(sec);
   const hr = hours > 0 ? `${hours} hr ` : '';
   const min = minutes > 0 ? `${seconds > 0 ? minutes + 1 : minutes} min ` : '';

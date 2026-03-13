@@ -12,6 +12,11 @@ env:
       - BUILD
       - RUNTIME
 
+  - variable: NPM_CONFIG_RECURSIVE_INSTALL
+    value: 'false'
+    availability:
+      - BUILD
+
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     value: urm-app-staging
     availability:
@@ -28,7 +33,7 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
-    value: "251680231116"
+    value: '251680231116'
     availability:
       - BUILD
       - RUNTIME
@@ -43,7 +48,7 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_DATABASE_URL
-    value: https://urm-app-staging-815ca.firebaseio.com/
+    value: https://urm-app-staging-default-rtdb.firebaseio.com/
     availability:
       - BUILD
       - RUNTIME
@@ -63,7 +68,7 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_ALGOLIA_API_KEY
-    secret: ALGOLIA_SEARCH_API_KEY_STAGING
+    secret: ALGOLIA_SEARCH_API_KEY
     availability:
       - BUILD
       - RUNTIME
@@ -77,7 +82,7 @@ env:
     availability:
       - RUNTIME
   - variable: FIREBASE_DATABASE_URL
-    value: https://urm-app-staging-815ca.firebaseio.com/
+    value: https://urm-app-staging-default-rtdb.firebaseio.com/
     availability:
       - RUNTIME
   - variable: FIREBASE_IMAGES_BUCKET
@@ -90,36 +95,24 @@ env:
       - RUNTIME
 
   - variable: ROLE_REQUEST_RECIPIENTS
-    secret: ROLE_REQUEST_RECIPIENTS_STAGING
+    secret: ROLE_REQUEST_RECIPIENTS
     availability:
       - RUNTIME
   - variable: RUNTIME_ALERT_RECIPIENTS
-    secret: RUNTIME_ALERT_RECIPIENTS_STAGING
+    secret: RUNTIME_ALERT_RECIPIENTS
     availability:
       - RUNTIME
   - variable: ADMIN_BASE_URL
-    secret: ADMIN_BASE_URL_STAGING
+    secret: ADMIN_BASE_URL
     availability:
       - RUNTIME
-  - variable: EMAIL
-    secret: SUBSPLASH_EMAIL_STAGING
+  - variable: SUBSPLASH_EMAIL
+    secret: SUBSPLASH_EMAIL
     availability:
       - RUNTIME
-  - variable: PASSWORD
-    secret: SUBSPLASH_PASSWORD_STAGING
+  - variable: SUBSPLASH_PASSWORD
+    secret: SUBSPLASH_PASSWORD
     availability:
       - RUNTIME
-  - variable: DOLBY_API_KEY
-    secret: DOLBY_API_KEY_STAGING
-    availability:
-      - RUNTIME
-  - variable: DOLBY_API_SECRET
-    secret: DOLBY_API_SECRET_STAGING
-    availability:
-      - RUNTIME
-  - variable: CLERK_SECRET_KEY
-    secret: CLERK_SECRET_KEY_STAGING
-    availability:
-      - RUNTIME
-  - variable: ALGOLIA_SEARCH_API_KEY_STAGING
-    secret: ALGOLIA_SEARCH_API_KEY_STAGING
+  - variable: ALGOLIA_SEARCH_API_KEY
+    secret: ALGOLIA_SEARCH_API_KEY

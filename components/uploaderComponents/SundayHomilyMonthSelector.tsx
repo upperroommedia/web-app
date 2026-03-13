@@ -70,7 +70,7 @@ function SundayHomilyMonthSelector({
         );
         setSundayHomiliesMonths(filteredByYear);
       } catch (error) {
-        // eslint-disable-next-line no-console
+         
         console.error('Error loading sunday homilies from bundle, falling back to Firestore:', error);
         // Fallback to original Firestore query
         const sundayHomiliesMonthsQuery = query(
@@ -194,11 +194,14 @@ function SundayHomilyMonthSelector({
             id="sunday-homilies-months-input"
             options={getFilteredOptions()}
             getOptionLabel={(option: List) => option.name}
-            renderOption={(props, option: List) => (
-              <ListItem {...props} key={option.id}>
+            renderOption={(props, option: List) => {
+              const { key: _key, ...optionProps } = props;
+              return (
+              <ListItem key={option.id} {...optionProps}>
                 {option.name}
               </ListItem>
-            )}
+              );
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}

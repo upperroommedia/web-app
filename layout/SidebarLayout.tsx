@@ -5,7 +5,7 @@
  * - Role-based navigation (Publishers vs Admins)
  * - Light/Dark mode toggle
  */
-import { useState, ReactNode, useMemo, useCallback, memo } from 'react';
+import { useState, ReactNode, useCallback, memo } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -103,10 +103,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
 
   const isAdmin = user?.isAdmin() ?? false;
 
-  const formattedRole = useMemo(() => {
-    if (!user?.role) return 'User';
-    return user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase();
-  }, [user?.role]);
+  const formattedRole = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase() : 'User';
 
   const handleDrawerToggle = useCallback(() => {
     setMobileOpen((prev) => !prev);
@@ -166,7 +163,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
     [isActivePath, closeDrawerIfMobile]
   );
 
-  const drawerContent = useMemo(() => (
+  const drawerContent = (
     <Box
       sx={{
         height: '100%',
@@ -418,7 +415,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
         </Box>
       </Box>
     </Box>
-  ), [user, isAdmin, currentTheme, formattedRole, muiTheme, toggleTheme, logoutUser, renderNavItem]);
+  );
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>

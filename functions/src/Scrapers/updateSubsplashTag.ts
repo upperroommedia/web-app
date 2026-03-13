@@ -5,6 +5,7 @@ import { Sermon } from '../../../types/SermonTypes';
 import { ListType } from '../../../types/List';
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { authenticateSubsplash } from '../subsplashUtils';
+import { subsplashSecrets } from '../subsplashSecrets';
 
 // Import retry IDs
 const retryIdsSet = new Set([
@@ -265,7 +266,8 @@ const retryIdsSet = new Set([
 
 export const updateSubsplashTag = onRequest({
     cors: true,
-    timeoutSeconds: 3600
+    timeoutSeconds: 3600,
+    secrets: subsplashSecrets
 }, async (req, res) => {
     const db = firebaseAdmin.firestore();
 

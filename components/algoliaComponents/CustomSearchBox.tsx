@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { ReactElement } from 'react';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -6,21 +6,14 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useInstantSearch, useSearchBox, UseSearchBoxProps, useStats } from 'react-instantsearch';
 
-const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: React.ReactElement<any> }) => {
+const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: ReactElement }) => {
   const { TextFieldEndAdornment, ...searchBoxProps } = props;
   const { refine } = useSearchBox(searchBoxProps);
   const { nbHits } = useStats();
   const { status, results } = useInstantSearch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [hasSettledResults, setHasSettledResults] = useState(false);
-
-  useEffect(() => {
-    if (!results.__isArtificial && status === 'idle') {
-      setHasSettledResults(true);
-    }
-  }, [results.__isArtificial, status]);
-
+  const hasSettledResults = !results.__isArtificial && status === 'idle';
   const isLoadingState = !hasSettledResults && (results.__isArtificial || status === 'stalled' || status === 'loading');
   
   const placeholder = isMobile 

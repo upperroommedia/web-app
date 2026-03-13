@@ -2,14 +2,10 @@
 
 ## App Hosting rollback
 
-1. List rollouts for staging backend:
+1. Choose the commit you want to restore (from git history or previous workflow runs).
+2. Create a rollback rollout from that commit:
    ```bash
-   firebase apphosting:rollouts:list web-staging --project urm-app-staging --location us-central1
-   ```
-2. Choose the commit/rollout you want to restore.
-3. Create a rollback rollout from that commit:
-   ```bash
-   firebase apphosting:rollouts:create web-staging --project urm-app-staging --location us-central1 --git-commit <commit_sha> --force
+   firebase apphosting:rollouts:create web-staging --project urm-app-staging --git-commit <commit_sha> --force
    ```
 
 ## Functions/rules rollback

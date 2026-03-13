@@ -27,8 +27,8 @@ Script path:
 
 - Firebase Admin credentials available in the current shell (standard project setup).
 - Subsplash credentials exported:
-  - `EMAIL`
-  - `PASSWORD`
+  - `SUBSPLASH_EMAIL`
+  - `SUBSPLASH_PASSWORD`
 
 ### Dry-run (default)
 
@@ -76,4 +76,3 @@ Run these checks from the Manage Publishing popup:
 4. Unpublish decoupling:
    - Remove from series and confirm list statuses do not change.
    - Remove from list(s) and confirm series publish flag does not change.
-

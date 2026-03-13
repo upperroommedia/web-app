@@ -7,6 +7,11 @@ import {
 } from '../notifications/emailTemplates';
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 import { getAdminBaseUrl, getRoleRequestRecipients } from '../notifications/notificationParams';
+import {
+  adminBaseUrlSecret,
+  roleRequestRecipientsSecret,
+  runtimeAlertRecipientsSecret,
+} from '../notifications/notificationSecrets';
 import { RoleRequestNotificationPayload } from '../notifications/notificationTypes';
 import { queueEmail } from '../notifications/queueEmail';
 import {
@@ -93,6 +98,7 @@ const listExistingRoleRequests = async (
 };
 
 const createRoleRequest = onCall(
+  { secrets: [roleRequestRecipientsSecret, runtimeAlertRecipientsSecret, adminBaseUrlSecret] },
   async (request: CallableRequest<CreateRoleRequestInputType>): Promise<CreateRoleRequestOutputType> => {
     const requesterUid = request.auth?.uid;
     if (!requesterUid) {

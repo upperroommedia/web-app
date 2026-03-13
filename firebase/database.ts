@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-/* eslint-disable import/export */
+ 
 import { connectDatabaseEmulator, getDatabase } from 'firebase/database';
 import firebase, { isDevelopment } from './firebase';
 const database = getDatabase(firebase);

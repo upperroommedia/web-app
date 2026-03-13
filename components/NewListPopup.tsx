@@ -3,8 +3,8 @@ import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
 import firestore from '../firebase/firestore';
 import { doc, updateDoc } from 'firebase/firestore';
-import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
-import addNewList from '../pages/api/addNewList';
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
+import addNewList from '../utils/addNewList';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import MenuItem from '@mui/material/MenuItem';
@@ -22,17 +22,19 @@ const areImageArraysEqual = (arr1?: ImageType[], arr2?: ImageType[]): boolean =>
   if (!arr1 && !arr2) return true;
   if (!arr1 || !arr2) return false;
   if (arr1.length !== arr2.length) return false;
-  
+
   // Sort both arrays by type and id for consistent comparison
   const sorted1 = [...arr1].sort((a, b) => `${a.type}-${a.id}`.localeCompare(`${b.type}-${b.id}`));
   const sorted2 = [...arr2].sort((a, b) => `${a.type}-${a.id}`.localeCompare(`${b.type}-${b.id}`));
-  
+
   return sorted1.every((img1, index) => {
     const img2 = sorted2[index];
-    return img1.id === img2.id && 
-           img1.type === img2.type && 
-           img1.downloadLink === img2.downloadLink &&
-           img1.name === img2.name;
+    return (
+      img1.id === img2.id &&
+      img1.type === img2.type &&
+      img1.downloadLink === img2.downloadLink &&
+      img1.name === img2.name
+    );
   });
 };
 
@@ -62,10 +64,7 @@ const NewListPopup = (props: NewListPopupProps) => {
   );
 
   const [submitting, setSubmitting] = useState(false);
-  const [newListError, setNewListError] = useState<{ error: boolean; message: string }>({
-    error: false,
-    message: '',
-  });
+  const [submitErrorMessage, setSubmitErrorMessage] = useState('');
   const overFlowBehaviorOptions: {
     [key in OverflowBehavior]: string;
   } = {
@@ -76,7 +75,9 @@ const NewListPopup = (props: NewListPopupProps) => {
   const [userHasTypedInList, setUserHasTypedInList] = useState<boolean>(false);
   useEffect(() => {
     if (props.existingList && newList.id !== props.existingList.id) {
-      setNewList(props.existingList);
+      queueMicrotask(() => {
+        setNewList(props.existingList ?? emptyList);
+      });
     }
   }, [props.existingList, newList]);
 
@@ -108,25 +109,27 @@ const NewListPopup = (props: NewListPopupProps) => {
     [setNewList]
   );
 
-  useEffect(() => {
-    if (submitting) {
-      return;
+  const validationErrorMessage = useMemo(() => {
+    if (submitting || !userHasTypedInList) {
+      return '';
     }
-    if (!userHasTypedInList) {
-      setNewListError({ error: false, message: '' });
-      return;
+    if (newList.name === '') {
+      return 'List cannot be empty';
     }
-    if (newList?.name === '') {
-      setNewListError({ error: true, message: 'List cannot be empty' });
-    } else if (
-      newList?.name &&
-      props.listArray.map((list) => list.name.toLowerCase()).includes(newList.name.toLowerCase())
-    ) {
-      setNewListError({ error: true, message: 'List already exists' });
-    } else {
-      setNewListError({ error: false, message: '' });
+    const lowerCaseListNames = props.listArray.map((list) => list.name.toLowerCase());
+    if (newList.name && lowerCaseListNames.includes(newList.name.toLowerCase())) {
+      return 'List already exists';
     }
-  }, [newList, userHasTypedInList, props.listArray, submitting]);
+    return '';
+  }, [newList.name, props.listArray, submitting, userHasTypedInList]);
+
+  const newListError = useMemo(
+    () => ({
+      error: submitErrorMessage.length > 0 || validationErrorMessage.length > 0,
+      message: submitErrorMessage || validationErrorMessage,
+    }),
+    [submitErrorMessage, validationErrorMessage]
+  );
 
   return (
     <PopUp
@@ -135,6 +138,7 @@ const NewListPopup = (props: NewListPopupProps) => {
       setOpen={props.setNewListPopup}
       onClose={() => {
         setUserHasTypedInList(false);
+        setSubmitErrorMessage('');
         setNewList(emptyList);
       }}
       button={
@@ -149,6 +153,7 @@ const NewListPopup = (props: NewListPopupProps) => {
           }
           onClick={async () => {
             setSubmitting(true);
+            setSubmitErrorMessage('');
             try {
               if (props.existingList) {
                 if (newList.subsplashId) {
@@ -197,9 +202,8 @@ const NewListPopup = (props: NewListPopupProps) => {
                 setUserHasTypedInList(false);
               }
             } catch (error) {
-              // eslint-disable-next-line no-console
               console.error(error);
-              setNewListError({ error: true, message: JSON.stringify(error) });
+              setSubmitErrorMessage(JSON.stringify(error));
             }
             setSubmitting(false);
           }}
@@ -215,7 +219,12 @@ const NewListPopup = (props: NewListPopupProps) => {
             setNewList((oldList) => {
               return { ...oldList, name: e.target.value };
             });
-            !userHasTypedInList && setUserHasTypedInList(true);
+            if (!userHasTypedInList) {
+              setUserHasTypedInList(true);
+            }
+            if (submitErrorMessage) {
+              setSubmitErrorMessage('');
+            }
           }}
           error={newListError.error}
           label={newListError.error ? newListError.message : 'Name'}
@@ -255,7 +264,6 @@ const NewListPopup = (props: NewListPopupProps) => {
                 setNewList((oldList) => ({ ...oldList, type: e.target.value as ListType }));
               }}
             >
-              {/* eslint-disable-next-line array-callback-return */}
               {(Object.values(ListType) as Array<ListType>).map((listType) => {
                 if (listType !== ListType.LATEST) {
                   return (
@@ -264,6 +272,7 @@ const NewListPopup = (props: NewListPopupProps) => {
                     </MenuItem>
                   );
                 }
+                return null;
               })}
             </Select>
           </FormControl>

@@ -1,5 +1,5 @@
 import Fuse from 'fuse.js';
-import type { IFuseOptions, FuseResult } from 'fuse.js';
+import type { IFuseOptions, FuseResult, FuseResultMatch } from 'fuse.js';
 
 export interface LocalSearchOptions {
     threshold?: number;
@@ -11,12 +11,11 @@ export interface LocalSearchOptions {
 export interface LocalSearchResult<T> {
     item: T;
     score?: number;
-    matches?: any[];
+    matches?: FuseResultMatch[];
 }
 
 export interface SearchableItem {
     id: string;
-    [key: string]: any;
 }
 
 export class LocalSearch<T extends SearchableItem> {
@@ -76,7 +75,7 @@ export class LocalSearch<T extends SearchableItem> {
 
         try {
             this.fuse = new Fuse(this.items, defaultOptions);
-        } catch (error) {
+        } catch (_error) {
             this.fuse = null;
         }
     }
@@ -97,7 +96,7 @@ export class LocalSearch<T extends SearchableItem> {
                 score: result.score,
                 matches: result.matches ? [...result.matches] : undefined
             }));
-        } catch (error) {
+        } catch (_error) {
             return [];
         }
     }

@@ -21,7 +21,7 @@ const editOnSoundCloud = onCall(
     }
     const token = soundcloudAccessToken.value();
     if (!token) {
-      throw new HttpsError('failed-precondition', 'SOUNDCLOUD_ACCESS_TOKEN is not set.');
+      throw new HttpsError('failed-precondition', 'SOUNDCLOUD_CLIENT_SECRET is not set.');
     }
     const data = request.data;
     const bucket = data.imageStoragePath ? firebaseAdmin.storage().bucket() : undefined;
@@ -31,10 +31,11 @@ const editOnSoundCloud = onCall(
         ...(data.title != null && { title: data.title }),
         ...(data.description != null && { description: data.description }),
         ...(data.tags != null && { tags: data.tags }),
-        ...(data.imageStoragePath != null && bucket != null && {
-          imageStoragePath: data.imageStoragePath,
-          bucket,
-        }),
+        ...(data.imageStoragePath != null &&
+          bucket != null && {
+            imageStoragePath: data.imageStoragePath,
+            bucket,
+          }),
       });
     } catch (error) {
       await emitOperationalAlert({

@@ -11,6 +11,7 @@ import { v4 } from 'uuid';
 import sizeOf from 'image-size';
 import { firestoreAdminImagesConverter } from '../firestoreDataConverter';
 import { Firestore } from 'firebase-admin/firestore';
+import { SubsplashImage } from '../types/Subsplash';
 
 const getImageDimensions = async (file: File): Promise<{ width: number; height: number }> => {
   if (!existsSync(os.tmpdir())) {
@@ -36,7 +37,7 @@ async function populateImages(
   bucket: Bucket,
   imageIds: Set<string>,
   db: Firestore,
-  subsplashImages: { image: any; imageName: string }[],
+  subsplashImages: { image: SubsplashImage; imageName: string }[],
   firestoreImagesMap: Map<string, ImageType>
 ): Promise<void> {
   const firestoreImages = db.collection('images').withConverter(firestoreAdminImagesConverter);

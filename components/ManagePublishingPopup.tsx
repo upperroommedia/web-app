@@ -83,6 +83,20 @@ const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => 
   return `${fallbackMessage} Another publishing action is in progress.${lockedKeys} Retry in about ${retryInSeconds}s.`;
 };
 
+const getErrorField = (error: unknown, field: 'code' | 'details' | 'message'): string | undefined => {
+  if (field === 'message' && error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error !== 'object' || error === null || !(field in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === 'string' ? value : undefined;
+};
+
+const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
+  getErrorField(error, 'message') || fallbackMessage;
+
 const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   sermon,
   open,
@@ -179,9 +193,9 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
       });
       onUpdate?.();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error uploading to SoundCloud:', error);
-      setSoundCloudError(error.message || 'Failed to upload to SoundCloud');
+      setSoundCloudError(getErrorMessage(error, 'Failed to upload to SoundCloud'));
     } finally {
       setIsUploadingToSoundCloud(false);
     }
@@ -212,8 +226,8 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
       });
       onUpdate?.();
-    } catch (error: any) {
-      if (error.details?.includes('Invalid track id')) {
+    } catch (error: unknown) {
+      if (getErrorField(error, 'details')?.includes('Invalid track id')) {
         await updateDoc(sermonRef, {
           soundCloudTrackId: deleteField(),
           status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
@@ -221,7 +235,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         onUpdate?.();
       } else {
         console.error('Error deleting from SoundCloud:', error);
-        setSoundCloudError(error.message || 'Failed to remove from SoundCloud');
+        setSoundCloudError(getErrorMessage(error, 'Failed to remove from SoundCloud'));
       }
     } finally {
       setIsUploadingToSoundCloud(false);
@@ -244,7 +258,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const batch = writeBatch(firestore);
       const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
       const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
-      sermonSeriesListSnapshot.forEach((docSnap: any) => {
+      sermonSeriesListSnapshot.forEach((docSnap) => {
         batch.update(docSnap.ref, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
       });
       if (sermon.seriesId) {
@@ -264,8 +278,8 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       await batch.commit();
       setSeriesPublished(false);
       onUpdate?.();
-    } catch (error: any) {
-      if (error.code === 'functions/not-found') {
+    } catch (error: unknown) {
+      if (getErrorField(error, 'code') === 'functions/not-found') {
         // Item already deleted from Subsplash
         const batch = writeBatch(firestore);
         if (sermon.seriesId) {
@@ -287,7 +301,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         onUpdate?.();
       } else {
         console.error('Error deleting from Subsplash:', error);
-        alert(getLockBusyMessage(error, error.message || 'Failed to delete from Subsplash'));
+        alert(getLockBusyMessage(error, getErrorMessage(error, 'Failed to delete from Subsplash')));
       }
     } finally {
       setIsUploadingToSubsplash(false);
@@ -383,9 +397,9 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         status: 'success',
         mediaItemId: id,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error uploading to Subsplash:', error);
-      const errorMessage = getLockBusyMessage(error, error?.message || 'Unknown error');
+      const errorMessage = getLockBusyMessage(error, getErrorMessage(error, 'Unknown error'));
       if (!options?.suppressAlert) {
         alert(errorMessage);
       }
@@ -574,19 +588,19 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
           sermon.id,
           addResult.mediaItemId || mediaItemId
         );
-      } catch (reorderError: any) {
+      } catch (reorderError: unknown) {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         try {
           await removeFromSeriesFunction({
             mediaItemId: addResult.mediaItemId || mediaItemId,
             operationKey: createOperationKey('manage-publishing-series-rollback', sermon.id),
           });
-        } catch (rollbackError: any) {
+        } catch (rollbackError: unknown) {
           throw new Error(
-            `Series reorder failed and rollback failed. Reorder error: ${reorderError?.message || 'Unknown'}; rollback error: ${rollbackError?.message || 'Unknown'}`
+            `Series reorder failed and rollback failed. Reorder error: ${getErrorMessage(reorderError, 'Unknown')}; rollback error: ${getErrorMessage(rollbackError, 'Unknown')}`
           );
         }
-        throw new Error(reorderError?.message || 'Series reorder failed after publish.');
+        throw new Error(getErrorMessage(reorderError, 'Series reorder failed after publish.'));
       }
 
       const seriesItemRef = doc(firestore, `series/${series.id}/seriesItems`, sermon.id);
@@ -612,10 +626,10 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       return {
         status: 'success',
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error publishing to series:', err);
       setSeriesPublished(false);
-      const errorMessage = getLockBusyMessage(err, err.message || 'Unknown error');
+      const errorMessage = getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'));
       if (!options?.suppressAlert) {
         alert(`Error publishing to series: ${errorMessage}`);
       }
@@ -665,9 +679,9 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       return {
         status: 'success',
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error unpublishing from series:', err);
-      const errorMessage = getLockBusyMessage(err, err.message || 'Unknown error');
+      const errorMessage = getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'));
       if (!options?.suppressAlert) {
         alert(`Error unpublishing from series: ${errorMessage}`);
       }

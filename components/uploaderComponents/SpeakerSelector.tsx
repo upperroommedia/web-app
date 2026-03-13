@@ -59,6 +59,8 @@ export const fetchSpeakerResults = async (query: string, hitsPerPage: number, pa
     } catch (error) {
       console.error('Search error:', error);
     }
+  } else {
+    console.warn('Algolia client not initialized. Returning empty speaker list.');
   }
   return speakers;
 };
@@ -146,7 +148,7 @@ function SpeakerSelector({
                 listConverter
               );
               const querySnapshot = await getDocs(q);
-              
+
               if (querySnapshot.docs.length > 0) {
                 const list = querySnapshot.docs[0].data();
                 // Don't add overflow lists to the sermon list
@@ -220,8 +222,10 @@ function SpeakerSelector({
             );
           });
         }}
-        renderOption={(props, option: AlgoliaSpeaker) => (
-          <ListItem {...props}>
+        renderOption={(props, option: AlgoliaSpeaker) => {
+          const { key: _key, ...optionProps } = props;
+          return (
+            <ListItem key={option.id} {...optionProps}>
             <AvatarWithDefaultImage
               defaultImageURL="/props.user.png"
               altName={option.name}
@@ -232,12 +236,13 @@ function SpeakerSelector({
               sx={{ marginRight: '15px' }}
             />
             {option._highlightResult && sermonSpeakers?.find((s) => s.id === option?.id) === undefined ? (
-                                    <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
+              <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
             ) : (
               <div>{option.name}</div>
             )}
-          </ListItem>
-        )}
+            </ListItem>
+          );
+        }}
         getOptionLabel={(option: AlgoliaSpeaker) => option.name}
         multiple
         renderInput={(params) => {

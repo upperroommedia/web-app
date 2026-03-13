@@ -14,6 +14,7 @@ import populateSpeakers from './populateSpeakersHelper';
 import populateTopics from './populateTopicsHelper';
 import handleError from '../handleError';
 import { getFirebaseImagesBucket } from '../../../shared/firebaseProjectConfig';
+import { subsplashSecrets } from '../subsplashSecrets';
 
 const storage = firebaseAdmin.storage();
 const firestore = firebaseAdmin.firestore();
@@ -28,7 +29,7 @@ export interface populateDatabaseFromSubsplashOutputType {
 }
 
 const populateDatabaseFromSubsplash = onCall(
-  { timeoutSeconds: 540, memory: '1GiB' },
+  { timeoutSeconds: 540, memory: '1GiB', secrets: subsplashSecrets },
   async (request: CallableRequest<populateDatabaseFromSubsplashInputType>): Promise<string> => {
     if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');

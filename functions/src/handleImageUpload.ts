@@ -20,6 +20,7 @@ import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
 import { getFirebaseImagesBucket } from '../../shared/firebaseProjectConfig';
+import { subsplashSecrets } from './subsplashSecrets';
 // import { resize } from 'imagemagick';
 
 // const adminImageConvertor = {
@@ -81,6 +82,7 @@ const handleImageUpload = onObjectFinalized(
     bucket: getFirebaseImagesBucket(),
     timeoutSeconds: 300,
     memory: '1GiB',
+    secrets: subsplashSecrets,
   },
   async (storageEvent): Promise<void> => {
     const object = storageEvent.data;
@@ -135,12 +137,12 @@ const handleImageUpload = onObjectFinalized(
       await remoteFile.download({ destination: originalFile });
       logger.log(`Downloaded image file: '${filePath}' to '${originalFile}'`);
 
-      // uploading to subsplash
-      const publicUrl = bucket.file(object.name).publicUrl();
+      await remoteFile.makePublic();
+      const publicUrl = remoteFile.publicUrl();
       logger.log('uploading to subsplash');
       const [subsplashImageId, computedImageMetadata] = await Promise.all([
         uploadImageToSubsplash(imageName, originalFile),
-        computeMetadataForImage(publicUrl),
+        computeMetadataForImage(originalFile),
       ]);
 
       // uploading to firestore

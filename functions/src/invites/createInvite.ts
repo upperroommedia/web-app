@@ -2,6 +2,7 @@ import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { buildInviteClaimUrl, queueInviteEmail } from './inviteEmail';
 import { createInviteTokenArtifact } from './inviteToken';
+import { adminBaseUrlSecret } from '../notifications/notificationSecrets';
 import {
   CreateInviteInputType,
   CreateInviteResultData,
@@ -81,6 +82,6 @@ export const createInviteHandler = async (
   };
 };
 
-const createInvite = onCall(createInviteHandler);
+const createInvite = onCall({ secrets: [adminBaseUrlSecret] }, createInviteHandler);
 
 export default createInvite;

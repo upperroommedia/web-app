@@ -16,8 +16,12 @@ export type ImageType = {
   vibrantColorHex?: string;
 };
 
-export const isImageType = (obj: any): obj is ImageType => {
-  return obj.id !== undefined && obj.type !== undefined && obj.size !== undefined;
+export const isImageType = (obj: unknown): obj is ImageType => {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+  const image = obj as Record<string, unknown>;
+  return image.id !== undefined && image.type !== undefined && image.size !== undefined;
 };
 
 export interface AlgoliaImage extends ImageType {

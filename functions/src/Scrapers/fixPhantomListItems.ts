@@ -7,8 +7,9 @@ import { Sermon } from '../../../types/SermonTypes';
 import { emptyList } from '../../../types/List';
 import updateSubsplashSermonTopics from '../helpers/updateSubsplashTagsHelper';
 import { authenticateSubsplash } from '../subsplashUtils';
+import { subsplashSecrets } from '../subsplashSecrets';
 
-export const fixPhantomListItems = onRequest({ cors: true }, async (req, res) => {
+export const fixPhantomListItems = onRequest({ cors: true, secrets: subsplashSecrets }, async (req, res) => {
     const db = firebaseAdmin.firestore();
 
     // Check if we should update Subsplash (default to false for safety)

@@ -8,6 +8,7 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Alert, { AlertColor } from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
+import LinearProgress from '@mui/material/LinearProgress';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -16,6 +17,7 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
+import Box from '@mui/material/Box';
 import { createFunctionV2 } from '../utils/createFunction';
 import {
   CreateRoleRequestInputType,
@@ -102,8 +104,12 @@ const RequestRoleChange = () => {
   };
 
   return (
-    <Stack spacing={2} sx={{ width: 1, maxWidth: 800 }}>
-      <FormControl component="form" onSubmit={handleSubmit} sx={{ display: 'flex', gap: 2, width: 1, maxWidth: 600 }}>
+    <Stack spacing={2} sx={{ width: 1, maxWidth: 900, mx: 'auto' }}>
+      <FormControl
+        component="form"
+        onSubmit={handleSubmit}
+        sx={{ display: 'flex', gap: 2, width: 1 }}
+      >
         <InputLabel id="role-select-label">Role</InputLabel>
         <Select
           defaultValue={defaultValue}
@@ -140,37 +146,76 @@ const RequestRoleChange = () => {
       <Stack spacing={1}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Typography variant="h6">Open Requests</Typography>
-          <Button size="small" onClick={fetchRequests} disabled={loadingRequests || submitting}>
-            Refresh
+          <Button
+            size="small"
+            onClick={fetchRequests}
+            disabled={loadingRequests || submitting}
+            sx={{ minWidth: 76 }}
+          >
+            {loadingRequests ? <CircularProgress size={16} color="inherit" /> : 'Refresh'}
           </Button>
         </Stack>
-        {loadingRequests ? (
-          <CircularProgress size={20} />
-        ) : requests.length === 0 ? (
+        {requests.length === 0 ? (
+          loadingRequests ? (
+            <Box
+              sx={{
+                minHeight: 120,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <CircularProgress size={20} />
+            </Box>
+          ) : (
           <Typography color="text.secondary">No requests submitted yet.</Typography>
+          )
         ) : (
-          <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-            <Table size="small" aria-label="your-role-requests">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Role</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Submitted</TableCell>
-                  <TableCell>Reason</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {requests.map((request) => (
-                  <TableRow key={request.roleRequestId}>
-                    <TableCell>{request.requestedRole}</TableCell>
-                    <TableCell>{formatStatus(request.status)}</TableCell>
-                    <TableCell>{new Date(request.createdAtMs).toLocaleString()}</TableCell>
-                    <TableCell sx={{ whiteSpace: 'pre-wrap' }}>{request.reason}</TableCell>
+          <Box sx={{ position: 'relative' }}>
+            {loadingRequests && (
+              <LinearProgress
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  zIndex: 1,
+                  borderTopLeftRadius: 4,
+                  borderTopRightRadius: 4,
+                }}
+              />
+            )}
+            <TableContainer
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                opacity: loadingRequests ? 0.7 : 1,
+                transition: 'opacity 0.2s ease',
+              }}
+            >
+              <Table size="small" aria-label="your-role-requests">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Role</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Submitted</TableCell>
+                    <TableCell>Reason</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                </TableHead>
+                <TableBody>
+                  {requests.map((request) => (
+                    <TableRow key={request.roleRequestId}>
+                      <TableCell>{request.requestedRole}</TableCell>
+                      <TableCell>{formatStatus(request.status)}</TableCell>
+                      <TableCell>{new Date(request.createdAtMs).toLocaleString()}</TableCell>
+                      <TableCell sx={{ whiteSpace: 'pre-wrap' }}>{request.reason}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
         )}
       </Stack>
     </Stack>

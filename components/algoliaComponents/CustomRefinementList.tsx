@@ -20,7 +20,7 @@ const normalizeLabel = (label: string) => {
     })
     .join(' ');
 };
-const CustomRefinementList = (
+  const CustomRefinementList = (
   props: UseRefinementListProps & { title: string; searchable?: boolean; searchablePlaceholder?: string; }
 ) => {
   const { status, results } = useInstantSearch();
@@ -29,7 +29,9 @@ const CustomRefinementList = (
 
   useEffect(() => {
     if (items.length > 0) {
-      setStableItems(items);
+      queueMicrotask(() => {
+        setStableItems(items);
+      });
     }
   }, [items]);
 
@@ -39,7 +41,7 @@ const CustomRefinementList = (
 
   if (showSkeleton) {
     return (
-      <FormGroup sx={{ width: '100%' }}>
+      <FormGroup sx={{ width: '100%', gap: 0.375 }}>
         <FormLabel>{props.title}</FormLabel>
         {props.searchable && (
           <Skeleton variant="rectangular" height={40} width="100%" sx={{ borderRadius: 0.75 }} />
@@ -48,13 +50,20 @@ const CustomRefinementList = (
           <Box
             key={`${props.attribute}-skeleton-${index}`}
             display="flex"
-            alignItems="center"
+            alignItems="flex-start"
             gap={1}
-            sx={{ py: 0.125 }}
+            sx={{ py: 0.125, width: '100%', minWidth: 0 }}
           >
             <Skeleton variant="rectangular" width={20} height={20} sx={{ borderRadius: '3px', mt: '2px', mb: '2px' }} />
-            <Skeleton variant="text" width={index % 2 === 0 ? '40%' : '50%'} sx={{ fontSize: '1rem', lineHeight: 1.5 }} />
-            <Skeleton variant="rectangular" width={34} height='1.5rem' sx={{ borderRadius: 0.5 }} />
+            <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
+              <Skeleton
+                variant="text"
+                width={index % 2 === 0 ? 112 : 148}
+                sx={{ fontSize: '1rem', lineHeight: 1.5 }}
+              />
+              <Box sx={{ flex: 1, minWidth: 0 }} />
+              <Skeleton variant="rectangular" width={34} height="1.5rem" sx={{ borderRadius: 0.5, flexShrink: 0 }} />
+            </Box>
           </Box>
         ))}
         {props.searchable && <Skeleton variant="text" width={68} height={22} sx={{ mt: 0.25, alignSelf: 'center' }} />}
@@ -63,7 +72,7 @@ const CustomRefinementList = (
   }
 
   return (
-    <FormGroup sx={{ width: '100%' }}>
+    <FormGroup sx={{ width: '100%', gap: 0.375 }}>
       <FormLabel>{props.title}</FormLabel>
       {/* Add MUI search for searchForItems */}
       {props.searchable && (
@@ -76,15 +85,37 @@ const CustomRefinementList = (
           onChange={(e) => searchForItems(e.currentTarget.value)}
         />
       )}
-      {renderedItems.map((item) => (
+      {renderedItems.map((item, index) => (
         <FormControlLabel
-          sx={{ py: 0, pl: 1 }}
-          key={item.label}
+          sx={{
+            py: 0.125,
+            pl: 0,
+            pr: 0,
+            mr: 0,
+            ml: 0,
+            width: '100%',
+            alignItems: 'flex-start',
+            '& .MuiFormControlLabel-label': {
+              flex: 1,
+              minWidth: 0,
+            },
+          }}
+          key={`${String(item.value)}-${index}`}
           control={<Checkbox sx={{ p: 0 }} disableRipple onChange={() => refine(item.value)} />}
           label={
-            <Box display="flex" alignItems="baseline" gap={1}>
-              <Typography noWrap>{normalizeLabel(item.label)}</Typography>
-              <Chip label={item.count} size="small" />
+            <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
+              <Typography
+                sx={{
+                  flex: 1,
+                  minWidth: 0,
+                  whiteSpace: 'normal',
+                  overflowWrap: 'anywhere',
+                  lineHeight: 1.3,
+                }}
+              >
+                {normalizeLabel(item.label)}
+              </Typography>
+              <Chip label={item.count} size="small" sx={{ flexShrink: 0 }} />
             </Box>
           }
         />

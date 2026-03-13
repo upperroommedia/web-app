@@ -44,7 +44,9 @@ const ImageUploader = (props: Props) => {
       const reader = new FileReader();
       reader.addEventListener('load', () => setImgSrc(reader.result?.toString() || ''));
       reader.readAsDataURL(e.target.files[0]);
-      props.title === '' && props.setTitle(e.target.files[0].name.split('.')[0]);
+      if (props.title === '') {
+        props.setTitle(e.target.files[0].name.split('.')[0]);
+      }
       setImageType(e.target.files[0].type.split('/').pop()!);
     }
   }

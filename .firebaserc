@@ -8,7 +8,15 @@
     "urm-app-staging": {
       "database": {
         "rtdb": [
-          "urm-app-staging-815ca"
+          "urm-app-staging-default-rtdb"
+        ]
+      },
+      "storage": {
+        "default": [
+          "urm-app-staging.firebasestorage.app"
+        ],
+        "images": [
+          "urm-app-staging-images"
         ]
       }
     },
@@ -17,8 +25,27 @@
         "rtdb": [
           "urm-app-default-rtdb"
         ]
+      },
+      "storage": {
+        "default": [
+          "urm-app.appspot.com"
+        ],
+        "images": [
+          "urm-app-images"
+        ]
       }
     }
   },
-  "etags": {}
+  "etags": {
+    "urm-app-staging": {
+      "extensionInstances": {
+        "firestore-send-email-6emo": "45cde34b603e2c4fbde854e76c3f554b204ca82a55de7d16dce8bea8aca19879",
+        "images-index": "ab3a020a3ab842c8f0601542de4896a15ad0206eae33f146383a84362128ff5a",
+        "lists-index": "8985f61ee048819b23c047a4bede977cc61fea45fcc2c465b792ece539c9e96f",
+        "sermons-index": "63d34cab3af6e890277560446dc1b4446c3606461629f4dfd75455993bb8e430",
+        "speakers-index": "3f111ddab2f51339397edc8af556c350bf0df517d8ab454137636f22fb70fdd1",
+        "users-index": "b2f0b0467f7b79a9e0b521f5adade52de6b6fb8f4e899815d8558a43d8674999"
+      }
+    }
+  }
 }

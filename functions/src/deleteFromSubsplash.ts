@@ -7,6 +7,7 @@ import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { subsplashSecrets } from './subsplashSecrets';
 
 export interface DeleteFromSubsplashInputType {
   operationKey: string;
@@ -15,7 +16,7 @@ export interface DeleteFromSubsplashInputType {
 
 export type DeleteFromSubsplashReturnType = void;
 
-const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSubsplashInputType>): Promise<DeleteFromSubsplashReturnType> => {
+const deleteFromSubsplash = onCall({ secrets: subsplashSecrets }, async (request: CallableRequest<DeleteFromSubsplashInputType>): Promise<DeleteFromSubsplashReturnType> => {
   logger.log('deleteFromSubsplash', request);
 
   // Authentication check
@@ -32,8 +33,8 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSub
   }
 
   // Environment validation
-  if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-    throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
+  if (process.env.SUBSPLASH_EMAIL == undefined || process.env.SUBSPLASH_PASSWORD == undefined) {
+    throw new HttpsError('failed-precondition', 'SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD is not set.');
   }
 
   const mediaItemId = request.data.subsplashId.trim();
@@ -60,16 +61,30 @@ const deleteFromSubsplash = onCall(async (request: CallableRequest<DeleteFromSub
     );
   } catch (error) {
     logger.error('Error deleting from Subsplash', { mediaItemId, error });
-    await emitOperationalAlert({
-      alertCode: 'PUBLISH_SUBSPLASH_DELETE_RUNTIME_FAILURE',
-      summary: 'deleteFromSubsplash callable failed during publish delete flow.',
-      error,
-      context: {
-        functionName: 'deleteFromSubsplash',
-        operationKey,
-        subsplashId: mediaItemId,
-      },
-    });
+
+    // Idempotency: deleting an already-deleted media item should succeed.
+    if (isAxiosError(error) && error.response?.status === 404) {
+      logger.warn(`Media item not found (already deleted): ${mediaItemId}`);
+      return;
+    }
+
+    try {
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SUBSPLASH_DELETE_RUNTIME_FAILURE',
+        summary: 'deleteFromSubsplash callable failed during publish delete flow.',
+        error,
+        context: {
+          functionName: 'deleteFromSubsplash',
+          operationKey,
+          subsplashId: mediaItemId,
+        },
+      });
+    } catch (alertError) {
+      logger.error('Failed to emit operational alert for deleteFromSubsplash', {
+        mediaItemId,
+        alertError,
+      });
+    }
 
     // Handle specific Subsplash API errors
     if (isAxiosError(error) && error.response?.data?.errors) {

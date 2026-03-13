@@ -63,9 +63,16 @@
       "rules": "database.rules.json"
     }
   ],
-  "storage": {
-    "rules": "storage.rules"
-  },
+  "storage": [
+    {
+      "target": "default",
+      "rules": "storage.rules"
+    },
+    {
+      "target": "images",
+      "rules": "storage.rules"
+    }
+  ],
   "apphosting": {
     "backendId": "web-staging",
     "rootDir": ".",

@@ -24,8 +24,6 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { isDevelopment } from '../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../utils/mockAlgoliaSearchClient';
 
-interface SearchableAdminSermonListProps { }
-
 function FilterButton({ onToggle }: { onToggle: () => void }) {
   return (
     <IconButton onClick={onToggle} sx={{ display: { xs: 'block', md: 'none' } }} aria-label="Toggle filters">
@@ -36,15 +34,26 @@ function FilterButton({ onToggle }: { onToggle: () => void }) {
 
 function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
   return (
-    <Stack sx={{ flex: 1, alignItems: 'center', overflow: 'auto', ...sx }}>
+    <Stack
+      sx={{
+        flex: 1,
+        minWidth: 0,
+        width: '100%',
+        alignItems: 'stretch',
+        overflow: 'auto',
+        px: { xs: 1, md: 0 },
+        ...sx,
+      }}
+    >
       <Stack
         gap={{ xs: 1.5, md: 2 }}
         alignItems="start"
         border={{ xs: 1, md: 0 }}
         borderRadius={2}
         p={{ xs: 1.5, md: 2 }}
-        margin={{ xs: 1, md: 2 }}
         width="100%"
+        minWidth={0}
+        boxSizing="border-box"
       >
         <CustomRefinementList attribute="status.subsplash" title="Subsplash Status" />
         <CustomRefinementList attribute="status.soundCloud" title="SoundCloud Status" />
@@ -75,7 +84,7 @@ function MobileFilterDrawer({ show }: { show: boolean }) {
   );
 }
 
-const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProps> = () => {
+const SearchableAdminSermonList: FunctionComponent = () => {
   const { user } = useAuth();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -116,7 +125,7 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
     if (isDevelopment) {
       return createMockAlgoliaSearchClient({
         userId: userId ?? '',
-        isAdmin: isAdminUser,
+        canSearchAllSermons: isAdminUser,
       });
     }
     if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
@@ -139,6 +148,8 @@ const SearchableAdminSermonList: FunctionComponent<SearchableAdminSermonListProp
                 gridTemplateAreas={{ xs: `"filters" "results"`, md: `"results filters"` }}
                 gridTemplateColumns={{ xs: '1fr', md: '1fr 300px' }}
                 width={1}
+                minWidth={0}
+                columnGap={{ md: 1 }}
               >
                 <SearchResultSermonList gridArea="results" />
                 {isMobile ? <MobileFilterDrawer show={showFilters} /> : <AdminSermonFilters />}

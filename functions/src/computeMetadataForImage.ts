@@ -3,6 +3,7 @@ import { Vibrant } from 'node-vibrant/node';
 import { logger } from 'firebase-functions';
 import sizeOf from 'buffer-image-size';
 import axios from 'axios';
+import fs from 'fs';
 
 interface ImageMetadata {
   width: number;
@@ -10,15 +11,33 @@ interface ImageMetadata {
   averageColorHex: string;
   vibrantColorHex: string;
 }
-const computeMetadataForImage = async (url: string, dimensionsOnly = false): Promise<ImageMetadata> => {
-  let buffer: Buffer | undefined;
-  try {
-    const response = await axios.get(url, { responseType: 'arraybuffer' });
-    buffer = Buffer.from(response.data, 'binary');
-  } catch (error) {
-    logger.error('Error fetching image:', error);
-    throw new Error('Failed to fetch image from URL');
+
+const loadImageBuffer = async (source: string | Buffer): Promise<Buffer> => {
+  if (Buffer.isBuffer(source)) {
+    return source;
   }
+
+  if (/^https?:\/\//i.test(source)) {
+    try {
+      const response = await axios.get(source, { responseType: 'arraybuffer' });
+      return Buffer.from(response.data, 'binary');
+    } catch (error) {
+      logger.error('Error fetching image:', error);
+      throw new Error('Failed to fetch image from URL');
+    }
+  }
+
+  try {
+    return fs.readFileSync(source);
+  } catch (error) {
+    logger.error('Error reading image file:', error);
+    throw new Error('Failed to read image from file');
+  }
+};
+
+const computeMetadataForImage = async (source: string | Buffer, dimensionsOnly = false): Promise<ImageMetadata> => {
+  let buffer: Buffer | undefined;
+  buffer = await loadImageBuffer(source);
   const { width, height } = sizeOf(buffer);
   if (dimensionsOnly) {
     return { width, height, averageColorHex: '', vibrantColorHex: '' };

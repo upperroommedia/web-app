@@ -38,12 +38,12 @@ const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardPr
   const sermonData = useMemo(() => sermonSnapshot?.data(), [sermonSnapshot]);
 
   if (error) {
-    // eslint-disable-next-line no-console
+     
     console.error(error);
     return <strong>Error: {JSON.stringify(error)}</strong>;
   }
   if (!loading && !sermonSnapshot?.exists()) {
-    // eslint-disable-next-line no-console
+     
     console.warn(`No Sermon Found for objectID: ${sermonId} - if this was recently deleted you can ignore`);
 
     return <></>;

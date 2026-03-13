@@ -13,6 +13,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
+import { subsplashSecrets } from './subsplashSecrets';
 
 export interface AddToSeriesInputType {
   seriesSubsplashId: string;
@@ -30,6 +31,7 @@ export interface AddToSeriesOutputType {
 }
 
 const addToSeries = onCall(
+  { secrets: subsplashSecrets },
   async (request: CallableRequest<AddToSeriesInputType>): Promise<AddToSeriesOutputType> => {
     logger.log('addToSeries');
 

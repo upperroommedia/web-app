@@ -1,5 +1,6 @@
 import firebaseAdmin from '../../../firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
+import { adminBaseUrlSecret } from '../notifications/notificationSecrets';
 import {
   AcceptRoleRequestInputType,
   AcceptRoleRequestOutputType,
@@ -122,6 +123,6 @@ export const acceptRoleRequestHandler = async (
   }
 };
 
-const acceptrolerequest = onCall(acceptRoleRequestHandler);
+const acceptrolerequest = onCall({ secrets: [adminBaseUrlSecret] }, acceptRoleRequestHandler);
 
 export default acceptrolerequest;

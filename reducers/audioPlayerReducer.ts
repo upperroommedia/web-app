@@ -11,9 +11,14 @@ export type AudioPlayerState = {
   playing: boolean;
 };
 
+type AudioPlayerAction = {
+  type: string;
+  payload?: unknown;
+};
+
 export default function audioPlayerReducer(
   state: AudioPlayerState,
-  action: { type: string; payload: any }
+  action: AudioPlayerAction
 ): AudioPlayerState {
   const { type, payload } = action;
   switch (type) {
@@ -29,9 +34,10 @@ export default function audioPlayerReducer(
           playing: false,
         };
       }
+      const nextSermonPayload = payload as SermonWithMetadata;
 
       const nextSermon: SermonWithMetadata = {
-        ...payload,
+        ...nextSermonPayload,
         currentSecond: 0,
       };
 
@@ -51,11 +57,12 @@ export default function audioPlayerReducer(
     }
 
     case 'SET_CURRENT_SERMON_URL': {
+      const nextUrl = payload as string | undefined;
       if (!state.currentSermon) {
         return state;
       }
 
-      if (state.currentSermon.url === payload) {
+      if (state.currentSermon.url === nextUrl) {
         return state;
       }
 
@@ -63,13 +70,14 @@ export default function audioPlayerReducer(
         ...state,
         currentSermon: {
           ...state.currentSermon,
-          url: payload,
+          url: nextUrl,
         },
       };
     }
 
     case 'TOGGLE_PLAYING': {
-      const nextPlaying = payload === undefined ? !state.playing : payload;
+      const nextPlayingPayload = payload as boolean | undefined;
+      const nextPlaying = nextPlayingPayload === undefined ? !state.playing : nextPlayingPayload;
       if (state.playing === nextPlaying) {
         return state;
       }
@@ -79,15 +87,17 @@ export default function audioPlayerReducer(
       };
     }
 
-    case 'UPDATE_CURRENT_SECOND':
-      if (state.currentSermonSecond === payload) {
+    case 'UPDATE_CURRENT_SECOND': {
+      const nextSecond = payload as number;
+      if (state.currentSermonSecond === nextSecond) {
         return state;
       }
       return {
         ...state,
-        currentSermon: state.currentSermon ? { ...state.currentSermon, currentSecond: payload } : undefined,
-        currentSermonSecond: payload,
+        currentSermon: state.currentSermon ? { ...state.currentSermon, currentSecond: nextSecond } : undefined,
+        currentSermonSecond: nextSecond,
       };
+    }
 
     default:
       throw new Error(`No case for ${type} in audioPlayerReducer`);

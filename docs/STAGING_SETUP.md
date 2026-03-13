@@ -18,39 +18,52 @@ firebase apphosting:backends:create --project urm-app-staging --location us-cent
 
 When prompted, set backend id to `web-staging` and root dir to repository root (`.`).
 
-## 3. Configure App Hosting secrets for `apphosting.staging.yaml`
+## 2b. Disable automatic App Hosting rollouts (required)
+
+Disable automatic rollouts for backend `web-staging` in Firebase Console so App Hosting only deploys when the staging workflow explicitly triggers a rollout:
+
+- Open App Hosting backend settings for `web-staging`.
+- Turn off automatic rollouts.
+
+## 3. Configure App Hosting secrets for `apphosting.yaml`
 
 Create/grant each secret in `urm-app-staging`:
 
 ```bash
-firebase apphosting:secrets:set ROLE_REQUEST_RECIPIENTS_STAGING --project urm-app-staging
-firebase apphosting:secrets:set RUNTIME_ALERT_RECIPIENTS_STAGING --project urm-app-staging
-firebase apphosting:secrets:set ADMIN_BASE_URL_STAGING --project urm-app-staging
-firebase apphosting:secrets:set SUBSPLASH_EMAIL_STAGING --project urm-app-staging
-firebase apphosting:secrets:set SUBSPLASH_PASSWORD_STAGING --project urm-app-staging
-firebase apphosting:secrets:set DOLBY_API_KEY_STAGING --project urm-app-staging
-firebase apphosting:secrets:set DOLBY_API_SECRET_STAGING --project urm-app-staging
-firebase apphosting:secrets:set CLERK_SECRET_KEY_STAGING --project urm-app-staging
-firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY_STAGING --project urm-app-staging
+firebase apphosting:secrets:set ROLE_REQUEST_RECIPIENTS --project urm-app-staging
+firebase apphosting:secrets:set RUNTIME_ALERT_RECIPIENTS --project urm-app-staging
+firebase apphosting:secrets:set ADMIN_BASE_URL --project urm-app-staging
+firebase apphosting:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
+firebase apphosting:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
+firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
 ```
 
 If access is not auto-granted:
 
 ```bash
-firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging
+firebase apphosting:secrets:grantaccess <SECRET_NAME> --project urm-app-staging --backend web-staging
 ```
 
 ## 3b. Configure Cloud Functions secrets/env (staging)
 
-SoundCloud publishing uses a Functions secret, not App Hosting env vars:
+Functions that send invite/role-request emails now read `ADMIN_BASE_URL` from Functions Secret Manager.
+Set/update Functions secrets in staging:
 
 ```bash
-firebase functions:secrets:set SOUNDCLOUD_ACCESS_TOKEN --project urm-app-staging
+firebase functions:secrets:set ADMIN_BASE_URL --project urm-app-staging
+firebase functions:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
+firebase functions:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
+firebase functions:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
+firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app-staging
 ```
 
 Notes:
-- `SOUNDCLOUD_ACCESS_TOKEN` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
-- App Hosting secrets in `apphosting.staging.yaml` do not automatically flow into Cloud Functions.
+
+- `ADMIN_BASE_URL` is consumed by invite and role-request email link builders.
+- `SUBSPLASH_EMAIL` and `SUBSPLASH_PASSWORD` are consumed by Subsplash publish/sync functions and related triggers.
+- `ALGOLIA_SEARCH_API_KEY` is consumed by `generateSecuredApiKey`.
+- `SOUNDCLOUD_CLIENT_SECRET` is consumed by `uploadToSoundCloud`, `editSoundCloudSermon`, and `deleteFromSoundCloud`.
+- App Hosting secrets in `apphosting.yaml` do not automatically flow into Cloud Functions.
 
 ## 3c. Enable Google Sign-In in staging Auth (one-time)
 
@@ -112,5 +125,6 @@ Create a Workload Identity Provider and service account with Firebase deploy per
 
 1. Open a PR from any feature branch into `staging` and confirm `staging-selective-deploy` passes.
 2. Merge into `staging` and confirm selective deploy executes.
-3. Open PR `staging -> main` and confirm `main-from-staging` passes.
-4. Open PR `feature -> main` and confirm `main-from-staging` fails.
+3. Confirm App Hosting rollout is triggered only when app-related files change.
+4. Open PR `staging -> main` and confirm `main-from-staging` passes.
+5. Open PR `feature -> main` and confirm `main-from-staging` fails.

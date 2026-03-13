@@ -13,6 +13,7 @@ on:
         type: boolean
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -27,7 +28,6 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      deploy_apphosting: ${{ steps.detect.outputs.deploy_apphosting }}
       deploy_firestore: ${{ steps.detect.outputs.deploy_firestore }}
       deploy_database: ${{ steps.detect.outputs.deploy_database }}
       deploy_storage: ${{ steps.detect.outputs.deploy_storage }}
@@ -35,10 +35,14 @@ jobs:
       deploy_functions_media: ${{ steps.detect.outputs.deploy_functions_media }}
       deploy_functions_image: ${{ steps.detect.outputs.deploy_functions_image }}
       deploy_functions_integrations: ${{ steps.detect.outputs.deploy_functions_integrations }}
+      anything_to_run: ${{ steps.detect.outputs.anything_to_run }}
       anything_to_deploy: ${{ steps.detect.outputs.anything_to_deploy }}
       changed_files: ${{ steps.detect.outputs.changed_files }}
+      diff_base_sha: ${{ steps.detect.outputs.diff_base_sha }}
+      diff_head_sha: ${{ steps.detect.outputs.diff_head_sha }}
+      diff_source: ${{ steps.detect.outputs.diff_source }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -48,6 +52,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BEFORE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_FILE: staging-selective-deploy.yml
+          GITHUB_TOKEN: ${{ github.token }}
           FORCE_FULL_REDEPLOY: ${{ github.event.inputs.force_full_redeploy || 'false' }}
         run: |
           set -euo pipefail
@@ -59,8 +66,67 @@ jobs:
 
           base_sha="$BEFORE_SHA"
           head_sha="$HEAD_SHA"
+          diff_source="event.before"
+
+          last_deploy_success_sha=""
+          last_deploy_success_run_id=""
+          set +e
+          successful_runs_json="$(curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPOSITORY}/actions/workflows/${WORKFLOW_FILE}/runs?branch=staging&status=success&exclude_pull_requests=true&per_page=20" \
+          )"
+          lookup_status=$?
+          set -e
+          if [[ "$lookup_status" -ne 0 ]]; then
+            echo "::warning::Unable to resolve successful workflow runs. Falling back to event.before."
+          fi
+
+          if [[ "$lookup_status" -eq 0 ]]; then
+            while IFS='|' read -r run_id run_head_sha; do
+              if [[ -z "$run_id" || -z "$run_head_sha" ]]; then
+                continue
+              fi
+
+              set +e
+              run_jobs_json="$(curl -fsSL \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")"
+              jobs_status=$?
+              set -e
+
+              if [[ "$jobs_status" -ne 0 ]]; then
+                continue
+              fi
+
+              run_had_deploy_step="$(echo "$run_jobs_json" | jq -r '
+                [
+                  .jobs[]?.steps[]?
+                  | select(
+                      (.name == "Deploy selected staging targets")
+                      and .conclusion == "success"
+                    )
+                ] | length > 0
+              ')"
+
+              if [[ "$run_had_deploy_step" == "true" ]]; then
+                last_deploy_success_sha="$run_head_sha"
+                last_deploy_success_run_id="$run_id"
+                break
+              fi
+            done < <(echo "$successful_runs_json" | jq -r '.workflow_runs[] | "\(.id)|\(.head_sha)"')
+          fi
+
+          if [[ -n "$last_deploy_success_sha" ]] && git cat-file -e "${last_deploy_success_sha}^{commit}" >/dev/null 2>&1; then
+            if git merge-base --is-ancestor "$last_deploy_success_sha" "$head_sha"; then
+              base_sha="$last_deploy_success_sha"
+              diff_source="last_successful_deploy_run:${last_deploy_success_run_id}"
+            fi
+          fi
 
           if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+            diff_source="bootstrap_fallback"
             if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
               if git rev-parse "${head_sha}^" >/dev/null 2>&1; then
                 base_sha="$(git rev-parse "${head_sha}^")"
@@ -83,7 +149,6 @@ jobs:
             return 1
           }
 
-          deploy_apphosting=false
           deploy_firestore=false
           deploy_database=false
           deploy_storage=false
@@ -93,7 +158,6 @@ jobs:
           deploy_functions_integrations=false
 
           if [[ "$force_full" == "true" ]]; then
-            deploy_apphosting=true
             deploy_firestore=true
             deploy_database=true
             deploy_storage=true
@@ -102,10 +166,6 @@ jobs:
             deploy_functions_image=true
             deploy_functions_integrations=true
           else
-            if contains_path '^(apphosting\.staging\.yaml|apphosting\.yaml|firebase\.json|next\.config\.js|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|turbo\.json|tsconfig\.json|playwright\.config\.ts|components/|pages/|public/|styles/|layout/|context/|hooks/|reducers/|constants/|utils/|extensions/|firebase/|shared/|scripts/|docs/)'; then
-              deploy_apphosting=true
-            fi
-
             if contains_path '^firestore\.rules$|^firestore\.indexes\.json$'; then
               deploy_firestore=true
             fi
@@ -143,14 +203,15 @@ jobs:
           fi
 
           anything_to_deploy=false
-          # App Hosting rollout is handled by the Firebase App Hosting GitHub app.
-          # This workflow only deploys non-App-Hosting Firebase targets.
+          anything_to_run=false
           if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
             anything_to_deploy=true
           fi
+          if [[ "$anything_to_deploy" == "true" ]]; then
+            anything_to_run=true
+          fi
 
           {
-            echo "deploy_apphosting=$deploy_apphosting"
             echo "deploy_firestore=$deploy_firestore"
             echo "deploy_database=$deploy_database"
             echo "deploy_storage=$deploy_storage"
@@ -158,7 +219,11 @@ jobs:
             echo "deploy_functions_media=$deploy_functions_media"
             echo "deploy_functions_image=$deploy_functions_image"
             echo "deploy_functions_integrations=$deploy_functions_integrations"
+            echo "anything_to_run=$anything_to_run"
             echo "anything_to_deploy=$anything_to_deploy"
+            echo "diff_base_sha=$base_sha"
+            echo "diff_head_sha=$head_sha"
+            echo "diff_source=$diff_source"
             echo "changed_files<<EOF"
             echo "$changed_files"
             echo "EOF"
@@ -172,7 +237,6 @@ jobs:
       - name: Publish planned deploy targets
         env:
           EVENT_NAME: ${{ github.event_name }}
-          DEPLOY_APPHOSTING: ${{ needs.detect-changes.outputs.deploy_apphosting }}
           DEPLOY_FIRESTORE: ${{ needs.detect-changes.outputs.deploy_firestore }}
           DEPLOY_DATABASE: ${{ needs.detect-changes.outputs.deploy_database }}
           DEPLOY_STORAGE: ${{ needs.detect-changes.outputs.deploy_storage }}
@@ -180,14 +244,19 @@ jobs:
           DEPLOY_FUNCTIONS_MEDIA: ${{ needs.detect-changes.outputs.deploy_functions_media }}
           DEPLOY_FUNCTIONS_IMAGE: ${{ needs.detect-changes.outputs.deploy_functions_image }}
           DEPLOY_FUNCTIONS_INTEGRATIONS: ${{ needs.detect-changes.outputs.deploy_functions_integrations }}
+          ANYTHING_TO_RUN: ${{ needs.detect-changes.outputs.anything_to_run }}
           ANYTHING_TO_DEPLOY: ${{ needs.detect-changes.outputs.anything_to_deploy }}
+          DIFF_BASE_SHA: ${{ needs.detect-changes.outputs.diff_base_sha }}
+          DIFF_HEAD_SHA: ${{ needs.detect-changes.outputs.diff_head_sha }}
+          DIFF_SOURCE: ${{ needs.detect-changes.outputs.diff_source }}
           CHANGED_FILES: ${{ needs.detect-changes.outputs.changed_files }}
         run: |
           {
             echo "## Staging Selective Deploy"
             echo ""
             echo "- Event: \`$EVENT_NAME\`"
-            echo "- App Hosting (auto-rollout via Firebase app): \`$DEPLOY_APPHOSTING\`"
+            echo "- Diff source: \`$DIFF_SOURCE\`"
+            echo "- Diff range: \`$DIFF_BASE_SHA..$DIFF_HEAD_SHA\`"
             echo "- Firestore rules/indexes: \`$DEPLOY_FIRESTORE\`"
             echo "- Realtime Database rules: \`$DEPLOY_DATABASE\`"
             echo "- Storage rules: \`$DEPLOY_STORAGE\`"
@@ -195,7 +264,8 @@ jobs:
             echo "- Functions media: \`$DEPLOY_FUNCTIONS_MEDIA\`"
             echo "- Functions image: \`$DEPLOY_FUNCTIONS_IMAGE\`"
             echo "- Functions integrations: \`$DEPLOY_FUNCTIONS_INTEGRATIONS\`"
-            echo "- Anything to deploy from this workflow (excludes App Hosting): \`$ANYTHING_TO_DEPLOY\`"
+            echo "- Any workflow action needed: \`$ANYTHING_TO_RUN\`"
+            echo "- Firebase backend deploy targets: \`$ANYTHING_TO_DEPLOY\`"
             echo ""
             echo "### Changed Files"
             echo '\`\`\`'
@@ -208,11 +278,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout repository
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
-        uses: actions/checkout@v4
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
+        uses: actions/checkout@v5
 
       - name: Validate GCP OIDC secrets
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         env:
           PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
@@ -228,25 +298,29 @@ jobs:
           fi
 
       - name: Authenticate to Google Cloud (OIDC)
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up Node.js
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Set up pnpm
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: pnpm/action-setup@v4
 
       - name: Install dependencies
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
         run: pnpm install --frozen-lockfile
+
+      - name: Materialize catalog dependencies for Firebase deploy
+        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
+        run: node scripts/materialize-catalog-for-firebase.mjs
 
       - name: Deploy selected staging targets
         if: needs.detect-changes.outputs.anything_to_deploy == 'true'
@@ -263,6 +337,18 @@ jobs:
           set -euo pipefail
 
           deployed_targets=()
+          failed_targets=()
+
+          run_function_deploy() {
+            local codebase="$1"
+            local log_file="$2"
+            local __pid_var="$3"
+            (
+              set -euo pipefail
+              pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only "$codebase" --non-interactive
+            ) >"$log_file" 2>&1 &
+            printf -v "$__pid_var" '%s' "$!"
+          }
 
           if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
             pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
@@ -280,24 +366,61 @@ jobs:
             deployed_targets+=("storage")
           fi
 
+          function_names=()
+          function_pids=()
+          function_logs=()
+
           if [[ "$DEPLOY_FUNCTIONS_CORE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive --force
-            deployed_targets+=("functions:core")
+            function_names+=("functions:core")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:core" "$log_file" pid
+            function_pids+=("$pid")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_MEDIA" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive --force
-            deployed_targets+=("functions:media")
+            function_names+=("functions:media")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:media" "$log_file" pid
+            function_pids+=("$pid")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_IMAGE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive --force
-            deployed_targets+=("functions:image")
+            function_names+=("functions:image")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:image" "$log_file" pid
+            function_pids+=("$pid")
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_INTEGRATIONS" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive --force
-            deployed_targets+=("functions:integrations")
+            function_names+=("functions:integrations")
+            log_file="$(mktemp)"
+            function_logs+=("$log_file")
+            run_function_deploy "functions:integrations" "$log_file" pid
+            function_pids+=("$pid")
+          fi
+
+          for i in "${!function_pids[@]}"; do
+            name="${function_names[$i]}"
+            pid="${function_pids[$i]}"
+            log_file="${function_logs[$i]}"
+
+            if wait "$pid"; then
+              deployed_targets+=("$name")
+              cat "$log_file"
+            else
+              failed_targets+=("$name")
+              echo "::error::Deploy failed for $name"
+              cat "$log_file"
+            fi
+            rm -f "$log_file"
+          done
+
+          if [[ "${#failed_targets[@]}" -gt 0 ]]; then
+            echo "::error::Failed backend deploy targets: ${failed_targets[*]}"
+            exit 1
           fi
 
           {
@@ -313,5 +436,5 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: No-op for non-deployable changes
-        if: needs.detect-changes.outputs.anything_to_deploy != 'true'
+        if: needs.detect-changes.outputs.anything_to_run != 'true'
         run: echo "No deployable changes detected for staging."

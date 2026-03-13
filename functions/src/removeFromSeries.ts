@@ -11,6 +11,7 @@ import { canUserRolePublish } from '../../types/User';
 import handleError from './handleError';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
+import { subsplashSecrets } from './subsplashSecrets';
 
 export interface RemoveFromSeriesInputType {
   mediaItemId: string;
@@ -24,6 +25,7 @@ export interface RemoveFromSeriesOutputType {
 }
 
 const removeFromSeries = onCall(
+  { secrets: subsplashSecrets },
   async (request: CallableRequest<RemoveFromSeriesInputType>): Promise<RemoveFromSeriesOutputType> => {
     logger.log('removeFromSeries');
 

@@ -642,12 +642,15 @@ const Uploader = (props: UploaderProps) => {
 
   // Dismiss the upload modal and stay on page
   const dismissUploadModal = useCallback(() => {
+    const uploadSucceeded = !uploadProgress.error && uploadProgress.percent >= 100;
     setIsNavigatingToSermon(false);
     setIsUploading(false);
     setUploadedSermon(null);
     setUploadProgress({ error: false, percent: 0, message: '' });
-    clearForm();
-  }, [clearForm]);
+    if (uploadSucceeded) {
+      clearForm();
+    }
+  }, [clearForm, uploadProgress.error, uploadProgress.percent]);
 
   const handleNewImage = useCallback(
     (image: ImageType | ImageSizeType) => {

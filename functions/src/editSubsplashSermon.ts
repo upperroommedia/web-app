@@ -8,6 +8,7 @@ import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { subsplashSecrets } from './subsplashSecrets';
 
 export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   extends Partial<Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'audioUrl' | 'autoPublish'>> {
@@ -16,12 +17,13 @@ export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
 }
 
 const editSubsplashSermon = onCall(
+  { secrets: subsplashSecrets },
   async (request: CallableRequest<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>): Promise<unknown> => {
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
     }
-    if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-      throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
+    if (process.env.SUBSPLASH_EMAIL == undefined || process.env.SUBSPLASH_PASSWORD == undefined) {
+      throw new HttpsError('failed-precondition', 'SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD is not set.');
     }
 
     const data = request.data;

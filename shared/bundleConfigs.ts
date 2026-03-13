@@ -1,4 +1,4 @@
-import type { FirestoreDataConverter } from 'firebase/firestore';
+import type { FirestoreDataConverter, WhereFilterOp } from 'firebase/firestore';
 import { Topic, topicConverter } from '../types/Topic';
 import { List, ListTag, ListType, listConverter } from '../types/List';
 import { isEqual, omit } from 'lodash';
@@ -14,9 +14,9 @@ export interface BundleConfig<T> {
   collectionName: string;
   collectionPath: string;
   converter: FirestoreDataConverter<T>;
-  shouldTrigger: (beforeData: any, afterData: any) => boolean;
+  shouldTrigger: (beforeData: T | undefined, afterData: T | undefined) => boolean;
   orderByField?: string;
-  whereConditions?: Array<{ field: string; operator: any; value: any }>;
+  whereConditions?: Array<{ field: string; operator: WhereFilterOp; value: unknown }>;
 }
 const fieldsToOmit = ['createdAtMillis', 'updatedAtMillis', 'count'];
 

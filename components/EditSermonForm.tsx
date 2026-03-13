@@ -11,14 +11,14 @@ import firebase from '../firebase/firebase';
 import { listConverter } from '../types/List';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
-import { useEffect, useMemo, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import { getDownloadURL, getStorage, ref } from '../firebase/storage';
 import { PROCESSED_SERMONS_BUCKET } from '../constants/storage_constants';
 import { showAudioTrimmerBoolean } from './uploaderComponents/utils';
 
 interface EditSermonFormInfo {
   open: boolean;
-  setOpen: any;
+  setOpen: Dispatch<SetStateAction<boolean>>;
   sermon: Sermon;
 }
 

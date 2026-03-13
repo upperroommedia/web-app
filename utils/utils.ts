@@ -9,7 +9,7 @@ export function getSquareImageStoragePath(sermon: Sermon) {
   return imageStoragePath;
 }
 
-export function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
+export function debounce<T extends (...args: unknown[]) => unknown>(func: T, wait: number): T {
   let timeout: ReturnType<typeof setTimeout> | null;
   return ((...args: Parameters<T>): void => {
     const later = () => {
@@ -17,7 +17,6 @@ export function debounce<T extends (...args: any[]) => any>(func: T, wait: numbe
       func(...args);
     };
     if (timeout) {
-      console.log('Debounced');
       clearTimeout(timeout);
     }
     timeout = setTimeout(later, wait);

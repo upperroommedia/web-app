@@ -54,8 +54,8 @@ const buildValidPayload = () => ({
 describe('deleteFromSubsplash lock contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.EMAIL = 'test@example.com';
-    process.env.PASSWORD = 'test-password';
+    process.env.SUBSPLASH_EMAIL = 'test@example.com';
+    process.env.SUBSPLASH_PASSWORD = 'test-password';
     mockAxios.mockResolvedValue({ status: 204, data: null } as never);
     mockAuthenticateSubsplash.mockResolvedValue('fake-token');
     mockWithIdempotency.mockImplementation(async (_operationKey, run) => run());
@@ -131,5 +131,30 @@ describe('deleteFromSubsplash lock contract', () => {
         retry_after_ms: 250,
       },
     });
+  });
+
+  it('treats 404 delete responses as already deleted and succeeds', async () => {
+    mockAxios.mockRejectedValueOnce({
+      isAxiosError: true,
+      message: 'Request failed with status code 404',
+      response: {
+        status: 404,
+        data: {
+          errors: [
+            {
+              code: 'resource_not_found',
+              detail: 'Media item not found',
+            },
+          ],
+        },
+      },
+    } as never);
+
+    await expect(
+      deleteHandler({
+        auth: { token: { role: 'admin' } },
+        data: buildValidPayload(),
+      })
+    ).resolves.toBeUndefined();
   });
 });

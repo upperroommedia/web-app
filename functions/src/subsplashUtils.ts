@@ -6,13 +6,13 @@ import FormData from 'form-data';
 export const authenticateSubsplash = async (): Promise<string> => {
   console.log('authenticating subsplash');
   const formData = new FormData();
-  if (!process.env.EMAIL || !process.env.PASSWORD) {
-    throw new Error('Missing email or password in .env file');
+  if (!process.env.SUBSPLASH_EMAIL || !process.env.SUBSPLASH_PASSWORD) {
+    throw new Error('Missing SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD in environment.');
   }
   formData.append('grant_type', 'password');
   formData.append('scope', 'app:9XTSHD');
-  formData.append('email', process.env.EMAIL);
-  formData.append('password', process.env.PASSWORD);
+  formData.append('email', process.env.SUBSPLASH_EMAIL);
+  formData.append('password', process.env.SUBSPLASH_PASSWORD);
   const config: AxiosRequestConfig = {
     method: 'post',
     url: 'https://core.subsplash.com/accounts/v1/oauth/token',

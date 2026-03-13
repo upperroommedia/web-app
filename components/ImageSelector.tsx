@@ -28,6 +28,7 @@ import { algoliasearch, SearchResponse } from 'algoliasearch';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import InputAdornment from '@mui/material/InputAdornment';
+const IMAGE_SAVE_TIMEOUT_MS = 30000;
 
 const client =
   process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
@@ -85,7 +86,7 @@ const ImageSelector = (props: {
           images.push(hit);
         });
       } catch (error) {
-        // eslint-disable-next-line no-console
+         
         console.error('Search error:', error);
       }
     }
@@ -132,10 +133,19 @@ const ImageSelector = (props: {
           customMetadata: { name, size: 'original', type: croppedImageData.type },
         });
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        let unsubscribe: () => void = () => {};
+        const timeoutId = window.setTimeout(() => {
+          unsubscribe();
+          setImageUploading(false);
+          alert('Image upload finished, but image processing did not complete in time. Please try again in a moment.');
+        }, IMAGE_SAVE_TIMEOUT_MS);
+
+        unsubscribe = onSnapshot(q, (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type === 'added') {
               const imageAddedToFirestore = change.doc.data() as ImageType;
+              window.clearTimeout(timeoutId);
+              setImageUploading(false);
               setImages((oldImages) => [imageAddedToFirestore, ...oldImages]);
               props.setNewSelectedImage(imageAddedToFirestore);
               props.confirmSelecedImage(imageAddedToFirestore);

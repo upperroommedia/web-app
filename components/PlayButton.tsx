@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Sermon, sermonStatusType } from '../types/SermonTypes';
 import { useMediaRemote, useMediaState } from '@vidstack/react';
 import IconButton from '@mui/material/IconButton';
@@ -25,11 +25,7 @@ export default function PlayButton({
   const waiting = useMediaState('waiting');
   const playing = useMediaState('playing');
 
-  useEffect(() => {
-    if (playing) {
-      setSrcLoading(false);
-    }
-  }, [playing]);
+  const isLoadingPlayback = waiting || (srcLoading && !playing && sermon.id === audioPlayerCurrentSermonId);
 
   return (
     <>
@@ -49,7 +45,7 @@ export default function PlayButton({
         >
           {sermon.id !== audioPlayerCurrentSermonId ? (
             <PlayCircleIcon fontSize="large" />
-          ) : waiting || srcLoading ? (
+          ) : isLoadingPlayback ? (
             <CircularProgress color="inherit" size={35} />
           ) : playing ? (
             <PauseCircleIcon fontSize="large" />

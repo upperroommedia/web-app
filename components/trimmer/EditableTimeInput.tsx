@@ -166,7 +166,9 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek }: Editable
   // Sync input from store when not focused/editing
   useEffect(() => {
     if (!isFocused && !isEditingRef.current) {
-      setInputValue(secondsToFixedFormat(storeValue));
+      queueMicrotask(() => {
+        setInputValue(secondsToFixedFormat(storeValue));
+      });
     }
   }, [storeValue, isFocused]);
 
