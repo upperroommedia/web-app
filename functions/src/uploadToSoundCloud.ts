@@ -1,6 +1,6 @@
 import handleError from './handleError';
 import { uploadTrack } from './soundcloudClient';
-import { soundcloudAccessToken } from './soundcloudSecrets';
+import { soundcloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
@@ -21,7 +21,7 @@ export type UploadToSoundCloudReturnType = {
 };
 
 const uploadToSoundCloudCall = onCall(
-  { secrets: [soundcloudAccessToken] },
+  { secrets: soundcloudSecretsWithRuntimeAlerts },
   async (request: CallableRequest<UploadToSoundCloudInputType>): Promise<UploadToSoundCloudReturnType> => {
     logger.log('uploadToSoundCloud', request);
     if (!canUserRolePublish(request.auth?.token.role)) {

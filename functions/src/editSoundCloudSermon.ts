@@ -1,6 +1,6 @@
 import handleError from './handleError';
 import { updateTrack } from './soundcloudClient';
-import { soundcloudAccessToken } from './soundcloudSecrets';
+import { soundcloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import firebaseAdmin from '../../firebase/firebaseAdmin';
 import { UploadToSoundCloudInputType } from './uploadToSoundCloud';
 import { logger } from 'firebase-functions/v2';
@@ -14,7 +14,7 @@ export interface EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA
 }
 
 const editOnSoundCloud = onCall(
-  { secrets: [soundcloudAccessToken] },
+  { secrets: soundcloudSecretsWithRuntimeAlerts },
   async (request: CallableRequest<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>): Promise<void> => {
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('permission-denied', 'You do not have the correct permissions for this action.');
