@@ -32,10 +32,15 @@ import {
 import {
   CreateSpeakerCallableInputType,
   CreateSpeakerCallableOutputType,
+  DeleteSpeakerCallableInputType,
+  DeleteSpeakerCallableOutputType,
 } from '../../functions/src/speakers/createSpeakerTypes';
 
 const createSpeakerCallable = createFunctionV2<CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType>(
   'createspeaker'
+);
+const deleteSpeakerCallable = createFunctionV2<DeleteSpeakerCallableInputType, DeleteSpeakerCallableOutputType>(
+  'deletespeaker'
 );
 
 const AdminSpeakers = () => {
@@ -190,8 +195,9 @@ const AdminSpeakers = () => {
   const handleCreateSpeaker = async (values: CreateSpeakerFormValues) => {
     const payload = buildCreateSpeakerPayload({
       name: values.name,
-      sermonCount: values.sermonCount,
       images: values.images,
+      shortDescription: values.shortDescription,
+      description: values.description,
       createSpeakerList: values.createSpeakerList,
     });
 
@@ -206,6 +212,16 @@ const AdminSpeakers = () => {
     if (shouldShowSpeakerListSuccess(response)) {
       setSpeakerListSuccessPopupOpen(true);
     }
+  };
+
+  const handleDeleteSpeaker = async (speakerId: string) => {
+    await deleteSpeakerCallable({
+      speakerId,
+      deleteAssociatedList: true,
+    });
+
+    setSpeakers((oldSpeakers) => oldSpeakers.filter((speaker) => speaker.id !== speakerId));
+    setTotalSpeakers((oldTotalSpeakers) => Math.max(0, oldTotalSpeakers - 1));
   };
 
   return (
@@ -228,6 +244,7 @@ const AdminSpeakers = () => {
         searchValue={speakerInput}
         onSearchChange={handleSearchChange}
         onAddSpeaker={() => setCreateSpeakerPopupOpen(true)}
+        onDeleteSpeaker={handleDeleteSpeaker}
         loading={speakersLoading}
       />
       <CreateSpeakerPopup

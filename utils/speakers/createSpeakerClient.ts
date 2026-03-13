@@ -13,26 +13,28 @@ export const SPEAKER_LIST_SUCCESS_INSTRUCTION =
 export interface BuildCreateSpeakerPayloadInput {
   name: string;
   images: ImageType[];
-  sermonCount?: number;
+  shortDescription?: string;
+  description?: string;
   createSpeakerList?: boolean;
 }
 
 export const buildCreateSpeakerPayload = ({
   name,
   images,
-  sermonCount,
+  shortDescription,
+  description,
   createSpeakerList,
 }: BuildCreateSpeakerPayloadInput): CreateSpeakerCallableInputType => {
+  const normalizedShortDescription = shortDescription?.trim();
+  const normalizedDescription = description?.trim();
   const payload: CreateSpeakerCallableInputType = {
     speaker: {
       name: name.trim(),
       images,
+      ...(normalizedShortDescription ? { shortDescription: normalizedShortDescription } : {}),
+      ...(normalizedDescription ? { description: normalizedDescription } : {}),
     },
   };
-
-  if (typeof sermonCount === 'number') {
-    payload.speaker.sermonCount = sermonCount;
-  }
 
   if (typeof createSpeakerList === 'boolean') {
     payload.createSpeakerList = createSpeakerList;

@@ -51,6 +51,9 @@ completed: 2026-03-10
 - Implemented shared speaker mutation handlers with duplicate-name checks, square-image enforcement, optional list creation/association, and optional associated-list delete behavior.
 - Wired lower-case callable exports (`createspeaker`, `updatespeaker`, `deletespeaker`) in `functions/src/index.ts`.
 - Added emulator-backed regression tests for auth, validation, CRUD state transitions, and optional speaker-list association behavior.
+- Updated `createspeaker` to create a Subsplash `speaker` tag first via `POST /tags/v1/tags` and persist the returned `tagId` on the Firestore speaker record.
+- Added optional create payload fields for `shortDescription` and `description`, mapped to Subsplash `short_description` and `description` on tag creation.
+- Updated `deletespeaker` to always delete Subsplash speaker tags and associated speaker lists (when present), remove speaker references from all sermon `speakers` arrays, and then delete the speaker Firestore record.
 
 ## Task Commits
 
@@ -73,6 +76,7 @@ Each task was committed atomically:
 - Kept all endpoint-specific validation in shared parser helpers so create/update/delete contracts remain consistent and reusable.
 - Preserved immutable speaker identifiers (`id`, `tagId`) during updates by deriving updated records from persisted speaker state.
 - Required explicit opt-in flags for list side effects (`createSpeakerList`, `deleteAssociatedList`) to avoid implicit list mutations.
+- Enforced create ordering so Subsplash tag creation succeeds before Firestore speaker creation, and added best-effort tag rollback on downstream create failures.
 
 ## Deviations from Plan
 

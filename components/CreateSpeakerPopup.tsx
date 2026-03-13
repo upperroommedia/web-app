@@ -14,13 +14,16 @@ import PopUp from './PopUp';
 
 export interface CreateSpeakerFormValues {
   name: string;
-  sermonCount?: number;
+  shortDescription?: string;
+  description?: string;
   images: ImageType[];
   createSpeakerList: boolean;
 }
 
 const emptyCreateSpeakerForm: CreateSpeakerFormValues = {
   name: '',
+  shortDescription: '',
+  description: '',
   images: [],
   createSpeakerList: false,
 };
@@ -92,8 +95,6 @@ const CreateSpeakerPopup = ({ open, setOpen, onSubmit }: CreateSpeakerPopupProps
   };
 
   const submitDisabled = submitting || normalizedName.length === 0 || !hasSquareImage;
-  const sermonCountValue = formValues.sermonCount ?? '';
-
   return (
     <PopUp
       title="Add Speaker"
@@ -123,16 +124,21 @@ const CreateSpeakerPopup = ({ open, setOpen, onSubmit }: CreateSpeakerPopupProps
           }}
         />
         <TextField
-          label="Sermon Count (optional)"
-          type="number"
-          value={sermonCountValue}
-          inputProps={{ min: 0 }}
+          label="Short Description (optional)"
+          value={formValues.shortDescription ?? ''}
+          fullWidth
           onChange={(event) => {
-            const value = event.target.value;
-            setFormValues((oldFormValues) => ({
-              ...oldFormValues,
-              sermonCount: value === '' ? undefined : Math.max(0, Number(value)),
-            }));
+            setFormValues((oldFormValues) => ({ ...oldFormValues, shortDescription: event.target.value }));
+          }}
+        />
+        <TextField
+          label="Description (optional)"
+          value={formValues.description ?? ''}
+          fullWidth
+          multiline
+          minRows={3}
+          onChange={(event) => {
+            setFormValues((oldFormValues) => ({ ...oldFormValues, description: event.target.value }));
           }}
         />
         <FormControlLabel

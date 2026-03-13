@@ -15,7 +15,9 @@ import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
 import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
+import Link from '@mui/material/Link';
 import SearchIcon from '@mui/icons-material/Search';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CircularProgress from '@mui/material/CircularProgress';
 import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
@@ -186,11 +188,15 @@ const SpeakerTable = (props: {
   searchValue: string;
   onSearchChange: (value: string) => void;
   onAddSpeaker: () => void;
+  onDeleteSpeaker: (speakerId: string) => Promise<void>;
   loading?: boolean;
 }) => {
   const [selectedSpeaker, setSelectedSpeaker] = useState<ISpeaker>();
 
   const [speakerDetailsPopup, setSpeakerDetailsPopup] = useState<boolean>(false);
+  const [deleteSpeakerPopup, setDeleteSpeakerPopup] = useState<boolean>(false);
+  const [deletingSpeaker, setDeletingSpeaker] = useState<boolean>(false);
+  const [deleteSpeakerError, setDeleteSpeakerError] = useState<string>('');
 
   // const [filters, setFilters] = useState<Filters>({
   //   none: true,
@@ -335,6 +341,38 @@ const SpeakerTable = (props: {
   const handleClick = (speaker: ISpeaker) => {
     setSelectedSpeaker(speaker);
     setSpeakerDetailsPopup(true);
+    setDeleteSpeakerError('');
+  };
+
+  const handleCloseSpeakerDetails = () => {
+    setSpeakerDetailsPopup(false);
+    setDeleteSpeakerPopup(false);
+    setDeletingSpeaker(false);
+    setDeleteSpeakerError('');
+  };
+
+  const handleOpenDeleteSpeakerPopup = () => {
+    setDeleteSpeakerError('');
+    setDeleteSpeakerPopup(true);
+  };
+
+  const handleDeleteSpeaker = async () => {
+    if (!selectedSpeaker || deletingSpeaker) {
+      return;
+    }
+
+    setDeletingSpeaker(true);
+    setDeleteSpeakerError('');
+    try {
+      await props.onDeleteSpeaker(selectedSpeaker.id);
+      setDeleteSpeakerPopup(false);
+      handleCloseSpeakerDetails();
+      setSelectedSpeaker(undefined);
+    } catch (error) {
+      setDeleteSpeakerError(error instanceof Error ? error.message : 'Unable to delete speaker.');
+    } finally {
+      setDeletingSpeaker(false);
+    }
   };
 
   // useEffect(() => {
@@ -444,7 +482,18 @@ const SpeakerTable = (props: {
         title="Speaker Details"
         open={speakerDetailsPopup}
         setOpen={setSpeakerDetailsPopup}
+        onClose={handleCloseSpeakerDetails}
         dialogProps={{ fullWidth: true, maxWidth: 'lg' }}
+        button={
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleOpenDeleteSpeakerPopup}
+            disabled={!selectedSpeaker}
+          >
+            Delete Speaker
+          </Button>
+        }
       >
         <div style={{ textAlign: 'center' }}>
           <h2>{selectedSpeaker?.name}</h2>
@@ -455,8 +504,53 @@ const SpeakerTable = (props: {
               newImageCallback={handleImageUpdate}
             />
           )}
+          {selectedSpeaker?.tagId && (
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-start' }}>
+              <Link
+                href={`https://dashboard.subsplash.com/-d/#/library/tags/speakers/${selectedSpeaker.tagId}`}
+                target="_blank"
+                rel="noreferrer"
+                sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}
+              >
+                <Typography variant="body2" fontWeight={600}>
+                  Subsplash Tag
+                </Typography>
+                <OpenInNewIcon fontSize="small" />
+              </Link>
+            </Box>
+          )}
         </div>
         {/* </div> */}
+      </DynamicPopUp>
+      <DynamicPopUp
+        title="Delete Speaker"
+        open={deleteSpeakerPopup}
+        setOpen={setDeleteSpeakerPopup}
+        button={
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleDeleteSpeaker}
+            disabled={!selectedSpeaker || deletingSpeaker}
+          >
+            {deletingSpeaker ? <CircularProgress size={20} color="inherit" /> : 'Delete'}
+          </Button>
+        }
+      >
+        <Box sx={{ minWidth: 320 }}>
+          <Typography sx={{ mb: 1.5 }}>
+            Delete <strong>{selectedSpeaker?.name || 'this speaker'}</strong>?
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            This will delete the speaker tag and associated list in Subsplash, remove this speaker from all sermons,
+            and delete the speaker record in Firebase.
+          </Typography>
+          {deleteSpeakerError && (
+            <Typography variant="body2" color="error" sx={{ mt: 2 }}>
+              {deleteSpeakerError}
+            </Typography>
+          )}
+        </Box>
       </DynamicPopUp>
     </>
   );

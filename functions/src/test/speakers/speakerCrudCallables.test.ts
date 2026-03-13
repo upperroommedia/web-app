@@ -1,4 +1,5 @@
 import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import axios from 'axios';
 import createspeaker from '../../speakers/createSpeaker';
 import updatespeaker from '../../speakers/updateSpeaker';
 import deletespeaker from '../../speakers/deleteSpeaker';
@@ -12,6 +13,7 @@ import {
   UpdateSpeakerCallableOutputType,
 } from '../../speakers/createSpeakerTypes';
 import { createNewSubsplashList } from '../../createNewSubsplashList';
+import { authenticateSubsplash } from '../../subsplashUtils';
 import { ImageType } from '../../../../types/Image';
 import { ListType, OverflowBehavior } from '../../../../types/List';
 
@@ -31,6 +33,18 @@ jest.mock('../../createNewSubsplashList', () => ({
   createNewSubsplashList: jest.fn(async () => ({ listId: 'subsplash-list-1' })),
 }));
 
+jest.mock('axios', () => jest.fn());
+
+jest.mock('../../subsplashUtils', () => {
+  const actual = jest.requireActual('../../subsplashUtils');
+  return {
+    ...actual,
+    authenticateSubsplash: jest.fn(async () => 'subsplash-token'),
+  };
+});
+
+jest.setTimeout(30000);
+
 type CallableAuthType = {
   uid?: string;
   token?: {
@@ -47,6 +61,8 @@ const firestore = firebaseAdmin.firestore();
 const speakersCollection = firestore.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
 const listsCollection = firestore.collection('lists').withConverter(firestoreAdminListConverter);
 const mockCreateNewSubsplashList = createNewSubsplashList as jest.MockedFunction<typeof createNewSubsplashList>;
+const mockAxios = axios as unknown as jest.MockedFunction<typeof axios>;
+const mockAuthenticateSubsplash = authenticateSubsplash as jest.MockedFunction<typeof authenticateSubsplash>;
 
 const createSpeakerHandler = createspeaker as unknown as (
   request: TestRequestType<CreateSpeakerCallableInputType>
@@ -104,26 +120,99 @@ describe('speaker CRUD callables', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCreateNewSubsplashList.mockResolvedValue({ listId: 'subsplash-list-1' });
+    mockAuthenticateSubsplash.mockResolvedValue('subsplash-token');
+    mockAxios.mockImplementation(async (...args: unknown[]) => {
+      const requestConfig = (typeof args[0] === 'string'
+        ? { ...(args[1] as Record<string, unknown> | undefined), url: args[0] }
+        : (args[0] as Record<string, unknown> | undefined)) ?? {};
+      const method = typeof requestConfig.method === 'string' ? requestConfig.method : undefined;
+      const url = typeof requestConfig.url === 'string' ? requestConfig.url : undefined;
+
+      if (url === 'https://core.subsplash.com/tags/v1/tags' && method === 'POST') {
+        return {
+          data: { id: 'subsplash-speaker-tag-1' },
+          status: 201,
+          statusText: 'Created',
+          headers: {},
+          config: requestConfig,
+        };
+      }
+
+      if (
+        typeof url === 'string' &&
+        url.startsWith('https://core.subsplash.com/tags/v1/tags/') &&
+        method === 'DELETE'
+      ) {
+        return {
+          data: {},
+          status: 204,
+          statusText: 'No Content',
+          headers: {},
+          config: requestConfig,
+        };
+      }
+
+      if (
+        typeof url === 'string' &&
+        url.startsWith('https://core.subsplash.com/builder/v1/lists/') &&
+        method === 'DELETE'
+      ) {
+        return {
+          data: {},
+          status: 204,
+          statusText: 'No Content',
+          headers: {},
+          config: requestConfig,
+        };
+      }
+
+      throw new Error(`Unexpected axios request in test: ${method ?? 'UNKNOWN'} ${url ?? 'UNKNOWN'}`);
+    });
     await clearCollection('speakers');
     await clearCollection('lists');
+    await clearCollection('sermons');
     await clearCollection('subsplashOperationKeys');
   });
 
   it('creates a speaker and persists expected fields', async () => {
+    const squareImage = createSquareImage();
     const result = await createSpeakerHandler({
       auth: defaultAuth,
       data: {
         speaker: {
           name: '  Speaker One  ',
-          images: [createSquareImage(), createWideImage()],
+          shortDescription: '  Short summary  ',
+          description: '  Long bio details.  ',
+          images: [squareImage, createWideImage()],
         },
       },
     });
 
     expect(result.status).toBe('success');
     expect(result.speaker.name).toBe('Speaker One');
+    expect(result.speaker.tagId).toBe('subsplash-speaker-tag-1');
     expect(result.speaker.sermonCount).toBe(0);
     expect(result.speakerListCreated).toBe(false);
+    expect(mockAuthenticateSubsplash).toHaveBeenCalled();
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        url: 'https://core.subsplash.com/tags/v1/tags',
+        data: {
+          app_key: '9XTSHD',
+          type: 'speaker',
+          title: 'Speaker One',
+          short_description: 'Short summary',
+          description: 'Long bio details.',
+          _embedded: {
+            'square-image': {
+              id: squareImage.id,
+              type: 'square',
+            },
+          },
+        },
+      })
+    );
 
     const persistedSpeaker = await speakersCollection.doc(result.speakerId).get();
     expect(persistedSpeaker.exists).toBe(true);
@@ -131,6 +220,7 @@ describe('speaker CRUD callables', () => {
       id: result.speakerId,
       name: 'Speaker One',
       sermonCount: 0,
+      tagId: 'subsplash-speaker-tag-1',
     });
   });
 
@@ -151,6 +241,7 @@ describe('speaker CRUD callables', () => {
     expect(result.speakerListCreated).toBe(true);
     expect(result.listId).toBeDefined();
     expect(result.listSubsplashId).toBe('subsplash-list-1');
+    expect(result.speaker.tagId).toBe('subsplash-speaker-tag-1');
     expect(mockCreateNewSubsplashList).toHaveBeenCalledWith({
       title: 'Speaker Two',
       images: [squareImage],
@@ -268,17 +359,26 @@ describe('speaker CRUD callables', () => {
       },
     });
     expect(deleteResult.status).toBe('success');
+    expect(deleteResult.tagDeleted).toBe(true);
+    expect(deleteResult.removedFromSermonsCount).toBe(0);
     expect(deleteResult.listDeleted).toBe(false);
     expect((await speakersCollection.doc('speaker-crud-1').get()).exists).toBe(false);
     expect((await listsCollection.doc('speaker-list-1').get()).exists).toBe(true);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/tags/v1/tags/speaker-tag-1',
+      })
+    );
   });
 
-  it('deletes associated list only when explicitly requested', async () => {
+  it('deletes subsplash tag/list and removes speaker references from sermon speaker arrays', async () => {
     await speakersCollection.doc('speaker-delete-list').set({
       id: 'speaker-delete-list',
       name: 'Speaker Delete',
       images: [createSquareImage('delete-square')],
       sermonCount: 1,
+      tagId: 'speaker-tag-delete',
       listId: 'speaker-list-delete',
     });
     await listsCollection.doc('speaker-list-delete').set({
@@ -290,21 +390,89 @@ describe('speaker CRUD callables', () => {
       createdAtMillis: Date.now(),
       updatedAtMillis: Date.now(),
       count: 0,
+      subsplashId: 'subsplash-list-delete',
+    });
+    await firestore.collection('sermons').doc('sermon-1').set({
+      id: 'sermon-1',
+      speakers: [
+        {
+          id: 'speaker-delete-list',
+          name: 'Speaker Delete',
+        },
+        {
+          id: 'speaker-keep',
+          name: 'Speaker Keep',
+        },
+      ],
+      editedAtMillis: 1,
+    });
+    await firestore.collection('sermons').doc('sermon-2').set({
+      id: 'sermon-2',
+      speakers: [
+        {
+          id: 'speaker-keep',
+          name: 'Speaker Keep',
+        },
+      ],
+      editedAtMillis: 1,
+    });
+    await firestore.collection('sermons').doc('sermon-3').set({
+      id: 'sermon-3',
+      speakers: [
+        {
+          name: 'Speaker Delete',
+        },
+      ],
+      editedAtMillis: 1,
     });
 
     const deleteResult = await deleteSpeakerHandler({
       auth: defaultAuth,
       data: {
         speakerId: 'speaker-delete-list',
-        deleteAssociatedList: true,
       },
     });
 
     expect(deleteResult.status).toBe('success');
+    expect(deleteResult.tagDeleted).toBe(true);
+    expect(deleteResult.removedFromSermonsCount).toBe(2);
     expect(deleteResult.listDeleted).toBe(true);
     expect(deleteResult.deletedListId).toBe('speaker-list-delete');
+    expect(deleteResult.deletedSubsplashListId).toBe('subsplash-list-delete');
     expect((await speakersCollection.doc('speaker-delete-list').get()).exists).toBe(false);
     expect((await listsCollection.doc('speaker-list-delete').get()).exists).toBe(false);
+
+    const sermonOne = (await firestore.collection('sermons').doc('sermon-1').get()).data() as { speakers: Array<{ id?: string; name?: string }> };
+    expect(sermonOne.speakers).toEqual([
+      {
+        id: 'speaker-keep',
+        name: 'Speaker Keep',
+      },
+    ]);
+
+    const sermonTwo = (await firestore.collection('sermons').doc('sermon-2').get()).data() as { speakers: Array<{ id?: string; name?: string }> };
+    expect(sermonTwo.speakers).toEqual([
+      {
+        id: 'speaker-keep',
+        name: 'Speaker Keep',
+      },
+    ]);
+
+    const sermonThree = (await firestore.collection('sermons').doc('sermon-3').get()).data() as { speakers: Array<{ id?: string; name?: string }> };
+    expect(sermonThree.speakers).toEqual([]);
+
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/tags/v1/tags/speaker-tag-delete',
+      })
+    );
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/builder/v1/lists/subsplash-list-delete',
+      })
+    );
   });
 
   it('rejects unauthorized callers for create, update, and delete', async () => {
@@ -328,6 +496,23 @@ describe('speaker CRUD callables', () => {
     ).rejects.toMatchObject({ code: 'unauthenticated' });
 
     await expect(
+      createSpeakerHandler({
+        auth: {
+          uid: 'publisher-1',
+          token: {
+            role: 'publisher',
+          },
+        },
+        data: {
+          speaker: {
+            name: 'Publisher Blocked Create',
+            images: [createSquareImage('publisher-create')],
+          },
+        },
+      })
+    ).rejects.toMatchObject({ code: 'unauthenticated' });
+
+    await expect(
       updateSpeakerHandler({
         auth: {
           uid: 'viewer-1',
@@ -338,6 +523,20 @@ describe('speaker CRUD callables', () => {
         data: {
           speakerId: 'speaker-unauthorized',
           patch: { name: 'Blocked' },
+        },
+      })
+    ).rejects.toMatchObject({ code: 'unauthenticated' });
+
+    await expect(
+      deleteSpeakerHandler({
+        auth: {
+          uid: 'publisher-1',
+          token: {
+            role: 'publisher',
+          },
+        },
+        data: {
+          speakerId: 'speaker-unauthorized',
         },
       })
     ).rejects.toMatchObject({ code: 'unauthenticated' });

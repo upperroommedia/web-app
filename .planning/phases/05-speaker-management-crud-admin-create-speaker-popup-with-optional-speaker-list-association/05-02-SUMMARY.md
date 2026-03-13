@@ -49,8 +49,10 @@ completed: 2026-03-10
 
 ## Accomplishments
 - Added a dedicated client helper for create-speaker payload shaping and response interpretation, including exact required success constants.
-- Implemented a reusable `CreateSpeakerPopup` that collects speaker info, supports image selection, optional list-association intent, and square-image-required validation.
+- Implemented a reusable `CreateSpeakerPopup` that collects speaker name, optional `shortDescription`, optional `description`, image selection, optional list-association intent, and square-image-required validation.
 - Wired `/admin/speakers` with a visible top `Add Speaker` action, create flow submission via `createFunctionV2('createspeaker')`, local speaker table refresh, and the required list-created success popup content.
+- Removed user-controlled create-time `sermonCount` input; speaker create now defaults this server-side.
+- Added delete affordance inside speaker details with an explicit confirmation popup and wired it to `deletespeaker`, removing deleted speakers from the admin table state.
 
 ## Task Commits
 
@@ -72,6 +74,7 @@ Each task was committed atomically:
 ## Decisions Made
 - Centralized required success copy/link constants in one helper and imported them into page UI to avoid string drift.
 - Kept callable invocation in the page container and popup as a form-only component to preserve separation of concerns.
+- Kept optional speaker descriptions UI-only for create payload passthrough and delegated persistence to Subsplash tag metadata.
 
 ## Deviations from Plan
 

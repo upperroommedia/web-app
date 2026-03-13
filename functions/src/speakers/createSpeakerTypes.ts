@@ -4,8 +4,8 @@ import { ISpeaker } from '../../../types/Speaker';
 export interface CreateSpeakerPayloadType {
   name: string;
   images: ImageType[];
-  sermonCount?: number;
-  tagId?: string;
+  shortDescription?: string;
+  description?: string;
 }
 
 export interface CreateSpeakerCallableInputType {
@@ -55,6 +55,8 @@ export interface DeleteSpeakerCallableInputType {
 export interface DeleteSpeakerCallableOutputType {
   status: 'success';
   speakerId: string;
+  tagDeleted: boolean;
+  removedFromSermonsCount: number;
   listDeleted: boolean;
   deletedListId?: string;
   deletedSubsplashListId?: string;

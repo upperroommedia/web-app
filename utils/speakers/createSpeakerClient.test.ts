@@ -34,7 +34,8 @@ describe('createSpeakerClient', () => {
     const squareImage = createSquareImage();
     const payload = buildCreateSpeakerPayload({
       name: '  New Speaker  ',
-      sermonCount: 4,
+      shortDescription: '  Short desc  ',
+      description: '  Long description  ',
       images: [squareImage],
       createSpeakerList: true,
     });
@@ -42,7 +43,8 @@ describe('createSpeakerClient', () => {
     expect(payload).toEqual({
       speaker: {
         name: 'New Speaker',
-        sermonCount: 4,
+        shortDescription: 'Short desc',
+        description: 'Long description',
         images: [squareImage],
       },
       createSpeakerList: true,
@@ -54,6 +56,8 @@ describe('createSpeakerClient', () => {
     const squareImage = createSquareImage();
     const payload = buildCreateSpeakerPayload({
       name: 'No Optional Fields',
+      shortDescription: '   ',
+      description: '',
       images: [squareImage],
     });
 

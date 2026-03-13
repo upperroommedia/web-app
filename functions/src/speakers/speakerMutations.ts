@@ -28,6 +28,18 @@ interface PreparedSpeakerListType {
   list: List;
 }
 
+interface CreateSubsplashSpeakerTagInputType {
+  title: string;
+  squareImage: ImageType;
+  shortDescription?: string;
+  description?: string;
+  operationKey?: string;
+}
+
+interface CreateSubsplashSpeakerTagOutputType {
+  tagId: string;
+}
+
 const normalizeOptionalString = (value: unknown): string | undefined => {
   if (value === undefined || value === null) {
     return undefined;
@@ -110,16 +122,15 @@ export const parseCreateSpeakerInput = (input: unknown): CreateSpeakerCallableIn
   }
 
   const operationKey = normalizeOptionalString(payload.operationKey);
-  const tagId = normalizeOptionalString(speakerRecord.tagId);
-  const sermonCountValue = speakerRecord.sermonCount;
-  const sermonCount = typeof sermonCountValue === 'number' ? sermonCountValue : 0;
+  const shortDescription = normalizeOptionalString(speakerRecord.shortDescription);
+  const description = normalizeOptionalString(speakerRecord.description);
 
   return {
     speaker: {
       name,
       images: images ?? [],
-      sermonCount,
-      ...(tagId ? { tagId } : {}),
+      ...(shortDescription ? { shortDescription } : {}),
+      ...(description ? { description } : {}),
     },
     createSpeakerList,
     ...(associatedListId ? { associatedListId } : {}),
@@ -268,6 +279,20 @@ const prepareSpeakerList = async (
   };
 };
 
+const normalizeSlug = (value: string): string => {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+};
+
+const getCreateSpeakerTagLockKey = (title: string): string => {
+  return `tag:create-speaker-${normalizeSlug(title) || 'untitled'}`;
+};
+
 const getSubsplashErrorCode = (payload: unknown): string | undefined => {
   if (!payload || typeof payload !== 'object') {
     return undefined;
@@ -285,6 +310,40 @@ const getSubsplashErrorCode = (payload: unknown): string | undefined => {
 
   const code = (firstError as { code?: unknown }).code;
   return typeof code === 'string' ? code : undefined;
+};
+
+const createSubsplashSpeakerTag = async (
+  input: CreateSubsplashSpeakerTagInputType
+): Promise<CreateSubsplashSpeakerTagOutputType> => {
+  const runMutation = async (): Promise<CreateSubsplashSpeakerTagOutputType> => {
+    const url = 'https://core.subsplash.com/tags/v1/tags';
+    const payload = {
+      app_key: '9XTSHD',
+      type: 'speaker',
+      title: input.title,
+      ...(input.shortDescription ? { short_description: input.shortDescription } : {}),
+      ...(input.description ? { description: input.description } : {}),
+      _embedded: {
+        'square-image': {
+          id: input.squareImage.id,
+          type: 'square',
+        },
+      },
+    };
+
+    const config = createAxiosConfig(url, await authenticateSubsplash(), 'POST', payload);
+    const response = (await axios(config)).data as { id?: unknown };
+    const tagId = typeof response.id === 'string' ? response.id : '';
+    if (!tagId) {
+      throw new HttpsError('internal', 'Subsplash did not return a tag id.');
+    }
+
+    return { tagId };
+  };
+
+  return withSubsplashLocks([getCreateSpeakerTagLockKey(input.title)], runMutation, {
+    ...(input.operationKey ? { operationKey: input.operationKey } : {}),
+  });
 };
 
 const deleteSubsplashListRemote = async (subsplashListId: string, operationKey?: string): Promise<void> => {
@@ -317,6 +376,113 @@ const deleteSubsplashListRemote = async (subsplashListId: string, operationKey?:
   }
 };
 
+const deleteSubsplashTagRemote = async (subsplashTagId: string, operationKey?: string): Promise<void> => {
+  const runMutation = async (): Promise<void> => {
+    const url = `https://core.subsplash.com/tags/v1/tags/${subsplashTagId}`;
+    const config = createAxiosConfig(url, await authenticateSubsplash(), 'DELETE');
+    await axios(config);
+  };
+
+  const runLockedMutation = async (): Promise<void> => {
+    return withSubsplashLocks([`tag:${subsplashTagId}`], runMutation, {
+      ...(operationKey ? { operationKey } : {}),
+    });
+  };
+
+  try {
+    if (operationKey) {
+      await withIdempotency(operationKey, runLockedMutation);
+      return;
+    }
+    await runLockedMutation();
+  } catch (error) {
+    if (isAxiosError(error)) {
+      const responseCode = getSubsplashErrorCode(error.response?.data);
+      if (error.response?.status === 404 || responseCode === 'resource_not_found') {
+        return;
+      }
+    }
+    throw error;
+  }
+};
+
+const matchesSpeakerReference = (candidate: unknown, targetSpeaker: ISpeaker, normalizedTargetName: string): boolean => {
+  if (!candidate || typeof candidate !== 'object') {
+    return false;
+  }
+
+  const candidateRecord = candidate as { id?: unknown; tagId?: unknown; name?: unknown };
+
+  if (typeof candidateRecord.id === 'string' && candidateRecord.id === targetSpeaker.id) {
+    return true;
+  }
+
+  if (
+    targetSpeaker.tagId &&
+    typeof candidateRecord.tagId === 'string' &&
+    candidateRecord.tagId === targetSpeaker.tagId
+  ) {
+    return true;
+  }
+
+  if (
+    typeof candidateRecord.name === 'string' &&
+    normalizeSpeakerNameForDuplicateCheck(candidateRecord.name) === normalizedTargetName
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const removeSpeakerFromSermons = async (targetSpeaker: ISpeaker): Promise<number> => {
+  const sermonsSnapshot = await firestore.collection('sermons').get();
+  const normalizedTargetName = normalizeSpeakerNameForDuplicateCheck(targetSpeaker.name);
+  const maxBatchWrites = 400;
+
+  let updatedSermons = 0;
+  let pendingWrites = 0;
+  let batch = firestore.batch();
+
+  const commitBatchIfNeeded = async (): Promise<void> => {
+    if (pendingWrites === 0) {
+      return;
+    }
+    await batch.commit();
+    batch = firestore.batch();
+    pendingWrites = 0;
+  };
+
+  for (const sermonDoc of sermonsSnapshot.docs) {
+    const sermonData = sermonDoc.data() as { speakers?: unknown[] };
+    if (!Array.isArray(sermonData.speakers) || sermonData.speakers.length === 0) {
+      continue;
+    }
+
+    const filteredSpeakers = sermonData.speakers.filter(
+      (candidate) => !matchesSpeakerReference(candidate, targetSpeaker, normalizedTargetName)
+    );
+
+    if (filteredSpeakers.length === sermonData.speakers.length) {
+      continue;
+    }
+
+    updatedSermons += 1;
+    batch.update(sermonDoc.ref, {
+      speakers: filteredSpeakers,
+      editedAtMillis: Date.now(),
+    });
+    pendingWrites += 1;
+
+    if (pendingWrites >= maxBatchWrites) {
+      await commitBatchIfNeeded();
+    }
+  }
+
+  await commitBatchIfNeeded();
+  return updatedSermons;
+};
+
 export const createSpeakerMutation = async (
   input: CreateSpeakerCallableInputType
 ): Promise<CreateSpeakerCallableOutputType> => {
@@ -329,41 +495,61 @@ export const createSpeakerMutation = async (
       await assertListExists(input.associatedListId);
     }
 
-    let preparedList: PreparedSpeakerListType | undefined;
-    if (input.createSpeakerList) {
-      preparedList = await prepareSpeakerList(
-        normalizedName,
-        squareImage,
-        scopeOperationKey(input.operationKey, 'create-speaker-list')
-      );
-    }
-
-    const speakerRef = speakersCollection.doc();
-    const associatedListId = preparedList?.list.id ?? input.associatedListId;
-    const speaker: ISpeaker = {
-      id: speakerRef.id,
-      name: normalizedName,
-      images: input.speaker.images,
-      sermonCount: input.speaker.sermonCount ?? 0,
-      ...(input.speaker.tagId ? { tagId: input.speaker.tagId } : {}),
-      ...(associatedListId ? { listId: associatedListId } : {}),
-    };
-
-    await firestore.runTransaction(async (transaction) => {
-      transaction.set(speakerRef, speaker);
-      if (preparedList) {
-        transaction.set(preparedList.listRef, preparedList.list);
-      }
+    const createdTag = await createSubsplashSpeakerTag({
+      title: normalizedName,
+      squareImage,
+      shortDescription: input.speaker.shortDescription,
+      description: input.speaker.description,
+      operationKey: scopeOperationKey(input.operationKey, 'create-speaker-tag'),
     });
 
-    return {
-      status: 'success',
-      speakerId: speaker.id,
-      speaker,
-      speakerListCreated: Boolean(preparedList),
-      ...(associatedListId ? { listId: associatedListId } : {}),
-      ...(preparedList?.list.subsplashId ? { listSubsplashId: preparedList.list.subsplashId } : {}),
-    };
+    let preparedList: PreparedSpeakerListType | undefined;
+    try {
+      if (input.createSpeakerList) {
+        preparedList = await prepareSpeakerList(
+          normalizedName,
+          squareImage,
+          scopeOperationKey(input.operationKey, 'create-speaker-list')
+        );
+      }
+
+      const speakerRef = speakersCollection.doc();
+      const associatedListId = preparedList?.list.id ?? input.associatedListId;
+      const speaker: ISpeaker = {
+        id: speakerRef.id,
+        name: normalizedName,
+        images: input.speaker.images,
+        sermonCount: 0,
+        tagId: createdTag.tagId,
+        ...(associatedListId ? { listId: associatedListId } : {}),
+      };
+
+      await firestore.runTransaction(async (transaction) => {
+        transaction.set(speakerRef, speaker);
+        if (preparedList) {
+          transaction.set(preparedList.listRef, preparedList.list);
+        }
+      });
+
+      return {
+        status: 'success',
+        speakerId: speaker.id,
+        speaker,
+        speakerListCreated: Boolean(preparedList),
+        ...(associatedListId ? { listId: associatedListId } : {}),
+        ...(preparedList?.list.subsplashId ? { listSubsplashId: preparedList.list.subsplashId } : {}),
+      };
+    } catch (error) {
+      try {
+        await deleteSubsplashTagRemote(
+          createdTag.tagId,
+          scopeOperationKey(input.operationKey, `rollback-delete-tag-${createdTag.tagId}`)
+        );
+      } catch {
+        // preserve the original failure from speaker creation path
+      }
+      throw error;
+    }
   });
 };
 
@@ -454,10 +640,22 @@ export const deleteSpeakerMutation = async (
     if (!existingSpeaker) {
       throw new HttpsError('not-found', `Speaker ${input.speakerId} does not exist.`);
     }
+
+    let tagDeleted = false;
+    if (existingSpeaker.tagId) {
+      await deleteSubsplashTagRemote(
+        existingSpeaker.tagId,
+        scopeOperationKey(input.operationKey, `delete-tag-${existingSpeaker.tagId}`)
+      );
+      tagDeleted = true;
+    }
+
     let deletedListId: string | undefined;
     let deletedSubsplashListId: string | undefined;
+    let listRefToDelete: DocumentReference<List> | undefined;
+    let listDeleted = false;
 
-    if (input.deleteAssociatedList && existingSpeaker.listId) {
+    if (existingSpeaker.listId) {
       const listRef = listsCollection.doc(existingSpeaker.listId);
       const listSnapshot = await listRef.get();
       if (listSnapshot.exists) {
@@ -473,28 +671,26 @@ export const deleteSpeakerMutation = async (
           );
           deletedSubsplashListId = list.subsplashId;
         }
-
-        const batch = firestore.batch();
-        batch.delete(speakerRef);
-        batch.delete(listRef);
-        await batch.commit();
-
-        return {
-          status: 'success',
-          speakerId: existingSpeaker.id,
-          listDeleted: true,
-          ...(deletedListId ? { deletedListId } : {}),
-          ...(deletedSubsplashListId ? { deletedSubsplashListId } : {}),
-        };
+        listRefToDelete = listRef;
+        listDeleted = true;
       }
     }
 
-    await speakerRef.delete();
+    const removedFromSermonsCount = await removeSpeakerFromSermons(existingSpeaker);
+
+    const deleteBatch = firestore.batch();
+    deleteBatch.delete(speakerRef);
+    if (listRefToDelete) {
+      deleteBatch.delete(listRefToDelete);
+    }
+    await deleteBatch.commit();
 
     return {
       status: 'success',
       speakerId: existingSpeaker.id,
-      listDeleted: false,
+      tagDeleted,
+      removedFromSermonsCount,
+      listDeleted,
       ...(deletedListId ? { deletedListId } : {}),
       ...(deletedSubsplashListId ? { deletedSubsplashListId } : {}),
     };
