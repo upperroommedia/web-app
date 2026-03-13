@@ -14,6 +14,7 @@ import {
 interface AudioTrimmerProps {
   url: string;
   trimStart: number;
+  trimDuration?: number;
   setTrimStart: (trimStartTime: number) => void;
   setTrimDuration: (durationSeconds: number) => void;
   setHasTrimmed?: Dispatch<SetStateAction<boolean>>;
@@ -21,12 +22,14 @@ interface AudioTrimmerProps {
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   url,
-  trimStart: _propTrimStart,
+  trimStart,
+  trimDuration,
   setTrimStart,
   setTrimDuration,
   setHasTrimmed,
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const initialTrimEnd = trimDuration && trimDuration > 0 ? trimStart + trimDuration : undefined;
 
   // Initialize audio element
   useEffect(() => {
@@ -48,6 +51,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   // Use the sync hook
   const { seek, togglePlayPause } = useAudioTrimmerSync(audioRef, {
     autoPauseAtEnd: true,
+    initialTrimStart: trimStart,
+    initialTrimEnd,
   });
 
   // Sync store changes to parent props
@@ -65,10 +70,12 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   // Track if user has trimmed
   useEffect(() => {
     if (setHasTrimmed && duration > 0) {
-      const hasTrimmed = storeTrimStart !== 0 || storeTrimEnd !== duration;
+      const effectiveInitialTrimEnd = initialTrimEnd ?? duration;
+      const hasTrimmed =
+        Math.abs(storeTrimStart - trimStart) > 0.05 || Math.abs(storeTrimEnd - effectiveInitialTrimEnd) > 0.05;
       setHasTrimmed(hasTrimmed);
     }
-  }, [storeTrimStart, storeTrimEnd, duration, setHasTrimmed]);
+  }, [duration, initialTrimEnd, setHasTrimmed, storeTrimEnd, storeTrimStart, trimStart]);
 
   // Reset store when component unmounts
   useEffect(() => {

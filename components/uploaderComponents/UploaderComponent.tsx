@@ -145,7 +145,7 @@ const Uploader = (props: UploaderProps) => {
       return new Date().getFullYear();
     }
   });
-  const [hasTrimmed, setHasTrimmed] = useState(false);
+  const [_hasTrimmed, setHasTrimmed] = useState(false);
 
   // Series selection (sermon can only be in one series)
   const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
@@ -684,6 +684,15 @@ const Uploader = (props: UploaderProps) => {
     return showAudioTrimmerBoolean(props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash);
   }, [props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash]);
 
+  const audioSettingsChanged = useMemo(() => {
+    if (!props.existingSermon) return false;
+
+    return (
+      Math.abs(sermon.sourceStartTime - props.existingSermon.sourceStartTime) > 0.05 ||
+      Math.abs(sermon.durationSeconds - props.existingSermon.durationSeconds) > 0.05
+    );
+  }, [props.existingSermon, sermon.durationSeconds, sermon.sourceStartTime]);
+
   return (
     <>
       <Head>
@@ -907,6 +916,7 @@ const Uploader = (props: UploaderProps) => {
                   <AudioTrimmerComponent
                     url={props.existingSermonUrl.url}
                     trimStart={sermon.sourceStartTime}
+                    trimDuration={sermon.durationSeconds}
                     setTrimStart={setTrimStartTime}
                     setTrimDuration={setTrimDuration}
                     clearAudioTrimmer={clearAudioTrimmer}
@@ -938,38 +948,51 @@ const Uploader = (props: UploaderProps) => {
                     }
                     setInvalidFormMessage(undefined);
                     setIsEditing(true);
-                    const promises = [];
-                    const pendingSermon = sermon;
-                    if (hasTrimmed) {
-                      pendingSermon.status.audioStatus = sermonStatusType.PENDING;
-                      pendingSermon.status.message = '';
-                      const generateAddIntroOutroTask =
-                        createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-                      const { introRef, outroRef } = await getIntroAndOutro(sermon);
-                      const data: AddIntroOutroInputType = {
-                        id: sermon.id,
-                        storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
-                        startTime: sermon.sourceStartTime,
-                        duration: sermon.durationSeconds,
-                        deleteOriginal: false,
-                        skipTranscode: true,
-                        introUrl: introRef,
-                        outroUrl: outroRef,
-                      };
-                      promises.push(generateAddIntroOutroTask(data));
-                      promises.push(editSermon(pendingSermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
+                    try {
+                      const promises = [];
+
+                      if (audioSettingsChanged) {
+                        const pendingSermon = {
+                          ...sermon,
+                          status: {
+                            ...sermon.status,
+                            audioStatus: sermonStatusType.PENDING,
+                            message: '',
+                          },
+                        };
+                        const generateAddIntroOutroTask =
+                          createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
+                        const { introRef, outroRef } = await getIntroAndOutro(sermon);
+                        const data: AddIntroOutroInputType = {
+                          id: sermon.id,
+                          storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
+                          startTime: sermon.sourceStartTime,
+                          duration: sermon.durationSeconds,
+                          deleteOriginal: false,
+                          skipTranscode: true,
+                          introUrl: introRef,
+                          outroUrl: outroRef,
+                        };
+                        promises.push(generateAddIntroOutroTask(data));
+                        promises.push(
+                          editSermon(pendingSermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId })
+                        );
+                      } else {
+                        promises.push(editSermon(sermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
+                      }
+
                       await Promise.all(promises);
+                      // Mark as intentional navigation to bypass unsaved changes warning
+                      isIntentionalNavigation.current = true;
+                      props.setEditFormOpen?.(false);
+                    } finally {
+                      setIsEditing(false);
                     }
-                    promises.push(editSermon(sermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
-                    setIsEditing(false);
-                    // Mark as intentional navigation to bypass unsaved changes warning
-                    isIntentionalNavigation.current = true;
-                    props.setEditFormOpen?.(false);
                   }}
                   disabled={
                     sermonsEqual(props.existingSermon, sermon) &&
                     listEqual(props.existingList, sermonList) &&
-                    !hasTrimmed
+                    !audioSettingsChanged
                   }
                   variant="contained"
                 >

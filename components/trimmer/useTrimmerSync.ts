@@ -12,6 +12,10 @@ interface UseTrimmerSyncOptions {
   autoPauseAtEnd?: boolean;
   /** Whether to loop within trim region */
   loopWithinTrim?: boolean;
+  /** Optional initial trim start for existing media. */
+  initialTrimStart?: number;
+  /** Optional initial trim end for existing media. */
+  initialTrimEnd?: number;
 }
 
 /**
@@ -22,7 +26,7 @@ export function useAudioTrimmerSync(
   audioRef: React.RefObject<HTMLAudioElement | null>,
   options: UseTrimmerSyncOptions = {}
 ) {
-  const { autoPauseAtEnd = true, loopWithinTrim = false } = options;
+  const { autoPauseAtEnd = true, loopWithinTrim = false, initialTrimStart = 0, initialTrimEnd } = options;
 
   // Only subscribe to state the caller needs for rendering. currentTime/lastChangeSource
   // are used for store→audio sync via subscribe() below so the hook (and parent) don't
@@ -45,13 +49,17 @@ export function useAudioTrimmerSync(
   const handleLoadedMetadata = useCallback(() => {
     if (audioRef.current && !initializedRef.current) {
       initializedRef.current = true;
+      const mediaDuration = audioRef.current.duration;
+      const clampedTrimStart = Math.max(0, Math.min(initialTrimStart, mediaDuration));
+      const requestedTrimEnd = initialTrimEnd ?? mediaDuration;
+      const clampedTrimEnd = Math.max(clampedTrimStart + 0.1, Math.min(requestedTrimEnd, mediaDuration));
       initialize({
-        duration: audioRef.current.duration,
-        trimStart: 0,
-        trimEnd: audioRef.current.duration,
+        duration: mediaDuration,
+        trimStart: clampedTrimStart,
+        trimEnd: clampedTrimEnd,
       });
     }
-  }, [audioRef, initialize]);
+  }, [audioRef, initialTrimEnd, initialTrimStart, initialize]);
 
   // Handle time updates from audio element
   const handleTimeUpdate = useCallback(() => {
