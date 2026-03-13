@@ -42,6 +42,7 @@ import CollectionsIcon from '@mui/icons-material/Collections';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import UploadIcon from '@mui/icons-material/Upload';
 import AddIcon from '@mui/icons-material/Add';
@@ -66,6 +67,7 @@ import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../..
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
 import { AddtoListInputType, AddToListOutputType } from '../../../functions/src/addToList';
 import { RemoveFromListInputType, RemoveFromListOutputType } from '../../../functions/src/removeFromList';
+import { AddIntroOutroInputType } from '../../../functions/src/addIntroOutro/types';
 import { CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType } from '../../../functions/src/createNewSubsplashList';
 import { AddToSeriesInputType, AddToSeriesOutputType } from '../../../functions/src/addToSeries';
 import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../../../functions/src/removeFromSeries';
@@ -82,6 +84,7 @@ import database, { ref as dbRef } from '../../../firebase/database';
 import UploadStatusList from '../../../components/UploadStatusList';
 import LinearProgress from '@mui/material/LinearProgress';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
+import { getIntroAndOutro } from '../../../utils/uploadUtils';
 
 const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
   const busyDetails = parseLockBusyDetails(error);
@@ -124,6 +127,7 @@ const SermonDetailsPage = () => {
   const [showStatusTooltip, setShowStatusTooltip] = useState(false);
   const [deletePopup, setDeletePopup] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRetryingProcessing, setIsRetryingProcessing] = useState(false);
 
   // Publishing state
   const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
@@ -519,6 +523,44 @@ const SermonDetailsPage = () => {
       setIsUploadingToSubsplash(false);
     }
   }, [sermon]);
+
+  const retryProcessing = useCallback(async () => {
+    if (!sermon || isRetryingProcessing) return;
+
+    setIsRetryingProcessing(true);
+    try {
+      const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
+      const { introRef, outroRef } = await getIntroAndOutro(sermon);
+      const payload: AddIntroOutroInputType = sermon.youtubeUrl
+        ? {
+            id: sermon.id,
+            youtubeUrl: sermon.youtubeUrl,
+            startTime: sermon.sourceStartTime,
+            duration: sermon.durationSeconds,
+            deleteOriginal: true,
+            introUrl: introRef,
+            outroUrl: outroRef,
+          }
+        : {
+            id: sermon.id,
+            storageFilePath: `sermons/${sermon.id}`,
+            startTime: sermon.sourceStartTime,
+            duration: sermon.durationSeconds,
+            deleteOriginal: true,
+            introUrl: introRef,
+            outroUrl: outroRef,
+          };
+
+      await generateAddIntroOutroTask(payload, {
+        metadata: { operationKey: createOperationKey('sermon-details-retry-processing', sermon.id) },
+      });
+    } catch (retryError) {
+      console.error('Error retrying sermon processing:', retryError);
+      alert(getErrorMessage(retryError, 'Failed to retry sermon processing'));
+    } finally {
+      setIsRetryingProcessing(false);
+    }
+  }, [isRetryingProcessing, sermon]);
 
   const publishToSeriesForSeries = useCallback(async (targetSeries: Series) => {
     if (!sermon) {
@@ -974,26 +1016,43 @@ const SermonDetailsPage = () => {
                 {statusInfo && sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
                   <Box sx={{ mb: 2 }}>
                     {sermon.status.audioStatus === sermonStatusType.ERROR ? (
-                      <Tooltip
-                        open={showStatusTooltip}
-                        onOpen={() => setShowStatusTooltip(true)}
-                        onClose={() => setShowStatusTooltip(false)}
-                        placement="top"
-                        title={sermon.status.message || 'Error'}
-                      >
-                        <Box
-                          onClick={() => setShowStatusTooltip((previousOpen) => !previousOpen)}
-                          sx={{ display: 'inline-flex', cursor: 'pointer' }}
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Tooltip
+                          open={showStatusTooltip}
+                          onOpen={() => setShowStatusTooltip(true)}
+                          onClose={() => setShowStatusTooltip(false)}
+                          placement="top"
+                          title={sermon.status.message || 'Error'}
                         >
-                          <Chip
-                            icon={statusInfo.icon}
-                            label={statusInfo.label}
-                            size="small"
-                            color={statusInfo.color}
-                            variant="outlined"
-                          />
-                        </Box>
-                      </Tooltip>
+                          <Box
+                            onClick={() => setShowStatusTooltip((previousOpen) => !previousOpen)}
+                            sx={{ display: 'inline-flex', cursor: 'pointer' }}
+                          >
+                            <Chip
+                              icon={statusInfo.icon}
+                              label={statusInfo.label}
+                              size="small"
+                              color={statusInfo.color}
+                              variant="outlined"
+                            />
+                          </Box>
+                        </Tooltip>
+                        <Tooltip title="Retry processing">
+                          <span>
+                            <Button
+                              size="small"
+                              color="error"
+                              variant="text"
+                              startIcon={isRetryingProcessing ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />}
+                              onClick={retryProcessing}
+                              disabled={isRetryingProcessing}
+                              sx={{ minWidth: 'auto', px: 1, py: 0.25 }}
+                            >
+                              Retry
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      </Stack>
                     ) : (
                       <Chip
                         icon={statusInfo.icon}
