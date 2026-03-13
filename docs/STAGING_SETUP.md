@@ -64,7 +64,6 @@ Notes:
 - `SUBSPLASH_EMAIL` and `SUBSPLASH_PASSWORD` are consumed by Subsplash publish/sync functions and related triggers.
 - `ALGOLIA_SEARCH_API_KEY` is consumed by `generateSecuredApiKey`.
 - `SOUNDCLOUD_CLIENT_ID` and `SOUNDCLOUD_CLIENT_SECRET` are consumed by the SoundCloud OAuth bootstrap and automatic token refresh flow.
-- `SOUNDCLOUD_REFRESH_TOKEN` is optional and only needed if you want a bootstrap refresh-token fallback before completing UI auth from Admin > Advanced.
 - App Hosting secrets in `apphosting.yaml` do not automatically flow into Cloud Functions.
 
 ## 3c. Enable Google Sign-In in staging Auth (one-time)

@@ -71,7 +71,6 @@ export type ExchangeSoundCloudAuthorizationCodeResult = {
 
 const soundcloudClientIdSecret = defineSecret('SOUNDCLOUD_CLIENT_ID');
 const soundcloudClientSecretSecret = defineSecret('SOUNDCLOUD_CLIENT_SECRET');
-const soundcloudRefreshTokenSecret = defineSecret('SOUNDCLOUD_REFRESH_TOKEN');
 
 const soundcloudAuthStateRef = firebaseAdmin
   .firestore()
@@ -90,7 +89,7 @@ const getConfiguredClientSecret = (): string | null =>
   readConfiguredValue(soundcloudClientSecretSecret.value()) ?? readConfiguredValue(process.env.SOUNDCLOUD_CLIENT_SECRET);
 
 const getBootstrapRefreshToken = (): string | null =>
-  readConfiguredValue(soundcloudRefreshTokenSecret.value()) ?? readConfiguredValue(process.env.SOUNDCLOUD_REFRESH_TOKEN);
+  readConfiguredValue(process.env.SOUNDCLOUD_REFRESH_TOKEN);
 
 const nowMillis = (): number => Date.now();
 
@@ -443,8 +442,7 @@ export const runWithSoundCloudAccessToken = async <T>(operation: (accessToken: s
 export const soundcloudSecretsWithRuntimeAlerts = [
   soundcloudClientIdSecret,
   soundcloudClientSecretSecret,
-  soundcloudRefreshTokenSecret,
   runtimeAlertRecipientsSecret,
 ];
 
-export const soundcloudOAuthSecrets = [soundcloudClientIdSecret, soundcloudClientSecretSecret, soundcloudRefreshTokenSecret];
+export const soundcloudOAuthSecrets = [soundcloudClientIdSecret, soundcloudClientSecretSecret];
