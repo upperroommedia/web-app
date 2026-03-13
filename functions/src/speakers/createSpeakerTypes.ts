@@ -27,6 +27,8 @@ export interface CreateSpeakerCallableOutputType {
 export interface UpdateSpeakerPatchType {
   name?: string;
   images?: ImageType[];
+  shortDescription?: string | null;
+  description?: string | null;
   associatedListId?: string | null;
 }
 
@@ -34,6 +36,7 @@ export interface UpdateSpeakerCallableInputType {
   speakerId: string;
   patch: UpdateSpeakerPatchType;
   createSpeakerList?: boolean;
+  deleteAssociatedList?: boolean;
   operationKey?: string;
 }
 

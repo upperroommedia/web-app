@@ -72,12 +72,18 @@ export async function createNewSubsplashList(input: CreateNewSubsplashListInputT
       type: 'standard',
       _embedded: input.images
         ? {
-            images: input.images.map((image) => {
-              return {
-                id: image.id,
-                type: image.type,
-              };
-            }),
+            images: input.images
+              .map((image) => {
+                const remoteImageId = image.subsplashId || image.id;
+                if (!remoteImageId) {
+                  return undefined;
+                }
+                return {
+                  id: remoteImageId,
+                  type: image.type,
+                };
+              })
+              .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined),
           }
         : {},
     };

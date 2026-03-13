@@ -116,6 +116,17 @@ const createWideImage = (id = 'img-wide'): ImageType => ({
   dateAddedMillis: Date.now(),
 });
 
+const createBannerImage = (id = 'img-banner'): ImageType => ({
+  id,
+  type: 'banner',
+  size: 'large',
+  width: 480,
+  height: 173,
+  downloadLink: `https://example.com/${id}.jpg`,
+  name: id,
+  dateAddedMillis: Date.now(),
+});
+
 describe('speaker CRUD callables', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -224,14 +235,16 @@ describe('speaker CRUD callables', () => {
     });
   });
 
-  it('creates and associates a speaker list using the square image payload', async () => {
+  it('creates and associates a speaker list using all selected speaker images', async () => {
     const squareImage = createSquareImage('speaker-square');
+    const wideImage = createWideImage('speaker-wide');
+    const bannerImage = createBannerImage('speaker-banner');
     const result = await createSpeakerHandler({
       auth: defaultAuth,
       data: {
         speaker: {
           name: 'Speaker Two',
-          images: [createWideImage(), squareImage],
+          images: [wideImage, bannerImage, squareImage],
         },
         createSpeakerList: true,
       },
@@ -244,7 +257,7 @@ describe('speaker CRUD callables', () => {
     expect(result.speaker.tagId).toBe('subsplash-speaker-tag-1');
     expect(mockCreateNewSubsplashList).toHaveBeenCalledWith({
       title: 'Speaker Two',
-      images: [squareImage],
+      images: [wideImage, bannerImage, squareImage],
     });
 
     const persistedSpeaker = await speakersCollection.doc(result.speakerId).get();
@@ -259,7 +272,7 @@ describe('speaker CRUD callables', () => {
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       subsplashId: 'subsplash-list-1',
     });
-    expect(persistedList.data()?.images).toEqual([squareImage]);
+    expect(persistedList.data()?.images).toEqual([wideImage, bannerImage, squareImage]);
   });
 
   it('rejects create requests without a square image', async () => {

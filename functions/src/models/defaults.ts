@@ -49,6 +49,8 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
 export const emptySpeaker: ISpeaker = {
   id: '',
   name: '',
+  shortDescription: '',
+  description: '',
   sermonCount: 0,
   images: [],
 };

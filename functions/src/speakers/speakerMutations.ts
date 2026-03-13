@@ -29,6 +29,7 @@ interface PreparedSpeakerListType {
 }
 
 interface CreateSubsplashSpeakerTagInputType {
+  tagId?: string;
   title: string;
   squareImage: ImageType;
   shortDescription?: string;
@@ -50,6 +51,21 @@ const normalizeOptionalString = (value: unknown): string | undefined => {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+};
+
+const normalizeOptionalNullableString = (value: unknown, fieldName: string): string | null | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw new HttpsError('invalid-argument', `${fieldName} must be a string or null.`);
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 };
 
 const resolveExplicitBoolean = (value: unknown, fieldName: string): boolean => {
@@ -156,9 +172,18 @@ export const parseUpdateSpeakerInput = (input: unknown): UpdateSpeakerCallableIn
 
   const patch = patchValue as Record<string, unknown>;
   const createSpeakerList = resolveExplicitBoolean(payload.createSpeakerList, 'createSpeakerList');
+  const deleteAssociatedList = resolveExplicitBoolean(payload.deleteAssociatedList, 'deleteAssociatedList');
   const operationKey = normalizeOptionalString(payload.operationKey);
   const name = patch.name === undefined ? undefined : requireTrimmedSpeakerName(patch.name, 'patch.name');
   const images = patch.images === undefined ? undefined : (patch.images as ImageType[]);
+  const hasShortDescription = Object.prototype.hasOwnProperty.call(patch, 'shortDescription');
+  const shortDescription = hasShortDescription
+    ? normalizeOptionalNullableString(patch.shortDescription, 'patch.shortDescription')
+    : undefined;
+  const hasDescription = Object.prototype.hasOwnProperty.call(patch, 'description');
+  const description = hasDescription
+    ? normalizeOptionalNullableString(patch.description, 'patch.description')
+    : undefined;
   const associatedListIdRaw = patch.associatedListId;
   const associatedListId = associatedListIdRaw === null
     ? null
@@ -175,7 +200,15 @@ export const parseUpdateSpeakerInput = (input: unknown): UpdateSpeakerCallableIn
     );
   }
 
-  if (name === undefined && images === undefined && associatedListId === undefined && !createSpeakerList) {
+  if (
+    name === undefined &&
+    images === undefined &&
+    shortDescription === undefined &&
+    description === undefined &&
+    associatedListId === undefined &&
+    !createSpeakerList &&
+    !deleteAssociatedList
+  ) {
     throw new HttpsError('invalid-argument', 'At least one patch field is required.');
   }
 
@@ -184,9 +217,12 @@ export const parseUpdateSpeakerInput = (input: unknown): UpdateSpeakerCallableIn
     patch: {
       ...(name !== undefined ? { name } : {}),
       ...(images !== undefined ? { images } : {}),
+      ...(shortDescription !== undefined ? { shortDescription } : {}),
+      ...(description !== undefined ? { description } : {}),
       ...(associatedListId !== undefined ? { associatedListId } : {}),
     },
     createSpeakerList,
+    deleteAssociatedList,
     ...(operationKey ? { operationKey } : {}),
   };
 };
@@ -252,12 +288,12 @@ const assertSpeakerNameUnique = async (speakerName: string, excludeSpeakerId?: s
 
 const prepareSpeakerList = async (
   speakerName: string,
-  squareImage: ImageType,
+  images: ImageType[],
   operationKey?: string
 ): Promise<PreparedSpeakerListType> => {
   const createResult = await createNewSubsplashList({
     title: speakerName,
-    images: [squareImage],
+    images,
     ...(operationKey ? { operationKey } : {}),
   });
 
@@ -268,7 +304,7 @@ const prepareSpeakerList = async (
     list: {
       id: listRef.id,
       name: speakerName,
-      images: [squareImage],
+      images,
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       count: 0,
       type: ListType.SPEAKER_LIST,
@@ -276,6 +312,18 @@ const prepareSpeakerList = async (
       updatedAtMillis: now,
       subsplashId: createResult.listId,
     },
+  };
+};
+
+const toSubsplashImageReference = (image: ImageType, fieldName: string): { id: string; type: ImageType['type'] } => {
+  const remoteImageId = image.subsplashId || image.id;
+  if (!remoteImageId) {
+    throw new HttpsError('invalid-argument', `${fieldName} is missing a remote image id.`);
+  }
+
+  return {
+    id: remoteImageId,
+    type: image.type,
   };
 };
 
@@ -316,24 +364,23 @@ const createSubsplashSpeakerTag = async (
   input: CreateSubsplashSpeakerTagInputType
 ): Promise<CreateSubsplashSpeakerTagOutputType> => {
   const runMutation = async (): Promise<CreateSubsplashSpeakerTagOutputType> => {
-    const url = 'https://core.subsplash.com/tags/v1/tags';
+    const url = input.tagId
+      ? `https://core.subsplash.com/tags/v1/tags/${input.tagId}`
+      : 'https://core.subsplash.com/tags/v1/tags';
     const payload = {
       app_key: '9XTSHD',
       type: 'speaker',
       title: input.title,
-      ...(input.shortDescription ? { short_description: input.shortDescription } : {}),
-      ...(input.description ? { description: input.description } : {}),
+      short_description: input.shortDescription ?? '',
+      description: input.description ?? '',
       _embedded: {
-        'square-image': {
-          id: input.squareImage.id,
-          type: 'square',
-        },
+        'square-image': toSubsplashImageReference(input.squareImage, 'squareImage'),
       },
     };
 
-    const config = createAxiosConfig(url, await authenticateSubsplash(), 'POST', payload);
+    const config = createAxiosConfig(url, await authenticateSubsplash(), input.tagId ? 'PATCH' : 'POST', payload);
     const response = (await axios(config)).data as { id?: unknown };
-    const tagId = typeof response.id === 'string' ? response.id : '';
+    const tagId = typeof response.id === 'string' ? response.id : input.tagId || '';
     if (!tagId) {
       throw new HttpsError('internal', 'Subsplash did not return a tag id.');
     }
@@ -344,6 +391,38 @@ const createSubsplashSpeakerTag = async (
   return withSubsplashLocks([getCreateSpeakerTagLockKey(input.title)], runMutation, {
     ...(input.operationKey ? { operationKey: input.operationKey } : {}),
   });
+};
+
+const syncSubsplashSpeakerListRemote = async (
+  subsplashListId: string,
+  speakerName: string,
+  images: ImageType[],
+  operationKey?: string
+): Promise<void> => {
+  const runMutation = async (): Promise<void> => {
+    const url = `https://core.subsplash.com/builder/v1/lists/${subsplashListId}`;
+    const payload = {
+      app_key: '9XTSHD',
+      title: speakerName,
+      _embedded: {
+        images: images.map((image) => toSubsplashImageReference(image, `images.${image.type}`)),
+      },
+    };
+    const config = createAxiosConfig(url, await authenticateSubsplash(), 'PATCH', payload);
+    await axios(config);
+  };
+
+  const runLockedMutation = async (): Promise<void> => {
+    return withSubsplashLocks([`list:${subsplashListId}`], runMutation, {
+      ...(operationKey ? { operationKey } : {}),
+    });
+  };
+
+  if (operationKey) {
+    await withIdempotency(operationKey, runLockedMutation);
+    return;
+  }
+  await runLockedMutation();
 };
 
 const deleteSubsplashListRemote = async (subsplashListId: string, operationKey?: string): Promise<void> => {
@@ -508,7 +587,7 @@ export const createSpeakerMutation = async (
       if (input.createSpeakerList) {
         preparedList = await prepareSpeakerList(
           normalizedName,
-          squareImage,
+          input.speaker.images,
           scopeOperationKey(input.operationKey, 'create-speaker-list')
         );
       }
@@ -518,6 +597,8 @@ export const createSpeakerMutation = async (
       const speaker: ISpeaker = {
         id: speakerRef.id,
         name: normalizedName,
+        shortDescription: input.speaker.shortDescription ?? '',
+        description: input.speaker.description ?? '',
         images: input.speaker.images,
         sermonCount: 0,
         tagId: createdTag.tagId,
@@ -569,24 +650,44 @@ export const updateSpeakerMutation = async (
     }
     const nextName = input.patch.name ?? existingSpeaker.name;
     const nextImages = input.patch.images ?? existingSpeaker.images;
-    const squareImage = requireSquareImage(nextImages);
+    requireSquareImage(nextImages);
     const normalizedName = requireTrimmedSpeakerName(nextName);
+    const nextShortDescription = Object.prototype.hasOwnProperty.call(input.patch, 'shortDescription')
+      ? input.patch.shortDescription || undefined
+      : existingSpeaker.shortDescription;
+    const nextDescription = Object.prototype.hasOwnProperty.call(input.patch, 'description')
+      ? input.patch.description || undefined
+      : existingSpeaker.description;
 
     if (normalizeSpeakerNameForDuplicateCheck(existingSpeaker.name) !== normalizeSpeakerNameForDuplicateCheck(normalizedName)) {
       await assertSpeakerNameUnique(normalizedName, existingSpeaker.id);
+    }
+
+    if (input.createSpeakerList && existingSpeaker.listId && !input.deleteAssociatedList) {
+      throw new HttpsError(
+        'invalid-argument',
+        'Speaker already has an associated list. Remove it before creating a new one.'
+      );
     }
 
     let preparedList: PreparedSpeakerListType | undefined;
     if (input.createSpeakerList) {
       preparedList = await prepareSpeakerList(
         normalizedName,
-        squareImage,
+        nextImages,
         scopeOperationKey(input.operationKey, 'create-speaker-list')
       );
     }
 
+    let existingListSnapshot: FirebaseFirestore.DocumentSnapshot<List> | undefined;
+    if (existingSpeaker.listId) {
+      existingListSnapshot = await listsCollection.doc(existingSpeaker.listId).get();
+    }
+
     let nextListId = existingSpeaker.listId;
-    if (preparedList) {
+    if (input.deleteAssociatedList) {
+      nextListId = undefined;
+    } else if (preparedList) {
       nextListId = preparedList.list.id;
     } else if (Object.prototype.hasOwnProperty.call(input.patch, 'associatedListId')) {
       if (input.patch.associatedListId === null) {
@@ -599,9 +700,50 @@ export const updateSpeakerMutation = async (
       }
     }
 
+    if (existingSpeaker.tagId) {
+      await createSubsplashSpeakerTag({
+        tagId: existingSpeaker.tagId,
+        title: normalizedName,
+        squareImage: requireSquareImage(nextImages),
+        shortDescription: nextShortDescription,
+        description: nextDescription,
+        operationKey: scopeOperationKey(input.operationKey, `update-speaker-tag-${existingSpeaker.tagId}`),
+      });
+    }
+
+    if (
+      existingSpeaker.listId &&
+      existingListSnapshot?.exists &&
+      nextListId === existingSpeaker.listId &&
+      !input.deleteAssociatedList &&
+      !preparedList
+    ) {
+      const existingList = existingListSnapshot.data();
+      if (existingList?.subsplashId) {
+        await syncSubsplashSpeakerListRemote(
+          existingList.subsplashId,
+          normalizedName,
+          nextImages,
+          scopeOperationKey(input.operationKey, `update-speaker-list-${existingList.subsplashId}`)
+        );
+      }
+    }
+
+    if (input.deleteAssociatedList && existingSpeaker.listId && existingListSnapshot?.exists) {
+      const existingList = existingListSnapshot.data();
+      if (existingList?.subsplashId) {
+        await deleteSubsplashListRemote(
+          existingList.subsplashId,
+          scopeOperationKey(input.operationKey, `delete-list-${existingList.subsplashId}`)
+        );
+      }
+    }
+
     const updatedSpeaker: ISpeaker = {
       id: existingSpeaker.id,
       name: normalizedName,
+      shortDescription: nextShortDescription ?? '',
+      description: nextDescription ?? '',
       images: nextImages,
       sermonCount: existingSpeaker.sermonCount,
       ...(existingSpeaker.tagId ? { tagId: existingSpeaker.tagId } : {}),
@@ -612,6 +754,28 @@ export const updateSpeakerMutation = async (
       transaction.set(speakerRef, updatedSpeaker);
       if (preparedList) {
         transaction.set(preparedList.listRef, preparedList.list);
+      }
+      if (
+        existingSpeaker.listId &&
+        existingListSnapshot?.exists &&
+        nextListId === existingSpeaker.listId &&
+        !input.deleteAssociatedList &&
+        !preparedList
+      ) {
+        transaction.set(
+          listsCollection.doc(existingSpeaker.listId),
+          {
+            ...(existingListSnapshot.data() || {}),
+            id: existingSpeaker.listId,
+            name: normalizedName,
+            images: nextImages,
+            updatedAtMillis: Date.now(),
+          },
+          { merge: true }
+        );
+      }
+      if (input.deleteAssociatedList && existingSpeaker.listId && existingListSnapshot?.exists) {
+        transaction.delete(listsCollection.doc(existingSpeaker.listId));
       }
     });
 

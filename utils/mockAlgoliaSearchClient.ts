@@ -1,6 +1,16 @@
-import type { SearchClient, SearchQuery, SearchResponse, SearchForFacetValuesResponse, SearchMethodParams, LegacySearchMethodProps, SearchForFacetValuesProps, SearchResponses } from 'algoliasearch';
+import type {
+  SearchClient,
+  SearchQuery,
+  SearchResponse,
+  SearchForFacetValuesResponse,
+  SearchMethodParams,
+  LegacySearchMethodProps,
+  SearchForFacetValuesProps,
+  SearchResponses,
+} from 'algoliasearch';
 import firestore, { collection, query, getDocs, where, orderBy, QueryConstraint } from '../firebase/firestore';
 import { sermonConverter } from '../types/Sermon';
+import { speakerConverter } from '../types/Speaker';
 
 interface MockAlgoliaClientOptions {
   userId: string;
@@ -63,21 +73,58 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
             return fallback;
           };
 
-          if (queryRequest.indexName !== 'sermons') {
-            // For non-sermons indices, return empty results
-            return {
-              hits: [],
-              nbHits: 0,
-              page: 0,
-              nbPages: 0,
-              hitsPerPage: getNumberParam('hitsPerPage', 20),
-              processingTimeMS: 0,
-              query: getStringParam('query'),
-              params: '',
-            } as SearchResponse<T>;
-          }
-
           try {
+            if (queryRequest.indexName === 'speakers') {
+              const searchQuery = getStringParam('query');
+              const hitsPerPage = getNumberParam('hitsPerPage', 20);
+              const page = getNumberParam('page', 0);
+
+              const speakersRef = collection(firestore, 'speakers');
+              const speakersQuery = query(speakersRef.withConverter(speakerConverter), orderBy('name'));
+              const speakersSnapshot = await getDocs(speakersQuery);
+              let allSpeakers = speakersSnapshot.docs.map((doc) => doc.data());
+
+              if (searchQuery) {
+                const queryLower = searchQuery.toLowerCase();
+                allSpeakers = allSpeakers.filter((speaker) => speaker.name?.toLowerCase().includes(queryLower));
+              }
+
+              const totalHits = allSpeakers.length;
+              const totalPages = Math.ceil(totalHits / hitsPerPage);
+              const startIndex = page * hitsPerPage;
+              const endIndex = startIndex + hitsPerPage;
+              const paginatedSpeakers = allSpeakers.slice(startIndex, endIndex);
+              const hits = paginatedSpeakers.map((speaker) => ({
+                ...speaker,
+                objectID: speaker.id,
+              })) as T[];
+
+              return {
+                hits,
+                nbHits: totalHits,
+                page,
+                nbPages: totalPages,
+                hitsPerPage,
+                processingTimeMS: 0,
+                query: searchQuery,
+                params: '',
+                exhaustiveNbHits: true,
+              } as SearchResponse<T>;
+            }
+
+            if (queryRequest.indexName !== 'sermons') {
+              return {
+                hits: [],
+                nbHits: 0,
+                page: 0,
+                nbPages: 0,
+                hitsPerPage: getNumberParam('hitsPerPage', 20),
+                processingTimeMS: 0,
+                query: getStringParam('query'),
+                params: '',
+              } as SearchResponse<T>;
+            }
+
             const searchQuery = getStringParam('query');
             const hitsPerPage = getNumberParam('hitsPerPage', 20);
             const page = getNumberParam('page', 0);

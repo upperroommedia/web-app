@@ -29,20 +29,11 @@ import {
   SUBSPLASH_SPEAKER_LIST_LINK,
   shouldShowSpeakerListSuccess,
 } from '../../utils/speakers/createSpeakerClient';
-import {
-  CreateSpeakerCallableInputType,
-  CreateSpeakerCallableOutputType,
-  DeleteSpeakerCallableInputType,
-  DeleteSpeakerCallableOutputType,
-} from '../../functions/src/speakers/createSpeakerTypes';
+import { CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType } from '../../functions/src/speakers/createSpeakerTypes';
 
 const createSpeakerCallable = createFunctionV2<CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType>(
   'createspeaker'
 );
-const deleteSpeakerCallable = createFunctionV2<DeleteSpeakerCallableInputType, DeleteSpeakerCallableOutputType>(
-  'deletespeaker'
-);
-
 const AdminSpeakers = () => {
   const [speakerInput, setSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
@@ -214,26 +205,13 @@ const AdminSpeakers = () => {
     }
   };
 
-  const handleDeleteSpeaker = async (speakerId: string) => {
-    await deleteSpeakerCallable({
-      speakerId,
-      deleteAssociatedList: true,
-    });
-
-    setSpeakers((oldSpeakers) => oldSpeakers.filter((speaker) => speaker.id !== speakerId));
-    setTotalSpeakers((oldTotalSpeakers) => Math.max(0, oldTotalSpeakers - 1));
-  };
-
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
       <SpeakerTable
         speakers={speakers}
-        setSpeakers={setSpeakers}
         rowsPerPage={rowsPerPage}
         page={page}
-        setPage={setPage}
         totalSpeakers={totalSpeakers}
-        setTotalSpeakers={setTotalSpeakers}
         handlePageChange={handlePageChange}
         handleChangeRowsPerPage={handleChangeRowsPerPage}
         handleSort={handleSort}
@@ -244,7 +222,6 @@ const AdminSpeakers = () => {
         searchValue={speakerInput}
         onSearchChange={handleSearchChange}
         onAddSpeaker={() => setCreateSpeakerPopupOpen(true)}
-        onDeleteSpeaker={handleDeleteSpeaker}
         loading={speakersLoading}
       />
       <CreateSpeakerPopup
