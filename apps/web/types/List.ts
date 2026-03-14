@@ -36,12 +36,17 @@ export interface List {
   images: ImageType[];
   overflowBehavior: OverflowBehavior;
   count?: number;
+  logicalCount?: number;
+  hasOverflowPages?: boolean;
   type: ListType;
   updatedAtMillis?: number;
   createdAtMillis: number;
   subsplashId?: string;
   moreSermonsRef?: string;
   isMoreSermonsList?: boolean;
+  isRootList?: boolean;
+  rootListId?: string;
+  overflowDepth?: number;
   listTagAndPosition?: ListTagAndPostionType;
 }
 
@@ -68,11 +73,16 @@ export const emptyList: List = {
   id: '',
   name: '',
   count: 0,
+  logicalCount: 0,
+  hasOverflowPages: false,
   type: ListType.SERIES,
   createdAtMillis: new Date().getTime(),
   updatedAtMillis: new Date().getTime(),
   overflowBehavior: OverflowBehavior.CREATENEWLIST,
   images: [],
+  isRootList: true,
+  rootListId: '',
+  overflowDepth: 0,
 };
 
 export const createEmptyList = (type: ListType): List => {
@@ -80,11 +90,16 @@ export const createEmptyList = (type: ListType): List => {
     id: '',
     name: '',
     count: 0,
+    logicalCount: 0,
+    hasOverflowPages: false,
     type,
     createdAtMillis: new Date().getTime(),
     updatedAtMillis: new Date().getTime(),
     overflowBehavior: OverflowBehavior.CREATENEWLIST,
     images: [],
+    isRootList: true,
+    rootListId: '',
+    overflowDepth: 0,
   };
 };
 

@@ -128,3 +128,26 @@ Plans:
 Plans:
 - [x] 05-01-PLAN.md — Implement backend `createspeaker`/`updatespeaker`/`deletespeaker` callables with optional speaker-list association and square-image contract tests
 - [x] 05-02-PLAN.md — Add admin Speakers top-button popup flow, callable wiring, and exact success popup link/instruction contract
+
+### Phase 6: Add-to-list overflow chain hardening and nested list admin model
+
+**Goal:** Expose overflow chains as one root-managed logical list so admin discovery, detail, delete, and reorder flows stay root-only, chain-aware, and safe.
+**Requirements**: [OFLOW-01, OFLOW-02, OFLOW-03, OFLOW-04, OFLOW-05, OFLOW-06]
+**Depends on:** Phase 5
+**Success Criteria** (what must be TRUE):
+  1. Overflow pages are never selectable/discoverable in uploader or admin list-selection flows; only root lists appear there.
+  2. Admin list discovery shows logical totals for the whole overflow chain and can indicate when root lists have overflow pages.
+  3. Direct navigation to an overflow list routes admins back to the root detail page, which shows one aggregated sermon list plus page-boundary/chain diagnostics.
+  4. Inconsistent chains stay readable but clearly warn admins and disable risky actions such as reorder or destructive operations.
+  5. Root-list delete is blocked when overflow pages exist and explains the affected chain instead of silently cascading.
+  6. Root edits keep overflow names canonical and root-detail reorder remaps page boundaries for the full logical chain.
+**Plans:** 7 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Define explicit root/overflow metadata and add the shared chain-audit callable
+- [ ] 06-02-PLAN.md — Persist canonical chain metadata, logical totals, and rename behavior on list write paths
+- [ ] 06-03-PLAN.md — Convert discovery/search/selection flows to a migration-safe root-only admin model
+- [ ] 06-04-PLAN.md — Make the root detail page the single aggregated chain-management entry point
+- [ ] 06-05-PLAN.md — Upgrade reorder to remap the full logical chain safely from the root detail page
+- [ ] 06-06-PLAN.md — Add a dry-run-safe legacy backfill/repair script for explicit overflow metadata
+- [ ] 06-07-PLAN.md — Add chain-aware delete blocking and cascade-warning admin UX

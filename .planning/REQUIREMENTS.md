@@ -46,6 +46,25 @@
 - [x] **OPS-ALERT-01**: Role-request notification failures emit operational alert signals without rolling back persisted requests.
 - [x] **OPS-ALERT-02**: Runtime caught failures enqueue structured operational notifications for every occurrence (no dedupe suppression).
 
+### Speaker Management CRUD + Optional Speaker List Association (Current Milestone)
+
+- [x] **SPK-01**: Admin speaker management is available through backend callable commands that support create, update, and delete.
+- [x] **SPK-02**: `/admin/speakers` shows a top-level Add Speaker button.
+- [x] **SPK-03**: Clicking Add Speaker opens a popup with complete speaker info inputs and image selection.
+- [x] **SPK-04**: Popup submit supports optional speaker-list creation and speaker/list association in one flow.
+- [x] **SPK-05**: Selected square images are reused for both speaker tag and speaker list payloads.
+- [x] **SPK-06**: When speaker-list creation succeeds, UI shows the exact Subsplash link and exact required instruction copy.
+- [x] **SPK-07**: Speaker create/update/delete flows are protected by regression coverage for auth, validation, and optional list side effects.
+
+### Overflow Chain Hardening + Root-Only List Admin Model (Current Milestone)
+
+- [ ] **OFLOW-01**: Overflow pages are never selectable or first-class discoverable records in uploader/admin list-selection flows; root lists are the only selectable/discoverable entities there.
+- [ ] **OFLOW-02**: Admin list discovery shows root-level logical totals across the full overflow chain and can indicate when nested overflow pages exist.
+- [ ] **OFLOW-03**: Direct navigation to an overflow list route redirects to the root list detail page, which is the single admin entry point for the logical list.
+- [ ] **OFLOW-04**: The root detail page aggregates chain sermons into one view, shows page-boundary/chain diagnostics, and disables risky actions when the chain is inconsistent.
+- [ ] **OFLOW-05**: Root-list delete is blocked when overflow pages exist and returns a clear cascade-aware explanation instead of silently cascading or succeeding.
+- [ ] **OFLOW-06**: Root metadata edits and reorder operations preserve canonical overflow naming and remap Subsplash page boundaries for the whole logical list safely.
+
 ## v2 Requirements
 
 ### Platform Hardening and Simplification
@@ -94,6 +113,19 @@
 | ROLE-REQ-02 | Phase 4 | Complete |
 | OPS-ALERT-01 | Phase 4 | Complete |
 | OPS-ALERT-02 | Phase 4 | Complete |
+| SPK-01 | Phase 5 | Complete |
+| SPK-02 | Phase 5 | Complete |
+| SPK-03 | Phase 5 | Complete |
+| SPK-04 | Phase 5 | Complete |
+| SPK-05 | Phase 5 | Complete |
+| SPK-06 | Phase 5 | Complete |
+| SPK-07 | Phase 5 | Complete |
+| OFLOW-01 | Phase 6 | Planned |
+| OFLOW-02 | Phase 6 | Planned |
+| OFLOW-03 | Phase 6 | Planned |
+| OFLOW-04 | Phase 6 | Planned |
+| OFLOW-05 | Phase 6 | Planned |
+| OFLOW-06 | Phase 6 | Planned |
 | SEC-01 | Next milestone candidate | Pending |
 | SEC-02 | Next milestone candidate | Pending |
 | REL-01 | Next milestone candidate | Pending |
@@ -102,8 +134,8 @@
 | TEST-01 | Next milestone candidate | Pending |
 
 **Coverage:**
-- v1 requirements: 26 total
-- Mapped to active phases or baseline: 26
+- v1 requirements: 39 total
+- Mapped to active phases or baseline: 39
 - Unmapped: 0
 
 ---

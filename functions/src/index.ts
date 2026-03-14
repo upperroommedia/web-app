@@ -69,6 +69,7 @@ import resendinvite from './invites/resendInvite';
 import createspeaker from './speakers/createSpeaker';
 import updatespeaker from './speakers/updateSpeaker';
 import deletespeaker from './speakers/deleteSpeaker';
+import getlistoverflowchain from './getListOverflowChain';
 
 // Series functions
 import createseries from './createSeries';
@@ -144,6 +145,7 @@ exports.resendinvite = resendinvite;
 exports.createspeaker = createspeaker;
 exports.updatespeaker = updatespeaker;
 exports.deletespeaker = deletespeaker;
+exports.getlistoverflowchain = getlistoverflowchain;
 
 // Series exports
 exports.createseries = createseries;

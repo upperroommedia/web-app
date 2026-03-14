@@ -4,10 +4,10 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
 status: executing
-last_updated: "2026-03-10T04:28:59.206Z"
-last_activity: 2026-03-10 - Completed phase 05 plan 02 admin speaker popup create flow + callable wiring
+last_updated: "2026-03-14T00:00:00.000Z"
+last_activity: 2026-03-14 - Added phase 06 for add-to-list overflow chain hardening and nested list admin model
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 4
   total_plans: 18
   completed_plans: 16
@@ -83,6 +83,7 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - Phase 3 added: Subsplash alpha-lock concurrency control
 - Phase 4 added: Role-based invite onboarding and operational notification routing
 - Phase 5 added: Speaker management CRUD + admin create speaker popup with optional speaker list association
+- Phase 6 added: Add-to-list overflow chain hardening and nested list admin model
 
 ## Blockers
 
@@ -117,3 +118,4 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-08: Completed 03-subsplash-alpha-lock-concurrency-control/03-07 with delete caller operation-key adoption, lock-busy retry UX wiring, and LOCK requirements traceability restoration.
 - 2026-03-10: Completed 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association/05-01 with separate createspeaker/updatespeaker/deletespeaker callables, shared speaker mutation orchestration, and emulator CRUD regression coverage.
 - 2026-03-10: Completed 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association/05-02 with admin add-speaker popup create flow, createspeaker callable wiring, and required list-success copy/link contract enforcement.
+- 2026-03-14: Added Phase 06 for add-to-list overflow chain hardening and nested list admin model.
