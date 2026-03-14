@@ -5,6 +5,9 @@ runConfig:
   maxInstances: 20
   concurrency: 80
 
+scripts:
+  runCommand: node .next/standalone/apps/web/server.js
+
 outputFiles:
   serverApp:
     include:
