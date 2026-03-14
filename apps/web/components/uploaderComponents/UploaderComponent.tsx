@@ -52,6 +52,7 @@ import { AudioSource } from '../../pages/api/uploadFile';
 import DropZone from '../DropZone';
 import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
+import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -246,7 +247,7 @@ const Uploader = (props: UploaderProps) => {
               const list = doc.data();
               return list;
             })
-            .filter((list) => list.isMoreSermonsList !== true) // Exclude overflow lists (only filter if explicitly true)
+            .filter(isDiscoverableRootList)
         );
       } finally {
         setSubtitlesLoading(false);

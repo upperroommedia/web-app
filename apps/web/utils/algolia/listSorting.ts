@@ -1,7 +1,7 @@
 import type { Order } from '../../context/types';
 import type { List } from '../../types/List';
 
-export type ListSortableProperty = Extract<keyof List, 'name' | 'count'>;
+export type ListSortableProperty = Extract<keyof List, 'name'>;
 
 export const LIST_PRIMARY_INDEX_NAME = 'lists';
 
@@ -10,19 +10,14 @@ export const LIST_SORT_INDEX_NAMES: Record<ListSortableProperty, Record<Order, s
     asc: 'lists_sort_name_asc',
     desc: 'lists_sort_name_desc',
   },
-  count: {
-    asc: 'lists_sort_count_asc',
-    desc: 'lists_sort_count_desc',
-  },
 };
 
-const LIST_SORTABLE_PROPERTIES = new Set<ListSortableProperty>(['name', 'count']);
+const LIST_SORTABLE_PROPERTIES = new Set<ListSortableProperty>(['name']);
 
 export const isListSortableProperty = (value: keyof List): value is ListSortableProperty =>
   LIST_SORTABLE_PROPERTIES.has(value as ListSortableProperty);
 
-export const getDefaultListSortOrder = (property: ListSortableProperty): Order =>
-  property === 'count' ? 'desc' : 'asc';
+export const getDefaultListSortOrder = (_property: ListSortableProperty): Order => 'asc';
 
 export const resolveListIndexName = (sortProperty: keyof List, sortOrder: Order): string => {
   if (!isListSortableProperty(sortProperty)) {

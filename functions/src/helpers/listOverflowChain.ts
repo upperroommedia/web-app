@@ -1,7 +1,6 @@
-import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import type { List } from '@upperroom/shared/types/List';
+import firebaseAdmin from '../../../packages/shared/firebase/firebaseAdmin.js';
+import type { List } from '../../../packages/shared/types/List';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { FieldValue } from 'firebase-admin/firestore';
 import axios from 'axios';
 import type {
   GetListOverflowChainIssue,
@@ -21,6 +20,7 @@ type StoredListRecord = {
 };
 
 const firestore = firebaseAdmin.firestore();
+const { FieldValue } = firebaseAdmin.firestore;
 
 const normalizeString = (value: unknown): string | undefined => {
   if (typeof value !== 'string') {
@@ -82,6 +82,9 @@ const pushIssue = (
     issues.push(nextIssue);
   }
 };
+
+const cloneIssues = (issues: GetListOverflowChainIssue[]): GetListOverflowChainIssue[] =>
+  issues.map((issue) => ({ ...issue }));
 
 type StoredChainNode = {
   record: StoredListRecord;
@@ -316,6 +319,16 @@ const buildChainFromRoot = async (
 
     const rootName = getListName(rootRecord);
     const currentName = getListName(currentRecord);
+    if (!parentRecord && currentRecord.data.isMoreSermonsList === true) {
+      pushIssue(issues, {
+        code: 'CHAIN_ROOT_METADATA_CONFLICT',
+        severity: 'blocking',
+        message: 'List is marked as an overflow page but no parent/root chain could be resolved.',
+        firestoreListId: currentRecord.id,
+        subsplashListId: currentRecord.data.subsplashId,
+      });
+    }
+
     if (parentRecord && currentName !== getCanonicalOverflowListName(rootName)) {
       pushIssue(issues, {
         code: 'CHAIN_NAME_DRIFT',
@@ -461,6 +474,80 @@ export const buildOverflowListMetadata = ({
   rootListId,
   overflowDepth,
 });
+
+export type OverflowChainRepairWrite = {
+  firestoreListId: string;
+  data: Pick<List, 'isRootList' | 'isMoreSermonsList' | 'rootListId' | 'overflowDepth'> &
+    Partial<Pick<List, 'logicalCount' | 'hasOverflowPages' | 'name'>> & {
+      updatedAtMillis: number;
+    };
+};
+
+export type OverflowChainRepairPlan = {
+  rootListId: string;
+  logicalCount: number;
+  hasOverflowPages: boolean;
+  canApply: boolean;
+  issues: GetListOverflowChainIssue[];
+  updates: OverflowChainRepairWrite[];
+};
+
+export const buildOverflowChainRepairPlan = (
+  chainState: GetListOverflowChainOutputType,
+  options?: {
+    now?: number;
+  }
+): OverflowChainRepairPlan => {
+  const issues = cloneIssues(chainState.issues);
+  const rootNode = chainState.nodes[0];
+  const logicalCount = chainState.nodes.reduce((sum, node) => sum + node.count, 0);
+  const hasOverflowPages = chainState.nodes.length > 1;
+  const now = options?.now ?? Date.now();
+
+  if (!rootNode) {
+    return {
+      rootListId: chainState.rootListId,
+      logicalCount,
+      hasOverflowPages,
+      canApply: false,
+      issues,
+      updates: [],
+    };
+  }
+
+  const rootName = rootNode.name.trim() || chainState.rootListId;
+  const updates = chainState.nodes.map((node) => {
+    const metadata =
+      node.depth === 0
+        ? buildRootListMetadata({
+            rootListId: chainState.rootListId,
+            logicalCount,
+            hasOverflowPages,
+          })
+        : buildOverflowListMetadata({
+            rootListId: chainState.rootListId,
+            overflowDepth: node.depth,
+          });
+
+    return {
+      firestoreListId: node.firestoreListId,
+      data: {
+        ...metadata,
+        ...(node.depth > 0 ? { name: buildOverflowListTitle(rootName) } : {}),
+        updatedAtMillis: now,
+      },
+    };
+  });
+
+  return {
+    rootListId: chainState.rootListId,
+    logicalCount,
+    hasOverflowPages,
+    canApply: !issues.some((issue) => issue.severity === 'blocking'),
+    issues,
+    updates,
+  };
+};
 
 export const syncOverflowChainMetadata = async (
   startingSubsplashId: string,

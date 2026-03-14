@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
+import Chip from '@mui/material/Chip';
 import FormControl from '@mui/material/FormControl';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -32,6 +33,7 @@ import { visuallyHidden } from '@mui/utils';
 import { Order } from '../context/types';
 import { List, ListType } from '../types/List';
 import { getDefaultListSortOrder, isListSortableProperty } from '../utils/algolia/listSorting';
+import { getListDiscoveryCount, getListOverflowIndicator } from '../utils/algolia/searchRecords';
 
 interface HeadCell {
   id: keyof List | 'actions';
@@ -86,7 +88,7 @@ const ListTableHead = ({
     <TableHead>
       <TableRow>
         {headCells.map((headCell) =>
-          headCell.id === 'name' || headCell.id === 'count' ? (
+          headCell.id === 'name' ? (
             <TableCell
               key={headCell.id}
               align="center"
@@ -245,7 +247,7 @@ const ListTable = ({
                     <TableRow
                       hover
                       key={list.id}
-                      onClick={() => router.push(`/admin/lists/${list.id}?count=${list.count || 20}`)}
+                      onClick={() => router.push(`/admin/lists/${list.id}?count=${getListDiscoveryCount(list) || 20}`)}
                       sx={{ cursor: 'pointer' }}
                     >
                       <TableCell
@@ -257,10 +259,24 @@ const ListTable = ({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {list.name}
+                        <Box display="flex" justifyContent="center" alignItems="center" gap={1}>
+                          <Typography
+                            component="span"
+                            sx={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {list.name}
+                          </Typography>
+                          {getListOverflowIndicator(list) ? (
+                            <Chip label="Overflow" color="warning" size="small" variant="outlined" />
+                          ) : null}
+                        </Box>
                       </TableCell>
                       <TableCell align="center" sx={{ width: headCells[1].width }}>
-                        {list.count ?? 0}
+                        {getListDiscoveryCount(list)}
                       </TableCell>
                       <TableCell
                         align="center"

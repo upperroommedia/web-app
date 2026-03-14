@@ -11,7 +11,8 @@ import NewListPopup from './NewListPopup';
 import firestore, { query, collection, getDocs, where, limit, orderBy, startAfter, QueryConstraint, QueryDocumentSnapshot } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
 import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
-import { algoliasearch, SearchResponse} from 'algoliasearch';
+import { algoliasearch } from 'algoliasearch';
+import { normalizeAlgoliaListHit, searchListsIndex, isDiscoverableRootList } from '../utils/algolia/searchRecords';
 
 interface ListSelectorProps {
   sermonList: List[];
@@ -88,10 +89,9 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           break;
         }
 
-        // Filter out isMoreSermonsList === true (include false and undefined)
         const validLists = listQuerySnapshot.docs
           .map((doc) => doc.data())
-          .filter((list) => list.isMoreSermonsList !== true);
+          .filter(isDiscoverableRootList);
 
         // Add to our collection, avoiding duplicates
         const existingIds = new Set(allValidLists.map(l => l.id));
@@ -116,18 +116,18 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
   const queryAlgolia = async (query: string): Promise<ListWithHighlight[]> => {
     if (client) {
       try {
-        const result: SearchResponse<ListWithHighlight> = await client.searchSingleIndex({
-          indexName: 'lists',
-          searchParams: {
-            query,
-            hitsPerPage: 5,
-            ...(props.listType && { facetFilters: `type:${props.listType}` }),
-            // Exclude overflow lists from search results
-            filters: 'NOT isMoreSermonsList:true',
-          }
+        const result = await searchListsIndex(client, {
+          query,
+          hitsPerPage: 5,
+          page: 0,
+          sortProperty: 'name',
+          sortOrder: 'asc',
+          listType: props.listType ?? '',
         });
-        // Also filter client-side as a safety measure
-        return result.hits.map((hit)=> hit).filter((list) => list.isMoreSermonsList !== true);
+        return result.hits.map((hit) => ({
+          ...normalizeAlgoliaListHit(hit),
+          _highlightResult: (hit as ListWithHighlight)._highlightResult,
+        }));
       } catch (error) {
         console.error('Search error:', error);
         return [];

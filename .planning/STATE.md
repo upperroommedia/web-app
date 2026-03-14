@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
-current_phase: 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
-status: executing
-last_updated: "2026-03-14T00:00:00.000Z"
-last_activity: 2026-03-14 - Added phase 06 for add-to-list overflow chain hardening and nested list admin model
+current_phase: 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model
+status: blocked
+last_updated: "2026-03-14T21:23:07Z"
+last_activity: 2026-03-14 - Executed phase 06 plan 04 root-detail overflow aggregation and diagnostics, but git metadata writes remain blocked by .git/index.lock permission errors
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 18
-  completed_plans: 16
+  total_plans: 25
+  completed_plans: 18
 ---
 
 # Session State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Phase 05 complete; continue milestone execution from remaining open work.
+**Current focus:** Phase 06 root-detail overflow aggregation is implemented in the worktree, but commit/state completion is blocked by git metadata write restrictions.
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
-**Current phase:** 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association
-**Status:** Executing
-**Last activity:** 2026-03-10 - Completed phase 05 plan 02 admin speaker popup create flow + callable wiring
+**Current phase:** 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model
+**Status:** Blocked on git metadata writes
+**Last activity:** 2026-03-14 - Executed phase 06 plan 04 root-detail overflow aggregation and diagnostics, but `.git/index.lock` creation failed during commit attempts
 
 ## Decisions
 
@@ -75,6 +75,12 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association]: Speaker-list creation reuses createNewSubsplashList and persists Firestore ListType.SPEAKER_LIST linked via speaker.listId.
 - [Phase 05]: Use createFunctionV2('createspeaker') from pages/admin/speakers.tsx and keep popup as a reusable form component.
 - [Phase 05]: Treat required speaker-list success copy/link as constants exported from a single helper and reuse those in UI.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Discovery treats explicit isRootList metadata as authoritative when present and falls back to legacy isMoreSermonsList exclusion until brownfield rollout verification completes.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Admin list discovery renders logicalCount ?? count and overflow badges via hasOverflowPages with moreSermonsRef fallback for legacy records.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Admin list discovery exposes only name sorting until truthful logical-total Algolia replicas exist.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Root detail resolves `getlistoverflowchain` before Firestore reads and redirects overflow routes to the logical root immediately.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Aggregated root detail renders only locally mirrored `listItems` rows and treats chain diagnostics or mirror gaps as read-only state.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Overflow-chain root detail remains inspect-only until chain-aware reorder persistence is delivered in plan 06-05.
 
 ## Accumulated Context
 
@@ -87,7 +93,8 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 ## Blockers
 
-- None recorded in state file.
+- Plan 06-03 cannot be fully completed in GSD terms because this environment denies writes under `.git/` (`fatal: Unable to create '.git/index.lock': Operation not permitted`), preventing atomic task commits and the final docs commit.
+- Plan 06-04 cannot be fully completed in GSD terms for the same reason: local git metadata writes are denied under `.git/`, so required task commits and the final docs commit cannot be created.
 
 ### Quick Tasks Completed
 
@@ -119,3 +126,5 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-10: Completed 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association/05-01 with separate createspeaker/updatespeaker/deletespeaker callables, shared speaker mutation orchestration, and emulator CRUD regression coverage.
 - 2026-03-10: Completed 05-speaker-management-crud-admin-create-speaker-popup-with-optional-speaker-list-association/05-02 with admin add-speaker popup create flow, createspeaker callable wiring, and required list-success copy/link contract enforcement.
 - 2026-03-14: Added Phase 06 for add-to-list overflow chain hardening and nested list admin model.
+- 2026-03-14: Executed 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model/06-03 worktree changes and passed targeted Jest + ESLint verification, but `.git/index.lock` permission failures blocked required commits and plan completion.
+- 2026-03-14: Executed 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model/06-04 worktree changes and passed targeted Jest + ESLint verification, but `.git/index.lock` permission failures again blocked required commits and plan completion.

@@ -7,7 +7,7 @@ This roadmap tracks active GSD-managed work on top of an already substantial bro
 ## Milestones
 
 - ✅ **Pre-GSD Product Foundation** - Existing platform capabilities established before current planning cycle
-- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-5 (in progress)
+- 🚧 **v1.0 Publishing Reliability + Dev Safety** - Phases 1-6 (in progress)
 - 📋 **v1.1 Platform Hardening (Candidate)** - Security/reliability simplification work to be phased next
 
 ## Phases
@@ -16,6 +16,8 @@ This roadmap tracks active GSD-managed work on top of an already substantial bro
 - [ ] **Phase 2: Dev External API Mocking** - Enforce fail-closed local external API policy with deterministic mocks.
 - [x] **Phase 3: Subsplash Alpha-Lock Concurrency Control** - Prevent stale-write races across Subsplash-linked mutation paths.
 - [x] **Phase 4: Role-Based Invite Onboarding + Notification Routing** - Add invite onboarding and centralized notification/operational alert infrastructure.
+- [x] **Phase 5: Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association** - Deliver speaker CRUD callables plus the admin create-speaker popup flow.
+- [ ] **Phase 6: Add-to-List Overflow Chain Hardening and Nested List Admin Model** - Keep overflow chains root-only, chain-aware, and safe across admin workflows.
 
 ## 🚧 v1.0 Publishing Reliability + Dev Safety
 
@@ -68,6 +70,7 @@ Plans:
 | 3. Subsplash alpha-lock concurrency control | 7/7 | Complete | 2026-03-08 |
 | 4. Role-based invite onboarding and operational notification routing | 5/5 | Complete | 2026-03-01 |
 | 5. Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association | 2/2 | Complete | 2026-03-10 |
+| 6. Add-to-list overflow chain hardening and nested list admin model | 2/7 | Blocked (git metadata writes) | - |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 

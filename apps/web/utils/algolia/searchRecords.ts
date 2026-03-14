@@ -24,6 +24,29 @@ export interface AlgoliaListHit extends Partial<List> {
   objectID: string;
 }
 
+type DiscoveryListRecord = Pick<
+  Partial<List>,
+  'count' | 'logicalCount' | 'hasOverflowPages' | 'moreSermonsRef' | 'isMoreSermonsList' | 'isRootList'
+>;
+
+export const LIST_DISCOVERY_FILTERS = 'NOT isMoreSermonsList:true';
+
+export const isDiscoverableRootList = (list: DiscoveryListRecord): boolean => {
+  if (typeof list.isRootList === 'boolean') {
+    return list.isRootList;
+  }
+
+  return list.isMoreSermonsList !== true;
+};
+
+export const getListDiscoveryCount = (list: DiscoveryListRecord): number => {
+  return list.logicalCount ?? list.count ?? 0;
+};
+
+export const getListOverflowIndicator = (list: DiscoveryListRecord): boolean => {
+  return list.hasOverflowPages ?? Boolean(list.moreSermonsRef);
+};
+
 const defaultSermonStatus: sermonStatus = {
   soundCloud: uploadStatus.NOT_UPLOADED,
   subsplash: uploadStatus.NOT_UPLOADED,
@@ -89,12 +112,17 @@ export const normalizeAlgoliaListHit = (hit: AlgoliaListHit): List => {
     images: hit.images ?? [],
     overflowBehavior: hit.overflowBehavior ?? OverflowBehavior.CREATENEWLIST,
     count: hit.count ?? 0,
+    logicalCount: getListDiscoveryCount(hit),
+    hasOverflowPages: getListOverflowIndicator(hit),
     type: hit.type ?? ListType.SERIES,
     updatedAtMillis: hit.updatedAtMillis,
     createdAtMillis: hit.createdAtMillis ?? 0,
     subsplashId: hit.subsplashId,
     moreSermonsRef: hit.moreSermonsRef,
     isMoreSermonsList: hit.isMoreSermonsList,
+    isRootList: typeof hit.isRootList === 'boolean' ? hit.isRootList : hit.isMoreSermonsList === true ? false : undefined,
+    rootListId: hit.rootListId,
+    overflowDepth: hit.overflowDepth,
     listTagAndPosition: hit.listTagAndPosition,
   };
 };
@@ -155,10 +183,14 @@ export const searchListsIndex = async (
         hitsPerPage,
         page,
         ...(listType ? { facetFilters: [[`type:${listType}`]] } : {}),
-        filters: 'NOT isMoreSermonsList:true',
+        filters: LIST_DISCOVERY_FILTERS,
       },
     ],
   });
+  const result = response.results[0] as SearchResponse<AlgoliaListHit>;
 
-  return response.results[0] as SearchResponse<AlgoliaListHit>;
+  return {
+    ...result,
+    hits: result.hits.filter(isDiscoverableRootList),
+  } as SearchResponse<AlgoliaListHit>;
 };

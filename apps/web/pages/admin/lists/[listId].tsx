@@ -41,8 +41,14 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+import {
+  GetListOverflowChainInputType,
+  GetListOverflowChainOutputType,
+} from '@upperroom/contracts/getListOverflowChain';
 import { ReorderListItemsInputType, ReorderListItemsOutputType } from '@upperroom/contracts/reorderListItems';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
+import ListBoundaryMarker from '../../../components/admin/lists/ListBoundaryMarker';
+import OverflowChainPanel from '../../../components/admin/lists/OverflowChainPanel';
 import useAuth from '../../../context/user/UserContext';
 import firestore, {
   collection,
@@ -61,17 +67,47 @@ import { sermonConverter } from '../../../types/Sermon';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import { createOperationKey } from '../../../utils/callableConcurrency';
 import { createFunctionV2 } from '../../../utils/createFunction';
+import {
+  buildListOverflowChainView,
+  ListOverflowChainView,
+  ListOverflowChainViewItem,
+  sortListOverflowChainSourceItems,
+} from '../../../utils/lists/listOverflowChainView';
 
 type ListDetailItem = Sermon & {
   position?: number;
   uploadStatus?: listUploadStatus;
 };
 
+export type LoadListDetailsPageItem = ListDetailItem;
+type ListPageItem = ListOverflowChainViewItem<LoadListDetailsPageItem>;
+
+interface LoadListDetailsPageDependencies {
+  listId: string;
+  getListOverflowChain: (input: GetListOverflowChainInputType) => Promise<GetListOverflowChainOutputType>;
+  getListDoc: (rootListId: string) => Promise<List>;
+  getNodeItems: (firestoreListId: string, subsplashId?: string) => Promise<LoadListDetailsPageItem[]>;
+  replaceRoute: (href: string) => Promise<unknown> | unknown;
+}
+
+interface LoadListDetailsPageResult {
+  redirected?: boolean;
+  list?: List;
+  chainView?: ListOverflowChainView<LoadListDetailsPageItem>;
+  items?: ListPageItem[];
+}
+
 interface SortableItemProps {
-  item: ListDetailItem;
+  item: ListPageItem;
   index: number;
   onOpenSermon: (id: string) => void;
+  dragDisabled?: boolean;
 }
+
+const createGetListOverflowChain = createFunctionV2<
+  GetListOverflowChainInputType,
+  GetListOverflowChainOutputType
+>('getlistoverflowchain');
 
 const createReorderListItems = createFunctionV2<ReorderListItemsInputType, ReorderListItemsOutputType>(
   'reorderlistitems'
@@ -80,29 +116,14 @@ const createReorderListItems = createFunctionV2<ReorderListItemsInputType, Reord
 const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
   error instanceof Error && error.message ? error.message : fallbackMessage;
 
-const cloneListItems = (items: ListDetailItem[]): ListDetailItem[] => items.map((item) => ({ ...item }));
+const cloneListItems = (items: ListPageItem[]): ListPageItem[] => items.map((item) => ({ ...item }));
 
-const normalizeListItemPositions = (items: ListDetailItem[]): ListDetailItem[] =>
+const normalizeListItemPositions = (items: ListPageItem[]): ListPageItem[] =>
   items.map((item, index) => ({
     ...item,
     position: index + 1,
+    logicalPosition: index + 1,
   }));
-
-const sortInitialListItems = (items: ListDetailItem[]): ListDetailItem[] => {
-  const allItemsHavePosition = items.length > 0 && items.every((item) => typeof item.position === 'number');
-
-  return [...items].sort((left, right) => {
-    if (allItemsHavePosition) {
-      return (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER);
-    }
-
-    return (
-      (right.createdAtMillis ?? 0) - (left.createdAtMillis ?? 0) ||
-      (right.dateMillis ?? 0) - (left.dateMillis ?? 0) ||
-      left.title.localeCompare(right.title)
-    );
-  });
-};
 
 const formatListType = (value?: string): string => {
   if (!value) {
@@ -115,7 +136,7 @@ const formatListType = (value?: string): string => {
     .join(' ');
 };
 
-const SortableListSermonItem = ({ item, index, onOpenSermon }: SortableItemProps) => {
+const SortableListSermonItem = ({ item, index, onOpenSermon, dragDisabled = false }: SortableItemProps) => {
   const {
     attributes,
     listeners,
@@ -123,7 +144,7 @@ const SortableListSermonItem = ({ item, index, onOpenSermon }: SortableItemProps
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id });
+  } = useSortable({ id: item.id, disabled: dragDisabled });
   const isSyncedToList = item.uploadStatus?.status === uploadStatus.UPLOADED;
   const speakerNames = item.speakers?.map((speaker) => speaker.name).filter(Boolean).join(', ');
 
@@ -166,7 +187,7 @@ const SortableListSermonItem = ({ item, index, onOpenSermon }: SortableItemProps
         sx={{
           display: 'flex',
           alignItems: 'center',
-          cursor: isDragging ? 'grabbing' : 'grab',
+          cursor: dragDisabled ? 'default' : isDragging ? 'grabbing' : 'grab',
           color: 'text.disabled',
           touchAction: 'none',
           '&:hover': { color: 'text.secondary' },
@@ -235,14 +256,54 @@ const SortableListSermonItem = ({ item, index, onOpenSermon }: SortableItemProps
   );
 };
 
+export const loadListDetailsPageData = async ({
+  listId,
+  getListOverflowChain,
+  getListDoc,
+  getNodeItems,
+  replaceRoute,
+}: LoadListDetailsPageDependencies): Promise<LoadListDetailsPageResult> => {
+  const chainState = await getListOverflowChain({ listId });
+
+  if (chainState.redirectListId && chainState.redirectListId !== listId) {
+    await replaceRoute(`/admin/lists/${chainState.redirectListId}`);
+    return {
+      redirected: true,
+    };
+  }
+
+  const [listData, nodeItemsByListId] = await Promise.all([
+    getListDoc(chainState.rootListId),
+    Promise.all(
+      chainState.nodes.map(async (node) => {
+        const items = await getNodeItems(node.firestoreListId, node.subsplashId);
+        return [node.firestoreListId, items] as const;
+      })
+    ),
+  ]);
+
+  const chainView = buildListOverflowChainView(chainState, Object.fromEntries(nodeItemsByListId));
+  const items = normalizeListItemPositions(chainView.items);
+
+  return {
+    list: listData,
+    chainView: {
+      ...chainView,
+      items,
+    },
+    items,
+  };
+};
+
 const ListDetailsPage = () => {
   const router = useRouter();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const originalItemsRef = useRef<ListDetailItem[]>([]);
+  const originalItemsRef = useRef<ListPageItem[]>([]);
   const listId = typeof router.query.listId === 'string' ? router.query.listId : '';
   const [list, setList] = useState<List | null>(null);
-  const [items, setItems] = useState<ListDetailItem[]>([]);
+  const [items, setItems] = useState<ListPageItem[]>([]);
+  const [chainView, setChainView] = useState<ListOverflowChainView<ListDetailItem> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -257,63 +318,80 @@ const ListDetailsPage = () => {
       setIsLoading(true);
 
       try {
-        const listRef = doc(firestore, 'lists', listId).withConverter(listConverter);
-        const listItemsRef = collection(firestore, 'lists', listId, 'listItems').withConverter(sermonConverter);
-        const [listSnapshot, listItemsSnapshot] = await Promise.all([
-          getDoc(listRef),
-          getDocs(listItemsRef),
-        ]);
+        const result = await loadListDetailsPageData({
+          listId,
+          getListOverflowChain: createGetListOverflowChain,
+          getListDoc: async (rootListId) => {
+            const rootListRef = doc(firestore, 'lists', rootListId).withConverter(listConverter);
+            const listSnapshot = await getDoc(rootListRef);
 
-        if (!listSnapshot.exists()) {
-          throw new Error('List not found.');
-        }
+            if (!listSnapshot.exists()) {
+              throw new Error('List not found.');
+            }
 
-        const listData = listSnapshot.data();
-        let uploadStatusBySermonId = new Map<string, listUploadStatus | undefined>();
+            return listSnapshot.data();
+          },
+          getNodeItems: async (firestoreListId, subsplashId) => {
+            const listItemsRef = collection(
+              firestore,
+              'lists',
+              firestoreListId,
+              'listItems'
+            ).withConverter(sermonConverter);
+            const listItemsSnapshot = await getDocs(listItemsRef);
 
-        if (listData.subsplashId) {
-          const sermonListsSnapshot = await getDocs(
-            query(
-              collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter),
-              where('subsplashId', '==', listData.subsplashId)
-            )
-          );
+            let uploadStatusBySermonId = new Map<string, listUploadStatus | undefined>();
 
-          uploadStatusBySermonId = new Map(
-            sermonListsSnapshot.docs.map((sermonListDoc) => {
-              const sermonId = sermonListDoc.ref.parent.parent?.id || '';
-              const sermonList = sermonListDoc.data() as SermonList;
-              return [sermonId, sermonList.uploadStatus];
-            })
-          );
-        }
+            if (subsplashId) {
+              const sermonListsSnapshot = await getDocs(
+                query(
+                  collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter),
+                  where('subsplashId', '==', subsplashId)
+                )
+              );
 
-        const nextItems = normalizeListItemPositions(
-          sortInitialListItems(
-            listItemsSnapshot.docs.map((itemDoc) => {
-              const data = itemDoc.data() as Partial<ListDetailItem>;
+              uploadStatusBySermonId = new Map(
+                sermonListsSnapshot.docs.map((sermonListDoc) => {
+                  const sermonId = sermonListDoc.ref.parent.parent?.id || '';
+                  const sermonList = sermonListDoc.data() as SermonList;
+                  return [sermonId, sermonList.uploadStatus];
+                })
+              );
+            }
 
-              return {
-                ...data,
-                id: itemDoc.id,
-                uploadStatus: uploadStatusBySermonId.get(itemDoc.id),
-              } as ListDetailItem;
-            })
-          )
-        );
+            return sortListOverflowChainSourceItems(
+              listItemsSnapshot.docs.map((itemDoc) => {
+                const data = itemDoc.data() as Partial<ListDetailItem>;
+
+                return {
+                  ...data,
+                  id: itemDoc.id,
+                  uploadStatus: uploadStatusBySermonId.get(itemDoc.id),
+                } as ListDetailItem;
+              })
+            );
+          },
+          replaceRoute: (href) => router.replace(href),
+        });
 
         if (cancelled) {
           return;
         }
 
-        setList(listData);
-        setItems(nextItems);
-        originalItemsRef.current = cloneListItems(nextItems);
+        if (result.redirected) {
+          return;
+        }
+
+        setList(result.list ?? null);
+        setChainView(result.chainView ?? null);
+        setItems(result.items ?? []);
+        originalItemsRef.current = cloneListItems(result.items ?? []);
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load list details', error);
           alert(getErrorMessage(error, 'Failed to load list details.'));
           setList(null);
+          setChainView(null);
           setItems([]);
           originalItemsRef.current = [];
         }
@@ -329,7 +407,7 @@ const ListDetailsPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [listId, router.isReady]);
+  }, [listId, router]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -363,8 +441,17 @@ const ListDetailsPage = () => {
 
   const syncedItemsCount = items.filter((item) => item.uploadStatus?.status === uploadStatus.UPLOADED).length;
   const localOnlyItemsCount = items.length - syncedItemsCount;
+  const hasOverflowPages = (chainView?.nodes.length ?? 0) > 1;
+  const isReadOnlySurface = Boolean(chainView?.isReadOnly || hasOverflowPages);
+  const boundaryMarkersByItemId = Object.fromEntries(
+    (chainView?.boundaryMarkers ?? []).map((marker) => [marker.beforeItemId, marker])
+  );
 
   const handleDragEnd = (event: DragEndEvent) => {
+    if (isReadOnlySurface) {
+      return;
+    }
+
     const { active, over } = event;
 
     if (!over || active.id === over.id) {
@@ -384,7 +471,7 @@ const ListDetailsPage = () => {
   };
 
   const saveOrderChanges = async () => {
-    if (!list || !hasOrderChanges) {
+    if (!list || !hasOrderChanges || isReadOnlySurface || chainView?.canSaveOrder === false) {
       return;
     }
 
@@ -541,7 +628,7 @@ const ListDetailsPage = () => {
                       <Box sx={{ display: 'flex', gap: 4 }}>
                         <Box>
                           <Typography variant="h5" fontWeight={700} color="primary.main">
-                            {items.length}
+                            {chainView?.expectedPhysicalCount ?? items.length}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             Total Sermons
@@ -594,6 +681,21 @@ const ListDetailsPage = () => {
               </Alert>
             ) : null}
 
+            {chainView?.warningMessage ? (
+              <Alert severity="warning" sx={{ mb: 3 }}>
+                {chainView.warningMessage}
+              </Alert>
+            ) : null}
+
+            {hasOverflowPages && !chainView?.warningMessage ? (
+              <Alert severity="info" sx={{ mb: 3 }}>
+                This root detail page now shows the whole overflow chain in one view. Reorder and destructive actions
+                stay disabled here until chain-aware save support lands.
+              </Alert>
+            ) : null}
+
+            {chainView ? <OverflowChainPanel nodes={chainView.nodes} /> : null}
+
             <Box
               sx={{
                 display: 'flex',
@@ -608,28 +710,26 @@ const ListDetailsPage = () => {
                 List Sermons
               </Typography>
 
-              {hasOrderChanges ? (
-                <Box sx={{ display: 'flex', gap: 1.5 }}>
-                  <Button
-                    variant="outlined"
-                    color="inherit"
-                    startIcon={<UndoIcon />}
-                    onClick={revertOrder}
-                    disabled={isSaving}
-                  >
-                    Revert
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={isSaving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
-                    onClick={saveOrderChanges}
-                    disabled={isSaving}
-                  >
-                    Save Order
-                  </Button>
-                </Box>
-              ) : null}
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <Button
+                  variant="outlined"
+                  color="inherit"
+                  startIcon={<UndoIcon />}
+                  onClick={revertOrder}
+                  disabled={isSaving || isReadOnlySurface || !hasOrderChanges}
+                >
+                  Revert
+                </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={isSaving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+                  onClick={saveOrderChanges}
+                  disabled={isSaving || isReadOnlySurface || !hasOrderChanges}
+                >
+                  Save Order
+                </Button>
+              </Box>
             </Box>
 
             {items.length === 0 ? (
@@ -662,9 +762,13 @@ const ListDetailsPage = () => {
                   <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
                     {items.map((item, index) => (
                       <Box key={item.id}>
+                        {boundaryMarkersByItemId[item.id] ? (
+                          <ListBoundaryMarker marker={boundaryMarkersByItemId[item.id]} />
+                        ) : null}
                         <SortableListSermonItem
                           item={item}
                           index={index}
+                          dragDisabled={isReadOnlySurface}
                           onOpenSermon={(sermonId) => {
                             void router.push(`/admin/sermons/${sermonId}`);
                           }}

@@ -12,6 +12,7 @@ import firestore, { collection, query, getDocs, where, orderBy, QueryConstraint 
 import { listConverter } from '../types/List';
 import { sermonConverter } from '../types/Sermon';
 import { speakerConverter } from '../types/Speaker';
+import { getListDiscoveryCount, isDiscoverableRootList } from './algolia/searchRecords';
 import { resolveListSortFromIndexName } from './algolia/listSorting';
 import { resolveSpeakerSortFromIndexName } from './algolia/speakerSorting';
 
@@ -134,9 +135,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               const listsRef = collection(firestore, 'lists');
               const listsQuery = query(listsRef.withConverter(listConverter), orderBy('name'));
               const listsSnapshot = await getDocs(listsQuery);
-              let allLists = listsSnapshot.docs
-                .map((doc) => doc.data())
-                .filter((list) => list.isMoreSermonsList !== true);
+              let allLists = listsSnapshot.docs.map((doc) => doc.data()).filter(isDiscoverableRootList);
 
               if (listTypeFilter) {
                 allLists = allLists.filter((list) => list.type === listTypeFilter);
@@ -148,8 +147,9 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               }
 
               allLists = [...allLists].sort((leftList, rightList) => {
-                const leftValue = leftList[sortProperty];
-                const rightValue = rightList[sortProperty];
+                const leftValue = sortProperty === 'count' ? getListDiscoveryCount(leftList) : leftList[sortProperty];
+                const rightValue =
+                  sortProperty === 'count' ? getListDiscoveryCount(rightList) : rightList[sortProperty];
 
                 if (typeof leftValue === 'number' && typeof rightValue === 'number') {
                   return sortOrder === 'asc' ? leftValue - rightValue : rightValue - leftValue;

@@ -15,6 +15,7 @@ import { ImageType } from '../../types/Image';
 import { getErrorMessage, showError } from './utils';
 import { isDevelopment } from '../../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../../utils/mockAlgoliaSearchClient';
+import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
@@ -157,8 +158,7 @@ function SpeakerSelector({
 
               if (querySnapshot.docs.length > 0) {
                 const list = querySnapshot.docs[0].data();
-                // Don't add overflow lists to the sermon list
-                if (list.isMoreSermonsList) {
+                if (!isDiscoverableRootList(list)) {
                   console.warn(`Attempted to add overflow list ${details.option.listId} - skipping`);
                   return;
                 }
