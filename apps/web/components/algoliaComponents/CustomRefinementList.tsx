@@ -18,8 +18,8 @@ const normalizeLabel = (label: string) => {
     })
     .join(' ');
 };
-  const CustomRefinementList = (
-  props: UseRefinementListProps & { title: string; searchable?: boolean; searchablePlaceholder?: string; }
+const CustomRefinementList = (
+  props: UseRefinementListProps & { title: string; searchable?: boolean; searchablePlaceholder?: string }
 ) => {
   const { status, results } = useInstantSearch();
   const { items, refine, searchForItems, canToggleShowMore, isShowingMore, toggleShowMore } = useRefinementList(props);
@@ -35,15 +35,14 @@ const normalizeLabel = (label: string) => {
 
   const renderedItems = useMemo(() => (items.length > 0 ? items : stableItems), [items, stableItems]);
   const skeletonRows = props.attribute === 'speakers.name' ? 5 : 2;
-  const showSkeleton = results.__isArtificial || (renderedItems.length === 0 && (status === 'loading' || status === 'stalled'));
+  const showSkeleton =
+    results.__isArtificial || (renderedItems.length === 0 && (status === 'loading' || status === 'stalled'));
 
   if (showSkeleton) {
     return (
       <FormGroup sx={{ width: '100%', gap: 0.375 }}>
         <FormLabel>{props.title}</FormLabel>
-        {props.searchable && (
-          <Skeleton variant="rectangular" height={40} width="100%" sx={{ borderRadius: 0.75 }} />
-        )}
+        {props.searchable && <Skeleton variant="rectangular" height={40} width="100%" sx={{ borderRadius: 0.75 }} />}
         {Array.from({ length: skeletonRows }).map((_, index) => (
           <Box
             key={`${props.attribute}-skeleton-${index}`}
@@ -54,11 +53,7 @@ const normalizeLabel = (label: string) => {
           >
             <Skeleton variant="rectangular" width={20} height={20} sx={{ borderRadius: '3px', mt: '2px', mb: '2px' }} />
             <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
-              <Skeleton
-                variant="text"
-                width={index % 2 === 0 ? 112 : 148}
-                sx={{ fontSize: '1rem', lineHeight: 1.5 }}
-              />
+              <Skeleton variant="text" width={index % 2 === 0 ? 112 : 148} sx={{ fontSize: '1rem', lineHeight: 1.5 }} />
               <Box sx={{ flex: 1, minWidth: 0 }} />
               <Skeleton variant="rectangular" width={34} height="1.5rem" sx={{ borderRadius: 0.5, flexShrink: 0 }} />
             </Box>
