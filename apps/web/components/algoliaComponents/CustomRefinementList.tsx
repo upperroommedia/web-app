@@ -9,7 +9,6 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/system/Box';
 import { useInstantSearch, useRefinementList, UseRefinementListProps } from 'react-instantsearch';
-import { useEffect, useMemo, useState } from 'react';
 
 const normalizeLabel = (label: string) => {
   return label
@@ -20,32 +19,19 @@ const normalizeLabel = (label: string) => {
     })
     .join(' ');
 };
-  const CustomRefinementList = (
-  props: UseRefinementListProps & { title: string; searchable?: boolean; searchablePlaceholder?: string; }
+const CustomRefinementList = (
+  props: UseRefinementListProps & { title: string; searchable?: boolean; searchablePlaceholder?: string }
 ) => {
   const { status, results } = useInstantSearch();
   const { items, refine, searchForItems, canToggleShowMore, isShowingMore, toggleShowMore } = useRefinementList(props);
-  const [stableItems, setStableItems] = useState(items);
-
-  useEffect(() => {
-    if (items.length > 0) {
-      queueMicrotask(() => {
-        setStableItems(items);
-      });
-    }
-  }, [items]);
-
-  const renderedItems = useMemo(() => (items.length > 0 ? items : stableItems), [items, stableItems]);
   const skeletonRows = props.attribute === 'speakers.name' ? 5 : 2;
-  const showSkeleton = results.__isArtificial || (renderedItems.length === 0 && (status === 'loading' || status === 'stalled'));
+  const showSkeleton = results.__isArtificial || (items.length === 0 && (status === 'loading' || status === 'stalled'));
 
   if (showSkeleton) {
     return (
       <FormGroup sx={{ width: '100%', gap: 0.375 }}>
         <FormLabel>{props.title}</FormLabel>
-        {props.searchable && (
-          <Skeleton variant="rectangular" height={40} width="100%" sx={{ borderRadius: 0.75 }} />
-        )}
+        {props.searchable && <Skeleton variant="rectangular" height={40} width="100%" sx={{ borderRadius: 0.75 }} />}
         {Array.from({ length: skeletonRows }).map((_, index) => (
           <Box
             key={`${props.attribute}-skeleton-${index}`}
@@ -56,11 +42,7 @@ const normalizeLabel = (label: string) => {
           >
             <Skeleton variant="rectangular" width={20} height={20} sx={{ borderRadius: '3px', mt: '2px', mb: '2px' }} />
             <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
-              <Skeleton
-                variant="text"
-                width={index % 2 === 0 ? 112 : 148}
-                sx={{ fontSize: '1rem', lineHeight: 1.5 }}
-              />
+              <Skeleton variant="text" width={index % 2 === 0 ? 112 : 148} sx={{ fontSize: '1rem', lineHeight: 1.5 }} />
               <Box sx={{ flex: 1, minWidth: 0 }} />
               <Skeleton variant="rectangular" width={34} height="1.5rem" sx={{ borderRadius: 0.5, flexShrink: 0 }} />
             </Box>
@@ -85,7 +67,7 @@ const normalizeLabel = (label: string) => {
           onChange={(e) => searchForItems(e.currentTarget.value)}
         />
       )}
-      {renderedItems.map((item, index) => (
+      {items.map((item) => (
         <FormControlLabel
           sx={{
             py: 0.125,
@@ -95,13 +77,28 @@ const normalizeLabel = (label: string) => {
             ml: 0,
             width: '100%',
             alignItems: 'flex-start',
+            columnGap: 1,
             '& .MuiFormControlLabel-label': {
               flex: 1,
               minWidth: 0,
             },
           }}
-          key={`${String(item.value)}-${index}`}
-          control={<Checkbox sx={{ p: 0 }} disableRipple onChange={() => refine(item.value)} />}
+          key={String(item.value)}
+          control={
+            <Checkbox
+              checked={item.isRefined}
+              disableRipple
+              size="small"
+              onChange={() => refine(item.value)}
+              sx={{
+                p: 0,
+                mt: '2px',
+                mr: 0,
+                flexShrink: 0,
+                alignSelf: 'flex-start',
+              }}
+            />
+          }
           label={
             <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
               <Typography

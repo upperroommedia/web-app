@@ -1,6 +1,6 @@
 import { FunctionComponent, ReactNode, useCallback, useEffect, useState, useMemo, type JSX } from 'react';
 import { algoliasearch, SearchClient } from 'algoliasearch';
-import { InstantSearch, useInstantSearch } from 'react-instantsearch';
+import { Configure, InstantSearch, useInstantSearch } from 'react-instantsearch';
 import Stack from '@mui/material/Stack';
 import CustomPagination from './algoliaComponents/CustomPagination';
 import SearchResultSermonList from './SearchResultSermonsList';
@@ -40,8 +40,10 @@ function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
         minWidth: 0,
         width: '100%',
         alignItems: 'stretch',
-        overflow: 'auto',
         px: { xs: 1, md: 0 },
+        position: { md: 'sticky' },
+        top: { md: 16 },
+        alignSelf: { md: 'start' },
         ...sx,
       }}
     >
@@ -61,8 +63,10 @@ function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
           attribute="speakers.name"
           limit={5}
           showMore={true}
+          showMoreLimit={25}
           searchable
           searchablePlaceholder="Search Speakers"
+          sortBy={['isRefined:desc', 'count:desc', 'name:asc']}
           title="Speakers"
         />
       </Stack>
@@ -140,6 +144,7 @@ const SearchableAdminSermonList: FunctionComponent = () => {
     <>
       {searchClient ? (
         <InstantSearch searchClient={searchClient} indexName="sermons" future={{ preserveSharedStateOnUnmount: true }}>
+          <Configure maxValuesPerFacet={1000} />
           <Stack justifyContent="center" alignItems="center" gap={{ xs: 0.5, sm: 1 }}>
             <MobileFilterSection onToggle={handleFilterToggle} />
             <NoResultsBoundary fallback={<NoResults />}>
