@@ -1,6 +1,6 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { isUserRoleAdmin } from '../../../types/User';
+import { isUserRoleAdmin } from '@upperroom/shared/types/User';
 import handleError from '../handleError';
 import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import { DeleteSpeakerCallableInputType, DeleteSpeakerCallableOutputType } from './createSpeakerTypes';

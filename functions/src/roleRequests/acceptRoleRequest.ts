@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { adminBaseUrlSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
 import handleError from '../handleError';

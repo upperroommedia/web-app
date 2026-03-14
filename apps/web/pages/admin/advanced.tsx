@@ -24,7 +24,7 @@ import {
 import type {
   GetSoundCloudAuthStatusInput,
   GetSoundCloudAuthStatusReturnType,
-} from '../../functions/src/getSoundCloudAuthStatus';
+} from '@upperroom/contracts/getSoundCloudAuthStatus';
 
 type NoticeState = {
   severity: 'success' | 'error' | 'info' | 'warning';

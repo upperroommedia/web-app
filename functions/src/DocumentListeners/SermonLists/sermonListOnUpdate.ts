@@ -1,8 +1,8 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { firestore, logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
-import { SermonList } from '../../../../types/SermonList';
-import { uploadStatus } from '../../../../types/SermonTypes';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { SermonList } from '@upperroom/shared/types/SermonList';
+import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';

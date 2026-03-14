@@ -1,7 +1,7 @@
 import { firestore, logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../handleError';
-import { BundleConfig } from '../../../shared/bundleConfigs';
+import { BundleConfig } from '@upperroom/shared/shared/bundleConfigs';
 import { generateAndStoreBundle } from './bundleCreationUtils';
 
 const database = firebaseAdmin.database();

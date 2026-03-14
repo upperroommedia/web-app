@@ -1,8 +1,8 @@
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { emitOperationalAlert } from '../../notifications/emitOperationalAlert';
 import * as queueEmailModule from '../../notifications/queueEmail';
-import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../../../shared/soundcloudAuth';
+import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 jest.setTimeout(45_000);
 

@@ -11,6 +11,7 @@
     "build-watch": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
+    "@upperroom/shared": "workspace:*",
     "@google-cloud/functions-framework": "catalog:",
     "@google-cloud/storage": "catalog:",
     "algoliasearch": "catalog:",

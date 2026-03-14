@@ -1,10 +1,10 @@
 import axios, { isAxiosError } from 'axios';
 import { DocumentReference } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { ImageType } from '../../../types/Image';
-import { ISpeaker } from '../../../types/Speaker';
-import { List, ListType, OverflowBehavior } from '../../../types/List';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import { ImageType } from '@upperroom/shared/types/Image';
+import { ISpeaker } from '@upperroom/shared/types/Speaker';
+import { List, ListType, OverflowBehavior } from '@upperroom/shared/types/List';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminListConverter, firestoreAdminSpeakerConverter } from '../firestoreDataConverter';
 import { createNewSubsplashList } from '../createNewSubsplashList';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';

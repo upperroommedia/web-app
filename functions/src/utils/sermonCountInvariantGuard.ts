@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminSermonConverter } from '../firestoreDataConverter';
 import { recalculateSermonCounts } from './recalculateSermonCounts';
 

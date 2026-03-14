@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { defineSecret } from 'firebase-functions/params';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { runtimeAlertRecipientsSecret } from './notifications/notificationSecrets';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
 

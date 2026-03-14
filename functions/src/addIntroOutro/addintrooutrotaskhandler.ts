@@ -1,10 +1,10 @@
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import path from 'path';
 import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
 import { AxiosError, isAxiosError } from 'axios';
-import { Sermon, sermonStatus, sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
+import { Sermon, sermonStatus, sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { firestoreAdminSermonConverter } from '../firestoreDataConverter';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { Database } from 'firebase-admin/database';
@@ -26,7 +26,7 @@ import {
 import { TIMEOUT_SECONDS } from './consts';
 import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
-import { PROCESSED_SERMONS_BUCKET } from '../../../constants/storage_constants';
+import { PROCESSED_SERMONS_BUCKET } from '@upperroom/shared/constants/storage_constants';
 import trim from './trim';
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 // import http from 'http';

@@ -2,9 +2,9 @@
  * Helper functions for setting up Firestore in tests
  */
 
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
-import { OverflowBehavior } from '../../../../types/List';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 
 const firestoreDB = firebaseAdmin.firestore();
 

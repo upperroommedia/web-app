@@ -1,13 +1,13 @@
 import { DocumentData, FirestoreDataConverter, QueryDocumentSnapshot, Timestamp } from 'firebase-admin/firestore';
-import type { Sermon } from '../../types/SermonTypes';
-import type { ISpeaker } from '../../types/Speaker';
-import type { ImageType } from '../../types/Image';
-import type { List } from '../../types/List';
-import type { SermonList } from '../../types/SermonList';
-import type { Topic } from '../../types/Topic';
-import type { ListItem, ListItemType } from '../../types/ListItem';
-import type { Series } from '../../types/Series';
-import type { SeriesItem } from '../../types/SeriesItem';
+import type { Sermon } from '@upperroom/shared/types/SermonTypes';
+import type { ISpeaker } from '@upperroom/shared/types/Speaker';
+import type { ImageType } from '@upperroom/shared/types/Image';
+import type { List } from '@upperroom/shared/types/List';
+import type { SermonList } from '@upperroom/shared/types/SermonList';
+import type { Topic } from '@upperroom/shared/types/Topic';
+import type { ListItem, ListItemType } from '@upperroom/shared/types/ListItem';
+import type { Series } from '@upperroom/shared/types/Series';
+import type { SeriesItem } from '@upperroom/shared/types/SeriesItem';
 import {
   createEmptySermon,
   FirebaseSermon,

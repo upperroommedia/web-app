@@ -2,7 +2,7 @@
  * Tests for deleteSeries Firebase function
  */
 
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mocks';
 import {
   clearFirestore,

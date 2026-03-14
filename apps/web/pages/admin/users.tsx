@@ -25,7 +25,7 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import UserTable from '../../components/UserTable';
 import useAuth from '../../context/user/UserContext';
-import { GetUserInputType, GetUserOutputType } from '../../functions/src/getUser';
+import { GetUserInputType, GetUserOutputType } from '@upperroom/contracts/getUser';
 import {
   CreateInviteInputType,
   CreateInviteResultData,
@@ -39,8 +39,8 @@ import {
   ResendInviteResultData,
   RevokeInviteInputType,
   RevokeInviteResultData,
-} from '../../functions/src/invites/inviteTypes';
-import { ListUsersInputType, ListUsersOutputType } from '../../functions/src/listUsers';
+} from '@upperroom/contracts/invites/inviteTypes';
+import { ListUsersInputType, ListUsersOutputType } from '@upperroom/contracts/listUsers';
 import {
   AcceptRoleRequestInputType,
   AcceptRoleRequestOutputType,
@@ -49,8 +49,8 @@ import {
   ListRoleRequestsInputType,
   ListRoleRequestsOutputType,
   RoleRequestSummary,
-} from '../../functions/src/roleRequests/roleRequestTypes';
-import { SetUserRoleInputType, SetUserRoleOutputType } from '../../functions/src/setUserRole';
+} from '@upperroom/contracts/roleRequests/roleRequestTypes';
+import { SetUserRoleInputType, SetUserRoleOutputType } from '@upperroom/contracts/setUserRole';
 import AppLayout from '../../layout/AppLayout';
 import { UserWithLoading } from '../../types/User';
 import { createFunctionV2 } from '../../utils/createFunction';

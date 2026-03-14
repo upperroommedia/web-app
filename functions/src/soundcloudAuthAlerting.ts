@@ -1,7 +1,7 @@
 import { HttpsError } from 'firebase-functions/v2/https';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { isSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
-import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../shared/soundcloudAuth';
+import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 export const emitSoundCloudReconnectAlertIfNeeded = async (input: {
   error: unknown;

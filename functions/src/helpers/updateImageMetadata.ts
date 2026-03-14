@@ -1,11 +1,11 @@
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { onRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import { ImageType } from '../../../types/Image';
+import { ImageType } from '@upperroom/shared/types/Image';
 import computeMetadataForImage from '../computeMetadataForImage';
 import { firestoreAdminImagesConverter } from '../firestoreDataConverter';
-import { getFirebaseImagesBucket } from '../../../shared/firebaseProjectConfig';
-import { extractStoragePathFromDownloadUrl } from '../../../shared/firebaseStorageUrls';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { extractStoragePathFromDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 import handleError from '../handleError';
 
 export const updateImageMetadata = onRequest({ timeoutSeconds: 300, memory: '2GiB' }, async (_req, res) => {

@@ -8,7 +8,7 @@
 
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
 import { authenticateSubsplash } from './subsplashUtils';
 import { getSeriesItems, patchMediaItemSeries, patchSeriesItemPositions } from './helpers/seriesHelpers';

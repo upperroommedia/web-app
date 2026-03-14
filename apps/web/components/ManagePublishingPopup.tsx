@@ -26,18 +26,18 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import storage, { getDownloadURL, ref } from '../firebase/storage';
 import firestore, { doc, updateDoc, collection, writeBatch, getDoc, getDocs, deleteField, setDoc, query, orderBy } from '../firebase/firestore';
 import { FunctionComponent, ReactNode, useCallback, useEffect, useState } from 'react';
-import { AddtoListInputType, AddToListOutputType } from '../functions/src/addToList';
-import { RemoveFromListInputType, RemoveFromListOutputType } from '../functions/src/removeFromList';
+import { AddtoListInputType, AddToListOutputType } from '@upperroom/contracts/addToList';
+import { RemoveFromListInputType, RemoveFromListOutputType } from '@upperroom/contracts/removeFromList';
 import {
   CreateNewSubsplashListInputType,
   CreateNewSubsplashListOutputType,
-} from '../functions/src/createNewSubsplashList';
-import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../functions/src/uploadToSubsplash';
-import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../functions/src/uploadToSoundCloud';
-import { CreateSeriesInputType, CreateSeriesOutputType } from '../functions/src/createSeries';
-import { AddToSeriesInputType, AddToSeriesOutputType } from '../functions/src/addToSeries';
-import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../functions/src/reorderSeriesItems';
-import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../functions/src/removeFromSeries';
+} from '@upperroom/contracts/createNewSubsplashList';
+import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
+import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '@upperroom/contracts/uploadToSoundCloud';
+import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
+import { AddToSeriesInputType, AddToSeriesOutputType } from '@upperroom/contracts/addToSeries';
+import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '@upperroom/contracts/reorderSeriesItems';
+import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '@upperroom/contracts/removeFromSeries';
 import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { Series, seriesConverter } from '../types/Series';

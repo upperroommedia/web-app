@@ -15,7 +15,7 @@ import ImageViewer from './ImageViewer';
 import PopUp from './PopUp';
 import useAuth from '../context/user/UserContext';
 import { createFunctionV2 } from '../utils/createFunction';
-import { CreateSeriesInputType, CreateSeriesOutputType } from '../functions/src/createSeries';
+import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
 import { Series, emptySeries } from '../types/Series';
 import firestore, { doc, updateDoc } from '../firebase/firestore';
 import { serverTimestamp } from 'firebase/firestore';

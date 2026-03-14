@@ -1,4 +1,4 @@
-import { OverflowBehavior } from '../../../../types/List';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { 
   subsplashMock, 
   TestRequest,
@@ -6,7 +6,7 @@ import {
 } from './mocks';
 import { createListDocument, clearFirestore } from './firestoreHelpers';
 import addToList from '../../addToList';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import axios from 'axios';
 
 const firestoreDB = firebaseAdmin.firestore();

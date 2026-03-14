@@ -11,7 +11,7 @@
  *   pnpm test:unit transactionRetryDuplication
  */
 
-import { OverflowBehavior } from '../../../../types/List';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { 
   subsplashMock, 
   TestRequest,

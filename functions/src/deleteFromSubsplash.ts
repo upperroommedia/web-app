@@ -2,7 +2,7 @@ import axios, { isAxiosError } from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, FunctionsErrorCode, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';

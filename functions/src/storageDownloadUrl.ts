@@ -1,6 +1,6 @@
 import type { File } from '@google-cloud/storage';
 import { randomUUID } from 'crypto';
-import { buildFirebaseStorageDownloadUrl } from '../../shared/firebaseStorageUrls';
+import { buildFirebaseStorageDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 
 type StorageObjectMetadata = {
   metadata?: Record<string, string | undefined>;

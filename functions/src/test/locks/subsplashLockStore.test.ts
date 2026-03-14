@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { HttpsError } from 'firebase-functions/v2/https';
 import * as lockStore from '../../locks/subsplashLockStore';
 import { sortLockKeys, withSubsplashLocks } from '../../locks/withSubsplashLocks';

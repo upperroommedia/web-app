@@ -6,7 +6,7 @@ import {
 import { getAdminBaseUrl, getRuntimeAlertRecipients } from './notificationParams';
 import { OperationalAlertPayload } from './notificationTypes';
 import { queueEmail } from './queueEmail';
-import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../../shared/soundcloudAuth';
+import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 const OPERATIONAL_ALERT_EMITTED = Symbol.for('urm.operationalAlertEmitted');
 

@@ -1,6 +1,6 @@
-import { ROLES } from '../../../context/types';
-import { FunctionOutputType } from '../../../types/Function';
-import { UserRoleType } from '../../../types/User';
+import { ROLES } from '@upperroom/shared/context/types';
+import { FunctionOutputType } from '@upperroom/shared/types/Function';
+import { UserRoleType } from '@upperroom/shared/types/User';
 
 export const ROLE_REQUEST_EMAIL_ENQUEUE_FAILED = 'ROLE_REQUEST_EMAIL_ENQUEUE_FAILED' as const;
 export const ROLE_REQUESTS_COLLECTION = 'roleRequests' as const;

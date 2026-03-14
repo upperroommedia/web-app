@@ -7,7 +7,7 @@
 //   ImageType,
 //   // resizeType,
 //   // supportedContentTypes
-// } from '../../types/Image';
+// } from '@upperroom/shared/types/Image';
 
 // // import { FirestoreDataConverter } from '@google-cloud/firestore';
 // // import { modifyImage, ResizedImageResult } from './resize-image';

@@ -1,6 +1,6 @@
 import { logger, https } from 'firebase-functions';
 import { HttpsError } from 'firebase-functions/v2/https';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from './handleError';
 
 const updateCreatedAndEditedAtMillis = https.onCall(async (): Promise<HttpsError | number> => {

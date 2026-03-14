@@ -40,7 +40,7 @@ import {
   DeleteSpeakerCallableOutputType,
   UpdateSpeakerCallableInputType,
   UpdateSpeakerCallableOutputType,
-} from '../../../functions/src/speakers/createSpeakerTypes';
+} from '@upperroom/contracts/speakers/createSpeakerTypes';
 import { buildUpdateSpeakerPayload } from '../../../utils/speakers/updateSpeakerClient';
 import {
   SPEAKER_LIST_SUCCESS_INSTRUCTION,

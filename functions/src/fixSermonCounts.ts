@@ -1,5 +1,5 @@
 import { https, logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { recalculateSermonCounts, validateSermonCounts } from './utils/recalculateSermonCounts';
 import handleError from './handleError';
 

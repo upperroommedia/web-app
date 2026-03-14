@@ -1,9 +1,9 @@
 import axios from 'axios';
 import { CollectionReference, Firestore } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
-import { ImageType } from '../../../types/Image';
-import { List, ListType } from '../../../types/List';
-import { Topic } from '../../../types/Topic';
+import { ImageType } from '@upperroom/shared/types/Image';
+import { List, ListType } from '@upperroom/shared/types/List';
+import { Topic } from '@upperroom/shared/types/Topic';
 import { createAxiosConfig } from '../subsplashUtils';
 
 interface SubsplashTopicTag {

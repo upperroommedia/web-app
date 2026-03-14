@@ -1,6 +1,6 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { createBundleHandler } from './utils/bundleCreationUtils';
-import { SUBTITLE_BUNDLE_CONFIG } from '../../shared/bundleConfigs';
+import { SUBTITLE_BUNDLE_CONFIG } from '@upperroom/shared/shared/bundleConfigs';
 
 export const createSubtitleBundle = onRequest(
     {

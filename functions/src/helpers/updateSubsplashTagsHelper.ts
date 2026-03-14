@@ -1,7 +1,7 @@
 import { createAxiosConfig } from '../subsplashUtils';
 import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
-import { Sermon } from '../../../types/SermonTypes';
+import { Sermon } from '@upperroom/shared/types/SermonTypes';
 import { withSubsplashLocks } from '../locks/withSubsplashLocks';
 
 // Helper function to update Subsplash with new sermon topics

@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { queueEmail } from '../../notifications/queueEmail';
 
 jest.setTimeout(45_000);

@@ -25,7 +25,7 @@ import {
   ListRoleRequestsInputType,
   ListRoleRequestsOutputType,
   RoleRequestSummary,
-} from '../functions/src/roleRequests/roleRequestTypes';
+} from '@upperroom/contracts/roleRequests/roleRequestTypes';
 
 const formatStatus = (value: string): string =>
   value

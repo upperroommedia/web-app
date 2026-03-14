@@ -1,10 +1,10 @@
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
-import { SermonList } from '../../../../types/SermonList';
+import { SermonList } from '@upperroom/shared/types/SermonList';
 import { removeFromList } from '../../removeFromList';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
 

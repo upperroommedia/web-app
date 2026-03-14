@@ -9,7 +9,7 @@ import Typography from '@mui/material/Typography';
 import { useRouter } from 'next/router';
 import useAuth from '../../context/user/UserContext';
 import auth from '../../firebase/auth';
-import { ClaimInviteInputType, ClaimInviteResultData, InviteRoleType } from '../../functions/src/invites/inviteTypes';
+import { ClaimInviteInputType, ClaimInviteResultData, InviteRoleType } from '@upperroom/contracts/invites/inviteTypes';
 import { createFunctionV2 } from '../../utils/createFunction';
 
 type ClaimInviteOutputType = { status: 'success'; data: ClaimInviteResultData } | { status: 'error'; error: string };

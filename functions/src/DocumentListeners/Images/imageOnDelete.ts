@@ -1,10 +1,10 @@
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import { firestoreAdminImagesConverter } from '../../firestoreDataConverter';
-import { getFirebaseImagesBucket } from '../../../../shared/firebaseProjectConfig';
-import { extractStoragePathFromDownloadUrl } from '../../../../shared/firebaseStorageUrls';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { extractStoragePathFromDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 
 const imagesBucket = getFirebaseImagesBucket();
 

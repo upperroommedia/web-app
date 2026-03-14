@@ -1,7 +1,7 @@
 import {
   buildFirebaseStorageDownloadUrl,
   extractStoragePathFromDownloadUrl,
-} from '../../../../shared/firebaseStorageUrls';
+} from '@upperroom/shared/shared/firebaseStorageUrls';
 
 describe('firebaseStorageUrls', () => {
   const bucketName = 'urm-app-staging-images';

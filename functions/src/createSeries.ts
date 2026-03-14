@@ -12,8 +12,8 @@ import {
   getSeriesSubtitleFromPublishedCount,
   patchSeriesMetadata,
 } from './helpers/seriesHelpers';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
-import { canUserRolePublish } from '../../types/User';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';

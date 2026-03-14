@@ -1,4 +1,4 @@
-import { OverflowBehavior } from '../../../../types/List';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { SubsplashListRow } from '../../types/Subsplash';
 import { 
   subsplashMock,
@@ -6,7 +6,7 @@ import {
 import { createListDocument, clearFirestore } from '../addToList/firestoreHelpers';
 import removeFromList from '../../removeFromList';
 import { RemoveFromListInputType } from '../../removeFromList';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import axios from 'axios';
 import * as lockStore from '../../locks/subsplashLockStore';
 

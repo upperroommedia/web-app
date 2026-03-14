@@ -15,7 +15,7 @@ import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
-import { DeleteSeriesInputType, DeleteSeriesOutputType } from '../../functions/src/deleteSeries';
+import { DeleteSeriesInputType, DeleteSeriesOutputType } from '@upperroom/contracts/deleteSeries';
 import Link from 'next/link';
 import Card from '@mui/material/Card';
 import Divider from '@mui/material/Divider';

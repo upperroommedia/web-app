@@ -10,7 +10,7 @@ import Typography from '@mui/material/Typography';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
-import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '../../functions/src/deleteSubsplashList';
+import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '@upperroom/contracts/deleteSubsplashList';
 import Link from 'next/link';
 import Card from '@mui/material/Card';
 import Divider from '@mui/material/Divider';

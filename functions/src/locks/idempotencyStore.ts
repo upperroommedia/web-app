@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DocumentData } from 'firebase-admin/firestore';
 import { IdempotencyRecord } from './lockTypes';

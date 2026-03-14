@@ -29,7 +29,7 @@ import {
   SUBSPLASH_SPEAKER_LIST_LINK,
   shouldShowSpeakerListSuccess,
 } from '../../utils/speakers/createSpeakerClient';
-import { CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType } from '../../functions/src/speakers/createSpeakerTypes';
+import { CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType } from '@upperroom/contracts/speakers/createSpeakerTypes';
 
 const createSpeakerCallable = createFunctionV2<CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType>(
   'createspeaker'

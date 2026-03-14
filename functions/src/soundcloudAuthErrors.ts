@@ -1,5 +1,5 @@
 import { HttpsError } from 'firebase-functions/v2/https';
-import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../shared/soundcloudAuth';
+import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 type ErrorDetailsRecord = Record<string, unknown>;
 

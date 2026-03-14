@@ -1,0 +1,17 @@
+{
+  "name": "@upperroom/shared",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build"
+  },
+  "dependencies": {
+    "firebase": "catalog:",
+    "firebase-admin": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

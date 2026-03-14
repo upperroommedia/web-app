@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { createAxiosConfig } from '../subsplashUtils';
-import { List, ListType, OverflowBehavior } from '../../../types/List';
-import { ImageType } from '../../../types/Image';
+import { List, ListType, OverflowBehavior } from '@upperroom/shared/types/List';
+import { ImageType } from '@upperroom/shared/types/Image';
 import populateImages from './populateImagesHelper';
 import { Bucket } from '@google-cloud/storage';
 import { HttpsError } from 'firebase-functions/v2/https';

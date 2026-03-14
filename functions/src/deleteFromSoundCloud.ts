@@ -3,7 +3,7 @@ import { deleteTrack, normalizeSoundCloudApiError } from './soundcloudClient';
 import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { isAxiosError } from 'axios';
 import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';

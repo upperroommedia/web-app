@@ -1,11 +1,11 @@
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import {
   INTRO_OUTRO_SERMONS_BUCKET,
   PROCESSED_SERMONS_BUCKET,
   UNPROCESSED_SERMONS_BUCKET,
-} from '../../../../constants/storage_constants';
+} from '@upperroom/shared/constants/storage_constants';
 
 const sermonOnDelete = onDocumentDeleted('sermons/{sermonId}', async (event) => {
   const { sermonId } = event.params;

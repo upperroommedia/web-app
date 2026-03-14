@@ -15,7 +15,7 @@
  *   pnpm test:unit transactionRetryInconsistency
  */
 
-import { OverflowBehavior } from '../../../../types/List';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { 
   subsplashMock, 
   TestRequest,
@@ -24,7 +24,7 @@ import {
 import { createListDocument, clearFirestore, getListBySubsplashId } from './firestoreHelpers';
 import addToList from '../../addToList';
 import { SubsplashListRow } from '../../types/Subsplash';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import axios from 'axios';
 

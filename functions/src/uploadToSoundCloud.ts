@@ -1,10 +1,10 @@
 import handleError from './handleError';
 import { normalizeSoundCloudApiError, uploadTrack } from './soundcloudClient';
 import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
 

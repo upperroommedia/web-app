@@ -1,5 +1,5 @@
 import firestore, { deleteDoc, doc } from '../firebase/firestore';
-import { DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType } from '../functions/src/deleteFromSubsplash';
+import { DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType } from '@upperroom/contracts/deleteFromSubsplash';
 import { sermonConverter } from '../types/Sermon';
 import { createOperationKey, formatLockBusyRetryMessage, parseLockBusyDetails } from './callableConcurrency';
 import { createFunctionV2 } from './createFunction';

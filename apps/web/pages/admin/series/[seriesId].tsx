@@ -83,13 +83,13 @@ import {
   parseLockBusyDetails,
 } from '../../../utils/callableConcurrency';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
-import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '../../../functions/src/uploadToSubsplash';
-import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '../../../functions/src/reorderSeriesItems';
-import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '../../../functions/src/removeFromSeries';
-import { AddToSeriesInputType, AddToSeriesOutputType } from '../../../functions/src/addToSeries';
-import { CreateSeriesInputType, CreateSeriesOutputType } from '../../../functions/src/createSeries';
-import { DeleteSeriesInputType, DeleteSeriesOutputType } from '../../../functions/src/deleteSeries';
-import type { BulkAddToSeriesInputType, BulkAddToSeriesOutputType } from '../../../functions/src/bulkAddToSeries';
+import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
+import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '@upperroom/contracts/reorderSeriesItems';
+import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '@upperroom/contracts/removeFromSeries';
+import { AddToSeriesInputType, AddToSeriesOutputType } from '@upperroom/contracts/addToSeries';
+import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
+import { DeleteSeriesInputType, DeleteSeriesOutputType } from '@upperroom/contracts/deleteSeries';
+import type { BulkAddToSeriesInputType, BulkAddToSeriesOutputType } from '@upperroom/contracts/bulkAddToSeries';
 import { serverTimestamp, deleteField } from 'firebase/firestore';
 
 interface SeriesItemWithSermon extends SeriesItem {

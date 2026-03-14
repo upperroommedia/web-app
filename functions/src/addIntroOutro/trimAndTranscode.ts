@@ -8,7 +8,7 @@ import { convertStringToMilliseconds, createTempFile, logMemoryUsage, throwError
 import { CustomMetadata, AudioSource } from './types';
 import { unlink } from 'fs/promises';
 import { Readable } from 'stream';
-import { sermonStatus, sermonStatusType } from '../../../types/SermonTypes';
+import { sermonStatus, sermonStatusType } from '@upperroom/shared/types/SermonTypes';
 import ytdl from 'ytdl-core';
 // import { HttpsProxyAgent } from 'https-proxy-agent';
 

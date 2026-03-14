@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 import { logger } from 'firebase-functions/v2';
-import { ImageType } from '../../../types/Image';
+import { ImageType } from '@upperroom/shared/types/Image';
 import { File, Bucket } from '@google-cloud/storage';
 import { Stream } from 'stream';
 import { existsSync, mkdirSync, unlinkSync } from 'fs';
@@ -13,7 +13,7 @@ import { firestoreAdminImagesConverter } from '../firestoreDataConverter';
 import { Firestore } from 'firebase-admin/firestore';
 import { SubsplashImage } from '../types/Subsplash';
 import { ensureFirebaseDownloadUrl } from '../storageDownloadUrl';
-import { extractStoragePathFromDownloadUrl } from '../../../shared/firebaseStorageUrls';
+import { extractStoragePathFromDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 
 const getImageDimensions = async (file: File): Promise<{ width: number; height: number }> => {
   if (!existsSync(os.tmpdir())) {

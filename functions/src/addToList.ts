@@ -3,11 +3,11 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { SubsplashMediaItem } from './types/Subsplash';
 import { createListRow, getFullListRows, getFullListRowsWithTotal, patchListRows, createNewList, getListDetails } from './helpers/addToListHelpers';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
 import { Timestamp } from 'firebase-admin/firestore';
-import { canUserRolePublish } from '../../types/User';
-import { OverflowBehavior } from '../../types/List';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 import handleError from './handleError';
 import axios from 'axios';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';

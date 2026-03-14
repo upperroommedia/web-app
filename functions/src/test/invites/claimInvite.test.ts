@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest } from 'firebase-functions/v2/https';
 import { claimInviteHandler } from '../../invites/claimInvite';
 import { createInviteHandler } from '../../invites/createInvite';

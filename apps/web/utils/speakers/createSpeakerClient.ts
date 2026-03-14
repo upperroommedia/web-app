@@ -1,7 +1,7 @@
 import type {
   CreateSpeakerCallableInputType,
   CreateSpeakerCallableOutputType,
-} from '../../functions/src/speakers/createSpeakerTypes';
+} from '@upperroom/contracts/speakers/createSpeakerTypes';
 import type { ImageType } from '../../types/Image';
 
 export const SUBSPLASH_SPEAKER_LIST_LINK =

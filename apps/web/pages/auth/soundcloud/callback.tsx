@@ -15,7 +15,7 @@ import { clearPendingSoundCloudOAuth, readPendingSoundCloudOAuth } from '../../.
 import type {
   ExchangeSoundCloudAuthCodeInput,
   ExchangeSoundCloudAuthCodeReturnType,
-} from '../../../functions/src/exchangeSoundCloudAuthCode';
+} from '@upperroom/contracts/exchangeSoundCloudAuthCode';
 
 const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
   const router = useRouter();

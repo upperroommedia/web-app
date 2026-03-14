@@ -2,11 +2,11 @@ import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest } from 'firebase-functions/v2/https';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { ListTag, ListType, OverflowBehavior } from '../../../types/List';
+import { ListTag, ListType, OverflowBehavior } from '@upperroom/shared/types/List';
 import { firestoreAdminListConverter } from '../firestoreDataConverter';
 import { SubsplashListRow } from '../types/Subsplash';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import handleError from '../handleError';
 

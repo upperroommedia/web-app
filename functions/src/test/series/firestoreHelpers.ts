@@ -2,9 +2,9 @@
  * Helper functions for setting up Firestore Series documents in tests
  */
 
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminSeriesConverter } from '../../firestoreDataConverter';
-import { Series } from '../../../../types/Series';
+import { Series } from '@upperroom/shared/types/Series';
 
 const firestoreDB = firebaseAdmin.firestore();
 // Use FieldValue from the same firebaseAdmin instance to ensure proper serialization in tests

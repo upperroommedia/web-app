@@ -1,5 +1,5 @@
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { isUserRoleAdmin } from '../../types/User';
+import { isUserRoleAdmin } from '@upperroom/shared/types/User';
 import {
   exchangeSoundCloudAuthorizationCode,
   soundcloudOAuthSecrets,

@@ -5,8 +5,8 @@ import { TaskOptions, getFunctions } from 'firebase-admin/functions';
 import { AddIntroOutroInputType } from './types';
 import handleError from '../handleError';
 import { TIMEOUT_SECONDS } from './consts';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
-import { sermonStatusType } from '../../../types/SermonTypes';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { sermonStatusType } from '@upperroom/shared/types/SermonTypes';
 import { getAudioSource, validateAddIntroOutroData } from './utils';
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
 

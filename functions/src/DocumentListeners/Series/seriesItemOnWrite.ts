@@ -1,7 +1,7 @@
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions/v2';
 import { FieldValue } from 'firebase-admin/firestore';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { authenticateSubsplash } from '../../subsplashUtils';
 import { deriveSeriesMetadata, patchSeriesMetadata } from '../../helpers/seriesHelpers';
 import handleError from '../../handleError';

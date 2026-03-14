@@ -1,6 +1,6 @@
 import { firestoreAdminSermonConverter } from '../firestoreDataConverter';
 import { Timestamp } from 'firebase-admin/firestore';
-import { uploadStatus, sermonStatusType, Sermon } from '../../../types/SermonTypes';
+import { uploadStatus, sermonStatusType, Sermon } from '@upperroom/shared/types/SermonTypes';
 
 describe('firestoreAdminSermonConverter', () => {
   const baseSermon: Sermon = {

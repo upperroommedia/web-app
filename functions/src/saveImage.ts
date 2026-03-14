@@ -1,13 +1,13 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import axios, { AxiosRequestConfig } from 'axios';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { unlink } from 'fs/promises';
 import fs, { existsSync, mkdirSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import handleError from './handleError';
-import { getFirebaseImagesBucket } from '../../shared/firebaseProjectConfig';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 export interface SaveImageInputType {
   url: string;
   name: string;

@@ -1,9 +1,9 @@
  
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from '../subsplashUtils';
-import { ImageType } from '../../../types/Image';
+import { ImageType } from '@upperroom/shared/types/Image';
 import {
   firestoreAdminListConverter,
   firestoreAdminSpeakerConverter,
@@ -13,7 +13,7 @@ import populateLists from './populateListsHelper';
 import populateSpeakers from './populateSpeakersHelper';
 import populateTopics from './populateTopicsHelper';
 import handleError from '../handleError';
-import { getFirebaseImagesBucket } from '../../../shared/firebaseProjectConfig';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 
 const storage = firebaseAdmin.storage();

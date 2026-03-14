@@ -16,11 +16,11 @@ import firestore, {
 import { sermonConverter } from '../../types/Sermon';
 import { Sermon } from '../../types/SermonTypes';
 import { createFunctionV2 } from '../../utils/createFunction';
-import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '../../functions/src/editSubsplashSermon';
+import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '@upperroom/contracts/editSubsplashSermon';
 import {
   EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA,
   EditSoundCloudSermonReturnType,
-} from '../../functions/src/editSoundCloudSermon';
+} from '@upperroom/contracts/editSoundCloudSermon';
 import { getSquareImageDownloadLink } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
 import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';

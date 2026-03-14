@@ -5,13 +5,9 @@ runConfig:
   maxInstances: 20
   concurrency: 80
 
-scripts:
-  runCommand: node apphosting-start.cjs
-
 outputFiles:
   serverApp:
     include:
-      - apphosting-start.cjs
       - .next/standalone
       - .next/static
       - public
@@ -22,11 +18,6 @@ env:
     availability:
       - BUILD
       - RUNTIME
-
-  - variable: NPM_CONFIG_RECURSIVE_INSTALL
-    value: 'false'
-    availability:
-      - BUILD
 
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     value: urm-app-staging

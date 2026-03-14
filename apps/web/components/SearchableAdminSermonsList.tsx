@@ -11,7 +11,7 @@ import useAuth from '../context/user/UserContext';
 import {
   GenerateSecuredApiKeyInputType,
   GenerateSecuredApiKeyOutputType,
-} from '../functions/src/generateAlgoliaSecureApiKey';
+} from '@upperroom/contracts/generateAlgoliaSecureApiKey';
 import { createFunction } from '../utils/createFunction';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';

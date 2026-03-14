@@ -1,9 +1,9 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import updateSubsplashSermonTopics from '../helpers/updateSubsplashTagsHelper';
-import { Sermon } from '../../../types/SermonTypes';
-import { ListType } from '../../../types/List';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import { Sermon } from '@upperroom/shared/types/SermonTypes';
+import { ListType } from '@upperroom/shared/types/List';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import handleError from '../handleError';

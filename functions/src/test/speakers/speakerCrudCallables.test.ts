@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import axios from 'axios';
 import createspeaker from '../../speakers/createSpeaker';
 import updatespeaker from '../../speakers/updateSpeaker';
@@ -14,8 +14,8 @@ import {
 } from '../../speakers/createSpeakerTypes';
 import { createNewSubsplashList } from '../../createNewSubsplashList';
 import { authenticateSubsplash } from '../../subsplashUtils';
-import { ImageType } from '../../../../types/Image';
-import { ListType, OverflowBehavior } from '../../../../types/List';
+import { ImageType } from '@upperroom/shared/types/Image';
+import { ListType, OverflowBehavior } from '@upperroom/shared/types/List';
 
 jest.mock('firebase-functions/v2/https', () => {
   const actual = jest.requireActual('firebase-functions/v2/https');

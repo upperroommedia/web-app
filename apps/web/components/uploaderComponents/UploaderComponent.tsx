@@ -32,7 +32,7 @@ import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import { createFunctionV2 } from '../../utils/createFunction';
-import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
+import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
 import { PROCESSED_SERMONS_BUCKET } from '../../constants/storage_constants';
 import { User } from '../../types/User';

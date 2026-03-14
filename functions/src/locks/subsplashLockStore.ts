@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { buildSubsplashLockBusyError } from './contentionError';
 import {
   DEFAULT_LOCK_HEARTBEAT_INTERVAL_MS,

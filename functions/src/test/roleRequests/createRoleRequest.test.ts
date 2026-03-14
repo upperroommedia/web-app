@@ -1,4 +1,4 @@
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import * as emitOperationalAlertModule from '../../notifications/emitOperationalAlert';
 import * as queueEmailModule from '../../notifications/queueEmail';
 import createRoleRequest from '../../roleRequests/createRoleRequest';

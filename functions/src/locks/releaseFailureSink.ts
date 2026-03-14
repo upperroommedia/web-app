@@ -1,5 +1,5 @@
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 
 export const LOCK_RELEASE_FAILURE_COLLECTION = 'lockReleaseFailures';
 

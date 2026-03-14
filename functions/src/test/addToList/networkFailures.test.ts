@@ -2,7 +2,7 @@
  * Integration tests for network failure robustness
  * Uses real Firestore emulator (not mocks)
  */
-import { OverflowBehavior } from '../../../../types/List';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { SubsplashListRow } from '../../types/Subsplash';
 import { 
   subsplashMock, 

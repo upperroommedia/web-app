@@ -1,6 +1,6 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { createBundleHandler } from './utils/bundleCreationUtils';
-import { TOPIC_BUNDLE_CONFIG } from '../../shared/bundleConfigs';
+import { TOPIC_BUNDLE_CONFIG } from '@upperroom/shared/shared/bundleConfigs';
 
 export const createTopicBundle = onRequest(
     {

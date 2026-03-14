@@ -12,9 +12,9 @@ import {
   getAllSeriesItemsAcrossStatuses,
   unlinkMediaItemFromSeries,
 } from './helpers/seriesHelpers';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminSeriesConverter } from './firestoreDataConverter';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
 import { runWithConcurrency } from './utils/runWithConcurrency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';

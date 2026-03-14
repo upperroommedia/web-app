@@ -11,7 +11,7 @@ import deleteFromSoundCloud from '../../deleteFromSoundCloud';
 import addintrooutrotaskgenerator from '../../addIntroOutro/addintrooutrotaskgenerator';
 import addintrooutrotaskhandler from '../../addIntroOutro/addintrooutrotaskhandler';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '../../../../shared/soundcloudAuth';
+import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 const mockUploadTrack = jest.fn();
 const mockUpdateTrack = jest.fn();
@@ -82,7 +82,7 @@ jest.mock('firebase-admin/functions', () => ({
     }),
   }),
 }));
-jest.mock('../../../../firebase/firebaseAdmin', () => ({
+jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
   default: {
     storage: () => ({

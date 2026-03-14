@@ -1,5 +1,5 @@
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
-import { sermonStatusType, uploadStatus } from '../../../../types/SermonTypes';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
 
 const firestoreDb = firebaseAdmin.firestore();

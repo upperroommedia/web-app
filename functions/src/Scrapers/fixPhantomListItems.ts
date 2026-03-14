@@ -1,10 +1,10 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
-import { Topic } from '../../../types/Topic';
-import { List, ListType, OverflowBehavior } from '../../../types/List';
-import { Sermon } from '../../../types/SermonTypes';
-import { emptyList } from '../../../types/List';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { Topic } from '@upperroom/shared/types/Topic';
+import { List, ListType, OverflowBehavior } from '@upperroom/shared/types/List';
+import { Sermon } from '@upperroom/shared/types/SermonTypes';
+import { emptyList } from '@upperroom/shared/types/List';
 import updateSubsplashSermonTopics from '../helpers/updateSubsplashTagsHelper';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';

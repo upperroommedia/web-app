@@ -177,6 +177,12 @@ importers:
       '@mui/x-date-pickers':
         specifier: ^8.5.1
         version: 8.27.2(@emotion/react@11.14.0(@types/react@19.2.14)(react@19.2.4))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.14)(react@19.2.4))(@types/react@19.2.14)(react@19.2.4))(@mui/material@7.3.9(@emotion/react@11.14.0(@types/react@19.2.14)(react@19.2.4))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.14)(react@19.2.4))(@types/react@19.2.14)(react@19.2.4))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(@mui/system@7.3.9(@emotion/react@11.14.0(@types/react@19.2.14)(react@19.2.4))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.14)(react@19.2.4))(@types/react@19.2.14)(react@19.2.4))(@types/react@19.2.14)(react@19.2.4))(@types/react@19.2.14)(date-fns@4.1.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@upperroom/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@upperroom/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@vidstack/react':
         specifier: ^1.12.13
         version: 1.12.13(@types/react@19.2.14)(react@19.2.4)
@@ -385,6 +391,9 @@ importers:
       '@ts-ffmpeg/fluent-ffmpeg':
         specifier: 'catalog:'
         version: 2.2.6
+      '@upperroom/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       algoliasearch:
         specifier: 5.27.0
         version: 5.27.0
@@ -527,6 +536,9 @@ importers:
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
+      '@upperroom/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       axios:
         specifier: 'catalog:'
         version: 1.13.6
@@ -582,6 +594,9 @@ importers:
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
+      '@upperroom/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       axios:
         specifier: 'catalog:'
         version: 1.13.6
@@ -619,6 +634,9 @@ importers:
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
+      '@upperroom/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       algoliasearch:
         specifier: 5.27.0
         version: 5.27.0
@@ -674,6 +692,9 @@ importers:
       '@ts-ffmpeg/fluent-ffmpeg':
         specifier: 'catalog:'
         version: 2.2.6
+      '@upperroom/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       axios:
         specifier: 'catalog:'
         version: 1.13.6
@@ -698,6 +719,35 @@ importers:
       ytdl-core:
         specifier: 'catalog:'
         version: 4.11.5
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 18.19.130
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
+  packages/contracts:
+    dependencies:
+      '@upperroom/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 18.19.130
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
+  packages/shared:
+    dependencies:
+      firebase:
+        specifier: 'catalog:'
+        version: 12.10.0
+      firebase-admin:
+        specifier: 'catalog:'
+        version: 13.7.0(encoding@0.1.13)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

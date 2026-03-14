@@ -12,7 +12,7 @@ import React, { FunctionComponent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import type { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '../functions/src/getUsersByIds';
+import type { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '@upperroom/contracts/getUsersByIds';
 import Card from '@mui/material/Card';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';

@@ -8,7 +8,7 @@ import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { List } from '../../types/List';
 import { createFunctionV2 } from '../../utils/createFunction';
-import { AddIntroOutroInputType } from '../../functions/src/addIntroOutro/types';
+import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
 import { UploadProgress } from '../../context/types';
 import { createOperationKey } from '../../utils/callableConcurrency';

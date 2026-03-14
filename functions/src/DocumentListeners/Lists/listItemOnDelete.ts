@@ -1,6 +1,6 @@
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import { FieldValue } from 'firebase-admin/firestore';
 

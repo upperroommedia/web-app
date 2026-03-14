@@ -1,6 +1,6 @@
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { getSoundCloudAuthStatus, soundcloudOAuthSecrets, type SoundCloudAuthStatus } from './soundcloudSecrets';
-import { isUserRoleAdmin } from '../../types/User';
+import { isUserRoleAdmin } from '@upperroom/shared/types/User';
 
 export type GetSoundCloudAuthStatusInput = Record<string, never>;
 export type GetSoundCloudAuthStatusReturnType = SoundCloudAuthStatus;

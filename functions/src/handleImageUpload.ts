@@ -2,14 +2,14 @@ import axios, { AxiosRequestConfig } from 'axios';
 import { logger } from 'firebase-functions';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import {
   ImageSizeType,
   ImageSizes,
   ImageType,
   // resizeType,
   // supportedContentTypes
-} from '../../types/Image';
+} from '@upperroom/shared/types/Image';
 import { HttpsError } from 'firebase-functions/v2/https';
 // import { FirestoreDataConverter } from '@google-cloud/firestore';
 // import { modifyImage, ResizedImageResult } from './resize-image';
@@ -19,7 +19,7 @@ import { mkdirp } from 'mkdirp';
 import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
-import { getFirebaseImagesBucket } from '../../shared/firebaseProjectConfig';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { ensureFirebaseDownloadUrl } from './storageDownloadUrl';
 import handleError from './handleError';

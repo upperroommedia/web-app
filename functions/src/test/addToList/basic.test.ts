@@ -1,4 +1,4 @@
-import { OverflowBehavior } from '../../../../types/List';
+import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { SubsplashListRow, SubsplashPatchPayload } from '../../types/Subsplash';
 import { 
   subsplashMock,

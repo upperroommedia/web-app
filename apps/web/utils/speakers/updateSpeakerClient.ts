@@ -1,7 +1,7 @@
 import type {
   UpdateSpeakerCallableInputType,
   UpdateSpeakerPatchType,
-} from '../../functions/src/speakers/createSpeakerTypes';
+} from '@upperroom/contracts/speakers/createSpeakerTypes';
 import type { ImageType } from '../../types/Image';
 
 export interface BuildUpdateSpeakerPayloadInput {

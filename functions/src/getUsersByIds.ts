@@ -1,9 +1,9 @@
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { https, logger } from 'firebase-functions/v2';
 import { CallableRequest } from 'firebase-functions/v2/https';
-import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '../../types/User';
+import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '@upperroom/shared/types/User';
 import { IdTokenResult } from 'firebase/auth';
-import { FunctionOutputType } from '../../types/Function';
+import { FunctionOutputType } from '@upperroom/shared/types/Function';
 import handleError from './handleError';
 
 export interface GetUsersByIdsInputType {

@@ -21,6 +21,7 @@
   },
   "main": "lib/functions/src/index.js",
   "dependencies": {
+    "@upperroom/shared": "workspace:*",
     "@google-cloud/functions-framework": "catalog:",
     "@google-cloud/storage": "catalog:",
     "algoliasearch": "catalog:",

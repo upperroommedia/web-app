@@ -1,8 +1,8 @@
 import { logger } from 'firebase-functions/v2';
 import { FirestoreDataConverter, Query } from 'firebase-admin/firestore';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
-import { BundleConfig, BundleMetadata } from '../../../shared/bundleConfigs';
-import { getFirebaseStorageBucket } from '../../../shared/firebaseProjectConfig';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { BundleConfig, BundleMetadata } from '@upperroom/shared/shared/bundleConfigs';
+import { getFirebaseStorageBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 import { Writable } from 'stream';
 import handleError from '../handleError';
 

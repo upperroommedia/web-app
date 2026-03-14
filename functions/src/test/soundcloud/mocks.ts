@@ -21,7 +21,7 @@ jest.mock('../../soundcloudSecrets', () => ({
   soundcloudOAuthSecrets: [],
 }));
 
-jest.mock('../../../../firebase/firebaseAdmin', () => ({
+jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
   default: {
     storage: () => ({
