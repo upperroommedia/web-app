@@ -6,14 +6,14 @@ runConfig:
   concurrency: 80
 
 scripts:
-  runCommand: node .next/standalone/apps/web/server.js
+  runCommand: node apps/web/.next/standalone/apps/web/server.js
 
 outputFiles:
   serverApp:
     include:
-      - .next/standalone
-      - .next/static
-      - public
+      - apps/web/.next/standalone
+      - apps/web/.next/static
+      - apps/web/public
 
 env:
   - variable: NODE_ENV
