@@ -1,19 +1,445 @@
 import Head from 'next/head';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useDocumentData } from 'react-firebase-hooks/firestore';
-import AdminSermonsList from '../../../components/AdminSermonsList';
-import firestore, { doc } from '../../../firebase/firestore';
-import AppLayout from '../../../layout/AppLayout';
-import { listConverter } from '../../../types/List';
-import useAuth from '../../../context/user/UserContext';
-// import { adminProtected } from '../../../utils/protectedRoutes';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Breadcrumbs from '@mui/material/Breadcrumbs';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import CollectionsIcon from '@mui/icons-material/Collections';
+import Divider from '@mui/material/Divider';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import PendingIcon from '@mui/icons-material/Pending';
+import SaveIcon from '@mui/icons-material/Save';
+import Typography from '@mui/material/Typography';
+import UndoIcon from '@mui/icons-material/Undo';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { alpha, useTheme } from '@mui/material/styles';
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { Modifier } from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
-const SeriesSermon = () => {
+import { ReorderListItemsInputType, ReorderListItemsOutputType } from '@upperroom/contracts/reorderListItems';
+import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
+import useAuth from '../../../context/user/UserContext';
+import firestore, {
+  collection,
+  collectionGroup,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  updateDoc,
+  where,
+} from '../../../firebase/firestore';
+import AppLayout from '../../../layout/AppLayout';
+import { listConverter, List } from '../../../types/List';
+import { sermonListConverter, SermonList, listUploadStatus } from '../../../types/SermonList';
+import { sermonConverter } from '../../../types/Sermon';
+import { Sermon, uploadStatus } from '../../../types/SermonTypes';
+import { createOperationKey } from '../../../utils/callableConcurrency';
+import { createFunctionV2 } from '../../../utils/createFunction';
+
+type ListDetailItem = Sermon & {
+  position?: number;
+  uploadStatus?: listUploadStatus;
+};
+
+interface SortableItemProps {
+  item: ListDetailItem;
+  index: number;
+  onOpenSermon: (id: string) => void;
+}
+
+const createReorderListItems = createFunctionV2<ReorderListItemsInputType, ReorderListItemsOutputType>(
+  'reorderlistitems'
+);
+
+const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
+  error instanceof Error && error.message ? error.message : fallbackMessage;
+
+const cloneListItems = (items: ListDetailItem[]): ListDetailItem[] => items.map((item) => ({ ...item }));
+
+const normalizeListItemPositions = (items: ListDetailItem[]): ListDetailItem[] =>
+  items.map((item, index) => ({
+    ...item,
+    position: index + 1,
+  }));
+
+const sortInitialListItems = (items: ListDetailItem[]): ListDetailItem[] => {
+  const allItemsHavePosition = items.length > 0 && items.every((item) => typeof item.position === 'number');
+
+  return [...items].sort((left, right) => {
+    if (allItemsHavePosition) {
+      return (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER);
+    }
+
+    return (
+      (right.createdAtMillis ?? 0) - (left.createdAtMillis ?? 0) ||
+      (right.dateMillis ?? 0) - (left.dateMillis ?? 0) ||
+      left.title.localeCompare(right.title)
+    );
+  });
+};
+
+const formatListType = (value?: string): string => {
+  if (!value) {
+    return 'List';
+  }
+
+  return value
+    .split('-')
+    .map((segment) => `${segment.slice(0, 1).toUpperCase()}${segment.slice(1)}`)
+    .join(' ');
+};
+
+const SortableListSermonItem = ({ item, index, onOpenSermon }: SortableItemProps) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id });
+  const isSyncedToList = item.uploadStatus?.status === uploadStatus.UPLOADED;
+  const speakerNames = item.speakers?.map((speaker) => speaker.name).filter(Boolean).join(', ');
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : 0,
+    position: 'relative' as const,
+  };
+
+  const handleRowClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('button,a,[role="button"],[data-no-row-nav="true"]')) {
+      return;
+    }
+    onOpenSermon(item.id);
+  };
+
+  return (
+    <Box
+      ref={setNodeRef}
+      style={style}
+      onClick={handleRowClick}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: { xs: 1.5, sm: 2 },
+        p: { xs: 2, sm: 2.5 },
+        cursor: 'pointer',
+        bgcolor: isDragging ? 'action.selected' : 'background.paper',
+        boxShadow: isDragging ? 4 : 0,
+        transition: 'background-color 0.15s ease',
+        '&:hover': { bgcolor: isDragging ? 'action.selected' : 'action.hover' },
+      }}
+    >
+      <Box
+        {...attributes}
+        {...listeners}
+        data-no-row-nav="true"
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          color: 'text.disabled',
+          touchAction: 'none',
+          '&:hover': { color: 'text.secondary' },
+        }}
+      >
+        <DragIndicatorIcon />
+      </Box>
+
+      <Typography
+        variant="body2"
+        sx={{
+          width: { xs: 24, sm: 32 },
+          textAlign: 'center',
+          color: 'text.secondary',
+          fontWeight: 600,
+          fontSize: '0.75rem',
+        }}
+      >
+        {index + 1}
+      </Typography>
+
+      <AvatarWithDefaultImage
+        image={item.images?.find((image) => image.type === 'square')}
+        altName={item.title || 'Sermon'}
+        width={56}
+        height={56}
+        borderRadius={8}
+        sx={{ flexShrink: 0 }}
+      />
+
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography
+          variant="subtitle2"
+          sx={{
+            fontWeight: 600,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {item.title || `Sermon ${item.id}`}
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+          {item.dateString ? (
+            <Typography variant="caption" color="text.secondary">
+              {item.dateString}
+            </Typography>
+          ) : null}
+          {speakerNames ? (
+            <Typography variant="caption" color="text.secondary">
+              {speakerNames}
+            </Typography>
+          ) : null}
+        </Box>
+      </Box>
+
+      <Chip
+        icon={isSyncedToList ? <CheckCircleIcon /> : <PendingIcon />}
+        label={isSyncedToList ? 'Synced' : 'Local only'}
+        color={isSyncedToList ? 'success' : 'warning'}
+        size="small"
+        variant={isSyncedToList ? 'filled' : 'outlined'}
+        sx={{ flexShrink: 0 }}
+      />
+    </Box>
+  );
+};
+
+const ListDetailsPage = () => {
   const router = useRouter();
-  const listId = router.query.listId as string;
-  const [series, _loading, _error] = useDocumentData(doc(firestore, `lists/${listId}`).withConverter(listConverter));
-  const title = series?.name || listId;
-  const count = Number(router.query.count as string);
+  const theme = useTheme();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const originalItemsRef = useRef<ListDetailItem[]>([]);
+  const listId = typeof router.query.listId === 'string' ? router.query.listId : '';
+  const [list, setList] = useState<List | null>(null);
+  const [items, setItems] = useState<ListDetailItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!router.isReady || !listId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadListDetails = async () => {
+      setIsLoading(true);
+
+      try {
+        const listRef = doc(firestore, 'lists', listId).withConverter(listConverter);
+        const listItemsRef = collection(firestore, 'lists', listId, 'listItems').withConverter(sermonConverter);
+        const [listSnapshot, listItemsSnapshot] = await Promise.all([
+          getDoc(listRef),
+          getDocs(listItemsRef),
+        ]);
+
+        if (!listSnapshot.exists()) {
+          throw new Error('List not found.');
+        }
+
+        const listData = listSnapshot.data();
+        let uploadStatusBySermonId = new Map<string, listUploadStatus | undefined>();
+
+        if (listData.subsplashId) {
+          const sermonListsSnapshot = await getDocs(
+            query(
+              collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter),
+              where('subsplashId', '==', listData.subsplashId)
+            )
+          );
+
+          uploadStatusBySermonId = new Map(
+            sermonListsSnapshot.docs.map((sermonListDoc) => {
+              const sermonId = sermonListDoc.ref.parent.parent?.id || '';
+              const sermonList = sermonListDoc.data() as SermonList;
+              return [sermonId, sermonList.uploadStatus];
+            })
+          );
+        }
+
+        const nextItems = normalizeListItemPositions(
+          sortInitialListItems(
+            listItemsSnapshot.docs.map((itemDoc) => {
+              const data = itemDoc.data() as Partial<ListDetailItem>;
+
+              return {
+                ...data,
+                id: itemDoc.id,
+                uploadStatus: uploadStatusBySermonId.get(itemDoc.id),
+              } as ListDetailItem;
+            })
+          )
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setList(listData);
+        setItems(nextItems);
+        originalItemsRef.current = cloneListItems(nextItems);
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load list details', error);
+          alert(getErrorMessage(error, 'Failed to load list details.'));
+          setList(null);
+          setItems([]);
+          originalItemsRef.current = [];
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadListDetails();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [listId, router.isReady]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const restrictToContainer: Modifier = ({ transform, draggingNodeRect }) => {
+    if (!containerRef.current || !draggingNodeRect) {
+      return transform;
+    }
+
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const minY = containerRect.top - draggingNodeRect.top;
+    const maxY = containerRect.bottom - draggingNodeRect.bottom;
+
+    return {
+      ...transform,
+      y: Math.min(Math.max(transform.y, minY), maxY),
+    };
+  };
+
+  const hasOrderChanges =
+    items.length !== originalItemsRef.current.length ||
+    items.some((item, index) => item.id !== originalItemsRef.current[index]?.id);
+
+  const syncedItemsCount = items.filter((item) => item.uploadStatus?.status === uploadStatus.UPLOADED).length;
+  const localOnlyItemsCount = items.length - syncedItemsCount;
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    setItems((previousItems) => {
+      const oldIndex = previousItems.findIndex((item) => item.id === active.id);
+      const newIndex = previousItems.findIndex((item) => item.id === over.id);
+
+      return normalizeListItemPositions(arrayMove(previousItems, oldIndex, newIndex));
+    });
+  };
+
+  const revertOrder = () => {
+    setItems(cloneListItems(originalItemsRef.current));
+  };
+
+  const saveOrderChanges = async () => {
+    if (!list || !hasOrderChanges) {
+      return;
+    }
+
+    const previousItems = cloneListItems(originalItemsRef.current);
+    setIsSaving(true);
+
+    try {
+      if (list.subsplashId) {
+        const syncedItemsMissingRemoteId = items.filter(
+          (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && !item.subsplashId
+        );
+
+        if (syncedItemsMissingRemoteId.length > 0) {
+          throw new Error('One or more synced sermons are missing Subsplash IDs. Refresh and try again.');
+        }
+
+        const syncedItems = items.filter(
+          (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && item.subsplashId
+        );
+
+        if (syncedItems.length > 0) {
+          const reorderResult = await createReorderListItems({
+            firestoreListId: listId,
+            itemOrder: syncedItems.map((item, index) => ({
+              mediaItemId: item.subsplashId as string,
+              position: index + 1,
+            })),
+            operationKey: createOperationKey('list-admin-reorder', listId),
+          });
+
+          if (reorderResult.status !== 'success') {
+            throw new Error(reorderResult.message || 'Subsplash reorder failed.');
+          }
+        }
+      }
+
+      await Promise.all(
+        items.map((item, index) =>
+          updateDoc(doc(firestore, 'lists', listId, 'listItems', item.id), {
+            position: index + 1,
+          })
+        )
+      );
+
+      originalItemsRef.current = cloneListItems(items);
+    } catch (error) {
+      console.error('Failed to save list order', error);
+      setItems(previousItems);
+      alert(getErrorMessage(error, 'Failed to save list order. The view was reset to the last synced order.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const title = list?.name || listId || 'List Details';
 
   return (
     <>
@@ -22,53 +448,251 @@ const SeriesSermon = () => {
         <meta property="og:title" content={title} key="title" />
         <meta
           name="description"
-          content={`Upper Room Media Sermons are English Coptic Orthodox Christian Sermons from the series ${series?.name}`}
+          content={`Manage sermons in the ${title} list.`}
           key="description"
         />
       </Head>
-      <AdminSermonsList collectionPath={`lists/${listId}/listItems`} count={count} />
+
+      <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, sm: 3 }, py: { xs: 3, sm: 4 } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 3 }}>
+          <Box>
+            <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 1 }}>
+              <Link href="/admin/lists">Lists</Link>
+              <Typography color="text.primary">{title}</Typography>
+            </Breadcrumbs>
+            <Typography variant="h4" fontWeight={700}>
+              {title}
+            </Typography>
+          </Box>
+
+          <Button
+            component={Link}
+            href="/admin/lists"
+            variant="outlined"
+            startIcon={<ArrowBackIcon />}
+          >
+            Back
+          </Button>
+        </Box>
+
+        {isLoading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}>
+            <CircularProgress />
+          </Box>
+        ) : !list ? (
+          <Alert severity="error">This list could not be loaded.</Alert>
+        ) : (
+          <>
+            <Card
+              sx={{
+                position: 'relative',
+                overflow: 'hidden',
+                mb: 3,
+                border: `1px solid ${alpha(theme.palette.primary.main, 0.14)}`,
+                boxShadow: `0 16px 40px ${alpha(theme.palette.common.black, 0.08)}`,
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 4,
+                  background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.light} 100%)`,
+                },
+              }}
+            >
+              <CardContent sx={{ p: { xs: 2, sm: 3, md: 4 } }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: { xs: 'column', sm: 'row' },
+                    gap: { xs: 2, sm: 3, md: 4 },
+                  }}
+                >
+                  <AvatarWithDefaultImage
+                    image={list.images?.find((image) => image.type === 'square')}
+                    altName={list.name}
+                    width={140}
+                    height={140}
+                    borderRadius={12}
+                    sx={{
+                      flexShrink: 0,
+                      boxShadow: 3,
+                      alignSelf: { xs: 'center', sm: 'flex-start' },
+                    }}
+                  />
+
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="h6" color="text.secondary" sx={{ mb: 1, fontWeight: 400 }}>
+                      {formatListType(list.type)}
+                    </Typography>
+
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexDirection: { xs: 'column', sm: 'row' },
+                        justifyContent: 'space-between',
+                        gap: 2,
+                        pt: 2,
+                        borderTop: 1,
+                        borderColor: 'divider',
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', gap: 4 }}>
+                        <Box>
+                          <Typography variant="h5" fontWeight={700} color="primary.main">
+                            {items.length}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Total Sermons
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography variant="h5" fontWeight={700} color="success.main">
+                            {syncedItemsCount}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Synced
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                        {list.subsplashId ? (
+                          <Chip
+                            icon={<CheckCircleIcon />}
+                            label="Connected to Subsplash"
+                            color="success"
+                            size="small"
+                          />
+                        ) : (
+                          <Chip
+                            icon={<PendingIcon />}
+                            label="Local only"
+                            color="warning"
+                            size="small"
+                          />
+                        )}
+                        {localOnlyItemsCount > 0 ? (
+                          <Chip
+                            label={`${localOnlyItemsCount} local only`}
+                            variant="outlined"
+                            size="small"
+                          />
+                        ) : null}
+                      </Box>
+                    </Box>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+
+            {list.subsplashId && localOnlyItemsCount > 0 ? (
+              <Alert severity="info" sx={{ mb: 3 }}>
+                This list contains sermons that are only local right now. Saving order will update Firestore for every
+                row and reorder the synced Subsplash items in their relative order.
+              </Alert>
+            ) : null}
+
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                justifyContent: 'space-between',
+                alignItems: { xs: 'flex-start', sm: 'center' },
+                gap: 2,
+                mb: 3,
+              }}
+            >
+              <Typography variant="h5" fontWeight={600}>
+                List Sermons
+              </Typography>
+
+              {hasOrderChanges ? (
+                <Box sx={{ display: 'flex', gap: 1.5 }}>
+                  <Button
+                    variant="outlined"
+                    color="inherit"
+                    startIcon={<UndoIcon />}
+                    onClick={revertOrder}
+                    disabled={isSaving}
+                  >
+                    Revert
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={isSaving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+                    onClick={saveOrderChanges}
+                    disabled={isSaving}
+                  >
+                    Save Order
+                  </Button>
+                </Box>
+              ) : null}
+            </Box>
+
+            {items.length === 0 ? (
+              <Card
+                sx={{
+                  textAlign: 'center',
+                  py: 6,
+                  px: 3,
+                  border: '2px dashed',
+                  borderColor: 'divider',
+                  bgcolor: 'transparent',
+                }}
+              >
+                <CollectionsIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  No sermons in this list yet
+                </Typography>
+                <Typography variant="body2" color="text.disabled">
+                  Add sermons to the list, then return here to fine-tune the order.
+                </Typography>
+              </Card>
+            ) : (
+              <Card ref={containerRef} sx={{ overflow: 'hidden' }}>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  modifiers={[restrictToVerticalAxis, restrictToContainer]}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                    {items.map((item, index) => (
+                      <Box key={item.id}>
+                        <SortableListSermonItem
+                          item={item}
+                          index={index}
+                          onOpenSermon={(sermonId) => {
+                            void router.push(`/admin/sermons/${sermonId}`);
+                          }}
+                        />
+                        {index < items.length - 1 ? <Divider /> : null}
+                      </Box>
+                    ))}
+                  </SortableContext>
+                </DndContext>
+              </Card>
+            )}
+          </>
+        )}
+      </Box>
     </>
   );
 };
 
-// export const getServerSideProps: GetServerSideProps = async (ctx: GetServerSidePropsContext) => {
-//   return adminProtected(ctx);
-// };
-
-const ProtectedSeriesSermon = () => {
+const ProtectedListDetailsPage = () => {
   const { user } = useAuth();
+
   if (!user?.isAdmin()) {
     return null;
-  } else {
-    return <SeriesSermon />;
   }
+
+  return <ListDetailsPage />;
 };
 
-ProtectedSeriesSermon.PageLayout = AppLayout;
+ProtectedListDetailsPage.PageLayout = AppLayout;
 
-export default ProtectedSeriesSermon;
-//  <Box>
-//       <Box display="flex" justifyContent="center" gap={1}>
-//         <Button
-//           color="info"
-//           variant="contained"
-//           size="small"
-//           onClick={() => {
-//             setEditSeriesPopup(true);
-//           }}
-//         >
-//           Edit Series
-//         </Button>
-
-//         <Button
-//           color="error"
-//           variant="contained"
-//           size="small"
-//           disabled={isDeleting}
-//           onClick={() => setDeleteSeriesPopup(true)}
-//         >
-//           {isDeleting ? <CircularProgress /> : 'Delete Series'}
-//         </Button>
-//       </Box>
-//       <SeriesSermonList seriesId={s.id} count={s.count} />
-//     </Box>
+export default ProtectedListDetailsPage;

@@ -1,9 +1,9 @@
 import { ChangeEvent, MouseEvent } from 'react';
-import { useRouter } from 'next/router';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import InputAdornment from '@mui/material/InputAdornment';
+import LinearProgress from '@mui/material/LinearProgress';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -15,57 +15,50 @@ import TableSortLabel from '@mui/material/TableSortLabel';
 import TextField from '@mui/material/TextField';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import SearchIcon from '@mui/icons-material/Search';
-import Button from '@mui/material/Button';
-import AddIcon from '@mui/icons-material/Add';
 import CircularProgress from '@mui/material/CircularProgress';
-import LinearProgress from '@mui/material/LinearProgress';
+import SearchIcon from '@mui/icons-material/Search';
 import { visuallyHidden } from '@mui/utils';
-import { ISpeaker } from '../types/Speaker';
 import { Order } from '../context/types';
-import { getDefaultSpeakerSortOrder, isSpeakerSortableProperty } from '../utils/algolia/speakerSorting';
+import { Topic } from '../types/Topic';
 
 interface HeadCell {
-  disablePadding: boolean;
-  id: keyof ISpeaker;
+  id: keyof Topic | 'images';
   label: string;
-  numeric: boolean;
   width: string;
 }
 
 const headCells: readonly HeadCell[] = [
-  { id: 'name', numeric: false, disablePadding: false, label: 'Name', width: '38%' },
-  { id: 'sermonCount', numeric: true, disablePadding: false, label: 'Sermon Count', width: '18%' },
-  { id: 'listId', numeric: false, disablePadding: false, label: 'List', width: '20%' },
-  { id: 'images', numeric: false, disablePadding: false, label: 'Images', width: '24%' },
+  { id: 'title', label: 'Title', width: '34%' },
+  { id: 'itemsCount', label: 'Items', width: '14%' },
+  { id: 'listId', label: 'List', width: '24%' },
+  { id: 'images', label: 'Images', width: '28%' },
 ];
 
-interface SpeakerTableProps {
-  speakers: ISpeaker[];
+interface TopicTableProps {
+  topics: Topic[];
   page: number;
   rowsPerPage: number;
-  totalSpeakers: number;
+  totalTopics: number;
+  sortOrder: Order;
+  sortProperty: keyof Topic;
+  searchValue: string;
+  loading?: boolean;
   handlePageChange: (newPage: number) => void;
   handleChangeRowsPerPage: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
-  handleSort: (property: keyof ISpeaker, order: Order) => Promise<void>;
-  sortOrder: Order;
-  sortProperty: keyof ISpeaker;
-  searchValue: string;
+  handleSort: (property: keyof Topic, order: Order) => Promise<void>;
   onSearchChange: (value: string) => void;
-  onAddSpeaker: () => void;
-  loading?: boolean;
 }
 
-const SpeakerTableHead = ({
+const TopicTableHead = ({
   order,
   orderBy,
   onRequestSort,
 }: {
   order: Order;
   orderBy: string;
-  onRequestSort: (event: MouseEvent<HTMLElement>, property: keyof ISpeaker) => void;
+  onRequestSort: (event: MouseEvent<HTMLElement>, property: keyof Topic) => void;
 }) => {
-  const createSortHandler = (property: keyof ISpeaker) => (event: MouseEvent<HTMLElement>) => {
+  const createSortHandler = (property: keyof Topic) => (event: MouseEvent<HTMLElement>) => {
     onRequestSort(event, property);
   };
 
@@ -73,18 +66,18 @@ const SpeakerTableHead = ({
     <TableHead>
       <TableRow>
         {headCells.map((headCell) =>
-          headCell.id === 'name' || headCell.id === 'sermonCount' ? (
+          headCell.id === 'title' || headCell.id === 'itemsCount' ? (
             <TableCell
-              align="center"
               key={headCell.id}
+              align="center"
               sortDirection={orderBy === headCell.id ? order : false}
               sx={{ width: headCell.width }}
             >
               <TableSortLabel
-                onClick={createSortHandler(headCell.id)}
                 active={orderBy === headCell.id}
                 direction={orderBy === headCell.id ? order : 'asc'}
                 hideSortIcon={false}
+                onClick={createSortHandler(headCell.id)}
               >
                 {headCell.label}
                 {orderBy === headCell.id ? (
@@ -95,7 +88,7 @@ const SpeakerTableHead = ({
               </TableSortLabel>
             </TableCell>
           ) : (
-            <TableCell align="center" key={headCell.id} sx={{ width: headCell.width }}>
+            <TableCell key={headCell.id} align="center" sx={{ width: headCell.width }}>
               {headCell.label}
             </TableCell>
           )
@@ -105,83 +98,58 @@ const SpeakerTableHead = ({
   );
 };
 
-const SpeakerTableToolbar = ({
-  searchValue,
-  onSearchChange,
-  onAddSpeaker,
-}: {
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  onAddSpeaker: () => void;
-}) => {
-  return (
-    <Toolbar
-      sx={{
-        pl: { sm: 2 },
-        pr: { xs: 1, sm: 2 },
-        gap: 2,
-        flexWrap: 'wrap',
-      }}
-    >
-      <Typography variant="h6" id="tableTitle" component="div" sx={{ flexShrink: 0 }}>
-        Speakers
-      </Typography>
-      <TextField
-        placeholder="Search speakers by name..."
-        value={searchValue}
-        onChange={(e) => onSearchChange(e.target.value)}
-        size="small"
-        sx={{ flex: 1, minWidth: 200, maxWidth: 350 }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon color="action" />
-            </InputAdornment>
-          ),
-        }}
-      />
-      <Button variant="contained" startIcon={<AddIcon />} onClick={onAddSpeaker}>
-        Add Speaker
-      </Button>
-    </Toolbar>
-  );
-};
-
-const SpeakerTable = ({
-  speakers,
+const TopicTable = ({
+  topics,
   page,
   rowsPerPage,
-  totalSpeakers,
-  handlePageChange,
-  handleChangeRowsPerPage,
-  handleSort,
+  totalTopics,
   sortOrder,
   sortProperty,
   searchValue,
-  onSearchChange,
-  onAddSpeaker,
   loading = false,
-}: SpeakerTableProps) => {
-  const router = useRouter();
-  const showInitialLoadingState = loading && speakers.length === 0;
-  const showBackgroundLoadingState = loading && speakers.length > 0;
+  handlePageChange,
+  handleChangeRowsPerPage,
+  handleSort,
+  onSearchChange,
+}: TopicTableProps) => {
+  const showInitialLoadingState = loading && topics.length === 0;
+  const showBackgroundLoadingState = loading && topics.length > 0;
 
-  const handleRequestSort = async (_: MouseEvent<HTMLElement>, property: keyof ISpeaker) => {
+  const handleRequestSort = async (_: MouseEvent<HTMLElement>, property: keyof Topic) => {
     const nextOrder =
-      sortProperty === property
-        ? sortOrder === 'asc'
-          ? 'desc'
-          : 'asc'
-        : isSpeakerSortableProperty(property)
-        ? getDefaultSpeakerSortOrder(property)
-        : 'asc';
+      sortProperty === property ? (sortOrder === 'asc' ? 'desc' : 'asc') : property === 'itemsCount' ? 'desc' : 'asc';
     await handleSort(property, nextOrder);
   };
 
   return (
     <Box width={1} display="flex" justifyContent="center">
       <Card sx={{ width: 1 }}>
-        <SpeakerTableToolbar searchValue={searchValue} onSearchChange={onSearchChange} onAddSpeaker={onAddSpeaker} />
+        <Toolbar
+          sx={{
+            pl: { sm: 2 },
+            pr: { xs: 1, sm: 2 },
+            gap: 2,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Typography variant="h6" id="tableTitle" component="div" sx={{ flexShrink: 0 }}>
+            Topics
+          </Typography>
+          <TextField
+            placeholder="Search topics by title..."
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.target.value)}
+            size="small"
+            sx={{ flex: 1, minWidth: 220, maxWidth: 360 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" />
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Toolbar>
         <Box position="relative">
           {showBackgroundLoadingState ? (
             <LinearProgress
@@ -196,8 +164,8 @@ const SpeakerTable = ({
             />
           ) : null}
           <TableContainer>
-            <Table sx={{ minWidth: 750, tableLayout: 'fixed' }} aria-labelledby="tableTitle" size="medium">
-              <SpeakerTableHead order={sortOrder} orderBy={sortProperty} onRequestSort={handleRequestSort} />
+            <Table sx={{ minWidth: 760, tableLayout: 'fixed' }} aria-labelledby="tableTitle" size="medium">
+              <TopicTableHead order={sortOrder} orderBy={sortProperty} onRequestSort={handleRequestSort} />
               <TableBody>
                 {showInitialLoadingState ? (
                   <TableRow>
@@ -207,28 +175,19 @@ const SpeakerTable = ({
                       </Box>
                     </TableCell>
                   </TableRow>
-                ) : speakers.length === 0 ? (
+                ) : topics.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4} align="center">
                       <Typography color="text.secondary" py={4}>
-                        {searchValue ? `No speakers found matching "${searchValue}"` : 'No speakers found'}
+                        {searchValue ? `No topics found matching "${searchValue}"` : 'No topics found'}
                       </Typography>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  speakers.map((speaker) => (
-                    <TableRow
-                      hover
-                      onClick={() => router.push(`/admin/speakers/${speaker.id}`)}
-                      tabIndex={-1}
-                      key={speaker.id}
-                      sx={{ cursor: 'pointer' }}
-                    >
+                  topics.map((topic) => (
+                    <TableRow key={topic.id}>
                       <TableCell
                         align="center"
-                        component="th"
-                        scope="row"
-                        padding="none"
                         sx={{
                           width: headCells[0].width,
                           overflow: 'hidden',
@@ -236,10 +195,10 @@ const SpeakerTable = ({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {speaker.name}
+                        {topic.title}
                       </TableCell>
                       <TableCell align="center" sx={{ width: headCells[1].width }}>
-                        {speaker.sermonCount || 0}
+                        {topic.itemsCount}
                       </TableCell>
                       <TableCell
                         align="center"
@@ -250,15 +209,15 @@ const SpeakerTable = ({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {speaker.listId || 'No list'}
+                        {topic.listId || 'No list'}
                       </TableCell>
                       <TableCell sx={{ width: headCells[3].width }}>
                         <Box display="flex" justifyContent="center" gap={1}>
                           {['square', 'wide', 'banner'].map((type, index) => {
-                            const image = speaker.images?.find((candidate) => candidate.type === type);
+                            const image = topic.images?.find((candidate) => candidate.type === type);
                             return (
                               <Box
-                                key={image?.id || `${speaker.id}-${type}-${index}`}
+                                key={image?.id || `${topic.id}-${type}-${index}`}
                                 sx={{
                                   borderRadius: 1,
                                   overflow: 'hidden',
@@ -294,7 +253,7 @@ const SpeakerTable = ({
         <TablePagination
           rowsPerPageOptions={[25, 50, 100]}
           component="div"
-          count={totalSpeakers}
+          count={totalTopics}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(_, newPage) => handlePageChange(newPage)}
@@ -305,4 +264,4 @@ const SpeakerTable = ({
   );
 };
 
-export default SpeakerTable;
+export default TopicTable;

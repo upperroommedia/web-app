@@ -1,8 +1,12 @@
 import type { SearchClient, SearchResponse } from 'algoliasearch';
+import type { Order } from '../../context/types';
+import { ListType, OverflowBehavior, type List } from '../../types/List';
 import type { ImageType } from '../../types/Image';
 import type { ISpeaker } from '../../types/Speaker';
 import type { Sermon, sermonStatus } from '../../types/SermonTypes';
 import { sermonStatusType, uploadStatus } from '../../types/SermonTypes';
+import { resolveListIndexName } from './listSorting';
+import { resolveSpeakerIndexName } from './speakerSorting';
 
 export interface AlgoliaSermonHit extends Omit<Partial<Sermon>, 'status'> {
   objectID: string;
@@ -14,6 +18,10 @@ export interface AlgoliaSermonHit extends Omit<Partial<Sermon>, 'status'> {
 export interface AlgoliaSpeakerHit extends Partial<ISpeaker> {
   objectID: string;
   nbHits?: number;
+}
+
+export interface AlgoliaListHit extends Partial<List> {
+  objectID: string;
 }
 
 const defaultSermonStatus: sermonStatus = {
@@ -74,16 +82,43 @@ export const normalizeAlgoliaSpeakerHit = (hit: AlgoliaSpeakerHit): ISpeaker => 
   };
 };
 
+export const normalizeAlgoliaListHit = (hit: AlgoliaListHit): List => {
+  return {
+    id: hit.id || hit.objectID,
+    name: hit.name || '',
+    images: hit.images ?? [],
+    overflowBehavior: hit.overflowBehavior ?? OverflowBehavior.CREATENEWLIST,
+    count: hit.count ?? 0,
+    type: hit.type ?? ListType.SERIES,
+    updatedAtMillis: hit.updatedAtMillis,
+    createdAtMillis: hit.createdAtMillis ?? 0,
+    subsplashId: hit.subsplashId,
+    moreSermonsRef: hit.moreSermonsRef,
+    isMoreSermonsList: hit.isMoreSermonsList,
+    listTagAndPosition: hit.listTagAndPosition,
+  };
+};
+
 export const searchSpeakersIndex = async (
   searchClient: SearchClient,
-  query: string,
-  hitsPerPage: number,
-  page: number
+  {
+    query,
+    hitsPerPage,
+    page,
+    sortProperty,
+    sortOrder,
+  }: {
+    query: string;
+    hitsPerPage: number;
+    page: number;
+    sortProperty: keyof ISpeaker;
+    sortOrder: Order;
+  }
 ): Promise<SearchResponse<AlgoliaSpeakerHit>> => {
   const response = await searchClient.search<AlgoliaSpeakerHit>({
     requests: [
       {
-        indexName: 'speakers',
+        indexName: resolveSpeakerIndexName(sortProperty, sortOrder),
         query,
         hitsPerPage,
         page,
@@ -92,4 +127,38 @@ export const searchSpeakersIndex = async (
   });
 
   return response.results[0] as SearchResponse<AlgoliaSpeakerHit>;
+};
+
+export const searchListsIndex = async (
+  searchClient: SearchClient,
+  {
+    query,
+    hitsPerPage,
+    page,
+    sortProperty,
+    sortOrder,
+    listType,
+  }: {
+    query: string;
+    hitsPerPage: number;
+    page: number;
+    sortProperty: keyof List;
+    sortOrder: Order;
+    listType: ListType | '';
+  }
+): Promise<SearchResponse<AlgoliaListHit>> => {
+  const response = await searchClient.search<AlgoliaListHit>({
+    requests: [
+      {
+        indexName: resolveListIndexName(sortProperty, sortOrder),
+        query,
+        hitsPerPage,
+        page,
+        ...(listType ? { facetFilters: [[`type:${listType}`]] } : {}),
+        filters: 'NOT isMoreSermonsList:true',
+      },
+    ],
+  });
+
+  return response.results[0] as SearchResponse<AlgoliaListHit>;
 };

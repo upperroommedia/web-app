@@ -9,8 +9,11 @@ import type {
   SearchResponses,
 } from 'algoliasearch';
 import firestore, { collection, query, getDocs, where, orderBy, QueryConstraint } from '../firebase/firestore';
+import { listConverter } from '../types/List';
 import { sermonConverter } from '../types/Sermon';
 import { speakerConverter } from '../types/Speaker';
+import { resolveListSortFromIndexName } from './algolia/listSorting';
+import { resolveSpeakerSortFromIndexName } from './algolia/speakerSorting';
 
 interface MockAlgoliaClientOptions {
   userId: string;
@@ -74,13 +77,17 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
           };
 
           try {
-            if (queryRequest.indexName === 'speakers') {
+            if (queryRequest.indexName?.startsWith('speakers')) {
               const searchQuery = getStringParam('query');
               const hitsPerPage = getNumberParam('hitsPerPage', 20);
               const page = getNumberParam('page', 0);
+              const { sortProperty, sortOrder } = resolveSpeakerSortFromIndexName(queryRequest.indexName);
 
               const speakersRef = collection(firestore, 'speakers');
-              const speakersQuery = query(speakersRef.withConverter(speakerConverter), orderBy('name'));
+              const speakersQuery = query(
+                speakersRef.withConverter(speakerConverter),
+                orderBy(sortProperty, sortOrder)
+              );
               const speakersSnapshot = await getDocs(speakersQuery);
               let allSpeakers = speakersSnapshot.docs.map((doc) => doc.data());
 
@@ -97,6 +104,71 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               const hits = paginatedSpeakers.map((speaker) => ({
                 ...speaker,
                 objectID: speaker.id,
+              })) as T[];
+
+              return {
+                hits,
+                nbHits: totalHits,
+                page,
+                nbPages: totalPages,
+                hitsPerPage,
+                processingTimeMS: 0,
+                query: searchQuery,
+                params: '',
+                exhaustiveNbHits: true,
+              } as SearchResponse<T>;
+            }
+
+            if (queryRequest.indexName?.startsWith('lists')) {
+              const searchQuery = getStringParam('query');
+              const hitsPerPage = getNumberParam('hitsPerPage', 20);
+              const page = getNumberParam('page', 0);
+              const facetFiltersRaw = getParam('facetFilters');
+              const facetFilters = Array.isArray(facetFiltersRaw) ? facetFiltersRaw.flat() : [];
+              const listTypeFilter =
+                facetFilters
+                  .find((filter): filter is string => typeof filter === 'string' && filter.startsWith('type:'))
+                  ?.split(':')[1] ?? '';
+              const { sortProperty, sortOrder } = resolveListSortFromIndexName(queryRequest.indexName);
+
+              const listsRef = collection(firestore, 'lists');
+              const listsQuery = query(listsRef.withConverter(listConverter), orderBy('name'));
+              const listsSnapshot = await getDocs(listsQuery);
+              let allLists = listsSnapshot.docs
+                .map((doc) => doc.data())
+                .filter((list) => list.isMoreSermonsList !== true);
+
+              if (listTypeFilter) {
+                allLists = allLists.filter((list) => list.type === listTypeFilter);
+              }
+
+              if (searchQuery) {
+                const queryLower = searchQuery.toLowerCase();
+                allLists = allLists.filter((list) => list.name?.toLowerCase().includes(queryLower));
+              }
+
+              allLists = [...allLists].sort((leftList, rightList) => {
+                const leftValue = leftList[sortProperty];
+                const rightValue = rightList[sortProperty];
+
+                if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+                  return sortOrder === 'asc' ? leftValue - rightValue : rightValue - leftValue;
+                }
+
+                const normalizedLeft = String(leftValue ?? '').toLowerCase();
+                const normalizedRight = String(rightValue ?? '').toLowerCase();
+                const comparison = normalizedLeft.localeCompare(normalizedRight);
+                return sortOrder === 'asc' ? comparison : -comparison;
+              });
+
+              const totalHits = allLists.length;
+              const totalPages = Math.ceil(totalHits / hitsPerPage);
+              const startIndex = page * hitsPerPage;
+              const endIndex = startIndex + hitsPerPage;
+              const paginatedLists = allLists.slice(startIndex, endIndex);
+              const hits = paginatedLists.map((list) => ({
+                ...list,
+                objectID: list.id,
               })) as T[];
 
               return {
@@ -224,11 +296,13 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
             allSermons.forEach((sermon) => {
               // Count status.subsplash
               const subsplashStatus = sermon.status?.subsplash || 'NOT_UPLOADED';
-              facetStats['status.subsplash'][subsplashStatus] = (facetStats['status.subsplash'][subsplashStatus] || 0) + 1;
+              facetStats['status.subsplash'][subsplashStatus] =
+                (facetStats['status.subsplash'][subsplashStatus] || 0) + 1;
 
               // Count status.soundCloud
               const soundCloudStatus = sermon.status?.soundCloud || 'NOT_UPLOADED';
-              facetStats['status.soundCloud'][soundCloudStatus] = (facetStats['status.soundCloud'][soundCloudStatus] || 0) + 1;
+              facetStats['status.soundCloud'][soundCloudStatus] =
+                (facetStats['status.soundCloud'][soundCloudStatus] || 0) + 1;
 
               // Count speakers.name
               sermon.speakers?.forEach((speaker) => {
@@ -264,7 +338,6 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               facets: facetStats,
             } as SearchResponse<T>;
           } catch (error) {
-             
             console.error('Mock Algolia search error:', error);
             return {
               hits: [],
@@ -282,9 +355,11 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
 
       return { results };
     },
-    searchForFacetValues: async (
-      { indexName, facetName, searchForFacetValuesRequest }: SearchForFacetValuesProps
-    ): Promise<SearchForFacetValuesResponse> => {
+    searchForFacetValues: async ({
+      indexName,
+      facetName,
+      searchForFacetValuesRequest,
+    }: SearchForFacetValuesProps): Promise<SearchForFacetValuesResponse> => {
       if (indexName !== 'sermons') {
         return {
           facetHits: [],
@@ -298,7 +373,7 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
 
         // Build query constraints for facet values
         const facetConstraints: QueryConstraint[] = [];
-        
+
         // Uploaders are restricted to their own sermons. Admins and publishers can search all sermons.
         if (!canSearchAllSermons) {
           facetConstraints.push(where('uploaderId', '==', userId));
@@ -354,7 +429,6 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
           exhaustiveFacetsCount: true,
         } as SearchForFacetValuesResponse;
       } catch (error) {
-         
         console.error('Mock Algolia searchForFacetValues error:', error);
         return {
           facetHits: [],

@@ -1,459 +1,218 @@
+import { ChangeEvent, useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
-import AppLayout from '../../layout/AppLayout';
-import Button from '@mui/material/Button';
-import firestore, { collection, deleteDoc, doc, limit, orderBy, query } from '../../firebase/firestore';
-import DeleteEntityPopup from '../../components/DeleteEntityPopup';
-import { memo, useCallback, useEffect, useState } from 'react';
-import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
-import AvatarWithDefaultImage from '../../components/AvatarWithDefaultImage';
 import Typography from '@mui/material/Typography';
-import { useCollectionData } from 'react-firebase-hooks/firestore';
-import CircularProgress from '@mui/material/CircularProgress';
-import { createFunctionV2 } from '../../utils/createFunction';
-import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '@upperroom/contracts/deleteSubsplashList';
-import Link from 'next/link';
-import Card from '@mui/material/Card';
-import Divider from '@mui/material/Divider';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
-import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
-import AddIcon from '@mui/icons-material/Add';
-import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
-import SearchIcon from '@mui/icons-material/Search';
-import Stack from '@mui/material/Stack';
-import Chip from '@mui/material/Chip';
-import InputAdornment from '@mui/material/InputAdornment';
-import { listConverter, List, ListType } from '../../types/List';
-import { algoliasearch, SearchResponse } from 'algoliasearch';
-import TextField from '@mui/material/TextField';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
-import InputLabel from '@mui/material/InputLabel';
-import FormControl from '@mui/material/FormControl';
+import AppLayout from '../../layout/AppLayout';
+import DeleteEntityPopup from '../../components/DeleteEntityPopup';
+import ListTable from '../../components/ListTable';
+import NewListPopup, { listTypeOptions } from '../../components/NewListPopup';
 import useAuth from '../../context/user/UserContext';
-import { alpha, useTheme } from '@mui/material/styles';
+import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
+import { Order } from '../../context/types';
+import { createFunctionV2 } from '../../utils/createFunction';
+import { normalizeAlgoliaListHit, searchListsIndex } from '../../utils/algolia/searchRecords';
+import { getDefaultListSortOrder } from '../../utils/algolia/listSorting';
+import { DeleteSubsplashListInputType, DeleteSubsplashListOutputType } from '@upperroom/contracts/deleteSubsplashList';
+import firestore, { deleteDoc, doc } from '../../firebase/firestore';
+import { List, ListType } from '../../types/List';
 
-const HITSPERPAGE = 20;
-
-const client =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
-    : undefined;
-
-interface ListListItemRowProps {
-  list: List;
-  disableButtons: boolean;
-  onEdit: (list: List) => void;
-  onDelete: (list: List) => void;
-}
-
-const ListListItemRow = memo(function ListListItemRow({
-  list,
-  disableButtons,
-  onEdit,
-  onDelete,
-}: ListListItemRowProps) {
-  const theme = useTheme();
-  const listImage = list.images?.find((image) => image.type === 'square');
-  return (
-    <Box>
-      <Link href={`/admin/lists/${list.id}?count=${list.count || 20}`} style={{ textDecoration: 'none' }}>
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            p: { xs: 2, sm: 2.5 },
-            gap: 2,
-            cursor: 'pointer',
-            transition: 'background-color 0.15s ease',
-            '&:hover': { bgcolor: 'action.hover' },
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
-            <AvatarWithDefaultImage
-              image={listImage}
-              altName={`Image of List: ${list.name}`}
-              width={64}
-              height={64}
-              borderRadius={10}
-              sx={{ flexShrink: 0 }}
-            />
-            <Box sx={{ minWidth: 0 }}>
-              <Typography
-                variant="subtitle1"
-                fontWeight={600}
-                sx={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {list.name}
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
-                {list.count !== undefined && (
-                  <Typography variant="body2" color="text.secondary">
-                    {list.count} items
-                  </Typography>
-                )}
-                <Chip
-                  label={listTypeOptions[list.type] || list.type}
-                  size="small"
-                  variant="outlined"
-                  sx={{ height: 22 }}
-                />
-              </Box>
-            </Box>
-          </Box>
-
-          <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-            <Tooltip title="Edit List">
-              <span>
-                <IconButton
-                  disabled={disableButtons}
-                  aria-label="edit list"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onEdit(list);
-                  }}
-                  sx={{
-                    '&:hover': {
-                      bgcolor: alpha(theme.palette.primary.main, 0.15),
-                      color: 'primary.main',
-                    },
-                  }}
-                >
-                  <EditIcon />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="Delete List">
-              <span>
-                <IconButton
-                  disabled={disableButtons}
-                  aria-label="delete list"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onDelete(list);
-                  }}
-                  sx={{
-                    color: 'error.main',
-                    '&:hover': {
-                      bgcolor: alpha(theme.palette.error.main, 0.15),
-                    },
-                  }}
-                >
-                  <DeleteIcon />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Stack>
-        </Box>
-      </Link>
-    </Box>
-  );
-});
+const createDeleteSubsplashList = createFunctionV2<DeleteSubsplashListInputType, DeleteSubsplashListOutputType>(
+  'deletesubsplashlist'
+);
 
 const AdminList = () => {
-  // Exclude overflow lists (isMoreSermonsList: true) from admin list view
-  // Note: Firestore doesn't support != with undefined, so we use a compound query
-  // We'll filter client-side for isMoreSermonsList !== true
-  const q = query(collection(firestore, 'lists').withConverter(listConverter), orderBy('name'), limit(HITSPERPAGE));
-  const [firebaseList, loading, error] = useCollectionData(q);
-  const [list, setList] = useState<List[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [searchResults, setSearchResults] = useState<List[]>();
-  const [currentPage, setCurrentPage] = useState<number>(0);
-  const [noMoreResults, setNoMoreResults] = useState<boolean>(false);
-  const [filter, setFilter] = useState<ListType | ''>('');
+  const { searchClient, loading: searchClientLoading, error: searchClientError, clearCache } = useAlgoliaSearch();
+  const [searchValue, setSearchValue] = useState<string>('');
+  const [debouncedSearchValue, setDebouncedSearchValue] = useState<string>('');
+  const [listTypeFilter, setListTypeFilter] = useState<ListType | ''>('');
+  const [page, setPage] = useState<number>(0);
+  const [rowsPerPage, setRowsPerPage] = useState<number>(25);
+  const [lists, setLists] = useState<List[]>([]);
+  const [listsLoading, setListsLoading] = useState<boolean>(false);
+  const [totalLists, setTotalLists] = useState<number>(0);
+  const [sortProperty, setSortProperty] = useState<keyof List>('name');
+  const [sortOrder, setSortOrder] = useState<Order>(getDefaultListSortOrder('name'));
+  const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [editListPopup, setEditListPopup] = useState<boolean>(false);
   const [deleteListPopup, setDeleteListPopup] = useState<boolean>(false);
-  const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [selectedList, setSelectedList] = useState<List>();
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
-  const disableButtons = isDeleting;
+  const [refreshNonce, setRefreshNonce] = useState<number>(0);
 
-  const handleListDelete = async () => {
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchValue(searchValue);
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [searchValue]);
+
+  useEffect(() => {
+    if (!searchClient) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadLists = async () => {
+      setListsLoading(true);
+
+      try {
+        const response = await searchListsIndex(searchClient, {
+          query: debouncedSearchValue,
+          hitsPerPage: rowsPerPage,
+          page,
+          sortProperty,
+          sortOrder,
+          listType: listTypeFilter,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setTotalLists(response.nbHits ?? 0);
+        setLists(response.hits.map(normalizeAlgoliaListHit));
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load lists from Algolia', error);
+          setLists([]);
+          setTotalLists(0);
+        }
+      } finally {
+        if (!cancelled) {
+          setListsLoading(false);
+        }
+      }
+    };
+
+    void loadLists();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearchValue, listTypeFilter, page, refreshNonce, rowsPerPage, searchClient, sortOrder, sortProperty]);
+
+  const handleDeleteList = async () => {
     if (!selectedList) {
       return;
     }
+
     try {
       setIsDeleting(true);
-      const deleteSubsplashList = createFunctionV2<DeleteSubsplashListInputType, DeleteSubsplashListOutputType>(
-        'deletesubsplashlist'
-      );
       if (selectedList.subsplashId) {
-        await deleteSubsplashList({ listId: selectedList.subsplashId });
+        await createDeleteSubsplashList({ listId: selectedList.subsplashId });
       }
       await deleteDoc(doc(firestore, 'lists', selectedList.id));
-      setList((oldList) => oldList.filter((list) => list.id !== selectedList.id));
-    } catch (_e) {
+      await clearCache();
+      setLists((previousLists) => previousLists.filter((list) => list.id !== selectedList.id));
+      setTotalLists((previousTotal) => Math.max(0, previousTotal - 1));
+      setRefreshNonce((currentValue) => currentValue + 1);
+    } catch (error) {
+      console.error(error);
       alert('Error deleting list');
     } finally {
       setIsDeleting(false);
     }
   };
 
-  const searchLists = useCallback(
-    async (query?: string) => {
-      if (client) {
-        try {
-          const res: SearchResponse<List> = await client.searchSingleIndex({
-            indexName: 'lists',
-            searchParams: {
-              query: query || searchQuery,
-              hitsPerPage: HITSPERPAGE,
-              page: currentPage,
-              ...(filter !== '' && { facetFilters: [`type:${filter}`] }),
-              // Exclude overflow lists from search results
-              filters: 'NOT isMoreSermonsList:true',
-            },
-          });
-          // Also filter client-side as a safety measure
-          const filteredHits = res.hits.filter((list) => list.isMoreSermonsList !== true);
-          if (filteredHits.length > 0) {
-            setNoMoreResults(false);
-            setSearchResults(filteredHits);
-          } else {
-            setSearchResults([]);
-            setNoMoreResults(true);
-          }
-        } catch (error) {
-           
-          console.error('Search error:', error);
-          setSearchResults([]);
-          setNoMoreResults(true);
-        }
-      }
-    },
-    [currentPage, filter, searchQuery]
-  );
+  const handleSort = async (property: keyof List, order: Order) => {
+    setSortProperty(property);
+    setSortOrder(order);
+    setPage(0);
+  };
 
-  useEffect(() => {
-    if (firebaseList) {
-      // Filter out overflow lists (isMoreSermonsList: true) from admin view
-      setList(firebaseList.filter((list) => list.isMoreSermonsList !== true));
-    }
-  }, [firebaseList]);
+  const handlePageChange = async (newPage: number) => {
+    setPage(newPage);
+  };
 
-  useEffect(() => {
-    if (searchQuery === '' && filter === '') {
-      setSearchResults(undefined);
-      return;
-    }
-    const fetchData = async () => {
-      await searchLists();
-    };
-    fetchData();
-  }, [currentPage, filter, searchLists, searchQuery]);
+  const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
 
-  const handleEditList = useCallback((l: List) => {
-    setSelectedList(l);
-    setEditListPopup(true);
-  }, []);
-
-  const handleDeleteListClick = useCallback((l: List) => {
-    setSelectedList(l);
-    setDeleteListPopup(true);
-  }, []);
+  const isLoading = listsLoading || searchClientLoading;
 
   return (
     <>
       <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
-        {error ? (
+        {searchClientError ? (
           <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Typography color="error">{`Error: ${error.message}`}</Typography>
-          </Box>
-        ) : loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-            <CircularProgress />
+            <Typography color="error">{searchClientError}</Typography>
           </Box>
         ) : (
-          <>
-            {/* Header */}
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: { xs: 'column', sm: 'row' },
-                justifyContent: 'space-between',
-                alignItems: { xs: 'flex-start', sm: 'center' },
-                gap: 2,
-                mb: 4,
-              }}
-            >
-              <Typography variant="h4" fontWeight={700}>
-                Manage Lists
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setNewListPopup(true)}
-              >
-                Add List
-              </Button>
-            </Box>
-
-            {/* Filters */}
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: { xs: 'column', sm: 'row' },
-                gap: 2,
-                mb: 3,
-              }}
-            >
-              <TextField
-                placeholder="Search lists by name..."
-                value={searchQuery}
-                onChange={async (e) => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(0);
-                  if (e.target.value === '') {
-                    setSearchResults(undefined);
-                  } else {
-                    await searchLists(e.target.value);
-                  }
-                }}
-                size="small"
-                sx={{ flex: 2 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
-                <InputLabel id="list-type-select-label">Type</InputLabel>
-                <Select
-                  value={filter}
-                  label="Type"
-                  labelId="list-type-select-label"
-                  onChange={(e) => {
-                    setCurrentPage(0);
-                    setFilter(e.target.value as ListType);
-                  }}
-                >
-                  <MenuItem value="">All Types</MenuItem>
-                  {(Object.values(ListType) as Array<ListType>).map((listType) => {
-                    if (listType !== ListType.LATEST) {
-                      return (
-                        <MenuItem key={listType} value={listType}>
-                          {listTypeOptions[listType]}
-                        </MenuItem>
-                      );
-                    }
-                    return null;
-                  })}
-                </Select>
-              </FormControl>
-            </Box>
-
-            {/* Lists */}
-            {(searchResults || list).length === 0 ? (
-              <Card
-                sx={{
-                  textAlign: 'center',
-                  py: 6,
-                  px: 3,
-                  border: '2px dashed',
-                  borderColor: 'divider',
-                  bgcolor: 'transparent',
-                }}
-              >
-                <PlaylistPlayIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>
-                  {searchQuery || filter ? 'No lists found matching your filters' : 'No lists yet'}
-                </Typography>
-                <Typography variant="body2" color="text.disabled" sx={{ mb: 3 }}>
-                  {searchQuery || filter
-                    ? 'Try adjusting your search or filter'
-                    : 'Create your first list to organize your content'}
-                </Typography>
-                {!searchQuery && !filter && (
-                  <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={() => setNewListPopup(true)}
-                  >
-                    Create Your First List
-                  </Button>
-                )}
-              </Card>
-            ) : (
-              <Card>
-                {(searchResults || list).map((l, index) => (
-                  <Box key={l.id}>
-                    <ListListItemRow
-                      list={l}
-                      disableButtons={disableButtons}
-                      onEdit={handleEditList}
-                      onDelete={handleDeleteListClick}
-                    />
-                    {index < (searchResults || list).length - 1 && <Divider />}
-                  </Box>
-                ))}
-              </Card>
-            )}
-
-            {/* Pagination */}
-            {((searchResults || list).length > 0 || currentPage > 0) && (
-              <Box display="flex" gap={2} justifyContent="center" mt={3}>
-                {currentPage > 0 && (
-                  <Button variant="outlined" onClick={() => setCurrentPage((oldPage) => oldPage - 1)}>
-                    Previous Page
-                  </Button>
-                )}
-                {!noMoreResults && !(searchResults && searchResults.length < HITSPERPAGE) && (
-                  <Button variant="outlined" onClick={() => setCurrentPage((oldPage) => oldPage + 1)}>
-                    Next Page
-                  </Button>
-                )}
-              </Box>
-            )}
-          </>
+          <ListTable
+            lists={lists}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            totalLists={totalLists}
+            sortOrder={sortOrder}
+            sortProperty={sortProperty}
+            searchValue={searchValue}
+            listTypeFilter={listTypeFilter}
+            loading={isLoading}
+            handlePageChange={handlePageChange}
+            handleChangeRowsPerPage={handleChangeRowsPerPage}
+            handleSort={handleSort}
+            onSearchChange={(value) => {
+              setSearchValue(value);
+              setPage(0);
+            }}
+            onFilterChange={(value) => {
+              setListTypeFilter(value);
+              setPage(0);
+            }}
+            onAddList={() => setNewListPopup(true)}
+            onEditList={(list) => {
+              setSelectedList(list);
+              setEditListPopup(true);
+            }}
+            onDeleteList={(list) => {
+              setSelectedList(list);
+              setDeleteListPopup(true);
+            }}
+            disableButtons={isDeleting}
+            listTypeOptions={listTypeOptions}
+          />
         )}
       </Box>
       <DeleteEntityPopup
         entityBeingDeleted="list"
-        handleDelete={handleListDelete}
         deleteConfirmationPopup={deleteListPopup}
         setDeleteConfirmationPopup={setDeleteListPopup}
+        handleDelete={handleDeleteList}
         isDeleting={isDeleting}
       />
-      {newListPopup && (
+      {newListPopup ? (
         <NewListPopup
           newListPopup={newListPopup}
           setNewListPopup={setNewListPopup}
-          listArray={list}
-          // setListArray={setList}
+          listArray={lists}
+          setListArray={setLists}
         />
-      )}
-      {editListPopup && (
+      ) : null}
+      {editListPopup ? (
         <NewListPopup
           newListPopup={editListPopup}
           setNewListPopup={setEditListPopup}
-          listArray={list}
-          // setListArray={setList}
+          listArray={lists}
+          setListArray={setLists}
           existingList={selectedList}
         />
-      )}
+      ) : null}
     </>
   );
 };
 
 const ProtectedAdminList = () => {
   const { user } = useAuth();
+
   if (!user?.isAdmin()) {
     return null;
-  } else {
-    return <AdminList />;
   }
+
+  return <AdminList />;
 };
 
 ProtectedAdminList.PageLayout = AppLayout;

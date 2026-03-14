@@ -33,7 +33,11 @@ jest.mock('../../subsplashUtils', () => ({
 // The logger works fine in tests without mocking
 
 jest.mock('firebase-functions/v2/https', () => ({
-  onCall: jest.fn(<T,>(handler: (request: CallableRequest<T>) => Promise<unknown>) => {
+  onCall: jest.fn(<T,>(
+    optsOrHandler: ((request: CallableRequest<T>) => Promise<unknown>) | unknown,
+    maybeHandler?: (request: CallableRequest<T>) => Promise<unknown>
+  ) => {
+    const handler = typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler;
     return handler as unknown as (request: TestRequest) => Promise<unknown>;
   }),
   HttpsError: class extends Error {
