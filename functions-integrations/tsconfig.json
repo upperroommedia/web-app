@@ -1,9 +1,15 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "module": "commonjs",
     "noImplicitReturns": true,
     "noUnusedLocals": true,
     "outDir": "lib",
+    "paths": {
+      "@upperroom/shared/*": [
+        "../packages/shared/*"
+      ]
+    },
     "rootDir": "..",
     "sourceMap": true,
     "strict": true,

@@ -132,6 +132,9 @@ importers:
       ts-node:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@18.19.130)(typescript@5.9.3)
+      tsc-alias:
+        specifier: ^1.8.16
+        version: 1.8.16
       turbo:
         specifier: ^2.5.8
         version: 2.8.14
@@ -531,200 +534,188 @@ importers:
   functions-core:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
-      '@upperroom/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.1
         version: 7.1.1(firebase-admin@13.7.0(encoding@0.1.13))
       form-data:
-        specifier: 'catalog:'
+        specifier: ^4.0.0
         version: 4.0.5
       google-auth-library:
-        specifier: 'catalog:'
+        specifier: ^9.15.1
         version: 9.15.1(encoding@0.1.13)
       headers:
-        specifier: 'catalog:'
+        specifier: ^0.9.6
         version: 0.9.6
       https-proxy-agent:
-        specifier: 'catalog:'
+        specifier: ^7.0.4
         version: 7.0.6
       image-size:
-        specifier: 'catalog:'
+        specifier: ^1.1.1
         version: 1.2.1
       lodash:
-        specifier: 'catalog:'
+        specifier: ^4.17.23
         version: 4.17.23
       mkdirp:
-        specifier: 'catalog:'
+        specifier: ^2.1.6
         version: 2.1.6
       node-fetch:
-        specifier: 'catalog:'
+        specifier: 3.3.0
         version: 3.3.0
       p-limit:
-        specifier: 'catalog:'
+        specifier: ^6.2.0
         version: 6.2.0
       uuid:
-        specifier: 'catalog:'
+        specifier: ^9.0.1
         version: 9.0.1
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
   functions-image:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
-      '@upperroom/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       buffer-image-size:
-        specifier: 'catalog:'
+        specifier: ^0.6.4
         version: 0.6.4
       fast-average-color-node:
-        specifier: 'catalog:'
+        specifier: ^3.1.0
         version: 3.2.0
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.1
         version: 7.1.1(firebase-admin@13.7.0(encoding@0.1.13))
       mkdirp:
-        specifier: 'catalog:'
+        specifier: ^2.1.6
         version: 2.1.6
       node-vibrant:
-        specifier: 'catalog:'
+        specifier: ^4.0.3
         version: 4.0.4(encoding@0.1.13)
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
   functions-integrations:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
-      '@upperroom/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       algoliasearch:
         specifier: 5.27.0
         version: 5.27.0
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.1
         version: 7.1.1(firebase-admin@13.7.0(encoding@0.1.13))
       form-data:
-        specifier: 'catalog:'
+        specifier: ^4.0.0
         version: 4.0.5
       google-auth-library:
-        specifier: 'catalog:'
+        specifier: ^9.15.1
         version: 9.15.1(encoding@0.1.13)
       headers:
-        specifier: 'catalog:'
+        specifier: ^0.9.6
         version: 0.9.6
       https-proxy-agent:
-        specifier: 'catalog:'
+        specifier: ^7.0.4
         version: 7.0.6
       image-size:
-        specifier: 'catalog:'
+        specifier: ^1.1.1
         version: 1.2.1
       lodash:
-        specifier: 'catalog:'
+        specifier: ^4.17.23
         version: 4.17.23
       mkdirp:
-        specifier: 'catalog:'
+        specifier: ^2.1.6
         version: 2.1.6
       node-fetch:
-        specifier: 'catalog:'
+        specifier: 3.3.0
         version: 3.3.0
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
   functions-media:
     dependencies:
       '@google-cloud/functions-framework':
-        specifier: 'catalog:'
+        specifier: ^3.2.0
         version: 3.5.1
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
       '@ts-ffmpeg/fluent-ffmpeg':
-        specifier: 'catalog:'
+        specifier: ^2.0.4
         version: 2.2.6
-      '@upperroom/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       axios:
-        specifier: 'catalog:'
+        specifier: ^1.13.6
         version: 1.13.6
       ffmpeg-static:
-        specifier: 'catalog:'
+        specifier: ^5.2.0
         version: 5.3.0
       ffprobe-static:
-        specifier: 'catalog:'
+        specifier: ^3.1.0
         version: 3.1.0
       firebase-admin:
-        specifier: 'catalog:'
+        specifier: ^13.7.0
         version: 13.7.0(encoding@0.1.13)
       firebase-functions:
-        specifier: 'catalog:'
+        specifier: ^7.1.1
         version: 7.1.1(firebase-admin@13.7.0(encoding@0.1.13))
       form-data:
-        specifier: 'catalog:'
+        specifier: ^4.0.0
         version: 4.0.5
       p-limit:
-        specifier: 'catalog:'
+        specifier: ^6.2.0
         version: 6.2.0
       ytdl-core:
-        specifier: 'catalog:'
+        specifier: ^4.11.5
         version: 4.11.5
     devDependencies:
       '@types/node':
-        specifier: 'catalog:'
+        specifier: ^18.19.7
         version: 18.19.130
       typescript:
-        specifier: 'catalog:'
+        specifier: ^5.9.3
         version: 5.9.3
 
   packages/contracts:
@@ -2899,6 +2890,10 @@ packages:
     resolution: {integrity: sha512-FmeCCAenzH0KH381SPT5FZmiA/TmpndpcaShhfgEN9eCVjnFBqq3l1xrI42y8+PPLI6hypzou4GXw00WHmPBLQ==}
     engines: {node: '>= 0.4'}
 
+  array-union@2.1.0:
+    resolution: {integrity: sha512-HGyxoOTYUyCM6stUe6EJgnd4EoewAI7zMdfqO+kGjnlZmBDz/cR5pf8r/cR4Wq60sL/p0IkcjUEEPwS3GFrIyw==}
+    engines: {node: '>=8'}
+
   array.prototype.findlast@1.2.5:
     resolution: {integrity: sha512-CVvd6FHg1Z3POpBLxO6E6zr+rSKEQ9L6rZHAaY7lLfhKsWYUBBOuMs0e9o24oopj6H+geRCX0YJ+TJLBK2eHyQ==}
     engines: {node: '>= 0.4'}
@@ -3348,6 +3343,10 @@ packages:
     resolution: {integrity: sha512-QrWXB+ZQSVPmIWIhtEO9H+gwHaMGYiF5ChvoJ+K9ZGHG/sVsa6yiesAD1GC/x46sET00Xlwo1u49RVVVzvcSkw==}
     engines: {node: '>= 10'}
 
+  commander@9.5.0:
+    resolution: {integrity: sha512-KRs7WVDKg86PWiuAqhDrAQnTXZKraVcCc6vFdL14qrZ/DcWwuRo7VoiYXalXO7S5GKpqYiVEwCbgFDfxNHKJBQ==}
+    engines: {node: ^12.20.0 || >=14}
+
   compress-commons@6.0.2:
     resolution: {integrity: sha512-6FqVXeETqWPoGcfzrXb37E50NP0LXT8kAMu5ooZayhWWdgEY4lBEEcbQNXtkuKQsGduxiIcI4gOTsxTmuq/bSg==}
     engines: {node: '>= 14'}
@@ -3601,6 +3600,10 @@ packages:
   diff@5.2.0:
     resolution: {integrity: sha512-uIFDxqpRZGZ6ThOk84hEfqWoHx2devRFvpTZcTHur85vImfaxUbTW9Ryh4CpCuDnToOP1CEtXKIgytHBPVff5A==}
     engines: {node: '>=0.3.1'}
+
+  dir-glob@3.0.1:
+    resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==}
+    engines: {node: '>=8'}
 
   discontinuous-range@1.0.0:
     resolution: {integrity: sha512-c68LpLbO+7kP/b1Hr1qs8/BJ09F5khZGTxqxZuhzxpmwJKOgRFHJWIb9/KmqnqHhLdO55aOxFH/EGBvUQbL/RQ==}
@@ -4389,6 +4392,10 @@ packages:
   globalthis@1.0.4:
     resolution: {integrity: sha512-DpLKbNU4WylpxJykQujfCcwYWiV/Jhm50Goo0wrVILAv5jOr9d+H+UR3PhSCD2rCCEIg0uc+G+muBTwD54JhDQ==}
     engines: {node: '>= 0.4'}
+
+  globby@11.1.0:
+    resolution: {integrity: sha512-jhIXaOzy1sb8IyocaruWSn1TjmnBVs8Ayhcy83rmxNJ8q2uWKCAj3CnJY+KpGSXCueAPc0i05kVvVKtP1t9S3g==}
+    engines: {node: '>=10'}
 
   google-auth-library@10.6.1:
     resolution: {integrity: sha512-5awwuLrzNol+pFDmKJd0dKtZ0fPLAtoA5p7YO4ODsDu6ONJUVqbYwvv8y2ZBO5MBNp9TJXigB19710kYpBPdtA==}
@@ -5482,6 +5489,10 @@ packages:
     resolution: {integrity: sha512-WWdIxpyjEn+FhQJQQv9aQAYlHoNVdzIzUySNV1gHUPDSdZJ3yZn7pAAbQcV7B56Mvu881q9FZV+0Vx2xC44VWA==}
     engines: {node: ^18.17.0 || >=20.5.0}
 
+  mylas@2.1.14:
+    resolution: {integrity: sha512-BzQguy9W9NJgoVn2mRWzbFrFWWztGCcng2QI9+41frfk+Athwgx3qhqhvStz7ExeUUu7Kzw427sNzHpEZNINog==}
+    engines: {node: '>=16.0.0'}
+
   mz@2.7.0:
     resolution: {integrity: sha512-z81GNO7nnYMEhrGh9LeymoE4+Yr0Wn5McHIZMK5cfQCl+NDX08sCZgUc9/6MHni9IWuFLm1Z3HTCXu2z9fN62Q==}
 
@@ -5918,6 +5929,10 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  plimit-lit@1.6.1:
+    resolution: {integrity: sha512-B7+VDyb8Tl6oMJT9oSO2CW8XC/T4UcJGrwOVoNGwOQsQYhlpfajmrMj5xeejqaASq3V/EqThyOeATEOMuSEXiA==}
+    engines: {node: '>=12'}
+
   pngjs@3.4.0:
     resolution: {integrity: sha512-NCrCHhWmnQklfH4MtJMRjZ2a8c80qXeMlQMv2uVp9ISJMTt562SbGd6n2oq0PaPgKm7Z6pL9E2UlLIhC+SHL3w==}
     engines: {node: '>=4.0.0'}
@@ -6043,6 +6058,10 @@ packages:
   qs@6.15.0:
     resolution: {integrity: sha512-mAZTtNCeetKMH+pSjrb76NAM8V9a05I9aBZOHztWy/UqcJdQYNsf59vrRKWnojAT9Y+GbIvoTBC++CPHqpDBhQ==}
     engines: {node: '>=0.6'}
+
+  queue-lit@1.5.2:
+    resolution: {integrity: sha512-tLc36IOPeMAubu8BkW8YDBV+WyIgKlYU7zUNs0J5Vk9skSZ4JfGlPOqplP0aHdfv7HL0B2Pg6nwiq60Qc6M2Hw==}
+    engines: {node: '>=12'}
 
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
@@ -6800,6 +6819,11 @@ packages:
         optional: true
       '@swc/wasm':
         optional: true
+
+  tsc-alias@1.8.16:
+    resolution: {integrity: sha512-QjCyu55NFyRSBAl6+MTFwplpFcnm2Pq01rR/uxfqJoLMm6X3O14KEGtaSDZpJYaE1bJBGDjD0eSuiIWPe2T58g==}
+    engines: {node: '>=16.20.2'}
+    hasBin: true
 
   tsconfig-paths@3.15.0:
     resolution: {integrity: sha512-2Ac2RgzDe/cn48GvOe3M+o82pEFewD3UPbyoUHHdKasHwJKjds4fLXWf/Ux5kATBKN20oaFGu+jbElp1pos0mg==}
@@ -9738,6 +9762,8 @@ snapshots:
       is-string: 1.1.1
       math-intrinsics: 1.1.0
 
+  array-union@2.1.0: {}
+
   array.prototype.findlast@1.2.5:
     dependencies:
       call-bind: 1.0.8
@@ -10247,6 +10273,8 @@ snapshots:
 
   commander@7.2.0: {}
 
+  commander@9.5.0: {}
+
   compress-commons@6.0.2:
     dependencies:
       crc-32: 1.2.2
@@ -10481,6 +10509,10 @@ snapshots:
   diff@4.0.4: {}
 
   diff@5.2.0: {}
+
+  dir-glob@3.0.1:
+    dependencies:
+      path-type: 4.0.0
 
   discontinuous-range@1.0.0: {}
 
@@ -11667,6 +11699,15 @@ snapshots:
     dependencies:
       define-properties: 1.2.1
       gopd: 1.2.0
+
+  globby@11.1.0:
+    dependencies:
+      array-union: 2.1.0
+      dir-glob: 3.0.1
+      fast-glob: 3.3.1
+      ignore: 5.3.2
+      merge2: 1.4.1
+      slash: 3.0.0
 
   google-auth-library@10.6.1:
     dependencies:
@@ -12993,6 +13034,8 @@ snapshots:
 
   mute-stream@2.0.0: {}
 
+  mylas@2.1.14: {}
+
   mz@2.7.0:
     dependencies:
       any-promise: 1.3.0
@@ -13448,6 +13491,10 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.2
 
+  plimit-lit@1.6.1:
+    dependencies:
+      queue-lit: 1.5.2
+
   pngjs@3.4.0: {}
 
   pngjs@6.0.0: {}
@@ -13574,6 +13621,8 @@ snapshots:
   qs@6.15.0:
     dependencies:
       side-channel: 1.1.0
+
+  queue-lit@1.5.2: {}
 
   queue-microtask@1.2.3: {}
 
@@ -14524,6 +14573,16 @@ snapshots:
       typescript: 5.9.3
       v8-compile-cache-lib: 3.0.1
       yn: 3.1.1
+
+  tsc-alias@1.8.16:
+    dependencies:
+      chokidar: 3.6.0
+      commander: 9.5.0
+      get-tsconfig: 4.13.6
+      globby: 11.1.0
+      mylas: 2.1.14
+      normalize-path: 3.0.0
+      plimit-lit: 1.6.1
 
   tsconfig-paths@3.15.0:
     dependencies:

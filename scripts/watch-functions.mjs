@@ -13,11 +13,8 @@ const WATCH_TARGETS = [
   'functions-media/src',
   'functions-image/src',
   'functions-integrations/src',
-  'firebase',
-  'shared',
-  'types',
-  'constants',
-  'context',
+  'packages/shared',
+  'packages/contracts',
 ];
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.json']);
 const IGNORED_SEGMENTS = new Set(['node_modules', 'lib', '.git', '.turbo']);

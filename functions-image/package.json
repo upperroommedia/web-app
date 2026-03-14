@@ -6,24 +6,23 @@
     "node": "22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "build:ci": "pnpm run build",
     "build-watch": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
-    "@upperroom/shared": "workspace:*",
-    "@google-cloud/functions-framework": "catalog:",
-    "@google-cloud/storage": "catalog:",
-    "axios": "catalog:",
-    "buffer-image-size": "catalog:",
-    "fast-average-color-node": "catalog:",
-    "firebase-admin": "catalog:",
-    "firebase-functions": "catalog:",
-    "mkdirp": "catalog:",
-    "node-vibrant": "catalog:"
+    "@google-cloud/functions-framework": "^3.2.0",
+    "@google-cloud/storage": "7.19.0",
+    "axios": "^1.13.6",
+    "buffer-image-size": "^0.6.4",
+    "fast-average-color-node": "^3.1.0",
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.1.1",
+    "mkdirp": "^2.1.6",
+    "node-vibrant": "^4.0.3"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@types/node": "^18.19.7",
+    "typescript": "^5.9.3"
   }
 }

@@ -6,26 +6,25 @@
     "node": "22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "build:ci": "pnpm run build",
     "build-watch": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
-    "@upperroom/shared": "workspace:*",
-    "@google-cloud/functions-framework": "catalog:",
-    "@google-cloud/storage": "catalog:",
-    "axios": "catalog:",
-    "ffmpeg-static": "catalog:",
-    "ffprobe-static": "catalog:",
-    "firebase-admin": "catalog:",
-    "firebase-functions": "catalog:",
-    "@ts-ffmpeg/fluent-ffmpeg": "catalog:",
-    "form-data": "catalog:",
-    "p-limit": "catalog:",
-    "ytdl-core": "catalog:"
+    "@google-cloud/functions-framework": "^3.2.0",
+    "@google-cloud/storage": "7.19.0",
+    "@ts-ffmpeg/fluent-ffmpeg": "^2.0.4",
+    "axios": "^1.13.6",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.1.1",
+    "form-data": "^4.0.0",
+    "p-limit": "^6.2.0",
+    "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@types/node": "^18.19.7",
+    "typescript": "^5.9.3"
   }
 }
