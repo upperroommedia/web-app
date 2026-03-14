@@ -8,6 +8,8 @@
    firebase apphosting:rollouts:create web-staging --project urm-app-staging --git-commit <commit_sha> --force
    ```
 
+App Hosting rollouts use `apps/web` as the backend root directory.
+
 ## Functions/rules rollback
 
 1. Re-run `staging-selective-deploy` workflow against the target rollback commit.

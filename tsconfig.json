@@ -1,47 +1,24 @@
 {
   "compilerOptions": {
     "target": "es2022",
-    "lib": [
-      "esnext",
-      "dom",
-      "dom.iterable"
-    ],
-    "allowJs": true,
+    "lib": ["es2022"],
     "skipLibCheck": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "incremental": true,
     "esModuleInterop": true,
     "module": "esnext",
-    "moduleResolution": "node",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "react-jsx",
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "types": [
-      "node",
-      "jest"
-    ],
-    "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    "components/Footer.js",
-    ".next/types/**/*.ts"
-  ],
+  "include": ["scripts/**/*.ts", "test/**/*.ts"],
   "exclude": [
     "node_modules",
-    "functions"
+    "apps/web/**",
+    "functions/**",
+    "functions-core/**",
+    "functions-media/**",
+    "functions-image/**",
+    "functions-integrations/**"
   ]
 }

@@ -1,5 +1,5 @@
 packages:
-  - '.'
+  - 'apps/*'
   - 'functions'
   - 'functions-core'
   - 'functions-media'

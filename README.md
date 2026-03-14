@@ -12,6 +12,8 @@ nvm use 22
 pnpm install
 ```
 
+The Next.js app now lives in `apps/web`. The repo root is the workspace orchestrator for local tooling, Firebase functions, and deployment metadata.
+
 ## Local Development
 
 Create `.env` from template (once):
@@ -36,6 +38,8 @@ pnpm dev
 
 This starts the web app and local Firebase emulators used by the project workflow.
 By default this runs `auth,functions,firestore,database,storage,tasks` emulators (not `extensions` or `apphosting`).
+`pnpm dev` also watches the local functions source tree and rebuilds the compiled function code when relevant files change.
+Set `ENABLE_FUNCTIONS_WATCH=0` if you need to disable that background rebuild loop temporarily.
 Enable optional emulators when needed:
 
 ```bash
@@ -58,6 +62,12 @@ Build all codebases:
 
 ```bash
 pnpm build-functions-codebases
+```
+
+Build the web app directly from its deploy root:
+
+```bash
+pnpm --dir apps/web build
 ```
 
 Run startup-load guard (checks that `core` does not load heavy/media/client-sdk deps at module load time):
@@ -92,6 +102,8 @@ pnpm exec firebase emulators:exec --only firestore,auth --config ../firebase.tes
 
 - Pushes to `staging` run `.github/workflows/staging-selective-deploy.yml`.
 - Deploys are path-filtered and target Firebase project `urm-app-staging`.
+- Firebase App Hosting is configured to build from `apps/web`.
+- Vercel should use `apps/web` as the project root in the Upper Room Media team account.
 - App Hosting rollouts are manually triggered by the workflow when app-related paths change.
 - Keep App Hosting automatic rollouts disabled for `web-staging` so staging pushes do not trigger duplicate App Hosting builds.
 - Use `workflow_dispatch` with `force_full_redeploy=true` for a full staging redeploy.

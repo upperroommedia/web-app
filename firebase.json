@@ -75,14 +75,17 @@
   ],
   "apphosting": {
     "backendId": "web-staging",
-    "rootDir": ".",
+    "rootDir": "apps/web",
     "ignore": [
       "node_modules",
       ".git",
       "firebase-debug.log",
       "firebase-debug.*.log",
-      ".next/cache"
-    ]
+      ".next",
+      "output",
+      "test-results"
+    ],
+    "alwaysDeployFromSource": true
   },
   "emulators": {
     "auth": {

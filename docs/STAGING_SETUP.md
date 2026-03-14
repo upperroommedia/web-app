@@ -16,7 +16,9 @@ Run after Blaze is enabled:
 firebase apphosting:backends:create --project urm-app-staging --location us-central1
 ```
 
-When prompted, set backend id to `web-staging` and root dir to repository root (`.`).
+When prompted, set backend id to `web-staging` and root dir to `apps/web`.
+
+If the backend already exists with the old repository-root setting, update the App Hosting backend root directory to `apps/web` before the next rollout.
 
 ## 2b. Disable automatic App Hosting rollouts (required)
 
@@ -129,3 +131,7 @@ Create a Workload Identity Provider and service account with Firebase deploy per
 3. Confirm App Hosting rollout is triggered only when app-related files change.
 4. Open PR `staging -> main` and confirm `main-from-staging` passes.
 5. Open PR `feature -> main` and confirm `main-from-staging` fails.
+
+## 7. Vercel parity
+
+In the Upper Room Media team account, update the Vercel project root directory for this project to `apps/web` so Vercel and App Hosting build the same deploy unit.

@@ -4,17 +4,26 @@
     "app-dev": {
       "cache": false,
       "persistent": true,
+      "dependsOn": [
+        "functions-core#build",
+        "functions-media#build",
+        "functions-image#build",
+        "functions-integrations#build"
+      ],
       "with": [
-        "web-app#emulators",
-        "functions-core#build-watch",
-        "functions-media#build-watch",
-        "functions-image#build-watch",
-        "functions-integrations#build-watch"
+        "//#emulators"
       ]
     },
-    "emulators": {
+    "//#emulators": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "SKIP_FUNCTIONS_BUILD",
+        "FIREBASE_PROJECT_ID",
+        "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+        "EMULATE_EXTENSIONS",
+        "EMULATE_APPHOSTING"
+      ]
     },
     "build-watch": {
       "cache": false,

@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import readline from 'node:readline';
 
 const DEFAULT_MAIL_TO = ['youssef.a.asaad@gmail.com'];
 const ENV_FILE_NAMES = ['.env', '.env.local'];
@@ -67,6 +68,14 @@ const loadEnvFromFiles = () => {
   return { loaded, loadedFileNames };
 };
 
+const prefixStream = (stream, prefix) => {
+  const rl = readline.createInterface({ input: stream });
+  rl.on('line', (line) => {
+    console.log(`${prefix}${line}`);
+  });
+  return rl;
+};
+
 const parseArgs = (argv) => {
   const options = {
     mail: false,
@@ -119,6 +128,10 @@ const { mail, mailTo } = parseArgs(process.argv.slice(2));
 const { loaded: fileEnv, loadedFileNames } = loadEnvFromFiles();
 const env = { ...fileEnv, ...process.env };
 
+if (!env.SKIP_FUNCTIONS_BUILD) {
+  env.SKIP_FUNCTIONS_BUILD = '1';
+}
+
 if (loadedFileNames.length > 0) {
   console.log(`[dev] loaded environment from ${loadedFileNames.join(', ')}`);
 }
@@ -140,6 +153,47 @@ if (mail) {
   console.log('[dev] --mail disabled (default)');
 }
 
+if (env.SKIP_FUNCTIONS_BUILD === '1') {
+  console.log('[dev] SKIP_FUNCTIONS_BUILD=1; relying on initial Turbo build plus background function rebuilds');
+}
+
+const enableFunctionsWatch = env.ENABLE_FUNCTIONS_WATCH !== '0';
+
+let functionsWatchChild = null;
+let functionsWatchStdout = null;
+let functionsWatchStderr = null;
+
+if (enableFunctionsWatch) {
+  functionsWatchChild = spawn('pnpm', ['run', 'build-functions-codebases-watch'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+    shell: process.platform === 'win32',
+  });
+
+  functionsWatchStdout = prefixStream(functionsWatchChild.stdout, '[functions-watch] ');
+  functionsWatchStderr = prefixStream(functionsWatchChild.stderr, '[functions-watch] ');
+
+  functionsWatchChild.on('exit', (code, signal) => {
+    if (functionsWatchStdout) {
+      functionsWatchStdout.close();
+    }
+    if (functionsWatchStderr) {
+      functionsWatchStderr.close();
+    }
+
+    if (signal) {
+      console.log(`[dev] functions watch exited via ${signal}`);
+      return;
+    }
+
+    if (code && code !== 0) {
+      console.log(`[dev] functions watch exited with code ${code}`);
+    }
+  });
+} else {
+  console.log('[dev] functions watch disabled (ENABLE_FUNCTIONS_WATCH=0)');
+}
+
 const child = spawn('pnpm', ['run', 'dev:core'], {
   stdio: 'inherit',
   env,
@@ -147,6 +201,10 @@ const child = spawn('pnpm', ['run', 'dev:core'], {
 });
 
 child.on('exit', (code, signal) => {
+  if (functionsWatchChild) {
+    functionsWatchChild.kill(signal ?? 'SIGTERM');
+  }
+
   if (signal) {
     process.kill(process.pid, signal);
     return;

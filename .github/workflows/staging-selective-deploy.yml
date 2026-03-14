@@ -194,7 +194,7 @@ jobs:
               deploy_functions_integrations=true
             fi
 
-            if contains_path '^(functions/src/|firebase/firebaseAdmin\.ts|shared/|types/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
+            if contains_path '^(functions/src/|apps/web/firebase/|apps/web/shared/|apps/web/types/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
               deploy_functions_core=true
               deploy_functions_media=true
               deploy_functions_image=true
