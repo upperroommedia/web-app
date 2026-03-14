@@ -5,6 +5,13 @@ runConfig:
   maxInstances: 20
   concurrency: 80
 
+outputFiles:
+  serverApp:
+    include:
+      - .next/standalone
+      - .next/static
+      - public
+
 env:
   - variable: NODE_ENV
     value: production
