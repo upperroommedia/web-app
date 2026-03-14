@@ -27,7 +27,7 @@ The default project selection is `urm-app` when available.
 If `.env` already exists, `setup:env` does not pull from Firebase again.
 You can also bypass the prompt and choose directly: `pnpm run setup:env -- --project urm-app-staging`.
 
-`pnpm dev` reads from `.env`/`.env.local` only and does not fetch from Firebase.
+`pnpm dev`, `pnpm build`, and `pnpm --dir apps/web build` read from the repo-root `.env`/`.env.local` files and do not fetch from Firebase.
 Any value can be overridden locally in `.env` or `.env.local` (for example `ADMIN_BASE_URL`).
 
 Run the app:

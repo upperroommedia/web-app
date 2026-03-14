@@ -1,10 +1,73 @@
 const path = require('node:path');
+const fs = require('node:fs');
 
 /** @type {import('next').NextConfig} */
 
+const rootEnvFiles = ['.env', '.env.local'];
+const repoRoot = path.join(__dirname, '../..');
+
+const stripWrappingQuotes = (value) => {
+  if (value.length < 2) {
+    return value;
+  }
+
+  const first = value[0];
+  const last = value[value.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return value.slice(1, -1);
+  }
+
+  return value;
+};
+
+const parseEnvFile = (content) => {
+  const parsed = {};
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    if (!key) {
+      continue;
+    }
+
+    parsed[key] = stripWrappingQuotes(line.slice(separatorIndex + 1).trim());
+  }
+
+  return parsed;
+};
+
+const loadRootEnv = () => {
+  const loadedEnv = {};
+
+  for (const fileName of rootEnvFiles) {
+    const absolutePath = path.join(repoRoot, fileName);
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    Object.assign(loadedEnv, parseEnvFile(fs.readFileSync(absolutePath, 'utf8')));
+  }
+
+  for (const [key, value] of Object.entries(loadedEnv)) {
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+};
+
+loadRootEnv();
+
 const nextConfig = {
   output: 'standalone',
-  outputFileTracingRoot: path.join(__dirname, '../..'),
+  outputFileTracingRoot: repoRoot,
   reactStrictMode: true,
   images: {
     remotePatterns: [
@@ -45,7 +108,7 @@ const nextConfig = {
   compress: true,
   poweredByHeader: false,
   turbopack: {
-    root: path.join(__dirname, '../..'),
+    root: repoRoot,
   },
 };
 
