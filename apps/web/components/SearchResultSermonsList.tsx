@@ -1,14 +1,5 @@
-/**
- * SermonsList Component for displaying a list of sermons
- */
-
-import SearchResultSermonListCard from './SearchResultSermonListCard';
+import { useEffect, useMemo, useRef } from 'react';
 import { useHits, useInstantSearch } from 'react-instantsearch';
-
-// import { Sermon } from '../types/SermonTypes';
-
-// import { useEffect } from 'react';
-// import useAudioPlayer from '../context/audio/audioPlayerContext';
 import List from '@mui/material/List';
 import Box from '@mui/material/Box';
 import { BoxProps } from '@mui/system/Box';
@@ -16,19 +7,93 @@ import useAudioPlayer from '../context/audio/audioPlayerContext';
 import { useMediaState } from '@vidstack/react';
 import SermonListCardSkeloten from './skeletons/SermonListCardSkeloten';
 import Typography from '@mui/material/Typography';
+import SermonListCard from './SermonListCard';
+import RemainingTimeComponent from './RemainingTimeComponent';
+import TrackProgressComponent from './TrackProgressComponent';
+import firestore, { collection, deleteField, doc, limit, orderBy, query, updateDoc, where } from '../firebase/firestore';
+import { sermonConverter } from '../types/Sermon';
+import { sermonStatusType } from '../types/SermonTypes';
+import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algolia/searchRecords';
 
 const SearchResultSermonList = (props: BoxProps) => {
   const { hits } = useHits();
-  const { status, results } = useInstantSearch();
+  const { status, results, indexUiState } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
   const playing = useMediaState('playing');
   const hasSettledResults = !results.__isArtificial && status === 'idle';
+  const acknowledgedPendingIdsRef = useRef<Set<string>>(new Set());
+  const pendingSermonsQuery = useMemo(
+    () =>
+      query(
+        collection(firestore, 'sermons').withConverter(sermonConverter),
+        where('searchPending', '==', true),
+        orderBy('createdAtMillis', 'desc'),
+        limit(8)
+      ),
+    []
+  );
+  const [pendingSermons] = useCollectionData(pendingSermonsQuery);
 
-  const isLoadingState = !hasSettledResults && (results.__isArtificial || status === 'loading' || status === 'stalled');
-  const shouldRenderHits = hasSettledResults || (!results.__isArtificial && status === 'idle');
+  const normalizedHits = useMemo(
+    () => hits.map((hit) => normalizeAlgoliaSermonHit(hit as AlgoliaSermonHit)),
+    [hits]
+  );
+  const visibleHitIds = useMemo(() => new Set(normalizedHits.map((hit) => hit.id)), [normalizedHits]);
+  const refinementList = (indexUiState as { refinementList?: Record<string, string[]> }).refinementList ?? {};
+  const hasActiveRefinements = Object.values(refinementList).some((values) => values.length > 0);
+  const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
+  const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
+  const visiblePendingSermons = useMemo(
+    () =>
+      (pendingSermons ?? []).filter(
+        (sermon) => sermon.status.audioStatus === sermonStatusType.PROCESSING || !visibleHitIds.has(sermon.id)
+      ),
+    [pendingSermons, visibleHitIds]
+  );
+  const visiblePendingIds = useMemo(() => new Set(visiblePendingSermons.map((sermon) => sermon.id)), [visiblePendingSermons]);
+  const visibleAlgoliaHits = useMemo(
+    () => normalizedHits.filter((sermon) => !visiblePendingIds.has(sermon.id)),
+    [normalizedHits, visiblePendingIds]
+  );
+  const hasVisibleHits = visibleAlgoliaHits.length > 0;
+  const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
+  const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending;
+  const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
+
+  useEffect(() => {
+    const indexedPendingSermons = (pendingSermons ?? []).filter(
+      (sermon) =>
+        sermon.searchPending &&
+        sermon.status.audioStatus !== sermonStatusType.PROCESSING &&
+        visibleHitIds.has(sermon.id) &&
+        !acknowledgedPendingIdsRef.current.has(sermon.id)
+    );
+
+    if (indexedPendingSermons.length === 0) {
+      return;
+    }
+
+    indexedPendingSermons.forEach((sermon) => acknowledgedPendingIdsRef.current.add(sermon.id));
+
+    void Promise.all(
+      indexedPendingSermons.map(async (sermon) => {
+        try {
+          await updateDoc(doc(firestore, 'sermons', sermon.id), {
+            searchPending: false,
+            searchIndexedAtMillis: Date.now(),
+            searchSyncError: deleteField(),
+          });
+        } catch (error) {
+          console.error('Failed to acknowledge Algolia sync for sermon', sermon.id, error);
+          acknowledgedPendingIdsRef.current.delete(sermon.id);
+        }
+      })
+    );
+  }, [pendingSermons, visibleHitIds]);
 
   return (
-    <Box display="flex" justifyContent={'start'} flex={3} overflow="hidden" {...props}>
+    <Box display="flex" justifyContent="start" flex={3} overflow="hidden" {...props}>
       <List
         sx={{
           maxWidth: '1200px',
@@ -47,16 +112,62 @@ const SearchResultSermonList = (props: BoxProps) => {
         )}
         {isLoadingState &&
           [...Array(20)].map((_, i) => <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />)}
-        {shouldRenderHits &&
-          hits.map((hit) => (
-            <SearchResultSermonListCard
-              key={hit.objectID}
-              sermonId={hit.objectID}
-              isPlaying={currentSermonId === hit.objectID ? playing : false}
+        {showPendingOverlay &&
+          visiblePendingSermons.length > 0 &&
+          visiblePendingSermons.map((sermon) => (
+            <SermonListCard
+              key={`pending-${sermon.id}`}
+              sermon={sermon}
+              playing={currentSermonId === sermon.id ? playing : false}
+              remainingTimeComponent={
+                <RemainingTimeComponent
+                  playing={currentSermonId === sermon.id ? playing : false}
+                  duration={sermon.durationSeconds}
+                />
+              }
+              trackProgressComponent={
+                <TrackProgressComponent
+                  playing={currentSermonId === sermon.id ? playing : false}
+                  duration={sermon.durationSeconds}
+                />
+              }
               audioPlayerCurrentSermonId={currentSermonId}
               audioPlayerSetCurrentSermon={setCurrentSermon}
+              subscriptionOwnedByParent
+              enableProcessingProgress
+              enableSeriesRealtime={false}
             />
           ))}
+        {shouldRenderHits &&
+          visibleAlgoliaHits.map((sermon) => (
+            <SermonListCard
+              key={sermon.id}
+              sermon={sermon}
+              playing={currentSermonId === sermon.id ? playing : false}
+              remainingTimeComponent={
+                <RemainingTimeComponent
+                  playing={currentSermonId === sermon.id ? playing : false}
+                  duration={sermon.durationSeconds}
+                />
+              }
+              trackProgressComponent={
+                <TrackProgressComponent
+                  playing={currentSermonId === sermon.id ? playing : false}
+                  duration={sermon.durationSeconds}
+                />
+              }
+              audioPlayerCurrentSermonId={currentSermonId}
+              audioPlayerSetCurrentSermon={setCurrentSermon}
+              subscriptionOwnedByParent
+              enableProcessingProgress={false}
+              enableSeriesRealtime={false}
+            />
+          ))}
+        {shouldRenderHits && visibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
+          <Typography sx={{ px: { xs: 0.5, sm: 1 } }} color="text.secondary">
+            No sermons found. Upload a sermon to get started.
+          </Typography>
+        )}
       </List>
     </Box>
   );

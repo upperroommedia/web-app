@@ -12,6 +12,7 @@ import AppLayout from '../../layout/AppLayout';
 import { formatLockBusyRetryMessage, parseLockBusyDetails } from '../../utils/callableConcurrency';
 import SearchableAdminSermonList from '../../components/SearchableAdminSermonsList';
 import { deleteSermonWithExternalCleanup } from '../../utils/deleteSermonWithExternalCleanup';
+import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
 
 type DeleteToastState = {
   open: boolean;
@@ -45,7 +46,9 @@ const getDeleteFailureMessage = (error: unknown): string => {
 
 const AdminSermons = () => {
   const router = useRouter();
+  const { clearCache } = useAlgoliaSearch();
   const processedDeleteIntentRef = useRef<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [deleteToast, setDeleteToast] = useState<DeleteToastState>({
     open: false,
     severity: 'info',
@@ -127,6 +130,8 @@ const AdminSermons = () => {
     const runDeleteIntent = async () => {
       try {
         await deleteSermonWithExternalCleanup(deleteIntentPayload);
+        await clearCache();
+        setRefreshNonce((currentNonce) => currentNonce + 1);
         setDeleteToast({
           open: true,
           severity: 'success',
@@ -146,7 +151,7 @@ const AdminSermons = () => {
     };
 
     runDeleteIntent();
-  }, [clearDeleteIntentPayload, deleteIntentPayload]);
+  }, [clearCache, clearDeleteIntentPayload, deleteIntentPayload]);
 
   return (
     <>
@@ -177,7 +182,7 @@ const AdminSermons = () => {
           </Button>
         </Stack>
 
-        <SearchableAdminSermonList />
+        <SearchableAdminSermonList refreshNonce={refreshNonce} />
       </Box>
       <Snackbar
         key={deleteToast.id}

@@ -195,9 +195,7 @@ const SpeakerTable = ({
                   </TableCell>
                 </TableRow>
               ) : (
-                speakers
-                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                  .map((speaker) => (
+                speakers.map((speaker) => (
                     <TableRow
                       hover
                       onClick={() => router.push(`/admin/speakers/${speaker.id}`)}

@@ -47,6 +47,7 @@ import {
   SUBSPLASH_SPEAKER_LIST_LINK,
   shouldShowSpeakerListSuccess,
 } from '../../../utils/speakers/createSpeakerClient';
+import { useAlgoliaSearch } from '../../../context/search/AlgoliaSearchContext';
 
 const updateSpeakerCallable = createFunctionV2<UpdateSpeakerCallableInputType, UpdateSpeakerCallableOutputType>('updatespeaker');
 const deleteSpeakerCallable = createFunctionV2<DeleteSpeakerCallableInputType, DeleteSpeakerCallableOutputType>('deletespeaker');
@@ -128,6 +129,7 @@ const SpeakerImageSummary = ({ images }: { images: ImageType[] }) => {
 const SpeakerDetailsPage = () => {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const { clearCache } = useAlgoliaSearch();
   const speakerId = router.query.speakerId as string;
   const [isEditing, setIsEditing] = useState(false);
   const [formState, setFormState] = useState<SpeakerFormState | null>(null);
@@ -218,6 +220,7 @@ const SpeakerDetailsPage = () => {
         speakerId: speaker.id,
         deleteAssociatedList: true,
       });
+      await clearCache();
       await router.push('/admin/speakers');
     } finally {
       setDeletePending(false);
@@ -250,6 +253,7 @@ const SpeakerDetailsPage = () => {
         })
       );
 
+      await clearCache();
       setIsEditing(false);
       setFormState(buildInitialFormState(response.speaker));
       if (shouldShowSpeakerListSuccess(response)) {

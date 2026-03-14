@@ -9,6 +9,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 interface IUserAvatar extends AvatarProps {
   user?: User;
   loading?: boolean;
+  fallbackLabel?: string;
 }
 
 const BREAKPOINTS = ['xs', 'sm', 'md', 'lg', 'xl'] as const;
@@ -77,9 +78,9 @@ function stringToColor(string: string) {
   return color;
 }
 
-export default function UserAvatar({ user, children, sx, loading, ...props }: IUserAvatar) {
+export default function UserAvatar({ user, children, sx, loading, fallbackLabel, ...props }: IUserAvatar) {
   const currentBreakpoint = useCurrentBreakpoint();
-  const displayName = user?.displayName || user?.email || '';
+  const displayName = user?.displayName || user?.email || fallbackLabel || '';
   const initials = displayName
     .split(' ')
     .map((n) => n[0])
@@ -89,7 +90,7 @@ export default function UserAvatar({ user, children, sx, loading, ...props }: IU
     resolveResponsiveValue(sxObj?.width, currentBreakpoint) ||
     resolveResponsiveValue(sxObj?.height, currentBreakpoint);
   const fontSize = Math.min(16, size * 0.4); // Scale font dynamically
-  if (loading) {
+  if (loading && !displayName) {
     return (
       <Skeleton
         variant="circular"

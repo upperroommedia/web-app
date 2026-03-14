@@ -141,20 +141,27 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
           data-testid="main-content-scroll"
           sx={{
             flex: 1,
-            px: { xs: 2, sm: 3, md: 4 },
-            pt: { xs: 2, sm: 3, md: 4 },
-            pb: {
-              xs: `calc(16px + ${MAIN_SCROLL_BOTTOM_INSET})`,
-              sm: `calc(24px + ${MAIN_SCROLL_BOTTOM_INSET})`,
-              md: `calc(32px + ${MAIN_SCROLL_BOTTOM_INSET})`,
-            },
             maxWidth: '100%',
             overflow: 'auto',
+            scrollbarGutter: 'stable',
             // Keep all trailing content reachable above the fixed floating player.
             scrollPaddingBottom: MAIN_SCROLL_BOTTOM_INSET,
           }}
         >
-          {children}
+          <Box
+            sx={{
+              px: { xs: 2, sm: 3, md: 4 },
+              pt: { xs: 2, sm: 3, md: 4 },
+              pb: {
+                xs: `calc(16px + ${MAIN_SCROLL_BOTTOM_INSET})`,
+                sm: `calc(24px + ${MAIN_SCROLL_BOTTOM_INSET})`,
+                md: `calc(32px + ${MAIN_SCROLL_BOTTOM_INSET})`,
+              },
+              maxWidth: '100%',
+            }}
+          >
+            {children}
+          </Box>
         </Box>
       </SidebarLayout>
     </>

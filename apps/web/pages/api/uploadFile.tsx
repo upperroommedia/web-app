@@ -37,7 +37,12 @@ const addFirestoreDocument = async (
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>
 ) => {
   const batch = writeBatch(firestore);
-  batch.set(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), sermon);
+  batch.set(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
+    ...sermon,
+    searchPending: true,
+    searchIndexedAtMillis: undefined,
+    searchSyncError: undefined,
+  });
   
   // Add sermon to list subcollections
   sermonList.forEach((list) => {

@@ -1,5 +1,4 @@
-import { FunctionComponent, ReactNode, useCallback, useEffect, useState, useMemo, type JSX } from 'react';
-import { algoliasearch, SearchClient } from 'algoliasearch';
+import { FunctionComponent, ReactNode, useCallback, useState, type JSX } from 'react';
 import { InstantSearch, useInstantSearch } from 'react-instantsearch';
 import Stack from '@mui/material/Stack';
 import CustomPagination from './algoliaComponents/CustomPagination';
@@ -8,11 +7,6 @@ import CustomSearchBox from './algoliaComponents/CustomSearchBox';
 import Box from '@mui/material/Box';
 import CustomRefinementList from './algoliaComponents/CustomRefinementList';
 import useAuth from '../context/user/UserContext';
-import {
-  GenerateSecuredApiKeyInputType,
-  GenerateSecuredApiKeyOutputType,
-} from '@upperroom/contracts/generateAlgoliaSecureApiKey';
-import { createFunction } from '../utils/createFunction';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
@@ -21,8 +15,7 @@ import AnimateHeight from 'react-animate-height';
 import { SxProps, Theme } from '@mui/system';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { isDevelopment } from '../firebase/firebase';
-import { createMockAlgoliaSearchClient } from '../utils/mockAlgoliaSearchClient';
+import { useAlgoliaSearch } from '../context/search/AlgoliaSearchContext';
 
 function FilterButton({ onToggle }: { onToggle: () => void }) {
   return (
@@ -84,14 +77,12 @@ function MobileFilterDrawer({ show }: { show: boolean }) {
   );
 }
 
-const SearchableAdminSermonList: FunctionComponent = () => {
+const SearchableAdminSermonList: FunctionComponent<{ refreshNonce?: number }> = ({ refreshNonce = 0 }) => {
   const { user } = useAuth();
+  const { searchClient, loading: searchClientLoading, error: searchClientError } = useAlgoliaSearch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [apiKey, setApiKey] = useState<string | null>(() => (isDevelopment ? 'mock-key' : null));
   const [showFilters, setShowFilters] = useState<boolean>(false);
-  const userId = user?.uid ?? null;
-  const isAdminUser = user?.isAdmin() ?? false;
 
   if (!user) {
     throw new Error('User not found');
@@ -100,46 +91,18 @@ const SearchableAdminSermonList: FunctionComponent = () => {
     throw new Error('User is not an admin or uploader');
   }
 
-  useEffect(() => {
-    const initApiKey = async () => {
-      if (isDevelopment || apiKey) {
-        return;
-      }
-      if (!process.env.NEXT_PUBLIC_ALGOLIA_APP_ID || !process.env.NEXT_PUBLIC_ALGOLIA_API_KEY) {
-        throw new Error('Missing Algolia Credentials');
-      }
-      if (isAdminUser) {
-        setApiKey(process.env.NEXT_PUBLIC_ALGOLIA_API_KEY);
-      } else if (userId) {
-        const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
-          'generatesecuredapikey'
-        );
-        const securedKey = await generateSecuredApiKey({ userId });
-        setApiKey(securedKey);
-      }
-    };
-    initApiKey();
-  }, [apiKey, userId, isAdminUser]);
-
-  const searchClient = useMemo((): SearchClient | null => {
-    if (isDevelopment) {
-      return createMockAlgoliaSearchClient({
-        userId: userId ?? '',
-        canSearchAllSermons: isAdminUser,
-      });
-    }
-    if (!apiKey || !process.env.NEXT_PUBLIC_ALGOLIA_APP_ID) {
-      return null;
-    }
-    return algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, apiKey);
-  }, [apiKey, userId, isAdminUser]);
-
   const handleFilterToggle = useCallback(() => setShowFilters((prev) => !prev), []);
 
   return (
     <>
       {searchClient ? (
-        <InstantSearch searchClient={searchClient} indexName="sermons" future={{ preserveSharedStateOnUnmount: true }}>
+        <InstantSearch
+          key={refreshNonce}
+          searchClient={searchClient}
+          indexName="sermons"
+          stalledSearchDelay={400}
+          future={{ preserveSharedStateOnUnmount: true }}
+        >
           <Stack justifyContent="center" alignItems="center" gap={{ xs: 0.5, sm: 1 }}>
             <MobileFilterSection onToggle={handleFilterToggle} />
             <NoResultsBoundary fallback={<NoResults />}>
@@ -160,8 +123,12 @@ const SearchableAdminSermonList: FunctionComponent = () => {
         </InstantSearch>
       ) : (
         <Stack margin={3} width={1} display="flex" justifyContent="center" alignItems="center">
-          <Typography variant="h6">Loading</Typography>
-          <CircularProgress />
+          <Typography variant="h6">{searchClientError ? 'Search unavailable' : 'Loading'}</Typography>
+          {searchClientError ? (
+            <Typography color="error">{searchClientError}</Typography>
+          ) : searchClientLoading ? (
+            <CircularProgress />
+          ) : null}
         </Stack>
       )}
     </>
@@ -169,11 +136,9 @@ const SearchableAdminSermonList: FunctionComponent = () => {
 };
 
 function NoResultsBoundary({ children, fallback }: { children: ReactNode; fallback: JSX.Element }) {
-  const { results } = useInstantSearch();
+  const { results, indexUiState } = useInstantSearch();
 
-  // The `__isArtificial` flag makes sure not to display the No Results message
-  // when no hits have been returned.
-  if (!results.__isArtificial && results.nbHits === 0) {
+  if (!results.__isArtificial && results.nbHits === 0 && indexUiState.query) {
     return (
       <>
         {fallback}

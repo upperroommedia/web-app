@@ -27,10 +27,10 @@ const generateSecuredApiKey = onCall(
         parentApiKey: apiKey,
         restrictions: {
           filters: `uploaderId:${request.data.userId}`,
+          restrictIndices: ['sermons'],
+          userToken: request.data.userId,
         },
       });
-
-      console.log(securedApiKey);
 
       return securedApiKey;
     } catch (error) {

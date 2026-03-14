@@ -1,7 +1,5 @@
 import Button from '@mui/material/Button';
-import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import FormGroup from '@mui/material/FormGroup';
 import FormLabel from '@mui/material/FormLabel';
 import Skeleton from '@mui/material/Skeleton';
@@ -86,8 +84,11 @@ const normalizeLabel = (label: string) => {
         />
       )}
       {renderedItems.map((item, index) => (
-        <FormControlLabel
+        <Box
+          component="label"
           sx={{
+            display: 'flex',
+            gap: 1,
             py: 0.125,
             pl: 0,
             pr: 0,
@@ -95,30 +96,45 @@ const normalizeLabel = (label: string) => {
             ml: 0,
             width: '100%',
             alignItems: 'flex-start',
-            '& .MuiFormControlLabel-label': {
-              flex: 1,
-              minWidth: 0,
-            },
+            cursor: 'pointer',
           }}
           key={`${String(item.value)}-${index}`}
-          control={<Checkbox sx={{ p: 0 }} disableRipple onChange={() => refine(item.value)} />}
-          label={
-            <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
-              <Typography
-                sx={{
-                  flex: 1,
-                  minWidth: 0,
-                  whiteSpace: 'normal',
-                  overflowWrap: 'anywhere',
-                  lineHeight: 1.3,
-                }}
-              >
-                {normalizeLabel(item.label)}
-              </Typography>
-              <Chip label={item.count} size="small" sx={{ flexShrink: 0 }} />
-            </Box>
-          }
-        />
+        >
+          <Box
+            component="input"
+            type="checkbox"
+            checked={item.isRefined}
+            onChange={() => refine(item.value)}
+            sx={{
+              mt: '2px',
+              mr: 0,
+              ml: 0,
+              width: '1rem',
+              height: '1rem',
+              minWidth: '1rem',
+              minHeight: '1rem',
+              flexShrink: 0,
+              cursor: 'pointer',
+              accentColor: 'primary.main',
+              appearance: 'auto',
+              WebkitAppearance: 'checkbox',
+            }}
+          />
+          <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
+            <Typography
+              sx={{
+                flex: 1,
+                minWidth: 0,
+                whiteSpace: 'normal',
+                overflowWrap: 'anywhere',
+                lineHeight: 1.3,
+              }}
+            >
+              {normalizeLabel(item.label)}
+            </Typography>
+            <Chip label={item.count} size="small" sx={{ flexShrink: 0 }} />
+          </Box>
+        </Box>
       ))}
       {/* Add small MUI button for showMore */}
       {canToggleShowMore && (

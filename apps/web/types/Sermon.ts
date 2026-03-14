@@ -25,7 +25,15 @@ export const createSermon = ({
   numberOfListsUploadedTo = 0,
   createdAtMillis = new Date().getTime(),
   editedAtMillis = new Date().getTime(),
-}): Sermon => {
+  searchPending = false,
+  searchIndexedAtMillis,
+  searchSyncError,
+  uploaderDisplayName,
+  uploaderEmail,
+  seriesName,
+  seriesImage,
+  seriesPublishedToSubsplash,
+}: Partial<Sermon> = {}): Sermon => {
   return {
     id,
     title,
@@ -43,6 +51,14 @@ export const createSermon = ({
     numberOfListsUploadedTo,
     createdAtMillis,
     editedAtMillis,
+    searchPending,
+    searchIndexedAtMillis,
+    searchSyncError,
+    uploaderDisplayName,
+    uploaderEmail,
+    seriesName,
+    seriesImage,
+    seriesPublishedToSubsplash,
   };
 };
 
@@ -107,5 +123,6 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
     numberOfListsUploadedTo: 0,
     createdAtMillis: currentDate.getTime(),
     editedAtMillis: currentDate.getTime(),
+    searchPending: true,
   };
 };
