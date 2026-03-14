@@ -45,7 +45,11 @@ import {
   GetListOverflowChainInputType,
   GetListOverflowChainOutputType,
 } from '@upperroom/contracts/getListOverflowChain';
-import { ReorderListItemsInputType, ReorderListItemsOutputType } from '@upperroom/contracts/reorderListItems';
+import {
+  ReorderListItemsAssignment,
+  ReorderListItemsInputType,
+  ReorderListItemsOutputType,
+} from '@upperroom/contracts/reorderListItems';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import ListBoundaryMarker from '../../../components/admin/lists/ListBoundaryMarker';
 import OverflowChainPanel from '../../../components/admin/lists/OverflowChainPanel';
@@ -57,6 +61,7 @@ import firestore, {
   getDoc,
   getDocs,
   query,
+  writeBatch,
   updateDoc,
   where,
 } from '../../../firebase/firestore';
@@ -104,6 +109,14 @@ interface SortableItemProps {
   dragDisabled?: boolean;
 }
 
+interface PersistListDetailsPageOrderDependencies {
+  rootListId: string;
+  rootSubsplashId?: string;
+  items: ListPageItem[];
+  chainView: ListOverflowChainView<ListDetailItem> | null;
+  reorderListItems: (input: ReorderListItemsInputType) => Promise<ReorderListItemsOutputType>;
+}
+
 const createGetListOverflowChain = createFunctionV2<
   GetListOverflowChainInputType,
   GetListOverflowChainOutputType
@@ -124,6 +137,143 @@ const normalizeListItemPositions = (items: ListPageItem[]): ListPageItem[] =>
     position: index + 1,
     logicalPosition: index + 1,
   }));
+
+const buildFirestoreOrderUpdatePlan = ({
+  rootListId,
+  items,
+  assignments,
+}: {
+  rootListId: string;
+  items: ListPageItem[];
+  assignments: ReorderListItemsAssignment[];
+}) => {
+  const assignmentByMediaItemId = new Map(assignments.map((assignment) => [assignment.mediaItemId, assignment]));
+  const useRemoteAssignmentPositions = assignments.length === items.length;
+
+  return items.map((item, index) => {
+    const mediaAssignment =
+      item.subsplashId && assignmentByMediaItemId.has(item.subsplashId)
+        ? assignmentByMediaItemId.get(item.subsplashId)
+        : undefined;
+    const targetListId = mediaAssignment?.firestoreListId ?? item.sourceListId ?? rootListId;
+    const position = useRemoteAssignmentPositions ? (mediaAssignment?.position ?? index + 1) : index + 1;
+
+    return {
+      item,
+      sourceListId: item.sourceListId ?? rootListId,
+      targetListId,
+      position,
+    };
+  });
+};
+
+const syncFirestoreListItemsOrder = async ({
+  rootListId,
+  items,
+  assignments,
+}: {
+  rootListId: string;
+  items: ListPageItem[];
+  assignments: ReorderListItemsAssignment[];
+}): Promise<void> => {
+  const batch = writeBatch(firestore);
+  const updatePlan = buildFirestoreOrderUpdatePlan({ rootListId, items, assignments });
+
+  updatePlan.forEach(({ item, sourceListId, targetListId, position }) => {
+    const sourceDocRef = doc(firestore, 'lists', sourceListId, 'listItems', item.id);
+    const targetDocRef = doc(firestore, 'lists', targetListId, 'listItems', item.id);
+
+    if (sourceListId !== targetListId) {
+      batch.delete(sourceDocRef);
+      const {
+        uploadStatus: _uploadStatus,
+        logicalPosition: _logicalPosition,
+        sourceListId: _sourceListId,
+        sourceListName: _sourceListName,
+        sourceDepth: _sourceDepth,
+        ...firestoreItem
+      } = item;
+      const sanitizedFirestoreItem = Object.fromEntries(
+        Object.entries({
+          ...firestoreItem,
+          position,
+        }).filter(([, value]) => typeof value !== 'undefined')
+      );
+
+      batch.set(targetDocRef, sanitizedFirestoreItem);
+      return;
+    }
+
+    batch.update(targetDocRef, {
+      position,
+    });
+  });
+
+  await batch.commit();
+};
+
+export const persistListDetailsPageOrder = async ({
+  rootListId,
+  rootSubsplashId,
+  items,
+  chainView,
+  reorderListItems,
+}: PersistListDetailsPageOrderDependencies): Promise<void> => {
+  if (!chainView || chainView.canSaveOrder === false) {
+    return;
+  }
+
+  if (!rootSubsplashId) {
+    await Promise.all(
+      items.map((item, index) =>
+        updateDoc(doc(firestore, 'lists', rootListId, 'listItems', item.id), {
+          position: index + 1,
+        })
+      )
+    );
+    return;
+  }
+
+  const syncedItemsMissingRemoteId = items.filter(
+    (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && !item.subsplashId
+  );
+
+  if (syncedItemsMissingRemoteId.length > 0) {
+    throw new Error('One or more synced sermons are missing Subsplash IDs. Refresh and try again.');
+  }
+
+  const syncedItems = items.filter(
+    (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && item.subsplashId
+  );
+
+  const reorderResult =
+    syncedItems.length > 0
+      ? await reorderListItems({
+          rootListId,
+          logicalItemOrder: syncedItems.map((item, index) => ({
+            mediaItemId: item.subsplashId as string,
+            position: index + 1,
+          })),
+          operationKey: createOperationKey('list-admin-reorder', rootListId),
+        })
+      : {
+          status: 'success' as const,
+          message: 'No synced items to reorder.',
+          rootListId,
+          subsplashListId: rootSubsplashId,
+          assignments: [],
+        };
+
+  if (reorderResult.status !== 'success') {
+    throw new Error(reorderResult.message || 'Subsplash reorder failed.');
+  }
+
+  await syncFirestoreListItemsOrder({
+    rootListId,
+    items,
+    assignments: reorderResult.assignments,
+  });
+};
 
 const formatListType = (value?: string): string => {
   if (!value) {
@@ -442,7 +592,7 @@ const ListDetailsPage = () => {
   const syncedItemsCount = items.filter((item) => item.uploadStatus?.status === uploadStatus.UPLOADED).length;
   const localOnlyItemsCount = items.length - syncedItemsCount;
   const hasOverflowPages = (chainView?.nodes.length ?? 0) > 1;
-  const isReadOnlySurface = Boolean(chainView?.isReadOnly || hasOverflowPages);
+  const isReadOnlySurface = Boolean(chainView?.isReadOnly);
   const boundaryMarkersByItemId = Object.fromEntries(
     (chainView?.boundaryMarkers ?? []).map((marker) => [marker.beforeItemId, marker])
   );
@@ -479,42 +629,13 @@ const ListDetailsPage = () => {
     setIsSaving(true);
 
     try {
-      if (list.subsplashId) {
-        const syncedItemsMissingRemoteId = items.filter(
-          (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && !item.subsplashId
-        );
-
-        if (syncedItemsMissingRemoteId.length > 0) {
-          throw new Error('One or more synced sermons are missing Subsplash IDs. Refresh and try again.');
-        }
-
-        const syncedItems = items.filter(
-          (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && item.subsplashId
-        );
-
-        if (syncedItems.length > 0) {
-          const reorderResult = await createReorderListItems({
-            firestoreListId: listId,
-            itemOrder: syncedItems.map((item, index) => ({
-              mediaItemId: item.subsplashId as string,
-              position: index + 1,
-            })),
-            operationKey: createOperationKey('list-admin-reorder', listId),
-          });
-
-          if (reorderResult.status !== 'success') {
-            throw new Error(reorderResult.message || 'Subsplash reorder failed.');
-          }
-        }
-      }
-
-      await Promise.all(
-        items.map((item, index) =>
-          updateDoc(doc(firestore, 'lists', listId, 'listItems', item.id), {
-            position: index + 1,
-          })
-        )
-      );
+      await persistListDetailsPageOrder({
+        rootListId: chainView?.rootListId ?? listId,
+        rootSubsplashId: list.subsplashId,
+        items,
+        chainView,
+        reorderListItems: createReorderListItems,
+      });
 
       originalItemsRef.current = cloneListItems(items);
     } catch (error) {
@@ -689,8 +810,8 @@ const ListDetailsPage = () => {
 
             {hasOverflowPages && !chainView?.warningMessage ? (
               <Alert severity="info" sx={{ mb: 3 }}>
-                This root detail page now shows the whole overflow chain in one view. Reorder and destructive actions
-                stay disabled here until chain-aware save support lands.
+                This root detail page now saves one logical order for the whole overflow chain and remaps Subsplash
+                page boundaries behind the scenes.
               </Alert>
             ) : null}
 

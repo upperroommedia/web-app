@@ -322,6 +322,15 @@ const ListTable = ({
                         </Box>
                       </TableCell>
                       <TableCell align="center" sx={{ width: headCells[4].width }}>
+                        {getListOverflowIndicator(list) ? (
+                          <Typography
+                            variant="caption"
+                            color="warning.main"
+                            sx={{ display: 'block', fontWeight: 600, mb: 0.5 }}
+                          >
+                            Delete blocked
+                          </Typography>
+                        ) : null}
                         <Tooltip title="Edit List">
                           <span>
                             <IconButton
@@ -336,11 +345,11 @@ const ListTable = ({
                             </IconButton>
                           </span>
                         </Tooltip>
-                        <Tooltip title="Delete List">
+                        <Tooltip title={getListOverflowIndicator(list) ? 'Delete blocked while overflow pages exist' : 'Delete List'}>
                           <span>
                             <IconButton
                               disabled={disableButtons}
-                              color="error"
+                              color={getListOverflowIndicator(list) ? 'warning' : 'error'}
                               onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();

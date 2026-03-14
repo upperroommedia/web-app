@@ -4,14 +4,23 @@ export interface ListItemOrderEntry {
 }
 
 export interface ReorderListItemsInputType {
-  firestoreListId: string;
-  itemOrder: ListItemOrderEntry[];
+  rootListId: string;
+  logicalItemOrder: ListItemOrderEntry[];
   operationKey?: string;
+}
+
+export interface ReorderListItemsAssignment {
+  mediaItemId: string;
+  firestoreListId: string;
+  subsplashListId: string;
+  overflowDepth: number;
+  position: number;
 }
 
 export interface ReorderListItemsOutputType {
   status: 'success' | 'error';
   message: string;
-  firestoreListId: string;
+  rootListId: string;
   subsplashListId?: string;
+  assignments: ReorderListItemsAssignment[];
 }

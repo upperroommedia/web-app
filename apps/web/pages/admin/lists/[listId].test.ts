@@ -1,7 +1,9 @@
 import type { GetListOverflowChainOutputType } from '@upperroom/contracts/getListOverflowChain';
+import type { ReorderListItemsOutputType } from '@upperroom/contracts/reorderListItems';
 import type { List } from '../../../types/List';
 import {
   loadListDetailsPageData,
+  persistListDetailsPageOrder,
   type LoadListDetailsPageItem,
 } from './[listId]';
 
@@ -154,5 +156,52 @@ describe('loadListDetailsPageData', () => {
         beforeItemId: 'sermon-c',
       }),
     ]);
+  });
+});
+
+describe('persistListDetailsPageOrder', () => {
+  it('does not invoke reorder while mutation blocking is active', async () => {
+    const reorderListItems = jest.fn<Promise<ReorderListItemsOutputType>, [unknown]>();
+
+    await persistListDetailsPageOrder({
+      rootListId: 'root-list',
+      rootSubsplashId: 'subsplash-root',
+      items: [
+        {
+          id: 'sermon-a',
+          title: 'A',
+          subsplashId: 'media-a',
+          position: 1,
+          logicalPosition: 1,
+          sourceListId: 'root-list',
+          sourceListName: 'Root List',
+          sourceDepth: 0,
+          uploadStatus: { status: 'UPLOADED' as const },
+        },
+      ],
+      chainView: {
+        rootListId: 'root-list',
+        items: [],
+        boundaryMarkers: [],
+        nodes: [],
+        diagnostics: [
+          {
+            code: 'CHAIN_PARENT_CHILD_MISMATCH',
+            severity: 'blocking',
+            message: 'Broken chain.',
+          },
+        ],
+        canSaveOrder: false,
+        canMutate: false,
+        isReadOnly: true,
+        hasCoverageGap: false,
+        localMirroredCount: 1,
+        expectedPhysicalCount: 1,
+        warningMessage: 'This logical list is currently read-only because the overflow chain audit reported diagnostics.',
+      },
+      reorderListItems,
+    });
+
+    expect(reorderListItems).not.toHaveBeenCalled();
   });
 });

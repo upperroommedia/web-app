@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: Publishing Reliability + Dev Safety
 current_phase: 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model
 status: blocked
-last_updated: "2026-03-14T21:23:07Z"
-last_activity: 2026-03-14 - Executed phase 06 plan 04 root-detail overflow aggregation and diagnostics, but git metadata writes remain blocked by .git/index.lock permission errors
+last_updated: "2026-03-14T21:41:32Z"
+last_activity: 2026-03-14 - Executed phase 06 plan 05 root-aware overflow reorder worktree changes and summary, but git metadata writes remain blocked by .git/index.lock permission errors
 progress:
   total_phases: 6
   completed_phases: 4
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Trustworthy end-to-end publishing pipeline for admins
-**Current focus:** Phase 06 root-detail overflow aggregation is implemented in the worktree, but commit/state completion is blocked by git metadata write restrictions.
+**Current focus:** Phase 06 worktree changes for plans 06-03, 06-04, 06-05, and 06-07 are implemented, but commit/state completion is blocked by git metadata write restrictions.
 
 ## Position
 
 **Milestone:** v1.0 Publishing Reliability + Dev Safety
 **Current phase:** 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model
 **Status:** Blocked on git metadata writes
-**Last activity:** 2026-03-14 - Executed phase 06 plan 04 root-detail overflow aggregation and diagnostics, but `.git/index.lock` creation failed during commit attempts
+**Last activity:** 2026-03-14 - Executed phase 06 plan 05 root-aware overflow reorder worktree changes and summary, but `.git/index.lock` creation failed during commit attempts
 
 ## Decisions
 
@@ -81,6 +81,10 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Root detail resolves `getlistoverflowchain` before Firestore reads and redirects overflow routes to the logical root immediately.
 - [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Aggregated root detail renders only locally mirrored `listItems` rows and treats chain diagnostics or mirror gaps as read-only state.
 - [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Overflow-chain root detail remains inspect-only until chain-aware reorder persistence is delivered in plan 06-05.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: `reorderlistitems` now accepts `rootListId` plus `logicalItemOrder`, validates the full overflow chain before patching, and returns per-page assignments so the client can sync mirrored `listItems` after remote success.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Root-detail reorder is enabled for healthy overflow chains and stays blocked only when `chainView` diagnostics or mirror gaps mark the surface read-only.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: `deletesubsplashlist` now accepts Firestore list ids, preflights through `getOverflowChainState`, and returns typed blocked-delete payloads for root lists that still have overflow pages.
+- [Phase 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model]: Admin list deletion stays inside a list-specific popup so blocked overflow deletes remain visible and never imply success.
 
 ## Accumulated Context
 
@@ -95,6 +99,10 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 - Plan 06-03 cannot be fully completed in GSD terms because this environment denies writes under `.git/` (`fatal: Unable to create '.git/index.lock': Operation not permitted`), preventing atomic task commits and the final docs commit.
 - Plan 06-04 cannot be fully completed in GSD terms for the same reason: local git metadata writes are denied under `.git/`, so required task commits and the final docs commit cannot be created.
+- Plan 06-05 cannot be fully completed in GSD terms because local git metadata writes are denied under `.git/`, so required task commits and the final docs commit cannot be created.
+- Plan 06-05 also cannot run its prescribed emulator verification in this environment because localhost port binding returns `EPERM` before the Firebase emulators start.
+- Plan 06-07 cannot be fully completed in GSD terms for the same reason: local git metadata writes are denied under `.git/`, so required task commits and the final docs commit cannot be created.
+- Plan 06-07 also cannot run its prescribed emulator verification in this environment because localhost port binding returns `EPERM` before the Firebase emulators start.
 
 ### Quick Tasks Completed
 
@@ -128,3 +136,5 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 - 2026-03-14: Added Phase 06 for add-to-list overflow chain hardening and nested list admin model.
 - 2026-03-14: Executed 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model/06-03 worktree changes and passed targeted Jest + ESLint verification, but `.git/index.lock` permission failures blocked required commits and plan completion.
 - 2026-03-14: Executed 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model/06-04 worktree changes and passed targeted Jest + ESLint verification, but `.git/index.lock` permission failures again blocked required commits and plan completion.
+- 2026-03-14: Executed 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model/06-05 worktree changes and wrote 06-05-SUMMARY.md; `pnpm --dir functions exec tsc --noEmit`, `pnpm --dir apps/web exec eslint 'pages/admin/lists/[listId].tsx'`, and the focused page Jest test passed, but `.git/index.lock` permission failures and localhost emulator port-binding `EPERM` still blocked full completion.
+- 2026-03-14: Executed 06-add-to-list-overflow-chain-hardening-and-nested-list-admin-model/06-07 worktree changes and wrote 06-07-SUMMARY.md, but `.git/index.lock` permission failures again blocked required commits and plan completion; emulator verification was also blocked by localhost port-binding `EPERM`.

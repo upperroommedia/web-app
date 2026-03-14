@@ -70,7 +70,7 @@ Plans:
 | 3. Subsplash alpha-lock concurrency control | 7/7 | Complete | 2026-03-08 |
 | 4. Role-based invite onboarding and operational notification routing | 5/5 | Complete | 2026-03-01 |
 | 5. Speaker Management CRUD + Admin Create Speaker Popup with Optional Speaker List Association | 2/2 | Complete | 2026-03-10 |
-| 6. Add-to-list overflow chain hardening and nested list admin model | 2/7 | Blocked (git metadata writes) | - |
+| 6. Add-to-list overflow chain hardening and nested list admin model | 2/7 | Blocked (git metadata writes; 06-03/04/05/07 worktree-only) | - |
 
 ### Phase 3: Subsplash alpha-lock concurrency control
 
@@ -151,6 +151,9 @@ Plans:
 - [ ] 06-02-PLAN.md — Persist canonical chain metadata, logical totals, and rename behavior on list write paths
 - [ ] 06-03-PLAN.md — Convert discovery/search/selection flows to a migration-safe root-only admin model
 - [ ] 06-04-PLAN.md — Make the root detail page the single aggregated chain-management entry point
-- [ ] 06-05-PLAN.md — Upgrade reorder to remap the full logical chain safely from the root detail page
+- [ ] 06-05-PLAN.md — Upgrade reorder to remap the full logical chain safely from the root detail page (worktree + summary complete; commits/emulator verification blocked)
 - [ ] 06-06-PLAN.md — Add a dry-run-safe legacy backfill/repair script for explicit overflow metadata
 - [ ] 06-07-PLAN.md — Add chain-aware delete blocking and cascade-warning admin UX
+
+Worktree note:
+- Plans `06-03`, `06-04`, and `06-07` have implementation changes and summaries on disk, but they remain incomplete in roadmap progress because `.git/index.lock` writes are denied in this environment.
