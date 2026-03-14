@@ -6,11 +6,12 @@ runConfig:
   concurrency: 80
 
 scripts:
-  runCommand: node .next/standalone/apps/web/server.js
+  runCommand: node apphosting-start.cjs
 
 outputFiles:
   serverApp:
     include:
+      - apphosting-start.cjs
       - .next/standalone
       - .next/static
       - public
