@@ -21,7 +21,7 @@ describe('addToList - Page Number Incrementation', () => {
     const rootListId = 'root-list-1';
     subsplashMock.createList(rootListId, 'Original List', 0, 5);
     
-    await createListDocument({
+    const rootFirestoreId = await createListDocument({
       subsplashId: rootListId,
       title: 'Original List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
@@ -67,13 +67,19 @@ describe('addToList - Page Number Incrementation', () => {
     // Verify Page 1 was created with correct subtitle
     const page1List = subsplashMock.getList(page1ListId!);
     expect(page1List).toBeDefined();
-    expect(page1List!.title).toBe('More Original List');
+    expect(page1List!.title).toBe('More Original List sermons');
     expect(page1List!.subtitle).toBe('Page 1');
 
     // Verify Firestore document for Page 1
     const page1Doc = await getListBySubsplashId(page1ListId!);
     expect(page1Doc).toBeDefined();
-    expect(page1Doc!.data().isMoreSermonsList).toBe(true);
+    expect(page1Doc!.data()).toMatchObject({
+      name: 'More Original List sermons',
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+    });
 
     // Fill Page 1 to capacity (4 items, since 1 was moved there)
     // We need to add 3 more items to root to push 3 more to Page 1
@@ -117,13 +123,19 @@ describe('addToList - Page Number Incrementation', () => {
     // Verify Page 2 was created with correct subtitle
     const page2List = subsplashMock.getList(page2ListId!);
     expect(page2List).toBeDefined();
-    expect(page2List!.title).toBe('More Original List');
+    expect(page2List!.title).toBe('More Original List sermons');
     expect(page2List!.subtitle).toBe('Page 2');
 
     // Verify Firestore document for Page 2
     const page2Doc = await getListBySubsplashId(page2ListId!);
     expect(page2Doc).toBeDefined();
-    expect(page2Doc!.data().isMoreSermonsList).toBe(true);
+    expect(page2Doc!.data()).toMatchObject({
+      name: 'More Original List sermons',
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 2,
+    });
 
     // Fill Page 2 to capacity and create Page 3
     for (let i = 6; i <= 8; i++) {
@@ -161,8 +173,29 @@ describe('addToList - Page Number Incrementation', () => {
     // Verify Page 3 was created with correct subtitle
     const page3List = subsplashMock.getList(page3ListId!);
     expect(page3List).toBeDefined();
-    expect(page3List!.title).toBe('More Original List');
+    expect(page3List!.title).toBe('More Original List sermons');
     expect(page3List!.subtitle).toBe('Page 3');
+
+    const rootDoc = await getListBySubsplashId(rootListId);
+    const page3Doc = await getListBySubsplashId(page3ListId!);
+    expect(rootDoc!.data()).toMatchObject({
+      count: 4,
+      logicalCount: 14,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 0,
+    });
+    expect(page1Doc!.data().count).toBe(4);
+    expect(page2Doc!.data().count).toBe(4);
+    expect(page3Doc!.data()).toMatchObject({
+      count: 2,
+      name: 'More Original List sermons',
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 3,
+    });
 
     // Summary: We should have Page 1, Page 2, and Page 3 with correct subtitles
     expect(page1List!.subtitle).toBe('Page 1');
@@ -170,4 +203,3 @@ describe('addToList - Page Number Incrementation', () => {
     expect(page3List!.subtitle).toBe('Page 3');
   });
 });
-

@@ -5,7 +5,7 @@ import {
   TestRequest,
   AddToListHandler
 } from './mocks';
-import { createListDocument, clearFirestore } from './firestoreHelpers';
+import { createListDocument, clearFirestore, getListBySubsplashId } from './firestoreHelpers';
 import addToList from '../../addToList';
 
 const addToListHandler = addToList as unknown as AddToListHandler;
@@ -70,7 +70,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     subsplashMock.listRows.set(listId, initialRows);
 
     // Create Firestore document for the list
-    await createListDocument({
+    const rootFirestoreId = await createListDocument({
       subsplashId: listId,
       title: 'Full List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
@@ -114,6 +114,31 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     expect(newListRows).toHaveLength(2);
     expect(newListRows[0]._embedded['media-item']?.id).toBe('item-8');
     expect(newListRows[1]._embedded['media-item']?.id).toBe('item-9');
+
+    const updatedRootDoc = await getListBySubsplashId(listId);
+    const overflowDoc = await getListBySubsplashId(newListId!);
+    expect(updatedRootDoc).not.toBeNull();
+    expect(overflowDoc).not.toBeNull();
+    expect(updatedRootDoc!.data()).toMatchObject({
+      count: 9,
+      logicalCount: 11,
+      hasOverflowPages: true,
+      isRootList: true,
+      isMoreSermonsList: false,
+      rootListId: rootFirestoreId,
+      overflowDepth: 0,
+      moreSermonsRef: newListId,
+    });
+    expect(overflowDoc!.data()).toMatchObject({
+      count: 2,
+      name: 'More Full List sermons',
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+    });
+    expect(subsplashMock.getList(newListId!)?.title).toBe('More Full List sermons');
+    expect(subsplashMock.getList(newListId!)?.subtitle).toBe('Page 1');
   });
 
   it('should propagate overflow down multiple lists in chain', async () => {

@@ -5,6 +5,7 @@ import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { getFullListRows } from './helpers/addToListHelpers';
+import { syncOverflowChainMetadata } from './helpers/listOverflowChain';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
@@ -109,6 +110,7 @@ export const removeFromList = async (
         const deleteConfig = createAxiosConfig(`https://core.subsplash.com/builder/v1/list-rows/${listItemId}`, token, 'DELETE');
         await axios(deleteConfig);
         logger.log(`Successfully deleted item ${listItemId} from original list ${listId}`);
+        await syncOverflowChainMetadata(listId, token);
         return { listId, listItemId, foundInOriginalList: true };
       } catch (error: unknown) {
         // If deletion fails, the item might have been moved to an overflow list
@@ -153,6 +155,7 @@ export const removeFromList = async (
                   );
                   await axios(deleteConfig);
                   logger.log(`Successfully deleted item from overflow list ${moreSermonsRef}`);
+                  await syncOverflowChainMetadata(listId, token);
                   return { listId: moreSermonsRef, listItemId: matchingRow.id, foundInOriginalList: false };
                 }
                 

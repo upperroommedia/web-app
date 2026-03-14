@@ -1,11 +1,15 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import type { List } from '@upperroom/shared/types/List';
 import { HttpsError } from 'firebase-functions/v2/https';
+import { FieldValue } from 'firebase-admin/firestore';
+import axios from 'axios';
 import type {
   GetListOverflowChainIssue,
   GetListOverflowChainNode,
   GetListOverflowChainOutputType,
 } from '../../../packages/contracts/getListOverflowChain';
+import { createAxiosConfig } from '../subsplashUtils';
+import { getFullListRows, patchListRows } from './addToListHelpers';
 
 type StoredListData = List & {
   title?: string;
@@ -31,6 +35,7 @@ const getListName = (record: StoredListRecord): string =>
   normalizeString(record.data.name) ?? normalizeString(record.data.title) ?? record.id;
 
 const getCanonicalOverflowListName = (rootName: string): string => `More ${rootName} sermons`;
+const getOverflowListSubtitle = (overflowDepth: number): string => `Page ${overflowDepth}`;
 
 const getListCount = (record: StoredListRecord): number => {
   return typeof record.data.count === 'number' && Number.isFinite(record.data.count) ? record.data.count : 0;
@@ -46,6 +51,11 @@ const getStoredListRecordById = async (listId: string): Promise<StoredListRecord
     id: snapshot.id,
     data: snapshot.data() as StoredListData,
   };
+};
+
+const getStoredListRecordBySubsplashId = async (subsplashId: string): Promise<StoredListRecord | null> => {
+  const matches = await getStoredListRecordsByField('subsplashId', subsplashId);
+  return matches[0] ?? null;
 };
 
 const getStoredListRecordsByField = async (field: string, value: string): Promise<StoredListRecord[]> => {
@@ -70,6 +80,114 @@ const pushIssue = (
 
   if (!alreadyExists) {
     issues.push(nextIssue);
+  }
+};
+
+type StoredChainNode = {
+  record: StoredListRecord;
+  depth: number;
+};
+
+const getStoredChainNodesFromRoot = async (
+  rootRecord: StoredListRecord
+): Promise<StoredChainNode[]> => {
+  const nodes: StoredChainNode[] = [];
+  const visitedListIds = new Set<string>();
+
+  let currentRecord: StoredListRecord | null = rootRecord;
+  let depth = 0;
+
+  while (currentRecord) {
+    if (visitedListIds.has(currentRecord.id)) {
+      break;
+    }
+
+    visitedListIds.add(currentRecord.id);
+    nodes.push({
+      record: currentRecord,
+      depth,
+    });
+
+    const nextSubsplashListId = normalizeString(currentRecord.data.moreSermonsRef);
+    if (!nextSubsplashListId) {
+      break;
+    }
+
+    currentRecord = await getStoredListRecordBySubsplashId(nextSubsplashListId);
+    if (!currentRecord) {
+      break;
+    }
+
+    depth += 1;
+  }
+
+  return nodes;
+};
+
+const getContentRowCount = async (subsplashId: string, token: string): Promise<number> => {
+  const rows = await getFullListRows(subsplashId, token);
+  return rows.filter((row) => row.type !== 'list').length;
+};
+
+const patchSubsplashListTitle = async (
+  subsplashId: string,
+  title: string,
+  token: string
+): Promise<void> => {
+  const requestData = JSON.stringify({
+    app_key: '9XTSHD',
+    title,
+  });
+  const config = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/lists/${subsplashId}`,
+    token,
+    'PATCH',
+    requestData
+  );
+
+  await axios(config);
+};
+
+const collapseEmptyTailOverflowPages = async (
+  rootRecord: StoredListRecord,
+  token: string
+): Promise<void> => {
+  while (true) {
+    const chain = await getStoredChainNodesFromRoot(rootRecord);
+    if (chain.length <= 1) {
+      return;
+    }
+
+    const tailNode = chain[chain.length - 1];
+    const tailSubsplashId = normalizeString(tailNode.record.data.subsplashId);
+    if (!tailSubsplashId) {
+      return;
+    }
+
+    const tailRows = await getFullListRows(tailSubsplashId, token);
+    const tailHasContent = tailRows.some((row) => row.type !== 'list');
+    const tailHasLinkedOverflow = tailRows.some((row) => row.type === 'list' && row._embedded.list?.id);
+
+    if (tailHasContent || tailHasLinkedOverflow) {
+      return;
+    }
+
+    const parentNode = chain[chain.length - 2];
+    const parentSubsplashId = normalizeString(parentNode.record.data.subsplashId);
+    if (!parentSubsplashId) {
+      return;
+    }
+
+    const parentRows = await getFullListRows(parentSubsplashId, token);
+    const updatedParentRows = parentRows.filter(
+      (row) => !(row.type === 'list' && row._embedded.list?.id === tailSubsplashId)
+    );
+
+    await patchListRows(parentSubsplashId, updatedParentRows, token);
+    await firestore.collection('lists').doc(parentNode.record.id).update({
+      moreSermonsRef: FieldValue.delete(),
+      updatedAtMillis: Date.now(),
+    });
   }
 };
 
@@ -307,6 +425,159 @@ export const getOverflowChainState = async (
     nodes,
     issues,
   };
+};
+
+export const buildOverflowListTitle = (rootName: string): string => getCanonicalOverflowListName(rootName);
+
+export const buildOverflowListSubtitle = (overflowDepth: number): string =>
+  getOverflowListSubtitle(overflowDepth);
+
+export const buildRootListMetadata = ({
+  rootListId,
+  logicalCount,
+  hasOverflowPages,
+}: {
+  rootListId: string;
+  logicalCount: number;
+  hasOverflowPages: boolean;
+}): Pick<List, 'isRootList' | 'isMoreSermonsList' | 'rootListId' | 'overflowDepth' | 'logicalCount' | 'hasOverflowPages'> => ({
+  isRootList: true,
+  isMoreSermonsList: false,
+  rootListId,
+  overflowDepth: 0,
+  logicalCount,
+  hasOverflowPages,
+});
+
+export const buildOverflowListMetadata = ({
+  rootListId,
+  overflowDepth,
+}: {
+  rootListId: string;
+  overflowDepth: number;
+}): Pick<List, 'isRootList' | 'isMoreSermonsList' | 'rootListId' | 'overflowDepth'> => ({
+  isRootList: false,
+  isMoreSermonsList: true,
+  rootListId,
+  overflowDepth,
+});
+
+export const syncOverflowChainMetadata = async (
+  startingSubsplashId: string,
+  token: string
+): Promise<void> => {
+  const startingRecord = await getStoredListRecordBySubsplashId(startingSubsplashId);
+  if (!startingRecord) {
+    return;
+  }
+
+  const issues: GetListOverflowChainIssue[] = [];
+  const rootRecord = await resolveRootRecord(startingRecord, issues);
+
+  await collapseEmptyTailOverflowPages(rootRecord, token);
+
+  const chain = await getStoredChainNodesFromRoot(rootRecord);
+  if (chain.length === 0) {
+    return;
+  }
+
+  const rootListId = chain[0].record.id;
+  const rootName = getListName(chain[0].record);
+  const counts = await Promise.all(
+    chain.map(async (node) => {
+      const subsplashId = normalizeString(node.record.data.subsplashId);
+      return subsplashId ? getContentRowCount(subsplashId, token) : 0;
+    })
+  );
+  const logicalCount = counts.reduce((sum, count) => sum + count, 0);
+  const hasOverflowPages = chain.length > 1;
+  const now = Date.now();
+  const batch = firestore.batch();
+
+  chain.forEach((node, index) => {
+    const metadata =
+      node.depth === 0
+        ? buildRootListMetadata({
+            rootListId,
+            logicalCount,
+            hasOverflowPages,
+          })
+        : buildOverflowListMetadata({
+            rootListId,
+            overflowDepth: node.depth,
+          });
+
+    const nextName =
+      node.depth === 0
+        ? getListName(node.record)
+        : buildOverflowListTitle(rootName);
+
+    batch.set(
+      firestore.collection('lists').doc(node.record.id),
+      {
+        ...metadata,
+        count: counts[index],
+        name: nextName,
+        updatedAtMillis: now,
+      },
+      { merge: true }
+    );
+  });
+
+  await batch.commit();
+};
+
+export const syncOverflowChainNames = async (
+  startingSubsplashId: string,
+  rootName: string,
+  token: string
+): Promise<void> => {
+  const startingRecord = await getStoredListRecordBySubsplashId(startingSubsplashId);
+  if (!startingRecord) {
+    return;
+  }
+
+  const issues: GetListOverflowChainIssue[] = [];
+  const rootRecord = await resolveRootRecord(startingRecord, issues);
+  const chain = await getStoredChainNodesFromRoot(rootRecord);
+  const batch = firestore.batch();
+  const now = Date.now();
+
+  batch.set(
+    firestore.collection('lists').doc(rootRecord.id),
+    {
+      name: rootName,
+      updatedAtMillis: now,
+    },
+    { merge: true }
+  );
+
+  for (const node of chain) {
+    if (node.depth === 0) {
+      continue;
+    }
+
+    const canonicalTitle = buildOverflowListTitle(rootName);
+    const subsplashId = normalizeString(node.record.data.subsplashId);
+    if (subsplashId) {
+      await patchSubsplashListTitle(subsplashId, canonicalTitle, token);
+    }
+
+    batch.set(
+      firestore.collection('lists').doc(node.record.id),
+      {
+        ...buildOverflowListMetadata({
+          rootListId: rootRecord.id,
+          overflowDepth: node.depth,
+        }),
+        name: canonicalTitle,
+        updatedAtMillis: now,
+      },
+      { merge: true }
+    );
+  }
+
+  await batch.commit();
 };
 
 export { getCanonicalOverflowListName };

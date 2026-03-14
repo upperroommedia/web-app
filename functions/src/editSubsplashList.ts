@@ -8,6 +8,7 @@ import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import { syncOverflowChainNames } from './helpers/listOverflowChain';
 
 export interface EditSubsplashListInputType {
   listId: string;
@@ -56,14 +57,21 @@ const editSubpslashList = onCall(
     logger.log('request data', requestData);
     const operationKey = getOperationKey(data.operationKey);
     const runMutation = async (): Promise<EditSubsplashListOutputType> => {
+      const token = await authenticateSubsplash();
       const config = createAxiosConfig(
         `https://core.subsplash.com/builder/v1/lists/${data.listId}`,
-        await authenticateSubsplash(),
+        token,
         'PATCH',
         requestData
       );
       logger.log('config', config);
-      return (await axios(config)).data;
+      const response = await axios(config);
+
+      if (data.title?.trim()) {
+        await syncOverflowChainNames(data.listId, data.title.trim(), token);
+      }
+
+      return response.data;
     };
 
     const runLockedMutation = async (): Promise<EditSubsplashListOutputType> => {

@@ -4,7 +4,6 @@ import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { SubsplashMediaItem } from './types/Subsplash';
 import { createListRow, getFullListRows, getFullListRowsWithTotal, patchListRows, createNewList, getListDetails } from './helpers/addToListHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { firestoreAdminListConverter } from './firestoreDataConverter';
 import { Timestamp } from 'firebase-admin/firestore';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
@@ -13,6 +12,13 @@ import axios from 'axios';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import {
+  buildOverflowListMetadata,
+  buildOverflowListSubtitle,
+  buildOverflowListTitle,
+  buildRootListMetadata,
+  syncOverflowChainMetadata,
+} from './helpers/listOverflowChain';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -76,9 +82,10 @@ async function processListStep(
   listId: string, 
   itemToAdd: SubsplashMediaItem, 
   token: string,
-  maxListSize: number = DEFAULT_MAX_LIST_SIZE
+  maxListSize: number = DEFAULT_MAX_LIST_SIZE,
+  shouldSyncChainMetadata: boolean = true
 ): Promise<{ listItemId?: string }> {
-  const listQuery = firestoreDB.collection('lists').where('subsplashId', '==', listId).limit(1).withConverter(firestoreAdminListConverter);
+  const listQuery = firestoreDB.collection('lists').where('subsplashId', '==', listId).limit(1);
 
   // Collect items to propagate after transaction commits
   // This fixes the transaction isolation bug where recursive calls can't see uncommitted documents
@@ -97,7 +104,16 @@ async function processListStep(
     if (querySnapshot.empty) throw new HttpsError('not-found', `List ${listId} not found in Firestore`);
     
     const listDoc = querySnapshot.docs[0];
-    const listData = listDoc.data();
+    const listData = listDoc.data() as Record<string, unknown>;
+    const listName =
+      (typeof listData.name === 'string' && listData.name.trim()) ||
+      (typeof listData.title === 'string' && listData.title.trim()) ||
+      listDoc.id;
+    const explicitRootListId =
+      typeof listData.rootListId === 'string' && listData.rootListId.trim()
+        ? listData.rootListId.trim()
+        : undefined;
+    const isOverflowList = listData.isMoreSermonsList === true;
 
     // Lock list by updating timestamp
     transaction.update(listDoc.ref, { updatedAtMillis: Timestamp.now().toMillis() });
@@ -135,6 +151,13 @@ async function processListStep(
           if (!listData.moreSermonsRef) {
             // Overflow list exists in Subsplash but not in Firestore - create it
             const overflowListDetails = await getListDetails(overflowListId, token);
+            const parentDepth =
+              typeof listData.overflowDepth === 'number'
+                ? listData.overflowDepth
+                : isOverflowList
+                  ? 1
+                  : 0;
+            const rootListId = explicitRootListId ?? listDoc.id;
             const newListRef = firestoreDB.collection('lists').doc();
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { id, ...dataToCopy } = listData;
@@ -148,11 +171,26 @@ async function processListStep(
               updatedAtMillis: Date.now(),
               count: 0,
               images: [],
-              isMoreSermonsList: true
+              ...buildOverflowListMetadata({
+                rootListId,
+                overflowDepth: parentDepth + 1,
+              }),
             };
             
             transaction.set(newListRef, newListData);
-            transaction.update(listDoc.ref, { moreSermonsRef: overflowListId });
+            transaction.update(listDoc.ref, {
+              moreSermonsRef: overflowListId,
+              ...(isOverflowList
+                ? buildOverflowListMetadata({
+                    rootListId,
+                    overflowDepth: parentDepth,
+                  })
+                : buildRootListMetadata({
+                    rootListId: listDoc.id,
+                    logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+                    hasOverflowPages: true,
+                  })),
+            });
           }
         }
       }
@@ -177,67 +215,65 @@ async function processListStep(
     // - If totalRowCount is already at maxListSize, adding any item will exceed the limit
     if (willOverflow) {
       if (listData.overflowBehavior === OverflowBehavior.CREATENEWLIST) {
-        let nextListId = listData.moreSermonsRef;
+        let nextListId =
+          typeof listData.moreSermonsRef === 'string' && listData.moreSermonsRef.trim()
+            ? listData.moreSermonsRef.trim()
+            : undefined;
+        let rootListId = explicitRootListId ?? listDoc.id;
+        let rootListName = listName;
+        let currentDepth =
+          typeof listData.overflowDepth === 'number'
+            ? listData.overflowDepth
+            : isOverflowList
+              ? 1
+              : 0;
         
         // Ensure we have a next list
         if (!nextListId) {
-          const currentListDetails = await getListDetails(listId, token);
-          // If the current list is already a "more" list, use its name without the "More " prefix
-          // Otherwise, use the current list's title
-          // This ensures we always get "More Original Name" and never "More More Original Name"
-          const baseTitle = currentListDetails.title.startsWith('More ') 
-            ? currentListDetails.title.substring(5) // Remove "More " prefix
-            : currentListDetails.title;
-          
-          // Calculate page number by depth in the linked list chain
-          // If current list is NOT a "more" list, the new overflow list is Page 1
-          // If current list IS a "more" list, traverse back to root and count depth
-          let pageNumber = 1;
-          if (listData.isMoreSermonsList) {
-            // Current list is a "more" list, so we need to find the root and count depth
-            // We're already at Page 1 (or deeper), so start counting from 1
-            // Traverse backwards by finding which list has moreSermonsRef pointing to current list
-            let currentListData = listData;
-            let depth = 1; // Start at 1 since we're already at a "more" list (Page 1)
-            
-            // Traverse backwards to find the root list
-            // Keep going while we can find a parent that is also a "more" list
+          if (isOverflowList) {
+            let currentSubsplashId = listId;
+
             while (true) {
-              // Find the parent list by looking for a list that has moreSermonsRef pointing to current list
               const parentQuery = await firestoreDB
                 .collection('lists')
-                .where('moreSermonsRef', '==', currentListData.subsplashId || listId)
+                .where('moreSermonsRef', '==', currentSubsplashId)
                 .limit(1)
                 .get();
-              
+
               if (parentQuery.empty) {
-                // Can't find parent, we've reached the root or a non-"more" list
                 break;
               }
-              
+
               const parentDoc = parentQuery.docs[0];
-              const parentData = parentDoc.data() as typeof listData;
-              
-              // If parent is also a "more" list, continue traversing
-              // Otherwise, we've found the root (which is not a "more" list)
-              if (parentData.isMoreSermonsList) {
-                currentListData = parentData;
-                depth++;
-              } else {
-                // Parent is the root list (not a "more" list), stop here
-                break;
+              const parentData = parentDoc.data() as Record<string, unknown>;
+
+              if (parentData.isMoreSermonsList === true) {
+                currentSubsplashId =
+                  typeof parentData.subsplashId === 'string' && parentData.subsplashId.trim()
+                    ? parentData.subsplashId
+                    : parentDoc.id;
+                currentDepth += 1;
+                if (!explicitRootListId && typeof parentData.rootListId === 'string' && parentData.rootListId.trim()) {
+                  rootListId = parentData.rootListId.trim();
+                }
+                continue;
               }
+
+              rootListId = parentDoc.id;
+              rootListName =
+                (typeof parentData.name === 'string' && parentData.name.trim()) ||
+                (typeof parentData.title === 'string' && parentData.title.trim()) ||
+                parentDoc.id;
+              break;
             }
-            
-            // Page number is depth + 1 (current overflow list will be one more level deep)
-            // If we're at Page 1 (depth=1), the next will be Page 2 (depth+1=2)
-            // If we're at Page 2 (depth=2), the next will be Page 3 (depth+1=3)
-            pageNumber = depth + 1;
           }
-          
-          const newTitle = `More ${baseTitle}`;
-          const subtitle = `Page ${pageNumber}`;
-          logger.log(`Creating new overflow list: ${newTitle} with subtitle: ${subtitle} (Page ${pageNumber})`);
+
+          const newOverflowDepth = currentDepth + 1;
+          const newTitle = buildOverflowListTitle(rootListName);
+          const subtitle = buildOverflowListSubtitle(newOverflowDepth);
+          logger.log(
+            `Creating new overflow list: ${newTitle} with subtitle: ${subtitle} (Page ${newOverflowDepth})`
+          );
           
           const newList = await createNewList(newTitle, token, subtitle);
           nextListId = newList.id;
@@ -256,13 +292,28 @@ async function processListStep(
             updatedAtMillis: Date.now(),
             count: 0,
             images: [],
-            isMoreSermonsList: true
+            ...buildOverflowListMetadata({
+              rootListId,
+              overflowDepth: newOverflowDepth,
+            }),
           };
           // Don't set moreSermonsRef if undefined (Firestore doesn't allow undefined values)
           // It will be set later if needed via transaction.update
           transaction.set(newListRef, newListData);
           
-          transaction.update(listDoc.ref, { moreSermonsRef: nextListId });
+          transaction.update(listDoc.ref, {
+            moreSermonsRef: nextListId,
+            ...(isOverflowList
+              ? buildOverflowListMetadata({
+                  rootListId,
+                  overflowDepth: currentDepth,
+                })
+              : buildRootListMetadata({
+                  rootListId: listDoc.id,
+                  logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+                  hasOverflowPages: true,
+                })),
+          });
         }
 
         // Identify items to move (Prune items to make space: Max (maxListSize - 1) items + 1 Link = maxListSize)
@@ -390,7 +441,11 @@ async function processListStep(
   // This fixes the transaction isolation bug - the Firestore document created above
   // is now committed and visible to the recursive calls
   for (const { listId: targetListId, item } of itemsToPropagateAfterCommit) {
-    await processListStep(targetListId, item, token, maxListSize);
+    await processListStep(targetListId, item, token, maxListSize, false);
+  }
+
+  if (shouldSyncChainMetadata) {
+    await syncOverflowChainMetadata(listId, token);
   }
   return { listItemId };
 }

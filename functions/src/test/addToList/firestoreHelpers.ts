@@ -9,23 +9,33 @@ import { OverflowBehavior } from '@upperroom/shared/types/List';
 const firestoreDB = firebaseAdmin.firestore();
 
 export interface ListDocumentData {
+  id?: string;
   subsplashId: string;
   title: string;
+  name?: string;
   overflowBehavior: OverflowBehavior;
   moreSermonsRef?: string;
   count?: number;
+  logicalCount?: number;
+  hasOverflowPages?: boolean;
   images?: unknown[];
   isMoreSermonsList?: boolean;
+  isRootList?: boolean;
+  rootListId?: string;
+  overflowDepth?: number;
 }
 
 /**
  * Create a Firestore document for a list
  */
 export async function createListDocument(data: ListDocumentData): Promise<string> {
-  const listRef = firestoreDB.collection('lists').doc();
+  const listRef = data.id
+    ? firestoreDB.collection('lists').doc(data.id)
+    : firestoreDB.collection('lists').doc();
   const docData: Record<string, unknown> = {
     id: listRef.id,
     subsplashId: data.subsplashId,
+    name: data.name ?? data.title,
     title: data.title,
     overflowBehavior: data.overflowBehavior,
     createdAtMillis: Date.now(),
@@ -36,9 +46,20 @@ export async function createListDocument(data: ListDocumentData): Promise<string
   };
   
   // Only include moreSermonsRef if it's defined (Firestore doesn't allow undefined)
-  if (data.moreSermonsRef !== undefined) {
-    docData.moreSermonsRef = data.moreSermonsRef;
-  }
+  (
+    [
+      'moreSermonsRef',
+      'logicalCount',
+      'hasOverflowPages',
+      'isRootList',
+      'rootListId',
+      'overflowDepth',
+    ] as const
+  ).forEach((field) => {
+    if (data[field] !== undefined) {
+      docData[field] = data[field];
+    }
+  });
   
   await listRef.set(docData);
   return listRef.id;
@@ -77,4 +98,3 @@ export async function getListBySubsplashId(subsplashId: string) {
   }
   return snapshot.docs[0];
 }
-

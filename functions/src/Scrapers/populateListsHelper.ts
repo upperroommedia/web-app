@@ -8,6 +8,7 @@ import { Bucket } from '@google-cloud/storage';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { CollectionReference, Firestore } from 'firebase-admin/firestore';
 import { SubsplashImage, SubsplashList } from '../types/Subsplash';
+import { buildRootListMetadata } from '../helpers/listOverflowChain';
 
 interface SubsplashCategoriesResponse {
   _embedded: {
@@ -148,6 +149,11 @@ async function populateLists(
             subsplashId: list.id,
             name: list.title,
             count: list.list_rows_count,
+            ...buildRootListMetadata({
+              rootListId: list.id,
+              logicalCount: list.list_rows_count,
+              hasOverflowPages: false,
+            }),
             overflowBehavior: OverflowBehavior.CREATENEWLIST,
             type: ListType.SERIES,
             createdAtMillis:

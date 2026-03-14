@@ -3,7 +3,7 @@ import { SubsplashListRow } from '../../types/Subsplash';
 import { 
   subsplashMock,
 } from '../addToList/mocks';
-import { createListDocument, clearFirestore } from '../addToList/firestoreHelpers';
+import { createListDocument, clearFirestore, getListBySubsplashId } from '../addToList/firestoreHelpers';
 import removeFromList from '../../removeFromList';
 import { RemoveFromListInputType } from '../../removeFromList';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
@@ -176,6 +176,17 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
         'media-item': { id: 'item-1' }
       }
     };
+    const itemRow2: SubsplashListRow = {
+      id: 'overflow-row-2',
+      app_key: '9XTSHD',
+      method: 'static',
+      position: 2,
+      type: 'media-item',
+      _embedded: {
+        'source-list': { id: overflowListId },
+        'media-item': { id: 'item-2' }
+      }
+    };
     
     // Root list has 199 items + 1 link
     const rootRows = Array.from({ length: 199 }, (_, i) => ({
@@ -190,10 +201,10 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       }
     }));
     subsplashMock.listRows.set(rootListId, [...rootRows, linkRow]);
-    subsplashMock.listRows.set(overflowListId, [itemRow]);
+    subsplashMock.listRows.set(overflowListId, [itemRow, itemRow2]);
     
     // Create Firestore documents
-    await createListDocument({
+    const rootFirestoreId = await createListDocument({
       subsplashId: rootListId,
       title: 'Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
@@ -226,11 +237,31 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     
     // Verify the item was removed from the overflow list
     const overflowRows = subsplashMock.getListRows(overflowListId);
-    expect(overflowRows).toHaveLength(0);
+    expect(overflowRows).toHaveLength(1);
+    expect(overflowRows[0]._embedded['media-item']?.id).toBe('item-2');
     
     // Verify root list is unchanged
     const rootRowsAfter = subsplashMock.getListRows(rootListId);
     expect(rootRowsAfter).toHaveLength(200); // 199 items + 1 link
+
+    const rootDoc = await getListBySubsplashId(rootListId);
+    const overflowDoc = await getListBySubsplashId(overflowListId);
+    expect(rootDoc!.data()).toMatchObject({
+      count: 199,
+      logicalCount: 200,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 0,
+      moreSermonsRef: overflowListId,
+    });
+    expect(overflowDoc!.data()).toMatchObject({
+      count: 1,
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+    });
   });
 
   it('should handle item not found in overflow chain (treat as success)', async () => {
@@ -416,7 +447,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     subsplashMock.listRows.set(overflowList2Id, [itemRow]);
     
     // Create Firestore documents
-    await createListDocument({
+    const rootFirestoreId = await createListDocument({
       subsplashId: rootListId,
       title: 'Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
@@ -456,6 +487,20 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     // Verify the item was removed from the second overflow list
     const overflow2Rows = subsplashMock.getListRows(overflowList2Id);
     expect(overflow2Rows).toHaveLength(0);
+
+    const rootRowsAfter = subsplashMock.getListRows(rootListId);
+    expect(rootRowsAfter).toHaveLength(0);
+
+    const rootDoc = await getListBySubsplashId(rootListId);
+    expect(rootDoc!.data()).toMatchObject({
+      count: 0,
+      logicalCount: 0,
+      hasOverflowPages: false,
+      isRootList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 0,
+    });
+    expect(rootDoc!.data().moreSermonsRef).toBeUndefined();
   });
 
   it('should replay duplicate operation keys without repeating delete work', async () => {
