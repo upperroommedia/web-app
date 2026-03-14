@@ -1,6 +1,7 @@
 import firestore, {
   collection,
   collectionGroup,
+  deleteField,
   doc,
   getDocs,
   query,
@@ -71,7 +72,14 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       })
     );
   }
-  promises.push(updateDoc(sermonRef, buildEditableSermonPatch(sermon)));
+  promises.push(
+    updateDoc(sermonRef, {
+      ...buildEditableSermonPatch(sermon),
+      searchPending: true,
+      searchIndexedAtMillis: deleteField(),
+      searchSyncError: deleteField(),
+    })
+  );
   const results = await Promise.allSettled(promises);
   for (const result of results) {
     if (result.status !== 'fulfilled') {

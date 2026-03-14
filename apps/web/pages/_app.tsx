@@ -11,6 +11,7 @@ import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import dynamic from 'next/dynamic';
 import { ThemeProvider as NextThemesProvider, useTheme } from 'next-themes';
 import { darkTheme, lightTheme } from '../styles/theme';
+import { AlgoliaSearchProvider } from '../context/search/AlgoliaSearchContext';
 
 // Dynamic import for MediaPlayerComponent to reduce initial bundle size
 const MediaPlayerComponent = dynamic(() => import('../components/MediaPlayerComponent'), {
@@ -42,7 +43,6 @@ function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'rou
               width: '100%',
               display: 'flex',
               flexDirection: 'column',
-              overflowY: 'auto',
               flexGrow: 1,
               minHeight: '100vh',
               bgcolor: 'background.default',
@@ -63,6 +63,8 @@ function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'rou
 }
 
 function MyApp({ Component, pageProps }: ComponentWithPageLayout) {
+  const algoliaAppId = process.env.NEXT_PUBLIC_ALGOLIA_APP_ID;
+
   return (
     <>
       <Head>
@@ -77,6 +79,12 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/URM_icon.png" />
         <link rel="apple-touch-icon" href="/URM_icon.png"></link>
+        {algoliaAppId && (
+          <>
+            <link rel="preconnect" href={`https://${algoliaAppId}-dsn.algolia.net`} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={`https://${algoliaAppId}-dsn.algolia.net`} />
+          </>
+        )}
       </Head>
       <UserProvider>
         <NextThemesProvider
@@ -85,7 +93,9 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
           enableSystem
           disableTransitionOnChange
         >
-          <AppContent Component={Component} pageProps={pageProps} />
+          <AlgoliaSearchProvider>
+            <AppContent Component={Component} pageProps={pageProps} />
+          </AlgoliaSearchProvider>
         </NextThemesProvider>
       </UserProvider>
     </>

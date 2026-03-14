@@ -274,6 +274,35 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
           },
         },
       },
+      MuiCheckbox: {
+        defaultProps: {
+          size: 'small',
+        },
+        styleOverrides: {
+          root: {
+            fontSize: '1rem',
+            lineHeight: 1,
+            padding: '0.5em',
+            '& .MuiSvgIcon-root': {
+              fontSize: '1.25em',
+            },
+          },
+          sizeSmall: {
+            fontSize: '0.9375rem',
+            padding: '0.375em',
+            '& .MuiSvgIcon-root': {
+              fontSize: '1.1667em',
+            },
+          },
+          sizeMedium: {
+            fontSize: '1rem',
+            padding: '0.5em',
+            '& .MuiSvgIcon-root': {
+              fontSize: '1.25em',
+            },
+          },
+        },
+      },
       MuiCard: {
         styleOverrides: {
           root: {

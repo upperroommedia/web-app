@@ -45,4 +45,12 @@ export interface Sermon {
   editedAtMillis: number;
   youtubeUrl?: string;
   seriesId?: string;  // Firestore series ID (not subsplashId) - sermon can only be in one series
+  searchPending?: boolean;
+  searchIndexedAtMillis?: number;
+  searchSyncError?: string;
+  uploaderDisplayName?: string;
+  uploaderEmail?: string;
+  seriesName?: string;
+  seriesImage?: ImageType;
+  seriesPublishedToSubsplash?: boolean;
 }

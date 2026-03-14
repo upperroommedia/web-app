@@ -1,27 +1,13 @@
-import Box from '@mui/material/Box';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
-import { ChangeEvent, useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import CreateSpeakerPopup, { CreateSpeakerFormValues } from '../../components/CreateSpeakerPopup';
 import PopUp from '../../components/PopUp';
 import SpeakerTable from '../../components/SpeakerTable';
 import { Order } from '../../context/types';
-import firestore, {
-  collection,
-  DocumentData,
-  getCountFromServer,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  Query,
-  QueryDocumentSnapshot,
-  startAfter,
-} from '../../firebase/firestore';
 import AppLayout from '../../layout/AppLayout';
-import { ISpeaker, speakerConverter } from '../../types/Speaker';
+import { ISpeaker } from '../../types/Speaker';
 import useAuth from '../../context/user/UserContext';
-import { fetchSpeakerResults } from '../../components/uploaderComponents/SpeakerSelector';
 import { createFunctionV2 } from '../../utils/createFunction';
 import {
   buildCreateSpeakerPayload,
@@ -30,157 +16,117 @@ import {
   shouldShowSpeakerListSuccess,
 } from '../../utils/speakers/createSpeakerClient';
 import { CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType } from '@upperroom/contracts/speakers/createSpeakerTypes';
+import Box from '@mui/material/Box';
+import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
+import { normalizeAlgoliaSpeakerHit, searchSpeakersIndex } from '../../utils/algolia/searchRecords';
 
 const createSpeakerCallable = createFunctionV2<CreateSpeakerCallableInputType, CreateSpeakerCallableOutputType>(
   'createspeaker'
 );
+
+const sortSpeakers = (speakers: ISpeaker[], sortProperty: keyof ISpeaker, sortOrder: Order): ISpeaker[] => {
+  const sortedSpeakers = [...speakers];
+  sortedSpeakers.sort((leftSpeaker, rightSpeaker) => {
+    const leftValue = leftSpeaker[sortProperty];
+    const rightValue = rightSpeaker[sortProperty];
+
+    if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+      return sortOrder === 'asc' ? leftValue - rightValue : rightValue - leftValue;
+    }
+
+    const normalizedLeft = String(leftValue ?? '').toLowerCase();
+    const normalizedRight = String(rightValue ?? '').toLowerCase();
+    if (normalizedLeft === normalizedRight) {
+      return 0;
+    }
+
+    const comparison = normalizedLeft.localeCompare(normalizedRight);
+    return sortOrder === 'asc' ? comparison : -comparison;
+  });
+
+  return sortedSpeakers;
+};
+
 const AdminSpeakers = () => {
+  const { searchClient, loading: searchClientLoading, clearCache } = useAlgoliaSearch();
   const [speakerInput, setSpeakerInput] = useState<string>('');
+  const [debouncedSpeakerInput, setDebouncedSpeakerInput] = useState<string>('');
   const [page, setPage] = useState<number>(0);
-  const [visitedPages, setVisitedPages] = useState<number[]>([0]);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [speakers, setSpeakers] = useState<ISpeaker[]>([]);
-  const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [speakersLoading, setSpeakersLoading] = useState<boolean>(false);
-  const [queryState, setQueryState] = useState<Query<DocumentData>>();
   const [totalSpeakers, setTotalSpeakers] = useState<number>(0);
   const [createSpeakerPopupOpen, setCreateSpeakerPopupOpen] = useState<boolean>(false);
   const [speakerListSuccessPopupOpen, setSpeakerListSuccessPopupOpen] = useState<boolean>(false);
-
-  const [lastSpeaker, setLastSpeaker] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [sortProperty, setSortProperty] = useState<keyof ISpeaker>('sermonCount');
   const [sortOrder, setSortOrder] = useState<Order>('desc');
 
-  const handleSort = async (property: keyof ISpeaker, order: Order) => {
-    if (sortProperty !== property || sortOrder !== order) {
-      setVisitedPages([]);
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSpeakerInput(speakerInput);
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [speakerInput]);
+
+  useEffect(() => {
+    if (!searchClient) {
+      return;
     }
-    setLastSpeaker(undefined);
+
+    let cancelled = false;
+
+    const loadSpeakers = async () => {
+      setSpeakersLoading(true);
+
+      try {
+        const response = await searchSpeakersIndex(searchClient, debouncedSpeakerInput, rowsPerPage, page);
+        if (cancelled) {
+          return;
+        }
+
+        setTotalSpeakers(response.nbHits ?? 0);
+        setSpeakers(sortSpeakers(response.hits.map(normalizeAlgoliaSpeakerHit), sortProperty, sortOrder));
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load speakers from Algolia', error);
+          setSpeakers([]);
+          setTotalSpeakers(0);
+        }
+      } finally {
+        if (!cancelled) {
+          setSpeakersLoading(false);
+        }
+      }
+    };
+
+    void loadSpeakers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSpeakerInput, page, rowsPerPage, searchClient, sortOrder, sortProperty]);
+
+  const handleSort = async (property: keyof ISpeaker, order: Order) => {
     setSortProperty(property);
     setSortOrder(order);
     setPage(0);
-    const q = query(
-      collection(firestore, 'speakers').withConverter(speakerConverter),
-      limit(rowsPerPage),
-      orderBy(property, order)
-    );
-    const querySnapshot = await getDocs(q);
-    const res: ISpeaker[] = [];
-    querySnapshot.forEach((doc) => {
-      res.push(doc.data());
-    });
-    setQueryState(
-      query(collection(firestore, 'speakers'), limit(rowsPerPage), orderBy(property, order), startAfter(lastSpeaker))
-    );
-    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    setSpeakers(res);
   };
 
   const handlePageChange = async (newPage: number) => {
-    if (visitedPages.includes(newPage)) {
-      setPage(newPage);
-      return;
-    }
-    setVisitedPages([...visitedPages, newPage]);
     setPage(newPage);
-    if (speakerInput === '' && queryState) {
-      await getMoreSpeakersFirebase();
-    } else {
-      const result = await getSpeakersAlgolia(speakerInput, newPage);
-      setSpeakers([...speakers, ...result]);
-    }
-  };
-
-  const getSpeakersAlgolia = async (query: string, newPage?: number) => {
-    const result = await fetchSpeakerResults(query, rowsPerPage, newPage || page);
-    if (result[0] && result[0].nbHits) {
-      setTotalSpeakers(result[0].nbHits);
-    }
-    setSpeakersLoading(false);
-    return result;
-  };
-
-  const getMoreSpeakersFirebase = async () => {
-    const q = query(
-      collection(firestore, 'speakers'),
-      limit(rowsPerPage),
-      orderBy('sermonCount', 'desc'),
-      startAfter(lastSpeaker)
-    ).withConverter(speakerConverter);
-    const querySnapshot = await getDocs(q);
-    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    querySnapshot.forEach((doc) => {
-      setSpeakers((oldSpeakers) => [...oldSpeakers, doc.data()]);
-    });
-    const result = await fetchSpeakerResults('', 1, 0);
-    if (result[0] && result[0].nbHits) {
-      setTotalSpeakers(result[0].nbHits);
-    }
   };
 
   const handleChangeRowsPerPage = async (event: ChangeEvent<HTMLInputElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
-    setLastSpeaker(undefined);
     setPage(0);
-    setSortProperty('sermonCount');
-    setSortOrder('desc');
-    const q = query(
-      collection(firestore, 'speakers'),
-      limit(parseInt(event.target.value, 10)),
-      orderBy('sermonCount', 'desc')
-    ).withConverter(speakerConverter);
-    const querySnapshot = await getDocs(q);
-    const res: ISpeaker[] = [];
-    querySnapshot.forEach((doc) => {
-      res.push(doc.data());
-    });
-    setQueryState(
-      query(
-        collection(firestore, 'speakers'),
-        limit(rowsPerPage),
-        orderBy('sermonCount', 'desc'),
-        startAfter(lastSpeaker)
-      )
-    );
-    setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    setSpeakers(res);
   };
-
-  useEffect(() => {
-    const getSpeakersFirebase = async () => {
-      const speakerCollection = collection(firestore, 'speakers').withConverter(speakerConverter);
-      const speakersCount = (await getCountFromServer(speakerCollection)).data().count;
-      setTotalSpeakers(speakersCount);
-
-      const q = query(speakerCollection, limit(rowsPerPage), orderBy('sermonCount', 'desc'));
-      setQueryState(q);
-      const querySnapshot = await getDocs(q);
-      const res: ISpeaker[] = [];
-      querySnapshot.forEach((doc) => {
-        res.push(doc.data());
-      });
-      setSpeakers(res);
-      setLastSpeaker(querySnapshot.docs[querySnapshot.docs.length - 1]);
-      const result = await fetchSpeakerResults('', 1, 0);
-      if (result[0] && result[0].nbHits) {
-        setTotalSpeakers(result[0].nbHits);
-      }
-    };
-    const g = async () => {
-      await getSpeakersFirebase();
-    };
-    g();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleSearchChange = (value: string) => {
     setSpeakerInput(value);
-    setSpeakersLoading(true);
-    clearTimeout(timer);
-    const newTimer = setTimeout(async () => {
-      setSpeakers(await getSpeakersAlgolia(value));
-    }, 300);
-    setTimer(newTimer);
+    setPage(0);
   };
 
   const handleCreateSpeaker = async (values: CreateSpeakerFormValues) => {
@@ -193,22 +139,33 @@ const AdminSpeakers = () => {
     });
 
     const response = await createSpeakerCallable(payload);
-    setSpeakers((oldSpeakers) => [response.speaker, ...oldSpeakers.filter((speaker) => speaker.id !== response.speaker.id)]);
+    await clearCache();
+    setSpeakers((oldSpeakers) =>
+      page === 0 && debouncedSpeakerInput === ''
+        ? sortSpeakers(
+            [response.speaker, ...oldSpeakers.filter((speaker) => speaker.id !== response.speaker.id)].slice(0, rowsPerPage),
+            sortProperty,
+            sortOrder
+          )
+        : oldSpeakers
+    );
     setTotalSpeakers((oldTotalSpeakers) => oldTotalSpeakers + 1);
     setSpeakerInput('');
+    setDebouncedSpeakerInput('');
     setPage(0);
-    setVisitedPages([0]);
-    setLastSpeaker(undefined);
 
     if (shouldShowSpeakerListSuccess(response)) {
       setSpeakerListSuccessPopupOpen(true);
     }
   };
 
+  const isLoading = speakersLoading || searchClientLoading;
+  const effectiveSpeakers = useMemo(() => speakers, [speakers]);
+
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', width: '100%' }}>
       <SpeakerTable
-        speakers={speakers}
+        speakers={effectiveSpeakers}
         rowsPerPage={rowsPerPage}
         page={page}
         totalSpeakers={totalSpeakers}
@@ -222,7 +179,7 @@ const AdminSpeakers = () => {
         searchValue={speakerInput}
         onSearchChange={handleSearchChange}
         onAddSpeaker={() => setCreateSpeakerPopupOpen(true)}
-        loading={speakersLoading}
+        loading={isLoading}
       />
       <CreateSpeakerPopup
         open={createSpeakerPopupOpen}

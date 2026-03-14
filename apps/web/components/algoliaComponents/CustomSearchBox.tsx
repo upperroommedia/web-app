@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { ReactElement, useEffect, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -8,17 +8,31 @@ import { useInstantSearch, useSearchBox, UseSearchBoxProps, useStats } from 'rea
 
 const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: ReactElement }) => {
   const { TextFieldEndAdornment, ...searchBoxProps } = props;
-  const { refine } = useSearchBox(searchBoxProps);
+  const { query, refine } = useSearchBox(searchBoxProps);
   const { nbHits } = useStats();
-  const { status, results } = useInstantSearch();
+  const { status } = useInstantSearch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const hasSettledResults = !results.__isArtificial && status === 'idle';
-  const isLoadingState = !hasSettledResults && (results.__isArtificial || status === 'stalled' || status === 'loading');
+  const [localQuery, setLocalQuery] = useState(query);
+  const isLoadingState = status === 'stalled';
   
   const placeholder = isMobile 
     ? 'Search sermons...' 
     : 'Search for a sermon by name, subtitle, speaker, or description';
+
+  useEffect(() => {
+    setLocalQuery(query);
+  }, [query]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      refine(localQuery);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [localQuery, refine]);
 
   return (
     <Stack
@@ -34,8 +48,9 @@ const CustomSearchBox = (props: UseSearchBoxProps & { TextFieldEndAdornment?: Re
         type="search"
         placeholder={placeholder}
         size={isMobile ? 'small' : 'medium'}
-        onChange={async (e) => {
-          refine(e.target.value);
+        value={localQuery}
+        onChange={(e) => {
+          setLocalQuery(e.target.value);
         }}
         InputProps={TextFieldEndAdornment ? { endAdornment: TextFieldEndAdornment } : {}}
       />

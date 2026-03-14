@@ -182,6 +182,8 @@ interface Props {
   onRefresh?: () => void;
   /** When true, parent already subscribes to sermon doc; skip internal useDocument to avoid duplicate listeners. */
   subscriptionOwnedByParent?: boolean;
+  enableProcessingProgress?: boolean;
+  enableSeriesRealtime?: boolean;
 }
 
 const SermonListCard: FunctionComponent<Props> = ({
@@ -194,6 +196,8 @@ const SermonListCard: FunctionComponent<Props> = ({
   minimal: _minimal,
   onRefresh,
   subscriptionOwnedByParent = false,
+  enableProcessingProgress = true,
+  enableSeriesRealtime = true,
 }: Props) => {
   const router = useRouter();
   const { user } = useAuth();
@@ -224,8 +228,8 @@ const SermonListCard: FunctionComponent<Props> = ({
   const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
   const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
   const processingProgressRef = useMemo(
-    () => (isProcessing ? ref(database, `addIntroOutro/${currentSermon.id}`) : null),
-    [isProcessing, currentSermon.id]
+    () => (enableProcessingProgress && isProcessing ? ref(database, `addIntroOutro/${currentSermon.id}`) : null),
+    [enableProcessingProgress, isProcessing, currentSermon.id]
   );
 
   const [snapshot, _loading, _error] = useObject(processingProgressRef);
@@ -236,22 +240,37 @@ const SermonListCard: FunctionComponent<Props> = ({
   const [series, setSeries] = useState<Series | null>(null);
   const seriesItemRef = useMemo(
     () => (
-      currentSermon.seriesId && currentSermon.id
+      enableSeriesRealtime && currentSermon.seriesId && currentSermon.id
         ? doc(firestore, `series/${currentSermon.seriesId}/seriesItems`, currentSermon.id)
         : null
     ),
-    [currentSermon.seriesId, currentSermon.id]
+    [currentSermon.seriesId, currentSermon.id, enableSeriesRealtime]
   );
   const [seriesItemSnapshot] = useDocument(seriesItemRef, {
     snapshotListenOptions: { includeMetadataChanges: false }
   });
-  const seriesPublishedToSubsplash = seriesItemSnapshot?.exists() && seriesItemSnapshot.data()?.publishedToSubsplash === true;
+  const seriesPublishedToSubsplash = enableSeriesRealtime
+    ? seriesItemSnapshot?.exists() && seriesItemSnapshot.data()?.publishedToSubsplash === true
+    : currentSermon.seriesPublishedToSubsplash === true;
 
-  const uploaderName = (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ??
-    uploader?.email ?? 'uploader';
+  const uploaderName =
+    currentSermon.uploaderDisplayName ||
+    currentSermon.uploaderEmail ||
+    (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ||
+    uploader?.email ||
+    currentSermon.uploaderId ||
+    'uploader';
 
   // Resolve uploader details using cache + batched backend lookup (avoids one network call per card).
   useEffect(() => {
+    if (currentSermon.uploaderDisplayName || currentSermon.uploaderEmail) {
+      queueMicrotask(() => {
+        setUploader(undefined);
+        setUploaderLoading(false);
+      });
+      return;
+    }
+
     const uid = currentSermon.uploaderId;
     if (!uid) {
       queueMicrotask(() => {
@@ -300,11 +319,31 @@ const SermonListCard: FunctionComponent<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentSermon.uploaderId, user]);
+  }, [currentSermon.uploaderDisplayName, currentSermon.uploaderEmail, currentSermon.uploaderId, user]);
 
   useEffect(() => {
     let cancelled = false;
     const seriesId = currentSermon.seriesId;
+    if (currentSermon.seriesName) {
+      queueMicrotask(() => {
+        setSeries({
+          id: seriesId || '',
+          name: currentSermon.seriesName || '',
+          subtitle: '',
+          summary: '',
+          images: currentSermon.seriesImage ? [currentSermon.seriesImage] : [],
+          itemCount: 0,
+          publishedItemCount: 0,
+          status: 'draft',
+          subsplashId: '',
+          ownerId: '',
+          createdAt: null,
+          updatedAt: null,
+        });
+      });
+      return;
+    }
+
     if (!seriesId) {
       queueMicrotask(() => {
         setSeries(null);
@@ -329,7 +368,7 @@ const SermonListCard: FunctionComponent<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentSermon.seriesId]);
+  }, [currentSermon.seriesId, currentSermon.seriesImage, currentSermon.seriesName]);
 
   const handleCardClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -389,7 +428,12 @@ const SermonListCard: FunctionComponent<Props> = ({
         }}
         sx={{ flexShrink: 0 }}
       >
-        <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 24, md: 40 }, height: { xs: 20, sm: 24, md: 40 } }} loading={uploaderLoading} />
+        <UserAvatar
+          user={uploader}
+          fallbackLabel={uploaderName}
+          sx={{ width: { xs: 20, sm: 24, md: 40 }, height: { xs: 20, sm: 24, md: 40 } }}
+          loading={uploaderLoading}
+        />
       </Box>
     </Tooltip>
   );

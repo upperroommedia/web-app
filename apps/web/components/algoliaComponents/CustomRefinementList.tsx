@@ -1,7 +1,5 @@
 import Button from '@mui/material/Button';
-import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import FormGroup from '@mui/material/FormGroup';
 import FormLabel from '@mui/material/FormLabel';
 import Skeleton from '@mui/material/Skeleton';
@@ -9,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/system/Box';
 import { useInstantSearch, useRefinementList, UseRefinementListProps } from 'react-instantsearch';
+import { useEffect, useMemo, useState } from 'react';
 
 const normalizeLabel = (label: string) => {
   return label
@@ -24,8 +23,20 @@ const CustomRefinementList = (
 ) => {
   const { status, results } = useInstantSearch();
   const { items, refine, searchForItems, canToggleShowMore, isShowingMore, toggleShowMore } = useRefinementList(props);
+  const [stableItems, setStableItems] = useState(items);
+
+  useEffect(() => {
+    if (items.length > 0) {
+      queueMicrotask(() => {
+        setStableItems(items);
+      });
+    }
+  }, [items]);
+
+  const renderedItems = useMemo(() => (items.length > 0 ? items : stableItems), [items, stableItems]);
   const skeletonRows = props.attribute === 'speakers.name' ? 5 : 2;
-  const showSkeleton = results.__isArtificial || (items.length === 0 && (status === 'loading' || status === 'stalled'));
+  const showSkeleton =
+    results.__isArtificial || (renderedItems.length === 0 && (status === 'loading' || status === 'stalled'));
 
   if (showSkeleton) {
     return (
@@ -67,9 +78,12 @@ const CustomRefinementList = (
           onChange={(e) => searchForItems(e.currentTarget.value)}
         />
       )}
-      {items.map((item) => (
-        <FormControlLabel
+      {renderedItems.map((item, index) => (
+        <Box
+          component="label"
           sx={{
+            display: 'flex',
+            gap: 1,
             py: 0.125,
             pl: 0,
             pr: 0,
@@ -77,45 +91,45 @@ const CustomRefinementList = (
             ml: 0,
             width: '100%',
             alignItems: 'flex-start',
-            columnGap: 1,
-            '& .MuiFormControlLabel-label': {
-              flex: 1,
-              minWidth: 0,
-            },
+            cursor: 'pointer',
           }}
-          key={String(item.value)}
-          control={
-            <Checkbox
-              checked={item.isRefined}
-              disableRipple
-              size="small"
-              onChange={() => refine(item.value)}
+          key={`${String(item.value)}-${index}`}
+        >
+          <Box
+            component="input"
+            type="checkbox"
+            checked={item.isRefined}
+            onChange={() => refine(item.value)}
+            sx={{
+              mt: '2px',
+              mr: 0,
+              ml: 0,
+              width: '1rem',
+              height: '1rem',
+              minWidth: '1rem',
+              minHeight: '1rem',
+              flexShrink: 0,
+              cursor: 'pointer',
+              accentColor: 'primary.main',
+              appearance: 'auto',
+              WebkitAppearance: 'checkbox',
+            }}
+          />
+          <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
+            <Typography
               sx={{
-                p: 0,
-                mt: '2px',
-                mr: 0,
-                flexShrink: 0,
-                alignSelf: 'flex-start',
+                flex: 1,
+                minWidth: 0,
+                whiteSpace: 'normal',
+                overflowWrap: 'anywhere',
+                lineHeight: 1.3,
               }}
-            />
-          }
-          label={
-            <Box display="flex" alignItems="flex-start" gap={1} width="100%" minWidth={0}>
-              <Typography
-                sx={{
-                  flex: 1,
-                  minWidth: 0,
-                  whiteSpace: 'normal',
-                  overflowWrap: 'anywhere',
-                  lineHeight: 1.3,
-                }}
-              >
-                {normalizeLabel(item.label)}
-              </Typography>
-              <Chip label={item.count} size="small" sx={{ flexShrink: 0 }} />
-            </Box>
-          }
-        />
+            >
+              {normalizeLabel(item.label)}
+            </Typography>
+            <Chip label={item.count} size="small" sx={{ flexShrink: 0 }} />
+          </Box>
+        </Box>
       ))}
       {/* Add small MUI button for showMore */}
       {canToggleShowMore && (
