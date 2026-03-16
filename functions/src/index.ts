@@ -70,6 +70,7 @@ import createspeaker from './speakers/createSpeaker';
 import updatespeaker from './speakers/updateSpeaker';
 import deletespeaker from './speakers/deleteSpeaker';
 import getlistoverflowchain from './getListOverflowChain';
+import getlistpublisheddrift from './getListPublishedDrift';
 
 // Series functions
 import createseries from './createSeries';
@@ -79,6 +80,7 @@ import removefromseries from './removeFromSeries';
 import reorderseriesitems from './reorderSeriesItems';
 import bulkaddtoseries from './bulkAddToSeries';
 import reorderlistitems from './reorderListItems';
+import resolvelistpublisheddrift from './resolveListPublishedDrift';
 
 exports.uploadToSubsplash = uploadToSubsplash;
 exports.editSubsplashSermon = editSubsplashSermon;
@@ -146,6 +148,7 @@ exports.createspeaker = createspeaker;
 exports.updatespeaker = updatespeaker;
 exports.deletespeaker = deletespeaker;
 exports.getlistoverflowchain = getlistoverflowchain;
+exports.getlistpublisheddrift = getlistpublisheddrift;
 
 // Series exports
 exports.createseries = createseries;
@@ -155,3 +158,4 @@ exports.removefromseries = removefromseries;
 exports.reorderseriesitems = reorderseriesitems;
 exports.bulkaddtoseries = bulkaddtoseries;
 exports.reorderlistitems = reorderlistitems;
+exports.resolvelistpublisheddrift = resolvelistpublisheddrift;

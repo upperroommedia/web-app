@@ -22,6 +22,14 @@ import addToList from '../../addToList';
 import { SubsplashListRow } from '../../types/Subsplash';
 import axios from 'axios';
 
+jest.mock('../../helpers/publishedListDrift', () => {
+  const actual = jest.requireActual('../../helpers/publishedListDrift');
+  return {
+    ...actual,
+    ensureCanPerformStrictPublishedMutation: jest.fn().mockResolvedValue(undefined),
+  };
+});
+
 const addToListHandler = addToList as unknown as AddToListHandler;
 const axiosMock = axios as unknown as jest.Mock;
 

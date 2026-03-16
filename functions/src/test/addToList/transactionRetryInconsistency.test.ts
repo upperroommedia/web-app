@@ -28,6 +28,14 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import axios from 'axios';
 
+jest.mock('../../helpers/publishedListDrift', () => {
+  const actual = jest.requireActual('../../helpers/publishedListDrift');
+  return {
+    ...actual,
+    ensureCanPerformStrictPublishedMutation: jest.fn().mockResolvedValue(undefined),
+  };
+});
+
 const addToListHandler = addToList as unknown as AddToListHandler;
 const firestoreDB = firebaseAdmin.firestore();
 const axiosMock = axios as unknown as jest.Mock;

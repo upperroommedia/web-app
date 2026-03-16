@@ -64,6 +64,23 @@ import useAudioPlayer from '../../../context/audio/audioPlayerContext';
 import { useMediaState, useMediaRemote } from '@vidstack/react';
 import { createFunctionV2 } from '../../../utils/createFunction';
 import { createOperationKey, parseLockBusyDetails } from '../../../utils/callableConcurrency';
+import {
+  createSubsplashDeleteIntentKey,
+  createSubsplashListAddIntentKey,
+  createSubsplashListCreateIntentKey,
+  createSubsplashListRemoveIntentKey,
+  createSubsplashSeriesCreateIntentKey,
+  createSubsplashSeriesPublishIntentKey,
+  createSubsplashSeriesReorderIntentKey,
+  createSubsplashSeriesRollbackIntentKey,
+  createSubsplashSeriesUnpublishIntentKey,
+  createSubsplashUploadIntentKey,
+  didAllListPublishesSucceed,
+  getNextPublishGeneration,
+  getSermonSubsplashStatusAfterListMutation,
+  summarizeListPublishErrors,
+} from '../../../utils/subsplashPublishFlow';
+import { runSubsplashSeriesPublishSaga } from '../../../utils/subsplashSeriesPublishSaga';
 import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '@upperroom/contracts/uploadToSoundCloud';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
 import { AddtoListInputType, AddToListOutputType } from '@upperroom/contracts/addToList';
@@ -364,7 +381,11 @@ const SermonDetailsPage = () => {
       const subsplashIdToListIdMap = new Map<string, string>();
       const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
-      const uploadOperationKey = createOperationKey('sermon-admin-upload', sermon.id);
+      const uploadOperationKey = createSubsplashUploadIntentKey(
+        'sermon-admin-upload',
+        sermon.id,
+        sermon.subsplashUploadGeneration
+      );
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
 
       const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
@@ -405,7 +426,7 @@ const SermonDetailsPage = () => {
             title: list.name,
             subtitle: '',
             images: list.images,
-            operationKey: createOperationKey('sermon-admin-list-create', `${sermon.id}-${list.id}`),
+            operationKey: createSubsplashListCreateIntentKey('sermon-admin-list-create', sermon.id, list.id),
           });
           await updateDoc(doc(firestore, `lists/${list.id}`), { subsplashId: listId });
           subsplashIdToListIdMap.set(listId, list.id);
@@ -413,25 +434,92 @@ const SermonDetailsPage = () => {
         })
       );
 
-      const addToListReturn = await addToList({
-        destinationListIds: listsMetadata.map(m => m.listId),
-        mediaItem: { id, type: 'media-item' },
-        operationKey: createOperationKey('sermon-admin-list-add', sermon.id),
-      });
+      const addToListReturn = listsMetadata.length === 0
+        ? []
+        : await addToList({
+          destinationListIds: listsMetadata.map((m) => m.listId),
+          mediaItem: { id, type: 'media-item' },
+          operationKey: createSubsplashListAddIntentKey(
+            'sermon-admin-list-add',
+            sermon.id,
+            listsToUploadTo.map((list) => ({
+              id: list.id,
+              publishGeneration: list.publishGeneration,
+            }))
+          ),
+        });
+      const targetListIds = listsMetadata.map((m) => m.listId);
 
       const batch = writeBatch(firestore);
+      const listsById = new Map(listsToUploadTo.map((list) => [list.id, list]));
       addToListReturn.forEach((r) => {
         const listId = subsplashIdToListIdMap.get(r.listId);
         if (!listId) return;
         const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`).withConverter(sermonListConverter);
+        const list = listsById.get(listId);
+        if (!list) {
+          throw new Error(`List metadata for firestore list ${listId} not found`);
+        }
         if (r.status === 'success') {
-          batch.update(docRef, { uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId } });
+          const actualPlacement =
+            r.actualPlacement ??
+            {
+              firestoreListId: listId,
+              subsplashListId: r.listId,
+              overflowDepth: 0,
+              position: 1,
+              listItemId: r.listItemId,
+            };
+          batch.set(
+            docRef,
+            {
+              ...list,
+              publishGeneration: list.publishGeneration ?? 0,
+              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId },
+            },
+            { merge: true }
+          );
+          batch.set(
+            doc(firestore, 'lists', listId, 'listItems', sermon.id),
+            {
+              subsplashId: id,
+              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId },
+              physicalPlacement: actualPlacement,
+            },
+            { merge: true }
+          );
         } else {
-          batch.update(docRef, { uploadStatus: { status: uploadStatus.ERROR, reason: r.error } });
+          batch.set(
+            docRef,
+            {
+              ...list,
+              publishGeneration: list.publishGeneration ?? 0,
+              uploadStatus: { status: uploadStatus.ERROR, reason: r.error },
+            },
+            { merge: true }
+          );
+          batch.set(
+            doc(firestore, 'lists', listId, 'listItems', sermon.id),
+            {
+              subsplashId: id,
+              uploadStatus: { status: uploadStatus.ERROR, reason: r.error },
+            },
+            { merge: true }
+          );
         }
       });
-      batch.update(sermonRef, { status: { ...sermon.status, subsplash: uploadStatus.UPLOADED }, approverId: user?.uid });
+      batch.update(sermonRef, {
+        status: {
+          ...sermon.status,
+          subsplash: getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
+        },
+        approverId: user?.uid,
+      });
       await batch.commit();
+      if (!didAllListPublishesSucceed(targetListIds, addToListReturn)) {
+        alert(summarizeListPublishErrors(targetListIds, addToListReturn) || 'One or more list publishes failed.');
+        return undefined;
+      }
       return id;
     } catch (error) {
       console.error('Error uploading to Subsplash:', error);
@@ -460,7 +548,11 @@ const SermonDetailsPage = () => {
         listItemIds: listsToRemoveFiltered.map((list) => list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : '') as string[],
         itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
         itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
-        operationKey: createOperationKey('sermon-admin-list-remove', sermon.id),
+        operationKey: createSubsplashListRemoveIntentKey(
+          'sermon-admin-list-remove',
+          sermon.id,
+          listsToRemoveFiltered.map((list) => list.subsplashId).filter((listId): listId is string => Boolean(listId))
+        ),
       });
 
       const batch = writeBatch(firestore);
@@ -471,7 +563,10 @@ const SermonDetailsPage = () => {
         const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${firestoreListId}`).withConverter(sermonListConverter);
         const docSnapshot = await getDoc(docRef);
         if (!docSnapshot.exists()) continue;
-        batch.update(docRef, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
+        batch.update(docRef, {
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+          publishGeneration: getNextPublishGeneration(docSnapshot.data().publishGeneration),
+        });
       }
       await batch.commit();
     } catch (error) {
@@ -483,7 +578,7 @@ const SermonDetailsPage = () => {
   const deleteFromSubsplash = useCallback(async () => {
     if (!sermon) return;
     const deleteFromSubsplashCall = createFunctionV2<{ subsplashId: string }, void>('deletefromsubsplash');
-    const deleteOperationKey = createOperationKey('sermon-admin-delete', sermon.id);
+    const deleteOperationKey = createSubsplashDeleteIntentKey('sermon-admin-delete', sermon.id);
     try {
       setIsUploadingToSubsplash(true);
       if (sermon.subsplashId) {
@@ -497,7 +592,10 @@ const SermonDetailsPage = () => {
       const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
       const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
       sermonSeriesListSnapshot.forEach((docSnap) => {
-        batch.update(docSnap.ref, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
+        batch.update(docSnap.ref, {
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+          publishGeneration: getNextPublishGeneration(docSnap.data().publishGeneration),
+        });
       });
       if (sermon.seriesId) {
         const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
@@ -511,12 +609,21 @@ const SermonDetailsPage = () => {
       }
       batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
         subsplashId: deleteField(),
+        subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
         status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
       });
       await batch.commit();
     } catch (error: unknown) {
       if (getErrorField(error, 'code') === 'functions/not-found') {
         const batch = writeBatch(firestore);
+        const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
+        const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
+        sermonSeriesListSnapshot.forEach((docSnap) => {
+          batch.update(docSnap.ref, {
+            uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+            publishGeneration: getNextPublishGeneration(docSnap.data().publishGeneration),
+          });
+        });
         if (sermon.seriesId) {
           const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
           const seriesItemSnapshot = await getDoc(seriesItemRef);
@@ -529,6 +636,7 @@ const SermonDetailsPage = () => {
         }
         batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
           subsplashId: deleteField(),
+          subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
           status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
         });
         await batch.commit();
@@ -607,7 +715,7 @@ const SermonDetailsPage = () => {
         firestoreId: targetSeries.id,
         skipSubsplash: false,
         images: targetSeries.images,
-        operationKey: createOperationKey('sermon-admin-series-create', targetSeries.id),
+        operationKey: createSubsplashSeriesCreateIntentKey('sermon-admin-series-create', targetSeries.id),
       });
 
       if (createResult.status !== 'success' || !createResult.subsplashId) {
@@ -625,97 +733,105 @@ const SermonDetailsPage = () => {
       ));
     }
 
+    const seriesItemRef = doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id);
     const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
-    const addResult = await addToSeriesFunction({
-      seriesSubsplashId,
-      mediaItemId,
-      operationKey: createOperationKey('sermon-admin-series-publish', sermon.id),
-    });
-    if (!addResult || addResult.status !== 'success') {
-      throw new Error(addResult?.error || 'Failed to add sermon to series.');
-    }
-    const confirmedMediaItemId = addResult.mediaItemId || mediaItemId;
-    // Subsplash is source of truth: once add succeeds, mark published immediately.
-    await setDoc(
-      doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id),
-      {
-        publishedToSubsplash: true,
-        sermonSubsplashId: confirmedMediaItemId,
-      },
-      { merge: true }
-    );
+    const reorderSeriesFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
+    const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
 
-    const orderedItemsSnapshot = await getDocs(
-      query(collection(firestore, `series/${resolvedSeries.id}/seriesItems`), orderBy('position', 'desc'))
-    );
-    const targetExistsInOrder = orderedItemsSnapshot.docs.some((seriesItemDoc) => seriesItemDoc.id === sermon.id);
-    if (!targetExistsInOrder) {
-      throw new Error('Sermon is missing from Firestore series order. Refresh and retry.');
-    }
+    const sagaResult = await runSubsplashSeriesPublishSaga({
+      ensureSeriesSubsplashId: async () => seriesSubsplashId as string,
+      addToSeries: async (resolvedSeriesSubsplashId) =>
+        addToSeriesFunction({
+          seriesSubsplashId: resolvedSeriesSubsplashId,
+          mediaItemId,
+          operationKey: createSubsplashSeriesPublishIntentKey(
+            'sermon-admin-series-publish',
+            sermon.id,
+            resolvedSeries.id
+          ),
+        }),
+      reorderSeries: async (resolvedMediaItemId) => {
+        const orderedItemsSnapshot = await getDocs(
+          query(collection(firestore, `series/${resolvedSeries.id}/seriesItems`), orderBy('position', 'desc'))
+        );
+        const targetExistsInOrder = orderedItemsSnapshot.docs.some((seriesItemDoc) => seriesItemDoc.id === sermon.id);
+        if (!targetExistsInOrder) {
+          throw new Error('Sermon is missing from Firestore series order. Refresh and retry.');
+        }
 
-    const publishedItems = orderedItemsSnapshot.docs
-      .map((seriesItemDoc) => {
-        const data = seriesItemDoc.data() as { publishedToSubsplash?: boolean; sermonSubsplashId?: string };
-        const isPublished = seriesItemDoc.id === sermon.id ? true : data.publishedToSubsplash === true;
-        const itemMediaItemId = seriesItemDoc.id === sermon.id
-          ? confirmedMediaItemId
-          : data.sermonSubsplashId;
-        return {
-          sermonId: seriesItemDoc.id,
-          isPublished,
-          mediaItemId: itemMediaItemId,
-        };
-      })
-      .filter((item) => item.isPublished);
+        const publishedItems = orderedItemsSnapshot.docs
+          .map((seriesItemDoc) => {
+            const data = seriesItemDoc.data() as { publishedToSubsplash?: boolean; sermonSubsplashId?: string };
+            const isPublished = seriesItemDoc.id === sermon.id ? true : data.publishedToSubsplash === true;
+            const itemMediaItemId = seriesItemDoc.id === sermon.id
+              ? resolvedMediaItemId
+              : data.sermonSubsplashId;
+            return {
+              sermonId: seriesItemDoc.id,
+              isPublished,
+              mediaItemId: itemMediaItemId,
+            };
+          })
+          .filter((item) => item.isPublished);
 
-    const missingMediaId = publishedItems.find((item) => !item.mediaItemId);
-    if (missingMediaId) {
-      throw new Error(`Published series item ${missingMediaId.sermonId} is missing a Subsplash media ID.`);
-    }
+        const missingMediaId = publishedItems.find((item) => !item.mediaItemId);
+        if (missingMediaId) {
+          throw new Error(`Published series item ${missingMediaId.sermonId} is missing a Subsplash media ID.`);
+        }
 
-    try {
-      const reorderSeriesFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
-      const reorderResult = await reorderSeriesFunction({
-        firestoreSeriesId: resolvedSeries.id,
-        itemOrder: publishedItems.map((item, index) => ({
-          mediaItemId: item.mediaItemId as string,
-          // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
-          position: publishedItems.length - index,
-        })),
-        operationKey: createOperationKey('sermon-admin-series-reorder', resolvedSeries.id),
-      });
-      if (reorderResult.status !== 'success') {
-        throw new Error(reorderResult.message || 'Subsplash reorder failed.');
-      }
-    } catch (reorderError: unknown) {
-      const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-      try {
-        await removeFromSeriesFunction({
-          mediaItemId: confirmedMediaItemId,
-          operationKey: createOperationKey('sermon-admin-series-rollback', sermon.id),
+        const reorderResult = await reorderSeriesFunction({
+          firestoreSeriesId: resolvedSeries.id,
+          itemOrder: publishedItems.map((item, index) => ({
+            mediaItemId: item.mediaItemId as string,
+            position: publishedItems.length - index,
+          })),
+          operationKey: createSubsplashSeriesReorderIntentKey(
+            'sermon-admin-series-reorder',
+            resolvedSeries.id,
+            publishedItems.map((item) => item.mediaItemId as string)
+          ),
         });
+        if (reorderResult.status !== 'success') {
+          throw new Error(reorderResult.message || 'Subsplash reorder failed.');
+        }
+      },
+      rollbackSeriesMembership: async (resolvedMediaItemId) => {
+        const rollbackResult = await removeFromSeriesFunction({
+          mediaItemId: resolvedMediaItemId,
+          operationKey: createSubsplashSeriesRollbackIntentKey(
+            'sermon-admin-series-rollback',
+            sermon.id,
+            resolvedSeries.id
+          ),
+        });
+        if (rollbackResult.status !== 'success') {
+          throw new Error(rollbackResult.message || 'Failed to rollback series membership.');
+        }
+      },
+      persistLocalPublished: async (resolvedMediaItemId) => {
         await setDoc(
-          doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id),
+          seriesItemRef,
+          {
+            publishedToSubsplash: true,
+            sermonSubsplashId: resolvedMediaItemId,
+          },
+          { merge: true }
+        );
+      },
+      persistLocalUnpublished: async () => {
+        await setDoc(
+          seriesItemRef,
           {
             publishedToSubsplash: false,
             sermonSubsplashId: deleteField(),
           },
           { merge: true }
         );
-        throw new Error(getErrorMessage(reorderError, 'Subsplash reorder failed.'));
-      } catch (rollbackError: unknown) {
-        await setDoc(
-          doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id),
-          {
-            publishedToSubsplash: true,
-            sermonSubsplashId: confirmedMediaItemId,
-          },
-          { merge: true }
-        );
-        throw new Error(
-          `Series reorder failed and rollback failed. ${sermon.title} remains published in Subsplash and has been kept published locally. Reorder error: ${getErrorMessage(reorderError, 'Unknown')}; rollback error: ${getErrorMessage(rollbackError, 'Unknown')}.`
-        );
-      }
+      },
+    });
+
+    if (sagaResult.status !== 'success') {
+      throw new Error(sagaResult.error || 'Failed to publish sermon to series.');
     }
 
     await refreshSeriesState(resolvedSeries.id);
@@ -854,7 +970,11 @@ const SermonDetailsPage = () => {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         await removeFromSeriesFunction({
           mediaItemId,
-          operationKey: createOperationKey('sermon-admin-series-unpublish', sermon.id),
+          operationKey: createSubsplashSeriesUnpublishIntentKey(
+            'sermon-admin-series-unpublish',
+            sermon.id,
+            series.id
+          ),
         });
       }
 

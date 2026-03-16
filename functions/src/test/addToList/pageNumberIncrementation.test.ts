@@ -7,6 +7,14 @@ import {
 import { createListDocument, clearFirestore, getListBySubsplashId } from './firestoreHelpers';
 import addToList from '../../addToList';
 
+jest.mock('../../helpers/publishedListDrift', () => {
+  const actual = jest.requireActual('../../helpers/publishedListDrift');
+  return {
+    ...actual,
+    ensureCanPerformStrictPublishedMutation: jest.fn().mockResolvedValue(undefined),
+  };
+});
+
 const addToListHandler = addToList as unknown as AddToListHandler;
 
 describe('addToList - Page Number Incrementation', () => {
@@ -177,6 +185,8 @@ describe('addToList - Page Number Incrementation', () => {
     expect(page3List!.subtitle).toBe('Page 3');
 
     const rootDoc = await getListBySubsplashId(rootListId);
+    const refreshedPage1Doc = await getListBySubsplashId(page1ListId!);
+    const refreshedPage2Doc = await getListBySubsplashId(page2ListId!);
     const page3Doc = await getListBySubsplashId(page3ListId!);
     expect(rootDoc!.data()).toMatchObject({
       count: 4,
@@ -186,8 +196,8 @@ describe('addToList - Page Number Incrementation', () => {
       rootListId: rootFirestoreId,
       overflowDepth: 0,
     });
-    expect(page1Doc!.data().count).toBe(4);
-    expect(page2Doc!.data().count).toBe(4);
+    expect(refreshedPage1Doc!.data().count).toBe(4);
+    expect(refreshedPage2Doc!.data().count).toBe(4);
     expect(page3Doc!.data()).toMatchObject({
       count: 2,
       name: 'More Original List sermons',

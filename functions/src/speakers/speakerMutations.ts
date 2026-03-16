@@ -10,6 +10,7 @@ import { createNewSubsplashList } from '../createNewSubsplashList';
 import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import { withIdempotency } from '../locks/withIdempotency';
 import { withSubsplashLocks } from '../locks/withSubsplashLocks';
+import { buildRootListMetadata } from '../helpers/listOverflowChain';
 import {
   CreateSpeakerCallableInputType,
   CreateSpeakerCallableOutputType,
@@ -311,6 +312,11 @@ const prepareSpeakerList = async (
       createdAtMillis: now,
       updatedAtMillis: now,
       subsplashId: createResult.listId,
+      ...buildRootListMetadata({
+        rootListId: listRef.id,
+        logicalCount: 0,
+        hasOverflowPages: false,
+      }),
     },
   };
 };

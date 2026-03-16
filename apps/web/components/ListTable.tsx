@@ -32,7 +32,10 @@ import SearchIcon from '@mui/icons-material/Search';
 import { visuallyHidden } from '@mui/utils';
 import { Order } from '../context/types';
 import { List, ListType } from '../types/List';
-import { getDefaultListSortOrder, isListSortableProperty } from '../utils/algolia/listSorting';
+import {
+  getDefaultListSortOrder,
+  type ListSortableProperty,
+} from '../utils/algolia/listSorting';
 import { getListDiscoveryCount, getListOverflowIndicator } from '../utils/algolia/searchRecords';
 
 interface HeadCell {
@@ -55,13 +58,13 @@ interface ListTableProps {
   rowsPerPage: number;
   totalLists: number;
   sortOrder: Order;
-  sortProperty: keyof List;
+  sortProperty: ListSortableProperty;
   searchValue: string;
   listTypeFilter: ListType | '';
   loading?: boolean;
   handlePageChange: (newPage: number) => void;
   handleChangeRowsPerPage: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
-  handleSort: (property: keyof List, order: Order) => Promise<void>;
+  handleSort: (property: ListSortableProperty, order: Order) => Promise<void>;
   onSearchChange: (value: string) => void;
   onFilterChange: (value: ListType | '') => void;
   onAddList: () => void;
@@ -78,9 +81,9 @@ const ListTableHead = ({
 }: {
   order: Order;
   orderBy: string;
-  onRequestSort: (event: MouseEvent<HTMLElement>, property: keyof List) => void;
+  onRequestSort: (event: MouseEvent<HTMLElement>, property: ListSortableProperty) => void;
 }) => {
-  const createSortHandler = (property: keyof List) => (event: MouseEvent<HTMLElement>) => {
+  const createSortHandler = (property: ListSortableProperty) => (event: MouseEvent<HTMLElement>) => {
     onRequestSort(event, property);
   };
 
@@ -145,15 +148,13 @@ const ListTable = ({
   const showInitialLoadingState = loading && lists.length === 0;
   const showBackgroundLoadingState = loading && lists.length > 0;
 
-  const handleRequestSort = async (_: MouseEvent<HTMLElement>, property: keyof List) => {
+  const handleRequestSort = async (_: MouseEvent<HTMLElement>, property: ListSortableProperty) => {
     const nextOrder =
       sortProperty === property
         ? sortOrder === 'asc'
           ? 'desc'
           : 'asc'
-        : isListSortableProperty(property)
-        ? getDefaultListSortOrder(property)
-        : 'asc';
+        : getDefaultListSortOrder(property);
     await handleSort(property, nextOrder);
   };
 

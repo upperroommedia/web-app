@@ -5,6 +5,7 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminListConverter } from '../../firestoreDataConverter';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
+import type { Sermon } from '@upperroom/shared/types/SermonTypes';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -18,6 +19,7 @@ export interface ListDocumentData {
   count?: number;
   logicalCount?: number;
   hasOverflowPages?: boolean;
+  maxListSize?: number;
   images?: unknown[];
   isMoreSermonsList?: boolean;
   isRootList?: boolean;
@@ -51,6 +53,7 @@ export async function createListDocument(data: ListDocumentData): Promise<string
       'moreSermonsRef',
       'logicalCount',
       'hasOverflowPages',
+      'maxListSize',
       'isRootList',
       'rootListId',
       'overflowDepth',
@@ -71,14 +74,7 @@ export async function createListDocument(data: ListDocumentData): Promise<string
 export async function clearFirestore(): Promise<void> {
   const collections = await firestoreDB.listCollections();
   for (const collection of collections) {
-    const snapshot = await collection.get();
-    const batch = firestoreDB.batch();
-    snapshot.docs.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-    if (snapshot.docs.length > 0) {
-      await batch.commit();
-    }
+    await firestoreDB.recursiveDelete(collection);
   }
 }
 
@@ -97,4 +93,15 @@ export async function getListBySubsplashId(subsplashId: string) {
     return null;
   }
   return snapshot.docs[0];
+}
+
+export async function createSermonDocument(sermon: Sermon): Promise<void> {
+  const payload = Object.fromEntries(
+    Object.entries({
+      ...sermon,
+      date: firebaseAdmin.firestore.Timestamp.fromMillis(sermon.dateMillis),
+    }).filter(([, value]) => value !== undefined)
+  );
+
+  await firestoreDB.collection('sermons').doc(sermon.id).set(payload);
 }

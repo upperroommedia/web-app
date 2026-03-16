@@ -5,6 +5,24 @@ import { IdempotencyRecord } from './lockTypes';
 
 const IDEMPOTENCY_COLLECTION = 'subsplashOperationKeys';
 
+const sanitizeFirestoreValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeFirestoreValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, nestedValue]) => [key, sanitizeFirestoreValue(nestedValue)] as const)
+        .filter(([, nestedValue]) => nestedValue !== undefined)
+    );
+  }
+
+  return value === undefined ? undefined : value;
+};
+
 const getIdempotencyRef = (operationKey: string): ReturnType<ReturnType<typeof firebaseAdmin.firestore>['doc']> => {
   return firebaseAdmin.firestore().collection(IDEMPOTENCY_COLLECTION).doc(operationKey);
 };
@@ -143,11 +161,12 @@ export const completeOperation = async (
 ): Promise<IdempotencyRecord> => {
   const nowMs = Date.now();
   const ref = getIdempotencyRef(operationKey);
+  const sanitizedResult = sanitizeFirestoreValue(result);
 
   await ref.set({
     operationKey,
     status: 'completed',
-    result,
+    ...(sanitizedResult !== undefined ? { result: sanitizedResult } : { result: FieldValue.delete() }),
     updatedAtMs: nowMs,
     completedAtMs: nowMs,
     failure: FieldValue.delete(),

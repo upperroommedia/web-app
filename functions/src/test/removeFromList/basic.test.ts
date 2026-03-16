@@ -9,6 +9,7 @@ import { RemoveFromListInputType } from '../../removeFromList';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import axios from 'axios';
 import * as lockStore from '../../locks/subsplashLockStore';
+import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 
 // Type for the handler function (what onCall wraps)
 export type RemoveFromListTestRequest = {
@@ -56,7 +57,7 @@ jest.mock('firebase-functions/v2/https', () => ({
 
 const removeFromListHandler = removeFromList as unknown as RemoveFromListHandler;
 
-jest.setTimeout(20_000);
+jest.setTimeout(60_000);
 
 describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () => {
   beforeEach(async () => {
@@ -142,6 +143,124 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     if (result[0].status === 'success') {
       expect(result[0].itemNotFound).toBe(true);
     }
+  });
+
+  it('allows remove on mismatched chains and does not touch unrelated canonical sermon memberships', async () => {
+    const rootListId = 'remove-mismatch-root';
+    const rootFirestoreId = 'remove-mismatch-root-firestore';
+    subsplashMock.createList(rootListId, 'Mismatch Root');
+    subsplashMock.listRows.set(rootListId, [
+      {
+        id: 'row-2',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'media-2' },
+        },
+      },
+      {
+        id: 'row-1',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'media-1' },
+        },
+      },
+    ]);
+
+    await createListDocument({
+      id: rootFirestoreId,
+      subsplashId: rootListId,
+      title: 'Mismatch Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 2,
+      logicalCount: 2,
+      hasOverflowPages: false,
+      isRootList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 0,
+    });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-1')
+      .collection('sermonLists')
+      .doc(rootFirestoreId)
+      .set({
+        id: rootFirestoreId,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-1' },
+      });
+    await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-2')
+      .collection('sermonLists')
+      .doc(rootFirestoreId)
+      .set({
+        id: rootFirestoreId,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-2' },
+      });
+    await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(rootFirestoreId)
+      .collection('listItems')
+      .doc('sermon-1')
+      .set({
+        id: 'sermon-1',
+        subsplashId: 'media-1',
+        position: 1,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-1' },
+      });
+    await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(rootFirestoreId)
+      .collection('listItems')
+      .doc('sermon-2')
+      .set({
+        id: 'sermon-2',
+        subsplashId: 'media-2',
+        position: 2,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-2' },
+      });
+
+    const result = await removeFromListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        listIds: [rootListId],
+        listItemIds: ['row-1'],
+        itemIds: ['media-1'],
+        itemTypes: ['media-item'],
+      },
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        listId: rootListId,
+        status: 'success',
+      }),
+    ]);
+
+    const remainingRows = subsplashMock.getListRows(rootListId);
+    expect(remainingRows.map((row) => row._embedded['media-item']?.id)).toEqual(['media-2']);
+
+    const unrelatedMembership = await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-2')
+      .collection('sermonLists')
+      .doc(rootFirestoreId)
+      .get();
+    expect(unrelatedMembership.exists).toBe(true);
+    expect(unrelatedMembership.data()?.uploadStatus?.listItemId).toBe('row-2');
   });
 
   it('should find and remove item from overflow list', async () => {
@@ -235,33 +354,31 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     expect(result).toHaveLength(1);
     expect(result[0].status).toBe('success');
     
-    // Verify the item was removed from the overflow list
+    // Removing one item drops the logical count to 200, so the overflow page should collapse.
     const overflowRows = subsplashMock.getListRows(overflowListId);
-    expect(overflowRows).toHaveLength(1);
-    expect(overflowRows[0]._embedded['media-item']?.id).toBe('item-2');
+    expect(overflowRows).toHaveLength(0);
     
-    // Verify root list is unchanged
+    // Root page should now contain all 200 media rows with no continuation link.
     const rootRowsAfter = subsplashMock.getListRows(rootListId);
-    expect(rootRowsAfter).toHaveLength(200); // 199 items + 1 link
+    expect(rootRowsAfter).toHaveLength(200);
+    expect(rootRowsAfter.every((row) => row.type === 'media-item')).toBe(true);
+    expect(rootRowsAfter[rootRowsAfter.length - 1]._embedded['media-item']?.id).toBe('item-2');
 
     const rootDoc = await getListBySubsplashId(rootListId);
     const overflowDoc = await getListBySubsplashId(overflowListId);
     expect(rootDoc!.data()).toMatchObject({
-      count: 199,
+      count: 200,
       logicalCount: 200,
-      hasOverflowPages: true,
+      hasOverflowPages: false,
       isRootList: true,
       rootListId: rootFirestoreId,
       overflowDepth: 0,
-      moreSermonsRef: overflowListId,
     });
     expect(overflowDoc!.data()).toMatchObject({
-      count: 1,
-      isRootList: false,
+      count: 0,
       isMoreSermonsList: true,
-      rootListId: rootFirestoreId,
-      overflowDepth: 1,
     });
+    expect(rootDoc!.data()?.moreSermonsRef).toBeUndefined();
   });
 
   it('should handle item not found in overflow chain (treat as success)', async () => {

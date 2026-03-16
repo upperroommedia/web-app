@@ -42,7 +42,24 @@ import { sermonConverter } from '../types/Sermon';
 import { Sermon, uploadStatus } from '../types/SermonTypes';
 import { Series, seriesConverter } from '../types/Series';
 import { createFunctionV2 } from '../utils/createFunction';
-import { createOperationKey, parseLockBusyDetails } from '../utils/callableConcurrency';
+import { parseLockBusyDetails } from '../utils/callableConcurrency';
+import {
+  createSubsplashDeleteIntentKey,
+  createSubsplashListAddIntentKey,
+  createSubsplashListCreateIntentKey,
+  createSubsplashListRemoveIntentKey,
+  createSubsplashSeriesCreateIntentKey,
+  createSubsplashSeriesPublishIntentKey,
+  createSubsplashSeriesReorderIntentKey,
+  createSubsplashSeriesRollbackIntentKey,
+  createSubsplashSeriesUnpublishIntentKey,
+  createSubsplashUploadIntentKey,
+  didAllListPublishesSucceed,
+  getNextPublishGeneration,
+  getSermonSubsplashStatusAfterListMutation,
+  summarizeListPublishErrors,
+} from '../utils/subsplashPublishFlow';
+import { runSubsplashSeriesPublishSaga } from '../utils/subsplashSeriesPublishSaga';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { SermonList, sermonListConverter } from '../types/SermonList';
@@ -259,7 +276,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   // ==================== Subsplash Functions ====================
   const deleteFromSubsplash = useCallback(async () => {
     const deleteFromSubsplashCall = createFunctionV2<{ subsplashId: string }, void>('deletefromsubsplash');
-    const deleteOperationKey = createOperationKey('manage-publishing-delete', sermon.id);
+    const deleteOperationKey = createSubsplashDeleteIntentKey('manage-publishing-delete', sermon.id);
     try {
       setIsUploadingToSubsplash(true);
       if (sermon.subsplashId) {
@@ -273,7 +290,10 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
       const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
       sermonSeriesListSnapshot.forEach((docSnap) => {
-        batch.update(docSnap.ref, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
+        batch.update(docSnap.ref, {
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+          publishGeneration: getNextPublishGeneration(docSnap.data().publishGeneration),
+        });
       });
       if (sermon.seriesId) {
         const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
@@ -287,6 +307,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       }
       batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
         subsplashId: deleteField(),
+        subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
         status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
       });
       await batch.commit();
@@ -296,6 +317,14 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       if (getErrorField(error, 'code') === 'functions/not-found') {
         // Item already deleted from Subsplash
         const batch = writeBatch(firestore);
+        const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
+        const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
+        sermonSeriesListSnapshot.forEach((docSnap) => {
+          batch.update(docSnap.ref, {
+            uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+            publishGeneration: getNextPublishGeneration(docSnap.data().publishGeneration),
+          });
+        });
         if (sermon.seriesId) {
           const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
           const seriesItemSnapshot = await getDoc(seriesItemRef);
@@ -308,6 +337,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         }
         batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
           subsplashId: deleteField(),
+          subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
           status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
         });
         await batch.commit();
@@ -331,7 +361,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const subsplashIdToListIdMap = new Map<string, string>();
       const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
-      const uploadOperationKey = createOperationKey('manage-publishing-upload', sermon.id);
+      const uploadOperationKey = createSubsplashUploadIntentKey(
+        'manage-publishing-upload',
+        sermon.id,
+        sermon.subsplashUploadGeneration
+      );
       const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
       const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
         title: sermon.title,
@@ -371,7 +405,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
             title: list.name,
             subtitle: '',
             images: list.images,
-            operationKey: createOperationKey('manage-publishing-list-create', `${sermon.id}-${list.id}`),
+            operationKey: createSubsplashListCreateIntentKey('manage-publishing-list-create', sermon.id, list.id),
           });
           await updateDoc(doc(firestore, `lists/${list.id}`), { subsplashId: listId });
           subsplashIdToListIdMap.set(listId, list.id);
@@ -379,13 +413,24 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         })
       );
 
-      const addToListReturn = await addToList({
-        destinationListIds: listsMetadata.map(m => m.listId),
-        mediaItem: { id, type: 'media-item' },
-        operationKey: createOperationKey('manage-publishing-list-add', sermon.id),
-      });
+      const addToListReturn = listsMetadata.length === 0
+        ? []
+        : await addToList({
+          destinationListIds: listsMetadata.map((m) => m.listId),
+          mediaItem: { id, type: 'media-item' },
+          operationKey: createSubsplashListAddIntentKey(
+            'manage-publishing-list-add',
+            sermon.id,
+            listsToUploadTo.map((list) => ({
+              id: list.id,
+              publishGeneration: list.publishGeneration,
+            }))
+          ),
+        });
+      const targetListIds = listsMetadata.map((m) => m.listId);
 
       const batch = writeBatch(firestore);
+      const listsById = new Map(listsToUploadTo.map((list) => [list.id, list]));
 
       addToListReturn.forEach((r) => {
         const listId = subsplashIdToListIdMap.get(r.listId);
@@ -393,20 +438,82 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
           throw new Error(`ListId for subsplashList ${r.listId} not found`);
         }
         const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`).withConverter(sermonListConverter);
+        const list = listsById.get(listId);
+        if (!list) {
+          throw new Error(`List metadata for firestore list ${listId} not found`);
+        }
         if (r.status === 'success') {
-          batch.update(docRef, { uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId } });
+          const actualPlacement =
+            r.actualPlacement ??
+            {
+              firestoreListId: listId,
+              subsplashListId: r.listId,
+              overflowDepth: 0,
+              position: 1,
+              listItemId: r.listItemId,
+            };
+          batch.set(
+            docRef,
+            {
+              ...list,
+              publishGeneration: list.publishGeneration ?? 0,
+              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId },
+            },
+            { merge: true }
+          );
+          batch.set(
+            doc(firestore, 'lists', listId, 'listItems', sermon.id),
+            {
+              subsplashId: id,
+              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId },
+              physicalPlacement: actualPlacement,
+            },
+            { merge: true }
+          );
         } else {
-          batch.update(docRef, { uploadStatus: { status: uploadStatus.ERROR, reason: r.error } });
+          batch.set(
+            docRef,
+            {
+              ...list,
+              publishGeneration: list.publishGeneration ?? 0,
+              uploadStatus: { status: uploadStatus.ERROR, reason: r.error },
+            },
+            { merge: true }
+          );
+          batch.set(
+            doc(firestore, 'lists', listId, 'listItems', sermon.id),
+            {
+              subsplashId: id,
+              uploadStatus: { status: uploadStatus.ERROR, reason: r.error },
+            },
+            { merge: true }
+          );
         }
       });
 
+      const listsPublishedSuccessfully = didAllListPublishesSucceed(targetListIds, addToListReturn);
       batch.update(sermonRef, {
-        status: { ...sermon.status, subsplash: uploadStatus.UPLOADED },
+        status: {
+          ...sermon.status,
+          subsplash: getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
+        },
         approverId: user?.uid,
       });
 
       await batch.commit();
       onUpdate?.();
+      if (!listsPublishedSuccessfully) {
+        const partialErrorMessage =
+          summarizeListPublishErrors(targetListIds, addToListReturn) || 'One or more list publishes failed.';
+        if (!options?.suppressAlert) {
+          alert(partialErrorMessage);
+        }
+        return {
+          status: 'error',
+          mediaItemId: id,
+          error: partialErrorMessage,
+        };
+      }
       return {
         status: 'success',
         mediaItemId: id,
@@ -447,7 +554,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         ) as string[],
         itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
         itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
-        operationKey: createOperationKey('manage-publishing-list-remove', sermon.id),
+        operationKey: createSubsplashListRemoveIntentKey(
+          'manage-publishing-list-remove',
+          sermon.id,
+          listsToRemoveFiltered.map((list) => list.subsplashId).filter((listId): listId is string => Boolean(listId))
+        ),
       });
       
       const batch = writeBatch(firestore);
@@ -459,7 +570,10 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${firestoreListId}`).withConverter(sermonListConverter);
         const docSnapshot = await getDoc(docRef);
         if (!docSnapshot.exists()) continue;
-        batch.update(docRef, { uploadStatus: { status: uploadStatus.NOT_UPLOADED } });
+        batch.update(docRef, {
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+          publishGeneration: getNextPublishGeneration(docSnapshot.data().publishGeneration),
+        });
       }
       
       await batch.commit();
@@ -521,7 +635,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
         position: publishedItems.length - index,
       })),
-      operationKey: createOperationKey('manage-publishing-series-reorder', seriesId),
+      operationKey: createSubsplashSeriesReorderIntentKey(
+        'manage-publishing-series-reorder',
+        seriesId,
+        publishedItems.map((item) => item.mediaItemId as string)
+      ),
     });
 
     if (reorderResult.status !== 'success') {
@@ -565,7 +683,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
           firestoreId: series.id,
           skipSubsplash: false,
           images: series.images,
-          operationKey: createOperationKey('manage-publishing-series-create', series.id),
+          operationKey: createSubsplashSeriesCreateIntentKey('manage-publishing-series-create', series.id),
         });
 
         if (createResult.status !== 'success' || !createResult.subsplashId) {
@@ -580,63 +698,72 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         setSeries((prev) => prev ? { ...prev, subsplashId: seriesSubsplashId, status: 'published' } : prev);
       }
 
+      const seriesItemRef = doc(firestore, `series/${series.id}/seriesItems`, sermon.id);
       const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
-      const addResult = await addToSeriesFunction({
-        seriesSubsplashId,
-        mediaItemId,
-        operationKey: createOperationKey('manage-publishing-series-publish', sermon.id),
+      const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+      const sagaResult = await runSubsplashSeriesPublishSaga({
+        ensureSeriesSubsplashId: async () => seriesSubsplashId as string,
+        addToSeries: async (resolvedSeriesSubsplashId) =>
+          addToSeriesFunction({
+            seriesSubsplashId: resolvedSeriesSubsplashId,
+            mediaItemId,
+            operationKey: createSubsplashSeriesPublishIntentKey(
+              'manage-publishing-series-publish',
+              sermon.id,
+              series.id
+            ),
+          }),
+        reorderSeries: async (resolvedMediaItemId) => {
+          await reorderSeriesFromFirebaseOrder(series.id, sermon.id, resolvedMediaItemId);
+        },
+        rollbackSeriesMembership: async (resolvedMediaItemId) => {
+          const rollbackResult = await removeFromSeriesFunction({
+            mediaItemId: resolvedMediaItemId,
+            operationKey: createSubsplashSeriesRollbackIntentKey(
+              'manage-publishing-series-rollback',
+              sermon.id,
+              series.id
+            ),
+          });
+          if (rollbackResult.status !== 'success') {
+            throw new Error(rollbackResult.message || 'Failed to rollback series membership.');
+          }
+        },
+        persistLocalPublished: async (resolvedMediaItemId) => {
+          await setDoc(
+            seriesItemRef,
+            {
+              publishedToSubsplash: true,
+              sermonSubsplashId: resolvedMediaItemId,
+            },
+            { merge: true }
+          );
+
+          const verificationSnapshot = await getDoc(seriesItemRef);
+          if (
+            !verificationSnapshot.exists() ||
+            verificationSnapshot.data()?.publishedToSubsplash !== true
+          ) {
+            throw new Error('Series publish did not persist locally. Please refresh and retry.');
+          }
+        },
+        persistLocalUnpublished: async () => {
+          await setDoc(
+            seriesItemRef,
+            {
+              publishedToSubsplash: false,
+              sermonSubsplashId: deleteField(),
+            },
+            { merge: true }
+          );
+        },
       });
 
-      if (!addResult || addResult.status !== 'success') {
-        throw new Error(addResult.error || 'Failed to add sermon to series');
-      }
-      if (addResult.confirmedSeriesId !== seriesSubsplashId) {
-        throw new Error(
-          `Subsplash did not confirm series assignment. Expected ${seriesSubsplashId}, got ${addResult.confirmedSeriesId || 'null'}.`
-        );
-      }
-
-      try {
-        await reorderSeriesFromFirebaseOrder(
-          series.id,
-          sermon.id,
-          addResult.mediaItemId || mediaItemId
-        );
-      } catch (reorderError: unknown) {
-        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-        try {
-          await removeFromSeriesFunction({
-            mediaItemId: addResult.mediaItemId || mediaItemId,
-            operationKey: createOperationKey('manage-publishing-series-rollback', sermon.id),
-          });
-        } catch (rollbackError: unknown) {
-          throw new Error(
-            `Series reorder failed and rollback failed. Reorder error: ${getErrorMessage(reorderError, 'Unknown')}; rollback error: ${getErrorMessage(rollbackError, 'Unknown')}`
-          );
-        }
-        throw new Error(getErrorMessage(reorderError, 'Series reorder failed after publish.'));
-      }
-
-      const seriesItemRef = doc(firestore, `series/${series.id}/seriesItems`, sermon.id);
-      await setDoc(
-        seriesItemRef,
-        {
-          publishedToSubsplash: true,
-          sermonSubsplashId: addResult.mediaItemId || mediaItemId,
-        },
-        { merge: true }
-      );
-
-      const verificationSnapshot = await getDoc(seriesItemRef);
-      if (
-        !verificationSnapshot.exists() ||
-        verificationSnapshot.data()?.publishedToSubsplash !== true
-      ) {
-        throw new Error('Series publish did not persist locally. Please refresh and retry.');
-      }
-
-      setSeriesPublished(true);
+      setSeriesPublished(sagaResult.localPublished);
       onUpdate?.();
+      if (sagaResult.status !== 'success') {
+        throw new Error(sagaResult.error || 'Failed to publish sermon to series.');
+      }
       return {
         status: 'success',
       };
@@ -677,7 +804,11 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         await removeFromSeriesFunction({
           mediaItemId,
-          operationKey: createOperationKey('manage-publishing-series-unpublish', sermon.id),
+          operationKey: createSubsplashSeriesUnpublishIntentKey(
+            'manage-publishing-series-unpublish',
+            sermon.id,
+            series.id
+          ),
         });
       }
 

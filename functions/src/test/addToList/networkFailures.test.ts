@@ -14,6 +14,14 @@ import { createListDocument, clearFirestore } from './firestoreHelpers';
 import addToList from '../../addToList';
 import { logger } from 'firebase-functions/v2';
 
+jest.mock('../../helpers/publishedListDrift', () => {
+  const actual = jest.requireActual('../../helpers/publishedListDrift');
+  return {
+    ...actual,
+    ensureCanPerformStrictPublishedMutation: jest.fn().mockResolvedValue(undefined),
+  };
+});
+
 const addToListHandler = addToList as unknown as AddToListHandler;
 
 describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () => {
@@ -318,10 +326,9 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(result[0].status).toBe('error');
     
     const rowsA_after = subsplashMock.getListRows(listA);
-    expect(rowsA_after).toHaveLength(10);
-    // When patching listB fails, listA may have already been patched successfully
-    // The new item should be at position 0 if listA was patched before the error
-    expect(rowsA_after[0]._embedded['media-item']?.id).toBe('new-item');
+    expect(rowsA_after).toHaveLength(200);
+    expect(rowsA_after[0]._embedded['media-item']?.id).toBe('a-item-0');
+    expect(rowsA_after[199].type).toBe('list');
   });
 
   it('should handle network failure on second call but succeed on retry', async () => {

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { buildSubsplashLockBusyError } from '../../locks/contentionError';
 import { withIdempotency } from '../../locks/withIdempotency';
@@ -17,7 +17,15 @@ jest.mock('../../subsplashUtils', () => ({
   })),
 }));
 
-jest.mock('axios');
+jest.mock('axios', () => {
+  const actual = jest.requireActual('axios');
+  const mockAxios = jest.fn();
+  return {
+    __esModule: true,
+    ...actual,
+    default: mockAxios,
+  };
+});
 jest.mock('../../locks/withIdempotency', () => ({
   withIdempotency: jest.fn(async (_operationKey: string, run: () => Promise<unknown>) => run()),
 }));
@@ -134,21 +142,28 @@ describe('deleteFromSubsplash lock contract', () => {
   });
 
   it('treats 404 delete responses as already deleted and succeeds', async () => {
-    mockAxios.mockRejectedValueOnce({
-      isAxiosError: true,
-      message: 'Request failed with status code 404',
-      response: {
-        status: 404,
-        data: {
-          errors: [
-            {
-              code: 'resource_not_found',
-              detail: 'Media item not found',
-            },
-          ],
-        },
-      },
-    } as never);
+    mockAxios.mockRejectedValueOnce(
+      new AxiosError(
+        'Request failed with status code 404',
+        'ERR_BAD_REQUEST',
+        undefined,
+        undefined,
+        {
+          status: 404,
+          statusText: 'Not Found',
+          headers: {},
+          config: { headers: {} } as never,
+          data: {
+            errors: [
+              {
+                code: 'resource_not_found',
+                detail: 'Media item not found',
+              },
+            ],
+          },
+        }
+      )
+    );
 
     await expect(
       deleteHandler({

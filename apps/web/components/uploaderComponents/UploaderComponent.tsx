@@ -590,15 +590,16 @@ const Uploader = (props: UploaderProps) => {
   }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
   const clearForm = useCallback(() => {
+    const latestListIds = new Set(emptyListWithLatest.map((list) => list.id));
+    const nextDefaultLists = sermonList.filter((list) => latestListIds.has(list.id));
     setSermon(createEmptySermon(props.user.uid));
-    setEmptyListWithLatest([]);
-    setSermonList([]);
+    setSermonList(nextDefaultLists);
     setSelectedSeries(null);
     setUploadAsSeries(false);
     setDate(new Date());
     clearAudioTrimmer();
     setFormErrors(getFormErrorInitialState());
-  }, [props.user.uid, clearAudioTrimmer, getFormErrorInitialState]);
+  }, [clearAudioTrimmer, emptyListWithLatest, getFormErrorInitialState, props.user.uid, sermonList]);
 
   // Handle successful upload - store sermon for the success modal
   const handleUploadSuccess = useCallback(

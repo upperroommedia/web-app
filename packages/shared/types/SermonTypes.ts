@@ -37,6 +37,8 @@ export interface Sermon {
   numberOfLists?: number;
   numberOfListsUploadedTo?: number;
   subsplashId?: string;
+  audioSource?: 'gcp' | 'subsplash';
+  subsplashAudioUrl?: string;
   soundCloudTrackId?: string;
   soundCloudTrackUrl?: string;
   uploaderId?: string;

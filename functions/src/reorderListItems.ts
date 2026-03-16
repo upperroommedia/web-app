@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import axios from 'axios';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
-import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import type {
   ListItemOrderEntry,
@@ -10,13 +10,22 @@ import type {
   ReorderListItemsOutputType,
 } from '../../packages/contracts/reorderListItems';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
-import { createListRow, getFullListRows, getListDetails, patchListRows } from './helpers/addToListHelpers';
+import { createListRow, getFullListRows, patchListRows } from './helpers/addToListHelpers';
 import { getOverflowChainState } from './helpers/listOverflowChain';
+import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
+import {
+  listDebugError,
+  listDebugLog,
+  summarizeAssignments,
+  summarizeOverflowIssues,
+  summarizeOverflowNodes,
+  summarizeSubsplashRows,
+} from './helpers/listDebugLogger';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
-import { authenticateSubsplash } from './subsplashUtils';
+import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { SubsplashListRow } from './types/Subsplash';
 
 const firestoreDB = firebaseAdmin.firestore();
@@ -33,7 +42,7 @@ type ChainRemoteNode = {
   firestoreListId: string;
   subsplashListId: string;
   overflowDepth: number;
-  maxItemCount: number;
+  currentItemCount: number;
   remoteRows: SubsplashListRow[];
 };
 
@@ -124,28 +133,14 @@ const partitionLogicalRowsAcrossChain = (
 }> => {
   let cursor = 0;
 
-  return nodes.map((node, index) => {
-    const remainingRows = sortedRemoteRows.length - cursor;
-    const remainingNodes = nodes.length - index;
-    const isTerminalNode = index === nodes.length - 1;
-    const maxContentRows = isTerminalNode ? node.maxItemCount : node.maxItemCount - 1;
-    const minimumRowsNeededForLaterPages = isTerminalNode ? 0 : remainingNodes - 1;
-    const rowCount = isTerminalNode
-      ? remainingRows
-      : Math.min(maxContentRows, Math.max(1, remainingRows - minimumRowsNeededForLaterPages));
+  return nodes.map((node) => {
+    const rowCount = node.currentItemCount;
     const rows = sortedRemoteRows.slice(cursor, cursor + rowCount);
 
-    if (rows.length > maxContentRows) {
+    if (rows.length !== rowCount) {
       throw new HttpsError(
         'failed-precondition',
-        `List ${node.firestoreListId} does not have enough capacity to preserve the existing overflow chain.`
-      );
-    }
-
-    if (rows.length === 0 && remainingRows > 0) {
-      throw new HttpsError(
-        'failed-precondition',
-        `List ${node.firestoreListId} does not have enough capacity to preserve the existing overflow chain.`
+        `List ${node.firestoreListId} could not preserve its existing logical page size during reorder.`
       );
     }
 
@@ -210,10 +205,38 @@ const buildPatchedRowsForNode = (
   return nextRows;
 };
 
+const deleteRowsMissingFromTarget = async (
+  node: ChainRemoteNode,
+  targetRows: SubsplashListRow[],
+  token: string
+): Promise<void> => {
+  const targetRowIds = new Set(
+    targetRows
+      .map((row) => row.id?.trim())
+      .filter((rowId): rowId is string => Boolean(rowId))
+  );
+
+  const rowsToDelete = node.remoteRows.filter((row) => row.id && !targetRowIds.has(row.id));
+
+  for (const row of rowsToDelete) {
+    const deleteConfig = createAxiosConfig(
+      `https://core.subsplash.com/builder/v1/list-rows/${row.id}`,
+      token,
+      'DELETE'
+    );
+    await axios(deleteConfig);
+  }
+};
+
 const reorderListItems = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<ReorderListItemsInputType>): Promise<ReorderListItemsOutputType> => {
-    logger.log('reorderListItems');
+    listDebugLog('reorderListItems.callable.start', {
+      uid: request.auth?.uid,
+      rootListId: request.data?.rootListId,
+      logicalItemOrder: request.data?.logicalItemOrder,
+      operationKey: request.data?.operationKey,
+    });
 
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError(
@@ -258,6 +281,12 @@ const reorderListItems = onCall(
         }
 
         const chainState = await getOverflowChainState(normalizedRootListId);
+        listDebugLog('reorderListItems.chainState', {
+          rootListId: normalizedRootListId,
+          canMutate: chainState.canMutate,
+          nodes: summarizeOverflowNodes(chainState.nodes),
+          issues: summarizeOverflowIssues(chainState.issues),
+        });
         if (chainState.rootListId !== normalizedRootListId) {
           throw new HttpsError(
             'failed-precondition',
@@ -273,6 +302,10 @@ const reorderListItems = onCall(
         }
 
         const sortedLogicalItemOrder = normalizeLogicalOrder(logicalItemOrder);
+        listDebugLog('reorderListItems.logicalOrder.normalized', {
+          rootListId: normalizedRootListId,
+          logicalItemOrder: sortedLogicalItemOrder,
+        });
 
         return withSubsplashLocks(
           chainState.nodes
@@ -291,6 +324,14 @@ const reorderListItems = onCall(
             }
 
             const token = await authenticateSubsplash();
+            listDebugLog('reorderListItems.strictPreflight.start', {
+              rootListId: normalizedRootListId,
+              action: 'reorder',
+            });
+            await ensureCanPerformStrictPublishedMutation(normalizedRootListId, token, 'reorder');
+            listDebugLog('reorderListItems.strictPreflight.success', {
+              rootListId: normalizedRootListId,
+            });
             const remoteNodes = await Promise.all(
               chainState.nodes.map(async (node) => {
                 const subsplashListId = node.subsplashId?.trim();
@@ -301,20 +342,25 @@ const reorderListItems = onCall(
                   );
                 }
 
-                const [listDetails, remoteRows] = await Promise.all([
-                  getListDetails(subsplashListId, token),
-                  getFullListRows(subsplashListId, token),
-                ]);
+                const remoteRows = await getFullListRows(subsplashListId, token);
+                const currentItemCount = remoteRows.filter((row) => row.type !== 'list').length;
 
                 return {
                   firestoreListId: node.firestoreListId,
                   subsplashListId,
                   overflowDepth: node.depth,
-                  maxItemCount: listDetails.max_item_count,
+                  currentItemCount,
                   remoteRows,
                 } satisfies ChainRemoteNode;
               })
             );
+            listDebugLog('reorderListItems.remoteNodes.loaded', {
+              rootListId: normalizedRootListId,
+              remoteNodes: remoteNodes.map((node) => ({
+                ...node,
+                remoteRows: summarizeSubsplashRows(node.remoteRows),
+              })),
+            });
 
             const remoteMediaRows = getRemoteMediaRows(remoteNodes);
             const remoteRowsByMediaItemId = new Map(
@@ -329,17 +375,45 @@ const reorderListItems = onCall(
 
             const partitions = partitionLogicalRowsAcrossChain(sortedRemoteRows, remoteNodes);
             const assignments = createAssignments(partitions);
+            listDebugLog('reorderListItems.partitions.created', {
+              rootListId: normalizedRootListId,
+              partitions: partitions.map((partition) => ({
+                node: partition.node.firestoreListId,
+                subsplashListId: partition.node.subsplashListId,
+                rows: summarizeSubsplashRows(partition.rows),
+              })),
+              assignments: summarizeAssignments(assignments),
+            });
 
             for (let index = 0; index < partitions.length; index += 1) {
               const partition = partitions[index];
               const nextNode = remoteNodes[index + 1];
-              await patchListRows(
-                partition.node.subsplashListId,
-                buildPatchedRowsForNode(partition, nextNode),
-                token
-              );
+              const nextRows = buildPatchedRowsForNode(partition, nextNode);
+              listDebugLog('reorderListItems.partition.apply.start', {
+                rootListId: normalizedRootListId,
+                firestoreListId: partition.node.firestoreListId,
+                subsplashListId: partition.node.subsplashListId,
+                nextNode: nextNode
+                  ? {
+                      firestoreListId: nextNode.firestoreListId,
+                      subsplashListId: nextNode.subsplashListId,
+                    }
+                  : undefined,
+                nextRows: summarizeSubsplashRows(nextRows),
+              });
+              await deleteRowsMissingFromTarget(partition.node, nextRows, token);
+              await patchListRows(partition.node.subsplashListId, nextRows, token);
+              listDebugLog('reorderListItems.partition.apply.complete', {
+                rootListId: normalizedRootListId,
+                firestoreListId: partition.node.firestoreListId,
+                subsplashListId: partition.node.subsplashListId,
+              });
             }
 
+            listDebugLog('reorderListItems.success', {
+              rootListId: normalizedRootListId,
+              assignments: summarizeAssignments(assignments),
+            });
             return {
               status: 'success',
               message: `Successfully reordered ${sortedLogicalItemOrder.length} items in list.`,
@@ -354,6 +428,11 @@ const reorderListItems = onCall(
         );
       });
     } catch (error) {
+      listDebugError('reorderListItems.callable.failed', {
+        rootListId: request.data?.rootListId,
+        operationKey: request.data?.operationKey,
+        error,
+      });
       throw handleError(error);
     }
   }

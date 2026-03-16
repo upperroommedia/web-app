@@ -24,14 +24,18 @@ import {
 } from '@upperroom/contracts/editSoundCloudSermon';
 import { getSquareImageDownloadLink } from '../../utils/utils';
 import { List, listConverter } from '../../types/List';
+import { sermonListConverter } from '../../types/SermonList';
+import { uploadStatus } from '../../types/SermonTypes';
 import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
 import { createOperationKey, parseLockBusyDetails } from '../../utils/callableConcurrency';
+import { resolveCanonicalSermonLists } from '../../utils/resolveCanonicalSermonLists';
 
 interface EditSermonOptions {
   originalSeriesId?: string;
 }
 
 const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSermonOptions) => {
+  const canonicalSermonList = await resolveCanonicalSermonLists(sermon, sermonList);
   const promises: Promise<unknown>[] = [];
   const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
   if (sermon.subsplashId) {
@@ -102,23 +106,32 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
 
   const sermonListDocs = await getDocs(sermonListQuery);
   const seriesListFromFirebase = sermonListDocs.docs.map((doc) => doc.ref.parent.parent?.id || '');
-
-  const seriesInFirebase = new Set<string>();
+  const canonicalListIds = new Set(canonicalSermonList.map((list) => list.id));
   const batch = writeBatch(firestore);
-  seriesListFromFirebase.forEach((listId) => {
-    if (sermonList.find((series) => series.id === listId)) {
-      // series exists in both lists
-      seriesInFirebase.add(listId);
-    } else {
-      // series exists in firebase but not updated list
-      batch.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
-    }
-  });
+
+  const staleListIds = seriesListFromFirebase.filter((listId) => !canonicalListIds.has(listId));
+  if (staleListIds.length > 0) {
+    console.warn('editSermon.autoDeletePrevented', {
+      sermonId: sermon.id,
+      staleListIds,
+      canonicalListIds: Array.from(canonicalListIds),
+    });
+  }
+
+  const seriesInFirebase = new Set(seriesListFromFirebase.filter((listId) => canonicalListIds.has(listId)));
 
   // add any new series to firebase
-  sermonList.forEach((series) => {
+  canonicalSermonList.forEach((series) => {
     if (!seriesInFirebase.has(series.id)) {
       batch.set(doc(firestore, `lists/${series.id}/listItems/${sermon.id}`).withConverter(sermonConverter), sermon);
+      batch.set(
+        doc(firestore, `sermons/${sermon.id}/sermonLists/${series.id}`).withConverter(sermonListConverter),
+        {
+          ...series,
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+          publishGeneration: 0,
+        }
+      );
     }
   });
   await batch.commit();

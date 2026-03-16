@@ -27,7 +27,9 @@ export interface AlgoliaListHit extends Partial<List> {
 type DiscoveryListRecord = Pick<
   Partial<List>,
   'count' | 'logicalCount' | 'hasOverflowPages' | 'moreSermonsRef' | 'isMoreSermonsList' | 'isRootList'
->;
+> & {
+  objectID?: string;
+};
 
 export const LIST_DISCOVERY_FILTERS = 'NOT isMoreSermonsList:true';
 

@@ -86,4 +86,47 @@ describe('idempotency store', () => {
   it('requires non-empty operation keys in wrapper', async () => {
     await expect(withIdempotency('', async () => 'ok')).rejects.toBeInstanceOf(HttpsError);
   });
+
+  it('sanitizes undefined values from stored terminal results', async () => {
+    const operationKey = 'op-complete-sanitize-1';
+    const terminalResult = [
+      {
+        listId: 'list-a',
+        status: 'success',
+        listItemId: undefined,
+        nested: {
+          keep: 'value',
+          drop: undefined,
+        },
+      },
+    ];
+
+    await claimOperation(operationKey);
+    await completeOperation(operationKey, terminalResult);
+
+    const storedRecord = await getOperationResult(operationKey);
+    expect(storedRecord?.result).toEqual([
+      {
+        listId: 'list-a',
+        status: 'success',
+        nested: {
+          keep: 'value',
+        },
+      },
+    ]);
+  });
+
+  it('supports completed operations with no result payload', async () => {
+    const operationKey = 'op-complete-void-1';
+
+    await claimOperation(operationKey);
+    await completeOperation(operationKey, undefined);
+
+    const storedRecord = await getOperationResult(operationKey);
+    expect(storedRecord?.status).toBe('completed');
+    expect(storedRecord?.result).toBeUndefined();
+
+    const replayed = await withIdempotency(operationKey, async () => 'should-not-run');
+    expect(replayed).toBeUndefined();
+  });
 });

@@ -1,0 +1,26 @@
+import fs from 'fs';
+import path from 'path';
+
+describe('functions-core index exports', () => {
+  it('includes list overflow admin callables in the core codebase entrypoint', () => {
+    const entrypointPath = path.resolve(__dirname, '../../../../functions-core/src/index.ts');
+    const entrypointSource = fs.readFileSync(entrypointPath, 'utf8');
+
+    expect(entrypointSource).toContain(
+      "import getlistoverflowchain from '../../functions/src/getListOverflowChain';"
+    );
+    expect(entrypointSource).toContain(
+      "import getlistpublisheddrift from '../../functions/src/getListPublishedDrift';"
+    );
+    expect(entrypointSource).toContain(
+      "import reorderlistitems from '../../functions/src/reorderListItems';"
+    );
+    expect(entrypointSource).toContain(
+      "import resolvelistpublisheddrift from '../../functions/src/resolveListPublishedDrift';"
+    );
+    expect(entrypointSource).toContain('exports.getlistoverflowchain = getlistoverflowchain;');
+    expect(entrypointSource).toContain('exports.getlistpublisheddrift = getlistpublisheddrift;');
+    expect(entrypointSource).toContain('exports.reorderlistitems = reorderlistitems;');
+    expect(entrypointSource).toContain('exports.resolvelistpublisheddrift = resolvelistpublisheddrift;');
+  });
+});

@@ -21,6 +21,14 @@ import { SubsplashListRow } from '../../types/Subsplash';
 import { createListDocument, clearFirestore } from './firestoreHelpers';
 import addToList from '../../addToList';
 
+jest.mock('../../helpers/publishedListDrift', () => {
+  const actual = jest.requireActual('../../helpers/publishedListDrift');
+  return {
+    ...actual,
+    ensureCanPerformStrictPublishedMutation: jest.fn().mockResolvedValue(undefined),
+  };
+});
+
 const addToListHandler = addToList as unknown as AddToListHandler;
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -205,4 +213,3 @@ describe('addToList - Transaction Isolation Bug (Real Firestore Emulator)', () =
     expect(overflowListSnapshot.empty).toBe(false);
   });
 });
-

@@ -4,9 +4,10 @@ import storage, { ref, uploadBytesResumable, UploadMetadata, deleteObject } from
 import { Dispatch, SetStateAction } from 'react';
 import { UploadableFile } from '../../components/DropZone';
 import { sermonConverter } from '../../types/Sermon';
-import { Sermon } from '../../types/SermonTypes';
+import { Sermon, uploadStatus } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { List } from '../../types/List';
+import { sermonListConverter } from '../../types/SermonList';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
@@ -48,6 +49,12 @@ const addFirestoreDocument = async (
   sermonList.forEach((list) => {
     const listItemRef = doc(firestore, 'lists', list.id, 'listItems', sermon.id);
     batch.set(listItemRef, sermon);
+    const sermonListRef = doc(firestore, 'sermons', sermon.id, 'sermonLists', list.id).withConverter(sermonListConverter);
+    batch.set(sermonListRef, {
+      ...list,
+      uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+      publishGeneration: 0,
+    });
   });
   
   // Add sermon to series subcollection if seriesId is set

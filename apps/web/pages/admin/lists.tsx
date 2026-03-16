@@ -5,9 +5,9 @@ import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
 import CircularProgress from '@mui/material/CircularProgress';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
+import MuiList from '@mui/material/List';
+import MuiListItem from '@mui/material/ListItem';
+import MuiListItemText from '@mui/material/ListItemText';
 import Typography from '@mui/material/Typography';
 import AppLayout from '../../layout/AppLayout';
 import ListTable from '../../components/ListTable';
@@ -24,6 +24,7 @@ import {
   searchListsIndex,
 } from '../../utils/algolia/searchRecords';
 import { getDefaultListSortOrder } from '../../utils/algolia/listSorting';
+import type { ListSortableProperty } from '../../utils/algolia/listSorting';
 import {
   DeleteSubsplashListBlockedDetails,
   DeleteSubsplashListInputType,
@@ -46,7 +47,7 @@ const AdminList = () => {
   const [lists, setLists] = useState<List[]>([]);
   const [listsLoading, setListsLoading] = useState<boolean>(false);
   const [totalLists, setTotalLists] = useState<number>(0);
-  const [sortProperty, setSortProperty] = useState<keyof List>('name');
+  const [sortProperty, setSortProperty] = useState<ListSortableProperty>('name');
   const [sortOrder, setSortOrder] = useState<Order>(getDefaultListSortOrder('name'));
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [editListPopup, setEditListPopup] = useState<boolean>(false);
@@ -155,7 +156,7 @@ const AdminList = () => {
     }
   };
 
-  const handleSort = async (property: keyof List, order: Order) => {
+  const handleSort = async (property: ListSortableProperty, order: Order) => {
     setSortProperty(property);
     setSortOrder(order);
     setPage(0);
@@ -293,16 +294,16 @@ const AdminList = () => {
               <Typography variant="subtitle2" gutterBottom>
                 Blocked continuation pages
               </Typography>
-              <List dense disablePadding>
+              <MuiList dense disablePadding>
                 {blockedDeleteDetails.overflowPages.map((page) => (
-                  <ListItem key={page.firestoreListId} disableGutters>
-                    <ListItemText
+                  <MuiListItem key={page.firestoreListId} disableGutters>
+                    <MuiListItemText
                       primary={page.name}
                       secondary={`Depth ${page.depth} • ${page.count} items${page.subsplashId ? ` • ${page.subsplashId}` : ''}`}
                     />
-                  </ListItem>
+                  </MuiListItem>
                 ))}
-              </List>
+              </MuiList>
             </Box>
           ) : null}
           <FormControlLabel

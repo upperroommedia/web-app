@@ -13,12 +13,17 @@ export type listUploadStatus =
     };
 export interface SermonList extends List {
   uploadStatus?: listUploadStatus;
+  publishGeneration?: number;
 }
 
-export const emptySermonList: SermonList = { ...emptyList, uploadStatus: { status: uploadStatus.NOT_UPLOADED } };
+export const emptySermonList: SermonList = {
+  ...emptyList,
+  uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+  publishGeneration: 0,
+};
 
 export const createEmptySermonList = (type: ListType): SermonList => {
-  return { ...createEmptyList(type), uploadStatus: { status: uploadStatus.NOT_UPLOADED } };
+  return { ...createEmptyList(type), uploadStatus: { status: uploadStatus.NOT_UPLOADED }, publishGeneration: 0 };
 };
 
 export const sermonListConverter: FirestoreDataConverter<SermonList> = {

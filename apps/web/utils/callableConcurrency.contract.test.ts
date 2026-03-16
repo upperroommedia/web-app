@@ -13,9 +13,16 @@ describe('caller lock/idempotency contract adoption', () => {
     const seriesListAdminPage = readFile('pages/admin/series.tsx');
     const sermonsListAdminPage = readFile('pages/admin/sermons.tsx');
 
-    expect(managePublishingPopup).toContain("createOperationKey('manage-publishing-upload', sermon.id)");
-    expect(managePublishingPopup).toContain("createOperationKey('manage-publishing-list-add', sermon.id)");
-    expect(managePublishingPopup).toContain("createOperationKey('manage-publishing-series-publish', sermon.id)");
+    expect(managePublishingPopup).toContain("createSubsplashUploadIntentKey(");
+    expect(managePublishingPopup).toContain("createSubsplashListCreateIntentKey('manage-publishing-list-create', sermon.id, list.id)");
+    expect(managePublishingPopup).toContain("createSubsplashListAddIntentKey(");
+    expect(managePublishingPopup).toContain("createSubsplashListRemoveIntentKey(");
+    expect(managePublishingPopup).toContain("createSubsplashDeleteIntentKey('manage-publishing-delete', sermon.id)");
+    expect(managePublishingPopup).toContain("createSubsplashSeriesCreateIntentKey('manage-publishing-series-create', series.id)");
+    expect(managePublishingPopup).toContain("createSubsplashSeriesPublishIntentKey(");
+    expect(managePublishingPopup).toContain("createSubsplashSeriesReorderIntentKey(");
+    expect(managePublishingPopup).toContain("createSubsplashSeriesRollbackIntentKey(");
+    expect(managePublishingPopup).toContain("createSubsplashSeriesUnpublishIntentKey(");
     expect(managePublishingPopup).toContain('parseLockBusyDetails(');
 
     expect(seriesAdminPage).toContain("createOperationKey('series-admin-upload', sermon.id)");
@@ -25,9 +32,16 @@ describe('caller lock/idempotency contract adoption', () => {
     expect(seriesAdminPage).toContain('expectedPublishedMembershipHash');
     expect(seriesAdminPage).toContain('parseLockBusyDetails(');
 
-    expect(sermonAdminPage).toContain("createOperationKey('sermon-admin-upload', sermon.id)");
-    expect(sermonAdminPage).toContain("createOperationKey('sermon-admin-list-add', sermon.id)");
-    expect(sermonAdminPage).toContain("createOperationKey('sermon-admin-series-publish', sermon.id)");
+    expect(sermonAdminPage).toContain("createSubsplashUploadIntentKey(");
+    expect(sermonAdminPage).toContain("createSubsplashListCreateIntentKey('sermon-admin-list-create', sermon.id, list.id)");
+    expect(sermonAdminPage).toContain("createSubsplashListAddIntentKey(");
+    expect(sermonAdminPage).toContain("createSubsplashListRemoveIntentKey(");
+    expect(sermonAdminPage).toContain("createSubsplashDeleteIntentKey('sermon-admin-delete', sermon.id)");
+    expect(sermonAdminPage).toContain("createSubsplashSeriesCreateIntentKey('sermon-admin-series-create', targetSeries.id)");
+    expect(sermonAdminPage).toContain("createSubsplashSeriesPublishIntentKey(");
+    expect(sermonAdminPage).toContain("createSubsplashSeriesReorderIntentKey(");
+    expect(sermonAdminPage).toContain("createSubsplashSeriesRollbackIntentKey(");
+    expect(sermonAdminPage).toContain("createSubsplashSeriesUnpublishIntentKey(");
     expect(sermonAdminPage).toContain('parseLockBusyDetails(');
 
     expect(seriesListAdminPage).toContain("createOperationKey('series-admin-delete', selectedSeries.id)");

@@ -1,10 +1,16 @@
-import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-import { SubsplashMediaItem } from './types/Subsplash';
-import { createListRow, getFullListRows, getFullListRowsWithTotal, patchListRows, createNewList, getListDetails } from './helpers/addToListHelpers';
+import { SubsplashListRow, SubsplashMediaItem } from './types/Subsplash';
+import {
+  createListRow,
+  getFullListRows,
+  getFullListRowsWithTotal,
+  patchListRows,
+  createNewList,
+  getListDetails,
+} from './helpers/addToListHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { Timestamp } from 'firebase-admin/firestore';
+import { Timestamp, type DocumentReference, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import handleError from './handleError';
@@ -17,8 +23,12 @@ import {
   buildOverflowListSubtitle,
   buildOverflowListTitle,
   buildRootListMetadata,
+  syncRootMembershipPlacements,
   syncOverflowChainMetadata,
 } from './helpers/listOverflowChain';
+import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
+import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
+import { getConfiguredMaxListSize } from './helpers/listCapacity';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -30,7 +40,18 @@ export interface AddtoListInputType {
 }
 
 type OutputTypes =
-  | { listId: string; status: 'success'; listItemId?: string }
+  | {
+      listId: string;
+      status: 'success';
+      listItemId?: string;
+      actualPlacement?: {
+        firestoreListId: string;
+        subsplashListId: string;
+        overflowDepth: number;
+        position: number;
+        listItemId?: string;
+      };
+    }
   | {
       listId: string;
       status: 'error';
@@ -41,16 +62,12 @@ type OutputTypes =
 
 export type AddToListOutputType = OutputTypes[];
 
-const DEFAULT_MAX_LIST_SIZE = 200;
-
 const getOperationKey = (operationKey?: string): string | undefined => {
   const normalizedKey = operationKey?.trim();
   return normalizedKey ? normalizedKey : undefined;
 };
 
-const getErrorPayload = (
-  error: unknown
-): { error: string; errorCode?: string; errorDetails?: unknown } => {
+const getErrorPayload = (error: unknown): { error: string; errorCode?: string; errorDetails?: unknown } => {
   if (error && typeof error === 'object') {
     const maybeError = error as {
       message?: unknown;
@@ -76,144 +93,347 @@ const getErrorPayload = (
   return { error: JSON.stringify(error) };
 };
 
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const normalizeString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+};
+
+const resolveListItemIdWithRetry = async (
+  listId: string,
+  itemToAdd: SubsplashMediaItem,
+  token: string,
+  finalRowsSnapshot?: SubsplashListRow[]
+): Promise<string | undefined> => {
+  const addedRowFromPatch = finalRowsSnapshot?.find((row) => row._embedded[itemToAdd.type]?.id === itemToAdd.id);
+  if (addedRowFromPatch?.id) {
+    return addedRowFromPatch.id;
+  }
+
+  const retryDelaysMs = [0, 50, 150, 300, 500];
+  for (const delayMs of retryDelaysMs) {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    const updatedListRows = await getFullListRows(listId, token);
+    const addedRow = updatedListRows.find((row) => row._embedded[itemToAdd.type]?.id === itemToAdd.id);
+    if (addedRow?.id) {
+      return addedRow.id;
+    }
+  }
+
+  return undefined;
+};
+
+const findItemInOverflowChain = async (
+  rootSubsplashListId: string,
+  itemToAdd: SubsplashMediaItem,
+  token: string
+): Promise<{ listId: string; listItemId: string } | null> => {
+  const visitedListIds = new Set<string>();
+  let currentListId: string | undefined = rootSubsplashListId;
+
+  while (currentListId && !visitedListIds.has(currentListId)) {
+    visitedListIds.add(currentListId);
+
+    const rows = await getFullListRows(currentListId, token);
+    const matchingRow = rows.find(
+      (row) => row.type === itemToAdd.type && row._embedded[itemToAdd.type]?.id === itemToAdd.id
+    );
+    if (matchingRow?.id) {
+      return {
+        listId: currentListId,
+        listItemId: matchingRow.id,
+      };
+    }
+
+    const listSnapshot = await firestoreDB.collection('lists').where('subsplashId', '==', currentListId).limit(1).get();
+    if (listSnapshot.empty) {
+      break;
+    }
+
+    currentListId = normalizeString(listSnapshot.docs[0].data().moreSermonsRef);
+  }
+
+  return null;
+};
+
+const deleteExistingRowsMissingFromTarget = async (
+  listId: string,
+  existingRows: SubsplashListRow[],
+  targetRows: SubsplashListRow[],
+  token: string
+): Promise<void> => {
+  const targetIds = new Set(
+    targetRows
+      .map((row) => row.id)
+      .filter((rowId): rowId is string => typeof rowId === 'string' && rowId.trim().length > 0)
+  );
+
+  const rowsToDelete = existingRows.filter((row) => row.id && !targetIds.has(row.id));
+  for (const rowToDelete of rowsToDelete) {
+    const deleteConfig = createAxiosConfig(
+      `https://core.subsplash.com/builder/v1/list-rows/${rowToDelete.id}`,
+      token,
+      'DELETE'
+    );
+    await axios(deleteConfig);
+  }
+};
+
+const ensureListIsPatchableBeforeDestructiveMutation = async (
+  listId: string,
+  currentRows: SubsplashListRow[],
+  token: string
+): Promise<void> => {
+  if (currentRows.length === 0) {
+    return;
+  }
+
+  await patchListRows(listId, currentRows, token);
+};
+
+const ensureImmediateOverflowListLinkInFirestore = async ({
+  listDoc,
+  listData,
+  currentRows,
+  token,
+  totalRowCount,
+  maxListSize,
+}: {
+  listDoc: QueryDocumentSnapshot;
+  listData: Record<string, unknown>;
+  currentRows: SubsplashListRow[];
+  token: string;
+  totalRowCount: number;
+  maxListSize: number;
+}): Promise<boolean> => {
+  if (listData.overflowBehavior !== OverflowBehavior.CREATENEWLIST) {
+    return false;
+  }
+
+  const linkRow = currentRows.find((row) => row.type === 'list' && row._embedded.list?.id);
+  const overflowListId = linkRow?._embedded.list?.id;
+  if (!overflowListId) {
+    return false;
+  }
+
+  const hasStoredLink =
+    typeof listData.moreSermonsRef === 'string' && listData.moreSermonsRef.trim() === overflowListId;
+  const existingOverflowSnapshot = await firestoreDB
+    .collection('lists')
+    .where('subsplashId', '==', overflowListId)
+    .limit(1)
+    .get();
+
+  if (hasStoredLink && !existingOverflowSnapshot.empty) {
+    return false;
+  }
+
+  const explicitRootListId =
+    typeof listData.rootListId === 'string' && listData.rootListId.trim() ? listData.rootListId.trim() : undefined;
+  const isOverflowList = listData.isMoreSermonsList === true;
+  const parentDepth = typeof listData.overflowDepth === 'number' ? listData.overflowDepth : isOverflowList ? 1 : 0;
+  const rootListId = explicitRootListId ?? listDoc.id;
+  const overflowListDetails = await getListDetails(overflowListId, token);
+  const now = Date.now();
+
+  const batch = firestoreDB.batch();
+  batch.set(
+    listDoc.ref,
+    {
+      moreSermonsRef: overflowListId,
+      maxListSize,
+      updatedAtMillis: now,
+      ...(isOverflowList
+        ? buildOverflowListMetadata({
+            rootListId,
+            overflowDepth: parentDepth,
+          })
+        : buildRootListMetadata({
+            rootListId: listDoc.id,
+            logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+            hasOverflowPages: true,
+          })),
+    },
+    { merge: true }
+  );
+
+  if (existingOverflowSnapshot.empty) {
+    const newListRef = firestoreDB.collection('lists').doc();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id, ...dataToCopy } = listData;
+    batch.set(newListRef, {
+      ...dataToCopy,
+      id: newListRef.id,
+      subsplashId: overflowListId,
+      name: overflowListDetails.title,
+      createdAtMillis: now,
+      updatedAtMillis: now,
+      count: 0,
+      maxListSize,
+      images: [],
+      ...buildOverflowListMetadata({
+        rootListId,
+        overflowDepth: parentDepth + 1,
+      }),
+    });
+  }
+
+  await batch.commit();
+  return true;
+};
+
 // Helper to handle a single list processing step recursively
 // Returns listItemId if item was added, undefined if item already existed
 async function processListStep(
-  listId: string, 
-  itemToAdd: SubsplashMediaItem, 
+  listId: string,
+  itemToAdd: SubsplashMediaItem,
   token: string,
-  maxListSize: number = DEFAULT_MAX_LIST_SIZE,
-  shouldSyncChainMetadata: boolean = true
-): Promise<{ listItemId?: string }> {
+  maxListSize: number = getConfiguredMaxListSize(),
+  shouldSyncChainMetadata: boolean = true,
+  shouldSearchLogicalChain: boolean = true,
+  shouldEnforceStrictPreflight: boolean = true
+): Promise<{
+  listItemId?: string;
+  actualPlacement?: {
+    firestoreListId: string;
+    subsplashListId: string;
+    overflowDepth: number;
+    position: number;
+    listItemId?: string;
+  };
+}> {
+  listDebugLog('addToList.processListStep.start', {
+    listId,
+    itemToAdd,
+    maxListSize,
+    shouldSyncChainMetadata,
+    shouldSearchLogicalChain,
+    shouldEnforceStrictPreflight,
+  });
   const listQuery = firestoreDB.collection('lists').where('subsplashId', '==', listId).limit(1);
-
-  // Collect items to propagate after transaction commits
-  // This fixes the transaction isolation bug where recursive calls can't see uncommitted documents
   let itemsToPropagateAfterCommit: Array<{ listId: string; item: SubsplashMediaItem }> = [];
   let itemExisted = false;
   let existingListItemId: string | undefined;
+  let finalRowsSnapshot: SubsplashListRow[] | undefined;
+  const querySnapshot = await listQuery.get();
+  if (querySnapshot.empty) {
+    throw new HttpsError('not-found', `List ${listId} not found in Firestore`);
+  }
 
-  await firestoreDB.runTransaction(async (transaction) => {
-    // Reset the array at the start of each transaction attempt
-    // This prevents accumulation of items when Firestore retries the transaction
-    itemsToPropagateAfterCommit = [];
-    itemExisted = false;
-    existingListItemId = undefined;
-    
-    const querySnapshot = await transaction.get(listQuery);
-    if (querySnapshot.empty) throw new HttpsError('not-found', `List ${listId} not found in Firestore`);
-    
-    const listDoc = querySnapshot.docs[0];
-    const listData = listDoc.data() as Record<string, unknown>;
-    const listName =
-      (typeof listData.name === 'string' && listData.name.trim()) ||
-      (typeof listData.title === 'string' && listData.title.trim()) ||
-      listDoc.id;
-    const explicitRootListId =
-      typeof listData.rootListId === 'string' && listData.rootListId.trim()
-        ? listData.rootListId.trim()
-        : undefined;
-    const isOverflowList = listData.isMoreSermonsList === true;
+  const listDoc = querySnapshot.docs[0];
+  const listData = listDoc.data() as Record<string, unknown>;
+  const listName =
+    (typeof listData.name === 'string' && listData.name.trim()) ||
+    (typeof listData.title === 'string' && listData.title.trim()) ||
+    listDoc.id;
+  const explicitRootListId =
+    typeof listData.rootListId === 'string' && listData.rootListId.trim() ? listData.rootListId.trim() : undefined;
+  const isOverflowList = listData.isMoreSermonsList === true;
 
-    // Lock list by updating timestamp
-    transaction.update(listDoc.ref, { updatedAtMillis: Timestamp.now().toMillis() });
+  let existingPlacementInChain: { listId: string; listItemId: string } | null = null;
+  if (shouldSearchLogicalChain) {
+    existingPlacementInChain = await findItemInOverflowChain(listId, itemToAdd, token);
+  }
 
-    // Fetch Subsplash Data (Network call inside transaction - needed for consistency check)
-    // Note: In high throughput scenarios, this might cause contention, but for this use case it ensures we see the latest state.
-    // Use getFullListRowsWithTotal to get the actual total count from API (includes unlisted items)
-    const { rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token);
+  listDebugLog('addToList.processListStep.loadedList', {
+    listId,
+    firestoreListId: listDoc.id,
+    explicitRootListId,
+    isOverflowList,
+    overflowBehavior: listData.overflowBehavior,
+    moreSermonsRef: listData.moreSermonsRef,
+    existingPlacementInChain,
+  });
 
-    // Check if item already exists
-    const exists = currentRows.some(row => 
-       row._embedded[row.type]?.id === itemToAdd.id
-    );
+  await listDoc.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
 
-    if (exists) {
-      logger.log(`Item ${itemToAdd.id} already in list ${listId}`);
-      itemExisted = true;
-      
-      // Item already exists - find its listItemId
-      const existingRow = currentRows.find(row => 
-        row._embedded[row.type]?.id === itemToAdd.id
-      );
-      existingListItemId = existingRow?.id;
-      
-      // BUG FIX: If item exists in Subsplash but Firestore document for overflow list doesn't exist,
-      // this means a previous transaction attempt updated Subsplash but failed before committing Firestore.
-      // We need to ensure the Firestore document exists to maintain consistency.
-      if (listData.overflowBehavior === OverflowBehavior.CREATENEWLIST) {
-        // Check if there's a link row to an overflow list (indicates overflow list exists in Subsplash)
-        const linkRow = currentRows.find(r => r.type === 'list');
-        if (linkRow && linkRow._embedded.list?.id) {
-          const overflowListId = linkRow._embedded.list.id;
-          
-          // Check if parent's moreSermonsRef is set (indicates Firestore doc should exist)
-          if (!listData.moreSermonsRef) {
-            // Overflow list exists in Subsplash but not in Firestore - create it
-            const overflowListDetails = await getListDetails(overflowListId, token);
-            const parentDepth =
-              typeof listData.overflowDepth === 'number'
-                ? listData.overflowDepth
-                : isOverflowList
-                  ? 1
-                  : 0;
-            const rootListId = explicitRootListId ?? listDoc.id;
-            const newListRef = firestoreDB.collection('lists').doc();
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { id, ...dataToCopy } = listData;
-            
-            const newListData: Record<string, unknown> = {
-              ...dataToCopy,
-              id: newListRef.id,
-              subsplashId: overflowListId,
-              name: overflowListDetails.title,
-              createdAtMillis: Date.now(),
-              updatedAtMillis: Date.now(),
-              count: 0,
-              images: [],
-              ...buildOverflowListMetadata({
-                rootListId,
-                overflowDepth: parentDepth + 1,
-              }),
-            };
-            
-            transaction.set(newListRef, newListData);
-            transaction.update(listDoc.ref, {
-              moreSermonsRef: overflowListId,
-              ...(isOverflowList
-                ? buildOverflowListMetadata({
-                    rootListId,
-                    overflowDepth: parentDepth,
-                  })
-                : buildRootListMetadata({
-                    rootListId: listDoc.id,
-                    logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
-                    hasOverflowPages: true,
-                  })),
-            });
-          }
-        }
-      }
-      
-      return;
+  const { rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token);
+  const exists = currentRows.some((row) => row._embedded[row.type]?.id === itemToAdd.id);
+  listDebugLog('addToList.processListStep.remoteState', {
+    listId,
+    totalRowCount,
+    exists,
+    currentRows: summarizeSubsplashRows(currentRows),
+  });
+
+  if (existingPlacementInChain && !exists) {
+    await ensureImmediateOverflowListLinkInFirestore({
+      listDoc,
+      listData,
+      currentRows,
+      token,
+      totalRowCount,
+      maxListSize,
+    });
+    listDebugLog('addToList.processListStep.alreadyInLogicalChain', {
+      listId,
+      itemId: itemToAdd.id,
+      existingPlacementInChain,
+    });
+    return {
+      listItemId: existingPlacementInChain.listItemId,
+    };
+  }
+
+  if (exists) {
+    listDebugLog('addToList.processListStep.alreadyInPhysicalList', {
+      listId,
+      itemId: itemToAdd.id,
+    });
+    itemExisted = true;
+    const existingRow = currentRows.find((row) => row._embedded[row.type]?.id === itemToAdd.id);
+    existingListItemId = existingRow?.id;
+
+    const repairedOverflowMetadata = await ensureImmediateOverflowListLinkInFirestore({
+      listDoc,
+      listData,
+      currentRows,
+      token,
+      totalRowCount,
+      maxListSize,
+    });
+
+    if (repairedOverflowMetadata && existingListItemId) {
+      return {
+        listItemId: existingListItemId,
+      };
     }
-
-    // Insert new item at position 1 (FIFO / Stack Push)
-    // "Always first one in the first list"
+  } else {
     const newRow = createListRow(itemToAdd, listId, 1);
     const updatedRows = [newRow, ...currentRows];
-    
-    // Check overflow using the actual total count from API (includes unlisted items)
-    // The API total represents the true count of all rows in the list, including unlisted ones
-    // If totalRowCount is already at maxListSize, adding any item will exceed the limit
     const willOverflow = totalRowCount >= maxListSize;
+    listDebugLog('addToList.processListStep.prePatchDecision', {
+      listId,
+      itemId: itemToAdd.id,
+      willOverflow,
+      maxListSize,
+      updatedRows: summarizeSubsplashRows(updatedRows),
+    });
 
-    // Handle Overflow
-    // Use totalRowCount (from API) instead of updatedRows.length because:
-    // - updatedRows.length only counts visible (non-unlisted) rows
-    // - totalRowCount includes unlisted items, which count toward the limit
-    // - If totalRowCount is already at maxListSize, adding any item will exceed the limit
     if (willOverflow) {
+      if (shouldEnforceStrictPreflight) {
+        listDebugLog('addToList.processListStep.strictPreflight.start', {
+          listId,
+          rootListId: explicitRootListId ?? listDoc.id,
+          action: 'overflow-publish',
+        });
+        await ensureCanPerformStrictPublishedMutation(explicitRootListId ?? listDoc.id, token, 'overflow-publish');
+        listDebugLog('addToList.processListStep.strictPreflight.success', {
+          listId,
+          rootListId: explicitRootListId ?? listDoc.id,
+        });
+      }
       if (listData.overflowBehavior === OverflowBehavior.CREATENEWLIST) {
         let nextListId =
           typeof listData.moreSermonsRef === 'string' && listData.moreSermonsRef.trim()
@@ -221,14 +441,17 @@ async function processListStep(
             : undefined;
         let rootListId = explicitRootListId ?? listDoc.id;
         let rootListName = listName;
-        let currentDepth =
-          typeof listData.overflowDepth === 'number'
-            ? listData.overflowDepth
-            : isOverflowList
-              ? 1
-              : 0;
-        
-        // Ensure we have a next list
+        const explicitOverflowDepth = typeof listData.overflowDepth === 'number' ? listData.overflowDepth : undefined;
+        const hasExplicitOverflowDepth = explicitOverflowDepth !== undefined;
+        let currentDepth: number = explicitOverflowDepth ?? (isOverflowList ? 1 : 0);
+        let pendingOverflowDoc:
+          | {
+              ref: DocumentReference;
+              data: Record<string, unknown>;
+              parentUpdate: Record<string, unknown>;
+            }
+          | undefined;
+
         if (!nextListId) {
           if (isOverflowList) {
             let currentSubsplashId = listId;
@@ -252,7 +475,9 @@ async function processListStep(
                   typeof parentData.subsplashId === 'string' && parentData.subsplashId.trim()
                     ? parentData.subsplashId
                     : parentDoc.id;
-                currentDepth += 1;
+                if (!hasExplicitOverflowDepth) {
+                  currentDepth += 1;
+                }
                 if (!explicitRootListId && typeof parentData.rootListId === 'string' && parentData.rootListId.trim()) {
                   rootListId = parentData.rootListId.trim();
                 }
@@ -271,256 +496,360 @@ async function processListStep(
           const newOverflowDepth = currentDepth + 1;
           const newTitle = buildOverflowListTitle(rootListName);
           const subtitle = buildOverflowListSubtitle(newOverflowDepth);
-          logger.log(
-            `Creating new overflow list: ${newTitle} with subtitle: ${subtitle} (Page ${newOverflowDepth})`
-          );
-          
+          listDebugLog('addToList.processListStep.createOverflowList.start', {
+            listId,
+            rootListId,
+            rootListName,
+            currentDepth,
+            newOverflowDepth,
+            newTitle,
+            subtitle,
+          });
+
           const newList = await createNewList(newTitle, token, subtitle);
           nextListId = newList.id;
+          listDebugLog('addToList.processListStep.createOverflowList.success', {
+            listId,
+            nextListId,
+            rootListId,
+            newOverflowDepth,
+          });
 
-          // Create Firestore doc for new list
           const newListRef = firestoreDB.collection('lists').doc();
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { id, ...dataToCopy } = listData; 
-          
-          const newListData: Record<string, unknown> = {
-            ...dataToCopy,
-            id: newListRef.id,
-            subsplashId: nextListId,
-            name: newTitle,
-            createdAtMillis: Date.now(),
-            updatedAtMillis: Date.now(),
-            count: 0,
-            images: [],
-            ...buildOverflowListMetadata({
-              rootListId,
-              overflowDepth: newOverflowDepth,
-            }),
+          const { id, ...dataToCopy } = listData;
+          const now = Date.now();
+
+          pendingOverflowDoc = {
+            ref: newListRef,
+            data: {
+              ...dataToCopy,
+              id: newListRef.id,
+              subsplashId: nextListId,
+              name: newTitle,
+              createdAtMillis: now,
+              updatedAtMillis: now,
+              count: 0,
+              maxListSize,
+              images: [],
+              ...buildOverflowListMetadata({
+                rootListId,
+                overflowDepth: newOverflowDepth,
+              }),
+            },
+            parentUpdate: {
+              moreSermonsRef: nextListId,
+              maxListSize,
+              ...(isOverflowList
+                ? buildOverflowListMetadata({
+                    rootListId,
+                    overflowDepth: currentDepth,
+                  })
+                : buildRootListMetadata({
+                    rootListId: listDoc.id,
+                    logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+                    hasOverflowPages: true,
+                  })),
+            },
           };
-          // Don't set moreSermonsRef if undefined (Firestore doesn't allow undefined values)
-          // It will be set later if needed via transaction.update
-          transaction.set(newListRef, newListData);
-          
-          transaction.update(listDoc.ref, {
-            moreSermonsRef: nextListId,
-            ...(isOverflowList
-              ? buildOverflowListMetadata({
-                  rootListId,
-                  overflowDepth: currentDepth,
-                })
-              : buildRootListMetadata({
-                  rootListId: listDoc.id,
-                  logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
-                  hasOverflowPages: true,
-                })),
+        }
+
+        const contentRows = updatedRows.filter((r) => !(r.type === 'list' && r._embedded.list?.id === nextListId));
+        const itemsToKeep = contentRows.slice(0, maxListSize - 1);
+        const itemsToPropagate = contentRows.slice(maxListSize - 1);
+        listDebugLog('addToList.processListStep.overflowPartition', {
+          listId,
+          nextListId,
+          itemsToKeep: summarizeSubsplashRows(itemsToKeep),
+          itemsToPropagate: summarizeSubsplashRows(itemsToPropagate),
+        });
+
+        if (itemsToPropagate.length > 0) {
+          listDebugLog('addToList.processListStep.overflowDeleteAndPropagate.start', {
+            listId,
+            nextListId,
+            propagateCount: itemsToPropagate.length,
+            rowsToDelete: summarizeSubsplashRows(itemsToPropagate.filter((r) => Boolean(r.id))),
+          });
+          await ensureListIsPatchableBeforeDestructiveMutation(listId, currentRows, token);
+
+          const rowsToDelete = itemsToPropagate.filter((r) => r.id);
+          for (const rowToDelete of rowsToDelete) {
+            const deleteConfig = createAxiosConfig(
+              `https://core.subsplash.com/builder/v1/list-rows/${rowToDelete.id}`,
+              token,
+              'DELETE'
+            );
+            await axios(deleteConfig);
+          }
+
+          const reversedPropagate = [...itemsToPropagate].reverse();
+          for (const itemRow of reversedPropagate) {
+            const embeddedResource = itemRow._embedded[itemRow.type];
+            if (embeddedResource) {
+              itemsToPropagateAfterCommit.push({
+                listId: nextListId!,
+                item: {
+                  id: embeddedResource.id,
+                  type: itemRow.type,
+                },
+              });
+            }
+          }
+          listDebugLog('addToList.processListStep.overflowDeleteAndPropagate.queued', {
+            listId,
+            nextListId,
+            itemsToPropagateAfterCommit,
           });
         }
 
-        // Identify items to move (Prune items to make space: Max (maxListSize - 1) items + 1 Link = maxListSize)
-        // We need to keep the top (maxListSize - 1) items
-        // The rest are overflow.
-        // NOTE: The array includes the new item at index 0.
-        // We will have at least (maxListSize + 1) items here if we overflowed.
-        
-        // We need to find the Link row if it exists to preserve/move it.
-        // Actually, the Link row should always be the LAST item if it exists.
-        // But we just prepended an item, so Link is pushed down.
-        
-        // Strategy:
-        // 1. Separate "Content" rows from "Link" rows.
-        // 2. We only want ONE Link row to the *immediate* next list at the bottom.
-        
-        const contentRows = updatedRows.filter(r => !(r.type === 'list' && r._embedded.list?.id === nextListId));
-        
-        // Check if we have *other* links? Assuming we only link to 'nextListId'.
-        
-        // Items to propagate are those that fall off the (maxListSize - 1) limit.
-        // We keep (maxListSize - 1) content items + 1 link row = maxListSize total.
-        // Take top (maxListSize - 1) content items.
-        const itemsToKeep = contentRows.slice(0, maxListSize - 1);
-        const itemsToPropagate = contentRows.slice(maxListSize - 1);
-        
-        // Step 1: Delete items that will be propagated (matching remove-item.har pattern)
-        // This matches the pattern in remove-item.har: DELETE to /builder/v1/list-rows/{id} with no body, returns 204
-        if (itemsToPropagate.length > 0) {
-            // Delete the rows that will be propagated (they have IDs since they're existing rows)
-            const rowsToDelete = itemsToPropagate.filter(r => r.id);
-            for (const rowToDelete of rowsToDelete) {
-                // Match HAR file: DELETE https://core.subsplash.com/builder/v1/list-rows/{id}
-                // No body, returns 204 No Content
-                const deleteConfig = createAxiosConfig(
-                    `https://core.subsplash.com/builder/v1/list-rows/${rowToDelete.id}`,
-                    token,
-                    'DELETE'
-                );
-                await axios(deleteConfig);
-            }
-            
-            // Store items for propagation AFTER transaction commits
-            // This fixes the transaction isolation bug
-            const reversedPropagate = [...itemsToPropagate].reverse();
-            for (const itemRow of reversedPropagate) {
-                 const embeddedResource = itemRow._embedded[itemRow.type];
-                 if (embeddedResource) {
-                     const itemToMove: SubsplashMediaItem = {
-                         id: embeddedResource.id,
-                         type: itemRow.type
-                     };
-                     itemsToPropagateAfterCommit.push({
-                       listId: nextListId!,
-                       item: itemToMove
-                     });
-                 }
-            }
-        }
-
-        // Step 2: Patch with remaining rows (reordering only, no new item yet)
-        // This matches remove-item.har: after DELETE, patch with remaining rows to update positions
-        // After deleting rows, the list has fewer rows, so we patch with itemsToKeep to reorder them
-        // We exclude the new item (newRow) from this patch - it will be added in step 3
-        // IMPORTANT: We also need to include the existing link row if it exists, otherwise it will still be in the list
-        // and cause the count to be wrong in step 3
-        const existingLinkRow = currentRows.find(r => r.type === 'list' && r._embedded.list?.id === nextListId);
-        const rowsToPatchAfterDelete = itemsToKeep.filter(r => r.id); // Only existing rows, no new item
+        const existingLinkRow = currentRows.find((r) => r.type === 'list' && r._embedded.list?.id === nextListId);
+        const rowsToPatchAfterDelete = itemsToKeep.filter((r) => r.id);
         if (existingLinkRow) {
-            // Include the existing link row in the patch so it gets reordered correctly
-            rowsToPatchAfterDelete.push(existingLinkRow);
+          rowsToPatchAfterDelete.push(existingLinkRow);
         }
         if (rowsToPatchAfterDelete.length > 0) {
-            await patchListRows(listId, rowsToPatchAfterDelete, token);
+          await patchListRows(listId, rowsToPatchAfterDelete, token);
         }
 
-        // Step 3: Add the new item with link row in a separate patch
-        // Now that the list has the correct count (after delete + patch), we can add the new item
-        // Note: itemsToKeep already includes the new item (it's at index 0 from updatedRows)
-        // If the link row already exists, we need to update it, not create a new one
-        // Create/Update Link Row - use existing link row if it exists, otherwise create new one
-        const linkRow = existingLinkRow 
-            ? { ...existingLinkRow, position: itemsToKeep.length + 1 } // Update existing link row position
-            : createListRow({ id: nextListId!, type: 'list' }, listId, itemsToKeep.length + 1); // Create new link row
-        
-        // Finalize rows: itemsToKeep (which already includes newRow at position 0) + link
+        const linkRow = existingLinkRow
+          ? { ...existingLinkRow, position: itemsToKeep.length + 1 }
+          : createListRow({ id: nextListId!, type: 'list' }, listId, itemsToKeep.length + 1);
         const finalRows = [...itemsToKeep, linkRow];
-        
-        // Patch Subsplash
-        await patchListRows(listId, finalRows, token);
+        finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+        listDebugLog('addToList.processListStep.overflowPatch.complete', {
+          listId,
+          nextListId,
+          finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
+        });
 
+        if (pendingOverflowDoc) {
+          const batch = firestoreDB.batch();
+          batch.set(pendingOverflowDoc.ref, pendingOverflowDoc.data);
+          batch.update(listDoc.ref, pendingOverflowDoc.parentUpdate);
+          await batch.commit();
+          listDebugLog('addToList.processListStep.overflowFirestoreMetadata.created', {
+            listId,
+            nextListId,
+            pendingOverflowFirestoreListId: pendingOverflowDoc.ref.id,
+            parentUpdate: pendingOverflowDoc.parentUpdate,
+          });
+        }
       } else if (listData.overflowBehavior === OverflowBehavior.REMOVEOLDEST) {
-        // Just slice to max size
         const finalRows = updatedRows.slice(0, maxListSize);
-        await patchListRows(listId, finalRows, token);
+        listDebugLog('addToList.processListStep.removeOldest.start', {
+          listId,
+          finalRows: summarizeSubsplashRows(finalRows),
+        });
+        await ensureListIsPatchableBeforeDestructiveMutation(listId, currentRows, token);
+        await deleteExistingRowsMissingFromTarget(listId, currentRows, finalRows, token);
+        finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+        listDebugLog('addToList.processListStep.removeOldest.complete', {
+          listId,
+          finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
+        });
       } else {
-         throw new HttpsError('failed-precondition', 'List overflowed and no valid behavior set');
+        throw new HttpsError('failed-precondition', 'List overflowed and no valid behavior set');
       }
     } else {
-      // No overflow, just patch
-      await patchListRows(listId, updatedRows, token);
+      finalRowsSnapshot = await patchListRows(listId, updatedRows, token);
+      listDebugLog('addToList.processListStep.simplePatch.complete', {
+        listId,
+        finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
+      });
     }
-  });
-  
-  // AFTER transaction commits: get the listItemId
+  }
+
   let listItemId: string | undefined;
   if (itemExisted) {
-    // Item already existed - use the captured listItemId
     listItemId = existingListItemId;
   } else {
-    // Item was newly added - fetch the updated rows to get the listItemId
-    // The item we just added should be at position 1
-    const updatedListRows = await getFullListRows(listId, token);
-    // Find the row by item ID (not just position 1, since concurrent adds may have shifted positions)
-    // The item we just added should be the one with the highest position among rows with this item ID
-    // Actually, since we add at position 1, it should be at position 1, but in concurrent scenarios
-    // other items might have been added, so we just find by item ID and take the first match
-    const addedRow = updatedListRows.find(row => 
-      row._embedded[itemToAdd.type]?.id === itemToAdd.id
-    );
-    listItemId = addedRow?.id;
+    listItemId = await resolveListItemIdWithRetry(listId, itemToAdd, token, finalRowsSnapshot);
   }
-  
-  // AFTER transaction commits: propagate items to overflow lists
-  // This fixes the transaction isolation bug - the Firestore document created above
-  // is now committed and visible to the recursive calls
+
+  if (!listItemId) {
+    listDebugError('addToList.processListStep.resolveListItemId.failed', {
+      listId,
+      itemId: itemToAdd.id,
+      finalRowsSnapshot: finalRowsSnapshot ? summarizeSubsplashRows(finalRowsSnapshot) : undefined,
+    });
+    throw new HttpsError('internal', `Added item ${itemToAdd.id} could not be resolved in list ${listId} after patch.`);
+  }
+
   for (const { listId: targetListId, item } of itemsToPropagateAfterCommit) {
-    await processListStep(targetListId, item, token, maxListSize, false);
+    listDebugLog('addToList.processListStep.propagate.start', {
+      sourceListId: listId,
+      targetListId,
+      item,
+    });
+    await processListStep(targetListId, item, token, maxListSize, false, false, false);
   }
+
+  let actualPlacement:
+    | {
+        firestoreListId: string;
+        subsplashListId: string;
+        overflowDepth: number;
+        position: number;
+        listItemId?: string;
+      }
+    | undefined;
+
+  const resolvedPlacement = await findItemInOverflowChain(listId, itemToAdd, token);
+  if (resolvedPlacement) {
+    const physicalListQuery = await firestoreDB
+      .collection('lists')
+      .where('subsplashId', '==', resolvedPlacement.listId)
+      .limit(1)
+      .get();
+    const physicalListDoc = physicalListQuery.docs[0];
+    const physicalRows = await getFullListRows(resolvedPlacement.listId, token);
+    const position = physicalRows.findIndex((row) => row.id === resolvedPlacement.listItemId) + 1;
+
+    if (physicalListDoc && position > 0) {
+      const physicalListData = physicalListDoc.data() as Record<string, unknown>;
+      actualPlacement = {
+        firestoreListId: physicalListDoc.id,
+        subsplashListId: resolvedPlacement.listId,
+        overflowDepth: typeof physicalListData.overflowDepth === 'number' ? physicalListData.overflowDepth : 0,
+        position,
+        listItemId: resolvedPlacement.listItemId,
+      };
+    }
+  }
+  listDebugLog('addToList.processListStep.finalPlacement', {
+    listId,
+    itemId: itemToAdd.id,
+    listItemId,
+    actualPlacement,
+  });
 
   if (shouldSyncChainMetadata) {
+    listDebugLog('addToList.processListStep.syncMetadata.start', {
+      listId,
+      itemId: itemToAdd.id,
+    });
     await syncOverflowChainMetadata(listId, token);
+    await syncRootMembershipPlacements(listId, token);
+    listDebugLog('addToList.processListStep.syncMetadata.complete', {
+      listId,
+      itemId: itemToAdd.id,
+    });
   }
-  return { listItemId };
+  return { listItemId, actualPlacement };
 }
 
-const addToList = onCall({ secrets: subsplashSecretsWithRuntimeAlerts }, async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
-  logger.log('addToList');
+const addToList = onCall(
+  { secrets: subsplashSecretsWithRuntimeAlerts },
+  async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
+    listDebugLog('addToList.callable.start', {
+      uid: request.auth?.uid,
+      destinationListIds: request.data?.destinationListIds,
+      mediaItem: request.data?.mediaItem,
+      maxListSize: request.data?.maxListSize,
+      operationKey: request.data?.operationKey,
+    });
 
-  if (!canUserRolePublish(request.auth?.token.role)) {
-    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-  }
+    if (!canUserRolePublish(request.auth?.token.role)) {
+      throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
+    }
 
-  const { destinationListIds, mediaItem } = request.data;
-  if (!destinationListIds || !mediaItem) {
-    throw new HttpsError('invalid-argument', 'Missing destinationListIds or mediaItem.');
-  }
+    const { destinationListIds, mediaItem } = request.data;
+    if (!destinationListIds || !mediaItem) {
+      throw new HttpsError('invalid-argument', 'Missing destinationListIds or mediaItem.');
+    }
 
-  const operationKey = getOperationKey(request.data.operationKey);
+    const operationKey = getOperationKey(request.data.operationKey);
 
-  try {
-    const token = await authenticateSubsplash();
-    const maxListSize = request.data.maxListSize ?? DEFAULT_MAX_LIST_SIZE;
-    const lockKeys = [...destinationListIds.map((listId) => `list:${listId}`), `media-item:${mediaItem.id}`];
+    try {
+      const token = await authenticateSubsplash();
+      const maxListSize = request.data.maxListSize ?? getConfiguredMaxListSize();
+      const lockKeys = [...destinationListIds.map((listId) => `list:${listId}`), `media-item:${mediaItem.id}`];
+      listDebugLog('addToList.callable.authenticated', {
+        destinationListIds,
+        mediaItemId: mediaItem.id,
+        maxListSize,
+        lockKeys,
+        operationKey,
+      });
 
-    const runMutation = async (): Promise<AddToListOutputType> => {
-      const results = await Promise.allSettled(
-        destinationListIds.map(async (listId) => {
-          const result = await processListStep(listId, mediaItem, token, maxListSize);
-          return { listId, listItemId: result.listItemId };
-        })
-      );
+      const runMutation = async (): Promise<AddToListOutputType> => {
+        listDebugLog('addToList.callable.runMutation.start', {
+          destinationListIds,
+          mediaItemId: mediaItem.id,
+        });
+        const results = await Promise.allSettled(
+          destinationListIds.map(async (listId) => {
+            const result = await processListStep(listId, mediaItem, token, maxListSize);
+            return { listId, listItemId: result.listItemId, actualPlacement: result.actualPlacement };
+          })
+        );
 
-      return results.map((result, index): OutputTypes => {
-        if (result.status === 'fulfilled') {
+        return results.map((result, index): OutputTypes => {
+          if (result.status === 'fulfilled') {
+            return {
+              listId: destinationListIds[index],
+              status: 'success',
+              ...(result.value.listItemId ? { listItemId: result.value.listItemId } : {}),
+              ...(result.value.actualPlacement ? { actualPlacement: result.value.actualPlacement } : {}),
+            };
+          }
+
+          const errorPayload = getErrorPayload(result.reason);
+          listDebugError('addToList.callable.runMutation.itemFailed', {
+            listId: destinationListIds[index],
+            mediaItemId: mediaItem.id,
+            errorPayload,
+          });
           return {
             listId: destinationListIds[index],
-            status: 'success',
-            listItemId: result.value.listItemId,
+            status: 'error',
+            ...errorPayload,
           };
-        }
+        });
+      };
 
-        const errorPayload = getErrorPayload(result.reason);
-        logger.error(`Error adding to list ${destinationListIds[index]}:`, errorPayload);
-        return {
-          listId: destinationListIds[index],
-          status: 'error',
-          ...errorPayload,
-        };
+      const executeLockedMutation = async (): Promise<AddToListOutputType> => {
+        return withSubsplashLocks(lockKeys, runMutation, {
+          ...(operationKey ? { operationKey } : {}),
+        });
+      };
+
+      const output = operationKey
+        ? await withIdempotency(operationKey, executeLockedMutation)
+        : await executeLockedMutation();
+      listDebugLog('addToList.callable.success', {
+        destinationListIds,
+        mediaItemId: mediaItem.id,
+        output,
       });
-    };
+      return output;
+    } catch (error) {
+      const errorPayload = getErrorPayload(error);
+      if (errorPayload.errorCode === 'aborted') {
+        listDebugWarn('addToList.callable.lockAborted', {
+          destinationListIds,
+          mediaItemId: mediaItem.id,
+          errorPayload,
+        });
+        return destinationListIds.map(
+          (listId): OutputTypes => ({
+            listId,
+            status: 'error',
+            ...errorPayload,
+          })
+        );
+      }
 
-    const executeLockedMutation = async (): Promise<AddToListOutputType> => {
-      return withSubsplashLocks(lockKeys, runMutation, {
-        ...(operationKey ? { operationKey } : {}),
+      const err = error as unknown;
+      listDebugError('addToList.callable.failed', {
+        destinationListIds,
+        mediaItemId: mediaItem.id,
+        errorPayload,
       });
-    };
-
-    if (operationKey) {
-      return await withIdempotency(operationKey, executeLockedMutation);
+      throw handleError(err);
     }
-
-    return await executeLockedMutation();
-  } catch (error) {
-    const errorPayload = getErrorPayload(error);
-    if (errorPayload.errorCode === 'aborted') {
-      return destinationListIds.map((listId): OutputTypes => ({
-        listId,
-        status: 'error',
-        ...errorPayload,
-      }));
-    }
-
-    const err = error as unknown;
-    logger.error('addToList failed', errorPayload);
-    throw handleError(err);
   }
-});
+);
 
 export default addToList;

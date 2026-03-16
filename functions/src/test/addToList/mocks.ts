@@ -1,6 +1,34 @@
-import { SubsplashList, SubsplashListRow, SubsplashListRowReference, SubsplashPatchPayload } from '../../types/Subsplash';
+import {
+  SubsplashList,
+  SubsplashListRow,
+  SubsplashListRowReference,
+  SubsplashPatchPayload,
+  SubsplashImage,
+} from '../../types/Subsplash';
 import { CallableRequest } from 'firebase-functions/v2/https';
 import { AddtoListInputType } from '../../addToList';
+
+export type MockSubsplashMutation = 'patch' | 'delete-row' | 'create-list';
+
+export interface MockSubsplashHistoryEntry {
+  event: MockSubsplashMutation;
+  listId: string;
+  rows: SubsplashListRow[];
+}
+
+export interface MockSubsplashMediaItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  summary?: string;
+  date?: string;
+  duration?: number;
+  tags?: string[];
+  audio_url?: string;
+  _embedded?: {
+    images?: SubsplashImage[];
+  };
+}
 
 // Type for the handler function (what onCall wraps)
 export type TestRequest = {
@@ -55,8 +83,13 @@ jest.mock('firebase-functions/v2/https', () => ({
 export class SubsplashMock {
   lists: Map<string, SubsplashList> = new Map();
   listRows: Map<string, SubsplashListRow[]> = new Map();
+  mediaItems: Map<string, MockSubsplashMediaItem> = new Map();
   maxListSize: number = 200; // Configurable max list size for testing
+  patchRetainsOmittedRows: boolean = true;
   private rowIdCounter: number = 0;
+  private staleListRowsAfterPatch: Map<string, number> = new Map();
+  private staleListRowsSnapshots: Map<string, SubsplashListRow[]> = new Map();
+  private history: MockSubsplashHistoryEntry[] = [];
 
   constructor() {
     this.reset();
@@ -65,8 +98,13 @@ export class SubsplashMock {
   reset() {
     this.lists.clear();
     this.listRows.clear();
+    this.mediaItems.clear();
     this.maxListSize = 200; // Reset to default
+    this.patchRetainsOmittedRows = true;
     this.rowIdCounter = 0;
+    this.staleListRowsAfterPatch.clear();
+    this.staleListRowsSnapshots.clear();
+    this.history = [];
   }
 
   createList(id: string, title: string, count: number = 0, maxItemCount?: number, subtitle?: string): SubsplashList {
@@ -98,8 +136,57 @@ export class SubsplashMock {
     return this.lists.get(id);
   }
 
+  createMediaItem(item: MockSubsplashMediaItem): MockSubsplashMediaItem {
+    this.mediaItems.set(item.id, JSON.parse(JSON.stringify(item)) as MockSubsplashMediaItem);
+    return this.getMediaItem(item.id)!;
+  }
+
+  getMediaItem(id: string): MockSubsplashMediaItem | undefined {
+    const item = this.mediaItems.get(id);
+    if (!item) {
+      return undefined;
+    }
+    return JSON.parse(JSON.stringify(item)) as MockSubsplashMediaItem;
+  }
+
+  getHistory(): MockSubsplashHistoryEntry[] {
+    return JSON.parse(JSON.stringify(this.history)) as MockSubsplashHistoryEntry[];
+  }
+
+  clearHistory() {
+    this.history = [];
+  }
+
+  setPatchRetainsOmittedRows(value: boolean) {
+    this.patchRetainsOmittedRows = value;
+  }
+
+  recordHistory(event: MockSubsplashMutation, listId: string) {
+    this.history.push({
+      event,
+      listId,
+      rows: JSON.parse(JSON.stringify(this.listRows.get(listId) || [])) as SubsplashListRow[],
+    });
+  }
+
   getListRows(listId: string): SubsplashListRow[] {
+    const staleReadsRemaining = this.staleListRowsAfterPatch.get(listId) ?? 0;
+    const staleSnapshot = this.staleListRowsSnapshots.get(listId);
+    if (staleReadsRemaining > 0 && staleSnapshot) {
+      if (staleReadsRemaining === 1) {
+        this.staleListRowsAfterPatch.delete(listId);
+        this.staleListRowsSnapshots.delete(listId);
+      } else {
+        this.staleListRowsAfterPatch.set(listId, staleReadsRemaining - 1);
+      }
+      return JSON.parse(JSON.stringify(staleSnapshot)) as SubsplashListRow[];
+    }
+
     return this.listRows.get(listId) || [];
+  }
+
+  returnStaleListRowsAfterNextPatch(listId: string, reads: number = 1) {
+    this.staleListRowsAfterPatch.set(listId, reads);
   }
 
   patchList(id: string, payload: SubsplashPatchPayload) {
@@ -116,8 +203,9 @@ export class SubsplashMock {
     list.list_rows_count = rowCount;
     
     const existingRows = this.listRows.get(id) || [];
+    const existingRowsSnapshot = JSON.parse(JSON.stringify(existingRows)) as SubsplashListRow[];
     
-    const newRows: SubsplashListRow[] = payload._embedded['list-rows'].map((row: SubsplashListRow | SubsplashListRowReference, index: number): SubsplashListRow => {
+    const requestedRows: SubsplashListRow[] = payload._embedded['list-rows'].map((row: SubsplashListRow | SubsplashListRowReference, index: number): SubsplashListRow => {
       if ('id' in row && 'position' in row && !('app_key' in row)) {
         const existingRow = existingRows.find(r => r.id === row.id);
         if (existingRow) {
@@ -148,7 +236,21 @@ export class SubsplashMock {
       };
     });
 
+    const newRows = this.patchRetainsOmittedRows
+      ? [
+          ...requestedRows,
+          ...existingRows.filter((row) => !requestedRows.some((requestedRow) => requestedRow.id === row.id)),
+        ].map((row, index) => ({
+          ...row,
+          position: index + 1,
+        }))
+      : requestedRows;
+
     this.listRows.set(id, newRows);
+    this.recordHistory('patch', id);
+    if ((this.staleListRowsAfterPatch.get(id) ?? 0) > 0) {
+      this.staleListRowsSnapshots.set(id, existingRowsSnapshot);
+    }
     return { ...list, _embedded: { 'list-rows': newRows } };
   }
   
@@ -194,7 +296,7 @@ export const networkFailureInjector = new NetworkFailureInjector();
 
 // Mock Axios to use SubsplashMock with failure injection
 jest.mock('axios', () => {
-  return jest.fn((config: { method: string; url: string; data?: string }) => {
+  const mockAxios = jest.fn((config: { method: string; url: string; data?: string }) => {
     const method = config.method.toUpperCase();
     const url = config.url;
 
@@ -223,6 +325,16 @@ jest.mock('axios', () => {
       }
     }
 
+    const getMediaItemMatch = url.match(/media\/v1\/media-items\/([a-zA-Z0-9-]+)$/);
+    if (method === 'GET' && getMediaItemMatch) {
+      const mediaItemId = getMediaItemMatch[1];
+      const mediaItem = subsplashMock.getMediaItem(mediaItemId);
+      if (mediaItem) {
+        return Promise.resolve({ data: mediaItem, status: 200 });
+      }
+      return Promise.reject({ response: { status: 404, data: { error: 'Media item not found' } } });
+    }
+
     const patchListMatch = url.match(/builder\/v1\/lists\/([a-zA-Z0-9-]+)$/);
     if (method === 'PATCH' && patchListMatch) {
       const listId = patchListMatch[1];
@@ -247,6 +359,7 @@ jest.mock('axios', () => {
       }
       const payload = JSON.parse(config.data || '{}') as { title: string; subtitle?: string };
       const newList = subsplashMock.postList(payload.title, payload.subtitle);
+      subsplashMock.recordHistory('create-list', newList.id);
       return Promise.resolve({ data: newList });
     }
 
@@ -266,6 +379,7 @@ jest.mock('axios', () => {
             r.position = index + 1;
           });
           subsplashMock.listRows.set(listId, updatedRows);
+          subsplashMock.recordHistory('delete-row', listId);
           
           // Update list count
           const list = subsplashMock.getList(listId);
@@ -297,5 +411,10 @@ jest.mock('axios', () => {
     }
 
     return Promise.reject(new Error(`Unhandled mock request: ${method} ${url}`));
+  });
+
+  return Object.assign(mockAxios, {
+    isAxiosError: (error: unknown) =>
+      Boolean(error && typeof error === 'object' && 'isAxiosError' in error),
   });
 });

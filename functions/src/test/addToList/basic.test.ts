@@ -1,14 +1,46 @@
 import { OverflowBehavior } from '@upperroom/shared/types/List';
+import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SubsplashListRow, SubsplashPatchPayload } from '../../types/Subsplash';
 import { 
   subsplashMock,
   TestRequest,
   AddToListHandler
 } from './mocks';
-import { createListDocument, clearFirestore, getListBySubsplashId } from './firestoreHelpers';
+import { createListDocument, clearFirestore, createSermonDocument, getListBySubsplashId } from './firestoreHelpers';
 import addToList from '../../addToList';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+
+jest.mock('../../helpers/publishedListDrift', () => {
+  const actual = jest.requireActual('../../helpers/publishedListDrift');
+  return {
+    ...actual,
+    ensureCanPerformStrictPublishedMutation: jest.fn().mockResolvedValue(undefined),
+  };
+});
 
 const addToListHandler = addToList as unknown as AddToListHandler;
+const firestoreDB = firebaseAdmin.firestore();
+
+const buildSermon = (id: string, subsplashId: string) => ({
+  id,
+  title: id,
+  description: '',
+  speakers: [],
+  subtitle: '',
+  dateMillis: 1,
+  sourceStartTime: 0,
+  durationSeconds: 60,
+  topics: [],
+  status: {
+    subsplash: uploadStatus.UPLOADED,
+    soundCloud: uploadStatus.NOT_UPLOADED,
+    audioStatus: sermonStatusType.PROCESSED,
+  },
+  images: [],
+  createdAtMillis: 1,
+  editedAtMillis: 1,
+  subsplashId,
+});
 
 describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
   beforeEach(async () => {
@@ -22,11 +54,12 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     subsplashMock.createList(listId, 'Test List');
     
     // Create Firestore document for the list
-    await createListDocument({
+    const firestoreListId = await createListDocument({
       subsplashId: listId,
       title: 'Test List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
     });
+    await createSermonDocument(buildSermon('sermon-1', 'media-1'));
     const mediaItem = { id: 'media-1', type: 'media-item' as const };
     const request: TestRequest = {
       auth: { token: { role: 'admin' } },
@@ -51,6 +84,22 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       expect(rows[0]._embedded['media-item']?.id).toBe('media-1');
       expect(rows[0].id).toBe(result[0].listItemId);
     }
+
+    const mirroredListItem = await firestoreDB
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-1')
+      .get();
+    expect(mirroredListItem.exists).toBe(true);
+    expect(mirroredListItem.data()).toMatchObject({
+      subsplashId: 'media-1',
+      position: 1,
+      uploadStatus: {
+        status: uploadStatus.UPLOADED,
+        listItemId: result[0].status === 'success' ? result[0].listItemId : undefined,
+      },
+    });
   });
 
   it('should handle overflow by creating new list and linking', async () => {
@@ -76,6 +125,10 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       count: 10,
     });
+    await createSermonDocument(buildSermon('sermon-new', 'new-item'));
+    for (let i = 0; i < 10; i += 1) {
+      await createSermonDocument(buildSermon(`sermon-${i}`, `item-${i}`));
+    }
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
@@ -139,6 +192,18 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     });
     expect(subsplashMock.getList(newListId!)?.title).toBe('More Full List sermons');
     expect(subsplashMock.getList(newListId!)?.subtitle).toBe('Page 1');
+
+    const rootMirrorSnapshot = await firestoreDB.collection('lists').doc(rootFirestoreId).collection('listItems').get();
+    expect(rootMirrorSnapshot.size).toBe(11);
+    expect(rootMirrorSnapshot.docs.map((doc) => doc.get('subsplashId'))).toContain('new-item');
+
+    const overflowMirrorDoc = await getListBySubsplashId(newListId!);
+    const overflowMirrorSnapshot = await firestoreDB
+      .collection('lists')
+      .doc(overflowMirrorDoc!.id)
+      .collection('listItems')
+      .get();
+    expect(overflowMirrorSnapshot.size).toBe(0);
   });
 
   it('should propagate overflow down multiple lists in chain', async () => {

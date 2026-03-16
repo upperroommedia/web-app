@@ -12,7 +12,7 @@ import firestore, { collection, query, getDocs, where, orderBy, QueryConstraint 
 import { listConverter } from '../types/List';
 import { sermonConverter } from '../types/Sermon';
 import { speakerConverter } from '../types/Speaker';
-import { getListDiscoveryCount, isDiscoverableRootList } from './algolia/searchRecords';
+import { isDiscoverableRootList } from './algolia/searchRecords';
 import { resolveListSortFromIndexName } from './algolia/listSorting';
 import { resolveSpeakerSortFromIndexName } from './algolia/speakerSorting';
 
@@ -147,9 +147,8 @@ export function createMockAlgoliaSearchClient(options: MockAlgoliaClientOptions)
               }
 
               allLists = [...allLists].sort((leftList, rightList) => {
-                const leftValue = sortProperty === 'count' ? getListDiscoveryCount(leftList) : leftList[sortProperty];
-                const rightValue =
-                  sortProperty === 'count' ? getListDiscoveryCount(rightList) : rightList[sortProperty];
+                const leftValue = leftList[sortProperty];
+                const rightValue = rightList[sortProperty];
 
                 if (typeof leftValue === 'number' && typeof rightValue === 'number') {
                   return sortOrder === 'asc' ? leftValue - rightValue : rightValue - leftValue;

@@ -1,5 +1,7 @@
 import firebaseAdmin from '../../../packages/shared/firebase/firebaseAdmin.js';
+import { FieldValue, type DocumentReference, type SetOptions } from 'firebase-admin/firestore';
 import type { List } from '../../../packages/shared/types/List';
+import { uploadStatus } from '../../../packages/shared/types/SermonTypes';
 import { HttpsError } from 'firebase-functions/v2/https';
 import axios from 'axios';
 import type {
@@ -9,6 +11,12 @@ import type {
 } from '../../../packages/contracts/getListOverflowChain';
 import { createAxiosConfig } from '../subsplashUtils';
 import { getFullListRows, patchListRows } from './addToListHelpers';
+import {
+  listDebugLog,
+  summarizeOverflowIssues,
+  summarizeOverflowNodes,
+  summarizeSubsplashRows,
+} from './listDebugLogger';
 
 type StoredListData = List & {
   title?: string;
@@ -20,7 +28,6 @@ type StoredListRecord = {
 };
 
 const firestore = firebaseAdmin.firestore();
-const { FieldValue } = firebaseAdmin.firestore;
 
 const normalizeString = (value: unknown): string | undefined => {
   if (typeof value !== 'string') {
@@ -132,6 +139,247 @@ const getContentRowCount = async (subsplashId: string, token: string): Promise<n
   return rows.filter((row) => row.type !== 'list').length;
 };
 
+const chunkValues = <T>(values: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+};
+
+type StoredSermonRecord = {
+  id: string;
+  data: Record<string, unknown> & {
+    subsplashId?: string;
+  };
+};
+
+const getStoredSermonsBySubsplashIds = async (subsplashIds: string[]): Promise<Map<string, StoredSermonRecord>> => {
+  const sermonsBySubsplashId = new Map<string, StoredSermonRecord>();
+
+  for (const subsplashIdChunk of chunkValues([...new Set(subsplashIds)], 10)) {
+    if (subsplashIdChunk.length === 0) {
+      continue;
+    }
+
+    const snapshot = await firestore.collection('sermons').where('subsplashId', 'in', subsplashIdChunk).get();
+    snapshot.docs.forEach((doc) => {
+      const sermonData = doc.data() as Record<string, unknown> & { subsplashId?: string };
+      const subsplashId = normalizeString(sermonData.subsplashId);
+      if (!subsplashId) {
+        return;
+      }
+
+      sermonsBySubsplashId.set(subsplashId, {
+        id: doc.id,
+        data: sermonData,
+      });
+    });
+  }
+
+  return sermonsBySubsplashId;
+};
+
+type BatchWriteOperation =
+  | {
+      type: 'set';
+      ref: DocumentReference;
+      data: Record<string, unknown>;
+      options?: SetOptions;
+    }
+  | {
+      type: 'update';
+      ref: DocumentReference;
+      data: Record<string, unknown>;
+    };
+
+const commitBatchWriteOperations = async (operations: BatchWriteOperation[]): Promise<void> => {
+  for (const operationChunk of chunkValues(operations, 400)) {
+    const batch = firestore.batch();
+
+    operationChunk.forEach((operation) => {
+      if (operation.type === 'set') {
+        if (operation.options) {
+          batch.set(operation.ref, operation.data, operation.options);
+        } else {
+          batch.set(operation.ref, operation.data);
+        }
+        return;
+      }
+
+      batch.update(operation.ref, operation.data);
+    });
+
+    await batch.commit();
+  }
+};
+
+export const syncRootMembershipPlacements = async (
+  startingSubsplashId: string,
+  token: string
+): Promise<void> => {
+  listDebugLog('listOverflowChain.syncRootMembershipPlacements.start', {
+    startingSubsplashId,
+  });
+  const startingRecord = await getStoredListRecordBySubsplashId(startingSubsplashId);
+  if (!startingRecord) {
+    listDebugLog('listOverflowChain.syncRootMembershipPlacements.skipMissingStartingRecord', {
+      startingSubsplashId,
+    });
+    return;
+  }
+
+  const issues: GetListOverflowChainIssue[] = [];
+  const rootRecord = await resolveRootRecord(startingRecord, issues);
+  const chain = await getStoredChainNodesFromRoot(rootRecord);
+  if (chain.length === 0) {
+    listDebugLog('listOverflowChain.syncRootMembershipPlacements.skipEmptyChain', {
+      startingSubsplashId,
+      rootListId: rootRecord.id,
+    });
+    return;
+  }
+
+  const rootNode = chain[0];
+  const rootListId = rootNode.record.id;
+  const rootListItemsRef = firestore.collection('lists').doc(rootListId).collection('listItems');
+  const rootListItemsSnapshot = await rootListItemsRef.get();
+  const rootListData = rootNode.record.data;
+  const rootListMembershipData = { ...rootListData };
+  delete rootListMembershipData.count;
+  delete rootListMembershipData.updatedAtMillis;
+
+  const rowsByNode = await Promise.all(
+    chain.map(async (node) => {
+      const subsplashListId = normalizeString(node.record.data.subsplashId);
+      return {
+        node,
+        subsplashListId,
+        rows: subsplashListId ? await getFullListRows(subsplashListId, token) : [],
+      };
+    })
+  );
+  listDebugLog('listOverflowChain.syncRootMembershipPlacements.rowsLoaded', {
+    startingSubsplashId,
+    rootListId,
+    chain: chain.map(({ record, depth }) => ({
+      firestoreListId: record.id,
+      subsplashId: record.data.subsplashId,
+      depth,
+    })),
+    rowsByNode: rowsByNode.map(({ node, subsplashListId, rows }) => ({
+      firestoreListId: node.record.id,
+      subsplashListId,
+      depth: node.depth,
+      rows: summarizeSubsplashRows(rows),
+    })),
+  });
+
+  const mediaPlacements = rowsByNode.flatMap(({ node, subsplashListId, rows }) =>
+    rows
+      .filter((row) => row.type === 'media-item' && normalizeString(row._embedded['media-item']?.id))
+      .map((row) => ({
+        node,
+        subsplashListId: subsplashListId as string,
+        row,
+        mediaItemId: normalizeString(row._embedded['media-item']?.id) as string,
+      }))
+  );
+
+  const sermonsBySubsplashId = await getStoredSermonsBySubsplashIds(
+    mediaPlacements.map((placement) => placement.mediaItemId)
+  );
+
+  let logicalPosition = 1;
+  const seenPublishedSermonIds = new Set<string>();
+  const operations: BatchWriteOperation[] = [];
+
+  mediaPlacements.forEach((placement) => {
+    const sermonRecord = sermonsBySubsplashId.get(placement.mediaItemId);
+    if (!sermonRecord) {
+      logicalPosition += 1;
+      return;
+    }
+
+    seenPublishedSermonIds.add(sermonRecord.id);
+
+    operations.push({
+      type: 'set',
+      ref: rootListItemsRef.doc(sermonRecord.id),
+      data: {
+        ...sermonRecord.data,
+        position: logicalPosition,
+        uploadStatus: {
+          status: uploadStatus.UPLOADED,
+          listItemId: placement.row.id,
+        },
+        physicalPlacement: {
+          firestoreListId: placement.node.record.id,
+          subsplashListId: placement.subsplashListId,
+          overflowDepth: placement.node.depth,
+          position: placement.row.position,
+          listItemId: placement.row.id,
+        },
+      },
+      options: { merge: true },
+    });
+
+    operations.push({
+      type: 'set',
+      ref: firestore.collection('sermons').doc(sermonRecord.id).collection('sermonLists').doc(rootListId),
+      data: {
+        ...rootListMembershipData,
+        id: rootListId,
+        uploadStatus: {
+          status: uploadStatus.UPLOADED,
+          listItemId: placement.row.id,
+        },
+      },
+      options: { merge: true },
+    });
+
+    logicalPosition += 1;
+  });
+
+  rootListItemsSnapshot.docs.forEach((doc) => {
+    const existingUploadStatus = doc.data()?.uploadStatus?.status;
+    if (existingUploadStatus !== uploadStatus.UPLOADED || seenPublishedSermonIds.has(doc.id)) {
+      return;
+    }
+
+    operations.push({
+      type: 'set',
+      ref: doc.ref,
+      data: {
+        uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+        physicalPlacement: FieldValue.delete(),
+        position: FieldValue.delete(),
+      },
+      options: { merge: true },
+    });
+
+    operations.push({
+      type: 'set',
+      ref: firestore.collection('sermons').doc(doc.id).collection('sermonLists').doc(rootListId),
+      data: {
+        uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+      },
+      options: { merge: true },
+    });
+  });
+
+  if (operations.length > 0) {
+    await commitBatchWriteOperations(operations);
+  }
+  listDebugLog('listOverflowChain.syncRootMembershipPlacements.complete', {
+    startingSubsplashId,
+    rootListId,
+    publishedPlacementCount: mediaPlacements.length,
+    seenPublishedSermonIds: [...seenPublishedSermonIds],
+    operationCount: operations.length,
+  });
+};
+
 const patchSubsplashListTitle = async (
   subsplashId: string,
   title: string,
@@ -155,9 +403,17 @@ const collapseEmptyTailOverflowPages = async (
   rootRecord: StoredListRecord,
   token: string
 ): Promise<void> => {
+  listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.start', {
+    rootListId: rootRecord.id,
+    rootSubsplashId: rootRecord.data.subsplashId,
+  });
   while (true) {
-    const chain = await getStoredChainNodesFromRoot(rootRecord);
+    const latestRootRecord = (await getStoredListRecordById(rootRecord.id)) ?? rootRecord;
+    const chain = await getStoredChainNodesFromRoot(latestRootRecord);
     if (chain.length <= 1) {
+      listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.noTailToCollapse', {
+        rootListId: rootRecord.id,
+      });
       return;
     }
 
@@ -170,8 +426,20 @@ const collapseEmptyTailOverflowPages = async (
     const tailRows = await getFullListRows(tailSubsplashId, token);
     const tailHasContent = tailRows.some((row) => row.type !== 'list');
     const tailHasLinkedOverflow = tailRows.some((row) => row.type === 'list' && row._embedded.list?.id);
+    listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.inspectTail', {
+      rootListId: rootRecord.id,
+      tailFirestoreListId: tailNode.record.id,
+      tailSubsplashId,
+      tailRows: summarizeSubsplashRows(tailRows),
+      tailHasContent,
+      tailHasLinkedOverflow,
+    });
 
     if (tailHasContent || tailHasLinkedOverflow) {
+      listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.tailPreserved', {
+        rootListId: rootRecord.id,
+        tailFirestoreListId: tailNode.record.id,
+      });
       return;
     }
 
@@ -182,6 +450,26 @@ const collapseEmptyTailOverflowPages = async (
     }
 
     const parentRows = await getFullListRows(parentSubsplashId, token);
+    const linkRowsToDelete = parentRows.filter(
+      (row) => row.type === 'list' && row._embedded.list?.id === tailSubsplashId && row.id
+    );
+    listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.deleteParentLinks', {
+      rootListId: rootRecord.id,
+      parentFirestoreListId: parentNode.record.id,
+      parentSubsplashId,
+      tailFirestoreListId: tailNode.record.id,
+      tailSubsplashId,
+      parentRows: summarizeSubsplashRows(parentRows),
+      linkRowsToDelete: summarizeSubsplashRows(linkRowsToDelete),
+    });
+    for (const linkRow of linkRowsToDelete) {
+      const deleteConfig = createAxiosConfig(
+        `https://core.subsplash.com/builder/v1/list-rows/${linkRow.id}`,
+        token,
+        'DELETE'
+      );
+      await axios(deleteConfig);
+    }
     const updatedParentRows = parentRows.filter(
       (row) => !(row.type === 'list' && row._embedded.list?.id === tailSubsplashId)
     );
@@ -190,6 +478,12 @@ const collapseEmptyTailOverflowPages = async (
     await firestore.collection('lists').doc(parentNode.record.id).update({
       moreSermonsRef: FieldValue.delete(),
       updatedAtMillis: Date.now(),
+    });
+    listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.collapsedTail', {
+      rootListId: rootRecord.id,
+      parentFirestoreListId: parentNode.record.id,
+      tailFirestoreListId: tailNode.record.id,
+      updatedParentRows: summarizeSubsplashRows(updatedParentRows),
     });
   }
 };
@@ -429,7 +723,7 @@ export const getOverflowChainState = async (
   const rootLogicalCount =
     typeof rootRecord.data.logicalCount === 'number' ? rootRecord.data.logicalCount : undefined;
 
-  return {
+  const output = {
     requestedListId: normalizedListId,
     rootListId: rootRecord.id,
     redirectListId: rootRecord.id,
@@ -438,6 +732,15 @@ export const getOverflowChainState = async (
     nodes,
     issues,
   };
+  listDebugLog('listOverflowChain.getOverflowChainState.complete', {
+    requestedListId: normalizedListId,
+    rootListId: rootRecord.id,
+    logicalCount: output.logicalCount,
+    canMutate: output.canMutate,
+    nodes: summarizeOverflowNodes(nodes),
+    issues: summarizeOverflowIssues(issues),
+  });
+  return output;
 };
 
 export const buildOverflowListTitle = (rootName: string): string => getCanonicalOverflowListName(rootName);
@@ -474,6 +777,20 @@ export const buildOverflowListMetadata = ({
   rootListId,
   overflowDepth,
 });
+
+export const shouldMirrorPhysicalListItemToRootMembership = (
+  list: Pick<List, 'isRootList' | 'isMoreSermonsList'>
+): boolean => {
+  if (list.isMoreSermonsList === true) {
+    return false;
+  }
+
+  if (list.isRootList === false) {
+    return false;
+  }
+
+  return true;
+};
 
 export type OverflowChainRepairWrite = {
   firestoreListId: string;
@@ -553,8 +870,14 @@ export const syncOverflowChainMetadata = async (
   startingSubsplashId: string,
   token: string
 ): Promise<void> => {
+  listDebugLog('listOverflowChain.syncOverflowChainMetadata.start', {
+    startingSubsplashId,
+  });
   const startingRecord = await getStoredListRecordBySubsplashId(startingSubsplashId);
   if (!startingRecord) {
+    listDebugLog('listOverflowChain.syncOverflowChainMetadata.skipMissingStartingRecord', {
+      startingSubsplashId,
+    });
     return;
   }
 
@@ -563,8 +886,13 @@ export const syncOverflowChainMetadata = async (
 
   await collapseEmptyTailOverflowPages(rootRecord, token);
 
-  const chain = await getStoredChainNodesFromRoot(rootRecord);
+  const latestRootRecord = (await getStoredListRecordById(rootRecord.id)) ?? rootRecord;
+  const chain = await getStoredChainNodesFromRoot(latestRootRecord);
   if (chain.length === 0) {
+    listDebugLog('listOverflowChain.syncOverflowChainMetadata.skipEmptyChain', {
+      startingSubsplashId,
+      rootListId: rootRecord.id,
+    });
     return;
   }
 
@@ -612,6 +940,19 @@ export const syncOverflowChainMetadata = async (
   });
 
   await batch.commit();
+  listDebugLog('listOverflowChain.syncOverflowChainMetadata.complete', {
+    startingSubsplashId,
+    rootListId,
+    rootName,
+    logicalCount,
+    hasOverflowPages,
+    counts,
+    chain: chain.map(({ record, depth }) => ({
+      firestoreListId: record.id,
+      subsplashId: record.data.subsplashId,
+      depth,
+    })),
+  });
 };
 
 export const syncOverflowChainNames = async (

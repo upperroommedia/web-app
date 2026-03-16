@@ -157,3 +157,13 @@ Plans:
 
 Worktree note:
 - Plans `06-03`, `06-04`, and `06-07` have implementation changes and summaries on disk, but they remain incomplete in roadmap progress because `.git/index.lock` writes are denied in this environment.
+
+### Phase 7: Legacy sermon mirroring, Firebase canonical list state, and Subsplash drift audit with ignore-and-lock handling
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 7 to break down)

@@ -33,7 +33,14 @@ jest.mock('../../createNewSubsplashList', () => ({
   createNewSubsplashList: jest.fn(async () => ({ listId: 'subsplash-list-1' })),
 }));
 
-jest.mock('axios', () => jest.fn());
+jest.mock('axios', () => {
+  const axiosMock = jest.fn();
+  return {
+    __esModule: true,
+    default: axiosMock,
+    isAxiosError: jest.fn((error: unknown) => Boolean(error && typeof error === 'object' && 'isAxiosError' in error)),
+  };
+});
 
 jest.mock('../../subsplashUtils', () => {
   const actual = jest.requireActual('../../subsplashUtils');
@@ -152,12 +159,12 @@ describe('speaker CRUD callables', () => {
       if (
         typeof url === 'string' &&
         url.startsWith('https://core.subsplash.com/tags/v1/tags/') &&
-        method === 'DELETE'
+        (method === 'DELETE' || method === 'PATCH')
       ) {
         return {
           data: {},
-          status: 204,
-          statusText: 'No Content',
+          status: method === 'DELETE' ? 204 : 200,
+          statusText: method === 'DELETE' ? 'No Content' : 'OK',
           headers: {},
           config: requestConfig,
         };
@@ -271,6 +278,12 @@ describe('speaker CRUD callables', () => {
       type: ListType.SPEAKER_LIST,
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       subsplashId: 'subsplash-list-1',
+      isRootList: true,
+      isMoreSermonsList: false,
+      rootListId: result.listId,
+      overflowDepth: 0,
+      logicalCount: 0,
+      hasOverflowPages: false,
     });
     expect(persistedList.data()?.images).toEqual([wideImage, bannerImage, squareImage]);
   });

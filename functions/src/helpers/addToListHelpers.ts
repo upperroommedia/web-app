@@ -88,7 +88,7 @@ export async function patchListRows(
   listId: string, 
   rows: SubsplashListRow[], 
   token: string
-): Promise<void> {
+): Promise<SubsplashListRow[]> {
   logger.log(`Patching list ${listId} with ${rows.length} rows`);
   
   // Get current list details to preserve display-options and images
@@ -151,7 +151,16 @@ export async function patchListRows(
   );
 
   try {
-    await axios(config);
+    const response = await axios(config);
+    const patchedRows = response?.data?._embedded?.['list-rows'];
+    if (Array.isArray(patchedRows)) {
+      return patchedRows as SubsplashListRow[];
+    }
+
+    return rows.map((row, index) => ({
+      ...row,
+      position: index + 1,
+    }));
   } catch (error: unknown) {
     const errorMessage = error && typeof error === 'object' && 'response' in error 
       ? (error as { response?: { data?: unknown } }).response?.data 

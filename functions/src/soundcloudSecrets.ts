@@ -8,6 +8,7 @@
  */
 import axios, { isAxiosError } from 'axios';
 import { randomUUID } from 'node:crypto';
+import { FieldValue } from 'firebase-admin/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
@@ -214,8 +215,8 @@ const writeTokenState = async (
     accessTokenExpiresAtMillis,
     connectedAtMillis,
     updatedAtMillis,
-    refreshLeaseOwner: firebaseAdmin.firestore.FieldValue.delete(),
-    refreshLeaseExpiresAtMillis: firebaseAdmin.firestore.FieldValue.delete(),
+    refreshLeaseOwner: FieldValue.delete(),
+    refreshLeaseExpiresAtMillis: FieldValue.delete(),
   };
 
   if (options?.connectedByUid) {
@@ -317,8 +318,8 @@ const refreshSoundCloudTokens = async (refreshToken: string): Promise<Required<R
 const clearRefreshLease = async (): Promise<void> => {
   await soundcloudAuthStateRef.set(
     {
-      refreshLeaseOwner: firebaseAdmin.firestore.FieldValue.delete(),
-      refreshLeaseExpiresAtMillis: firebaseAdmin.firestore.FieldValue.delete(),
+      refreshLeaseOwner: FieldValue.delete(),
+      refreshLeaseExpiresAtMillis: FieldValue.delete(),
     },
     { merge: true }
   );

@@ -38,6 +38,7 @@ export interface List {
   count?: number;
   logicalCount?: number;
   hasOverflowPages?: boolean;
+  maxListSize?: number;
   type: ListType;
   updatedAtMillis?: number;
   createdAtMillis: number;
@@ -75,6 +76,7 @@ export const emptyList: List = {
   count: 0,
   logicalCount: 0,
   hasOverflowPages: false,
+  maxListSize: 200,
   type: ListType.SERIES,
   createdAtMillis: new Date().getTime(),
   updatedAtMillis: new Date().getTime(),
@@ -92,6 +94,7 @@ export const createEmptyList = (type: ListType): List => {
     count: 0,
     logicalCount: 0,
     hasOverflowPages: false,
+    maxListSize: 200,
     type,
     createdAtMillis: new Date().getTime(),
     updatedAtMillis: new Date().getTime(),

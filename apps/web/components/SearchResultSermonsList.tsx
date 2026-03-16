@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHits, useInstantSearch } from 'react-instantsearch';
 import List from '@mui/material/List';
 import Box from '@mui/material/Box';
@@ -10,11 +10,79 @@ import Typography from '@mui/material/Typography';
 import SermonListCard from './SermonListCard';
 import RemainingTimeComponent from './RemainingTimeComponent';
 import TrackProgressComponent from './TrackProgressComponent';
-import firestore, { collection, deleteField, doc, limit, orderBy, query, updateDoc, where } from '../firebase/firestore';
+import firestore, {
+  collection,
+  deleteField,
+  doc,
+  documentId,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+  where,
+} from '../firebase/firestore';
 import { sermonConverter } from '../types/Sermon';
-import { sermonStatusType } from '../types/SermonTypes';
+import { Sermon, sermonStatusType } from '../types/SermonTypes';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algolia/searchRecords';
+
+const FIRESTORE_IN_QUERY_LIMIT = 10;
+
+const chunkIds = (ids: string[], chunkSize: number): string[][] => {
+  const chunks: string[][] = [];
+
+  for (let index = 0; index < ids.length; index += chunkSize) {
+    chunks.push(ids.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+};
+
+const useLiveVisibleSermons = (sermonIds: string[]) => {
+  const [liveSermonsById, setLiveSermonsById] = useState<Record<string, Sermon>>({});
+
+  useEffect(() => {
+    if (sermonIds.length === 0) {
+      return;
+    }
+
+    const chunkSnapshots = new Map<number, Record<string, Sermon>>();
+    const unsubscribeCallbacks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
+      const sermonsQuery = query(
+        collection(firestore, 'sermons').withConverter(sermonConverter),
+        where(documentId(), 'in', idChunk)
+      );
+
+      return onSnapshot(sermonsQuery, (snapshot) => {
+        const nextChunkRecords: Record<string, Sermon> = {};
+        snapshot.docs.forEach((docSnapshot) => {
+          nextChunkRecords[docSnapshot.id] = docSnapshot.data();
+        });
+        chunkSnapshots.set(chunkIndex, nextChunkRecords);
+
+        const mergedRecords: Record<string, Sermon> = {};
+        chunkSnapshots.forEach((records) => Object.assign(mergedRecords, records));
+        setLiveSermonsById(mergedRecords);
+      });
+    });
+
+    return () => {
+      unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [sermonIds]);
+
+  return useMemo(() => {
+    if (sermonIds.length === 0) {
+      return {};
+    }
+
+    const visibleIdSet = new Set(sermonIds);
+    return Object.fromEntries(
+      Object.entries(liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
+    );
+  }, [liveSermonsById, sermonIds]);
+};
 
 const SearchResultSermonList = (props: BoxProps) => {
   const { hits } = useHits();
@@ -56,7 +124,16 @@ const SearchResultSermonList = (props: BoxProps) => {
     () => normalizedHits.filter((sermon) => !visiblePendingIds.has(sermon.id)),
     [normalizedHits, visiblePendingIds]
   );
-  const hasVisibleHits = visibleAlgoliaHits.length > 0;
+  const visibleAlgoliaHitIds = useMemo(
+    () => visibleAlgoliaHits.map((sermon) => sermon.id),
+    [visibleAlgoliaHits]
+  );
+  const liveVisibleSermonsById = useLiveVisibleSermons(visibleAlgoliaHitIds);
+  const hydratedVisibleAlgoliaHits = useMemo(
+    () => visibleAlgoliaHits.map((sermon) => liveVisibleSermonsById[sermon.id] ?? sermon),
+    [liveVisibleSermonsById, visibleAlgoliaHits]
+  );
+  const hasVisibleHits = hydratedVisibleAlgoliaHits.length > 0;
   const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
   const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
@@ -139,7 +216,7 @@ const SearchResultSermonList = (props: BoxProps) => {
             />
           ))}
         {shouldRenderHits &&
-          visibleAlgoliaHits.map((sermon) => (
+          hydratedVisibleAlgoliaHits.map((sermon) => (
             <SermonListCard
               key={sermon.id}
               sermon={sermon}
@@ -163,7 +240,7 @@ const SearchResultSermonList = (props: BoxProps) => {
               enableSeriesRealtime={false}
             />
           ))}
-        {shouldRenderHits && visibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
+        {shouldRenderHits && hydratedVisibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
           <Typography sx={{ px: { xs: 0.5, sm: 1 } }} color="text.secondary">
             No sermons found. Upload a sermon to get started.
           </Typography>

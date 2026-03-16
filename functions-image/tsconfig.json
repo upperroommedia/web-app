@@ -19,6 +19,9 @@
   },
   "compileOnSave": true,
   "include": [
-    "src/index.ts"
+    "src/index.ts",
+    "../functions/src/**/*.ts",
+    "../packages/shared/**/*.ts",
+    "../packages/contracts/**/*.ts"
   ]
 }

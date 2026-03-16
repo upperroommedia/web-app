@@ -9,6 +9,14 @@ import addToList from '../../addToList';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import axios from 'axios';
 
+jest.mock('../../helpers/publishedListDrift', () => {
+  const actual = jest.requireActual('../../helpers/publishedListDrift');
+  return {
+    ...actual,
+    ensureCanPerformStrictPublishedMutation: jest.fn().mockResolvedValue(undefined),
+  };
+});
+
 const firestoreDB = firebaseAdmin.firestore();
 const axiosMock = axios as unknown as jest.Mock;
 
