@@ -7,6 +7,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { SermonList } from '@upperroom/shared/types/SermonList';
 import { removeFromList } from '../../removeFromList';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
+import { syncRootProjectionStatusFromCanonical } from '../../helpers/syncRootProjectionStatusFromCanonical';
 
 const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{sermonListId}', async (event) => {
   const snapshot = event.data;
@@ -81,6 +82,11 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
     if (didMutate) {
       await ensureSermonCountInvariant(sermonId);
     }
+    await syncRootProjectionStatusFromCanonical({
+      sermonId,
+      rootListId: data.rootListId ?? data.id,
+      canonicalMembership: undefined,
+    });
   } catch (error) {
     console.error(`Error in sermonListOnDelete for sermon ${sermonId}:`, error);
     throw handleError(error);

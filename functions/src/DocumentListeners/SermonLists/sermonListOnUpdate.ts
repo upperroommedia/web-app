@@ -6,6 +6,7 @@ import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
+import { syncRootProjectionStatusFromCanonical } from '../../helpers/syncRootProjectionStatusFromCanonical';
 
 const sermonListOnUpdate = firestore.onDocumentUpdated(
   'sermons/{sermonId}/sermonLists/{sermonListId}',
@@ -54,6 +55,11 @@ const sermonListOnUpdate = firestore.onDocumentUpdated(
       if (didMutate) {
         await ensureSermonCountInvariant(sermonId);
       }
+      await syncRootProjectionStatusFromCanonical({
+        sermonId,
+        rootListId: updatedList?.rootListId ?? sermonListId,
+        canonicalMembership: updatedList,
+      });
     } catch (error) {
       logger.error(`Error updating numberOfListsUploadedTo for sermon ${sermonId}:`, error);
       throw handleError(error);

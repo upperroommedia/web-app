@@ -11,10 +11,12 @@ import {
   getPublishedDriftWarningMessage,
   isStrictListActionLocked,
   loadListDetailsPageData,
+  mergeRootItemsWithCanonicalMemberships,
   persistListDetailsPageOrder,
+  subscribeToListDetailsLiveUpdates,
   type LoadListDetailsPageItem,
 } from '../../../../pages/admin/lists/[listId]';
-import { doc, updateDoc, writeBatch } from '../../../../firebase/firestore';
+import { collection, doc, updateDoc, writeBatch } from '../../../../firebase/firestore';
 
 jest.mock('../../../../context/user/UserContext', () => ({
   __esModule: true,
@@ -255,6 +257,24 @@ describe('getPhysicalListTagLabel', () => {
     expect(getPhysicalListTagLabel({ sourceDepth: 0 })).toBe('Root page');
     expect(getPhysicalListTagLabel({ sourceDepth: 1 })).toBe('Overflow 1');
     expect(getPhysicalListTagLabel({ sourceDepth: 2 })).toBe('Overflow 2');
+  });
+});
+
+describe('mergeRootItemsWithCanonicalMemberships', () => {
+  it('prefers canonical membership upload status over stale root projection state', () => {
+    const mergedItems = mergeRootItemsWithCanonicalMemberships({
+      items: [
+        {
+          ...buildDetailItem({ id: 'sermon-a', title: 'A' }),
+          uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'stale-row' },
+        },
+      ],
+      canonicalMembershipBySermonId: new Map([
+        ['sermon-a', { uploadStatus: { status: uploadStatus.NOT_UPLOADED } }],
+      ]),
+    });
+
+    expect(mergedItems[0].uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
   });
 });
 
@@ -602,5 +622,51 @@ describe('published drift helpers', () => {
         })
       )
     ).toBe(false);
+  });
+});
+
+describe('subscribeToListDetailsLiveUpdates', () => {
+  it('ignores the initial snapshots and reloads once when Firestore changes afterward', () => {
+    jest.useFakeTimers();
+
+    const scheduleReload = jest.fn();
+    const unsubscribe = jest.fn();
+    const snapshotCallbacks: Array<() => void> = [];
+    const onSnapshotImpl = jest.fn((_ref, onNext: () => void) => {
+      snapshotCallbacks.push(onNext);
+      return unsubscribe;
+    });
+
+    const cleanup = subscribeToListDetailsLiveUpdates({
+      rootListId: 'root-list',
+      scheduleReload,
+      onSnapshotImpl: onSnapshotImpl as unknown as typeof import('../../../../firebase/firestore').onSnapshot,
+      docImpl: mockedDoc as unknown as typeof import('../../../../firebase/firestore').doc,
+      collectionImpl: collection as unknown as typeof import('../../../../firebase/firestore').collection,
+      collectionGroupImpl: jest.fn() as unknown as typeof import('../../../../firebase/firestore').collectionGroup,
+      queryImpl: jest.fn((value) => value) as unknown as typeof import('../../../../firebase/firestore').query,
+      whereImpl: jest.fn(() => ({})) as unknown as typeof import('../../../../firebase/firestore').where,
+    });
+
+    expect(snapshotCallbacks).toHaveLength(3);
+
+    snapshotCallbacks[0]();
+    snapshotCallbacks[1]();
+    snapshotCallbacks[2]();
+    jest.runAllTimers();
+    expect(scheduleReload).not.toHaveBeenCalled();
+
+    snapshotCallbacks[0]();
+    snapshotCallbacks[1]();
+    jest.runAllTimers();
+    expect(scheduleReload).toHaveBeenCalledTimes(1);
+
+    snapshotCallbacks[2]();
+    jest.runAllTimers();
+    expect(scheduleReload).toHaveBeenCalledTimes(2);
+
+    cleanup();
+    expect(unsubscribe).toHaveBeenCalledTimes(3);
+    jest.useRealTimers();
   });
 });

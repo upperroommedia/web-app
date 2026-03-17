@@ -18,4 +18,27 @@ else
   fi
 fi
 
+load_dotenv_file() {
+  local env_file="$1"
+  [ -f "$env_file" ] || return 0
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      ''|\#*) continue ;;
+    esac
+
+    if [[ "$line" != *=* ]]; then
+      continue
+    fi
+
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    export "$key=$value"
+  done < "$env_file"
+}
+
+load_dotenv_file ".env"
+load_dotenv_file ".env.local"
+
 exec "$@"

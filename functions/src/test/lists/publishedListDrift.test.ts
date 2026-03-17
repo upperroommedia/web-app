@@ -399,6 +399,32 @@ describe('published list drift', () => {
     ]);
   });
 
+  it('ignores stale root projection upload status when canonical membership is already NOT_UPLOADED', async () => {
+    const fixture = await seedPublishedOverflowFixture();
+    const staleSermon = buildSermon(2);
+
+    await firestore
+      .collection('sermons')
+      .doc(staleSermon.id)
+      .collection('sermonLists')
+      .doc(fixture.rootFirestoreListId)
+      .set(
+        {
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+        },
+        { merge: true }
+      );
+
+    const driftState = await auditPublishedListDrift(fixture.rootFirestoreListId, 'test-token');
+
+    expect(driftState.localPublishedItems.map((item) => item.sermonId)).not.toContain(staleSermon.id);
+    expect(
+      driftState.issues.some(
+        (issue) => issue.code === 'LOCAL_ONLY_PUBLISHED' && issue.sermonId === staleSermon.id
+      )
+    ).toBe(false);
+  });
+
   it('updates only the published subset when resolving Firebase from Subsplash order', async () => {
     const fixture = await seedPublishedOverflowFixture({ unpublishedIds: ['sermon-12'] });
 

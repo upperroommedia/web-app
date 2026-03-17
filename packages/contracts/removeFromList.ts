@@ -3,6 +3,7 @@ export interface RemoveFromListInputType {
   listItemIds: string[];
   itemIds: string[];
   itemTypes: string[];
+  sermonIds?: string[];
   operationKey?: string;
 }
 

@@ -539,44 +539,21 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       const listsToRemoveFiltered = listsToRemoveFrom.filter(
         (list) => list.uploadStatus?.status === uploadStatus.UPLOADED && list.uploadStatus.listItemId
       );
-      
-      const subsplashIdToFirestoreIdMap = new Map<string, string>();
-      listsToRemoveFiltered.forEach((list) => {
-        if (list.subsplashId) {
-          subsplashIdToFirestoreIdMap.set(list.subsplashId, list.id);
-        }
-      });
-      
-      const removeFromListReturn = await removeFromListCallable({
+
+      await removeFromListCallable({
         listIds: listsToRemoveFiltered.map((list) => list.subsplashId) as string[],
         listItemIds: listsToRemoveFiltered.map((list) =>
           list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : ''
         ) as string[],
         itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
         itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
+        sermonIds: listsToRemoveFiltered.map(() => sermon.id),
         operationKey: createSubsplashListRemoveIntentKey(
           'manage-publishing-list-remove',
           sermon.id,
           listsToRemoveFiltered.map((list) => list.subsplashId).filter((listId): listId is string => Boolean(listId))
         ),
       });
-      
-      const batch = writeBatch(firestore);
-      
-      for (const r of removeFromListReturn) {
-        if (r.status === 'error') continue;
-        const firestoreListId = subsplashIdToFirestoreIdMap.get(r.listId);
-        if (!firestoreListId) continue;
-        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${firestoreListId}`).withConverter(sermonListConverter);
-        const docSnapshot = await getDoc(docRef);
-        if (!docSnapshot.exists()) continue;
-        batch.update(docRef, {
-          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
-          publishGeneration: getNextPublishGeneration(docSnapshot.data().publishGeneration),
-        });
-      }
-      
-      await batch.commit();
       onUpdate?.();
     } catch (error) {
       console.error('Error removing from list:', error);

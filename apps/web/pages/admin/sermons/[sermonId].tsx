@@ -538,37 +538,18 @@ const SermonDetailsPage = () => {
         (list) => list.uploadStatus?.status === uploadStatus.UPLOADED && list.uploadStatus.listItemId
       );
 
-      const subsplashIdToFirestoreIdMap = new Map<string, string>();
-      listsToRemoveFiltered.forEach((list) => {
-        if (list.subsplashId) subsplashIdToFirestoreIdMap.set(list.subsplashId, list.id);
-      });
-
-      const removeFromListReturn = await removeFromListCallable({
+      await removeFromListCallable({
         listIds: listsToRemoveFiltered.map((list) => list.subsplashId) as string[],
         listItemIds: listsToRemoveFiltered.map((list) => list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : '') as string[],
         itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
         itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
+        sermonIds: listsToRemoveFiltered.map(() => sermon.id),
         operationKey: createSubsplashListRemoveIntentKey(
           'sermon-admin-list-remove',
           sermon.id,
           listsToRemoveFiltered.map((list) => list.subsplashId).filter((listId): listId is string => Boolean(listId))
         ),
       });
-
-      const batch = writeBatch(firestore);
-      for (const r of removeFromListReturn) {
-        if (r.status === 'error') continue;
-        const firestoreListId = subsplashIdToFirestoreIdMap.get(r.listId);
-        if (!firestoreListId) continue;
-        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${firestoreListId}`).withConverter(sermonListConverter);
-        const docSnapshot = await getDoc(docRef);
-        if (!docSnapshot.exists()) continue;
-        batch.update(docRef, {
-          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
-          publishGeneration: getNextPublishGeneration(docSnapshot.data().publishGeneration),
-        });
-      }
-      await batch.commit();
     } catch (error) {
       console.error('Error removing from list:', error);
       alert(getLockBusyMessage(error, 'Failed to remove sermon from one or more Subsplash lists.'));
@@ -1124,7 +1105,51 @@ const SermonDetailsPage = () => {
                 {/* Speakers */}
                 <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: { xs: 1, sm: 2 } }}>
                   {sermon.speakers.map((speaker) => (
-                    <Chip key={speaker.id} label={speaker.name} size="small" variant="outlined" sx={{ height: { xs: 22, sm: 26 }, '& .MuiChip-label': { fontSize: { xs: '0.7rem', sm: '0.8rem' } } }} />
+                    <Chip
+                      key={speaker.id}
+                      component={Link}
+                      href={`/admin/speakers/${speaker.id}`}
+                      clickable
+                      avatar={
+                        <AvatarWithDefaultImage
+                          altName={speaker.name}
+                          image={speaker.images?.find((image) => image.type === 'square')}
+                          width={20}
+                          height={20}
+                          borderRadius={999}
+                        />
+                      }
+                      label={speaker.name}
+                      size="small"
+                      variant="outlined"
+                      sx={{
+                        height: { xs: 22, sm: 26 },
+                        cursor: 'pointer',
+                        borderRadius: 999,
+                        pl: { xs: '1px', sm: '2px' },
+                        bgcolor: alpha(theme.palette.primary.main, 0.08),
+                        textDecoration: 'none',
+                        transition: theme.transitions.create(['background-color', 'border-color', 'box-shadow']),
+                        '& .MuiChip-label': {
+                          fontSize: { xs: '0.62rem', sm: '0.7rem' },
+                          fontWeight: 700,
+                          px: { xs: '6px', sm: '8px' },
+                        },
+                        '& .MuiChip-avatar': {
+                          ml: 0,
+                          mr: { xs: '3px', sm: '4px' },
+                          width: { xs: 18, sm: 20 },
+                          height: { xs: 18, sm: 20 },
+                        },
+                        '&:hover': {
+                          backgroundColor: alpha(theme.palette.primary.main, 0.14),
+                          borderColor: 'primary.main',
+                        },
+                        '&:focus-visible': {
+                          boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.3)}`,
+                        },
+                      }}
+                    />
                   ))}
                 </Stack>
 

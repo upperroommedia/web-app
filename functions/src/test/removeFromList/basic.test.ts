@@ -113,14 +113,50 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
 
   it('should handle item not found gracefully (treat as success)', async () => {
     const listId = 'remove-test-list-2';
+    const firestoreListId = 'remove-test-list-2-firestore';
     subsplashMock.createList(listId, 'Test List');
     
     // Create Firestore document for the list
     await createListDocument({
+      id: firestoreListId,
       subsplashId: listId,
       title: 'Test List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
     });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-1')
+      .set({
+        id: 'sermon-1',
+        subsplashId: 'item-1',
+        position: 1,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'missing-row' },
+        physicalPlacement: {
+          firestoreListId,
+          subsplashListId: listId,
+          overflowDepth: 0,
+          position: 1,
+          listItemId: 'missing-row',
+        },
+      });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-1')
+      .collection('sermonLists')
+      .doc(firestoreListId)
+      .set({
+        id: firestoreListId,
+        name: 'Test List',
+        overflowBehavior: OverflowBehavior.CREATENEWLIST,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'missing-row' },
+        publishGeneration: 0,
+      });
 
     // Try to remove an item that doesn't exist (simulating direct Subsplash edit)
     const request: RemoveFromListTestRequest = {
@@ -128,7 +164,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       data: {
         listIds: [listId],
         listItemIds: ['non-existent-row'],
-        itemIds: ['non-existent-item'],
+        itemIds: ['item-1'],
         itemTypes: ['media-item'],
       }
     };
@@ -143,6 +179,128 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     if (result[0].status === 'success') {
       expect(result[0].itemNotFound).toBe(true);
     }
+
+    const rootProjection = await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-1')
+      .get();
+    expect(rootProjection.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+    expect(rootProjection.data()?.physicalPlacement).toBeUndefined();
+
+    const canonicalMembership = await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-1')
+      .collection('sermonLists')
+      .doc(firestoreListId)
+      .get();
+    expect(canonicalMembership.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+    expect(canonicalMembership.data()?.publishGeneration).toBe(1);
+  });
+
+  it('clears the removed sermon projection by explicit sermon id when projection subsplash ids are stale', async () => {
+    const listId = 'remove-test-list-explicit-sermon';
+    const firestoreListId = 'remove-test-list-explicit-sermon-firestore';
+    subsplashMock.createList(listId, 'Test List');
+
+    const row: SubsplashListRow = {
+      id: 'row-1',
+      app_key: '9XTSHD',
+      method: 'static',
+      position: 1,
+      type: 'media-item',
+      _embedded: {
+        'source-list': { id: listId },
+        'media-item': { id: 'media-1' },
+      },
+    };
+    subsplashMock.listRows.set(listId, [row]);
+
+    await createListDocument({
+      id: firestoreListId,
+      subsplashId: listId,
+      title: 'Test List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      isRootList: true,
+      rootListId: firestoreListId,
+      overflowDepth: 0,
+      count: 1,
+      logicalCount: 1,
+      hasOverflowPages: false,
+    });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-1')
+      .set({
+        id: 'sermon-1',
+        title: 'Test Sermon',
+        subsplashId: 'stale-media-id',
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-1' },
+        physicalPlacement: {
+          firestoreListId,
+          subsplashListId: listId,
+          overflowDepth: 0,
+          position: 1,
+          listItemId: 'row-1',
+        },
+      });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-1')
+      .collection('sermonLists')
+      .doc(firestoreListId)
+      .set({
+        id: firestoreListId,
+        name: 'Test List',
+        overflowBehavior: OverflowBehavior.CREATENEWLIST,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-1' },
+        publishGeneration: 0,
+      });
+
+    const request: RemoveFromListTestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        listIds: [listId],
+        listItemIds: ['row-1'],
+        itemIds: ['media-1'],
+        itemTypes: ['media-item'],
+        sermonIds: ['sermon-1'],
+      },
+    };
+
+    const result = await removeFromListHandler(request);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+
+    const rootProjection = await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-1')
+      .get();
+    expect(rootProjection.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+    expect(rootProjection.data()?.physicalPlacement).toBeUndefined();
+
+    const canonicalMembership = await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-1')
+      .collection('sermonLists')
+      .doc(firestoreListId)
+      .get();
+    expect(canonicalMembership.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+    expect(canonicalMembership.data()?.publishGeneration).toBe(1);
   });
 
   it('allows remove on mismatched chains and does not touch unrelated canonical sermon memberships', async () => {

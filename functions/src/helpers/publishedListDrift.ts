@@ -52,6 +52,8 @@ type RootProjectionItem = Sermon & {
   };
 };
 
+type CanonicalListMembership = Pick<SermonList, 'uploadStatus'>;
+
 type RemoteNodeSnapshot = {
   firestoreListId: string;
   subsplashListId: string;
@@ -159,6 +161,43 @@ const loadRootProjectionItems = async (rootListId: string): Promise<RootProjecti
     })
   );
 };
+
+const loadCanonicalMemberships = async (
+  rootListId: string
+): Promise<Map<string, CanonicalListMembership>> => {
+  const snapshot = await firestore.collectionGroup('sermonLists').where('id', '==', rootListId).get();
+  const canonicalMemberships = new Map<string, CanonicalListMembership>();
+
+  snapshot.docs.forEach((docSnapshot) => {
+    const sermonId = docSnapshot.ref.parent.parent?.id;
+    if (!sermonId) {
+      return;
+    }
+
+    canonicalMemberships.set(sermonId, docSnapshot.data() as CanonicalListMembership);
+  });
+
+  return canonicalMemberships;
+};
+
+const applyCanonicalMembershipsToRootProjectionItems = ({
+  items,
+  canonicalMemberships,
+}: {
+  items: RootProjectionItem[];
+  canonicalMemberships: Map<string, CanonicalListMembership>;
+}): RootProjectionItem[] =>
+  items.map((item) => {
+    const canonicalMembership = canonicalMemberships.get(item.id);
+    if (!canonicalMembership?.uploadStatus) {
+      return item;
+    }
+
+    return {
+      ...item,
+      uploadStatus: canonicalMembership.uploadStatus,
+    };
+  });
 
 const loadRootList = async (rootListId: string): Promise<List> => {
   const snapshot = await firestore.collection('lists').doc(rootListId).withConverter(firestoreAdminListConverter).get();
@@ -332,7 +371,11 @@ export const auditPublishedListDrift = async (
     rootListId,
   });
   const chainState = await getOverflowChainState(rootListId);
-  const rootListItems = await loadRootProjectionItems(chainState.rootListId);
+  const canonicalMemberships = await loadCanonicalMemberships(chainState.rootListId);
+  const rootListItems = applyCanonicalMembershipsToRootProjectionItems({
+    items: await loadRootProjectionItems(chainState.rootListId),
+    canonicalMemberships,
+  });
   const remoteNodes = await fetchRemoteNodes(chainState.rootListId, token);
   const issues: PublishedListDriftIssue[] = [];
 

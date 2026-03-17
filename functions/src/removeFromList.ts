@@ -30,6 +30,7 @@ export interface RemoveFromListInputType {
   listItemIds: string[];
   itemIds: string[]; // The actual item IDs (sermon/media item IDs) for searching overflow lists
   itemTypes: string[]; // The item types (e.g., 'media-item', 'media-series') corresponding to itemIds
+  sermonIds?: string[];
   operationKey?: string;
 }
 
@@ -254,14 +255,18 @@ const buildTargetRowsForNode = (
 const updateRootProjectionAfterRemoval = async ({
   rootFirestoreListId,
   removedMediaItemId,
+  removedSermonId,
   placementsByMediaItemId,
 }: {
   rootFirestoreListId: string;
   removedMediaItemId: string;
+  removedSermonId?: string;
   placementsByMediaItemId: Map<string, PublishedPlacement>;
 }): Promise<void> => {
   const firestoreDB = firebaseAdmin.firestore();
   const rootProjectionRef = firestoreDB.collection('lists').doc(rootFirestoreListId).collection('listItems');
+  const rootListSnapshot = await firestoreDB.collection('lists').doc(rootFirestoreListId).get();
+  const rootListData = rootListSnapshot.data() ?? {};
   const projectionSnapshot = await rootProjectionRef.get();
   const sermonIdByMediaItemId = new Map<string, string>();
 
@@ -274,19 +279,59 @@ const updateRootProjectionAfterRemoval = async ({
   });
 
   const batch = firestoreDB.batch();
-  const removedSermonId = sermonIdByMediaItemId.get(removedMediaItemId);
-  if (removedSermonId) {
-    batch.set(
-      rootProjectionRef.doc(removedSermonId),
+  const resolvedRemovedSermonId = removedSermonId ?? sermonIdByMediaItemId.get(removedMediaItemId);
+  if (resolvedRemovedSermonId) {
+    listDebugLog('removeFromList.updateRootProjectionAfterRemoval.removedSermonResolved', {
+      rootFirestoreListId,
+      removedMediaItemId,
+      removedSermonId: resolvedRemovedSermonId,
+      resolutionMode: removedSermonId ? 'explicit-sermon-id' : 'projection-media-match',
+    });
+    const removedCanonicalRef = firestoreDB
+      .collection('sermons')
+      .doc(resolvedRemovedSermonId)
+      .collection('sermonLists')
+      .doc(rootFirestoreListId);
+    const removedCanonicalSnapshot = await removedCanonicalRef.get();
+
+    batch.update(
+      rootProjectionRef.doc(resolvedRemovedSermonId),
       {
         uploadStatus: {
           status: uploadStatus.NOT_UPLOADED,
-          listItemId: FieldValue.delete(),
         },
         physicalPlacement: FieldValue.delete(),
-      },
-      { merge: true }
+      }
     );
+    if (removedCanonicalSnapshot.exists) {
+      batch.update(removedCanonicalRef, {
+        ...rootListData,
+        id: rootFirestoreListId,
+        uploadStatus: {
+          status: uploadStatus.NOT_UPLOADED,
+        },
+        publishGeneration: FieldValue.increment(1),
+      });
+    } else {
+      batch.set(
+        removedCanonicalRef,
+        {
+          ...rootListData,
+          id: rootFirestoreListId,
+          uploadStatus: {
+            status: uploadStatus.NOT_UPLOADED,
+          },
+          publishGeneration: 1,
+        },
+        { merge: true }
+      );
+    }
+  } else {
+    listDebugWarn('removeFromList.updateRootProjectionAfterRemoval.missingRemovedSermonId', {
+      rootFirestoreListId,
+      removedMediaItemId,
+      knownProjectionMediaItemIds: [...sermonIdByMediaItemId.keys()],
+    });
   }
 
   placementsByMediaItemId.forEach((placement, mediaItemId) => {
@@ -306,6 +351,22 @@ const updateRootProjectionAfterRemoval = async ({
       },
       { merge: true }
     );
+    batch.set(
+      firestoreDB
+        .collection('sermons')
+        .doc(sermonId)
+        .collection('sermonLists')
+        .doc(rootFirestoreListId),
+      {
+        ...rootListData,
+        id: rootFirestoreListId,
+        uploadStatus: {
+          status: uploadStatus.UPLOADED,
+          ...(placement.listItemId ? { listItemId: placement.listItemId } : {}),
+        },
+      },
+      { merge: true }
+    );
   });
 
   await batch.commit();
@@ -314,11 +375,13 @@ const updateRootProjectionAfterRemoval = async ({
 const rebalanceOverflowChainAfterRemoval = async ({
   rootSubsplashListId,
   removedMediaItemId,
+  removedSermonId,
   token,
   maxListSize,
 }: {
   rootSubsplashListId: string;
   removedMediaItemId: string;
+  removedSermonId?: string;
   token: string;
   maxListSize?: number;
 }): Promise<void> => {
@@ -400,6 +463,7 @@ const rebalanceOverflowChainAfterRemoval = async ({
   await updateRootProjectionAfterRemoval({
     rootFirestoreListId: nodes[0].firestoreListId,
     removedMediaItemId,
+    removedSermonId,
     placementsByMediaItemId,
   });
   listDebugLog('removeFromList.rebalance.complete', {
@@ -417,6 +481,7 @@ export const removeFromList = async (
   listItemIds: string[],
   itemIds: string[],
   itemTypes: string[],
+  sermonIds?: string[],
   operationKey?: string
 ) => {
   const normalizedOperationKey = getOperationKey(operationKey);
@@ -425,11 +490,17 @@ export const removeFromList = async (
     listItemIds,
     itemIds,
     itemTypes,
+    sermonIds,
     operationKey: normalizedOperationKey,
   });
   const token = await authenticateSubsplash();
   // Validate input arrays have the same length
-  if (listIds.length !== listItemIds.length || listIds.length !== itemIds.length || listIds.length !== itemTypes.length) {
+  if (
+    listIds.length !== listItemIds.length ||
+    listIds.length !== itemIds.length ||
+    listIds.length !== itemTypes.length ||
+    (sermonIds !== undefined && listIds.length !== sermonIds.length)
+  ) {
     throw new Error('All input arrays must have the same length');
   }
 
@@ -452,11 +523,13 @@ export const removeFromList = async (
       const listId = listIds[index];
       const itemId = itemIds[index];
       const itemType = itemTypes[index];
+      const sermonId = sermonIds?.[index];
       listDebugLog('removeFromList.item.start', {
         listId,
         listItemId,
         itemId,
         itemType,
+        sermonId,
       });
       
       try {
@@ -468,7 +541,12 @@ export const removeFromList = async (
             itemId,
             itemType,
           });
-          await syncOverflowChainMetadata(listId, token);
+          await rebalanceOverflowChainAfterRemoval({
+            rootSubsplashListId: listId,
+            removedMediaItemId: itemId,
+            removedSermonId: sermonId,
+            token,
+          });
           return { listId, listItemId, foundInOriginalList: false, itemNotFound: true };
         }
 
@@ -498,6 +576,7 @@ export const removeFromList = async (
         await rebalanceOverflowChainAfterRemoval({
           rootSubsplashListId: listId,
           removedMediaItemId: itemId,
+          removedSermonId: sermonId,
           token,
         });
         return {
@@ -519,6 +598,7 @@ export const removeFromList = async (
           await rebalanceOverflowChainAfterRemoval({
             rootSubsplashListId: listId,
             removedMediaItemId: itemId,
+            removedSermonId: sermonId,
             token,
           });
           return { listId, listItemId, foundInOriginalList: false, itemNotFound: true };
@@ -614,6 +694,7 @@ const removeFromListCallable = onCall(
       listItemIds: request.data?.listItemIds,
       itemIds: request.data?.itemIds,
       itemTypes: request.data?.itemTypes,
+      sermonIds: request.data?.sermonIds,
       operationKey: request.data?.operationKey,
     });
 
@@ -621,20 +702,34 @@ const removeFromListCallable = onCall(
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     const data = request.data;
-    if (!data.listItemIds || !data.listIds || !data.itemIds || !data.itemTypes || 
-        data.listIds.length !== data.listItemIds.length || 
-        data.listIds.length !== data.itemIds.length || 
-        data.listIds.length !== data.itemTypes.length) {
+    if (
+      !data.listItemIds ||
+      !data.listIds ||
+      !data.itemIds ||
+      !data.itemTypes ||
+      data.listIds.length !== data.listItemIds.length ||
+      data.listIds.length !== data.itemIds.length ||
+      data.listIds.length !== data.itemTypes.length ||
+      (data.sermonIds !== undefined && data.listIds.length !== data.sermonIds.length)
+    ) {
       throw new HttpsError(
         'invalid-argument',
-        'The function must be called with non-empty equal sized listIds, listItemIds, itemIds, and itemTypes arrays.'
+        'The function must be called with non-empty equal sized listIds, listItemIds, itemIds, itemTypes, and optional sermonIds arrays.'
       );
     }
     try {
-      const output = await removeFromList(data.listIds, data.listItemIds, data.itemIds, data.itemTypes, data.operationKey);
+      const output = await removeFromList(
+        data.listIds,
+        data.listItemIds,
+        data.itemIds,
+        data.itemTypes,
+        data.sermonIds,
+        data.operationKey
+      );
       listDebugLog('removeFromList.callable.success', {
         listIds: data.listIds,
         itemIds: data.itemIds,
+        sermonIds: data.sermonIds,
         output,
       });
       return output;

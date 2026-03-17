@@ -39,7 +39,7 @@
       "port": 9199
     },
     "database": {
-      "port": 9000
+      "port": 19000
     },
     "tasks": {
       "port": 8123
@@ -50,4 +50,3 @@
     "singleProjectMode": true
   }
 }
-

@@ -477,6 +477,142 @@ describe('overflow chain end-to-end regression', () => {
     }
   });
 
+  it('clears root projection publish state for sequential root and overflow removals', async () => {
+    const maxListSize = 3;
+    const previousMaxListSizeOverride = process.env.SUBSPLASH_DEV_MAX_LIST_SIZE;
+    process.env.SUBSPLASH_DEV_MAX_LIST_SIZE = String(maxListSize);
+    try {
+      const rootSubsplashListId = 'remove-sequential-subsplash-list';
+      const rootFirestoreListId = 'remove-sequential-firestore-list';
+
+      subsplashMock.createList(rootSubsplashListId, ROOT_TITLE, 0, maxListSize);
+      await createListDocument({
+        id: rootFirestoreListId,
+        subsplashId: rootSubsplashListId,
+        title: ROOT_TITLE,
+        overflowBehavior: OverflowBehavior.CREATENEWLIST,
+        maxListSize,
+        count: 0,
+        logicalCount: 0,
+        hasOverflowPages: false,
+        isRootList: true,
+        isMoreSermonsList: false,
+        rootListId: rootFirestoreListId,
+        overflowDepth: 0,
+      });
+
+      for (let index = 1; index <= 6; index += 1) {
+        const result = await addToListHandler({
+          auth: { token: { role: 'admin' } },
+          data: {
+            destinationListIds: [rootSubsplashListId],
+            mediaItem: { id: buildSermonId(index), type: 'media-item' },
+            maxListSize,
+            operationKey: `remove-sequential:add:${index}`,
+          },
+        });
+
+        expect(result[0].status).toBe('success');
+        await syncPublishedProjectionFromCurrentChain(rootFirestoreListId, rootSubsplashListId);
+      }
+
+      const rootRemovalMediaId = buildSermonId(5);
+      const rootRemovalLocation = getMediaLocation(rootSubsplashListId, rootRemovalMediaId);
+      subsplashMock.clearHistory();
+
+      const firstRemoveResult = await removeFromListHandler({
+        auth: { token: { role: 'admin' } },
+        data: {
+          listIds: [rootSubsplashListId],
+          listItemIds: [rootRemovalLocation.rowId],
+          itemIds: [rootRemovalMediaId],
+          itemTypes: ['media-item'],
+          operationKey: 'remove-sequential:remove:5',
+        },
+      });
+
+      expect(firstRemoveResult[0].status).toBe('success');
+      assertSubsplashHistoryNeverExceedsCapacity(maxListSize);
+
+      const overflowRemovalMediaId = buildSermonId(2);
+      const overflowRemovalLocation = getMediaLocation(rootSubsplashListId, overflowRemovalMediaId);
+      subsplashMock.clearHistory();
+
+      const secondRemoveResult = await removeFromListHandler({
+        auth: { token: { role: 'admin' } },
+        data: {
+          listIds: [rootSubsplashListId],
+          listItemIds: [overflowRemovalLocation.rowId],
+          itemIds: [overflowRemovalMediaId],
+          itemTypes: ['media-item'],
+          operationKey: 'remove-sequential:remove:2',
+        },
+      });
+
+      expect(secondRemoveResult[0].status).toBe('success');
+      assertSubsplashHistoryNeverExceedsCapacity(maxListSize);
+
+      await assertChainMatches(
+        rootFirestoreListId,
+        rootSubsplashListId,
+        [buildSermonId(6), buildSermonId(4), buildSermonId(3), buildSermonId(1)],
+        maxListSize,
+        [[buildSermonId(6), buildSermonId(4)], [buildSermonId(3), buildSermonId(1)]]
+      );
+
+      const removedRootProjection = await firestore
+        .collection('lists')
+        .doc(rootFirestoreListId)
+        .collection('listItems')
+        .doc(rootRemovalMediaId)
+        .get();
+      expect(removedRootProjection.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+      expect(removedRootProjection.data()?.physicalPlacement).toBeUndefined();
+
+      const removedOverflowProjection = await firestore
+        .collection('lists')
+        .doc(rootFirestoreListId)
+        .collection('listItems')
+        .doc(overflowRemovalMediaId)
+        .get();
+      expect(removedOverflowProjection.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+      expect(removedOverflowProjection.data()?.physicalPlacement).toBeUndefined();
+
+      const removedRootCanonical = await firestore
+        .collection('sermons')
+        .doc(rootRemovalMediaId)
+        .collection('sermonLists')
+        .doc(rootFirestoreListId)
+        .get();
+      expect(removedRootCanonical.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+      expect(removedRootCanonical.data()?.publishGeneration).toBe(1);
+
+      const removedOverflowCanonical = await firestore
+        .collection('sermons')
+        .doc(overflowRemovalMediaId)
+        .collection('sermonLists')
+        .doc(rootFirestoreListId)
+        .get();
+      expect(removedOverflowCanonical.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+      expect(removedOverflowCanonical.data()?.publishGeneration).toBe(1);
+
+      const remainingCanonical = await firestore
+        .collection('sermons')
+        .doc(buildSermonId(3))
+        .collection('sermonLists')
+        .doc(rootFirestoreListId)
+        .get();
+      expect(remainingCanonical.data()?.uploadStatus?.status).toBe(uploadStatus.UPLOADED);
+      expect(remainingCanonical.data()?.uploadStatus?.listItemId).toEqual(expect.any(String));
+    } finally {
+      if (previousMaxListSizeOverride) {
+        process.env.SUBSPLASH_DEV_MAX_LIST_SIZE = previousMaxListSizeOverride;
+      } else {
+        delete process.env.SUBSPLASH_DEV_MAX_LIST_SIZE;
+      }
+    }
+  });
+
   it('keeps mock Subsplash pages and Firestore overflow metadata aligned across add, reorder, and delete flows', async () => {
     const maxListSize = 5;
     const rootSubsplashListId = 'root-subsplash-list';

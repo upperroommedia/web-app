@@ -64,15 +64,20 @@ import OverflowChainPanel from '../../../components/admin/lists/OverflowChainPan
 import useAuth from '../../../context/user/UserContext';
 import firestore, {
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
+  query,
   writeBatch,
   updateDoc,
+  where,
+  type Unsubscribe,
 } from '../../../firebase/firestore';
 import AppLayout from '../../../layout/AppLayout';
 import { listConverter, List } from '../../../types/List';
-import { listUploadStatus } from '../../../types/SermonList';
+import { listUploadStatus, sermonListConverter } from '../../../types/SermonList';
 import { sermonConverter } from '../../../types/Sermon';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import { createOperationKey } from '../../../utils/callableConcurrency';
@@ -124,6 +129,18 @@ interface PersistListDetailsPageOrderDependencies {
   chainView: ListOverflowChainView<ListDetailItem> | null;
   publishedDrift?: GetListPublishedDriftOutputType | null;
   reorderListItems: (input: ReorderListItemsInputType) => Promise<ReorderListItemsOutputType>;
+}
+
+interface SubscribeToListDetailsLiveUpdatesDependencies {
+  rootListId: string;
+  scheduleReload: () => void;
+  reportError?: (error: unknown) => void;
+  onSnapshotImpl?: typeof onSnapshot;
+  docImpl?: typeof doc;
+  collectionImpl?: typeof collection;
+  collectionGroupImpl?: typeof collectionGroup;
+  queryImpl?: typeof query;
+  whereImpl?: typeof where;
 }
 
 const createGetListOverflowChain = createFunctionV2<
@@ -219,6 +236,29 @@ const normalizeListItemPositions = (items: ListPageItem[]): ListPageItem[] =>
     position: index + 1,
     logicalPosition: index + 1,
   }));
+
+type CanonicalListMembershipStatus = {
+  uploadStatus?: listUploadStatus;
+};
+
+export const mergeRootItemsWithCanonicalMemberships = ({
+  items,
+  canonicalMembershipBySermonId,
+}: {
+  items: LoadListDetailsPageItem[];
+  canonicalMembershipBySermonId: Map<string, CanonicalListMembershipStatus>;
+}): LoadListDetailsPageItem[] =>
+  items.map((item) => {
+    const canonicalMembership = canonicalMembershipBySermonId.get(item.id);
+    if (!canonicalMembership?.uploadStatus) {
+      return item;
+    }
+
+    return {
+      ...item,
+      uploadStatus: canonicalMembership.uploadStatus,
+    };
+  });
 
 export const getPhysicalListTagLabel = (item: Pick<ListPageItem, 'sourceDepth'>): string =>
   item.sourceDepth <= 0 ? 'Root page' : `Overflow ${item.sourceDepth}`;
@@ -395,6 +435,84 @@ export const persistListDetailsPageOrder = async ({
     assignments: reorderResult.assignments,
     chainView,
   });
+};
+
+export const subscribeToListDetailsLiveUpdates = ({
+  rootListId,
+  scheduleReload,
+  reportError,
+  onSnapshotImpl = onSnapshot,
+  docImpl = doc,
+  collectionImpl = collection,
+  collectionGroupImpl = collectionGroup,
+  queryImpl = query,
+  whereImpl = where,
+}: SubscribeToListDetailsLiveUpdatesDependencies): Unsubscribe => {
+  let sawInitialListSnapshot = false;
+  let sawInitialItemsSnapshot = false;
+  let sawInitialCanonicalSnapshot = false;
+  let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const queueReload = () => {
+    if (reloadTimer) {
+      return;
+    }
+
+    reloadTimer = setTimeout(() => {
+      reloadTimer = undefined;
+      scheduleReload();
+    }, 0);
+  };
+
+  const handleError = (error: unknown) => {
+    console.error('List details live update subscription failed', error);
+    reportError?.(error);
+  };
+
+  const unsubscribeList = onSnapshotImpl(
+    docImpl(firestore, 'lists', rootListId),
+    () => {
+      if (!sawInitialListSnapshot) {
+        sawInitialListSnapshot = true;
+        return;
+      }
+      queueReload();
+    },
+    handleError
+  );
+
+  const unsubscribeItems = onSnapshotImpl(
+    collectionImpl(firestore, 'lists', rootListId, 'listItems'),
+    () => {
+      if (!sawInitialItemsSnapshot) {
+        sawInitialItemsSnapshot = true;
+        return;
+      }
+      queueReload();
+    },
+    handleError
+  );
+
+  const unsubscribeCanonicalMemberships = onSnapshotImpl(
+    queryImpl(collectionGroupImpl(firestore, 'sermonLists'), whereImpl('id', '==', rootListId)),
+    () => {
+      if (!sawInitialCanonicalSnapshot) {
+        sawInitialCanonicalSnapshot = true;
+        return;
+      }
+      queueReload();
+    },
+    handleError
+  );
+
+  return () => {
+    if (reloadTimer) {
+      clearTimeout(reloadTimer);
+    }
+    unsubscribeList();
+    unsubscribeItems();
+    unsubscribeCanonicalMemberships();
+  };
 };
 
 const formatListType = (value?: string): string => {
@@ -633,24 +751,40 @@ const ListDetailsPage = () => {
               rootListId,
               'listItems'
             ).withConverter(sermonConverter);
+            const canonicalMembershipSnapshot = await getDocs(
+              query(collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter), where('id', '==', rootListId))
+            );
+            const canonicalMembershipBySermonId = new Map<string, CanonicalListMembershipStatus>();
+            canonicalMembershipSnapshot.docs.forEach((membershipDoc) => {
+              const sermonId = membershipDoc.ref.parent.parent?.id;
+              if (!sermonId) {
+                return;
+              }
+              canonicalMembershipBySermonId.set(sermonId, {
+                uploadStatus: membershipDoc.data().uploadStatus,
+              });
+            });
             const listItemsSnapshot = await getDocs(listItemsRef);
 
-            return sortListOverflowChainSourceItems(
-              listItemsSnapshot.docs.map((itemDoc) => {
-                const data = itemDoc.data() as Partial<ListDetailItem>;
-                const derivedUploadStatus =
-                  data.uploadStatus ??
-                  (data.subsplashId
-                    ? ({ status: uploadStatus.UPLOADED } as listUploadStatus)
-                    : undefined);
+            return mergeRootItemsWithCanonicalMemberships({
+              items: sortListOverflowChainSourceItems(
+                listItemsSnapshot.docs.map((itemDoc) => {
+                  const data = itemDoc.data() as Partial<ListDetailItem>;
+                  const derivedUploadStatus =
+                    data.uploadStatus ??
+                    (data.subsplashId
+                      ? ({ status: uploadStatus.UPLOADED } as listUploadStatus)
+                      : undefined);
 
-                return {
-                  ...data,
-                  id: itemDoc.id,
-                  uploadStatus: derivedUploadStatus,
-                } as ListDetailItem;
-              })
-            );
+                  return {
+                    ...data,
+                    id: itemDoc.id,
+                    uploadStatus: derivedUploadStatus,
+                  } as ListDetailItem;
+                })
+              ),
+              canonicalMembershipBySermonId,
+            });
           },
           replaceRoute: (href) => router.replace(href),
         });
@@ -693,6 +827,18 @@ const ListDetailsPage = () => {
       cancelled = true;
     };
   }, [listId, reloadNonce, router]);
+
+  useEffect(() => {
+    const rootListId = chainView?.rootListId;
+    if (!rootListId) {
+      return;
+    }
+
+    return subscribeToListDetailsLiveUpdates({
+      rootListId,
+      scheduleReload: () => setReloadNonce((value) => value + 1),
+    });
+  }, [chainView?.rootListId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {

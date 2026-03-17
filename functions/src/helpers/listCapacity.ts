@@ -11,11 +11,16 @@ const parsePositiveInteger = (value: string | undefined): number | undefined => 
   return parsed;
 };
 
-// export const DEFAULT_MAX_LIST_SIZE = 200;
-export const DEFAULT_MAX_LIST_SIZE = 3; // TODO: Remove this override after testing with smaller list sizes
+export const DEFAULT_MAX_LIST_SIZE = 200;
 
-export const getConfiguredMaxListSize = (): number =>
-  parsePositiveInteger(process.env.SUBSPLASH_DEV_MAX_LIST_SIZE) ?? DEFAULT_MAX_LIST_SIZE;
+export const getConfiguredMaxListSize = (): number => {
+  if (process.env.SUBSPLASH_DEV_MAX_LIST_SIZE) {
+    console.log(
+      `Using custom max list size of ${process.env.SUBSPLASH_DEV_MAX_LIST_SIZE} from SUBSPLASH_DEV_MAX_LIST_SIZE environment variable`
+    );
+  }
+  return parsePositiveInteger(process.env.SUBSPLASH_DEV_MAX_LIST_SIZE) ?? DEFAULT_MAX_LIST_SIZE;
+};
 
 export const getPageContentCapacity = (
   remainingContentCount: number,

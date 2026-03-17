@@ -17,11 +17,14 @@ if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
   process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9100';
 }
 if (!process.env.FIREBASE_DATABASE_EMULATOR_HOST) {
-  process.env.FIREBASE_DATABASE_EMULATOR_HOST = '127.0.0.1:9000';
+  process.env.FIREBASE_DATABASE_EMULATOR_HOST = '127.0.0.1:19000';
 }
 if (!process.env.GCLOUD_PROJECT) {
   process.env.GCLOUD_PROJECT = 'urm-app';
 }
+// Tests must not inherit local dev-only list capacity overrides from the repo root .env.
+// Individual suites can set SUBSPLASH_DEV_MAX_LIST_SIZE explicitly when they need to exercise a smaller capacity.
+delete process.env.SUBSPLASH_DEV_MAX_LIST_SIZE;
 if (!process.env.ROLE_REQUEST_RECIPIENTS) {
   process.env.ROLE_REQUEST_RECIPIENTS = '["test-role-alerts@example.test"]';
 }
