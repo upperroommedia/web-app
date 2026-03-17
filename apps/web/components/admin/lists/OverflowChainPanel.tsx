@@ -24,7 +24,7 @@ const OverflowChainPanel = ({ nodes }: OverflowChainPanelProps) => {
   };
 
   return (
-    <Card sx={{ mb: 3 }}>
+    <Card>
       <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
         <Typography variant="h6" fontWeight={700} sx={{ mb: 0.5 }}>
           Overflow Chain

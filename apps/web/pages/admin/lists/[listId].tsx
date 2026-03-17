@@ -2,6 +2,9 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import Accordion from '@mui/material/Accordion';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import AccordionSummary from '@mui/material/AccordionSummary';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Breadcrumbs from '@mui/material/Breadcrumbs';
@@ -14,6 +17,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import CollectionsIcon from '@mui/icons-material/Collections';
 import Divider from '@mui/material/Divider';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import PendingIcon from '@mui/icons-material/Pending';
 import SaveIcon from '@mui/icons-material/Save';
@@ -1156,14 +1160,51 @@ const ListDetailsPage = () => {
               </Alert>
             ) : null}
 
-            {hasOverflowPages && !chainView?.warningMessage ? (
-              <Alert severity="info" sx={{ mb: 3 }}>
-                This root detail page now saves one logical order for the whole overflow chain and remaps Subsplash
-                page boundaries behind the scenes.
-              </Alert>
+            {chainView ? (
+              <Accordion
+                disableGutters
+                sx={{
+                  mb: 3,
+                  border: 1,
+                  borderColor: 'divider',
+                  borderRadius: 3,
+                  boxShadow: 'none',
+                  overflow: 'hidden',
+                  '&::before': {
+                    display: 'none',
+                  },
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon />}
+                  aria-controls="advanced-debug-content"
+                  id="advanced-debug-header"
+                  sx={{
+                    px: 2.5,
+                    py: 0.5,
+                    bgcolor: alpha(theme.palette.info.main, 0.04),
+                  }}
+                >
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={700}>
+                      Advanced Debug
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Overflow chain diagnostics and physical page mapping.
+                    </Typography>
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 2.5 }}>
+                  {hasOverflowPages && !chainView.warningMessage ? (
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      This root detail page now saves one logical order for the whole overflow chain and remaps
+                      Subsplash page boundaries behind the scenes.
+                    </Alert>
+                  ) : null}
+                  <OverflowChainPanel nodes={chainView.nodes} />
+                </AccordionDetails>
+              </Accordion>
             ) : null}
-
-            {chainView ? <OverflowChainPanel nodes={chainView.nodes} /> : null}
 
             <Box
               sx={{
