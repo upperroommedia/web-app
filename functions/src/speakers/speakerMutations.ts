@@ -1,5 +1,5 @@
 import axios, { isAxiosError } from 'axios';
-import { DocumentReference } from 'firebase-admin/firestore';
+import { DocumentReference, DocumentSnapshot } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { ImageType } from '@upperroom/shared/types/Image';
 import { ISpeaker } from '@upperroom/shared/types/Speaker';
@@ -11,6 +11,7 @@ import { authenticateSubsplash, createAxiosConfig } from '../subsplashUtils';
 import { withIdempotency } from '../locks/withIdempotency';
 import { withSubsplashLocks } from '../locks/withSubsplashLocks';
 import { buildRootListMetadata } from '../helpers/listOverflowChain';
+import { deleteLogicalListChain } from '../helpers/deleteLogicalListChain';
 import {
   CreateSpeakerCallableInputType,
   CreateSpeakerCallableOutputType,
@@ -431,36 +432,6 @@ const syncSubsplashSpeakerListRemote = async (
   await runLockedMutation();
 };
 
-const deleteSubsplashListRemote = async (subsplashListId: string, operationKey?: string): Promise<void> => {
-  const runMutation = async (): Promise<void> => {
-    const url = `https://core.subsplash.com/builder/v1/lists/${subsplashListId}`;
-    const config = createAxiosConfig(url, await authenticateSubsplash(), 'DELETE');
-    await axios(config);
-  };
-
-  const runLockedMutation = async (): Promise<void> => {
-    return withSubsplashLocks([`list:${subsplashListId}`], runMutation, {
-      ...(operationKey ? { operationKey } : {}),
-    });
-  };
-
-  try {
-    if (operationKey) {
-      await withIdempotency(operationKey, runLockedMutation);
-      return;
-    }
-    await runLockedMutation();
-  } catch (error) {
-    if (isAxiosError(error)) {
-      const responseCode = getSubsplashErrorCode(error.response?.data);
-      if (error.response?.status === 404 || responseCode === 'resource_not_found') {
-        return;
-      }
-    }
-    throw error;
-  }
-};
-
 const deleteSubsplashTagRemote = async (subsplashTagId: string, operationKey?: string): Promise<void> => {
   const runMutation = async (): Promise<void> => {
     const url = `https://core.subsplash.com/tags/v1/tags/${subsplashTagId}`;
@@ -685,7 +656,7 @@ export const updateSpeakerMutation = async (
       );
     }
 
-    let existingListSnapshot: FirebaseFirestore.DocumentSnapshot<List> | undefined;
+    let existingListSnapshot: DocumentSnapshot<List> | undefined;
     if (existingSpeaker.listId) {
       existingListSnapshot = await listsCollection.doc(existingSpeaker.listId).get();
     }
@@ -736,13 +707,10 @@ export const updateSpeakerMutation = async (
     }
 
     if (input.deleteAssociatedList && existingSpeaker.listId && existingListSnapshot?.exists) {
-      const existingList = existingListSnapshot.data();
-      if (existingList?.subsplashId) {
-        await deleteSubsplashListRemote(
-          existingList.subsplashId,
-          scopeOperationKey(input.operationKey, `delete-list-${existingList.subsplashId}`)
-        );
-      }
+      await deleteLogicalListChain({
+        listId: existingSpeaker.listId,
+        operationKey: scopeOperationKey(input.operationKey, `delete-list-chain-${existingSpeaker.listId}`),
+      });
     }
 
     const updatedSpeaker: ISpeaker = {
@@ -779,9 +747,6 @@ export const updateSpeakerMutation = async (
           },
           { merge: true }
         );
-      }
-      if (input.deleteAssociatedList && existingSpeaker.listId && existingListSnapshot?.exists) {
-        transaction.delete(listsCollection.doc(existingSpeaker.listId));
       }
     });
 
@@ -822,7 +787,6 @@ export const deleteSpeakerMutation = async (
 
     let deletedListId: string | undefined;
     let deletedSubsplashListId: string | undefined;
-    let listRefToDelete: DocumentReference<List> | undefined;
     let listDeleted = false;
 
     if (existingSpeaker.listId) {
@@ -833,15 +797,12 @@ export const deleteSpeakerMutation = async (
         if (!list) {
           throw new HttpsError('internal', `List ${existingSpeaker.listId} could not be loaded.`);
         }
-        deletedListId = list.id;
-        if (list.subsplashId) {
-          await deleteSubsplashListRemote(
-            list.subsplashId,
-            scopeOperationKey(input.operationKey, `delete-list-${list.subsplashId}`)
-          );
-          deletedSubsplashListId = list.subsplashId;
-        }
-        listRefToDelete = listRef;
+        const deleteResult = await deleteLogicalListChain({
+          listId: list.id,
+          operationKey: scopeOperationKey(input.operationKey, `delete-list-chain-${list.id}`),
+        });
+        deletedListId = deleteResult.rootListId;
+        deletedSubsplashListId = deleteResult.rootSubsplashListId;
         listDeleted = true;
       }
     }
@@ -850,9 +811,6 @@ export const deleteSpeakerMutation = async (
 
     const deleteBatch = firestore.batch();
     deleteBatch.delete(speakerRef);
-    if (listRefToDelete) {
-      deleteBatch.delete(listRefToDelete);
-    }
     await deleteBatch.commit();
 
     return {

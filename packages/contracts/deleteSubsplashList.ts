@@ -3,32 +3,11 @@ export interface DeleteSubsplashListInputType {
   operationKey?: string;
 }
 
-export interface DeleteSubsplashListBlockedOverflowPage {
-  firestoreListId: string;
-  subsplashId?: string;
-  name: string;
-  depth: number;
-  count: number;
-}
-
-export interface DeleteSubsplashListBlockedDetails {
-  reason: 'ROOT_HAS_OVERFLOW_PAGES';
-  requestedListId: string;
-  rootListId: string;
-  rootName: string;
-  logicalCount: number;
-  totalPages: number;
-  overflowPageCount: number;
-  overflowPages: DeleteSubsplashListBlockedOverflowPage[];
-}
-
 export interface DeleteSubsplashListDeletedResult {
   status: 'deleted';
+  deletedFirestoreListIds: string[];
+  deletedSubsplashListIds: string[];
+  rootListId: string;
+  requestedListId: string;
 }
-
-export interface DeleteSubsplashListBlockedResult {
-  status: 'blocked';
-  blocked: DeleteSubsplashListBlockedDetails;
-}
-
-export type DeleteSubsplashListOutputType = DeleteSubsplashListDeletedResult | DeleteSubsplashListBlockedResult;
+export type DeleteSubsplashListOutputType = DeleteSubsplashListDeletedResult;

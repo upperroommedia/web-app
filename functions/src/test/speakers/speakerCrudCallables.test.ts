@@ -501,6 +501,182 @@ describe('speaker CRUD callables', () => {
     );
   });
 
+  it('deletes the full speaker overflow chain when deleting a speaker with an associated speaker list', async () => {
+    const now = Date.now();
+    await speakersCollection.doc('speaker-delete-overflow').set({
+      id: 'speaker-delete-overflow',
+      name: 'Speaker Overflow',
+      images: [createSquareImage('overflow-square')],
+      sermonCount: 1,
+      tagId: 'speaker-tag-overflow',
+      listId: 'speaker-list-root',
+    });
+    await listsCollection.doc('speaker-list-root').set({
+      id: 'speaker-list-root',
+      name: 'Speaker Overflow',
+      type: ListType.SPEAKER_LIST,
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      images: [createSquareImage('overflow-square')],
+      createdAtMillis: now,
+      updatedAtMillis: now,
+      count: 2,
+      logicalCount: 4,
+      hasOverflowPages: true,
+      subsplashId: 'subsplash-speaker-root',
+      moreSermonsRef: 'subsplash-speaker-overflow-1',
+      isRootList: true,
+      isMoreSermonsList: false,
+      rootListId: 'speaker-list-root',
+      overflowDepth: 0,
+    });
+    await listsCollection.doc('speaker-list-overflow-1').set({
+      id: 'speaker-list-overflow-1',
+      name: 'More Speaker Overflow sermons',
+      type: ListType.SPEAKER_LIST,
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      images: [createSquareImage('overflow-square')],
+      createdAtMillis: now,
+      updatedAtMillis: now,
+      count: 2,
+      subsplashId: 'subsplash-speaker-overflow-1',
+      moreSermonsRef: 'subsplash-speaker-overflow-2',
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: 'speaker-list-root',
+      overflowDepth: 1,
+    });
+    await listsCollection.doc('speaker-list-overflow-2').set({
+      id: 'speaker-list-overflow-2',
+      name: 'More Speaker Overflow sermons',
+      type: ListType.SPEAKER_LIST,
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      images: [createSquareImage('overflow-square')],
+      createdAtMillis: now,
+      updatedAtMillis: now,
+      count: 0,
+      subsplashId: 'subsplash-speaker-overflow-2',
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: 'speaker-list-root',
+      overflowDepth: 2,
+    });
+
+    const deleteResult = await deleteSpeakerHandler({
+      auth: defaultAuth,
+      data: {
+        speakerId: 'speaker-delete-overflow',
+      },
+    });
+
+    expect(deleteResult.status).toBe('success');
+    expect(deleteResult.tagDeleted).toBe(true);
+    expect(deleteResult.listDeleted).toBe(true);
+    expect(deleteResult.deletedListId).toBe('speaker-list-root');
+    expect(deleteResult.deletedSubsplashListId).toBe('subsplash-speaker-root');
+    expect((await speakersCollection.doc('speaker-delete-overflow').get()).exists).toBe(false);
+    expect((await listsCollection.doc('speaker-list-root').get()).exists).toBe(false);
+    expect((await listsCollection.doc('speaker-list-overflow-1').get()).exists).toBe(false);
+    expect((await listsCollection.doc('speaker-list-overflow-2').get()).exists).toBe(false);
+
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/tags/v1/tags/speaker-tag-overflow',
+      })
+    );
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/builder/v1/lists/subsplash-speaker-overflow-2',
+      })
+    );
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/builder/v1/lists/subsplash-speaker-overflow-1',
+      })
+    );
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/builder/v1/lists/subsplash-speaker-root',
+      })
+    );
+  });
+
+  it('cascades overflow speaker lists when updateSpeaker deletes the associated list', async () => {
+    const now = Date.now();
+    await speakersCollection.doc('speaker-update-delete-overflow').set({
+      id: 'speaker-update-delete-overflow',
+      name: 'Speaker Update Overflow',
+      images: [createSquareImage('update-overflow-square')],
+      sermonCount: 3,
+      tagId: 'speaker-tag-update-overflow',
+      listId: 'speaker-update-list-root',
+    });
+    await listsCollection.doc('speaker-update-list-root').set({
+      id: 'speaker-update-list-root',
+      name: 'Speaker Update Overflow',
+      type: ListType.SPEAKER_LIST,
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      images: [createSquareImage('update-overflow-square')],
+      createdAtMillis: now,
+      updatedAtMillis: now,
+      count: 2,
+      logicalCount: 4,
+      hasOverflowPages: true,
+      subsplashId: 'subsplash-update-root',
+      moreSermonsRef: 'subsplash-update-overflow-1',
+      isRootList: true,
+      isMoreSermonsList: false,
+      rootListId: 'speaker-update-list-root',
+      overflowDepth: 0,
+    });
+    await listsCollection.doc('speaker-update-list-overflow-1').set({
+      id: 'speaker-update-list-overflow-1',
+      name: 'More Speaker Update Overflow sermons',
+      type: ListType.SPEAKER_LIST,
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      images: [createSquareImage('update-overflow-square')],
+      createdAtMillis: now,
+      updatedAtMillis: now,
+      count: 1,
+      subsplashId: 'subsplash-update-overflow-1',
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: 'speaker-update-list-root',
+      overflowDepth: 1,
+    });
+
+    const updateResult = await updateSpeakerHandler({
+      auth: defaultAuth,
+      data: {
+        speakerId: 'speaker-update-delete-overflow',
+        patch: {
+          name: 'Speaker Update Overflow',
+        },
+        deleteAssociatedList: true,
+      },
+    });
+
+    expect(updateResult.status).toBe('success');
+    expect(updateResult.speaker.listId).toBeUndefined();
+    expect((await listsCollection.doc('speaker-update-list-root').get()).exists).toBe(false);
+    expect((await listsCollection.doc('speaker-update-list-overflow-1').get()).exists).toBe(false);
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/builder/v1/lists/subsplash-update-overflow-1',
+      })
+    );
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'DELETE',
+        url: 'https://core.subsplash.com/builder/v1/lists/subsplash-update-root',
+      })
+    );
+  });
+
   it('rejects unauthorized callers for create, update, and delete', async () => {
     await speakersCollection.doc('speaker-unauthorized').set({
       id: 'speaker-unauthorized',

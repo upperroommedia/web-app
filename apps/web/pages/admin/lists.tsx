@@ -5,9 +5,6 @@ import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
 import CircularProgress from '@mui/material/CircularProgress';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import MuiList from '@mui/material/List';
-import MuiListItem from '@mui/material/ListItem';
-import MuiListItemText from '@mui/material/ListItemText';
 import Typography from '@mui/material/Typography';
 import AppLayout from '../../layout/AppLayout';
 import ListTable from '../../components/ListTable';
@@ -26,11 +23,9 @@ import {
 import { getDefaultListSortOrder } from '../../utils/algolia/listSorting';
 import type { ListSortableProperty } from '../../utils/algolia/listSorting';
 import {
-  DeleteSubsplashListBlockedDetails,
   DeleteSubsplashListInputType,
   DeleteSubsplashListOutputType,
 } from '@upperroom/contracts/deleteSubsplashList';
-import firestore, { deleteDoc, doc } from '../../firebase/firestore';
 import { List, ListType } from '../../types/List';
 
 const createDeleteSubsplashList = createFunctionV2<DeleteSubsplashListInputType, DeleteSubsplashListOutputType>(
@@ -56,7 +51,6 @@ const AdminList = () => {
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState<boolean>(false);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string>('');
-  const [blockedDeleteDetails, setBlockedDeleteDetails] = useState<DeleteSubsplashListBlockedDetails | null>(null);
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
 
   useEffect(() => {
@@ -118,7 +112,6 @@ const AdminList = () => {
   const resetDeleteDialogState = () => {
     setDeleteConfirmed(false);
     setDeleteErrorMessage('');
-    setBlockedDeleteDetails(null);
   };
 
   const closeDeleteListPopup = () => {
@@ -133,18 +126,11 @@ const AdminList = () => {
 
     try {
       setIsDeleting(true);
-      if (selectedList.subsplashId) {
-        const deleteResult = await createDeleteSubsplashList({ listId: selectedList.id });
-        if (deleteResult.status === 'blocked') {
-          setBlockedDeleteDetails(deleteResult.blocked);
-          setDeleteErrorMessage('');
-          return;
-        }
-      }
-      await deleteDoc(doc(firestore, 'lists', selectedList.id));
+      const deleteResult = await createDeleteSubsplashList({ listId: selectedList.id });
       await clearCache();
-      setLists((previousLists) => previousLists.filter((list) => list.id !== selectedList.id));
-      setTotalLists((previousTotal) => Math.max(0, previousTotal - 1));
+      const deletedIdSet = new Set(deleteResult.deletedFirestoreListIds);
+      setLists((previousLists) => previousLists.filter((list) => !deletedIdSet.has(list.id)));
+      setTotalLists((previousTotal) => Math.max(0, previousTotal - deleteResult.deletedFirestoreListIds.length));
       setRefreshNonce((currentValue) => currentValue + 1);
       closeDeleteListPopup();
       setSelectedList(undefined);
@@ -170,26 +156,6 @@ const AdminList = () => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
-
-  const activeBlockedDeleteDetails =
-    blockedDeleteDetails ??
-    (selectedList && getListOverflowIndicator(selectedList)
-      ? {
-          reason: 'ROOT_HAS_OVERFLOW_PAGES' as const,
-          requestedListId: selectedList.id,
-          rootListId: selectedList.rootListId ?? selectedList.id,
-          rootName: selectedList.name,
-          logicalCount: getListDiscoveryCount(selectedList),
-          totalPages: 0,
-          overflowPageCount: 0,
-          overflowPages: [],
-        }
-      : null);
-
-  const deleteImpactSummary =
-    activeBlockedDeleteDetails && activeBlockedDeleteDetails.totalPages > 0
-      ? `${activeBlockedDeleteDetails.totalPages} linked pages`
-      : 'linked overflow continuation pages';
 
   const isLoading = listsLoading || searchClientLoading;
 
@@ -239,9 +205,7 @@ const AdminList = () => {
       </Box>
       <PopUp
         title={
-          activeBlockedDeleteDetails
-            ? 'Delete blocked for overflow chain'
-            : 'Are you sure you want to permanently delete this list?'
+          'Are you sure you want to permanently delete this list?'
         }
         open={deleteListPopup}
         setOpen={(open) => {
@@ -256,54 +220,28 @@ const AdminList = () => {
           <Button
             aria-label="confirm delete list"
             onClick={handleDeleteList}
-            color={activeBlockedDeleteDetails ? 'warning' : 'error'}
-            disabled={!deleteConfirmed || isDeleting || Boolean(blockedDeleteDetails)}
+            color="error"
+            disabled={!deleteConfirmed || isDeleting}
           >
-            {isDeleting ? <CircularProgress size={20} color="inherit" /> : blockedDeleteDetails ? 'Delete Blocked' : 'Delete Forever'}
+            {isDeleting ? <CircularProgress size={20} color="inherit" /> : 'Delete Forever'}
           </Button>
         }
       >
         <Box display="flex" flexDirection="column" gap={2} sx={{ minWidth: { xs: 0, sm: 440 } }}>
           {deleteErrorMessage ? <Alert severity="error">{deleteErrorMessage}</Alert> : null}
-          {activeBlockedDeleteDetails ? (
-            <Alert severity="warning">
-              {`This root list is part of an overflow chain. Deleting it would affect ${deleteImpactSummary}, so the delete path stops instead of cascading.`}
-            </Alert>
-          ) : null}
           {selectedList ? (
             <Box>
               <Typography variant="body2" color="text.secondary">
-                {activeBlockedDeleteDetails
-                  ? `Logical list: ${activeBlockedDeleteDetails.rootName}`
-                  : `List: ${selectedList.name}`}
+                {`List: ${selectedList.name}`}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {`Logical items: ${activeBlockedDeleteDetails ? activeBlockedDeleteDetails.logicalCount : getListDiscoveryCount(selectedList)}`}
+                {`Logical items: ${getListDiscoveryCount(selectedList)}`}
               </Typography>
-              {activeBlockedDeleteDetails ? (
+              {getListOverflowIndicator(selectedList) ? (
                 <Typography variant="body2" color="text.secondary">
-                  {activeBlockedDeleteDetails.totalPages > 0
-                    ? `Overflow pages: ${activeBlockedDeleteDetails.overflowPageCount} of ${activeBlockedDeleteDetails.totalPages} physical pages`
-                    : 'Overflow pages exist on this root list and must be removed before deletion.'}
+                  Deleting this logical list will also delete all linked overflow pages.
                 </Typography>
               ) : null}
-            </Box>
-          ) : null}
-          {blockedDeleteDetails?.overflowPages.length ? (
-            <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                Blocked continuation pages
-              </Typography>
-              <MuiList dense disablePadding>
-                {blockedDeleteDetails.overflowPages.map((page) => (
-                  <MuiListItem key={page.firestoreListId} disableGutters>
-                    <MuiListItemText
-                      primary={page.name}
-                      secondary={`Depth ${page.depth} • ${page.count} items${page.subsplashId ? ` • ${page.subsplashId}` : ''}`}
-                    />
-                  </MuiListItem>
-                ))}
-              </MuiList>
             </Box>
           ) : null}
           <FormControlLabel
