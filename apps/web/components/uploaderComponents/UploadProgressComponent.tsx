@@ -147,8 +147,8 @@ export default function UploadProgressComponent({
             onClick={onDismiss}
             sx={{
               position: 'absolute',
-              top: -20,
-              right: -20,
+              top: -12,
+              right: -12,
               color: 'text.secondary',
               '&:hover': {
                 color: 'text.primary',
