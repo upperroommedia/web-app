@@ -311,11 +311,11 @@ const syncFirestoreListItemsOrder = async ({
     const physicalPlacement =
       assignment
         ? {
-            firestoreListId: targetListId,
-            subsplashListId: assignment.subsplashListId,
-            overflowDepth: assignment.overflowDepth,
-            position: assignment.position,
-          }
+          firestoreListId: targetListId,
+          subsplashListId: assignment.subsplashListId,
+          overflowDepth: assignment.overflowDepth,
+          position: assignment.position,
+        }
         : undefined;
 
     batch.set(
@@ -409,20 +409,20 @@ export const persistListDetailsPageOrder = async ({
   const reorderResult =
     syncedItems.length > 0
       ? await reorderListItems({
-          rootListId,
-          logicalItemOrder: syncedItems.map((item, index) => ({
-            mediaItemId: item.subsplashId as string,
-            position: index + 1,
-          })),
-          operationKey: createOperationKey('list-admin-reorder', rootListId),
-        })
+        rootListId,
+        logicalItemOrder: syncedItems.map((item, index) => ({
+          mediaItemId: item.subsplashId as string,
+          position: index + 1,
+        })),
+        operationKey: createOperationKey('list-admin-reorder', rootListId),
+      })
       : {
-          status: 'success' as const,
-          message: 'No synced items to reorder.',
-          rootListId,
-          subsplashListId: rootSubsplashId,
-          assignments: [],
-        };
+        status: 'success' as const,
+        message: 'No synced items to reorder.',
+        rootListId,
+        subsplashListId: rootSubsplashId,
+        assignments: [],
+      };
 
   if (reorderResult.status !== 'success') {
     throw new Error(reorderResult.message || 'Subsplash reorder failed.');
@@ -1104,13 +1104,6 @@ const ListDetailsPage = () => {
                 </Box>
               </CardContent>
             </Card>
-
-            {list.subsplashId && localOnlyItemsCount > 0 ? (
-              <Alert severity="info" sx={{ mb: 3 }}>
-                This list contains sermons that are only local right now. Saving order will update Firestore for every
-                row and reorder the synced Subsplash items in their relative order.
-              </Alert>
-            ) : null}
 
             {chainView?.warningMessage ? (
               <Alert severity="warning" sx={{ mb: 3 }}>
