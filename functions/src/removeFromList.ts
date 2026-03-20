@@ -24,6 +24,7 @@ import {
 import { getConfiguredMaxListSize, getPageContentCapacity } from './helpers/listCapacity';
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SubsplashListRow } from './types/Subsplash';
+import { canReconstructRemoteRow, getRemoteRowResourceId } from './helpers/remoteChainItems';
 
 export interface RemoveFromListInputType {
   listIds: string[];
@@ -107,9 +108,7 @@ const findItemPlacementInOverflowChain = async (
     visitedListIds.add(currentListId);
 
     const rows = await getFullListRows(currentListId, token);
-    const matchingRow = rows.find(
-      (row) => row.type === itemType && row._embedded[row.type]?.id === itemId && row.id
-    );
+    const matchingRow = rows.find((row) => row.type === itemType && getRemoteRowResourceId(row) === itemId && row.id);
     if (matchingRow?.id) {
       return {
         listId: currentListId,
@@ -222,9 +221,17 @@ const buildTargetRowsForNode = (
       return { ...row };
     }
 
+    const resourceId = getRemoteRowResourceId(row);
+    if (!resourceId || !canReconstructRemoteRow(row)) {
+      throw new HttpsError(
+        'failed-precondition',
+        `Row ${row.id ?? 'unknown'} cannot be moved across overflow pages because Subsplash did not provide a reconstructible resource identity.`
+      );
+    }
+
     return createListRow(
       {
-        id: row._embedded?.[row.type]?.id as string,
+        id: resourceId,
         type: row.type,
       },
       node.subsplashListId,
@@ -439,7 +446,7 @@ const rebalanceOverflowChainAfterRemoval = async ({
     appliedRows
       .filter((row) => row.type !== 'list')
       .forEach((row) => {
-        const mediaItemId = normalizeString(row._embedded?.[row.type]?.id);
+        const mediaItemId = getRemoteRowResourceId(row);
         if (!mediaItemId) {
           return;
         }

@@ -43,6 +43,8 @@ export interface List {
   createdAtMillis: number;
   subsplashId?: string;
   moreSermonsRef?: string;
+  manualOverflowRowId?: string;
+  manualOverflowTargetSubsplashId?: string;
   isMoreSermonsList?: boolean;
   isRootList?: boolean;
   rootListId?: string;

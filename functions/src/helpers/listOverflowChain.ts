@@ -17,6 +17,11 @@ import {
   summarizeOverflowNodes,
   summarizeSubsplashRows,
 } from './listDebugLogger';
+import {
+  countLogicalContentRows,
+  getLogicalContentRows,
+  getRemoteRowResourceId,
+} from './remoteChainItems';
 
 type StoredListData = List & {
   title?: string;
@@ -136,7 +141,9 @@ const getStoredChainNodesFromRoot = async (
 
 const getContentRowCount = async (subsplashId: string, token: string): Promise<number> => {
   const rows = await getFullListRows(subsplashId, token);
-  return rows.filter((row) => row.type !== 'list').length;
+  const currentRecord = await getStoredListRecordBySubsplashId(subsplashId);
+  const expectedNextSubsplashListId = normalizeString(currentRecord?.data.moreSermonsRef);
+  return countLogicalContentRows({ rows, expectedNextSubsplashListId });
 };
 
 const chunkValues = <T>(values: T[], size: number): T[][] => {
@@ -275,15 +282,21 @@ export const syncRootMembershipPlacements = async (
     })),
   });
 
-  const mediaPlacements = rowsByNode.flatMap(({ node, subsplashListId, rows }) =>
-    rows
-      .filter((row) => row.type === 'media-item' && normalizeString(row._embedded['media-item']?.id))
-      .map((row) => ({
+  const contentPlacements = rowsByNode.flatMap(({ node, subsplashListId, rows }, nodeIndex) => {
+    const expectedNextSubsplashListId = chain[nodeIndex + 1]?.record.data.subsplashId;
+    return getLogicalContentRows({
+      rows,
+      expectedNextSubsplashListId: normalizeString(expectedNextSubsplashListId),
+    }).map((row) => ({
         node,
         subsplashListId: subsplashListId as string,
         row,
-        mediaItemId: normalizeString(row._embedded['media-item']?.id) as string,
-      }))
+        mediaItemId: row.type === 'media-item' ? getRemoteRowResourceId(row) : undefined,
+      }));
+  });
+
+  const mediaPlacements = contentPlacements.filter(
+    (placement): placement is typeof placement & { mediaItemId: string } => Boolean(placement.mediaItemId)
   );
 
   const sermonsBySubsplashId = await getStoredSermonsBySubsplashIds(
@@ -294,7 +307,12 @@ export const syncRootMembershipPlacements = async (
   const seenPublishedSermonIds = new Set<string>();
   const operations: BatchWriteOperation[] = [];
 
-  mediaPlacements.forEach((placement) => {
+  contentPlacements.forEach((placement) => {
+    if (!placement.mediaItemId) {
+      logicalPosition += 1;
+      return;
+    }
+
     const sermonRecord = sermonsBySubsplashId.get(placement.mediaItemId);
     if (!sermonRecord) {
       logicalPosition += 1;
@@ -424,7 +442,7 @@ const collapseEmptyTailOverflowPages = async (
     }
 
     const tailRows = await getFullListRows(tailSubsplashId, token);
-    const tailHasContent = tailRows.some((row) => row.type !== 'list');
+    const tailHasContent = countLogicalContentRows({ rows: tailRows }) > 0;
     const tailHasLinkedOverflow = tailRows.some((row) => row.type === 'list' && row._embedded.list?.id);
     listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.inspectTail', {
       rootListId: rootRecord.id,
@@ -731,6 +749,7 @@ export const getOverflowChainState = async (
     canMutate: !issues.some((issue) => issue.severity === 'blocking'),
     nodes,
     issues,
+    remoteItems: [],
   };
   listDebugLog('listOverflowChain.getOverflowChainState.complete', {
     requestedListId: normalizedListId,

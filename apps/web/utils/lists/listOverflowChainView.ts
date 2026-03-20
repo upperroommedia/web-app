@@ -37,6 +37,7 @@ export interface ListOverflowChainBoundaryMarker {
 export interface ListOverflowChainNodeView {
   firestoreListId: string;
   subsplashId?: string;
+  nextSubsplashListId?: string | null;
   name: string;
   depth: number;
   isRoot: boolean;
@@ -90,6 +91,8 @@ export const buildListOverflowChainView = <T extends SortableListItem>(
   itemsByListId: Record<string, readonly T[]>
 ): ListOverflowChainView<T> => {
   const rootLogicalItems = sortListOverflowChainSourceItems(itemsByListId[chain.rootListId] ?? []);
+  const effectiveLogicalCount =
+    Array.isArray(chain.remoteItems) && chain.remoteItems.length > 0 ? chain.remoteItems.length : chain.logicalCount;
   const nodeByFirestoreListId = new Map(chain.nodes.map((node) => [node.firestoreListId, node]));
   const hasExplicitPerNodeMirrors = chain.nodes.some((node) => {
     if (node.firestoreListId === chain.rootListId) {
@@ -107,7 +110,11 @@ export const buildListOverflowChainView = <T extends SortableListItem>(
   let logicalPosition = 1;
 
   const totalRootLogicalCount = rootLogicalItems.length;
-  const rootProjectionFullyCoversChain = useRootLogicalProjection && totalRootLogicalCount === chain.logicalCount;
+  const rootProjectionFullyCoversChain = useRootLogicalProjection && totalRootLogicalCount === effectiveLogicalCount;
+  const remoteItemsFullyCoverChain =
+    Array.isArray(chain.remoteItems) &&
+    chain.remoteItems.length === effectiveLogicalCount &&
+    chain.remoteItems.every((item) => item.placement.firestoreListId);
   const placementCountsByNode = rootProjectionUsesPhysicalPlacement
     ? rootLogicalItems.reduce<Map<string, number>>((counts, item) => {
         const firestoreListId = item.physicalPlacement?.firestoreListId;
@@ -119,13 +126,25 @@ export const buildListOverflowChainView = <T extends SortableListItem>(
         return counts;
       }, new Map<string, number>())
     : new Map<string, number>();
+  const remotePlacementCountsByNode = remoteItemsFullyCoverChain
+    ? chain.remoteItems!.reduce<Map<string, number>>((counts, item) => {
+        counts.set(
+          item.placement.firestoreListId,
+          (counts.get(item.placement.firestoreListId) ?? 0) + 1
+        );
+        return counts;
+      }, new Map<string, number>())
+    : new Map<string, number>();
 
   const nodes: ListOverflowChainNodeView[] = chain.nodes.map((node, index) => {
     const localItems = itemsByListId[node.firestoreListId] ?? [];
     let localCount = localItems.length;
     let missingMirroredCount = Math.max(0, node.count - localCount);
 
-    if (rootProjectionUsesPhysicalPlacement) {
+    if (remoteItemsFullyCoverChain) {
+      localCount = remotePlacementCountsByNode.get(node.firestoreListId) ?? 0;
+      missingMirroredCount = 0;
+    } else if (rootProjectionUsesPhysicalPlacement) {
       localCount = placementCountsByNode.get(node.firestoreListId) ?? 0;
       missingMirroredCount = 0;
     } else if (useRootLogicalProjection) {
@@ -144,6 +163,7 @@ export const buildListOverflowChainView = <T extends SortableListItem>(
     return {
       firestoreListId: node.firestoreListId,
       subsplashId: node.subsplashId,
+      nextSubsplashListId: node.nextSubsplashListId,
       name: node.name,
       depth: node.depth,
       isRoot: node.isRoot,
@@ -290,12 +310,12 @@ export const buildListOverflowChainView = <T extends SortableListItem>(
     });
   });
 
-  const hasCoverageGap = nodes.some((node) => node.hasCoverageGap);
+  const hasCoverageGap = !remoteItemsFullyCoverChain && nodes.some((node) => node.hasCoverageGap);
   const hasBlockingIssues = diagnostics.some((diagnostic) => diagnostic.severity === 'blocking');
   const canSaveOrder = chain.canMutate && !hasBlockingIssues && !hasCoverageGap;
   const isReadOnly = !canSaveOrder;
   const localMirroredCount = items.length;
-  const expectedPhysicalCount = chain.logicalCount;
+  const expectedPhysicalCount = effectiveLogicalCount;
 
   let warningMessage: string | undefined;
   if (isReadOnly) {

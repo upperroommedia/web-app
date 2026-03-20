@@ -225,7 +225,7 @@ describe('loadListDetailsPageData', () => {
     ]);
   });
 
-  it('loads published drift diagnostics alongside the logical list data', async () => {
+  it('does not load published drift diagnostics during the initial logical list load', async () => {
     const getListPublishedDrift = jest.fn().mockResolvedValue(buildPublishedDrift());
 
     const result = await loadListDetailsPageData({
@@ -246,8 +246,8 @@ describe('loadListDetailsPageData', () => {
       replaceRoute: jest.fn(),
     });
 
-    expect(getListPublishedDrift).toHaveBeenCalledWith({ listId: 'root-list' });
-    expect(result.publishedDrift).toEqual(expect.objectContaining({ inSync: false, canReorder: false }));
+    expect(getListPublishedDrift).not.toHaveBeenCalled();
+    expect(result.publishedDrift).toBeNull();
     expect(result.items?.map((item) => item.id)).toEqual(['sermon-a', 'sermon-b', 'sermon-c', 'sermon-d']);
   });
 });
@@ -667,6 +667,45 @@ describe('subscribeToListDetailsLiveUpdates', () => {
 
     cleanup();
     expect(unsubscribe).toHaveBeenCalledTimes(3);
+    jest.useRealTimers();
+  });
+
+  it('does not reload if one source emits again before the other initial snapshots arrive', () => {
+    jest.useFakeTimers();
+
+    const scheduleReload = jest.fn();
+    const snapshotCallbacks: Array<() => void> = [];
+    const onSnapshotImpl = jest.fn((_ref, onNext: () => void) => {
+      snapshotCallbacks.push(onNext);
+      return jest.fn();
+    });
+
+    subscribeToListDetailsLiveUpdates({
+      rootListId: 'root-list',
+      scheduleReload,
+      onSnapshotImpl: onSnapshotImpl as unknown as typeof import('../../../../firebase/firestore').onSnapshot,
+      docImpl: mockedDoc as unknown as typeof import('../../../../firebase/firestore').doc,
+      collectionImpl: collection as unknown as typeof import('../../../../firebase/firestore').collection,
+      collectionGroupImpl: jest.fn() as unknown as typeof import('../../../../firebase/firestore').collectionGroup,
+      queryImpl: jest.fn((value) => value) as unknown as typeof import('../../../../firebase/firestore').query,
+      whereImpl: jest.fn(() => ({})) as unknown as typeof import('../../../../firebase/firestore').where,
+    });
+
+    expect(snapshotCallbacks).toHaveLength(3);
+
+    snapshotCallbacks[0]();
+    snapshotCallbacks[0]();
+    jest.runAllTimers();
+    expect(scheduleReload).not.toHaveBeenCalled();
+
+    snapshotCallbacks[1]();
+    snapshotCallbacks[2]();
+    jest.runAllTimers();
+    expect(scheduleReload).not.toHaveBeenCalled();
+
+    snapshotCallbacks[0]();
+    jest.runAllTimers();
+    expect(scheduleReload).toHaveBeenCalledTimes(1);
     jest.useRealTimers();
   });
 });

@@ -29,6 +29,7 @@ import {
 import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
 import { getConfiguredMaxListSize } from './helpers/listCapacity';
+import { canReconstructRemoteRow, getRemoteRowResourceId } from './helpers/remoteChainItems';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -113,7 +114,9 @@ const resolveListItemIdWithRetry = async (
   token: string,
   finalRowsSnapshot?: SubsplashListRow[]
 ): Promise<string | undefined> => {
-  const addedRowFromPatch = finalRowsSnapshot?.find((row) => row._embedded[itemToAdd.type]?.id === itemToAdd.id);
+  const addedRowFromPatch = finalRowsSnapshot?.find(
+    (row) => row.type === itemToAdd.type && getRemoteRowResourceId(row) === itemToAdd.id
+  );
   if (addedRowFromPatch?.id) {
     return addedRowFromPatch.id;
   }
@@ -125,7 +128,9 @@ const resolveListItemIdWithRetry = async (
     }
 
     const updatedListRows = await getFullListRows(listId, token);
-    const addedRow = updatedListRows.find((row) => row._embedded[itemToAdd.type]?.id === itemToAdd.id);
+    const addedRow = updatedListRows.find(
+      (row) => row.type === itemToAdd.type && getRemoteRowResourceId(row) === itemToAdd.id
+    );
     if (addedRow?.id) {
       return addedRow.id;
     }
@@ -146,9 +151,7 @@ const findItemInOverflowChain = async (
     visitedListIds.add(currentListId);
 
     const rows = await getFullListRows(currentListId, token);
-    const matchingRow = rows.find(
-      (row) => row.type === itemToAdd.type && row._embedded[itemToAdd.type]?.id === itemToAdd.id
-    );
+    const matchingRow = rows.find((row) => row.type === itemToAdd.type && getRemoteRowResourceId(row) === itemToAdd.id);
     if (matchingRow?.id) {
       return {
         listId: currentListId,
@@ -359,7 +362,7 @@ async function processListStep(
   await listDoc.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
 
   const { rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token);
-  const exists = currentRows.some((row) => row._embedded[row.type]?.id === itemToAdd.id);
+  const exists = currentRows.some((row) => getRemoteRowResourceId(row) === itemToAdd.id);
   listDebugLog('addToList.processListStep.remoteState', {
     listId,
     totalRowCount,
@@ -392,7 +395,7 @@ async function processListStep(
       itemId: itemToAdd.id,
     });
     itemExisted = true;
-    const existingRow = currentRows.find((row) => row._embedded[row.type]?.id === itemToAdd.id);
+    const existingRow = currentRows.find((row) => getRemoteRowResourceId(row) === itemToAdd.id);
     existingListItemId = existingRow?.id;
 
     const repairedOverflowMetadata = await ensureImmediateOverflowListLinkInFirestore({
@@ -585,16 +588,21 @@ async function processListStep(
 
           const reversedPropagate = [...itemsToPropagate].reverse();
           for (const itemRow of reversedPropagate) {
-            const embeddedResource = itemRow._embedded[itemRow.type];
-            if (embeddedResource) {
-              itemsToPropagateAfterCommit.push({
-                listId: nextListId!,
-                item: {
-                  id: embeddedResource.id,
-                  type: itemRow.type,
-                },
-              });
+            const resourceId = getRemoteRowResourceId(itemRow);
+            if (!resourceId || !canReconstructRemoteRow(itemRow)) {
+              throw new HttpsError(
+                'failed-precondition',
+                `Row ${itemRow.id ?? 'unknown'} cannot be shifted into overflow because Subsplash did not provide a reconstructible resource identity.`
+              );
             }
+
+            itemsToPropagateAfterCommit.push({
+              listId: nextListId!,
+              item: {
+                id: resourceId,
+                type: itemRow.type,
+              },
+            });
           }
           listDebugLog('addToList.processListStep.overflowDeleteAndPropagate.queued', {
             listId,

@@ -71,6 +71,7 @@ import updatespeaker from './speakers/updateSpeaker';
 import deletespeaker from './speakers/deleteSpeaker';
 import getlistoverflowchain from './getListOverflowChain';
 import getlistpublisheddrift from './getListPublishedDrift';
+import marklistoverflowlink from './markListOverflowLink';
 
 // Series functions
 import createseries from './createSeries';
@@ -149,6 +150,7 @@ exports.updatespeaker = updatespeaker;
 exports.deletespeaker = deletespeaker;
 exports.getlistoverflowchain = getlistoverflowchain;
 exports.getlistpublisheddrift = getlistpublisheddrift;
+exports.marklistoverflowlink = marklistoverflowlink;
 
 // Series exports
 exports.createseries = createseries;

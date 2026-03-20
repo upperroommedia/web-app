@@ -1,5 +1,6 @@
 export interface ListItemOrderEntry {
-  mediaItemId: string;
+  rowId?: string;
+  mediaItemId?: string;
   position: number;
 }
 
@@ -10,7 +11,9 @@ export interface ReorderListItemsInputType {
 }
 
 export interface ReorderListItemsAssignment {
-  mediaItemId: string;
+  rowId?: string;
+  mediaItemId?: string;
+  matchedSermonId?: string;
   firestoreListId: string;
   subsplashListId: string;
   overflowDepth: number;

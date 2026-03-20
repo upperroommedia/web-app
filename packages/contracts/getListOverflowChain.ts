@@ -32,6 +32,40 @@ export interface GetListOverflowChainNode {
   nextSubsplashListId: string | null;
 }
 
+export interface GetListOverflowChainRemoteItemPlacement {
+  firestoreListId: string;
+  subsplashListId: string;
+  overflowDepth: number;
+  position: number;
+  listItemId?: string;
+}
+
+export interface GetListOverflowChainRemoteItem {
+  rowId: string;
+  rowType: string;
+  rowMethod: string;
+  logicalPosition: number;
+  resourceId?: string;
+  isListRow?: boolean;
+  isOverflowLink?: boolean;
+  isOverflowCandidate?: boolean;
+  linkedListId?: string;
+  linkedListTitle?: string;
+  title?: string;
+  subtitle?: string;
+  imageUrl?: string;
+  imageType?: string;
+  imageAverageColorHex?: string;
+  matchedSermonId?: string;
+  isTrackedInFirebase: boolean;
+  isSubsplashOnlyPlaceholder: boolean;
+  reconstructible: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canRemove: boolean;
+  placement: GetListOverflowChainRemoteItemPlacement;
+}
+
 export interface GetListOverflowChainOutputType {
   requestedListId: string;
   rootListId: string;
@@ -40,4 +74,5 @@ export interface GetListOverflowChainOutputType {
   canMutate: boolean;
   nodes: GetListOverflowChainNode[];
   issues: GetListOverflowChainIssue[];
+  remoteItems?: GetListOverflowChainRemoteItem[];
 }

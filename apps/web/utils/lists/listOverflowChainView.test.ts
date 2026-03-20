@@ -172,4 +172,216 @@ describe('buildListOverflowChainView', () => {
     ]);
     expect(view.canSaveOrder).toBe(true);
   });
+
+  it('uses remote coverage to keep the logical chain mutable even when local mirrors are sparse', () => {
+    const view = buildListOverflowChainView<TestItem>(
+      buildChain({
+        remoteItems: [
+          {
+            rowId: 'row-a',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 1,
+            isTrackedInFirebase: false,
+            isSubsplashOnlyPlaceholder: true,
+            reconstructible: true,
+            canEdit: false,
+            canDelete: false,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'root-list',
+              subsplashListId: 'subsplash-root',
+              overflowDepth: 0,
+              position: 1,
+            },
+          },
+          {
+            rowId: 'row-b',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 2,
+            isTrackedInFirebase: true,
+            isSubsplashOnlyPlaceholder: false,
+            reconstructible: true,
+            canEdit: true,
+            canDelete: true,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'root-list',
+              subsplashListId: 'subsplash-root',
+              overflowDepth: 0,
+              position: 2,
+            },
+          },
+          {
+            rowId: 'row-c',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 3,
+            isTrackedInFirebase: false,
+            isSubsplashOnlyPlaceholder: true,
+            reconstructible: true,
+            canEdit: false,
+            canDelete: false,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'overflow-list',
+              subsplashListId: 'subsplash-overflow',
+              overflowDepth: 1,
+              position: 1,
+            },
+          },
+          {
+            rowId: 'row-d',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 4,
+            isTrackedInFirebase: false,
+            isSubsplashOnlyPlaceholder: true,
+            reconstructible: true,
+            canEdit: false,
+            canDelete: false,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'overflow-list',
+              subsplashListId: 'subsplash-overflow',
+              overflowDepth: 1,
+              position: 2,
+            },
+          },
+        ],
+      }),
+      {
+        'root-list': [
+          { id: 'remote-row-a', title: 'A', position: 1 },
+          {
+            id: 'remote-row-b',
+            title: 'B',
+            position: 2,
+            physicalPlacement: { firestoreListId: 'root-list', overflowDepth: 0, position: 2 },
+          },
+          {
+            id: 'remote-row-c',
+            title: 'C',
+            position: 3,
+            physicalPlacement: { firestoreListId: 'overflow-list', overflowDepth: 1, position: 1 },
+          },
+          {
+            id: 'remote-row-d',
+            title: 'D',
+            position: 4,
+            physicalPlacement: { firestoreListId: 'overflow-list', overflowDepth: 1, position: 2 },
+          },
+        ],
+      }
+    );
+
+    expect(view.hasCoverageGap).toBe(false);
+    expect(view.canSaveOrder).toBe(true);
+    expect(view.warningMessage).toBeUndefined();
+  });
+
+  it('trusts the fetched remote row count over stale logicalCount metadata', () => {
+    const view = buildListOverflowChainView<TestItem>(
+      buildChain({
+        logicalCount: 5,
+        remoteItems: [
+          {
+            rowId: 'row-a',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 1,
+            isTrackedInFirebase: false,
+            isSubsplashOnlyPlaceholder: true,
+            reconstructible: true,
+            canEdit: false,
+            canDelete: false,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'root-list',
+              subsplashListId: 'subsplash-root',
+              overflowDepth: 0,
+              position: 1,
+            },
+          },
+          {
+            rowId: 'row-b',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 2,
+            isTrackedInFirebase: false,
+            isSubsplashOnlyPlaceholder: true,
+            reconstructible: true,
+            canEdit: false,
+            canDelete: false,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'root-list',
+              subsplashListId: 'subsplash-root',
+              overflowDepth: 0,
+              position: 2,
+            },
+          },
+          {
+            rowId: 'row-c',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 3,
+            isTrackedInFirebase: false,
+            isSubsplashOnlyPlaceholder: true,
+            reconstructible: true,
+            canEdit: false,
+            canDelete: false,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'overflow-list',
+              subsplashListId: 'subsplash-overflow',
+              overflowDepth: 1,
+              position: 1,
+            },
+          },
+          {
+            rowId: 'row-d',
+            rowType: 'media-item',
+            rowMethod: 'static',
+            logicalPosition: 4,
+            isTrackedInFirebase: false,
+            isSubsplashOnlyPlaceholder: true,
+            reconstructible: true,
+            canEdit: false,
+            canDelete: false,
+            canRemove: true,
+            placement: {
+              firestoreListId: 'overflow-list',
+              subsplashListId: 'subsplash-overflow',
+              overflowDepth: 1,
+              position: 2,
+            },
+          },
+        ],
+      }),
+      {
+        'root-list': [
+          { id: 'remote-row-a', title: 'A', position: 1 },
+          { id: 'remote-row-b', title: 'B', position: 2 },
+          {
+            id: 'remote-row-c',
+            title: 'C',
+            position: 3,
+            physicalPlacement: { firestoreListId: 'overflow-list', overflowDepth: 1, position: 1 },
+          },
+          {
+            id: 'remote-row-d',
+            title: 'D',
+            position: 4,
+            physicalPlacement: { firestoreListId: 'overflow-list', overflowDepth: 1, position: 2 },
+          },
+        ],
+      }
+    );
+
+    expect(view.expectedPhysicalCount).toBe(4);
+    expect(view.hasCoverageGap).toBe(false);
+    expect(view.canSaveOrder).toBe(true);
+  });
 });

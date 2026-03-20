@@ -4,7 +4,17 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { createAxiosConfig } from '../subsplashUtils';
 import { SubsplashList, SubsplashListRow, SubsplashMediaType, SubsplashPatchPayload, SubsplashListRowPatch } from '../types/Subsplash';
 
-export const mediaTypes: SubsplashMediaType[] = ['media-item', 'media-series', 'song', 'link', 'rss', 'list', 'album'];
+export const mediaTypes: SubsplashMediaType[] = [
+  'media-item',
+  'media-series',
+  'song',
+  'link',
+  'rss',
+  'list',
+  'album',
+  'calendar',
+  'event',
+];
 
 export async function getFullListRows(listId: string, token: string): Promise<SubsplashListRow[]> {
   // Max page size is 200, which is also the list limit, so one call is enough usually.

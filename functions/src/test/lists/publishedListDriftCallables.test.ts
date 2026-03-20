@@ -97,10 +97,27 @@ describe('published list drift callables', () => {
 
       expect(authenticateSubsplashMock).toHaveBeenCalledTimes(1);
       expect(auditPublishedListDriftMock).toHaveBeenCalledWith('root-list', 'fake-token');
-      expect(result).toMatchObject({
+      expect(result).toEqual({
+        requestedListId: 'root-list',
         rootListId: 'root-list',
         inSync: true,
+        canReorder: true,
+        canOverflowPublish: true,
+        canDelete: true,
+        canRemove: true,
+        issues: [
+          {
+            code: 'IN_SYNC',
+            severity: 'info',
+            message: 'Published Firebase and Subsplash state are in sync for this list.',
+            firestoreListId: 'root-list',
+          },
+        ],
+        localPublishedItems: [],
+        remotePublishedItems: [],
       });
+      expect(result).not.toHaveProperty('localItems');
+      expect(result).not.toHaveProperty('remoteNodes');
     });
   });
 

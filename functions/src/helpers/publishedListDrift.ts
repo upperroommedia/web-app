@@ -25,9 +25,17 @@ import {
   firestoreAdminSermonConverter,
 } from '../firestoreDataConverter';
 import { createAxiosConfig } from '../subsplashUtils';
-import { getFullListRows } from './addToListHelpers';
 import { getOverflowChainState } from './listOverflowChain';
 import type { SubsplashImage, SubsplashListRow } from '../types/Subsplash';
+import {
+  getLogicalContentRows,
+  canReconstructRemoteRow,
+  getRemoteRowResourceId,
+  getRemoteRowSubtitle,
+  getRemoteRowTitle,
+  isKnownRemoteContentType,
+  loadRemoteChainItems,
+} from './remoteChainItems';
 import {
   listDebugLog,
   summarizeOverflowIssues,
@@ -143,9 +151,26 @@ const pushIssue = (
   }
 };
 
-const getRemoteMediaItemId = (row: SubsplashListRow): string | undefined => {
-  const embedded = row._embedded?.[row.type];
-  return normalizeString(embedded?.id);
+const REORDER_BLOCKING_ISSUE_CODES = new Set<PublishedListDriftIssue['code']>([
+  'REMOTE_ONLY_AMBIGUOUS_MATCH',
+  'REMOTE_ONLY_UNSUPPORTED_TYPE',
+  'REMOTE_ONLY_UNKNOWN_TYPE',
+  'CONTINUATION_ROW_INVALID',
+  'CHAIN_STRUCTURE_INVALID',
+]);
+
+const OVERFLOW_PUBLISH_BLOCKING_ISSUE_CODES = new Set<PublishedListDriftIssue['code']>([
+  ...REORDER_BLOCKING_ISSUE_CODES,
+]);
+
+const canProceedWithPublishedMutation = (
+  issues: PublishedListDriftIssue[],
+  action: 'reorder' | 'overflow-publish'
+): boolean => {
+  const blockingCodes =
+    action === 'reorder' ? REORDER_BLOCKING_ISSUE_CODES : OVERFLOW_PUBLISH_BLOCKING_ISSUE_CODES;
+
+  return !issues.some((issue) => blockingCodes.has(issue.code));
 };
 
 const loadRootProjectionItems = async (rootListId: string): Promise<RootProjectionItem[]> => {
@@ -241,25 +266,8 @@ const getStoredSermonsBySubsplashIds = async (
   };
 };
 
-const fetchRemoteNodes = async (rootListId: string, token: string): Promise<RemoteNodeSnapshot[]> => {
-  const chainState = await getOverflowChainState(rootListId);
-  const nodes = await Promise.all(
-    chainState.nodes.map(async (node) => {
-      const subsplashListId = normalizeString(node.subsplashId);
-      if (!subsplashListId) {
-        throw new Error(`List ${node.firestoreListId} is missing its Subsplash id.`);
-      }
-
-      return {
-        firestoreListId: node.firestoreListId,
-        subsplashListId,
-        overflowDepth: node.depth,
-        rows: await getFullListRows(subsplashListId, token),
-      } satisfies RemoteNodeSnapshot;
-    })
-  );
-
-  return nodes;
+const omitUndefinedValues = <T extends Record<string, unknown>>(value: T): T => {
+  return Object.fromEntries(Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined)) as T;
 };
 
 const getSubsplashMediaItemDetails = async (
@@ -286,8 +294,18 @@ const buildRemoteItems = (
 
   remoteNodes.forEach((node, index) => {
     const expectedNextSubsplashListId = remoteNodes[index + 1]?.subsplashListId;
-    const linkRows = node.rows.filter((row) => row.type === 'list');
-    const contentRows = node.rows.filter((row) => row.type !== 'list');
+    const contentRows = getLogicalContentRows({
+      rows: node.rows,
+      expectedNextSubsplashListId,
+    });
+    const linkRows = expectedNextSubsplashListId
+      ? node.rows.filter(
+          (row, rowIndex, rows) =>
+            row.type === 'list' &&
+            rowIndex === rows.length - 1 &&
+            normalizeString(row._embedded?.list?.id) === expectedNextSubsplashListId
+        )
+      : [];
 
     if (expectedNextSubsplashListId) {
       if (linkRows.length !== 1) {
@@ -312,27 +330,20 @@ const buildRemoteItems = (
           });
         }
       }
-    } else if (linkRows.length > 0) {
-      pushIssue(issues, {
-        code: 'CONTINUATION_ROW_INVALID',
-        severity: 'blocking',
-        message: `Tail overflow page ${node.firestoreListId} should not contain a continuation row.`,
-        firestoreListId: node.firestoreListId,
-        subsplashListId: node.subsplashListId,
-      });
     }
 
     contentRows.forEach((row, contentIndex) => {
-      const mediaItemId = getRemoteMediaItemId(row);
-      if (!mediaItemId) {
+      const rowId = normalizeString(row.id);
+      if (!rowId) {
         return;
       }
 
-      if (row.type !== 'media-item') {
+      const mediaItemId = getRemoteRowResourceId(row);
+      if (!isKnownRemoteContentType(row.type)) {
         pushIssue(issues, {
           code: 'REMOTE_ONLY_UNSUPPORTED_TYPE',
           severity: 'blocking',
-          message: `Remote row ${mediaItemId} has unsupported type ${row.type}.`,
+          message: `Remote row ${mediaItemId ?? rowId} has unsupported type ${row.type}.`,
           mediaItemId,
           mediaType: row.type,
           firestoreListId: node.firestoreListId,
@@ -341,14 +352,21 @@ const buildRemoteItems = (
         });
       }
 
-      const matchedSermon = ambiguousSubsplashIds.has(mediaItemId)
-        ? undefined
-        : localSermonsBySubsplashId.get(mediaItemId);
+      const matchedSermon = mediaItemId
+        ? ambiguousSubsplashIds.has(mediaItemId)
+          ? undefined
+          : localSermonsBySubsplashId.get(mediaItemId)
+        : undefined;
       remoteItems.push({
-        mediaItemId,
+        rowId,
+        ...(mediaItemId ? { mediaItemId } : {}),
         mediaType: row.type,
-        title: matchedSermon?.title,
-        matchedSermonId: matchedSermon?.id,
+        title: matchedSermon?.title ?? getRemoteRowTitle(row),
+        subtitle: matchedSermon?.subtitle ?? getRemoteRowSubtitle(row),
+        ...(matchedSermon?.id ? { matchedSermonId: matchedSermon.id } : {}),
+        isTrackedInFirebase: Boolean(matchedSermon),
+        isSubsplashOnlyPlaceholder: row.type === 'media-item' && !matchedSermon,
+        reconstructible: canReconstructRemoteRow(row),
         placement: {
           firestoreListId: node.firestoreListId,
           subsplashListId: node.subsplashListId,
@@ -376,7 +394,7 @@ export const auditPublishedListDrift = async (
     items: await loadRootProjectionItems(chainState.rootListId),
     canonicalMemberships,
   });
-  const remoteNodes = await fetchRemoteNodes(chainState.rootListId, token);
+  const { remoteNodes } = await loadRemoteChainItems(chainState.rootListId, token, chainState);
   const issues: PublishedListDriftIssue[] = [];
 
   chainState.issues.forEach((issue) => {
@@ -389,10 +407,12 @@ export const auditPublishedListDrift = async (
     });
   });
 
-  const remoteMediaItemIds = remoteNodes.flatMap((node) =>
-    node.rows
-      .filter((row) => row.type !== 'list')
-      .map((row) => getRemoteMediaItemId(row))
+  const remoteMediaItemIds = remoteNodes.flatMap((node, index) =>
+    getLogicalContentRows({
+      rows: node.rows,
+      expectedNextSubsplashListId: remoteNodes[index + 1]?.subsplashListId,
+    })
+      .map((row) => getRemoteRowResourceId(row))
       .filter((value): value is string => Boolean(value))
   );
   const { sermonsBySubsplashId, ambiguousSubsplashIds } = await getStoredSermonsBySubsplashIds(remoteMediaItemIds);
@@ -409,7 +429,9 @@ export const auditPublishedListDrift = async (
 
   const remotePublishedItems = buildRemoteItems(remoteNodes, sermonsBySubsplashId, ambiguousSubsplashIds, issues);
 
-  const remoteMediaIds = new Set(remotePublishedItems.map((item) => item.mediaItemId));
+  const remoteMediaIds = new Set(
+    remotePublishedItems.map((item) => item.mediaItemId).filter((value): value is string => Boolean(value))
+  );
   const localPublishedByMediaId = new Map(
     localPublishedItems
       .filter((item): item is typeof item & { mediaItemId: string } => Boolean(item.mediaItemId))
@@ -417,7 +439,7 @@ export const auditPublishedListDrift = async (
   );
 
   remotePublishedItems.forEach((item) => {
-    if (item.mediaType !== 'media-item') {
+    if (item.mediaType !== 'media-item' || !item.mediaItemId) {
       return;
     }
 
@@ -473,10 +495,11 @@ export const auditPublishedListDrift = async (
     .filter(
       (item) =>
         item.mediaType === 'media-item' &&
+        item.mediaItemId &&
         item.matchedSermonId &&
         localPublishedByMediaId.has(item.mediaItemId)
     )
-    .map((item) => item.mediaItemId);
+    .map((item) => item.mediaItemId as string);
   const sharedLocalSequence = localPublishedItems
     .filter((item) => item.mediaItemId && sharedRemoteSequence.includes(item.mediaItemId))
     .map((item) => item.mediaItemId as string);
@@ -521,8 +544,8 @@ export const auditPublishedListDrift = async (
     requestedListId: rootListId,
     rootListId: chainState.rootListId,
     inSync: !hasMismatch,
-    canReorder: !hasMismatch,
-    canOverflowPublish: !hasMismatch,
+    canReorder: canProceedWithPublishedMutation(issues, 'reorder'),
+    canOverflowPublish: canProceedWithPublishedMutation(issues, 'overflow-publish'),
     canDelete: true,
     canRemove: true,
     issues,
@@ -562,6 +585,15 @@ export const ensureCanPerformStrictPublishedMutation = async (
     listDebugLog('publishedListDrift.ensureStrict.allowed', {
       rootListId,
       action,
+    });
+    return driftState;
+  }
+
+  if (canProceedWithPublishedMutation(driftState.issues, action)) {
+    listDebugLog('publishedListDrift.ensureStrict.allowedWithDrift', {
+      rootListId,
+      action,
+      issues: summarizeOverflowIssues(driftState.issues),
     });
     return driftState;
   }
@@ -676,7 +708,7 @@ const buildImportedSermon = async (
     editedAtMillis: now,
     subsplashId: mediaItemId,
     audioSource: 'subsplash',
-    subsplashAudioUrl: details.audio_url,
+    ...(details.audio_url ? { subsplashAudioUrl: details.audio_url } : {}),
   };
 };
 
@@ -732,7 +764,7 @@ export const resolvePublishedListDrift = async ({
     .map((item) => item.id);
 
   const unresolvableBlockingIssues = driftState.issues.filter((issue) =>
-    ['REMOTE_ONLY_AMBIGUOUS_MATCH', 'REMOTE_ONLY_UNSUPPORTED_TYPE', 'CONTINUATION_ROW_INVALID', 'CHAIN_STRUCTURE_INVALID'].includes(
+    ['REMOTE_ONLY_AMBIGUOUS_MATCH', 'REMOTE_ONLY_UNSUPPORTED_TYPE', 'REMOTE_ONLY_UNKNOWN_TYPE', 'CONTINUATION_ROW_INVALID', 'CHAIN_STRUCTURE_INVALID'].includes(
       issue.code
     )
   );
@@ -783,7 +815,7 @@ export const resolvePublishedListDrift = async ({
   const localById = new Map(driftState.localItems.map((item) => [item.id, item]));
 
   for (const remoteItem of driftState.remotePublishedItems) {
-    if (remoteItem.mediaType !== 'media-item') {
+    if (remoteItem.mediaType !== 'media-item' || !remoteItem.mediaItemId) {
       continue;
     }
 
@@ -807,7 +839,11 @@ export const resolvePublishedListDrift = async ({
     if (!sermon) {
       sermon = await buildImportedSermon(remoteItem.mediaItemId, token);
       importedSermonIds.push(sermon.id);
-      await firestore.collection('sermons').doc(sermon.id).withConverter(firestoreAdminSermonConverter).set(sermon);
+      await firestore
+        .collection('sermons')
+        .doc(sermon.id)
+        .withConverter(firestoreAdminSermonConverter)
+        .set(omitUndefinedValues(sermon as unknown as Record<string, unknown>) as unknown as Sermon);
     }
 
     resolvedPublishedSermons.push({
@@ -837,7 +873,7 @@ export const resolvePublishedListDrift = async ({
 
     batch.set(
       rootListItemRef,
-      {
+      omitUndefinedValues({
         ...sermon,
         position: index + 1,
         ...(isPublishedRemotely
@@ -852,7 +888,7 @@ export const resolvePublishedListDrift = async ({
               uploadStatus: { status: uploadStatus.NOT_UPLOADED },
               physicalPlacement: FieldValue.delete(),
             }),
-      } as Record<string, unknown>,
+      }) as Record<string, unknown>,
       { merge: true }
     );
 

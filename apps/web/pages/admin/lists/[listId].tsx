@@ -19,11 +19,11 @@ import Divider from '@mui/material/Divider';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PendingIcon from '@mui/icons-material/Pending';
 import SaveIcon from '@mui/icons-material/Save';
 import Typography from '@mui/material/Typography';
 import UndoIcon from '@mui/icons-material/Undo';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { alpha, useTheme } from '@mui/material/styles';
 import {
   DndContext,
@@ -48,7 +48,12 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   GetListOverflowChainInputType,
   GetListOverflowChainOutputType,
+  GetListOverflowChainRemoteItem,
 } from '@upperroom/contracts/getListOverflowChain';
+import type {
+  MarkListOverflowLinkInputType,
+  MarkListOverflowLinkOutputType,
+} from '@upperroom/contracts/markListOverflowLink';
 import type {
   GetListPublishedDriftInputType,
   GetListPublishedDriftOutputType,
@@ -84,6 +89,7 @@ import { listConverter, List } from '../../../types/List';
 import { listUploadStatus, sermonListConverter } from '../../../types/SermonList';
 import { sermonConverter } from '../../../types/Sermon';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
+import type { ImageType } from '../../../types/Image';
 import { createOperationKey } from '../../../utils/callableConcurrency';
 import { createFunctionV2 } from '../../../utils/createFunction';
 import {
@@ -94,6 +100,20 @@ import {
 } from '../../../utils/lists/listOverflowChainView';
 
 type ListDetailItem = Sermon & {
+  rowId?: string;
+  rowType?: string;
+  rowMethod?: string;
+  isTrackedInFirebase?: boolean;
+  isSubsplashOnlyPlaceholder?: boolean;
+  reconstructible?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canRemove?: boolean;
+  isListRow?: boolean;
+  isOverflowLink?: boolean;
+  isOverflowCandidate?: boolean;
+  linkedListId?: string;
+  linkedListTitle?: string;
   position?: number;
   uploadStatus?: listUploadStatus;
 };
@@ -118,12 +138,18 @@ interface LoadListDetailsPageResult {
   publishedDrift?: GetListPublishedDriftOutputType | null;
 }
 
+const inFlightListDetailsLoads = new Map<string, Promise<LoadListDetailsPageResult>>();
+
 interface SortableItemProps {
   item: ListPageItem;
   index: number;
   onOpenSermon: (id: string) => void;
+  onMarkOverflow?: (item: ListPageItem) => void;
   dragDisabled?: boolean;
+  overflowMarkDisabled?: boolean;
+  overflowMarkLoading?: boolean;
   placementDirty?: boolean;
+  showPhysicalPlacement?: boolean;
 }
 
 interface PersistListDetailsPageOrderDependencies {
@@ -155,11 +181,10 @@ const createGetListPublishedDrift = createFunctionV2<
   GetListPublishedDriftInputType,
   GetListPublishedDriftOutputType
 >('getlistpublisheddrift');
-const createResolveListPublishedDrift = createFunctionV2<
-  ResolveListPublishedDriftInputType,
-  ResolveListPublishedDriftOutputType
->('resolvelistpublisheddrift');
-
+const createMarkListOverflowLink = createFunctionV2<
+  MarkListOverflowLinkInputType,
+  MarkListOverflowLinkOutputType
+>('marklistoverflowlink');
 const createReorderListItems = createFunctionV2<ReorderListItemsInputType, ReorderListItemsOutputType>(
   'reorderlistitems'
 );
@@ -172,9 +197,101 @@ const cloneListItems = (items: ListPageItem[]): ListPageItem[] => items.map((ite
 const AUTO_RESOLUTION_BLOCKING_CODES = new Set<PublishedListDriftIssue['code']>([
   'REMOTE_ONLY_AMBIGUOUS_MATCH',
   'REMOTE_ONLY_UNSUPPORTED_TYPE',
+  'REMOTE_ONLY_UNKNOWN_TYPE',
   'CONTINUATION_ROW_INVALID',
   'CHAIN_STRUCTURE_INVALID',
 ]);
+
+const buildRemoteListPageItems = ({
+  remoteItems,
+  rootItems,
+}: {
+  remoteItems: GetListOverflowChainRemoteItem[];
+  rootItems: LoadListDetailsPageItem[];
+}): LoadListDetailsPageItem[] => {
+  const rootItemById = new Map(rootItems.map((item) => [item.id, item]));
+  const rootItemBySubsplashId = new Map(
+    rootItems
+      .filter((item): item is LoadListDetailsPageItem & { subsplashId: string } => Boolean(item.subsplashId))
+      .map((item) => [item.subsplashId, item])
+  );
+
+  return remoteItems.map((remoteItem) => {
+    const localItem =
+      (remoteItem.matchedSermonId ? rootItemById.get(remoteItem.matchedSermonId) : undefined) ??
+      (remoteItem.resourceId ? rootItemBySubsplashId.get(remoteItem.resourceId) : undefined);
+
+    const remoteImage: ImageType | undefined = remoteItem.imageUrl
+      ? {
+        id: `remote-image-${remoteItem.rowId}`,
+        size: 'original',
+        type: (remoteItem.imageType === 'wide' || remoteItem.imageType === 'banner' ? remoteItem.imageType : 'square') as ImageType['type'],
+        height: 0,
+        width: 0,
+        downloadLink: remoteItem.imageUrl,
+        name: `Subsplash ${remoteItem.rowType}`,
+        dateAddedMillis: 0,
+        ...(remoteItem.imageAverageColorHex ? { averageColorHex: remoteItem.imageAverageColorHex } : {}),
+      }
+      : undefined;
+
+    return {
+      ...(localItem ?? {
+        id: `remote-${remoteItem.rowId}`,
+        title: remoteItem.title ?? `Subsplash ${remoteItem.rowType}`,
+        subtitle: remoteItem.subtitle ?? '',
+        description: '',
+        speakers: [],
+        dateMillis: 0,
+        sourceStartTime: 0,
+        durationSeconds: 0,
+        topics: [],
+        status: {
+          subsplash: uploadStatus.UPLOADED,
+          soundCloud: uploadStatus.NOT_UPLOADED,
+          audioStatus: 'processed' as Sermon['status']['audioStatus'],
+        },
+        images: [],
+        createdAtMillis: 0,
+        editedAtMillis: 0,
+      }),
+      rowId: remoteItem.rowId,
+      rowType: remoteItem.rowType,
+      rowMethod: remoteItem.rowMethod,
+      position: remoteItem.logicalPosition,
+      subsplashId: remoteItem.resourceId,
+      isTrackedInFirebase: remoteItem.isTrackedInFirebase,
+      isSubsplashOnlyPlaceholder: remoteItem.isSubsplashOnlyPlaceholder,
+      reconstructible: remoteItem.reconstructible,
+      canEdit: remoteItem.canEdit,
+      canDelete: remoteItem.canDelete,
+      canRemove: remoteItem.canRemove,
+      isListRow: remoteItem.isListRow,
+      isOverflowLink: remoteItem.isOverflowLink,
+      isOverflowCandidate: remoteItem.isOverflowCandidate,
+      linkedListId: remoteItem.linkedListId,
+      linkedListTitle: remoteItem.linkedListTitle,
+      uploadStatus: localItem?.uploadStatus,
+      physicalPlacement: remoteItem.placement,
+      title: localItem?.title ?? remoteItem.title ?? `Subsplash ${remoteItem.rowType}`,
+      subtitle: localItem?.subtitle ?? remoteItem.subtitle ?? '',
+      images: localItem?.images?.length ? localItem.images : remoteImage ? [remoteImage] : [],
+    } as LoadListDetailsPageItem;
+  });
+};
+
+const getPreferredListItemImage = (images: ImageType[] | undefined): ImageType | undefined => {
+  if (!images || images.length === 0) {
+    return undefined;
+  }
+
+  return (
+    images.find((image) => image.type === 'square') ??
+    images.find((image) => image.type === 'wide') ??
+    images.find((image) => image.type === 'banner') ??
+    images[0]
+  );
+};
 
 export const canAutoResolvePublishedDrift = (
   publishedDrift?: GetListPublishedDriftOutputType | null
@@ -267,6 +384,24 @@ export const mergeRootItemsWithCanonicalMemberships = ({
 export const getPhysicalListTagLabel = (item: Pick<ListPageItem, 'sourceDepth'>): string =>
   item.sourceDepth <= 0 ? 'Root page' : `Overflow ${item.sourceDepth}`;
 
+const resolveAssignmentForItem = (
+  item: Pick<ListPageItem, 'rowId' | 'subsplashId'>,
+  assignments: ReorderListItemsAssignment[]
+): ReorderListItemsAssignment | undefined => {
+  if (item.rowId) {
+    const assignmentByRowId = assignments.find((assignment) => assignment.rowId === item.rowId);
+    if (assignmentByRowId) {
+      return assignmentByRowId;
+    }
+  }
+
+  if (item.subsplashId) {
+    return assignments.find((assignment) => assignment.mediaItemId === item.subsplashId);
+  }
+
+  return undefined;
+};
+
 const buildFirestoreOrderUpdatePlan = ({
   rootListId,
   items,
@@ -276,22 +411,19 @@ const buildFirestoreOrderUpdatePlan = ({
   items: ListPageItem[];
   assignments: ReorderListItemsAssignment[];
 }) => {
-  const assignmentByMediaItemId = new Map(assignments.map((assignment) => [assignment.mediaItemId, assignment]));
+  return items
+    .filter((item) => item.isTrackedInFirebase !== false)
+    .map((item, index) => {
+      const rowAssignment = resolveAssignmentForItem(item, assignments);
+      const targetListId = rowAssignment?.firestoreListId ?? item.sourceListId ?? rootListId;
 
-  return items.map((item, index) => {
-    const mediaAssignment =
-      item.subsplashId && assignmentByMediaItemId.has(item.subsplashId)
-        ? assignmentByMediaItemId.get(item.subsplashId)
-        : undefined;
-    const targetListId = mediaAssignment?.firestoreListId ?? item.sourceListId ?? rootListId;
-
-    return {
-      item,
-      sourceListId: item.sourceListId ?? rootListId,
-      targetListId,
-      logicalPosition: index + 1,
-    };
-  });
+      return {
+        item,
+        sourceListId: item.sourceListId ?? rootListId,
+        targetListId,
+        logicalPosition: index + 1,
+      };
+    });
 };
 
 const syncFirestoreListItemsOrder = async ({
@@ -307,7 +439,7 @@ const syncFirestoreListItemsOrder = async ({
   const updatePlan = buildFirestoreOrderUpdatePlan({ rootListId, items, assignments });
 
   updatePlan.forEach(({ item, targetListId, logicalPosition }) => {
-    const assignment = assignments.find((entry) => entry.mediaItemId === item.subsplashId);
+    const assignment = resolveAssignmentForItem(item, assignments);
     const physicalPlacement =
       assignment
         ? {
@@ -340,12 +472,11 @@ export const applyReorderAssignmentsToItems = ({
   assignments: ReorderListItemsAssignment[];
   chainView: ListOverflowChainView<ListDetailItem>;
 }): ListPageItem[] => {
-  const assignmentByMediaItemId = new Map(assignments.map((assignment) => [assignment.mediaItemId, assignment]));
   const nodeByFirestoreListId = new Map(chainView.nodes.map((node) => [node.firestoreListId, node]));
 
   return normalizeListItemPositions(
     items.map((item) => {
-      const assignment = item.subsplashId ? assignmentByMediaItemId.get(item.subsplashId) : undefined;
+      const assignment = resolveAssignmentForItem(item, assignments);
       if (!assignment) {
         return item;
       }
@@ -394,31 +525,28 @@ export const persistListDetailsPageOrder = async ({
     return normalizeListItemPositions(items);
   }
 
-  const syncedItemsMissingRemoteId = items.filter(
-    (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && !item.subsplashId
+  const itemsMissingRemoteRowId = items.filter(
+    (item) => !item.rowId && !item.subsplashId
   );
 
-  if (syncedItemsMissingRemoteId.length > 0) {
-    throw new Error('One or more synced sermons are missing Subsplash IDs. Refresh and try again.');
+  if (itemsMissingRemoteRowId.length > 0) {
+    throw new Error('One or more remote rows are missing row IDs. Refresh and try again.');
   }
 
-  const syncedItems = items.filter(
-    (item) => item.uploadStatus?.status === uploadStatus.UPLOADED && item.subsplashId
-  );
-
   const reorderResult =
-    syncedItems.length > 0
+    items.length > 0
       ? await reorderListItems({
         rootListId,
-        logicalItemOrder: syncedItems.map((item, index) => ({
-          mediaItemId: item.subsplashId as string,
+        logicalItemOrder: items.map((item, index) => ({
+          ...(item.rowId ? { rowId: item.rowId } : {}),
+          ...(item.subsplashId ? { mediaItemId: item.subsplashId } : {}),
           position: index + 1,
         })),
         operationKey: createOperationKey('list-admin-reorder', rootListId),
       })
       : {
         status: 'success' as const,
-        message: 'No synced items to reorder.',
+        message: 'No remote items to reorder.',
         rootListId,
         subsplashListId: rootSubsplashId,
         assignments: [],
@@ -457,6 +585,9 @@ export const subscribeToListDetailsLiveUpdates = ({
   let sawInitialCanonicalSnapshot = false;
   let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const allInitialSnapshotsSeen = () =>
+    sawInitialListSnapshot && sawInitialItemsSnapshot && sawInitialCanonicalSnapshot;
+
   const queueReload = () => {
     if (reloadTimer) {
       return;
@@ -480,6 +611,9 @@ export const subscribeToListDetailsLiveUpdates = ({
         sawInitialListSnapshot = true;
         return;
       }
+      if (!allInitialSnapshotsSeen()) {
+        return;
+      }
       queueReload();
     },
     handleError
@@ -492,6 +626,9 @@ export const subscribeToListDetailsLiveUpdates = ({
         sawInitialItemsSnapshot = true;
         return;
       }
+      if (!allInitialSnapshotsSeen()) {
+        return;
+      }
       queueReload();
     },
     handleError
@@ -502,6 +639,9 @@ export const subscribeToListDetailsLiveUpdates = ({
     () => {
       if (!sawInitialCanonicalSnapshot) {
         sawInitialCanonicalSnapshot = true;
+        return;
+      }
+      if (!allInitialSnapshotsSeen()) {
         return;
       }
       queueReload();
@@ -534,9 +674,14 @@ const SortableListSermonItem = ({
   item,
   index,
   onOpenSermon,
+  onMarkOverflow,
   dragDisabled = false,
+  overflowMarkDisabled = false,
+  overflowMarkLoading = false,
   placementDirty = false,
+  showPhysicalPlacement = false,
 }: SortableItemProps) => {
+  const theme = useTheme();
   const {
     attributes,
     listeners,
@@ -546,8 +691,22 @@ const SortableListSermonItem = ({
     isDragging,
   } = useSortable({ id: item.id, disabled: dragDisabled });
   const isSyncedToList = item.uploadStatus?.status === uploadStatus.UPLOADED;
+  const isPlaceholder = item.isTrackedInFirebase === false;
   const speakerNames = item.speakers?.map((speaker) => speaker.name).filter(Boolean).join(', ');
   const physicalListTagLabel = getPhysicalListTagLabel(item);
+  const isDarkMode = theme.palette.mode === 'dark';
+  const placeholderBackground = isDarkMode
+    ? alpha(theme.palette.common.black, 0.18)
+    : alpha(theme.palette.common.black, 0.03);
+  const firebaseRowBackground = isDarkMode ? alpha(theme.palette.common.white, 0.03) : 'background.paper';
+  const firebaseRowHoverBackground = isDarkMode ? alpha(theme.palette.common.white, 0.06) : 'action.hover';
+  const placeholderBorder = isDarkMode
+    ? alpha(theme.palette.common.white, 0.09)
+    : alpha(theme.palette.common.black, 0.08);
+  const placeholderPrimaryText = alpha(theme.palette.text.primary, 0.4);
+  const placeholderSecondaryText = isDarkMode
+    ? alpha(theme.palette.text.secondary, 0.82)
+    : alpha(theme.palette.text.secondary, 0.6);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -561,6 +720,10 @@ const SortableListSermonItem = ({
     if (target.closest('button,a,[role="button"],[data-no-row-nav="true"]')) {
       return;
     }
+    if (item.isTrackedInFirebase === false) {
+      return;
+    }
+
     onOpenSermon(item.id);
   };
 
@@ -572,13 +735,20 @@ const SortableListSermonItem = ({
       sx={{
         display: 'flex',
         alignItems: 'center',
-        gap: { xs: 1.5, sm: 2 },
-        p: { xs: 2, sm: 2.5 },
-        cursor: 'pointer',
-        bgcolor: isDragging ? 'action.selected' : 'background.paper',
+        gap: { xs: 1.25, sm: 1.5 },
+        p: { xs: 1.25, sm: 1.5 },
+        cursor: isPlaceholder ? 'default' : 'pointer',
+        bgcolor: isPlaceholder ? placeholderBackground : isDragging ? 'action.selected' : firebaseRowBackground,
         boxShadow: isDragging ? 4 : 0,
+        borderLeft: `3px solid ${placeholderBorder}`,
         transition: 'background-color 0.15s ease',
-        '&:hover': { bgcolor: isDragging ? 'action.selected' : 'action.hover' },
+        '&:hover': {
+          bgcolor: isPlaceholder
+            ? placeholderBackground
+            : isDragging
+              ? 'action.selected'
+              : firebaseRowHoverBackground,
+        },
       }}
     >
       <Box
@@ -611,11 +781,11 @@ const SortableListSermonItem = ({
       </Typography>
 
       <AvatarWithDefaultImage
-        image={item.images?.find((image) => image.type === 'square')}
+        image={getPreferredListItemImage(item.images)}
         altName={item.title || 'Sermon'}
-        width={56}
-        height={56}
-        borderRadius={8}
+        width={44}
+        height={44}
+        borderRadius={6}
         sx={{ flexShrink: 0 }}
       />
 
@@ -624,6 +794,7 @@ const SortableListSermonItem = ({
           variant="subtitle2"
           sx={{
             fontWeight: 600,
+            color: isPlaceholder ? placeholderPrimaryText : 'text.primary',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -633,13 +804,18 @@ const SortableListSermonItem = ({
         </Typography>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
           {item.dateString ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
               {item.dateString}
             </Typography>
           ) : null}
           {speakerNames ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
               {speakerNames}
+            </Typography>
+          ) : null}
+          {item.rowType && item.rowType !== 'media-item' ? (
+            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
+              {formatListType(item.rowType)}
             </Typography>
           ) : null}
         </Box>
@@ -647,20 +823,49 @@ const SortableListSermonItem = ({
 
       <Chip
         icon={isSyncedToList ? <CheckCircleIcon /> : <PendingIcon />}
-        label={isSyncedToList ? 'Synced' : 'Local only'}
-        color={isSyncedToList ? 'success' : 'warning'}
+        label={isPlaceholder ? 'Subsplash only' : isSyncedToList ? 'Synced' : 'Local only'}
+        color={isSyncedToList ? 'success' : isPlaceholder ? 'warning' : 'default'}
         size="small"
-        variant={isSyncedToList ? 'filled' : 'outlined'}
-        sx={{ flexShrink: 0 }}
+        variant={isSyncedToList || isPlaceholder ? 'filled' : 'outlined'}
+        sx={
+          isPlaceholder
+            ? {
+              flexShrink: 0,
+              color: isDarkMode
+                ? alpha(theme.palette.warning.light, 0.95)
+                : theme.palette.warning.dark,
+              borderColor: alpha(theme.palette.warning.main, isDarkMode ? 0.3 : 0.2),
+              bgcolor: alpha(theme.palette.warning.main, isDarkMode ? 0.14 : 0.12),
+            }
+            : { flexShrink: 0 }
+        }
       />
-      <Chip
-        label={physicalListTagLabel}
-        size="small"
-        color={placementDirty ? 'default' : 'info'}
-        variant={placementDirty ? 'outlined' : 'filled'}
-        title={item.sourceListName}
-        sx={{ flexShrink: 0 }}
-      />
+      {showPhysicalPlacement ? (
+        <Chip
+          label={physicalListTagLabel}
+          size="small"
+          color={placementDirty ? 'default' : 'info'}
+          variant={placementDirty ? 'outlined' : 'filled'}
+          title={item.sourceListName}
+          sx={{ flexShrink: 0 }}
+        />
+      ) : null}
+      {item.isOverflowCandidate && item.linkedListId ? (
+        <Button
+          size="small"
+          variant="outlined"
+          data-no-row-nav="true"
+          onClick={() => onMarkOverflow?.(item)}
+          disabled={overflowMarkDisabled || overflowMarkLoading}
+          sx={{ flexShrink: 0, textTransform: 'none' }}
+        >
+          {overflowMarkLoading ? (
+            <CircularProgress size={14} />
+          ) : (
+            `Mark as overflow list ${item.sourceDepth + 1}`
+          )}
+        </Button>
+      ) : null}
     </Box>
   );
 };
@@ -668,7 +873,6 @@ const SortableListSermonItem = ({
 export const loadListDetailsPageData = async ({
   listId,
   getListOverflowChain,
-  getListPublishedDrift,
   getListDoc,
   getRootItems,
   replaceRoute,
@@ -686,13 +890,12 @@ export const loadListDetailsPageData = async ({
     getListDoc(chainState.rootListId),
     getRootItems(chainState.rootListId),
   ]);
-  const publishedDrift =
-    listData.subsplashId && getListPublishedDrift
-      ? await getListPublishedDrift({ listId: chainState.rootListId })
-      : null;
 
+  const displayItems = chainState.remoteItems && chainState.remoteItems.length > 0
+    ? buildRemoteListPageItems({ remoteItems: chainState.remoteItems, rootItems })
+    : rootItems;
   const chainView = buildListOverflowChainView(chainState, {
-    [chainState.rootListId]: rootItems,
+    [chainState.rootListId]: displayItems,
   });
   const items = normalizeListItemPositions(chainView.items);
 
@@ -703,8 +906,26 @@ export const loadListDetailsPageData = async ({
       items,
     },
     items,
-    publishedDrift,
+    publishedDrift: null,
   };
+};
+
+const loadListDetailsPageDataSingleFlight = (
+  key: string,
+  dependencies: LoadListDetailsPageDependencies
+): Promise<LoadListDetailsPageResult> => {
+  const existingLoad = inFlightListDetailsLoads.get(key);
+  if (existingLoad) {
+    return existingLoad;
+  }
+
+  const nextLoad = loadListDetailsPageData(dependencies).finally(() => {
+    if (inFlightListDetailsLoads.get(key) === nextLoad) {
+      inFlightListDetailsLoads.delete(key);
+    }
+  });
+  inFlightListDetailsLoads.set(key, nextLoad);
+  return nextLoad;
 };
 
 const ListDetailsPage = () => {
@@ -717,11 +938,14 @@ const ListDetailsPage = () => {
   const [items, setItems] = useState<ListPageItem[]>([]);
   const [chainView, setChainView] = useState<ListOverflowChainView<ListDetailItem> | null>(null);
   const [publishedDrift, setPublishedDrift] = useState<GetListPublishedDriftOutputType | null>(null);
-  const [publishedDriftIgnored, setPublishedDriftIgnored] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isResolvingPublishedDrift, setIsResolvingPublishedDrift] = useState(false);
+  const [markingOverflowRowId, setMarkingOverflowRowId] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [isAdvancedDebugOpen, setIsAdvancedDebugOpen] = useState(false);
+  const [isPublishedDriftExpanded, setIsPublishedDriftExpanded] = useState(false);
+  const [isPublishedDriftLoading, setIsPublishedDriftLoading] = useState(false);
+  const [visibleItemsCount, setVisibleItemsCount] = useState(200);
 
   useEffect(() => {
     if (!router.isReady || !listId) {
@@ -734,64 +958,66 @@ const ListDetailsPage = () => {
       setIsLoading(true);
 
       try {
-        const result = await loadListDetailsPageData({
-          listId,
-          getListOverflowChain: createGetListOverflowChain,
-          getListPublishedDrift: createGetListPublishedDrift,
-          getListDoc: async (rootListId) => {
-            const rootListRef = doc(firestore, 'lists', rootListId).withConverter(listConverter);
-            const listSnapshot = await getDoc(rootListRef);
+        const result = await loadListDetailsPageDataSingleFlight(
+          `${listId}:${reloadNonce}`,
+          {
+            listId,
+            getListOverflowChain: createGetListOverflowChain,
+            getListDoc: async (rootListId) => {
+              const rootListRef = doc(firestore, 'lists', rootListId).withConverter(listConverter);
+              const listSnapshot = await getDoc(rootListRef);
 
-            if (!listSnapshot.exists()) {
-              throw new Error('List not found.');
-            }
-
-            return listSnapshot.data();
-          },
-          getRootItems: async (rootListId) => {
-            const listItemsRef = collection(
-              firestore,
-              'lists',
-              rootListId,
-              'listItems'
-            ).withConverter(sermonConverter);
-            const canonicalMembershipSnapshot = await getDocs(
-              query(collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter), where('id', '==', rootListId))
-            );
-            const canonicalMembershipBySermonId = new Map<string, CanonicalListMembershipStatus>();
-            canonicalMembershipSnapshot.docs.forEach((membershipDoc) => {
-              const sermonId = membershipDoc.ref.parent.parent?.id;
-              if (!sermonId) {
-                return;
+              if (!listSnapshot.exists()) {
+                throw new Error('List not found.');
               }
-              canonicalMembershipBySermonId.set(sermonId, {
-                uploadStatus: membershipDoc.data().uploadStatus,
+
+              return listSnapshot.data();
+            },
+            getRootItems: async (rootListId) => {
+              const listItemsRef = collection(
+                firestore,
+                'lists',
+                rootListId,
+                'listItems'
+              ).withConverter(sermonConverter);
+              const canonicalMembershipSnapshot = await getDocs(
+                query(collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter), where('id', '==', rootListId))
+              );
+              const canonicalMembershipBySermonId = new Map<string, CanonicalListMembershipStatus>();
+              canonicalMembershipSnapshot.docs.forEach((membershipDoc) => {
+                const sermonId = membershipDoc.ref.parent.parent?.id;
+                if (!sermonId) {
+                  return;
+                }
+                canonicalMembershipBySermonId.set(sermonId, {
+                  uploadStatus: membershipDoc.data().uploadStatus,
+                });
               });
-            });
-            const listItemsSnapshot = await getDocs(listItemsRef);
+              const listItemsSnapshot = await getDocs(listItemsRef);
 
-            return mergeRootItemsWithCanonicalMemberships({
-              items: sortListOverflowChainSourceItems(
-                listItemsSnapshot.docs.map((itemDoc) => {
-                  const data = itemDoc.data() as Partial<ListDetailItem>;
-                  const derivedUploadStatus =
-                    data.uploadStatus ??
-                    (data.subsplashId
-                      ? ({ status: uploadStatus.UPLOADED } as listUploadStatus)
-                      : undefined);
+              return mergeRootItemsWithCanonicalMemberships({
+                items: sortListOverflowChainSourceItems(
+                  listItemsSnapshot.docs.map((itemDoc) => {
+                    const data = itemDoc.data() as Partial<ListDetailItem>;
+                    const derivedUploadStatus =
+                      data.uploadStatus ??
+                      (data.subsplashId
+                        ? ({ status: uploadStatus.UPLOADED } as listUploadStatus)
+                        : undefined);
 
-                  return {
-                    ...data,
-                    id: itemDoc.id,
-                    uploadStatus: derivedUploadStatus,
-                  } as ListDetailItem;
-                })
-              ),
-              canonicalMembershipBySermonId,
-            });
-          },
-          replaceRoute: (href) => router.replace(href),
-        });
+                    return {
+                      ...data,
+                      id: itemDoc.id,
+                      uploadStatus: derivedUploadStatus,
+                    } as ListDetailItem;
+                  })
+                ),
+                canonicalMembershipBySermonId,
+              });
+            },
+            replaceRoute: (href) => router.replace(href),
+          }
+        );
 
         if (cancelled) {
           return;
@@ -805,7 +1031,6 @@ const ListDetailsPage = () => {
         setChainView(result.chainView ?? null);
         setItems(result.items ?? []);
         setPublishedDrift(result.publishedDrift ?? null);
-        setPublishedDriftIgnored(false);
         originalItemsRef.current = cloneListItems(result.items ?? []);
       } catch (error) {
         if (!cancelled) {
@@ -815,7 +1040,6 @@ const ListDetailsPage = () => {
           setChainView(null);
           setItems([]);
           setPublishedDrift(null);
-          setPublishedDriftIgnored(false);
           originalItemsRef.current = [];
         }
       } finally {
@@ -830,7 +1054,7 @@ const ListDetailsPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [listId, reloadNonce, router]);
+  }, [listId, reloadNonce, router.isReady]);
 
   useEffect(() => {
     const rootListId = chainView?.rootListId;
@@ -843,6 +1067,48 @@ const ListDetailsPage = () => {
       scheduleReload: () => setReloadNonce((value) => value + 1),
     });
   }, [chainView?.rootListId]);
+
+  useEffect(() => {
+    setVisibleItemsCount(200);
+  }, [items.length, listId]);
+
+  useEffect(() => {
+    setIsPublishedDriftExpanded(false);
+  }, [listId, publishedDrift?.rootListId, publishedDrift?.inSync]);
+
+  useEffect(() => {
+    if (!isAdvancedDebugOpen || !list?.subsplashId || !chainView?.rootListId || publishedDrift || isPublishedDriftLoading) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadPublishedDrift = async () => {
+      setIsPublishedDriftLoading(true);
+
+      try {
+        const nextPublishedDrift = await createGetListPublishedDrift({ listId: chainView.rootListId });
+        if (!cancelled) {
+          setPublishedDrift(nextPublishedDrift);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load published drift diagnostics', error);
+          alert(getErrorMessage(error, 'Failed to load published drift diagnostics.'));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsPublishedDriftLoading(false);
+        }
+      }
+    };
+
+    void loadPublishedDrift();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chainView?.rootListId, isAdvancedDebugOpen, isPublishedDriftLoading, list?.subsplashId, publishedDrift]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -874,16 +1140,21 @@ const ListDetailsPage = () => {
     items.length !== originalItemsRef.current.length ||
     items.some((item, index) => item.id !== originalItemsRef.current[index]?.id);
 
-  const syncedItemsCount = items.filter((item) => item.uploadStatus?.status === uploadStatus.UPLOADED).length;
-  const localOnlyItemsCount = items.length - syncedItemsCount;
+  const syncedItemsCount = items.filter((item) => item.isTrackedInFirebase !== false).length;
+  const localOnlyItemsCount = items.filter((item) => item.isSubsplashOnlyPlaceholder).length;
   const hasOverflowPages = (chainView?.nodes.length ?? 0) > 1;
   const isReadOnlySurface = isStrictListActionLocked({ chainView, publishedDrift });
   const publishedDriftIssueMessages = getPublishedDriftIssueMessages(publishedDrift);
   const publishedDriftWarningMessage = getPublishedDriftWarningMessage({
     publishedDrift,
-    ignored: publishedDriftIgnored,
+    ignored: false,
   });
-  const canAutoResolveDrift = canAutoResolvePublishedDrift(publishedDrift);
+  const totalItemsCount = items.length;
+  const renderedItems = items.slice(0, visibleItemsCount);
+  const hasMoreVisibleItems = renderedItems.length < items.length;
+  const subsplashListUrl = list?.subsplashId
+    ? `https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`
+    : undefined;
 
   const handleDragEnd = (event: DragEndEvent) => {
     if (isReadOnlySurface) {
@@ -937,23 +1208,24 @@ const ListDetailsPage = () => {
     }
   };
 
-  const resolvePublishedDrift = async () => {
-    if (!publishedDrift || publishedDrift.inSync || !chainView) {
+  const markOverflowLink = async (item: ListPageItem) => {
+    if (!chainView || !item.rowId) {
       return;
     }
 
-    setIsResolvingPublishedDrift(true);
+    setMarkingOverflowRowId(item.rowId);
     try {
-      await createResolveListPublishedDrift({
-        listId: chainView.rootListId,
-        strategy: 'FIREBASE_FROM_SUBSPLASH',
+      await createMarkListOverflowLink({
+        rootListId: chainView.rootListId,
+        physicalFirestoreListId: item.sourceListId,
+        rowId: item.rowId,
       });
       setReloadNonce((value) => value + 1);
     } catch (error) {
-      console.error('Failed to resolve published drift', error);
-      alert(getErrorMessage(error, 'Failed to update Firebase to match Subsplash.'));
+      console.error('Failed to mark overflow list row', error);
+      alert(getErrorMessage(error, 'Failed to mark this list row as the overflow page.'));
     } finally {
-      setIsResolvingPublishedDrift(false);
+      setMarkingOverflowRowId(null);
     }
   };
 
@@ -972,7 +1244,7 @@ const ListDetailsPage = () => {
       </Head>
 
       <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, sm: 3 }, py: { xs: 3, sm: 4 } }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 3 }}>
+        <Box sx={{ mb: 3 }}>
           <Box>
             <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 1 }}>
               <Link href="/admin/lists">Lists</Link>
@@ -982,15 +1254,6 @@ const ListDetailsPage = () => {
               {title}
             </Typography>
           </Box>
-
-          <Button
-            component={Link}
-            href="/admin/lists"
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-          >
-            Back
-          </Button>
         </Box>
 
         {isLoading ? (
@@ -1059,10 +1322,10 @@ const ListDetailsPage = () => {
                       <Box sx={{ display: 'flex', gap: 4 }}>
                         <Box>
                           <Typography variant="h5" fontWeight={700} color="primary.main">
-                            {chainView?.expectedPhysicalCount ?? items.length}
+                            {totalItemsCount}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Total Sermons
+                            Total Items
                           </Typography>
                         </Box>
                         <Box>
@@ -1075,7 +1338,7 @@ const ListDetailsPage = () => {
                         </Box>
                       </Box>
 
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: { xs: 'flex-start', sm: 'flex-end' }, gap: 1 }}>
                         {list.subsplashId ? (
                           <Chip
                             icon={<CheckCircleIcon />}
@@ -1091,11 +1354,36 @@ const ListDetailsPage = () => {
                             size="small"
                           />
                         )}
+                        {subsplashListUrl ? (
+                          <Button
+                            component="a"
+                            href={subsplashListUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            size="small"
+                            endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
+                            sx={{
+                              minWidth: 0,
+                              px: 0,
+                              py: 0,
+                              textTransform: 'none',
+                              color: 'warning.main',
+                              fontWeight: 600,
+                              '&:hover': {
+                                bgcolor: 'transparent',
+                                color: 'warning.dark',
+                              },
+                            }}
+                          >
+                            Open in Subsplash
+                          </Button>
+                        ) : null}
                         {localOnlyItemsCount > 0 ? (
                           <Chip
-                            label={`${localOnlyItemsCount} local only`}
+                            label={`${localOnlyItemsCount} Subsplash only`}
                             variant="outlined"
                             size="small"
+                            color="warning"
                           />
                         ) : null}
                       </Box>
@@ -1111,56 +1399,16 @@ const ListDetailsPage = () => {
               </Alert>
             ) : null}
 
-            {publishedDriftWarningMessage ? (
-              <Alert
-                severity={publishedDrift?.issues.some((issue) => issue.severity === 'blocking') ? 'warning' : 'info'}
-                sx={{ mb: 3 }}
-                action={
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                    <Button
-                      color="inherit"
-                      size="small"
-                      variant="outlined"
-                      disabled={!canAutoResolveDrift || isResolvingPublishedDrift}
-                      onClick={() => void resolvePublishedDrift()}
-                    >
-                      {isResolvingPublishedDrift ? 'Resolving…' : 'Update Firebase To Match Subsplash'}
-                    </Button>
-                    <Button
-                      color="inherit"
-                      size="small"
-                      variant="text"
-                      onClick={() => setPublishedDriftIgnored(true)}
-                      disabled={publishedDriftIgnored}
-                    >
-                      {publishedDriftIgnored ? 'Ignored' : 'Ignore For Now'}
-                    </Button>
-                  </Box>
-                }
-              >
-                <Typography variant="body2" sx={{ fontWeight: 600, mb: publishedDriftIssueMessages.length > 0 ? 1 : 0 }}>
-                  {publishedDriftWarningMessage}
-                </Typography>
-                {publishedDriftIssueMessages.length > 0 ? (
-                  <Box component="ul" sx={{ pl: 2.5, mb: 0 }}>
-                    {publishedDriftIssueMessages.map((message) => (
-                      <Box component="li" key={message}>
-                        <Typography variant="body2">{message}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                ) : null}
-              </Alert>
-            ) : null}
-
             {chainView ? (
               <Accordion
                 disableGutters
+                expanded={isAdvancedDebugOpen}
+                onChange={(_event, expanded) => setIsAdvancedDebugOpen(expanded)}
                 sx={{
-                  mb: 3,
+                  mb: 2.5,
                   border: 1,
                   borderColor: 'divider',
-                  borderRadius: 3,
+                  borderRadius: 1,
                   boxShadow: 'none',
                   overflow: 'hidden',
                   '&::before': {
@@ -1173,26 +1421,102 @@ const ListDetailsPage = () => {
                   aria-controls="advanced-debug-content"
                   id="advanced-debug-header"
                   sx={{
-                    px: 2.5,
-                    py: 0.5,
+                    minHeight: 0,
+                    px: 1.5,
+                    py: 0.25,
                     bgcolor: alpha(theme.palette.info.main, 0.04),
+                    '& .MuiAccordionSummary-content': {
+                      my: 0.75,
+                    },
                   }}
                 >
                   <Box>
-                    <Typography variant="subtitle1" fontWeight={700}>
+                    <Typography variant="subtitle2" fontWeight={600}>
                       Advanced Debug
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary">
                       Overflow chain diagnostics and physical page mapping.
                     </Typography>
                   </Box>
                 </AccordionSummary>
-                <AccordionDetails sx={{ p: 2.5 }}>
+                <AccordionDetails sx={{ p: 2 }}>
                   {hasOverflowPages && !chainView.warningMessage ? (
                     <Alert severity="info" sx={{ mb: 2 }}>
                       This root detail page now saves one logical order for the whole overflow chain and remaps
                       Subsplash page boundaries behind the scenes.
                     </Alert>
+                  ) : null}
+                  {isPublishedDriftLoading ? (
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        mb: 2,
+                        color: 'text.secondary',
+                      }}
+                    >
+                      <CircularProgress size={16} />
+                      <Typography variant="body2">Loading published drift diagnostics…</Typography>
+                    </Box>
+                  ) : null}
+                  {publishedDriftWarningMessage ? (
+                    <Box
+                      sx={{
+                        mb: 2,
+                        border: 1,
+                        borderColor: alpha(theme.palette.warning.main, 0.24),
+                        bgcolor: alpha(theme.palette.warning.main, 0.08),
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 1.5,
+                          px: 1.5,
+                          py: 1.25,
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {publishedDriftWarningMessage}
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Button color="inherit" size="small" variant="outlined" disabled>
+                            Firebase Sync Disabled
+                          </Button>
+                          <Button
+                            size="small"
+                            color="warning"
+                            onClick={() => setIsPublishedDriftExpanded((value) => !value)}
+                            endIcon={
+                              <ExpandMoreIcon
+                                sx={{
+                                  transform: isPublishedDriftExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                  transition: 'transform 0.2s ease',
+                                }}
+                              />
+                            }
+                          >
+                            {isPublishedDriftExpanded ? 'Hide Details' : 'Show Details'}
+                          </Button>
+                        </Box>
+                      </Box>
+                      {isPublishedDriftExpanded && publishedDriftIssueMessages.length > 0 ? (
+                        <Box sx={{ px: 1.5, pb: 1.5 }}>
+                          <Box component="ul" sx={{ pl: 2.5, mb: 0 }}>
+                            {publishedDriftIssueMessages.map((message) => (
+                              <Box component="li" key={message}>
+                                <Typography variant="body2">{message}</Typography>
+                              </Box>
+                            ))}
+                          </Box>
+                        </Box>
+                      ) : null}
+                    </Box>
                   ) : null}
                   <OverflowChainPanel nodes={chainView.nodes} />
                 </AccordionDetails>
@@ -1262,25 +1586,42 @@ const ListDetailsPage = () => {
                   modifiers={[restrictToVerticalAxis, restrictToContainer]}
                   onDragEnd={handleDragEnd}
                 >
-                  <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
-                    {items.map((item, index) => (
+                  <SortableContext items={renderedItems.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                    {renderedItems.map((item, index) => (
                       <Box key={item.id}>
                         <SortableListSermonItem
                           item={item}
                           index={index}
-                          dragDisabled={isReadOnlySurface}
+                          dragDisabled={isReadOnlySurface || item.reconstructible === false}
+                          overflowMarkDisabled={
+                            hasOrderChanges ||
+                            Boolean(
+                              chainView?.nodes.find((node) => node.firestoreListId === item.sourceListId)
+                                ?.nextSubsplashListId
+                            )
+                          }
+                          overflowMarkLoading={markingOverflowRowId === item.rowId}
                           placementDirty={hasOrderChanges}
+                          showPhysicalPlacement={isAdvancedDebugOpen}
+                          onMarkOverflow={markOverflowLink}
                           onOpenSermon={(sermonId) => {
                             void router.push(`/admin/sermons/${sermonId}`);
                           }}
                         />
-                        {index < items.length - 1 ? <Divider /> : null}
+                        {index < renderedItems.length - 1 ? <Divider /> : null}
                       </Box>
                     ))}
                   </SortableContext>
                 </DndContext>
               </Card>
             )}
+            {hasMoreVisibleItems ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                <Button variant="outlined" onClick={() => setVisibleItemsCount((value) => value + 200)}>
+                  Load More
+                </Button>
+              </Box>
+            ) : null}
           </>
         )}
       </Box>

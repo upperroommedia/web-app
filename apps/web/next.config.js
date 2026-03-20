@@ -75,6 +75,7 @@ const nextConfig = {
       { protocol: 'https', hostname: 'account.microsoft.com' },
       { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
       { protocol: 'https', hostname: 'core.subsplash.com' },
+      { protocol: 'https', hostname: 'cdn.subsplash.com' },
       { protocol: 'https', hostname: 'localhost' },
       { protocol: 'http', hostname: '127.0.0.1' },
       { protocol: 'https', hostname: 'storage.googleapis.com' },

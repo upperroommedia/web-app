@@ -278,7 +278,7 @@ describe('published list drift', () => {
     const result = await auditPublishedListDrift(fixture.rootFirestoreListId, 'fake-token');
 
     expect(result.inSync).toBe(false);
-    expect(result.canReorder).toBe(false);
+    expect(result.canReorder).toBe(true);
     expect(result.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -301,6 +301,8 @@ describe('published list drift', () => {
 
     const result = await auditPublishedListDrift(fixture.rootFirestoreListId, 'fake-token');
 
+    expect(result.canReorder).toBe(true);
+    expect(result.canOverflowPublish).toBe(true);
     expect(result.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: 'REMOTE_ONLY_MATCHED', sermonId: 'sermon-5' }),

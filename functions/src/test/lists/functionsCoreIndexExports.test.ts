@@ -13,6 +13,9 @@ describe('functions-core index exports', () => {
       "import getlistpublisheddrift from '../../functions/src/getListPublishedDrift';"
     );
     expect(entrypointSource).toContain(
+      "import marklistoverflowlink from '../../functions/src/markListOverflowLink';"
+    );
+    expect(entrypointSource).toContain(
       "import reorderlistitems from '../../functions/src/reorderListItems';"
     );
     expect(entrypointSource).toContain(
@@ -20,6 +23,7 @@ describe('functions-core index exports', () => {
     );
     expect(entrypointSource).toContain('exports.getlistoverflowchain = getlistoverflowchain;');
     expect(entrypointSource).toContain('exports.getlistpublisheddrift = getlistpublisheddrift;');
+    expect(entrypointSource).toContain('exports.marklistoverflowlink = marklistoverflowlink;');
     expect(entrypointSource).toContain('exports.reorderlistitems = reorderlistitems;');
     expect(entrypointSource).toContain('exports.resolvelistpublisheddrift = resolvelistpublisheddrift;');
   });

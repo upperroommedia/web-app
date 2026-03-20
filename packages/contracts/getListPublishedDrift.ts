@@ -12,7 +12,8 @@ export type PublishedListDriftIssueCode =
   | 'LOCAL_ONLY_PUBLISHED'
   | 'CONTINUATION_ROW_INVALID'
   | 'CHAIN_STRUCTURE_INVALID'
-  | 'REMOTE_ONLY_UNSUPPORTED_TYPE';
+  | 'REMOTE_ONLY_UNSUPPORTED_TYPE'
+  | 'REMOTE_ONLY_UNKNOWN_TYPE';
 
 export type PublishedListDriftIssueSeverity = 'info' | 'warning' | 'blocking';
 
@@ -46,10 +47,15 @@ export interface PublishedListDriftLocalItem {
 }
 
 export interface PublishedListDriftRemoteItem {
-  mediaItemId: string;
+  rowId: string;
+  mediaItemId?: string;
   mediaType: string;
   title?: string;
+  subtitle?: string;
   matchedSermonId?: string;
+  isTrackedInFirebase: boolean;
+  isSubsplashOnlyPlaceholder: boolean;
+  reconstructible: boolean;
   placement: PublishedListPlacement;
 }
 

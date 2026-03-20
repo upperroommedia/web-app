@@ -14,6 +14,12 @@ import { createListRow, getFullListRows, patchListRows } from './helpers/addToLi
 import { getOverflowChainState } from './helpers/listOverflowChain';
 import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 import {
+  canReconstructRemoteRow,
+  countLogicalContentRows,
+  getRemoteRowResourceId,
+  getLogicalContentRows,
+} from './helpers/remoteChainItems';
+import {
   listDebugError,
   listDebugLog,
   summarizeAssignments,
@@ -26,17 +32,9 @@ import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-import { SubsplashListRow } from './types/Subsplash';
+import { SubsplashListRow, type SubsplashMediaType } from './types/Subsplash';
 
 const firestoreDB = firebaseAdmin.firestore();
-
-const getRowMediaItemId = (row: SubsplashListRow): string | undefined => {
-  if (row.type !== 'media-item') {
-    return undefined;
-  }
-
-  return row._embedded?.['media-item']?.id;
-};
 
 type ChainRemoteNode = {
   firestoreListId: string;
@@ -44,6 +42,17 @@ type ChainRemoteNode = {
   overflowDepth: number;
   currentItemCount: number;
   remoteRows: SubsplashListRow[];
+};
+
+type RemoteContentRow = {
+  row: SubsplashListRow;
+  rowId: string;
+  resourceId?: string;
+};
+
+type NormalizedListItemOrderEntry = ListItemOrderEntry & {
+  rowId: string;
+  usedLegacyMediaItemId: boolean;
 };
 
 const getBlockingIssuesMessage = (
@@ -60,76 +69,78 @@ const getBlockingIssuesMessage = (
     .join(', ')}.`;
 };
 
-const normalizeLogicalOrder = (logicalItemOrder: ListItemOrderEntry[]): ListItemOrderEntry[] => {
-  const seenMediaItemIds = new Set<string>();
+const normalizeLogicalOrder = (logicalItemOrder: ListItemOrderEntry[]): NormalizedListItemOrderEntry[] => {
+  const seenRowIds = new Set<string>();
 
-  logicalItemOrder.forEach(({ mediaItemId, position }) => {
-    if (!mediaItemId || !mediaItemId.trim()) {
-      throw new HttpsError('invalid-argument', 'Each logicalItemOrder entry must include a mediaItemId.');
+  const normalized = logicalItemOrder.map((entry) => {
+    const rowId = entry.rowId?.trim() || entry.mediaItemId?.trim();
+    if (!rowId) {
+      throw new HttpsError('invalid-argument', 'Each logicalItemOrder entry must include a rowId.');
     }
 
-    if (!Number.isInteger(position) || position < 1) {
+    if (!Number.isInteger(entry.position) || entry.position < 1) {
       throw new HttpsError(
         'invalid-argument',
         'Each logicalItemOrder entry must include a positive integer position.'
       );
     }
 
-    if (seenMediaItemIds.has(mediaItemId)) {
-      throw new HttpsError('invalid-argument', `Duplicate mediaItemId ${mediaItemId} in logicalItemOrder.`);
+    if (seenRowIds.has(rowId)) {
+      throw new HttpsError('invalid-argument', `Duplicate rowId ${rowId} in logicalItemOrder.`);
     }
 
-    seenMediaItemIds.add(mediaItemId);
+    seenRowIds.add(rowId);
+    return {
+      ...entry,
+      rowId,
+      usedLegacyMediaItemId: !entry.rowId && Boolean(entry.mediaItemId),
+    };
   });
 
-  return [...logicalItemOrder].sort((left, right) => left.position - right.position);
+  return normalized.sort((left, right) => left.position - right.position);
 };
 
-const getRemoteMediaRows = (nodes: ChainRemoteNode[]): SubsplashListRow[] =>
-  nodes.flatMap((node) =>
-    node.remoteRows.filter((row) => {
-      if (row.type === 'list') {
-        return false;
-      }
-
-      if (!getRowMediaItemId(row)) {
-        throw new HttpsError(
-          'failed-precondition',
-          `List ${node.firestoreListId} contains non-media rows that cannot be reordered safely.`
-        );
-      }
-
-      return true;
-    })
+const getRemoteContentRows = (nodes: ChainRemoteNode[]): RemoteContentRow[] =>
+  nodes.flatMap((node, nodeIndex) =>
+    getLogicalContentRows({
+      rows: node.remoteRows,
+      expectedNextSubsplashListId: nodes[nodeIndex + 1]?.subsplashListId,
+    }).map((row) => ({
+      row,
+      rowId: row.id as string,
+      resourceId: getRemoteRowResourceId(row),
+    }))
   );
 
 const validateLogicalOrderAgainstRemoteRows = (
-  sortedLogicalItemOrder: ListItemOrderEntry[],
-  remoteMediaRowsById: Map<string, SubsplashListRow>
+  sortedLogicalItemOrder: NormalizedListItemOrderEntry[],
+  remoteRowsById: Map<string, RemoteContentRow>,
+  remoteRowsByMediaItemId: Map<string, RemoteContentRow>
 ): void => {
-  if (sortedLogicalItemOrder.length !== remoteMediaRowsById.size) {
+  if (sortedLogicalItemOrder.length !== remoteRowsById.size) {
     throw new HttpsError(
       'failed-precondition',
-      'Logical reorder payload must include every synced media item in the overflow chain.'
+      'Logical reorder payload must include every remote content row in the overflow chain.'
     );
   }
 
-  sortedLogicalItemOrder.forEach(({ mediaItemId }) => {
-    if (!remoteMediaRowsById.has(mediaItemId)) {
+  sortedLogicalItemOrder.forEach(({ rowId, mediaItemId }) => {
+    const matchingRow = remoteRowsById.get(rowId) ?? (mediaItemId ? remoteRowsByMediaItemId.get(mediaItemId) : undefined);
+    if (!matchingRow) {
       throw new HttpsError(
         'failed-precondition',
-        `Cannot reorder media item ${mediaItemId}; it does not exist in the logical overflow chain.`
+        `Cannot reorder row ${rowId}; it does not exist in the logical overflow chain.`
       );
     }
   });
 };
 
 const partitionLogicalRowsAcrossChain = (
-  sortedRemoteRows: SubsplashListRow[],
+  sortedRemoteRows: RemoteContentRow[],
   nodes: ChainRemoteNode[]
 ): Array<{
   node: ChainRemoteNode;
-  rows: SubsplashListRow[];
+  rows: RemoteContentRow[];
 }> => {
   let cursor = 0;
 
@@ -154,17 +165,41 @@ const partitionLogicalRowsAcrossChain = (
 };
 
 const createAssignments = (
-  partitions: ReturnType<typeof partitionLogicalRowsAcrossChain>
+  partitions: ReturnType<typeof partitionLogicalRowsAcrossChain>,
+  options?: {
+    includeRowId?: boolean;
+  }
 ): ReorderListItemsAssignment[] =>
   partitions.flatMap(({ node, rows }) =>
     rows.map((row, index) => ({
-      mediaItemId: getRowMediaItemId(row)!,
+      ...(options?.includeRowId ? { rowId: row.rowId } : {}),
+      ...(row.row.type === 'media-item' && row.resourceId ? { mediaItemId: row.resourceId } : {}),
       firestoreListId: node.firestoreListId,
       subsplashListId: node.subsplashListId,
       overflowDepth: node.overflowDepth,
       position: index + 1,
     }))
   );
+
+const ensureMovedRowsAreReconstructible = (
+  partitions: ReturnType<typeof partitionLogicalRowsAcrossChain>
+): void => {
+  partitions.forEach(({ node, rows }) => {
+    rows.forEach((row) => {
+      const sourceListId = row.row._embedded?.['source-list']?.id;
+      if (sourceListId === node.subsplashListId) {
+        return;
+      }
+
+      if (!canReconstructRemoteRow(row.row) || !row.resourceId) {
+        throw new HttpsError(
+          'failed-precondition',
+          `Row ${row.rowId} cannot be moved across overflow pages because Subsplash did not provide a reconstructible resource identity.`
+        );
+      }
+    });
+  });
+};
 
 const buildPatchedRowsForNode = (
   partition: ReturnType<typeof partitionLogicalRowsAcrossChain>[number],
@@ -177,7 +212,7 @@ const buildPatchedRowsForNode = (
       )
     : undefined;
 
-  const nextRows = partition.rows.map((row) => {
+  const nextRows = partition.rows.map(({ row, resourceId }) => {
     const sourceListId = row._embedded?.['source-list']?.id;
     if (sourceListId === partition.node.subsplashListId) {
       return { ...row };
@@ -185,8 +220,8 @@ const buildPatchedRowsForNode = (
 
     return createListRow(
       {
-        id: getRowMediaItemId(row)!,
-        type: 'media-item',
+        id: resourceId!,
+        type: row.type as SubsplashMediaType,
       },
       partition.node.subsplashListId,
       0
@@ -333,7 +368,7 @@ const reorderListItems = onCall(
               rootListId: normalizedRootListId,
             });
             const remoteNodes = await Promise.all(
-              chainState.nodes.map(async (node) => {
+              chainState.nodes.map(async (node, nodeIndex) => {
                 const subsplashListId = node.subsplashId?.trim();
                 if (!subsplashListId) {
                   throw new HttpsError(
@@ -343,7 +378,10 @@ const reorderListItems = onCall(
                 }
 
                 const remoteRows = await getFullListRows(subsplashListId, token);
-                const currentItemCount = remoteRows.filter((row) => row.type !== 'list').length;
+                const currentItemCount = countLogicalContentRows({
+                  rows: remoteRows,
+                  expectedNextSubsplashListId: chainState.nodes[nodeIndex + 1]?.subsplashId?.trim(),
+                });
 
                 return {
                   firestoreListId: node.firestoreListId,
@@ -362,25 +400,39 @@ const reorderListItems = onCall(
               })),
             });
 
-            const remoteMediaRows = getRemoteMediaRows(remoteNodes);
+            const remoteContentRows = getRemoteContentRows(remoteNodes);
+            const remoteRowsById = new Map(remoteContentRows.map((row) => [row.rowId, row]));
             const remoteRowsByMediaItemId = new Map(
-              remoteMediaRows.map((row) => [getRowMediaItemId(row)!, row])
+              remoteContentRows
+                .filter((row): row is RemoteContentRow & { resourceId: string } => Boolean(row.resourceId))
+                .map((row) => [row.resourceId, row])
             );
 
-            validateLogicalOrderAgainstRemoteRows(sortedLogicalItemOrder, remoteRowsByMediaItemId);
+            validateLogicalOrderAgainstRemoteRows(sortedLogicalItemOrder, remoteRowsById, remoteRowsByMediaItemId);
 
-            const sortedRemoteRows = sortedLogicalItemOrder.map(({ mediaItemId }) => ({
-              ...remoteRowsByMediaItemId.get(mediaItemId)!,
-            }));
+            const sortedRemoteRows = sortedLogicalItemOrder.map(({ rowId, mediaItemId }) => {
+              const remoteRow = remoteRowsById.get(rowId) ?? (mediaItemId ? remoteRowsByMediaItemId.get(mediaItemId) : undefined);
+              if (!remoteRow) {
+                throw new HttpsError(
+                  'failed-precondition',
+                  `Cannot reorder row ${rowId}; it does not exist in the logical overflow chain.`
+                );
+              }
+
+              return { ...remoteRow };
+            });
 
             const partitions = partitionLogicalRowsAcrossChain(sortedRemoteRows, remoteNodes);
-            const assignments = createAssignments(partitions);
+            ensureMovedRowsAreReconstructible(partitions);
+            const assignments = createAssignments(partitions, {
+              includeRowId: sortedLogicalItemOrder.some((entry) => !entry.usedLegacyMediaItemId),
+            });
             listDebugLog('reorderListItems.partitions.created', {
               rootListId: normalizedRootListId,
               partitions: partitions.map((partition) => ({
                 node: partition.node.firestoreListId,
                 subsplashListId: partition.node.subsplashListId,
-                rows: summarizeSubsplashRows(partition.rows),
+                rows: summarizeSubsplashRows(partition.rows.map((row) => row.row)),
               })),
               assignments: summarizeAssignments(assignments),
             });

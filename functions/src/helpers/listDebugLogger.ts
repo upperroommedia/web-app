@@ -61,7 +61,9 @@ export const summarizeOverflowIssues = (
 
 export const summarizeAssignments = (assignments: ReorderListItemsAssignment[]): Record<string, unknown>[] =>
   assignments.map((assignment) => ({
+    rowId: assignment.rowId,
     mediaItemId: assignment.mediaItemId,
+    matchedSermonId: assignment.matchedSermonId,
     firestoreListId: assignment.firestoreListId,
     subsplashListId: assignment.subsplashListId,
     overflowDepth: assignment.overflowDepth,

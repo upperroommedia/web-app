@@ -1,15 +1,20 @@
 
-export type SubsplashMediaType = 
+export type SubsplashMediaType =
   | 'media-item'
   | 'media-series'
   | 'song'
   | 'link'
   | 'rss'
   | 'list'
-  | 'album';
+  | 'album'
+  | 'calendar'
+  | 'event';
+
+export type SubsplashListRowMethod = 'static' | 'most_recent' | 'next_upcoming';
 
 export interface SubsplashResourceLink {
   href: string;
+  templated?: boolean;
 }
 
 export interface SubsplashImageLinks {
@@ -34,13 +39,22 @@ export interface SubsplashEmbedResource {
   [key: string]: unknown;
 }
 
+export interface SubsplashSourceListReference {
+  id: string;
+  _links?: {
+    self?: SubsplashResourceLink;
+    'list-rows'?: SubsplashResourceLink;
+    [key: string]: SubsplashResourceLink | undefined;
+  };
+}
+
 export interface SubsplashMediaItem {
   id: string;
   type: SubsplashMediaType;
 }
 
 export interface SubsplashListRowEmbedded {
-  'source-list': { id: string };
+  'source-list': SubsplashSourceListReference;
   'media-item'?: SubsplashEmbedResource;
   'media-series'?: SubsplashEmbedResource;
   'song'?: SubsplashEmbedResource;
@@ -48,14 +62,22 @@ export interface SubsplashListRowEmbedded {
   'rss'?: SubsplashEmbedResource;
   'list'?: SubsplashEmbedResource;
   'album'?: SubsplashEmbedResource;
+  'calendar'?: SubsplashEmbedResource;
+  'event'?: SubsplashEmbedResource;
 }
 
 export interface SubsplashListRow {
-  id?: string; 
+  id?: string;
+  _links?: {
+    self?: SubsplashResourceLink;
+    [key: string]: SubsplashResourceLink | undefined;
+  };
   app_key: string;
-  method: 'static';
+  method: SubsplashListRowMethod;
   position: number;
   type: SubsplashMediaType;
+  created_at?: string;
+  updated_at?: string;
   _embedded: SubsplashListRowEmbedded;
 }
 

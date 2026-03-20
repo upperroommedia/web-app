@@ -4,6 +4,18 @@ import getlistoverflowchain from '../../getListOverflowChain';
 import { getOverflowChainState } from '../../helpers/listOverflowChain';
 import type { GetListOverflowChainInputType, GetListOverflowChainOutputType } from '../../../../packages/contracts/getListOverflowChain';
 
+jest.mock('../../subsplashUtils', () => ({
+  authenticateSubsplash: jest.fn(async () => 'test-token'),
+}));
+
+jest.mock('../../helpers/remoteChainItems', () => ({
+  loadRemoteChainItems: jest.fn(async (_rootListId: string, _token: string, chainState: GetListOverflowChainOutputType) => ({
+    chainState,
+    remoteItems: [],
+    remoteNodes: [],
+  })),
+}));
+
 jest.mock('firebase-functions/v2/https', () => {
   const actual = jest.requireActual('firebase-functions/v2/https');
   return {
