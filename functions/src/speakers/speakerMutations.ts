@@ -44,6 +44,12 @@ interface CreateSubsplashSpeakerTagOutputType {
   tagId: string;
 }
 
+interface UpdateSubsplashSpeakerTagImageInputType {
+  tagId: string;
+  squareImage: ImageType;
+  operationKey?: string;
+}
+
 const normalizeOptionalString = (value: unknown): string | undefined => {
   if (value === undefined || value === null) {
     return undefined;
@@ -349,6 +355,10 @@ const getCreateSpeakerTagLockKey = (title: string): string => {
   return `tag:create-speaker-${normalizeSlug(title) || 'untitled'}`;
 };
 
+const getUpdateSpeakerTagLockKey = (tagId: string): string => {
+  return `tag:update-speaker-${tagId}`;
+};
+
 const SPEAKER_TAG_RETRY_ATTEMPTS = 3;
 const SPEAKER_TAG_RETRY_BASE_DELAY_MS = 400;
 const SPEAKER_TAG_RETRY_MAX_DELAY_MS = 5000;
@@ -474,6 +484,27 @@ export const createSubsplashSpeakerTag = async (
   };
 
   return withSubsplashLocks([getCreateSpeakerTagLockKey(input.title)], runMutation, {
+    ...(input.operationKey ? { operationKey: input.operationKey } : {}),
+  });
+};
+
+export const updateSubsplashSpeakerTagSquareImage = async (
+  input: UpdateSubsplashSpeakerTagImageInputType
+): Promise<void> => {
+  const runMutation = async (): Promise<void> => {
+    const url = `https://core.subsplash.com/tags/v1/tags/${input.tagId}`;
+    const payload = {
+      app_key: '9XTSHD',
+      _embedded: {
+        'square-image': toSubsplashImageReference(input.squareImage, 'squareImage'),
+      },
+    };
+
+    const config = createAxiosConfig(url, await authenticateSubsplash(), 'PATCH', payload);
+    await withSubsplashSpeakerRetry('updateSpeakerTagSquareImage', () => axios(config));
+  };
+
+  await withSubsplashLocks([getUpdateSpeakerTagLockKey(input.tagId)], runMutation, {
     ...(input.operationKey ? { operationKey: input.operationKey } : {}),
   });
 };

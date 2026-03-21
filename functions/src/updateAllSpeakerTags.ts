@@ -11,7 +11,7 @@ import type {
 import { firestoreAdminSpeakerConverter } from './firestoreDataConverter';
 import handleError from './handleError';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
-import { createSubsplashSpeakerTag, requireSquareImage, requireTrimmedSpeakerName } from './speakers/speakerMutations';
+import { requireSquareImage, requireTrimmedSpeakerName, updateSubsplashSpeakerTagSquareImage } from './speakers/speakerMutations';
 
 const SCRIPT_RUNNER_EMAIL = 'youssef.a.asaad@gmail.com';
 const BETWEEN_SPEAKER_DELAY_MS = 150;
@@ -180,13 +180,10 @@ const updateAllSpeakerTags = onCall(
         }
 
         try {
-          await createSubsplashSpeakerTag({
+          await updateSubsplashSpeakerTagSquareImage({
             tagId: speaker.tagId,
-            title: normalizedName,
             squareImage,
-            shortDescription: speaker.shortDescription || undefined,
-            description: speaker.description || undefined,
-            operationKey: `admin-script-update-speaker-tag-${speaker.id}`,
+            operationKey: `admin-script-update-speaker-tag-image-${speaker.id}`,
           });
           result.updatedCount += 1;
           result.processedSpeakerIds.push(speaker.id);
