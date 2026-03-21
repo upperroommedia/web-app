@@ -1,6 +1,6 @@
 # Staging Infrastructure Setup
 
-This repository is now configured for staging-first promotions and selective Firebase deploys. Complete these one-time external setup steps before the first staging deployment.
+This repository is now configured for staging-first promotions and selective Firebase backend deploys. App Hosting remains connected to GitHub through the Firebase console. Complete these one-time external setup steps before the first staging deployment.
 
 ## 1. Upgrade staging project billing (required)
 
@@ -18,16 +18,24 @@ firebase apphosting:backends:create --project urm-app-staging --location us-cent
 
 When prompted, set backend id to `web-staging` and root dir to `apps/web`.
 
+After the backend is created, open the backend settings in Firebase Console and set:
+
+- Live branch: `staging`
+- Environment name: `staging`
+
+With environment name `staging`, App Hosting will merge [`apphosting.yaml`](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/apphosting.yaml) with [`apphosting.staging.yaml`](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/apphosting.staging.yaml) for staging rollouts.
+
 If the backend already exists with the old repository-root setting, update the App Hosting backend root directory to `apps/web` before the next rollout.
 
-## 2b. Disable automatic App Hosting rollouts (required)
+## 2b. Leave automatic App Hosting rollouts enabled
 
-Disable automatic rollouts for backend `web-staging` in Firebase Console so App Hosting only deploys when the staging workflow explicitly triggers a rollout:
+App Hosting should continue rolling out from Firebase Console on pushes to the `staging` branch:
 
 - Open App Hosting backend settings for `web-staging`.
-- Turn off automatic rollouts.
+- Confirm the backend is connected to the `staging` branch.
+- Confirm automatic rollouts remain enabled.
 
-## 3. Configure App Hosting secrets for `apphosting.yaml`
+## 3. Configure App Hosting secrets for staging
 
 Create/grant each secret in `urm-app-staging`:
 
@@ -129,8 +137,9 @@ Create a Workload Identity Provider and service account with Firebase deploy per
 1. Open a PR from any feature branch into `staging` and confirm `staging-selective-deploy` passes.
 2. Merge into `staging` and confirm selective deploy executes.
 3. Confirm App Hosting rollout is triggered only when app-related files change.
-4. Open PR `staging -> main` and confirm `main-from-staging` passes.
-5. Open PR `feature -> main` and confirm `main-from-staging` fails.
+4. Confirm the staging App Hosting backend picks up `apps/web/apphosting.staging.yaml`.
+5. Open PR `staging -> main` and confirm `main-from-staging` passes.
+6. Open PR `feature -> main` and confirm `main-from-staging` fails.
 
 ## 7. Vercel parity
 
