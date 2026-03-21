@@ -1108,18 +1108,18 @@ const SeriesDetailsPage = () => {
         items
           .filter((item) => Boolean(item.sermonId))
           .map(async (item, index) => {
-          const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.sermonId as string);
-          try {
-            await updateDoc(itemRef, { position: items.length - index });
-          } catch (err: unknown) {
-            // Item might have been deleted by another user - skip it
-            if (getErrorField(err, 'code') === 'not-found' || getErrorMessage(err, '').includes('NOT_FOUND')) {
-              console.warn(`SeriesItem ${item.sermonId} not found - may have been removed`);
-            } else {
-              throw err;
+            const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.sermonId as string);
+            try {
+              await updateDoc(itemRef, { position: items.length - index });
+            } catch (err: unknown) {
+              // Item might have been deleted by another user - skip it
+              if (getErrorField(err, 'code') === 'not-found' || getErrorMessage(err, '').includes('NOT_FOUND')) {
+                console.warn(`SeriesItem ${item.sermonId} not found - may have been removed`);
+              } else {
+                throw err;
+              }
             }
-          }
-        })
+          })
       );
 
       // Update original order reference after successful save
@@ -2072,8 +2072,8 @@ const SeriesDetailsPage = () => {
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
             {selectedSeriesItemIds.size > 1
-              ? `${selectedSeriesItemIds.size} sermons will be removed from this series. This also removes them from the Subsplash series when applicable.`
-              : `${removeTarget?.sermon?.title || removeTarget?.remoteTitle || 'This item'} will be removed from this series. This also removes it from the Subsplash series when applicable.`}
+              ? `${selectedSeriesItemIds.size} sermons will be removed from this series.`
+              : `"${removeTarget?.sermon?.title || removeTarget?.remoteTitle || 'This item'}" will be removed from this series.`}
           </Typography>
         </DialogContent>
         <DialogActions>
