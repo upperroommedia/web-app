@@ -35,6 +35,7 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import SaveIcon from '@mui/icons-material/Save';
 import UndoIcon from '@mui/icons-material/Undo';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
@@ -1666,16 +1667,7 @@ const SeriesDetailsPage = () => {
       !sermonSearchQuery ||
       sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase())
     ));
-  const displayedAddableSermons = sermonSearchQuery.trim().length === 0
-    ? [...filteredAddableSermons].sort((first, second) => {
-      const firstSelected = selectedSermonIds.has(first.id);
-      const secondSelected = selectedSermonIds.has(second.id);
-      if (firstSelected === secondSelected) {
-        return 0;
-      }
-      return firstSelected ? -1 : 1;
-    })
-    : filteredAddableSermons;
+  const displayedAddableSermons = filteredAddableSermons;
   const selectedSermonCount = selectedSermonIds.size;
   const allVisibleSermonsSelected = filteredAddableSermons.length > 0 &&
     filteredAddableSermons.every((sermon) => selectedSermonIds.has(sermon.id));
@@ -1863,12 +1855,35 @@ const SeriesDetailsPage = () => {
                     </Box>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
                       {series.subsplashId ? (
-                        <Chip
-                          icon={<CheckCircleIcon />}
-                          label="Published to Subsplash"
-                          color="success"
-                          size="small"
-                        />
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.75 }}>
+                          <Chip
+                            icon={<CheckCircleIcon />}
+                            label="Published to Subsplash"
+                            color="success"
+                            size="small"
+                          />
+                          <Box
+                            component="a"
+                            href={`https://dashboard.subsplash.com/-d/#/library/media/series/${series.subsplashId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            sx={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                              color: 'primary.main',
+                              textDecoration: 'none',
+                              '&:hover': {
+                                textDecoration: 'underline',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" color="inherit">
+                              View in Subsplash
+                            </Typography>
+                            <OpenInNewIcon sx={{ fontSize: 16 }} />
+                          </Box>
+                        </Box>
                       ) : (
                         <Chip
                           icon={<PendingIcon />}
@@ -2209,92 +2224,105 @@ const SeriesDetailsPage = () => {
             </Box>
           ) : (
             <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
-              {displayedAddableSermons.map((sermon) => (
-                <Box
-                  key={sermon.id}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 2,
-                    p: 1.5,
-                    borderRadius: 2,
-                    cursor: isAddingSelectedSermons ? 'default' : 'pointer',
-                    transition: 'background-color 0.15s ease',
-                    bgcolor: selectedSermonIds.has(sermon.id) ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
-                    '&:hover': {
-                      bgcolor: isAddingSelectedSermons
-                        ? 'transparent'
-                        : (selectedSermonIds.has(sermon.id)
-                          ? alpha(theme.palette.primary.main, 0.12)
-                          : 'action.hover'),
-                    },
-                  }}
-                  onClick={() => {
-                    if (isAddingSelectedSermons) {
-                      return;
-                    }
-                    setSelectedSermonIds((previousSelected) => {
-                      const nextSelected = new Set(previousSelected);
-                      if (nextSelected.has(sermon.id)) {
-                        nextSelected.delete(sermon.id);
-                      } else {
-                        nextSelected.add(sermon.id);
-                      }
-                      return nextSelected;
-                    });
-                  }}
-                >
-                  <Checkbox
-                    checked={selectedSermonIds.has(sermon.id)}
-                    disabled={isAddingSelectedSermons}
-                    onChange={(event) => {
-                      event.stopPropagation();
+              {displayedAddableSermons.map((sermon, index) => {
+                const isSelected = selectedSermonIds.has(sermon.id);
+                const previousSelected = index > 0 && selectedSermonIds.has(displayedAddableSermons[index - 1].id);
+                const nextSelected = index < displayedAddableSermons.length - 1
+                  && selectedSermonIds.has(displayedAddableSermons[index + 1].id);
+
+                return (
+                  <Box
+                    key={sermon.id}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      p: 1.5,
+                      mt: isSelected && previousSelected ? '-1px' : 0,
+                      border: '1px solid',
+                      borderColor: isSelected ? 'primary.main' : 'transparent',
+                      borderTopLeftRadius: isSelected && !previousSelected ? 8 : 0,
+                      borderTopRightRadius: isSelected && !previousSelected ? 8 : 0,
+                      borderBottomLeftRadius: isSelected && !nextSelected ? 8 : 0,
+                      borderBottomRightRadius: isSelected && !nextSelected ? 8 : 0,
+                      cursor: isAddingSelectedSermons ? 'default' : 'pointer',
+                      transition: 'background-color 0.15s ease, border-color 0.15s ease',
+                      bgcolor: isSelected ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                      '&:hover': {
+                        bgcolor: isAddingSelectedSermons
+                          ? 'transparent'
+                          : (isSelected
+                            ? alpha(theme.palette.primary.main, 0.12)
+                            : 'action.hover'),
+                      },
+                    }}
+                    onClick={() => {
                       if (isAddingSelectedSermons) {
                         return;
                       }
-                      setSelectedSermonIds((previousSelected) => {
-                        const nextSelected = new Set(previousSelected);
-                        if (event.target.checked) {
-                          nextSelected.add(sermon.id);
+                      setSelectedSermonIds((previousSelectedIds) => {
+                        const nextSelectedIds = new Set(previousSelectedIds);
+                        if (nextSelectedIds.has(sermon.id)) {
+                          nextSelectedIds.delete(sermon.id);
                         } else {
-                          nextSelected.delete(sermon.id);
+                          nextSelectedIds.add(sermon.id);
                         }
-                        return nextSelected;
+                        return nextSelectedIds;
                       });
                     }}
-                  />
-                  <AvatarWithDefaultImage
-                    image={sermon.images?.find((img) => img.type === 'square')}
-                    altName={sermon.title}
-                    width={48}
-                    height={48}
-                    borderRadius={6}
-                  />
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography
-                      variant="body2"
-                      fontWeight={500}
-                      sx={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
+                  >
+                    <Checkbox
+                      checked={isSelected}
+                      disabled={isAddingSelectedSermons}
+                      onChange={(event) => {
+                        event.stopPropagation();
+                        if (isAddingSelectedSermons) {
+                          return;
+                        }
+                        setSelectedSermonIds((previousSelectedIds) => {
+                          const nextSelectedIds = new Set(previousSelectedIds);
+                          if (event.target.checked) {
+                            nextSelectedIds.add(sermon.id);
+                          } else {
+                            nextSelectedIds.delete(sermon.id);
+                          }
+                          return nextSelectedIds;
+                        });
                       }}
-                    >
-                      {sermon.title}
-                    </Typography>
-                    {sermon.dateString && (
-                      <Typography variant="caption" color="text.secondary">
-                        {sermon.dateString}
+                    />
+                    <AvatarWithDefaultImage
+                      image={sermon.images?.find((img) => img.type === 'square')}
+                      altName={sermon.title}
+                      width={48}
+                      height={48}
+                      borderRadius={6}
+                    />
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography
+                        variant="body2"
+                        fontWeight={500}
+                        sx={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {sermon.title}
                       </Typography>
-                    )}
+                      {sermon.dateString && (
+                        <Typography variant="caption" color="text.secondary">
+                          {sermon.dateString}
+                        </Typography>
+                      )}
+                    </Box>
+                    <IconButton size="small" color="primary" disabled>
+                      {activeAddingSermonId === sermon.id
+                        ? <CircularProgress size={16} />
+                        : <AddIcon />}
+                    </IconButton>
                   </Box>
-                  <IconButton size="small" color="primary" disabled>
-                    {activeAddingSermonId === sermon.id
-                      ? <CircularProgress size={16} />
-                      : <AddIcon />}
-                  </IconButton>
-                </Box>
-              ))}
+                );
+              })}
             </Box>
           )}
         </DialogContent>

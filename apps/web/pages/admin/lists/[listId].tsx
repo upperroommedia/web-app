@@ -73,6 +73,7 @@ import firestore, {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   query,
   writeBatch,
@@ -86,6 +87,7 @@ import { listUploadStatus, sermonListConverter } from '../../../types/SermonList
 import { sermonConverter } from '../../../types/Sermon';
 import { Sermon, uploadStatus } from '../../../types/SermonTypes';
 import type { ImageType } from '../../../types/Image';
+import { ISpeaker, speakerConverter } from '../../../types/Speaker';
 import { createOperationKey } from '../../../utils/callableConcurrency';
 import { createFunctionV2 } from '../../../utils/createFunction';
 import {
@@ -931,6 +933,7 @@ const ListDetailsPage = () => {
   const originalItemsRef = useRef<ListPageItem[]>([]);
   const listId = typeof router.query.listId === 'string' ? router.query.listId : '';
   const [list, setList] = useState<List | null>(null);
+  const [associatedSpeaker, setAssociatedSpeaker] = useState<ISpeaker | null>(null);
   const [items, setItems] = useState<ListPageItem[]>([]);
   const [chainView, setChainView] = useState<ListOverflowChainView<ListDetailItem> | null>(null);
   const [publishedDrift, setPublishedDrift] = useState<GetListPublishedDriftOutputType | null>(null);
@@ -1067,6 +1070,42 @@ const ListDetailsPage = () => {
   useEffect(() => {
     setVisibleItemsCount(200);
   }, [items.length, listId]);
+
+  useEffect(() => {
+    if (!list?.id) {
+      setAssociatedSpeaker(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAssociatedSpeaker = async () => {
+      try {
+        const speakerSnapshot = await getDocs(
+          query(
+            collection(firestore, 'speakers').withConverter(speakerConverter),
+            where('listId', '==', list.id),
+            limit(1)
+          )
+        );
+
+        if (!cancelled) {
+          setAssociatedSpeaker(speakerSnapshot.docs[0]?.data() ?? null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load associated speaker', error);
+          setAssociatedSpeaker(null);
+        }
+      }
+    };
+
+    void loadAssociatedSpeaker();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [list?.id]);
 
   useEffect(() => {
     setIsPublishedDriftExpanded(false);
@@ -1300,9 +1339,59 @@ const ListDetailsPage = () => {
                   />
 
                   <Box sx={{ flex: 1 }}>
-                    <Typography variant="h6" color="text.secondary" sx={{ mb: 1, fontWeight: 400 }}>
-                      {formatListType(list.type)}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+                      <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 400 }}>
+                        {formatListType(list.type)}
+                      </Typography>
+                      {associatedSpeaker ? (
+                        <Chip
+                          component={Link}
+                          href={`/admin/speakers/${associatedSpeaker.id}`}
+                          clickable
+                          avatar={(
+                            <AvatarWithDefaultImage
+                              altName={associatedSpeaker.name}
+                              image={associatedSpeaker.images?.find((image) => image.type === 'square')}
+                              width={20}
+                              height={20}
+                              borderRadius={999}
+                            />
+                          )}
+                          label={associatedSpeaker.name}
+                          size="small"
+                          variant="outlined"
+                          sx={{
+                            height: { xs: 22, sm: 26 },
+                            cursor: 'pointer',
+                            borderRadius: 999,
+                            pl: { xs: '1px', sm: '2px' },
+                            bgcolor: alpha(theme.palette.primary.main, 0.08),
+                            textDecoration: 'none',
+                            transition: theme.transitions.create(['background-color', 'border-color', 'box-shadow']),
+                            '& .MuiChip-label': {
+                              fontSize: { xs: '0.62rem', sm: '0.7rem' },
+                              fontWeight: 700,
+                              px: { xs: '6px', sm: '8px' },
+                            },
+                            '& .MuiChip-avatar': {
+                              ml: 0,
+                              mr: { xs: '3px', sm: '4px' },
+                              width: { xs: 18, sm: 20 },
+                              height: { xs: 18, sm: 20 },
+                            },
+                            '&:hover': {
+                              backgroundColor: alpha(theme.palette.primary.main, 0.14),
+                              borderColor: 'primary.main',
+                            },
+                            '&:focus-visible': {
+                              backgroundColor: alpha(theme.palette.primary.main, 0.14),
+                              borderColor: 'primary.main',
+                              boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.3)}`,
+                            },
+                          }}
+                        />
+                      ) : null}
+                    </Box>
 
                     <Box
                       sx={{
