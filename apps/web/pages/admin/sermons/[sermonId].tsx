@@ -1280,7 +1280,7 @@ const SermonDetailsPage = () => {
                     bgcolor: sermon.images?.find((img) => img.type === 'square')?.averageColorHex || 'action.hover',
                     backgroundImage: sermon.images?.find((img) => img.type === 'square')?.downloadLink
                       ? `url(${sermon.images.find((img) => img.type === 'square')?.downloadLink})`
-                      : 'url(/URM_Icon.png)',
+                      : 'url(/URM_icon.png)',
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
                   }}

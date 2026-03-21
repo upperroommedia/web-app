@@ -593,7 +593,7 @@ const SermonListCard: FunctionComponent<Props> = ({
             bgcolor: sermonImage?.averageColorHex || 'action.hover',
             backgroundImage: sermonImage?.downloadLink
               ? `url(${sermonImage.downloadLink})`
-              : 'url(/URM_Icon.png)',
+              : 'url(/URM_icon.png)',
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
@@ -697,7 +697,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                     <Chip
                       avatar={
                         <Avatar 
-                          src={seriesImage?.downloadLink || '/URM_Icon.png'} 
+                          src={seriesImage?.downloadLink || '/URM_icon.png'} 
                           alt={series.name} 
                           sx={{ 
                             width: { sm: 18, md: 22 }, 

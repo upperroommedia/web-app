@@ -272,7 +272,7 @@ function SpeakerSelector({
                 sx={{ mr: 0.5, mb: 0.5 }}
                 avatar={
                   <AvatarWithDefaultImage
-                    defaultImageURL="/props.user.png"
+                    defaultImageURL="/user.png"
                     altName={speaker.name}
                     width={24}
                     height={24}
@@ -289,7 +289,7 @@ function SpeakerSelector({
           return (
             <ListItem key={option.id} {...optionProps}>
             <AvatarWithDefaultImage
-              defaultImageURL="/props.user.png"
+              defaultImageURL="/user.png"
               altName={option.name}
               width={30}
               height={30}
