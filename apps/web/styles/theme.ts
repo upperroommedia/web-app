@@ -173,7 +173,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
       },
     },
     shape: {
-      borderRadius: 12,
+      borderRadius: 8,
     },
     shadows: [
       'none',
@@ -212,7 +212,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
               height: 8,
             },
             '&::-webkit-scrollbar-thumb, & *::-webkit-scrollbar-thumb': {
-              borderRadius: 8,
+              borderRadius: 7,
               backgroundColor: modeColors.text.tertiary,
               border: '2px solid transparent',
             },
@@ -225,7 +225,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
       MuiButton: {
         styleOverrides: {
           root: {
-            borderRadius: 8,
+            borderRadius: 6,
             padding: '8px 16px',
             fontWeight: 500,
             transition: 'all 0.2s ease-in-out',
@@ -307,7 +307,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
         styleOverrides: {
           root: {
             backgroundColor: modeColors.background.card,
-            borderRadius: 12,
+            borderRadius: 8,
             border: `1px solid ${modeColors.border.default}`,
             boxShadow: mode === 'dark' ? '0 4px 6px -1px rgba(0,0,0,0.2)' : '0 4px 6px -1px rgba(0,0,0,0.05)',
             transition: 'all 0.2s ease-in-out',
@@ -392,7 +392,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
         styleOverrides: {
           root: {
             fontWeight: 500,
-            borderRadius: 6,
+            borderRadius: 4,
           },
           outlined: {
             borderColor: modeColors.border.light,
@@ -429,7 +429,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
       MuiListItemButton: {
         styleOverrides: {
           root: {
-            borderRadius: 8,
+            borderRadius: 6,
             margin: '2px 8px',
             padding: '10px 12px',
             transition: 'all 0.15s ease-in-out',
@@ -459,7 +459,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
           paper: {
             backgroundColor: modeColors.background.card,
             border: `1px solid ${modeColors.border.default}`,
-            borderRadius: 16,
+            borderRadius: 12,
           },
         },
       },
@@ -476,7 +476,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
           tooltip: {
             backgroundColor: modeColors.background.elevated,
             border: `1px solid ${modeColors.border.default}`,
-            borderRadius: 8,
+            borderRadius: 6,
             fontSize: '0.75rem',
             padding: '8px 12px',
             color: modeColors.text.primary,
@@ -489,7 +489,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
       MuiAlert: {
         styleOverrides: {
           root: {
-            borderRadius: 8,
+            borderRadius: 6,
           },
           standardSuccess: {
             backgroundColor: colors.status.successBg,
@@ -534,7 +534,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
         styleOverrides: {
           root: {
             backgroundColor: modeColors.background.card,
-            borderRadius: 12,
+            borderRadius: 8,
             border: `1px solid ${modeColors.border.default}`,
           },
         },
@@ -544,7 +544,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
           paper: {
             backgroundColor: modeColors.background.card,
             border: `1px solid ${modeColors.border.default}`,
-            borderRadius: 12,
+            borderRadius: 8,
             marginTop: 4,
           },
         },
@@ -552,7 +552,7 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
       MuiMenuItem: {
         styleOverrides: {
           root: {
-            borderRadius: 6,
+            borderRadius: 4,
             margin: '2px 6px',
             padding: '8px 12px',
             '&:hover': {

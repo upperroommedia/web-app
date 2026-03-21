@@ -89,6 +89,8 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
 }: SeriesListItemRowProps) {
   const theme = useTheme();
   const seriesImage = series.images?.find((image) => image.type === 'wide')
+    || series.images?.find((image) => image.type === 'banner')
+    || series.images?.find((image) => image.type === 'square');
   const ownerDisplayName = owner
     ? (`${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || owner.displayName || owner.email || owner.uid)
     : series.ownerId;
@@ -98,25 +100,39 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
         <Box
           sx={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'stretch',
             justifyContent: 'space-between',
-            p: { xs: 2, sm: 2.5 },
-            gap: 2,
+            minHeight: { xs: 88, sm: 96 },
+            gap: 0,
             cursor: 'pointer',
             transition: 'background-color 0.15s ease',
             '&:hover': { bgcolor: 'action.hover' },
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, flex: 1, minWidth: 0 }}>
             <AvatarWithDefaultImage
               image={seriesImage}
               altName={`Image of Series: ${series.name}`}
-              width={112}
-              height={63}
-              borderRadius={10}
-              sx={{ flexShrink: 0 }}
+              width={1}
+              height={1}
+              borderRadius={0}
+              sx={{
+                flexShrink: 0,
+                width: 'auto',
+                height: '100%',
+                aspectRatio: '16 / 9',
+              }}
             />
-            <Box sx={{ minWidth: 0 }}>
+            <Box
+              sx={{
+                minWidth: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                px: { xs: 1.5, sm: 2 },
+                py: { xs: 1.25, sm: 1.5 },
+              }}
+            >
               <Typography
                 variant="subtitle1"
                 fontWeight={600}
@@ -186,7 +202,15 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
             </Box>
           </Box>
 
-          <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+          <Stack
+            direction="row"
+            spacing={0.5}
+            sx={{
+              flexShrink: 0,
+              alignItems: 'center',
+              px: { xs: 1, sm: 1.5 },
+            }}
+          >
             <Tooltip title="Edit Series">
               <span>
                 <IconButton
@@ -491,6 +515,7 @@ const AdminSeriesPage = () => {
             {filteredSeries.length === 0 ? (
               <Card
                 sx={{
+                  borderRadius: 1,
                   textAlign: 'center',
                   py: 6,
                   px: 3,
@@ -521,7 +546,7 @@ const AdminSeriesPage = () => {
                 )}
               </Card>
             ) : (
-              <Card>
+              <Card sx={{ borderRadius: 1 }}>
                 {filteredSeries.map((series, index) => (
                   <Box key={series.id}>
                     <SeriesListItemRow

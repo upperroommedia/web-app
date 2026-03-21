@@ -555,6 +555,7 @@ const SermonListCard: FunctionComponent<Props> = ({
         sx={{
           display: 'flex',
           flexDirection: 'row',
+          borderRadius: 1,
           cursor: 'pointer',
           overflow: 'hidden',
           mb: { xs: 1, sm: 1.5 },

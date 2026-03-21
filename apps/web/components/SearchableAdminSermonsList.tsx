@@ -44,7 +44,7 @@ function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
         gap={{ xs: 1.5, md: 2 }}
         alignItems="start"
         border={{ xs: 1, md: 0 }}
-        borderRadius={2}
+        borderRadius={1}
         p={{ xs: 1.5, md: 2 }}
         width="100%"
         minWidth={0}
