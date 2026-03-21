@@ -88,7 +88,7 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
   onDelete,
 }: SeriesListItemRowProps) {
   const theme = useTheme();
-  const seriesImage = series.images?.find((image) => image.type === 'square');
+  const seriesImage = series.images?.find((image) => image.type === 'wide')
   const ownerDisplayName = owner
     ? (`${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || owner.displayName || owner.email || owner.uid)
     : series.ownerId;
@@ -111,8 +111,8 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
             <AvatarWithDefaultImage
               image={seriesImage}
               altName={`Image of Series: ${series.name}`}
-              width={64}
-              height={64}
+              width={112}
+              height={63}
               borderRadius={10}
               sx={{ flexShrink: 0 }}
             />
@@ -569,7 +569,7 @@ const AdminSeriesPage = () => {
 
 const ProtectedAdminSeriesPage = () => {
   const { user } = useAuth();
-  
+
   // Allow both admins and publishers to see this page
   if (!user?.canPublish()) {
     return (
@@ -587,7 +587,7 @@ const ProtectedAdminSeriesPage = () => {
       </Box>
     );
   }
-  
+
   return <AdminSeriesPage />;
 };
 
