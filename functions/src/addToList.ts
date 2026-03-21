@@ -392,7 +392,6 @@ const applyRemoveOldestMutation = async ({
     );
   }
 
-  throw new HttpsError('internal', 'Reached an unexpected REMOVEOLDEST completion state.');
 };
 
 const ensureImmediateOverflowListLinkInFirestore = async ({

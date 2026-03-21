@@ -64,10 +64,6 @@ import {
   ReorderListItemsInputType,
   ReorderListItemsOutputType,
 } from '@upperroom/contracts/reorderListItems';
-import type {
-  ResolveListPublishedDriftInputType,
-  ResolveListPublishedDriftOutputType,
-} from '@upperroom/contracts/resolveListPublishedDrift';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import OverflowChainPanel from '../../../components/admin/lists/OverflowChainPanel';
 import useAuth from '../../../context/user/UserContext';
@@ -1054,7 +1050,7 @@ const ListDetailsPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [listId, reloadNonce, router.isReady]);
+  }, [listId, reloadNonce, router]);
 
   useEffect(() => {
     const rootListId = chainView?.rootListId;

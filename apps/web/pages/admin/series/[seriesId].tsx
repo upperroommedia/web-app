@@ -11,7 +11,6 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -551,6 +550,8 @@ const SortableItem = memo(({
     </Box>
   );
 });
+
+SortableItem.displayName = 'SortableItem';
 
 const SeriesDetailsPage = () => {
   const router = useRouter();
