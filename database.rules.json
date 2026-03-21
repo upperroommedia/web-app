@@ -1,6 +1,20 @@
 {
   "rules": {
-    ".read": true,
-    ".write": "auth != null && (auth.token.role == 'uploader' || auth.token.role == 'admin')"
+    ".read": false,
+    ".write": false,
+    "bundle-metadata": {
+      ".read": true,
+      ".write": false
+    },
+    "addIntroOutro": {
+      "$sermonId": {
+        ".read": "auth != null && (auth.token.role == 'uploader' || auth.token.role == 'admin' || auth.token.role == 'publisher')",
+        ".write": false
+      }
+    },
+    "subsplashLocks": {
+      ".read": false,
+      ".write": false
+    }
   }
 }
