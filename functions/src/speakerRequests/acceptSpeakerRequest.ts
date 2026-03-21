@@ -117,6 +117,7 @@ export const acceptSpeakerRequestHandler = async (
         speakerName: speakerRequest.speakerName,
         speakerId: createSpeakerResult.speakerId,
         status: SPEAKER_REQUEST_STATUS_ACCEPTED,
+        speakerListCreated: createSpeakerResult.speakerListCreated === true,
         ...(outcomeEmailResult.status === 'queue_failed'
           ? {
               warning: {

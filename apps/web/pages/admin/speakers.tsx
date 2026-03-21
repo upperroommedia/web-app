@@ -298,6 +298,9 @@ const AdminSpeakers = () => {
           ? `${selectedSpeakerRequest.speakerName} was created, but the requester email could not be queued.`
           : `${selectedSpeakerRequest.speakerName} was created and the requester has been notified.`,
       });
+      if (response.data.speakerListCreated) {
+        setSpeakerListSuccessPopupOpen(true);
+      }
       setSelectedSpeakerRequest(null);
       await refreshSpeakersAndRequests();
       return;

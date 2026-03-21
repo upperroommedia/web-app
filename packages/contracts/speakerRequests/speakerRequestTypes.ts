@@ -131,6 +131,7 @@ export interface AcceptSpeakerRequestResultData {
   speakerName: string;
   speakerId: string;
   status: typeof SPEAKER_REQUEST_STATUS_ACCEPTED;
+  speakerListCreated: boolean;
   warning?: SpeakerRequestResolutionWarning;
 }
 
