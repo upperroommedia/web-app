@@ -71,14 +71,21 @@ const rotateSize = (width: number, height: number, rotation: number): Size => {
   };
 };
 
+const areSizesEqual = (left: Size | null, right: Size | null): boolean =>
+  left?.width === right?.width && left?.height === right?.height;
+
+const areMediaSizesEqual = (left: MediaSize | null, right: MediaSize): boolean =>
+  left?.width === right.width &&
+  left?.height === right.height &&
+  left?.naturalWidth === right.naturalWidth &&
+  left?.naturalHeight === right.naturalHeight;
+
 const ImageUploader = (props: Props) => {
   const [imgSrc, setImgSrc] = useState(props.imgSrc);
   const [imageType, setImageType] = useState(() => inferImageExtension(props.sourceFileName ?? props.imgSrc));
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);
-  const [minZoom, setMinZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area>();
   const [autoBackgroundColorHex, setAutoBackgroundColorHex] = useState('#9fccb9');
   const [backgroundFillMode, setBackgroundFillMode] = useState<BackgroundFillMode>('auto');
   const [customBackgroundColorHex, setCustomBackgroundColorHex] = useState('#000000');
@@ -87,9 +94,12 @@ const ImageUploader = (props: Props) => {
   const [mediaSize, setMediaSize] = useState<MediaSize | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const rotationFrameRef = useRef<number | null>(null);
+  const initializedZoomImageSrcRef = useRef<string | undefined>(undefined);
+  const croppedAreaPixelsRef = useRef<Area | null>(null);
   const [previewContainerSize, setPreviewContainerSize] = useState<Size | null>(null);
-  const onCropComplete = useCallback((croppedArea: Area, croppedAreaPixels: Area) => {
-    setCroppedAreaPixels(croppedAreaPixels);
+  const onCropComplete = useCallback((_: Area, croppedAreaPixels: Area) => {
+    croppedAreaPixelsRef.current = croppedAreaPixels;
   }, []);
 
   useEffect(() => {
@@ -127,10 +137,11 @@ const ImageUploader = (props: Props) => {
 
     const updatePreviewContainerSize = () => {
       const nextRect = node.getBoundingClientRect();
-      setPreviewContainerSize({
+      const nextSize = {
         width: nextRect.width,
         height: nextRect.height,
-      });
+      };
+      setPreviewContainerSize((currentSize) => (areSizesEqual(currentSize, nextSize) ? currentSize : nextSize));
     };
 
     updatePreviewContainerSize();
@@ -147,6 +158,9 @@ const ImageUploader = (props: Props) => {
   useEffect(() => {
     return () => {
       previewResizeObserverRef.current?.disconnect();
+      if (rotationFrameRef.current !== null) {
+        window.cancelAnimationFrame(rotationFrameRef.current);
+      }
     };
   }, []);
 
@@ -193,22 +207,29 @@ const ImageUploader = (props: Props) => {
 
     return Number.isFinite(nextFitZoom) && nextFitZoom > 0 ? nextFitZoom : 1;
   }, [explicitCropSize, mediaSize, rotation]);
+  const resolvedMinZoom = fitZoom ?? 1;
+  const effectiveZoom = Math.max(zoom, resolvedMinZoom);
+  const cropperReady = Boolean(explicitCropSize && mediaSize);
 
   useEffect(() => {
-    if (fitZoom === null) {
+    if (!imgSrc) {
+      initializedZoomImageSrcRef.current = undefined;
       return;
     }
 
-    setMinZoom(fitZoom);
+    if (fitZoom === null || initializedZoomImageSrcRef.current === imgSrc) {
+      return;
+    }
+
+    initializedZoomImageSrcRef.current = imgSrc;
     setZoom(fitZoom);
-  }, [fitZoom]);
-  const cropperReady = Boolean(explicitCropSize && mediaSize);
+  }, [fitZoom, imgSrc]);
 
   function onSelectFile(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files.length > 0) {
       setCrop({ x: 0, y: 0 }); // Makes crop preview update between images.
       setRotation(0);
-      setMinZoom(1);
+      setZoom(1);
       setMediaSize(null);
       setBackgroundFillMode('auto');
       setCustomBackgroundColorHex('#000000');
@@ -233,8 +254,19 @@ const ImageUploader = (props: Props) => {
   }, [props]);
 
   const handleMediaLoaded = useCallback((loadedMediaSize: MediaSize) => {
-    setMediaSize(loadedMediaSize);
-    setCrop({ x: 0, y: 0 });
+    setMediaSize((currentMediaSize) => (areMediaSizesEqual(currentMediaSize, loadedMediaSize) ? currentMediaSize : loadedMediaSize));
+    setCrop((currentCrop) => (Math.abs(currentCrop.x) < 1 && Math.abs(currentCrop.y) < 1 ? currentCrop : { x: 0, y: 0 }));
+  }, []);
+
+  const scheduleRotationUpdate = useCallback((nextRotation: number) => {
+    if (rotationFrameRef.current !== null) {
+      window.cancelAnimationFrame(rotationFrameRef.current);
+    }
+
+    rotationFrameRef.current = window.requestAnimationFrame(() => {
+      rotationFrameRef.current = null;
+      setRotation((currentRotation) => (currentRotation === nextRotation ? currentRotation : nextRotation));
+    });
   }, []);
 
   const centerImage = useCallback(() => {
@@ -289,6 +321,7 @@ const ImageUploader = (props: Props) => {
       button={
         <Button
           onClick={async () => {
+            const croppedAreaPixels = croppedAreaPixelsRef.current;
             if (!imgSrc || !croppedAreaPixels || isCropping) {
               return;
             }
@@ -335,14 +368,15 @@ const ImageUploader = (props: Props) => {
             image={imgSrc}
             crop={crop}
             rotation={rotation}
-            zoom={zoom}
-            minZoom={minZoom}
+            zoom={effectiveZoom}
+            minZoom={resolvedMinZoom}
             aspect={typeToAspectRatio[props.type]}
             cropSize={explicitCropSize}
             onCropChange={setCrop}
-            onRotationChange={setRotation}
             onCropComplete={onCropComplete}
-            onZoomChange={setZoom}
+            onZoomChange={(nextZoom) => {
+              setZoom((currentZoom) => (currentZoom === nextZoom ? currentZoom : nextZoom));
+            }}
             onMediaLoaded={handleMediaLoaded}
             restrictPosition={false}
             objectFit="contain"
@@ -423,8 +457,8 @@ const ImageUploader = (props: Props) => {
               Zoom
             </Typography>
             <Slider
-              value={zoom}
-              min={minZoom}
+              value={effectiveZoom}
+              min={resolvedMinZoom}
               max={3}
               step={0.01}
               aria-labelledby="Zoom"
@@ -514,7 +548,7 @@ const ImageUploader = (props: Props) => {
               disabled={isCropping}
               onChange={(e, rotation) => {
                 if (typeof rotation === 'number') {
-                  setRotation(rotation);
+                  scheduleRotationUpdate(rotation);
                 }
               }}
             />
