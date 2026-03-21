@@ -41,6 +41,7 @@ import { createFormErrorMessage, getErrorMessage, showAudioTrimmerBoolean, showE
 import UploaderDatePicker from './UploaderDatePicker';
 import { UploaderFieldError, UploadProgress } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
+import SpeakerRequestPopup from './SpeakerRequestPopup';
 import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
 import { BIBLE_STUDIES_STRING, MAX_DURATION_SECONDS, SUNDAY_HOMILIES_STRING } from './consts';
 import BibleChapterSelector from './BibleChapterSelector';
@@ -122,6 +123,7 @@ const Uploader = (props: UploaderProps) => {
   const [subtitlesLoading, setSubtitlesLoading] = useState(true);
   const [formErrors, setFormErrors] = useState<FormErrors>(getFormErrorInitialState());
   const [showAdvancedListConfig, setShowAdvancedListConfig] = useState(false);
+  const [speakerRequestPopupOpen, setSpeakerRequestPopupOpen] = useState(false);
 
   // Bible Study Helpers
   const [selectedChapter, setSelectedChapter] = useState<List | null>(
@@ -857,7 +859,10 @@ const Uploader = (props: UploaderProps) => {
             setSermonList={setSermonList}
             speakerError={formErrors?.speakers}
             setSpeakerError={setSpeakerError}
+            showSpeakerRequestAction={!props.user.isAdmin()}
+            onOpenSpeakerRequest={() => setSpeakerRequestPopupOpen(true)}
           />
+          <SpeakerRequestPopup open={speakerRequestPopupOpen} setOpen={setSpeakerRequestPopupOpen} />
           <div style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
             <BundleListSelector
               sermonList={sermonList}

@@ -418,9 +418,13 @@ const SpeakerDetailsPage = () => {
                       <Typography variant="subtitle2" sx={{ mb: 1 }}>
                         Speaker Images
                       </Typography>
-                      <ImageViewer images={formState.images} newImageCallback={handleImageUpdate} speaker={speaker} />
+                      <ImageViewer
+                        images={formState.images}
+                        newImageCallback={handleImageUpdate}
+                        speaker={speaker}
+                        requiredTypes={['square']}
+                      />
                     </Box>
-                    {!hasSquareImage && <Alert severity="warning">A square image is required before you can save this speaker.</Alert>}
 
                     {speakerList && !showingListAsRemoved && (
                       <Card variant="outlined">

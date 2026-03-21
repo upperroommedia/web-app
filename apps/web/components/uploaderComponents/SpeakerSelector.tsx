@@ -16,6 +16,9 @@ import { getErrorMessage, showError } from './utils';
 import { isDevelopment } from '../../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../../utils/mockAlgoliaSearchClient';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
+import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
+import Box from '@mui/material/Box';
 
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
@@ -37,6 +40,8 @@ interface SpeakerSelectorProps {
   speakerError?: UploaderFieldError;
   setSermonList: Dispatch<SetStateAction<List[]>>;
   setSpeakerError: (error: boolean, message: string) => void;
+  showSpeakerRequestAction?: boolean;
+  onOpenSpeakerRequest?: () => void;
 }
 
 const client: SearchClient | undefined = isDevelopment
@@ -85,14 +90,27 @@ function SpeakerSelector({
   speakerError,
   setSermonList,
   setSpeakerError,
+  showSpeakerRequestAction = false,
+  onOpenSpeakerRequest,
 }: SpeakerSelectorProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestSearchRequestRef = useRef(0);
   const [speakersArray, setSpeakersArray] = useState<AlgoliaSpeaker[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
-      // fetch speakers
-      setSpeakersArray(await fetchSpeakerResults('', 20, 0));
+      setSearchLoading(true);
+      const requestId = ++latestSearchRequestRef.current;
+      const speakerResults = await fetchSpeakerResults('', 20, 0);
+      if (requestId !== latestSearchRequestRef.current) {
+        return;
+      }
+      setSpeakersArray(speakerResults);
+      setSearchLoading(false);
+      setHasCompletedSearch(true);
     };
     fetchData();
   }, []);
@@ -179,15 +197,53 @@ function SpeakerSelector({
           }
         }}
         onInputChange={(_, value) => {
+          setSearchInput(value);
+          setHasCompletedSearch(false);
           if (timerRef.current) {
             clearTimeout(timerRef.current);
           }
           timerRef.current = setTimeout(async () => {
-            setSpeakersArray(await fetchSpeakerResults(value, 25, 0));
+            setSearchLoading(true);
+            const requestId = ++latestSearchRequestRef.current;
+            const speakerResults = await fetchSpeakerResults(value, 25, 0);
+            if (requestId !== latestSearchRequestRef.current) {
+              return;
+            }
+            setSpeakersArray(speakerResults);
+            setSearchLoading(false);
+            setHasCompletedSearch(true);
           }, 300);
         }}
         id="speaker-input"
         options={getSpeakersUnion(sermonSpeakers, speakersArray)}
+        loading={searchLoading}
+        loadingText="Searching speakers..."
+        noOptionsText={
+          showSpeakerRequestAction && hasCompletedSearch && searchInput.trim().length > 0 ? (
+            <Box
+              sx={{
+                py: 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 1,
+              }}
+            >
+              <Typography variant="body2">Need to add a new speaker please make a request here</Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onOpenSpeakerRequest}
+                sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+              >
+                Here
+              </Button>
+            </Box>
+          ) : (
+            'No speakers found'
+          )
+        }
         isOptionEqualToValue={(option, value) => value === undefined || option === undefined || option.id === value.id}
         renderTags={(speakers, getTagProps) => {
           return speakers.map((speaker, index) => {

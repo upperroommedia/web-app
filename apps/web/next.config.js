@@ -71,6 +71,7 @@ const nextConfig = {
   outputFileTracingRoot: repoRoot,
   reactStrictMode: true,
   images: {
+    dangerouslyAllowLocalIP: process.env.NODE_ENV === 'development',
     remotePatterns: [
       { protocol: 'https', hostname: 'graph.facebook.com' },
       { protocol: 'https', hostname: 'account.microsoft.com' },
@@ -78,6 +79,7 @@ const nextConfig = {
       { protocol: 'https', hostname: 'core.subsplash.com' },
       { protocol: 'https', hostname: 'cdn.subsplash.com' },
       { protocol: 'https', hostname: 'images.subsplash.com' },
+      { protocol: 'https', hostname: 'firebasestorage.googleapis.com' },
       { protocol: 'https', hostname: 'localhost' },
       { protocol: 'http', hostname: '127.0.0.1' },
       { protocol: 'https', hostname: 'storage.googleapis.com' },

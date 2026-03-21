@@ -20,6 +20,7 @@ interface propsType {
   speaker?: ISpeaker;
   vertical?: boolean;
   requiredTypes?: ImageSizeType[];
+  renderHeaderForType?: (type: ImageSizeType, image?: ImageType) => React.ReactNode;
 }
 
 const ImageViewer = (props: propsType) => {
@@ -68,8 +69,10 @@ const ImageViewer = (props: propsType) => {
       >
         {ImageSizes.map((type, i) => {
           const image: ImageType | undefined = props.images.find((image) => image.type === type);
+          const header = props.renderHeaderForType?.(type, image);
           return image ? (
             <div key={`${image.id}-image`} style={{ width: '100%' }}>
+              {header && <div style={{ marginBottom: '8px' }}>{header}</div>}
               <div id={`${image.id}-image`} className={styles.imageHover}>
                 <div
                   className={styles.imageContainer}
@@ -146,6 +149,7 @@ const ImageViewer = (props: propsType) => {
             </div>
           ) : (
             <div key={i} style={{ width: '100%' }}>
+              {header && <div style={{ marginBottom: '8px' }}>{header}</div>}
               <div className={styles.imageHover}>
               <div
                 style={{

@@ -9,6 +9,9 @@ export interface ProfessionalEmailTemplateInput {
   intro: string;
   details: EmailDetailItem[];
   logoUrl?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  imageCaption?: string;
   actionLabel?: string;
   actionUrl?: string;
   actionHint?: string;
@@ -68,6 +71,22 @@ export const buildProfessionalEmailHtml = (input: ProfessionalEmailTemplateInput
         </p>`
       : '';
 
+  const imageHtml =
+    input.imageUrl
+      ? `<div style="margin: 24px 0 8px;">
+          <img
+            src="${escapeHtml(input.imageUrl)}"
+            alt="${escapeHtml(input.imageAlt ?? 'Email image')}"
+            style="display: block; max-width: 220px; max-height: 220px; width: 100%; height: auto; border-radius: 12px; border: 1px solid #e5e7eb; background: #f9fafb;"
+          />
+          ${
+            input.imageCaption
+              ? `<p style="margin: 10px 0 0; color: #6b7280; font-size: 13px;">${escapeHtml(input.imageCaption)}</p>`
+              : ''
+          }
+        </div>`
+      : '';
+
   const footerText = input.footer ?? 'UpperRoom Media';
   const logoHtml = input.logoUrl
     ? `<img
@@ -110,6 +129,7 @@ export const buildProfessionalEmailHtml = (input: ProfessionalEmailTemplateInput
                 <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-top: 20px;">
                   ${detailsHtml}
                 </table>
+                ${imageHtml}
                 ${actionHtml}
                 ${actionHintHtml}
               </td>

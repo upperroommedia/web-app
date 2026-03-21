@@ -104,7 +104,7 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
     if (isDevelopment && user) {
       return createMockAlgoliaSearchClient({
         userId: user.uid,
-        canSearchAllSermons: user.isAdmin() || user.canPublish(),
+        canSearchAllSermons: user.isAdmin(),
       });
     }
 

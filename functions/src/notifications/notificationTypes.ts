@@ -1,4 +1,11 @@
-export type NotificationSource = 'role-request' | 'runtime-alert';
+export type NotificationSource = 'role-request' | 'speaker-request' | 'runtime-alert';
+
+interface SpeakerRequestImageAsset {
+  downloadLink: string;
+  storagePath: string;
+  fileName: string;
+  contentType: string;
+}
 
 export interface RoleRequestNotificationPayload {
   requesterUid: string;
@@ -6,6 +13,17 @@ export interface RoleRequestNotificationPayload {
   requesterDisplayName?: string;
   requestedRole: string;
   reason: string;
+  requestedAtMs: number;
+  adminUrl: string;
+}
+
+export interface SpeakerRequestNotificationPayload {
+  requesterUid: string;
+  requesterEmail: string;
+  requesterDisplayName?: string;
+  speakerName: string;
+  description: string;
+  image: SpeakerRequestImageAsset;
   requestedAtMs: number;
   adminUrl: string;
 }
