@@ -294,6 +294,7 @@ const CreateSpeakerPopup = ({
                     src={requestedImageAsset.downloadLink}
                     alt={requestedImageAsset.fileName}
                     fill
+                    sizes="(max-width: 600px) 100vw, 220px"
                   style={{ objectFit: 'contain' }}
                 />
               </Box>

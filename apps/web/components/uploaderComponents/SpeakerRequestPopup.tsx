@@ -234,6 +234,7 @@ const SpeakerRequestPopup = ({ open, setOpen }: SpeakerRequestPopupProps) => {
                   src={previewUrl}
                   alt={selectedFile?.name ?? 'Speaker preview'}
                   fill
+                  sizes="(max-width: 600px) 100vw, 220px"
                   style={{ objectFit: 'contain' }}
                 />
               </Box>

@@ -302,6 +302,7 @@ const UserTable = (props: {
                             src={user.photoURL || '/user.png'}
                             alt={`Image of ${displayName}`}
                             fill
+                            sizes="44px"
                             style={{ objectFit: 'cover' }}
                           />
                         </Box>

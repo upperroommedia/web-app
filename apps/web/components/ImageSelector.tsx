@@ -242,6 +242,7 @@ const ImageSelector = (props: {
                       <Image
                         src={image.downloadLink}
                         fill
+                        sizes="164px"
                         alt={image.name}
                         style={{
                           borderRadius: '5px',
@@ -308,6 +309,7 @@ const ImageSelector = (props: {
                     <Image
                       src={image.downloadLink}
                       fill
+                      sizes="164px"
                       alt={image.name}
                       style={{
                         borderRadius: '5px',

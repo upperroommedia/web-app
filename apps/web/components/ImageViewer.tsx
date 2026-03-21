@@ -109,6 +109,7 @@ const ImageViewer = (props: propsType) => {
                     <Image
                       src={image.downloadLink}
                       alt={image.name}
+                      sizes={props.vertical ? '100vw' : '(max-width: 600px) 100vw, (max-width: 900px) 50vw, 33vw'}
                       style={{
                         objectFit: 'contain',
                       }}
