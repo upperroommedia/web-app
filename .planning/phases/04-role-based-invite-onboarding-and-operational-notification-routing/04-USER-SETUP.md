@@ -8,11 +8,11 @@ Complete these items for notification delivery to function in Firebase environme
 
 ## Environment Variables
 
-| Status | Variable | Source | Add to |
-|--------|----------|--------|--------|
-| [ ] | `ROLE_REQUEST_RECIPIENTS` | Firebase Functions params (`firebase functions:params:set`) | Firebase Functions runtime params |
-| [ ] | `RUNTIME_ALERT_RECIPIENTS` | Firebase Functions params (`firebase functions:params:set`) | Firebase Functions runtime params |
-| [ ] | `ADMIN_BASE_URL` | Production admin URL (for notification links) | Firebase Functions runtime params |
+| Status | Variable                   | Source                                                      | Add to                            |
+| ------ | -------------------------- | ----------------------------------------------------------- | --------------------------------- |
+| [ ]    | `ADMIN_REQUEST_RECIPIENTS` | Firebase Functions params (`firebase functions:params:set`) | Firebase Functions runtime params |
+| [ ]    | `RUNTIME_ALERT_RECIPIENTS` | Firebase Functions params (`firebase functions:params:set`) | Firebase Functions runtime params |
+| [ ]    | `ADMIN_BASE_URL`           | Production admin URL (for notification links)               | Firebase Functions runtime params |
 
 ## Dashboard Configuration
 
@@ -32,8 +32,9 @@ firebase functions:params:get --project <project-id>
 ```
 
 Expected results:
+
 - Trigger Email extension appears as installed for the target project.
-- Params output includes `ROLE_REQUEST_RECIPIENTS`, `RUNTIME_ALERT_RECIPIENTS`, and `ADMIN_BASE_URL`.
+- Params output includes `ADMIN_REQUEST_RECIPIENTS`, `RUNTIME_ALERT_RECIPIENTS`, and `ADMIN_BASE_URL`.
 
 ---
 

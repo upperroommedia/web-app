@@ -99,8 +99,8 @@ env:
     availability:
       - RUNTIME
 
-  - variable: ROLE_REQUEST_RECIPIENTS
-    secret: ROLE_REQUEST_RECIPIENTS
+  - variable: ADMIN_REQUEST_RECIPIENTS
+    secret: ADMIN_REQUEST_RECIPIENTS
     availability:
       - RUNTIME
   - variable: RUNTIME_ALERT_RECIPIENTS

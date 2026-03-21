@@ -3,8 +3,8 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { buildProfessionalEmailHtml, formatEmailDateTime } from '../notifications/emailTemplates';
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
-import { getAdminBaseUrl, getRoleRequestRecipients } from '../notifications/notificationParams';
-import { roleRequestSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
+import { getAdminBaseUrl, getAdminRequestRecipients } from '../notifications/notificationParams';
+import { adminRequestSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
 import { SpeakerRequestNotificationPayload } from '../notifications/notificationTypes';
 import { queueEmail } from '../notifications/queueEmail';
 import {
@@ -139,7 +139,7 @@ const listExistingSpeakerRequests = async (
 };
 
 const createSpeakerRequest = onCall(
-  { secrets: roleRequestSecretsWithRuntimeAlerts },
+  { secrets: adminRequestSecretsWithRuntimeAlerts },
   async (request: CallableRequest<CreateSpeakerRequestInputType>): Promise<CreateSpeakerRequestOutputType> => {
     const requesterUid = request.auth?.uid;
     if (!requesterUid) {
@@ -219,11 +219,11 @@ const createSpeakerRequest = onCall(
     let confirmationNotificationState: SpeakerRequestNotificationState = { status: 'not_attempted' };
     const warnings: string[] = [];
 
-    const roleRequestRecipients = getRoleRequestRecipients();
+    const adminRequestRecipients = getAdminRequestRecipients();
 
     try {
       const adminMailId = await queueEmail({
-        to: roleRequestRecipients,
+        to: adminRequestRecipients,
         source: 'speaker-request',
         alertType: 'speaker-request-created',
         metadata: {
@@ -294,21 +294,21 @@ const createSpeakerRequest = onCall(
         },
         message: {
           subject: 'UpperRoom Media speaker request received',
-        text: buildConfirmationMessageText({
-          requesterEmail,
-          speakerName: validation.value.speakerName,
-          description: validation.value.description,
-          requestedAtMs: createdAtMs,
-          image: validation.value.image,
-        }),
-        html: buildConfirmationMessageHtml({
-          requesterEmail,
-          speakerName: validation.value.speakerName,
-          description: validation.value.description,
-          requestedAtMs: createdAtMs,
-          image: validation.value.image,
-        }),
-      },
+          text: buildConfirmationMessageText({
+            requesterEmail,
+            speakerName: validation.value.speakerName,
+            description: validation.value.description,
+            requestedAtMs: createdAtMs,
+            image: validation.value.image,
+          }),
+          html: buildConfirmationMessageHtml({
+            requesterEmail,
+            speakerName: validation.value.speakerName,
+            description: validation.value.description,
+            requestedAtMs: createdAtMs,
+            image: validation.value.image,
+          }),
+        },
       });
 
       confirmationNotificationState = {

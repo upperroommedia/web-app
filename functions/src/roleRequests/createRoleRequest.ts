@@ -1,13 +1,10 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
-import {
-  buildProfessionalEmailHtml,
-  formatEmailDateTime,
-} from '../notifications/emailTemplates';
+import { buildProfessionalEmailHtml, formatEmailDateTime } from '../notifications/emailTemplates';
 import { emitOperationalAlert } from '../notifications/emitOperationalAlert';
-import { getAdminBaseUrl, getRoleRequestRecipients } from '../notifications/notificationParams';
-import { roleRequestSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
+import { getAdminBaseUrl, getAdminRequestRecipients } from '../notifications/notificationParams';
+import { adminRequestSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
 import { RoleRequestNotificationPayload } from '../notifications/notificationTypes';
 import { queueEmail } from '../notifications/queueEmail';
 import {
@@ -94,7 +91,7 @@ const listExistingRoleRequests = async (
 };
 
 const createRoleRequest = onCall(
-  { secrets: roleRequestSecretsWithRuntimeAlerts },
+  { secrets: adminRequestSecretsWithRuntimeAlerts },
   async (request: CallableRequest<CreateRoleRequestInputType>): Promise<CreateRoleRequestOutputType> => {
     const requesterUid = request.auth?.uid;
     if (!requesterUid) {
@@ -117,9 +114,7 @@ const createRoleRequest = onCall(
 
     const existingRequests = await listExistingRoleRequests(requesterUid);
     const existing = existingRequests.find(
-      ({ data }) =>
-        data.status === ROLE_REQUEST_STATUS_PENDING &&
-        data.requestedRole === validation.value.requestedRole
+      ({ data }) => data.status === ROLE_REQUEST_STATUS_PENDING && data.requestedRole === validation.value.requestedRole
     );
 
     if (existing) {
@@ -163,11 +158,11 @@ const createRoleRequest = onCall(
       adminUrl,
     };
 
-    const roleRequestRecipients = getRoleRequestRecipients();
+    const adminRequestRecipients = getAdminRequestRecipients();
 
     try {
       const mailId = await queueEmail({
-        to: roleRequestRecipients,
+        to: adminRequestRecipients,
         source: 'role-request',
         alertType: 'role-request-created',
         metadata: {

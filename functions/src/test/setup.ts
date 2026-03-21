@@ -1,7 +1,7 @@
 /**
  * Jest setup file for Firebase Functions tests
  * This file runs before all tests and configures Firebase Admin SDK to use the emulator
- * 
+ *
  * When running with `firebase emulators:exec`, the emulators are started automatically.
  * This setup ensures the Admin SDK connects to them.
  */
@@ -25,8 +25,8 @@ if (!process.env.GCLOUD_PROJECT) {
 // Tests must not inherit local dev-only list capacity overrides from the repo root .env.
 // Individual suites can set SUBSPLASH_DEV_MAX_LIST_SIZE explicitly when they need to exercise a smaller capacity.
 delete process.env.SUBSPLASH_DEV_MAX_LIST_SIZE;
-if (!process.env.ROLE_REQUEST_RECIPIENTS) {
-  process.env.ROLE_REQUEST_RECIPIENTS = '["test-role-alerts@example.test"]';
+if (!process.env.ADMIN_REQUEST_RECIPIENTS) {
+  process.env.ADMIN_REQUEST_RECIPIENTS = '["test-role-alerts@example.test"]';
 }
 if (!process.env.RUNTIME_ALERT_RECIPIENTS) {
   process.env.RUNTIME_ALERT_RECIPIENTS = '["test-runtime-alerts@example.test"]';
@@ -46,7 +46,7 @@ if (!firebaseAdmin.apps.length) {
       storageBucket: 'urm-app.appspot.com',
       databaseURL: 'https://urm-app-default-rtdb.firebaseio.com/',
     });
-    
+
     // Only log in verbose mode
     if (process.env.VERBOSE) {
       console.log('✓ Firebase Admin SDK initialized for tests');

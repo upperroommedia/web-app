@@ -32,7 +32,7 @@ Disable automatic rollouts for backend `web-staging` in Firebase Console so App 
 Create/grant each secret in `urm-app-staging`:
 
 ```bash
-firebase apphosting:secrets:set ROLE_REQUEST_RECIPIENTS --project urm-app-staging
+firebase apphosting:secrets:set ADMIN_REQUEST_RECIPIENTS --project urm-app-staging
 firebase apphosting:secrets:set RUNTIME_ALERT_RECIPIENTS --project urm-app-staging
 firebase apphosting:secrets:set ADMIN_BASE_URL --project urm-app-staging
 firebase apphosting:secrets:set SUBSPLASH_EMAIL --project urm-app-staging

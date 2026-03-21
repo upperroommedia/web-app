@@ -1,10 +1,6 @@
-import {
-  getAdminBaseUrlEnv,
-  getRoleRequestRecipientsEnv,
-  getRuntimeAlertRecipientsEnv,
-} from '../env';
+import { getAdminBaseUrlEnv, getAdminRequestRecipientsEnv, getRuntimeAlertRecipientsEnv } from '../env';
 
-export const getRoleRequestRecipients = (): string[] => getRoleRequestRecipientsEnv();
+export const getAdminRequestRecipients = (): string[] => getAdminRequestRecipientsEnv();
 
 export const getRuntimeAlertRecipients = (): string[] => getRuntimeAlertRecipientsEnv();
 
