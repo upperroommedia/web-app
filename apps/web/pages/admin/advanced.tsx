@@ -25,11 +25,18 @@ import type {
   GetSoundCloudAuthStatusInput,
   GetSoundCloudAuthStatusReturnType,
 } from '@upperroom/contracts/getSoundCloudAuthStatus';
+import type {
+  UpdateAllSpeakerTagsInputType,
+  UpdateAllSpeakerTagsOutputType,
+} from '@upperroom/contracts/updateAllSpeakerTags';
+import type { UpdateAllSpeakerTagsResultType } from '@upperroom/contracts/updateAllSpeakerTags';
 
 type NoticeState = {
   severity: 'success' | 'error' | 'info' | 'warning';
   text: string;
 } | null;
+
+const SCRIPT_RUNNER_EMAIL = 'youssef.a.asaad@gmail.com';
 
 const formatTimestamp = (value?: number): string => {
   if (!value) {
@@ -48,9 +55,12 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
   const [status, setStatus] = useState<GetSoundCloudAuthStatusReturnType | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isRunningSpeakerTagUpdate, setIsRunningSpeakerTagUpdate] = useState(false);
+  const [speakerTagUpdateResult, setSpeakerTagUpdateResult] = useState<UpdateAllSpeakerTagsResultType | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
 
   const isAdmin = user?.isAdmin() ?? false;
+  const canRunScripts = isAdmin && user?.email?.trim().toLowerCase() === SCRIPT_RUNNER_EMAIL;
   const redirectUri = useMemo(() => {
     if (typeof window === 'undefined') {
       return '';
@@ -147,6 +157,45 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       setIsConnecting(false);
     }
   }, [redirectUri, status?.clientId]);
+
+  const runUpdateAllSpeakerTags = useCallback(async () => {
+    if (!canRunScripts) {
+      setNotice({ severity: 'error', text: 'You are not allowed to run admin scripts.' });
+      return;
+    }
+
+    setIsRunningSpeakerTagUpdate(true);
+    setSpeakerTagUpdateResult(null);
+    setNotice({ severity: 'info', text: 'Updating Subsplash speaker tags from Firebase images…' });
+    try {
+      const updateAllSpeakerTags = createFunctionV2<UpdateAllSpeakerTagsInputType, UpdateAllSpeakerTagsOutputType>(
+        'updateallspeakertags'
+      );
+      const result = await updateAllSpeakerTags({});
+      if (result.status !== 'success') {
+        setNotice({ severity: 'error', text: result.error });
+        return;
+      }
+
+      setSpeakerTagUpdateResult(result.data);
+
+      const rateLimitText = result.data.abortedDueToRateLimit
+        ? ` Rate limited after ${result.data.updatedCount} updates.${result.data.retryAfterMs ? ` Retry after about ${Math.ceil(result.data.retryAfterMs / 1000)}s.` : ''}`
+        : '';
+      const failureText = result.data.failedCount > 0
+        ? ` ${result.data.failedCount} speaker tags failed.`
+        : '';
+      setNotice({
+        severity: result.data.abortedDueToRateLimit || result.data.failedCount > 0 ? 'warning' : 'success',
+        text: `Updated ${result.data.updatedCount} speaker tags. Skipped ${result.data.skippedNoTagCount} without tags, ${result.data.skippedNoSquareImageCount} without square images, and ${result.data.skippedNoNameCount} without names.${failureText}${rateLimitText}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update speaker tags.';
+      setNotice({ severity: 'error', text: message });
+    } finally {
+      setIsRunningSpeakerTagUpdate(false);
+    }
+  }, [canRunScripts]);
 
   return (
     <Box sx={{ maxWidth: 960, mx: 'auto', width: '100%' }}>
@@ -254,6 +303,106 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
             </Stack>
           </CardContent>
         </Card>
+
+        {canRunScripts ? (
+          <Card variant="outlined">
+            <CardContent>
+              <Stack spacing={2.5}>
+                <Box>
+                  <Typography variant="h6" fontWeight={700}>
+                    Scripts
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Temporary one-off maintenance actions. These are restricted to a single designated admin account.
+                  </Typography>
+                </Box>
+
+                <Divider />
+
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  spacing={1.5}
+                >
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={700}>
+                      Update All Speaker Tags
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Sync every Subsplash speaker tag square icon with the current Firebase speaker square image.
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    onClick={runUpdateAllSpeakerTags}
+                    disabled={isRunningSpeakerTagUpdate}
+                  >
+                    {isRunningSpeakerTagUpdate ? 'Updating…' : 'Update All Speaker Tags'}
+                  </Button>
+                </Stack>
+
+                {speakerTagUpdateResult ? (
+                  <Card variant="outlined" sx={{ bgcolor: 'background.default' }}>
+                    <CardContent>
+                      <Stack spacing={2}>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight={700}>
+                            Last Run Summary
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            Clear result summary for the most recent speaker-tag sync run.
+                          </Typography>
+                        </Box>
+
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
+                          <Chip color="success" label={`${speakerTagUpdateResult.updatedCount} updated`} />
+                          <Chip label={`${speakerTagUpdateResult.totalSpeakers} total speakers`} />
+                          <Chip label={`${speakerTagUpdateResult.skippedNoTagCount} skipped: no tag`} />
+                          <Chip label={`${speakerTagUpdateResult.skippedNoSquareImageCount} skipped: no square image`} />
+                          <Chip label={`${speakerTagUpdateResult.skippedNoNameCount} skipped: no name`} />
+                          <Chip
+                            color={speakerTagUpdateResult.failedCount > 0 ? 'error' : 'default'}
+                            label={`${speakerTagUpdateResult.failedCount} failed`}
+                          />
+                          {speakerTagUpdateResult.abortedDueToRateLimit ? (
+                            <Chip
+                              color="warning"
+                              label={
+                                speakerTagUpdateResult.retryAfterMs
+                                  ? `rate limited, retry after ~${Math.ceil(speakerTagUpdateResult.retryAfterMs / 1000)}s`
+                                  : 'rate limited'
+                              }
+                            />
+                          ) : null}
+                        </Stack>
+
+                        {speakerTagUpdateResult.failedSpeakers.length > 0 ? (
+                          <Alert severity="warning">
+                            <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                              Failed speaker tag updates
+                            </Typography>
+                            <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                              {speakerTagUpdateResult.failedSpeakers.map((failedSpeaker) => (
+                                <Box component="li" key={failedSpeaker.speakerId} sx={{ mb: 0.5 }}>
+                                  <Typography variant="body2">
+                                    {failedSpeaker.name} ({failedSpeaker.speakerId}): {failedSpeaker.error}
+                                  </Typography>
+                                </Box>
+                              ))}
+                            </Box>
+                          </Alert>
+                        ) : (
+                          <Alert severity="success">No speaker tag updates failed in the last run.</Alert>
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ) : null}
+              </Stack>
+            </CardContent>
+          </Card>
+        ) : null}
       </Stack>
     </Box>
   );

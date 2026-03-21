@@ -1,5 +1,6 @@
 import axios, { isAxiosError } from 'axios';
 import { DocumentReference, DocumentSnapshot } from 'firebase-admin/firestore';
+import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { ImageType } from '@upperroom/shared/types/Image';
 import { ISpeaker } from '@upperroom/shared/types/Speaker';
@@ -348,6 +349,83 @@ const getCreateSpeakerTagLockKey = (title: string): string => {
   return `tag:create-speaker-${normalizeSlug(title) || 'untitled'}`;
 };
 
+const SPEAKER_TAG_RETRY_ATTEMPTS = 3;
+const SPEAKER_TAG_RETRY_BASE_DELAY_MS = 400;
+const SPEAKER_TAG_RETRY_MAX_DELAY_MS = 5000;
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const getAxiosStatusCode = (error: unknown): number | undefined => (
+  error && typeof error === 'object' && 'response' in error
+    ? (error as { response?: { status?: number } }).response?.status
+    : undefined
+);
+
+const getRetryAfterDelayMs = (error: unknown): number | undefined => {
+  if (!(error && typeof error === 'object' && 'response' in error)) {
+    return undefined;
+  }
+
+  const headers = (error as { response?: { headers?: Record<string, unknown> } }).response?.headers;
+  if (!headers) {
+    return undefined;
+  }
+
+  const retryAfter = headers['retry-after'];
+  if (typeof retryAfter === 'number' && Number.isFinite(retryAfter)) {
+    return retryAfter * 1000;
+  }
+  if (typeof retryAfter === 'string') {
+    const numeric = Number.parseInt(retryAfter, 10);
+    if (Number.isFinite(numeric)) {
+      return numeric * 1000;
+    }
+  }
+
+  return undefined;
+};
+
+const shouldRetrySubsplashRequest = (status?: number): boolean => (
+  status === 429 || status === 408 || status === 502 || status === 503 || status === 504
+);
+
+const withSubsplashSpeakerRetry = async <T>(
+  operationName: string,
+  requestFn: () => Promise<T>
+): Promise<T> => {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      const status = getAxiosStatusCode(error);
+      if (!shouldRetrySubsplashRequest(status) || attempt >= SPEAKER_TAG_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      const retryAfterMs = getRetryAfterDelayMs(error);
+      const computedBackoffMs = Math.min(
+        SPEAKER_TAG_RETRY_BASE_DELAY_MS * (2 ** attempt),
+        SPEAKER_TAG_RETRY_MAX_DELAY_MS
+      );
+      const delayMs = retryAfterMs ?? computedBackoffMs;
+
+      logger.warn(`Subsplash ${operationName} received retryable status ${status}; retrying`, {
+        operationName,
+        status,
+        attempt: attempt + 1,
+        maxAttempts: SPEAKER_TAG_RETRY_ATTEMPTS + 1,
+        delayMs,
+      });
+
+      await sleep(delayMs);
+      attempt += 1;
+    }
+  }
+};
+
 const getSubsplashErrorCode = (payload: unknown): string | undefined => {
   if (!payload || typeof payload !== 'object') {
     return undefined;
@@ -367,7 +445,7 @@ const getSubsplashErrorCode = (payload: unknown): string | undefined => {
   return typeof code === 'string' ? code : undefined;
 };
 
-const createSubsplashSpeakerTag = async (
+export const createSubsplashSpeakerTag = async (
   input: CreateSubsplashSpeakerTagInputType
 ): Promise<CreateSubsplashSpeakerTagOutputType> => {
   const runMutation = async (): Promise<CreateSubsplashSpeakerTagOutputType> => {
@@ -386,7 +464,7 @@ const createSubsplashSpeakerTag = async (
     };
 
     const config = createAxiosConfig(url, await authenticateSubsplash(), input.tagId ? 'PATCH' : 'POST', payload);
-    const response = (await axios(config)).data as { id?: unknown };
+    const response = (await withSubsplashSpeakerRetry('createSpeakerTag', () => axios(config))).data as { id?: unknown };
     const tagId = typeof response.id === 'string' ? response.id : input.tagId || '';
     if (!tagId) {
       throw new HttpsError('internal', 'Subsplash did not return a tag id.');
