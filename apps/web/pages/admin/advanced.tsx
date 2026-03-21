@@ -38,6 +38,50 @@ type NoticeState = {
 
 const SCRIPT_RUNNER_EMAIL = 'youssef.a.asaad@gmail.com';
 
+const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const formatCallableError = (error: unknown, fallbackMessage: string): string => {
+  if (error instanceof Error && error.message && error.message !== 'internal') {
+    return error.message;
+  }
+
+  if (isObjectRecord(error)) {
+    const details = isObjectRecord(error.details) ? error.details : null;
+    const detailMessage = typeof details?.message === 'string'
+      ? details.message
+      : typeof details?.error === 'string'
+        ? details.error
+        : null;
+    if (detailMessage) {
+      return detailMessage;
+    }
+
+    const upstreamStatus = typeof details?.upstream_status === 'number' ? details.upstream_status : null;
+    const upstreamText = details?.upstream ? JSON.stringify(details.upstream) : null;
+    if (upstreamStatus && upstreamText) {
+      return `Speaker tag sync failed upstream with status ${upstreamStatus}: ${upstreamText}`;
+    }
+    if (upstreamStatus) {
+      return `Speaker tag sync failed upstream with status ${upstreamStatus}.`;
+    }
+
+    const code = typeof error.code === 'string' ? error.code : null;
+    if (code === 'deadline-exceeded') {
+      return 'The speaker tag sync ran longer than the current callable timeout before it could return a summary.';
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message === 'internal'
+      ? 'The speaker tag sync failed before it could return a useful summary. Check the function logs for the last processed speaker.'
+      : error.message;
+  }
+
+  return fallbackMessage;
+};
+
 const formatTimestamp = (value?: number): string => {
   if (!value) {
     return 'Not available';
@@ -190,7 +234,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
         text: `Updated ${result.data.updatedCount} speaker tags. Skipped ${result.data.skippedNoTagCount} without tags, ${result.data.skippedNoSquareImageCount} without square images, and ${result.data.skippedNoNameCount} without names.${failureText}${rateLimitText}`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update speaker tags.';
+      const message = formatCallableError(error, 'Failed to update speaker tags.');
       setNotice({ severity: 'error', text: message });
     } finally {
       setIsRunningSpeakerTagUpdate(false);

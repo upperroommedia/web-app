@@ -124,7 +124,12 @@ const createEmptyResult = (totalSpeakers: number): UpdateAllSpeakerTagsResultTyp
 });
 
 const updateAllSpeakerTags = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
+  {
+    secrets: subsplashSecretsWithRuntimeAlerts,
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    maxInstances: 1,
+  },
   async (request: CallableRequest<UpdateAllSpeakerTagsInputType>): Promise<UpdateAllSpeakerTagsOutputType> => {
     const requester = await assertAuthorizedScriptRunner(request);
 
