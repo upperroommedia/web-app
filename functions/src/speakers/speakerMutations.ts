@@ -387,7 +387,7 @@ const getRetryAfterDelayMs = (error: unknown): number | undefined => {
 };
 
 const shouldRetrySubsplashRequest = (status?: number): boolean => (
-  status === 429 || status === 408 || status === 502 || status === 503 || status === 504
+  status === 429 || status === 408 || status === 500 || status === 502 || status === 503 || status === 504
 );
 
 const withSubsplashSpeakerRetry = async <T>(

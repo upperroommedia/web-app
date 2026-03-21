@@ -1,4 +1,5 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { isAxiosError } from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { ISpeaker } from '@upperroom/shared/types/Speaker';
@@ -51,6 +52,63 @@ const getRetryAfterMs = (error: unknown): number | undefined => {
 
   const retryAfterMs = (error.details as { retry_after_ms?: unknown }).retry_after_ms;
   return typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) ? retryAfterMs : undefined;
+};
+
+const normalizeSpeakerSyncError = (error: unknown): HttpsError => {
+  if (error instanceof HttpsError) {
+    return error;
+  }
+
+  if (isAxiosError(error)) {
+    const status = error.response?.status;
+    const retryAfterHeader = error.response?.headers?.['retry-after'];
+    let retryAfterMs: number | undefined;
+    if (typeof retryAfterHeader === 'number' && Number.isFinite(retryAfterHeader)) {
+      retryAfterMs = retryAfterHeader * 1000;
+    } else if (typeof retryAfterHeader === 'string') {
+      const numeric = Number.parseInt(retryAfterHeader, 10);
+      if (Number.isFinite(numeric)) {
+        retryAfterMs = numeric * 1000;
+      }
+    }
+
+    if (status === 429) {
+      return new HttpsError('resource-exhausted', error.message, {
+        code: 'UPSTREAM_RATE_LIMITED',
+        upstream_status: status,
+        ...(retryAfterMs ? { retry_after_ms: retryAfterMs } : {}),
+        upstream: error.response?.data,
+      });
+    }
+
+    return new HttpsError('internal', error.message, {
+      code: 'UPSTREAM_REQUEST_FAILED',
+      upstream_status: status,
+      upstream: error.response?.data,
+    });
+  }
+
+  if (error instanceof Error) {
+    return new HttpsError('internal', error.message);
+  }
+
+  return new HttpsError('internal', 'Unknown speaker tag sync failure.');
+};
+
+const describeSpeakerSyncFailure = (error: HttpsError): string => {
+  if (error.details && typeof error.details === 'object') {
+    const details = error.details as { upstream_status?: unknown; upstream?: unknown };
+    const upstreamStatus = typeof details.upstream_status === 'number' ? details.upstream_status : undefined;
+    const upstreamText = details.upstream ? JSON.stringify(details.upstream) : undefined;
+    if (upstreamStatus && upstreamText) {
+      return `${error.message} (status ${upstreamStatus}: ${upstreamText})`;
+    }
+    if (upstreamStatus) {
+      return `${error.message} (status ${upstreamStatus})`;
+    }
+  }
+
+  return error.message;
 };
 
 const createEmptyResult = (totalSpeakers: number): UpdateAllSpeakerTagsResultType => ({
@@ -133,16 +191,17 @@ const updateAllSpeakerTags = onCall(
           result.updatedCount += 1;
           result.processedSpeakerIds.push(speaker.id);
         } catch (error) {
-          const normalizedError = handleError(error, {
-            alertCode: 'UPDATE_ALL_SPEAKER_TAGS_FAILURE',
-            summary: 'Update-all-speaker-tags script failed while syncing a Subsplash speaker tag.',
-            request,
-            context: {
-              functionName: 'updateAllSpeakerTags',
-              speakerId: speaker.id,
-              speakerName: normalizedName,
-              speakerTagId: speaker.tagId,
-            },
+          const normalizedError = normalizeSpeakerSyncError(error);
+          const failureDescription = describeSpeakerSyncFailure(normalizedError);
+
+          logger.warn('updateallspeakertags:speaker-failed', {
+            functionName: 'updateAllSpeakerTags',
+            speakerId: speaker.id,
+            speakerName: normalizedName,
+            speakerTagId: speaker.tagId,
+            normalizedErrorCode: normalizedError.code,
+            failure: failureDescription,
+            requesterEmail,
           });
 
           if (normalizedError.code === 'resource-exhausted') {
@@ -152,7 +211,7 @@ const updateAllSpeakerTags = onCall(
             result.failedSpeakers.push({
               speakerId: speaker.id,
               name: normalizedName,
-              error: normalizedError.message,
+              error: failureDescription,
             });
             break;
           }
@@ -161,7 +220,7 @@ const updateAllSpeakerTags = onCall(
           result.failedSpeakers.push({
             speakerId: speaker.id,
             name: normalizedName,
-            error: normalizedError.message,
+            error: failureDescription,
           });
         }
 
