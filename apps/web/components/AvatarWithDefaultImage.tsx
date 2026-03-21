@@ -48,8 +48,8 @@ function AvatarWithDefaultImage({
         <Image
           src={image.downloadLink}
           alt={`Image of ${altName}`}
-          width={width}
-          height={height}
+          fill
+          sizes={`${width}px`}
           style={{ objectFit: 'cover' }}
         />
       )}

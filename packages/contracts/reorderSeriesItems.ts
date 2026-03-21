@@ -5,6 +5,7 @@ export interface ItemOrderEntry {
 
 export interface ReorderSeriesItemsInputType {
   firestoreSeriesId: string;
+  expectedRemoteMembershipHash?: string;
   itemOrder: ItemOrderEntry[];
   operationKey?: string;
 }

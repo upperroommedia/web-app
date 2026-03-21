@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from './subsplashUtils';
-import { getSeriesItems, patchSeriesItemPositions } from './helpers/seriesHelpers';
+import { getAllSeriesItemsAcrossStatuses, patchSeriesItemPositions } from './helpers/seriesHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminSeriesConverter } from './firestoreDataConverter';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
@@ -14,6 +14,7 @@ import handleError from './handleError';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import { createSeriesRemoteMembershipHash } from './helpers/seriesRemoteState';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -24,6 +25,7 @@ export interface ItemOrderEntry {
 
 export interface ReorderSeriesItemsInputType {
   firestoreSeriesId: string;
+  expectedRemoteMembershipHash?: string;
   itemOrder: ItemOrderEntry[];
   operationKey?: string;
 }
@@ -48,7 +50,7 @@ const reorderSeriesItems = onCall(
       );
     }
 
-    const { firestoreSeriesId, itemOrder, operationKey } = request.data;
+    const { firestoreSeriesId, expectedRemoteMembershipHash, itemOrder, operationKey } = request.data;
 
     // Validation
     if (!firestoreSeriesId || !firestoreSeriesId.trim()) {
@@ -94,17 +96,31 @@ const reorderSeriesItems = onCall(
               };
             }
 
+            const normalizedExpectedRemoteMembershipHash = expectedRemoteMembershipHash?.trim();
+
             // Authenticate with Subsplash.
             const token = await authenticateSubsplash();
 
             // Subsplash is source-of-truth: fetch current membership before patching.
-            const [publishedItems, draftItems, scheduledItems] = await Promise.all([
-              getSeriesItems(subsplashSeriesId, token, { status: 'published' }),
-              getSeriesItems(subsplashSeriesId, token, { status: 'draft' }),
-              getSeriesItems(subsplashSeriesId, token, { status: 'scheduled' }),
-            ]);
+            const remoteItems = await getAllSeriesItemsAcrossStatuses(subsplashSeriesId, token);
+            const remoteMembershipHash = createSeriesRemoteMembershipHash(
+              [...remoteItems]
+                .sort((left, right) => (right.position ?? Number.NEGATIVE_INFINITY) - (left.position ?? Number.NEGATIVE_INFINITY))
+                .map((item) => ({ id: item.id, status: item.status }))
+            );
+
+            if (
+              normalizedExpectedRemoteMembershipHash &&
+              normalizedExpectedRemoteMembershipHash !== remoteMembershipHash
+            ) {
+              throw new HttpsError(
+                'failed-precondition',
+                'Series membership changed in Subsplash. Refresh and retry.'
+              );
+            }
+
             const remoteItemsById = new Map<string, { id: string; position: number | null }>();
-            [...publishedItems, ...draftItems, ...scheduledItems].forEach((item) => {
+            remoteItems.forEach((item) => {
               remoteItemsById.set(item.id, { id: item.id, position: item.position ?? null });
             });
 
@@ -118,13 +134,30 @@ const reorderSeriesItems = onCall(
               }
             });
 
-            const requestedPositions = new Map(itemOrder.map((entry) => [entry.mediaItemId, entry.position]));
+            if (normalizedExpectedRemoteMembershipHash && itemOrder.length !== remoteItemsById.size) {
+              throw new HttpsError(
+                'failed-precondition',
+                'Reorder request must include every media item currently in the Subsplash series.'
+              );
+            }
 
-            // Patch using remote membership as baseline, replacing only explicitly requested items.
-            const itemsToUpdate = Array.from(remoteItemsById.values()).map((item) => ({
-              id: item.id,
-              position: requestedPositions.get(item.id) ?? item.position,
-            }));
+            const requestedPositions = new Map(itemOrder.map((entry) => [entry.mediaItemId, entry.position]));
+            if (normalizedExpectedRemoteMembershipHash && requestedPositions.size !== remoteItemsById.size) {
+              throw new HttpsError(
+                'failed-precondition',
+                'Reorder request must be a full permutation of current Subsplash series membership.'
+              );
+            }
+
+            const itemsToUpdate = Array.from(remoteItemsById.values()).map((item) => {
+              const requestedPosition = requestedPositions.get(item.id);
+              return {
+                id: item.id,
+                position: normalizedExpectedRemoteMembershipHash
+                  ? (requestedPosition ?? null)
+                  : (requestedPosition ?? item.position),
+              };
+            });
 
             await patchSeriesItemPositions(subsplashSeriesId, itemsToUpdate, token);
 

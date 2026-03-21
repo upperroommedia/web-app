@@ -6,7 +6,7 @@
  */
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -43,6 +43,7 @@ import CollectionsIcon from '@mui/icons-material/Collections';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import Link from 'next/link';
+import Image from 'next/image';
 import { alpha, useTheme } from '@mui/material/styles';
 import {
   DndContext,
@@ -86,15 +87,161 @@ import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '@upperroom/contracts/reorderSeriesItems';
 import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '@upperroom/contracts/removeFromSeries';
-import { AddToSeriesInputType, AddToSeriesOutputType } from '@upperroom/contracts/addToSeries';
 import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
 import { DeleteSeriesInputType, DeleteSeriesOutputType } from '@upperroom/contracts/deleteSeries';
 import type { BulkAddToSeriesInputType, BulkAddToSeriesOutputType } from '@upperroom/contracts/bulkAddToSeries';
+import type {
+  GetSeriesRemoteStateOutputType,
+  GetSeriesRemoteStateRemoteItem,
+} from '../../../../../packages/contracts/getSeriesRemoteState';
 import { serverTimestamp, deleteField } from 'firebase/firestore';
+import { AspectRatio } from '../../../types/Image';
 
 interface SeriesItemWithSermon extends SeriesItem {
   sermon?: Sermon;
 }
+
+interface SeriesDisplayItem extends SeriesItemWithSermon {
+  displayId: string;
+  sermonId?: string;
+  remoteMediaItemId?: string;
+  remoteStatus?: GetSeriesRemoteStateRemoteItem['remoteStatus'];
+  remoteTitle?: string;
+  remoteSubtitle?: string;
+  remoteImageUrl?: string;
+  remoteImageType?: string;
+  isSubsplashOnlyPlaceholder: boolean;
+  isTrackedInFirebase: boolean;
+  canReorder: boolean;
+  canUnpublish: boolean;
+  canRemoveLocally: boolean;
+}
+
+const cloneSeriesDisplayItems = (source: SeriesDisplayItem[]): SeriesDisplayItem[] =>
+  source.map((item) => ({
+    ...item,
+    sermon: item.sermon ? { ...item.sermon } : undefined,
+  }));
+
+const createLocalDisplayItem = (item: SeriesItemWithSermon): SeriesDisplayItem => ({
+  ...item,
+  displayId: item.id,
+  sermonId: item.id,
+  remoteMediaItemId: item.sermonSubsplashId || item.sermon?.subsplashId,
+  remoteTitle: item.sermon?.title,
+  remoteSubtitle: item.sermon?.dateString,
+  isSubsplashOnlyPlaceholder: false,
+  isTrackedInFirebase: true,
+  canReorder: true,
+  canUnpublish: item.publishedToSubsplash === true,
+  canRemoveLocally: true,
+});
+
+const createPlaceholderDisplayItem = (remoteItem: GetSeriesRemoteStateRemoteItem): SeriesDisplayItem => ({
+  id: `remote:${remoteItem.mediaItemId}`,
+  displayId: `remote:${remoteItem.mediaItemId}`,
+  sermonId: undefined,
+  position: 0,
+  addedAt: null,
+  publishedToSubsplash: remoteItem.remoteStatus === 'published',
+  sermonSubsplashId: remoteItem.mediaItemId,
+  remoteMediaItemId: remoteItem.mediaItemId,
+  remoteStatus: remoteItem.remoteStatus,
+  remoteTitle: remoteItem.title,
+  remoteSubtitle: remoteItem.subtitle,
+  remoteImageUrl: remoteItem.imageUrl,
+  remoteImageType: remoteItem.imageType,
+  isSubsplashOnlyPlaceholder: true,
+  isTrackedInFirebase: false,
+  canReorder: remoteItem.canReorder,
+  canUnpublish: remoteItem.canUnpublish,
+  canRemoveLocally: false,
+});
+
+const buildSeriesDisplayItems = (
+  localItems: SeriesItemWithSermon[],
+  remoteState: GetSeriesRemoteStateOutputType | null
+): SeriesDisplayItem[] => {
+  const localDisplayItems = localItems.map(createLocalDisplayItem);
+  if (!remoteState) {
+    return localDisplayItems;
+  }
+
+  const localBySermonId = new Map(localDisplayItems.map((item) => [item.sermonId || item.id, item]));
+  const matchedTrackedIds = new Set(
+    remoteState.remoteItems
+      .map((item) => item.matchedSermonId)
+      .filter((itemId): itemId is string => Boolean(itemId))
+  );
+
+  const remoteDisplayItems = remoteState.remoteItems.map((remoteItem) => {
+    if (remoteItem.matchedSermonId) {
+      const localItem = localBySermonId.get(remoteItem.matchedSermonId);
+      if (localItem) {
+        return {
+          ...localItem,
+          remoteMediaItemId: remoteItem.mediaItemId,
+          sermonSubsplashId: remoteItem.mediaItemId,
+          publishedToSubsplash: remoteItem.publishedToSubsplashInFirebase,
+          remoteStatus: remoteItem.remoteStatus,
+          remoteTitle: remoteItem.title || localItem.sermon?.title,
+          remoteSubtitle: remoteItem.subtitle || localItem.sermon?.dateString,
+          remoteImageUrl: remoteItem.imageUrl,
+          remoteImageType: remoteItem.imageType,
+          isSubsplashOnlyPlaceholder: false,
+          isTrackedInFirebase: true,
+          canReorder: remoteItem.canReorder,
+          canUnpublish: remoteItem.canUnpublish,
+          canRemoveLocally: true,
+        } satisfies SeriesDisplayItem;
+      }
+    }
+
+    return createPlaceholderDisplayItem(remoteItem);
+  });
+
+  const localOnlyItemsByAnchor = new Map<number, SeriesDisplayItem[]>();
+  let matchedTrackedSeen = 0;
+  localDisplayItems.forEach((item) => {
+    if (item.sermonId && matchedTrackedIds.has(item.sermonId)) {
+      matchedTrackedSeen += 1;
+      return;
+    }
+
+    const existing = localOnlyItemsByAnchor.get(matchedTrackedSeen) || [];
+    existing.push(item);
+    localOnlyItemsByAnchor.set(matchedTrackedSeen, existing);
+  });
+
+  const combinedItems: SeriesDisplayItem[] = [];
+  const prependItems = localOnlyItemsByAnchor.get(0);
+  if (prependItems) {
+    combinedItems.push(...prependItems);
+  }
+
+  let remoteTrackedSeen = 0;
+  remoteDisplayItems.forEach((item) => {
+    combinedItems.push(item);
+    if (item.sermonId && matchedTrackedIds.has(item.sermonId)) {
+      remoteTrackedSeen += 1;
+      const anchoredItems = localOnlyItemsByAnchor.get(remoteTrackedSeen);
+      if (anchoredItems) {
+        combinedItems.push(...anchoredItems);
+      }
+    }
+  });
+
+  for (const [anchor, anchoredItems] of localOnlyItemsByAnchor.entries()) {
+    if (anchor > remoteTrackedSeen) {
+      combinedItems.push(...anchoredItems);
+    }
+  }
+
+  return combinedItems.map((item, index, source) => ({
+    ...item,
+    position: source.length - index,
+  }));
+};
 
 const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
   const busyDetails = parseLockBusyDetails(error);
@@ -121,19 +268,14 @@ const getErrorField = (error: unknown, field: 'code' | 'message'): string | unde
 const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
   getErrorField(error, 'message') || fallbackMessage;
 
-const cloneSeriesItems = (source: SeriesItemWithSermon[]): SeriesItemWithSermon[] =>
-  source.map((item) => ({
-    ...item,
-    sermon: item.sermon ? { ...item.sermon } : undefined,
-  }));
-
 interface SortableItemProps {
-  item: SeriesItemWithSermon;
+  item: SeriesDisplayItem;
   index: number;
+  isSelected: boolean;
+  onToggleSelected: (displayId: string, checked: boolean) => void;
   onOpenSermon: (id: string) => void;
-  onRequestPublish: (item: SeriesItemWithSermon) => void;
-  onRequestUnpublish: (item: SeriesItemWithSermon) => void;
-  onRequestRemove: (item: SeriesItemWithSermon) => void;
+  onRequestPublish: (item: SeriesDisplayItem) => void;
+  onRequestUnpublish: (item: SeriesDisplayItem) => void;
   isPublishing: boolean;
   isUnpublishing: boolean;
   actionsDisabled: boolean;
@@ -141,13 +283,14 @@ interface SortableItemProps {
   publishBlockedReason?: string;
 }
 
-const SortableItem = ({
+const SortableItem = memo(({
   item,
   index,
+  isSelected,
+  onToggleSelected,
   onOpenSermon,
   onRequestPublish,
   onRequestUnpublish,
-  onRequestRemove,
   isPublishing,
   isUnpublishing,
   actionsDisabled,
@@ -162,7 +305,7 @@ const SortableItem = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id });
+  } = useSortable({ id: item.displayId });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -171,12 +314,33 @@ const SortableItem = ({
     position: 'relative' as const,
   };
 
+  const isDarkMode = theme.palette.mode === 'dark';
+  const isPlaceholder = item.isSubsplashOnlyPlaceholder;
+  const placeholderBackground = isDarkMode
+    ? alpha(theme.palette.common.black, 0.18)
+    : alpha(theme.palette.common.black, 0.03);
+  const firebaseRowBackground = isDarkMode ? alpha(theme.palette.common.white, 0.03) : 'background.paper';
+  const firebaseRowHoverBackground = isDarkMode ? alpha(theme.palette.common.white, 0.06) : 'action.hover';
+  const placeholderBorder = isDarkMode
+    ? alpha(theme.palette.common.white, 0.09)
+    : alpha(theme.palette.common.black, 0.08);
+  const placeholderPrimaryText = alpha(theme.palette.text.primary, isDarkMode ? 0.58 : 0.4);
+  const placeholderSecondaryText = isDarkMode
+    ? alpha(theme.palette.text.secondary, 0.82)
+    : alpha(theme.palette.text.secondary, 0.6);
+
+  const localImage = item.sermon?.images?.find((img) => img.type === 'square')
+    || item.sermon?.images?.find((img) => img.type === 'wide')
+    || item.sermon?.images?.[0];
+
   const handleRowClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     if (target.closest('button,a,[role="button"],[data-no-row-nav="true"]')) {
       return;
     }
-    onOpenSermon(item.id);
+    if (item.sermonId) {
+      onOpenSermon(item.sermonId);
+    }
   };
 
   return (
@@ -187,13 +351,20 @@ const SortableItem = ({
       sx={{
         display: 'flex',
         alignItems: 'center',
-        gap: { xs: 1.5, sm: 2 },
-        p: { xs: 2, sm: 2.5 },
-        cursor: 'pointer',
-        bgcolor: isDragging ? 'action.selected' : 'background.paper',
+        gap: { xs: 1.25, sm: 1.5 },
+        p: { xs: 1.25, sm: 1.5 },
+        cursor: isPlaceholder ? 'default' : item.sermonId ? 'pointer' : 'default',
+        bgcolor: isPlaceholder ? placeholderBackground : isDragging ? 'action.selected' : firebaseRowBackground,
         boxShadow: isDragging ? 4 : 0,
+        borderLeft: `3px solid ${placeholderBorder}`,
         transition: 'background-color 0.15s ease',
-        '&:hover': { bgcolor: isDragging ? 'action.selected' : 'action.hover' },
+        '&:hover': {
+          bgcolor: isPlaceholder
+            ? placeholderBackground
+            : isDragging
+              ? 'action.selected'
+              : (item.sermonId ? firebaseRowHoverBackground : firebaseRowBackground),
+        },
       }}
     >
       {/* Drag Handle */}
@@ -226,32 +397,86 @@ const SortableItem = ({
         {index + 1}
       </Typography>
 
-      <AvatarWithDefaultImage
-        image={item.sermon?.images?.find((img) => img.type === 'square')}
-        altName={item.sermon?.title || 'Sermon'}
-        width={56}
-        height={56}
-        borderRadius={8}
-        sx={{ flexShrink: 0 }}
-      />
+      {localImage ? (
+        <AvatarWithDefaultImage
+          image={localImage}
+          altName={item.sermon?.title || item.remoteTitle || 'Sermon'}
+          width={44}
+          height={44}
+          borderRadius={6}
+          sx={{ flexShrink: 0 }}
+        />
+      ) : item.remoteImageUrl ? (
+        <Box
+          sx={{
+            width: 44,
+            height: 44,
+            borderRadius: '6px',
+            flexShrink: 0,
+            overflow: 'hidden',
+            position: 'relative',
+            bgcolor: 'action.hover',
+          }}
+        >
+          <Image
+            src={item.remoteImageUrl}
+            alt={item.remoteTitle || 'Subsplash item'}
+            fill
+            sizes="44px"
+            style={{ objectFit: 'cover' }}
+          />
+        </Box>
+      ) : (
+        <Box
+          sx={{
+            width: 44,
+            height: 44,
+            borderRadius: 1.5,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: 'action.hover',
+            color: 'text.secondary',
+          }}
+        >
+          <CollectionsIcon fontSize="small" />
+        </Box>
+      )}
 
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Typography
           variant="subtitle2"
           sx={{
             fontWeight: 600,
+            color: isPlaceholder ? placeholderPrimaryText : 'text.primary',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
         >
-          {item.sermon?.title || `Sermon ${item.id}`}
+          {item.sermon?.title || item.remoteTitle || `Sermon ${item.displayId}`}
         </Typography>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
-          {item.sermon?.dateString && (
-            <Typography variant="caption" color="text.secondary">
-              {item.sermon.dateString}
+          {(item.sermon?.dateString || item.remoteSubtitle) && (
+            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
+              {item.sermon?.dateString || item.remoteSubtitle}
             </Typography>
+          )}
+          {item.isSubsplashOnlyPlaceholder && (
+            <Chip
+              label="Subsplash only"
+              size="small"
+              color="warning"
+              variant="filled"
+              sx={{
+                height: 22,
+                '& .MuiChip-label': { px: 1 },
+                color: isDarkMode ? alpha(theme.palette.warning.light, 0.95) : theme.palette.warning.dark,
+                borderColor: alpha(theme.palette.warning.main, isDarkMode ? 0.3 : 0.2),
+                bgcolor: alpha(theme.palette.warning.main, isDarkMode ? 0.14 : 0.12),
+              }}
+            />
           )}
           {item.publishedToSubsplash ? (
             <Chip
@@ -275,7 +500,7 @@ const SortableItem = ({
         </Box>
       </Box>
 
-      {item.publishedToSubsplash ? (
+      {item.publishedToSubsplash || item.isSubsplashOnlyPlaceholder ? (
         <Button
           size="small"
           color="warning"
@@ -287,7 +512,7 @@ const SortableItem = ({
           }}
           disabled={actionsDisabled || isUnpublishing}
         >
-          Unpublish
+          {item.isSubsplashOnlyPlaceholder ? 'Remove Remote' : 'Unpublish'}
         </Button>
       ) : (
         <Button
@@ -299,36 +524,33 @@ const SortableItem = ({
             event.stopPropagation();
             onRequestPublish(item);
           }}
-          disabled={actionsDisabled || isPublishing || !canPublish}
+          disabled={actionsDisabled || isPublishing || !canPublish || item.isSubsplashOnlyPlaceholder}
           title={!canPublish ? (publishBlockedReason || SERIES_PUBLISH_BLOCKED_MESSAGE) : undefined}
         >
           Publish
         </Button>
       )}
 
-      <Tooltip title="Remove from series">
-        <IconButton
+      {(item.canRemoveLocally || item.isSubsplashOnlyPlaceholder) ? (
+        <Checkbox
+          checked={isSelected}
           size="small"
+          data-no-row-nav="true"
           onClick={(event) => {
             event.stopPropagation();
-            onRequestRemove(item);
           }}
-          disabled={actionsDisabled}
-          sx={{
-            color: 'error.main',
-            flexShrink: 0,
-            '&:hover': {
-              bgcolor: alpha(theme.palette.error.main, 0.15),
-              color: 'error.main',
-            },
+          onChange={(event) => {
+            event.stopPropagation();
+            onToggleSelected(item.displayId, event.target.checked);
           }}
-        >
-          <DeleteIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
+          sx={{ p: 0.5, ml: 0.5, flexShrink: 0 }}
+        />
+      ) : (
+        <Box sx={{ width: 30, flexShrink: 0 }} />
+      )}
     </Box>
   );
-};
+});
 
 const SeriesDetailsPage = () => {
   const router = useRouter();
@@ -337,7 +559,8 @@ const SeriesDetailsPage = () => {
   const seriesId = router.query.seriesId as string;
 
   const [series, setSeries] = useState<Series | null>(null);
-  const [items, setItems] = useState<SeriesItemWithSermon[]>([]);
+  const [items, setItems] = useState<SeriesDisplayItem[]>([]);
+  const [remoteSeriesState, setRemoteSeriesState] = useState<GetSeriesRemoteStateOutputType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editPopup, setEditPopup] = useState(false);
@@ -347,7 +570,7 @@ const SeriesDetailsPage = () => {
   const [addItemPopup, setAddItemPopup] = useState(false);
 
   // Store original item order for revert functionality
-  const originalItemsRef = useRef<SeriesItemWithSermon[]>([]);
+  const originalItemsRef = useRef<SeriesDisplayItem[]>([]);
 
   // Ref for the sortable container to restrict drag bounds
   const containerRef = useRef<HTMLDivElement>(null);
@@ -359,9 +582,10 @@ const SeriesDetailsPage = () => {
   const [activeAddingSermonId, setActiveAddingSermonId] = useState<string | null>(null);
   const [publishingItemId, setPublishingItemId] = useState<string | null>(null);
   const [unpublishingItemId, setUnpublishingItemId] = useState<string | null>(null);
-  const [removeTarget, setRemoveTarget] = useState<SeriesItemWithSermon | null>(null);
-  const [unpublishTarget, setUnpublishTarget] = useState<SeriesItemWithSermon | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<SeriesDisplayItem | null>(null);
+  const [unpublishTarget, setUnpublishTarget] = useState<SeriesDisplayItem | null>(null);
   const [isRemovingItem, setIsRemovingItem] = useState(false);
+  const [selectedSeriesItemIds, setSelectedSeriesItemIds] = useState<Set<string>>(new Set());
 
   const isAdmin = user?.isAdmin() ?? false;
 
@@ -390,7 +614,9 @@ const SeriesDetailsPage = () => {
         return;
       }
 
-      setSeries(seriesData);
+      const getSeriesRemoteStateFunction = createFunctionV2<{ firestoreSeriesId: string }, GetSeriesRemoteStateOutputType>(
+        'getseriesremotestate'
+      );
 
       // Fetch series items
       const itemsQuery = query(
@@ -427,9 +653,28 @@ const SeriesDetailsPage = () => {
         })
       );
 
-      setItems(itemsWithSermons);
+      let nextRemoteSeriesState: GetSeriesRemoteStateOutputType | null = null;
+      if (seriesData.subsplashId) {
+        try {
+          nextRemoteSeriesState = await getSeriesRemoteStateFunction({
+            firestoreSeriesId: seriesId,
+          });
+        } catch (remoteError) {
+          console.error('Error fetching remote series state:', remoteError);
+        }
+      }
+
+      setSeries(seriesData);
+      setRemoteSeriesState(nextRemoteSeriesState);
+
+      const mergedItems = buildSeriesDisplayItems(itemsWithSermons, nextRemoteSeriesState);
+      setItems(mergedItems);
+      setSelectedSeriesItemIds((previousSelected) => {
+        const validIds = new Set(mergedItems.map((item) => item.displayId));
+        return new Set(Array.from(previousSelected).filter((itemId) => validIds.has(itemId)));
+      });
       // Store original order for revert functionality
-      originalItemsRef.current = cloneSeriesItems(itemsWithSermons);
+      originalItemsRef.current = cloneSeriesDisplayItems(mergedItems);
     } catch (err: unknown) {
       console.error('Error fetching series:', err);
       setError(getErrorMessage(err, 'Failed to fetch series'));
@@ -493,6 +738,41 @@ const SeriesDetailsPage = () => {
       sermon.status?.subsplash === uploadStatus.UPLOADED
     );
   }, []);
+
+  const getRemoteDisplayItems = useCallback(
+    (sourceItems: SeriesDisplayItem[]) => sourceItems.filter((item) => Boolean(item.remoteMediaItemId)),
+    []
+  );
+
+  const getPublishedRemoteMembership = useCallback(
+    (sourceItems: SeriesDisplayItem[]) => (
+      getRemoteDisplayItems(sourceItems)
+        .filter((item) => item.remoteStatus === 'published' || item.publishedToSubsplash)
+        .map((item) => item.remoteMediaItemId)
+        .filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId))
+    ),
+    [getRemoteDisplayItems]
+  );
+
+  const getPublishedRemoteOrderWithAdditions = useCallback(
+    (sourceItems: SeriesDisplayItem[], additions: Map<string, string>) => {
+      return sourceItems
+        .filter((item) => {
+          if (item.sermonId && additions.has(item.sermonId)) {
+            return true;
+          }
+          return item.remoteStatus === 'published' || item.publishedToSubsplash;
+        })
+        .map((item) => {
+          if (item.sermonId && additions.has(item.sermonId)) {
+            return additions.get(item.sermonId);
+          }
+          return item.remoteMediaItemId;
+        })
+        .filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId));
+    },
+    []
+  );
 
   const ensureSeriesSubsplashId = useCallback(async (): Promise<string> => {
     if (!series) {
@@ -589,56 +869,6 @@ const SeriesDetailsPage = () => {
     return mediaItemId;
   }, [user?.uid]);
 
-  const reorderPublishedItemsInSubsplash = useCallback(async (
-    targetSermonId: string,
-    targetMediaItemId: string
-  ) => {
-    const orderedItemsSnapshot = await getDocs(
-      query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'desc'))
-    );
-    const orderedItems = orderedItemsSnapshot.docs.map((seriesItemDoc) => {
-      const data = seriesItemDoc.data() as {
-        publishedToSubsplash?: boolean;
-        sermonSubsplashId?: string;
-      };
-
-      return {
-        sermonId: seriesItemDoc.id,
-        published: seriesItemDoc.id === targetSermonId ? true : data.publishedToSubsplash === true,
-        mediaItemId: seriesItemDoc.id === targetSermonId
-          ? targetMediaItemId
-          : data.sermonSubsplashId,
-      };
-    });
-
-    const targetExists = orderedItems.some((item) => item.sermonId === targetSermonId);
-    if (!targetExists) {
-      throw new Error('Published item is missing from series order.');
-    }
-
-    const publishedItems = orderedItems.filter((item) => item.published);
-
-    const missingMediaIdItem = publishedItems.find((item) => !item.mediaItemId);
-    if (missingMediaIdItem) {
-      throw new Error(`Missing Subsplash media ID for sermon ${missingMediaIdItem.sermonId}.`);
-    }
-
-    const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
-    const reorderResult = await reorderFunction({
-      firestoreSeriesId: seriesId,
-      itemOrder: publishedItems.map((item, index) => ({
-        mediaItemId: item.mediaItemId as string,
-        // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
-        position: publishedItems.length - index,
-      })),
-      operationKey: createOperationKey('series-admin-reorder', seriesId),
-    });
-
-    if (reorderResult.status !== 'success') {
-      throw new Error(reorderResult.message || 'Subsplash reorder failed.');
-    }
-  }, [seriesId]);
-
   const syncSeriesItemPublishedState = useCallback(async (
     seriesItemId: string,
     options: { publishedToSubsplash: boolean; sermonSubsplashId?: string }
@@ -655,30 +885,34 @@ const SeriesDetailsPage = () => {
     );
 
     setItems((previousItems) => previousItems.map((item) => (
-      item.id === seriesItemId
+      item.sermonId === seriesItemId
         ? {
           ...item,
           publishedToSubsplash: options.publishedToSubsplash,
           sermonSubsplashId: options.publishedToSubsplash ? options.sermonSubsplashId : undefined,
+          remoteMediaItemId: options.publishedToSubsplash ? options.sermonSubsplashId : item.remoteMediaItemId,
+          remoteStatus: options.publishedToSubsplash ? 'published' : item.remoteStatus,
         }
         : item
     )));
     originalItemsRef.current = originalItemsRef.current.map((item) => (
-      item.id === seriesItemId
+      item.sermonId === seriesItemId
         ? {
           ...item,
           publishedToSubsplash: options.publishedToSubsplash,
           sermonSubsplashId: options.publishedToSubsplash ? options.sermonSubsplashId : undefined,
+          remoteMediaItemId: options.publishedToSubsplash ? options.sermonSubsplashId : item.remoteMediaItemId,
+          remoteStatus: options.publishedToSubsplash ? 'published' : item.remoteStatus,
         }
         : item
     ));
   }, [seriesId]);
 
   const publishItemToSeries = useCallback(async (
-    seriesItem: SeriesItemWithSermon,
+    seriesItem: SeriesDisplayItem,
     options?: { suppressAlert?: boolean }
   ): Promise<boolean> => {
-    if (!seriesItem.sermon) {
+    if (!seriesItem.sermon || !seriesItem.sermonId) {
       if (!options?.suppressAlert) {
         alert('Sermon details are missing for this item. Refresh and retry.');
       }
@@ -696,52 +930,38 @@ const SeriesDetailsPage = () => {
     try {
       const seriesSubsplashId = await ensureSeriesSubsplashId();
       const mediaItemId = await uploadSermonToSubsplash(seriesItem.sermon);
-      const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
-      const addResult = await addToSeriesFunction({
+      const currentPublishedMembership = getPublishedRemoteMembership(items);
+      const expectedPublishedMembershipHash = createPublishedMembershipHash(currentPublishedMembership);
+      const additions = new Map<string, string>([[seriesItem.sermonId, mediaItemId]]);
+      const publishedItemOrder = getPublishedRemoteOrderWithAdditions(items, additions);
+      const intentFingerprint = [
+        `${seriesItem.sermonId}:${mediaItemId}`,
+        `order:${publishedItemOrder.join(',')}`,
+        `snapshot:${expectedPublishedMembershipHash}`,
+      ].join('|');
+      const operationKey = createRetryIntentKey('series-admin-publish', seriesId, intentFingerprint);
+
+      const bulkAddToSeriesFunction = createFunctionV2<BulkAddToSeriesInputType, BulkAddToSeriesOutputType>('bulkaddtoseries');
+      const bulkResult = await bulkAddToSeriesFunction({
+        firestoreSeriesId: seriesId,
         seriesSubsplashId,
-        mediaItemId,
-        operationKey: createOperationKey('series-admin-add-item', seriesItem.id),
+        operationKey,
+        expectedPublishedMembershipHash,
+        adds: [{ sermonId: seriesItem.sermonId, mediaItemId }],
+        publishedItemOrder,
+        maxConcurrency: 1,
+        rollbackOnFailure: true,
       });
 
-      if (!addResult || addResult.status !== 'success') {
-        throw new Error(addResult?.error || 'Failed to add sermon to series in Subsplash.');
+      if (bulkResult.status !== 'success' || bulkResult.failed > 0 || !bulkResult.reorderApplied) {
+        throw new Error(bulkResult.message || 'Failed to publish sermon to series in Subsplash.');
       }
 
-      const confirmedMediaItemId = addResult.mediaItemId || mediaItemId;
-      // Subsplash is source of truth: once add succeeds, persist published state immediately.
-      await syncSeriesItemPublishedState(seriesItem.id, {
+      await syncSeriesItemPublishedState(seriesItem.sermonId, {
         publishedToSubsplash: true,
-        sermonSubsplashId: confirmedMediaItemId,
+        sermonSubsplashId: mediaItemId,
       });
-
-      try {
-        await reorderPublishedItemsInSubsplash(seriesItem.id, confirmedMediaItemId);
-      } catch (reorderError: unknown) {
-        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-        try {
-          await removeFromSeriesFunction({
-            mediaItemId: confirmedMediaItemId,
-            operationKey: createOperationKey('series-admin-rollback-remove', seriesItem.id),
-          });
-          await syncSeriesItemPublishedState(seriesItem.id, {
-            publishedToSubsplash: false,
-          });
-          throw new Error(getErrorMessage(reorderError, 'Series reorder failed after publish.'));
-        } catch (rollbackError: unknown) {
-          // Rollback failure means item likely remains published in Subsplash.
-          await syncSeriesItemPublishedState(seriesItem.id, {
-            publishedToSubsplash: true,
-            sermonSubsplashId: confirmedMediaItemId,
-          });
-          const partialFailureMessage =
-            `Series reorder failed and rollback failed. ${seriesItem.sermon?.title || 'This sermon'} remains published in Subsplash and has been kept published locally. Reorder error: ${getErrorMessage(reorderError, 'Unknown')}; rollback error: ${getErrorMessage(rollbackError, 'Unknown')}.`;
-          console.error(partialFailureMessage);
-          if (!options?.suppressAlert) {
-            alert(partialFailureMessage);
-          }
-          return true;
-        }
-      }
+      await fetchSeriesData();
 
       return true;
     } catch (err: unknown) {
@@ -753,12 +973,21 @@ const SeriesDetailsPage = () => {
     } finally {
       setPublishingItemId(null);
     }
-  }, [ensureSeriesSubsplashId, reorderPublishedItemsInSubsplash, syncSeriesItemPublishedState, uploadSermonToSubsplash]);
+  }, [
+    ensureSeriesSubsplashId,
+    fetchSeriesData,
+    getPublishedRemoteMembership,
+    getPublishedRemoteOrderWithAdditions,
+    items,
+    seriesId,
+    syncSeriesItemPublishedState,
+    uploadSermonToSubsplash,
+  ]);
 
-  const unpublishItemFromSeries = useCallback(async (seriesItem: SeriesItemWithSermon) => {
+  const unpublishItemFromSeries = useCallback(async (seriesItem: SeriesDisplayItem) => {
     setUnpublishingItemId(seriesItem.id);
     try {
-      const mediaItemId = seriesItem.sermonSubsplashId || seriesItem.sermon?.subsplashId;
+      const mediaItemId = seriesItem.remoteMediaItemId || seriesItem.sermonSubsplashId || seriesItem.sermon?.subsplashId;
       if (mediaItemId) {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         await removeFromSeriesFunction({
@@ -767,21 +996,14 @@ const SeriesDetailsPage = () => {
         });
       }
 
-      await updateDoc(doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.id), {
-        publishedToSubsplash: false,
-        sermonSubsplashId: deleteField(),
-      });
+      if (seriesItem.sermonId) {
+        await updateDoc(doc(firestore, `series/${seriesId}/seriesItems`, seriesItem.sermonId), {
+          publishedToSubsplash: false,
+          sermonSubsplashId: deleteField(),
+        });
+      }
 
-      setItems((previousItems) => previousItems.map((item) => (
-        item.id === seriesItem.id
-          ? { ...item, publishedToSubsplash: false, sermonSubsplashId: undefined }
-          : item
-      )));
-      originalItemsRef.current = originalItemsRef.current.map((item) => (
-        item.id === seriesItem.id
-          ? { ...item, publishedToSubsplash: false, sermonSubsplashId: undefined }
-          : item
-      ));
+      await fetchSeriesData();
     } catch (err: unknown) {
       console.error('Error unpublishing series item:', err);
       alert(`Error unpublishing item from series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
@@ -789,7 +1011,7 @@ const SeriesDetailsPage = () => {
       setUnpublishingItemId(null);
       setUnpublishTarget(null);
     }
-  }, [seriesId]);
+  }, [fetchSeriesData, seriesId]);
 
   // Custom modifier to restrict drag to container bounds
   const restrictToContainer: Modifier = ({ transform, draggingNodeRect, containerNodeRect: _containerNodeRect }) => {
@@ -823,58 +1045,56 @@ const SeriesDetailsPage = () => {
 
   // Check if order has changed from original
   const hasOrderChanges = items.length !== originalItemsRef.current.length ||
-    items.some((item, index) => item.id !== originalItemsRef.current[index]?.id);
+    items.some((item, index) => item.displayId !== originalItemsRef.current[index]?.displayId);
 
   // Handle drag end to reorder items
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
       setItems((prevItems) => {
-        const oldIndex = prevItems.findIndex((item) => item.id === active.id);
-        const newIndex = prevItems.findIndex((item) => item.id === over.id);
+        const oldIndex = prevItems.findIndex((item) => item.displayId === active.id);
+        const newIndex = prevItems.findIndex((item) => item.displayId === over.id);
 
-        const newItems = arrayMove(prevItems, oldIndex, newIndex);
-        // Update positions
-        newItems.forEach((item, i) => {
-          item.position = newItems.length - i;
-        });
-        return newItems;
+        return arrayMove(prevItems, oldIndex, newIndex).map((item, i, source) => ({
+          ...item,
+          position: source.length - i,
+        }));
       });
     }
-  };
+  }, []);
 
   // Revert to original order
   const revertOrder = () => {
-    setItems(cloneSeriesItems(originalItemsRef.current));
+    setItems(cloneSeriesDisplayItems(originalItemsRef.current));
   };
 
   // Save order changes
-  const saveOrderChanges = async () => {
+  const saveOrderChanges = useCallback(async () => {
     if (!series || !hasOrderChanges) return;
 
     setIsSaving(true);
-    const previousItems = cloneSeriesItems(originalItemsRef.current);
+    const previousItems = cloneSeriesDisplayItems(originalItemsRef.current);
     try {
       // If series is published to Subsplash, use the reorder function
-      if (series.subsplashId) {
+      if (series.subsplashId && remoteSeriesState) {
         const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>(
           'reorderseriesitems'
         );
-        const publishedItems = items.filter((item) => item.publishedToSubsplash);
-        const publishedItemsMissingIds = publishedItems.filter(
-          (item) => !item.sermonSubsplashId && !item.sermon?.subsplashId
+        const remoteItems = getRemoteDisplayItems(items);
+        const remoteItemsMissingIds = remoteItems.filter(
+          (item) => !item.remoteMediaItemId
         );
-        if (publishedItemsMissingIds.length > 0) {
-          throw new Error('One or more published items are missing Subsplash IDs. Refresh and try again.');
+        if (remoteItemsMissingIds.length > 0) {
+          throw new Error('One or more remote items are missing Subsplash IDs. Refresh and try again.');
         }
 
         const reorderResult = await reorderFunction({
           firestoreSeriesId: seriesId,
-          itemOrder: publishedItems.map((item, index) => ({
-            mediaItemId: item.sermonSubsplashId || item.sermon?.subsplashId || '',
-            // Subsplash uses inverted ordering semantics: position 1 is the bottom item.
-            position: publishedItems.length - index,
+          expectedRemoteMembershipHash: remoteSeriesState.remoteMembershipHash,
+          itemOrder: remoteItems.map((item, index) => ({
+            mediaItemId: item.remoteMediaItemId || '',
+            position: remoteItems.length - index,
           })),
           operationKey: createOperationKey('series-admin-reorder', seriesId),
         });
@@ -885,14 +1105,16 @@ const SeriesDetailsPage = () => {
 
       // Persist order in Firestore only after Subsplash succeeds.
       await Promise.all(
-        items.map(async (item, index) => {
-          const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.id);
+        items
+          .filter((item) => Boolean(item.sermonId))
+          .map(async (item, index) => {
+          const itemRef = doc(firestore, `series/${seriesId}/seriesItems`, item.sermonId as string);
           try {
             await updateDoc(itemRef, { position: items.length - index });
           } catch (err: unknown) {
             // Item might have been deleted by another user - skip it
             if (getErrorField(err, 'code') === 'not-found' || getErrorMessage(err, '').includes('NOT_FOUND')) {
-              console.warn(`SeriesItem ${item.id} not found - may have been removed`);
+              console.warn(`SeriesItem ${item.sermonId} not found - may have been removed`);
             } else {
               throw err;
             }
@@ -901,7 +1123,8 @@ const SeriesDetailsPage = () => {
       );
 
       // Update original order reference after successful save
-      originalItemsRef.current = cloneSeriesItems(items);
+      originalItemsRef.current = cloneSeriesDisplayItems(items);
+      await fetchSeriesData();
     } catch (err: unknown) {
       console.error('Error saving order:', err);
       setItems(previousItems);
@@ -909,7 +1132,7 @@ const SeriesDetailsPage = () => {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [fetchSeriesData, getRemoteDisplayItems, hasOrderChanges, items, remoteSeriesState, series, seriesId]);
 
   const executeRemoveItem = async () => {
     if (!removeTarget || isRemovingItem) {
@@ -918,8 +1141,8 @@ const SeriesDetailsPage = () => {
 
     setIsRemovingItem(true);
     try {
-      const mediaItemId = removeTarget.sermonSubsplashId || removeTarget.sermon?.subsplashId;
-      if (series?.subsplashId && removeTarget.publishedToSubsplash === true && mediaItemId) {
+      const mediaItemId = removeTarget.remoteMediaItemId || removeTarget.sermonSubsplashId || removeTarget.sermon?.subsplashId;
+      if (series?.subsplashId && removeTarget.canUnpublish && mediaItemId) {
         const removeFromSeriesCallable = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         try {
           await removeFromSeriesCallable({
@@ -933,32 +1156,27 @@ const SeriesDetailsPage = () => {
         }
       }
 
-      await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, removeTarget.id));
+      if (removeTarget.sermonId) {
+        await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, removeTarget.sermonId));
 
-      try {
-        await updateDoc(doc(firestore, 'sermons', removeTarget.id), {
-          seriesId: null,
-        });
-      } catch (sermonErr: unknown) {
-        if (getErrorField(sermonErr, 'code') === 'not-found' || getErrorMessage(sermonErr, '').includes('NOT_FOUND')) {
-          console.warn(`Sermon ${removeTarget.id} not found - may have been deleted`);
-        } else {
-          throw sermonErr;
+        try {
+          await updateDoc(doc(firestore, 'sermons', removeTarget.sermonId), {
+            seriesId: null,
+          });
+        } catch (sermonErr: unknown) {
+          if (getErrorField(sermonErr, 'code') === 'not-found' || getErrorMessage(sermonErr, '').includes('NOT_FOUND')) {
+            console.warn(`Sermon ${removeTarget.sermonId} not found - may have been deleted`);
+          } else {
+            throw sermonErr;
+          }
         }
       }
-
-      const updatedItems = items
-        .filter((item) => item.id !== removeTarget.id)
-        .map((item, index, source) => ({ ...item, position: source.length - index }));
-
-      await Promise.all(
-        updatedItems.map((item) => updateDoc(doc(firestore, `series/${seriesId}/seriesItems`, item.id), {
-          position: item.position,
-        }))
-      );
-
-      setItems(updatedItems);
-      originalItemsRef.current = cloneSeriesItems(updatedItems);
+      await fetchSeriesData();
+      setSelectedSeriesItemIds((previousSelected) => {
+        const nextSelected = new Set(previousSelected);
+        nextSelected.delete(removeTarget.displayId);
+        return nextSelected;
+      });
       setRemoveTarget(null);
     } catch (err: unknown) {
       console.error('Error removing item:', err);
@@ -968,10 +1186,77 @@ const SeriesDetailsPage = () => {
     }
   };
 
+  const bulkRemoveTargets = items.filter(
+    (item) => selectedSeriesItemIds.has(item.displayId)
+  );
+
+  const removeSeriesItems = useCallback(async (targets: SeriesDisplayItem[]) => {
+    if (targets.length === 0) {
+      return;
+    }
+
+    setIsRemovingItem(true);
+    try {
+      for (const target of targets) {
+        const mediaItemId = target.remoteMediaItemId || target.sermonSubsplashId || target.sermon?.subsplashId;
+        if (series?.subsplashId && target.canUnpublish && mediaItemId) {
+          const removeFromSeriesCallable = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
+          try {
+            await removeFromSeriesCallable({
+              mediaItemId,
+              operationKey: createOperationKey('series-admin-remove-item', target.displayId),
+            });
+          } catch (removeErr: unknown) {
+            if (getErrorField(removeErr, 'code') !== 'functions/not-found') {
+              throw removeErr;
+            }
+          }
+        }
+      }
+
+      const batch = writeBatch(firestore);
+      targets.forEach((target) => {
+        if (!target.sermonId) {
+          return;
+        }
+        batch.delete(doc(firestore, `series/${seriesId}/seriesItems`, target.sermonId));
+        batch.update(doc(firestore, 'sermons', target.sermonId), {
+          seriesId: null,
+        });
+      });
+      await batch.commit();
+
+      setSelectedSeriesItemIds(new Set());
+      await fetchSeriesData();
+      setRemoveTarget(null);
+    } catch (err: unknown) {
+      console.error('Error removing item:', err);
+      alert(`Error removing item: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
+    } finally {
+      setIsRemovingItem(false);
+    }
+  }, [fetchSeriesData, series?.subsplashId, seriesId]);
+
+  const handleToggleSelected = useCallback((displayId: string, checked: boolean) => {
+    setSelectedSeriesItemIds((previousSelected) => {
+      const nextSelected = new Set(previousSelected);
+      if (checked) {
+        nextSelected.add(displayId);
+      } else {
+        nextSelected.delete(displayId);
+      }
+      return nextSelected;
+    });
+  }, []);
+
+  const handleOpenSermon = useCallback((id: string) => {
+    void router.push(`/admin/sermons/${id}`);
+  }, [router]);
+
   // Add item to series
   const addItemToSeries = useCallback(async (sermon: Sermon): Promise<boolean> => {
     try {
-      if (items.some((item) => item.id === sermon.id)) {
+      if (items.some((item) => item.sermonId === sermon.id)) {
         return false;
       }
       const latestPositionSnapshot = await getDocs(
@@ -1020,17 +1305,14 @@ const SeriesDetailsPage = () => {
         seriesId,
       });
 
-      const newItem: SeriesItemWithSermon = {
+      const newItem: SeriesDisplayItem = createLocalDisplayItem({
         id: latestSermon.id,
         position: newPosition,
         publishedToSubsplash: false,
         sermonSubsplashId: latestSermon.subsplashId,
         addedAt: null,
         sermon: { ...latestSermon, seriesId },
-      };
-
-      setItems((previousItems) => [newItem, ...previousItems]);
-      originalItemsRef.current = [newItem, ...originalItemsRef.current];
+      });
 
       // Keep state fully consistent: if sermon is already in Subsplash, immediately publish it to series too.
       if (isSermonPublishedToSubsplash(latestSermon)) {
@@ -1038,13 +1320,13 @@ const SeriesDetailsPage = () => {
         if (!publishSucceeded) {
           await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, latestSermon.id));
           await updateDoc(doc(firestore, 'sermons', latestSermon.id), { seriesId: previousSeriesId });
-          setItems((previousItems) => previousItems.filter((item) => item.id !== latestSermon.id));
-          originalItemsRef.current = originalItemsRef.current.filter((item) => item.id !== latestSermon.id);
           throw new Error(
             `${latestSermon.title} is already published to Subsplash, but automatic series publish failed. The sermon was not added to this series.`
           );
         }
       }
+
+      await fetchSeriesData();
 
       return true;
     } catch (err: unknown) {
@@ -1052,7 +1334,7 @@ const SeriesDetailsPage = () => {
       alert(`Error adding item: ${getErrorMessage(err, 'Unknown error')}`);
       return false;
     }
-  }, [isSermonPublishedToSubsplash, items, publishItemToSeries, router, seriesId]);
+  }, [fetchSeriesData, isSermonPublishedToSubsplash, items, publishItemToSeries, router, seriesId]);
 
   const addSelectedSermons = useCallback(async () => {
     if (isAddingSelectedSermons) {
@@ -1061,7 +1343,7 @@ const SeriesDetailsPage = () => {
 
     const sermonsToAdd = availableSermons
       .filter((sermon) => selectedSermonIds.has(sermon.id))
-      .filter((sermon) => !items.some((item) => item.id === sermon.id));
+      .filter((sermon) => !items.some((item) => item.sermonId === sermon.id));
 
     if (sermonsToAdd.length === 0) {
       return;
@@ -1121,64 +1403,51 @@ const SeriesDetailsPage = () => {
         await batch.commit();
       }
 
-      const newItems = additions.map(({ sermon, position }) => ({
+      const newItems = additions.map(({ sermon, position }) => createLocalDisplayItem({
         id: sermon.id,
         position,
         publishedToSubsplash: false,
         sermonSubsplashId: sermon.subsplashId,
         addedAt: null,
         sermon: { ...sermon, seriesId },
-      } as SeriesItemWithSermon));
+      }));
       const orderedNewItems = [...newItems].sort((a, b) => b.position - a.position);
-
-      setItems((previousItems) => [...orderedNewItems, ...previousItems]);
-      originalItemsRef.current = [...orderedNewItems, ...originalItemsRef.current];
 
       const publishedCandidates = orderedNewItems.filter((seriesItem) => isSermonPublishedToSubsplash(seriesItem.sermon));
       if (publishedCandidates.length > 0) {
         const priorSeriesIdsBySermonId = new Map(additions.map((entry) => [entry.sermon.id, entry.previousSeriesId]));
         const mediaItemIdBySermonId = new Map<string, string>();
         for (const seriesItem of publishedCandidates) {
-          if (!seriesItem.sermon) {
-            throw new Error(`Sermon details missing for ${seriesItem.id}.`);
+          if (!seriesItem.sermon || !seriesItem.sermonId) {
+            throw new Error(`Sermon details missing for ${seriesItem.displayId}.`);
           }
 
-          setActiveAddingSermonId(seriesItem.id);
+          setActiveAddingSermonId(seriesItem.displayId);
           const mediaItemId = seriesItem.sermon.subsplashId
             ? seriesItem.sermon.subsplashId
             : await uploadSermonToSubsplash(seriesItem.sermon);
-          mediaItemIdBySermonId.set(seriesItem.id, mediaItemId);
+          mediaItemIdBySermonId.set(seriesItem.sermonId, mediaItemId);
         }
 
         const seriesSubsplashId = await ensureSeriesSubsplashId();
-        const publishedCandidateIds = new Set(publishedCandidates.map((item) => item.id));
         const reorderedItems = [...orderedNewItems, ...items];
-        const publishedItemOrderWithGaps = reorderedItems
-          .filter((item) => item.publishedToSubsplash === true || publishedCandidateIds.has(item.id))
-          .map((item) => mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId || item.sermon?.subsplashId);
-        const publishedItemOrder = publishedItemOrderWithGaps.filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId));
+        const publishedItemOrder = getPublishedRemoteOrderWithAdditions(reorderedItems, mediaItemIdBySermonId);
 
-        if (publishedItemOrder.length === 0 || publishedItemOrder.length !== publishedItemOrderWithGaps.length) {
+        if (publishedItemOrder.length === 0) {
           throw new Error('Cannot publish to series because one or more published sermons are missing Subsplash media IDs.');
         }
 
-        const currentPublishedMembershipWithGaps = items
-          .filter((item) => item.publishedToSubsplash === true)
-          .map((item) => item.sermonSubsplashId || item.sermon?.subsplashId);
-        const currentPublishedMembership = currentPublishedMembershipWithGaps.filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId));
-        if (currentPublishedMembership.length !== currentPublishedMembershipWithGaps.length) {
-          throw new Error('Cannot publish to series because an existing published sermon is missing a Subsplash media ID.');
-        }
+        const currentPublishedMembership = getPublishedRemoteMembership(items);
         const expectedPublishedMembershipHash = createPublishedMembershipHash(currentPublishedMembership);
 
         const bulkAdds = publishedCandidates.map((item) => {
-          const mediaItemId = mediaItemIdBySermonId.get(item.id);
+          const mediaItemId = item.sermonId ? mediaItemIdBySermonId.get(item.sermonId) : undefined;
           if (!mediaItemId) {
-            throw new Error(`Cannot publish sermon ${item.id} because it is missing a Subsplash media ID.`);
+            throw new Error(`Cannot publish sermon ${item.displayId} because it is missing a Subsplash media ID.`);
           }
 
           return {
-            sermonId: item.id,
+            sermonId: item.sermonId,
             mediaItemId,
           };
         });
@@ -1215,17 +1484,21 @@ const SeriesDetailsPage = () => {
           const titlesKeptPublished: string[] = [];
 
           publishedCandidates.forEach((seriesItem) => {
-            const mediaItemId = mediaItemIdBySermonId.get(seriesItem.id);
-            const result = resultBySermonId.get(seriesItem.id);
+            const mediaItemId = seriesItem.sermonId ? mediaItemIdBySermonId.get(seriesItem.sermonId) : undefined;
+            const result = seriesItem.sermonId ? resultBySermonId.get(seriesItem.sermonId) : undefined;
             const wasAdded = result?.status === 'success';
             const wasRolledBack = mediaItemId ? rolledBackMediaItemIds.has(mediaItemId) : false;
 
             if (wasAdded && !wasRolledBack) {
-              idsToKeepPublished.add(seriesItem.id);
-              titlesKeptPublished.push(seriesItem.sermon?.title || seriesItem.id);
+              if (seriesItem.sermonId) {
+                idsToKeepPublished.add(seriesItem.sermonId);
+              }
+              titlesKeptPublished.push(seriesItem.sermon?.title || seriesItem.displayId);
             } else {
-              idsToRemoveLocally.add(seriesItem.id);
-              titlesToRetry.push(seriesItem.sermon?.title || seriesItem.id);
+              if (seriesItem.sermonId) {
+                idsToRemoveLocally.add(seriesItem.sermonId);
+              }
+              titlesToRetry.push(seriesItem.sermon?.title || seriesItem.displayId);
             }
           });
 
@@ -1256,28 +1529,6 @@ const SeriesDetailsPage = () => {
             await keepBatch.commit();
           }
 
-          setItems((previousItems) => previousItems
-            .filter((item) => !idsToRemoveLocally.has(item.id))
-            .map((item) => (
-              idsToKeepPublished.has(item.id)
-                ? {
-                  ...item,
-                  publishedToSubsplash: true,
-                  sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
-                }
-                : item
-            )));
-          originalItemsRef.current = originalItemsRef.current
-            .filter((item) => !idsToRemoveLocally.has(item.id))
-            .map((item) => (
-              idsToKeepPublished.has(item.id)
-                ? {
-                  ...item,
-                  publishedToSubsplash: true,
-                  sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
-                }
-                : item
-            ));
           setSelectedSermonIds(new Set(idsToRemoveLocally));
 
           const keptPublishedMessage = titlesKeptPublished.length > 0
@@ -1312,27 +1563,6 @@ const SeriesDetailsPage = () => {
           );
         });
         await publishBatch.commit();
-
-        setItems((previousItems) => previousItems.map((item) => {
-          if (!publishedSermonIds.has(item.id)) {
-            return item;
-          }
-          return {
-            ...item,
-            publishedToSubsplash: true,
-            sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
-          };
-        }));
-        originalItemsRef.current = originalItemsRef.current.map((item) => {
-          if (!publishedSermonIds.has(item.id)) {
-            return item;
-          }
-          return {
-            ...item,
-            publishedToSubsplash: true,
-            sermonSubsplashId: mediaItemIdBySermonId.get(item.id) || item.sermonSubsplashId,
-          };
-        });
       }
 
       if (orderedNewItems.length > 0) {
@@ -1340,6 +1570,7 @@ const SeriesDetailsPage = () => {
         setSelectedSermonIds(new Set());
         setAddItemPopup(false);
       }
+      await fetchSeriesData();
     } catch (err: unknown) {
       console.error('Error adding selected sermons:', err);
       alert(`Error adding selected sermons: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
@@ -1357,6 +1588,9 @@ const SeriesDetailsPage = () => {
     router,
     selectedSermonIds,
     seriesId,
+    fetchSeriesData,
+    getPublishedRemoteMembership,
+    getPublishedRemoteOrderWithAdditions,
     uploadSermonToSubsplash,
   ]);
 
@@ -1419,8 +1653,14 @@ const SeriesDetailsPage = () => {
   const title = series.name || 'Series Details';
   const publishedItemsCount = items.filter((item) => item.publishedToSubsplash).length;
   const derivedSeriesSubtitle = `${publishedItemsCount} part series`;
+  const selectableItems = items.filter((item) => item.canRemoveLocally || item.isSubsplashOnlyPlaceholder);
+  const removableItemsCount = selectableItems.length;
+  const allRemovableItemsSelected = removableItemsCount > 0 && selectableItems
+    .every((item) => selectedSeriesItemIds.has(item.displayId));
+  const someRemovableItemsSelected = selectableItems
+    .some((item) => selectedSeriesItemIds.has(item.displayId));
   const filteredAddableSermons = availableSermons
-    .filter((sermon) => !items.some((item) => item.id === sermon.id))
+    .filter((sermon) => !items.some((item) => item.sermonId === sermon.id))
     .filter((sermon) => (
       !sermonSearchQuery ||
       sermon.title.toLowerCase().includes(sermonSearchQuery.toLowerCase())
@@ -1554,15 +1794,21 @@ const SeriesDetailsPage = () => {
               }}
             >
               <AvatarWithDefaultImage
-                image={series.images?.find((img) => img.type === 'square')}
+                image={
+                  series.images?.find((img) => img.type === 'wide')
+                  || series.images?.find((img) => img.type === 'banner')
+                  || series.images?.find((img) => img.type === 'square')
+                }
                 altName={series.name}
-                width={140}
-                height={140}
+                width={220}
+                height={Math.round(220 / AspectRatio.wide)}
                 borderRadius={12}
                 sx={{
                   flexShrink: 0,
                   boxShadow: 3,
                   alignSelf: { xs: 'center', sm: 'flex-start' },
+                  width: { xs: 180, sm: 220 },
+                  height: { xs: Math.round(180 / AspectRatio.wide), sm: Math.round(220 / AspectRatio.wide) },
                 }}
               />
               <Box sx={{ flex: 1 }}>
@@ -1652,7 +1898,34 @@ const SeriesDetailsPage = () => {
           <Typography variant="h5" fontWeight={600}>
             Series Items
           </Typography>
-          <Stack direction="row" spacing={1.5}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+            {removableItemsCount > 0 && (
+              <FormControlLabel
+                sx={{ mr: 0 }}
+                control={(
+                  <Checkbox
+                    checked={allRemovableItemsSelected}
+                    indeterminate={!allRemovableItemsSelected && someRemovableItemsSelected}
+                    onChange={(event) => {
+                      if (isRemovingItem) {
+                        return;
+                      }
+                      if (event.target.checked) {
+                        setSelectedSeriesItemIds(new Set(
+                          items
+                            .filter((item) => item.canRemoveLocally || item.isSubsplashOnlyPlaceholder)
+                            .map((item) => item.displayId)
+                        ));
+                      } else {
+                        setSelectedSeriesItemIds(new Set());
+                      }
+                    }}
+                    disabled={isRemovingItem}
+                  />
+                )}
+                label={`${selectedSeriesItemIds.size} selected`}
+              />
+            )}
             {hasOrderChanges && (
               <>
                 <Button
@@ -1674,6 +1947,17 @@ const SeriesDetailsPage = () => {
                   Save Order
                 </Button>
               </>
+            )}
+            {selectedSeriesItemIds.size > 0 && (
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={isRemovingItem ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />}
+                onClick={() => setRemoveTarget(bulkRemoveTargets[0] || null)}
+                disabled={isRemovingItem}
+              >
+                Remove Selected
+              </Button>
             )}
             <Button
               variant="outlined"
@@ -1731,22 +2015,23 @@ const SeriesDetailsPage = () => {
               modifiers={[restrictToVerticalAxis, restrictToContainer]}
             >
               <SortableContext
-                items={items.map((item) => item.id)}
+                items={items.map((item) => item.displayId)}
                 strategy={verticalListSortingStrategy}
               >
                 {items.map((item, index) => (
-                  <Box key={item.id}>
+                  <Box key={item.displayId}>
                     <SortableItem
                       item={item}
                       index={index}
-                      onOpenSermon={(id) => router.push(`/admin/sermons/${id}`)}
+                      isSelected={selectedSeriesItemIds.has(item.displayId)}
+                      onToggleSelected={handleToggleSelected}
+                      onOpenSermon={handleOpenSermon}
                       onRequestPublish={publishItemToSeries}
                       onRequestUnpublish={setUnpublishTarget}
-                      onRequestRemove={setRemoveTarget}
                       isPublishing={publishingItemId === item.id}
                       isUnpublishing={unpublishingItemId === item.id}
                       actionsDisabled={listActionsDisabled}
-                      canPublish={canPublishSermonToSeries(item.sermon)}
+                      canPublish={!item.isSubsplashOnlyPlaceholder && canPublishSermonToSeries(item.sermon)}
                       publishBlockedReason={SERIES_PUBLISH_BLOCKED_MESSAGE}
                     />
                     {index < items.length - 1 && <Divider />}
@@ -1783,11 +2068,12 @@ const SeriesDetailsPage = () => {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Remove Sermon From Series?</DialogTitle>
+        <DialogTitle>Remove Item From Series?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            {removeTarget?.sermon?.title || 'This sermon'} will be removed from this series.
-            This also removes it from the Subsplash series when applicable.
+            {selectedSeriesItemIds.size > 1
+              ? `${selectedSeriesItemIds.size} sermons will be removed from this series. This also removes them from the Subsplash series when applicable.`
+              : `${removeTarget?.sermon?.title || removeTarget?.remoteTitle || 'This item'} will be removed from this series. This also removes it from the Subsplash series when applicable.`}
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -1797,7 +2083,13 @@ const SeriesDetailsPage = () => {
           <Button
             color="error"
             variant="contained"
-            onClick={executeRemoveItem}
+            onClick={() => {
+              if (selectedSeriesItemIds.size > 1) {
+                void removeSeriesItems(bulkRemoveTargets);
+                return;
+              }
+              void executeRemoveItem();
+            }}
             startIcon={isRemovingItem ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon fontSize="small" />}
             disabled={isRemovingItem}
           >

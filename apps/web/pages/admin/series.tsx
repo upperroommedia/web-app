@@ -39,6 +39,9 @@ import InputAdornment from '@mui/material/InputAdornment';
 import SearchIcon from '@mui/icons-material/Search';
 import useAuth from '../../context/user/UserContext';
 import { alpha, useTheme } from '@mui/material/styles';
+import UserAvatar from '../../components/UserAvatar';
+import type { User as AppUser } from '../../types/User';
+import type { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '@upperroom/contracts/getUsersByIds';
 import {
   createOperationKey,
   formatLockBusyRetryMessage,
@@ -69,6 +72,7 @@ interface SeriesListItemRowProps {
   series: Series;
   isAdmin: boolean;
   currentUserId: string | undefined;
+  owner?: AppUser;
   disableButtons: boolean;
   onEdit: (series: Series) => void;
   onDelete: (series: Series) => void;
@@ -78,12 +82,16 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
   series,
   isAdmin,
   currentUserId,
+  owner,
   disableButtons,
   onEdit,
   onDelete,
 }: SeriesListItemRowProps) {
   const theme = useTheme();
   const seriesImage = series.images?.find((image) => image.type === 'square');
+  const ownerDisplayName = owner
+    ? (`${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim() || owner.displayName || owner.email || owner.uid)
+    : series.ownerId;
   return (
     <Box>
       <Link href={`/admin/series/${series.id}`} style={{ textDecoration: 'none' }}>
@@ -145,10 +153,33 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                 )}
                 {isAdmin && series.ownerId !== currentUserId && (
                   <Chip
-                    label={`Owner: ${series.ownerId.slice(0, 8)}...`}
+                    avatar={(
+                      <UserAvatar
+                        user={owner}
+                        fallbackLabel={ownerDisplayName}
+                        sx={{ width: { xs: 18, sm: 20 }, height: { xs: 18, sm: 20 } }}
+                      />
+                    )}
+                    label={ownerDisplayName}
                     size="small"
                     variant="outlined"
-                    sx={{ height: 22 }}
+                    sx={{
+                      height: { xs: 22, sm: 26 },
+                      borderRadius: 999,
+                      pl: { xs: '1px', sm: '2px' },
+                      bgcolor: alpha(theme.palette.primary.main, 0.08),
+                      '& .MuiChip-label': {
+                        fontSize: { xs: '0.62rem', sm: '0.7rem' },
+                        fontWeight: 700,
+                        px: { xs: '6px', sm: '8px' },
+                      },
+                      '& .MuiChip-avatar': {
+                        ml: 0,
+                        mr: { xs: '3px', sm: '4px' },
+                        width: { xs: 18, sm: 20 },
+                        height: { xs: 18, sm: 20 },
+                      },
+                    }}
                   />
                 )}
               </Box>
@@ -208,6 +239,7 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
 const AdminSeriesPage = () => {
   const { user } = useAuth();
   const [seriesList, setSeriesList] = useState<Series[]>([]);
+  const [ownerById, setOwnerById] = useState<Record<string, AppUser>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -257,6 +289,51 @@ const AdminSeriesPage = () => {
   useEffect(() => {
     fetchSeries();
   }, [fetchSeries]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setOwnerById({});
+      return;
+    }
+
+    const ownerIds = Array.from(
+      new Set(
+        seriesList
+          .map((series) => series.ownerId)
+          .filter((ownerId): ownerId is string => Boolean(ownerId && ownerId !== user?.uid))
+      )
+    );
+
+    if (ownerIds.length === 0) {
+      setOwnerById({});
+      return;
+    }
+
+    let cancelled = false;
+    const getUsersByIds = createFunctionV2<GetUsersByIdsInputType, GetUsersByIdsOutputType>('getusersbyids');
+
+    getUsersByIds({ uids: ownerIds })
+      .then((result) => {
+        if (cancelled || result.status !== 'success') {
+          return;
+        }
+
+        const nextOwnerById: Record<string, AppUser> = {};
+        result.data.forEach((owner) => {
+          nextOwnerById[owner.uid] = owner as AppUser;
+        });
+        setOwnerById(nextOwnerById);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Error fetching series owners:', err);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, seriesList, user?.uid]);
 
   const handleSeriesDelete = async () => {
     if (!selectedSeries) return;
@@ -451,6 +528,7 @@ const AdminSeriesPage = () => {
                       series={series}
                       isAdmin={isAdmin}
                       currentUserId={user?.uid}
+                      owner={series.ownerId ? ownerById[series.ownerId] : undefined}
                       disableButtons={disableButtons}
                       onEdit={handleEditSeries}
                       onDelete={handleDeleteSeriesClick}

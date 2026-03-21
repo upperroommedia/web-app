@@ -10,6 +10,8 @@ import Button from '@mui/material/Button';
 import Cancel from '@mui/icons-material/Cancel';
 import Tooltip from '@mui/material/Tooltip';
 import IconButton from '@mui/material/IconButton';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 const DynamicPopUp = dynamic(() => import('./PopUp'), { ssr: false });
 interface propsType {
@@ -17,10 +19,14 @@ interface propsType {
   newImageCallback: (image: ImageType | ImageSizeType) => void;
   speaker?: ISpeaker;
   vertical?: boolean;
+  requiredTypes?: ImageSizeType[];
 }
 
 const ImageViewer = (props: propsType) => {
   const { newImageCallback } = props;
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
   const [selectedImage, setSelectedImage] = useState<ImageType>();
   const [newSelectedImage, setNewSelectedImage] = useState<ImageType>();
   const [imageSelectorPopup, setImageSelectorPopup] = useState<boolean>(false);
@@ -45,14 +51,17 @@ const ImageViewer = (props: propsType) => {
     action();
   }, []);
 
+  const requiredTypes = props.requiredTypes ?? [];
+  const isRequiredType = (type: ImageSizeType): boolean => requiredTypes.includes(type);
+
   return (
     <>
       <div
         style={{
           height: '100%',
           display: 'grid',
-          gridTemplateColumns: props.vertical ? '1fr' : 'repeat(3, 1fr)',
-          gap: '10px',
+          gridTemplateColumns: props.vertical ? '1fr' : isMobile ? '1fr' : isTablet ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))',
+          gap: isMobile ? '16px' : '10px',
           alignItems: 'center',
           justifyItems: 'center',
         }}
@@ -60,13 +69,14 @@ const ImageViewer = (props: propsType) => {
         {ImageSizes.map((type, i) => {
           const image: ImageType | undefined = props.images.find((image) => image.type === type);
           return image ? (
-            <div key={`${image.id}-image`}>
+            <div key={`${image.id}-image`} style={{ width: '100%' }}>
               <div id={`${image.id}-image`} className={styles.imageHover}>
                 <div
                   className={styles.imageContainer}
                   style={{
                     aspectRatio: AspectRatio[type],
-                    backgroundColor: image.averageColorHex || 'var(--placeholder-bg, #2d323b)',
+                    backgroundColor: 'transparent',
+                    overflow: 'visible',
                   }}
                   role="button"
                   tabIndex={0}
@@ -83,16 +93,25 @@ const ImageViewer = (props: propsType) => {
                       setNewSelectedImage(image);
                     })
                   }
-                >
-                  <Image
-                    src={image.downloadLink}
-                    alt={image.name}
+                  >
+                  <div
                     style={{
-                      objectFit: 'contain',
                       borderRadius: '5px',
+                      overflow: 'hidden',
+                      position: 'absolute',
+                      inset: 0,
+                      backgroundColor: image.averageColorHex || 'var(--placeholder-bg, #2d323b)',
                     }}
-                    fill
-                  />
+                  >
+                    <Image
+                      src={image.downloadLink}
+                      alt={image.name}
+                      style={{
+                        objectFit: 'contain',
+                      }}
+                      fill
+                    />
+                  </div>
                 </div>
                 <h3 className={styles.imageCover}>Change Image</h3>
                 <div className={styles.removeImage} onMouseOver={(e) => e.preventDefault()}>
@@ -126,12 +145,13 @@ const ImageViewer = (props: propsType) => {
               </div>
             </div>
           ) : (
-            <div key={i} className={styles.imageHover}>
+            <div key={i} style={{ width: '100%' }}>
+              <div className={styles.imageHover}>
               <div
                 style={{
                   display: 'flex',
                   borderRadius: '8px',
-                  overflow: 'hidden',
+                  overflow: 'visible',
                   position: 'relative',
                   width: '100%',
                   justifyContent: 'center',
@@ -141,6 +161,9 @@ const ImageViewer = (props: propsType) => {
                   border: '2px dashed var(--border-color, rgba(255,255,255,0.2))',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease-in-out',
+                  borderColor: isRequiredType(type)
+                    ? 'rgba(245, 158, 11, 0.8)'
+                    : 'var(--border-color, rgba(255,255,255,0.2))',
                 }}
                 role="button"
                 tabIndex={0}
@@ -155,8 +178,42 @@ const ImageViewer = (props: propsType) => {
                     setSelectedImage({ type } as ImageType);
                   })
                 }
-              >
-                <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '0.875rem' }}>Add image +</span>
+                >
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 12,
+                    transform: 'translateY(-50%)',
+                    padding: '2px 8px',
+                    borderRadius: '999px',
+                    backgroundColor: isRequiredType(type)
+                      ? 'rgba(245, 158, 11, 0.92)'
+                      : 'rgba(15, 23, 42, 0.72)',
+                    color: isRequiredType(type) ? '#111827' : '#e2e8f0',
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.01em',
+                    }}
+                  >
+                  {isRequiredType(type) ? 'Required' : 'Optional'}
+                </div>
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}
+                >
+                  <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '0.875rem' }}>
+                    Add {type} image +
+                  </span>
+                </div>
+              </div>
               </div>
             </div>
           );

@@ -13,6 +13,17 @@ import * as lockStore from '../../locks/subsplashLockStore';
 type ReorderSeriesItemsHandler = (request: TestRequest<ReorderSeriesItemsInputType>) => Promise<ReorderSeriesItemsOutputType>;
 const reorderSeriesItemsHandler = reorderSeriesItems as unknown as ReorderSeriesItemsHandler;
 
+const createExpectedRemoteMembershipHash = (seriesId: string): string => {
+  const remoteItems = [...subsplashSeriesMock.getSeriesItems(seriesId)]
+    .sort((left, right) => (right.position ?? Number.NEGATIVE_INFINITY) - (left.position ?? Number.NEGATIVE_INFINITY));
+
+  if (remoteItems.length === 0) {
+    return 'empty';
+  }
+
+  return remoteItems.map((item) => `${item.id}:${item.status}`).join('|');
+};
+
 describe('reorderSeriesItems - Basic Functionality', () => {
   beforeEach(async () => {
     await clearFirestore();
@@ -47,6 +58,7 @@ describe('reorderSeriesItems - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [
           { mediaItemId: item3.id, position: 1 },
           { mediaItemId: item1.id, position: 2 },
@@ -89,6 +101,7 @@ describe('reorderSeriesItems - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [
           { mediaItemId: item1.id, position: 1 },
           { mediaItemId: item2.id, position: 2 },
@@ -119,6 +132,7 @@ describe('reorderSeriesItems - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [],
       },
     };
@@ -148,6 +162,7 @@ describe('reorderSeriesItems - Authentication', () => {
       auth: undefined,
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [],
       },
     };
@@ -166,6 +181,7 @@ describe('reorderSeriesItems - Authentication', () => {
       auth: { token: { role: 'viewer' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [],
       },
     };
@@ -184,6 +200,7 @@ describe('reorderSeriesItems - Authentication', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [],
       },
     };
@@ -205,6 +222,7 @@ describe('reorderSeriesItems - Validation', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: '',
+        expectedRemoteMembershipHash: 'empty',
         itemOrder: [],
       },
     };
@@ -217,6 +235,7 @@ describe('reorderSeriesItems - Validation', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: 'non-existent-id',
+        expectedRemoteMembershipHash: 'empty',
         itemOrder: [],
       },
     };
@@ -252,6 +271,7 @@ describe('reorderSeriesItems - Error Handling', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [{ mediaItemId: item.id, position: 1 }],
       },
     };
@@ -285,6 +305,7 @@ describe('reorderSeriesItems - Locking and Idempotency', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [{ mediaItemId: item.id, position: 1 }],
         operationKey: 'reorder-op-replay-1',
       } as ReorderSeriesItemsInputType,
@@ -331,6 +352,7 @@ describe('reorderSeriesItems - Locking and Idempotency', () => {
       auth: { token: { role: 'admin' } },
       data: {
         firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
         itemOrder: [{ mediaItemId: item.id, position: 1 }],
         operationKey: 'reorder-op-busy-1',
       } as ReorderSeriesItemsInputType,
@@ -351,5 +373,123 @@ describe('reorderSeriesItems - Locking and Idempotency', () => {
       heartbeat.stop();
       await lockStore.releaseLock(lockKey, 'reorder-owner-1').catch(() => undefined);
     }
+  });
+});
+
+describe('reorderSeriesItems - Remote source of truth', () => {
+  beforeEach(async () => {
+    await clearFirestore();
+    subsplashSeriesMock.reset();
+    networkFailureInjector.clear();
+  });
+
+  it('rejects stale remote membership hashes', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Stale Series');
+    const item1 = subsplashSeriesMock.createMediaItem('Item 1', {
+      seriesId: subsplashSeries.id,
+      position: 1,
+    });
+    const item2 = subsplashSeriesMock.createMediaItem('Item 2', {
+      seriesId: subsplashSeries.id,
+      position: 2,
+    });
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Stale Series',
+      itemCount: 2,
+    });
+
+    const request: TestRequest<ReorderSeriesItemsInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: `${createExpectedRemoteMembershipHash(subsplashSeries.id)}-stale`,
+        itemOrder: [
+          { mediaItemId: item2.id, position: 1 },
+          { mediaItemId: item1.id, position: 2 },
+        ],
+      },
+    };
+
+    await expect(reorderSeriesItemsHandler(request)).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+  });
+
+  it('rejects reorder payloads that omit remote-only series items', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Mixed Series');
+    const trackedItem = subsplashSeriesMock.createMediaItem('Tracked Item', {
+      seriesId: subsplashSeries.id,
+      position: 1,
+    });
+    const remoteOnlyItem = subsplashSeriesMock.createMediaItem('Remote Only Item', {
+      seriesId: subsplashSeries.id,
+      position: 2,
+    });
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Mixed Series',
+      itemCount: 1,
+    });
+
+    const request: TestRequest<ReorderSeriesItemsInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
+        itemOrder: [{ mediaItemId: trackedItem.id, position: 1 }],
+      },
+    };
+
+    await expect(reorderSeriesItemsHandler(request)).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: expect.stringContaining('include every media item'),
+    });
+
+    expect(subsplashSeriesMock.getMediaItem(remoteOnlyItem.id)?.position).toBe(2);
+  });
+
+  it('reorders a full mixed remote membership including remote-only items', async () => {
+    const subsplashSeries = subsplashSeriesMock.createSeries('Mixed Series');
+    const trackedItem = subsplashSeriesMock.createMediaItem('Tracked Item', {
+      seriesId: subsplashSeries.id,
+      position: 1,
+    });
+    const remoteOnlyItem = subsplashSeriesMock.createMediaItem('Remote Only Item', {
+      seriesId: subsplashSeries.id,
+      position: 2,
+    });
+    const anotherTrackedItem = subsplashSeriesMock.createMediaItem('Another Tracked Item', {
+      seriesId: subsplashSeries.id,
+      position: 3,
+    });
+    const firestoreId = await createSeriesDocument({
+      subsplashId: subsplashSeries.id,
+      name: 'Mixed Series',
+      itemCount: 2,
+    });
+
+    const request: TestRequest<ReorderSeriesItemsInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        firestoreSeriesId: firestoreId,
+        expectedRemoteMembershipHash: createExpectedRemoteMembershipHash(subsplashSeries.id),
+        itemOrder: [
+          { mediaItemId: remoteOnlyItem.id, position: 1 },
+          { mediaItemId: anotherTrackedItem.id, position: 2 },
+          { mediaItemId: trackedItem.id, position: 3 },
+        ],
+      },
+    };
+
+    const result = await reorderSeriesItemsHandler(request);
+    expect(result.status).toBe('success');
+
+    const reorderedItems = subsplashSeriesMock.getSeriesItems(subsplashSeries.id);
+    expect(reorderedItems.map((item) => item.id)).toEqual([
+      remoteOnlyItem.id,
+      anotherTrackedItem.id,
+      trackedItem.id,
+    ]);
   });
 });

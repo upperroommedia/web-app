@@ -19,6 +19,8 @@ import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contra
 import { Series, emptySeries } from '../types/Series';
 import firestore, { doc, updateDoc } from '../firebase/firestore';
 import { serverTimestamp } from 'firebase/firestore';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 interface NewSeriesPopupProps {
   open: boolean;
@@ -32,6 +34,8 @@ const getDerivedSubtitle = (publishedItemCount: number): string => `${publishedI
 
 const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   const { user } = useAuth();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const [formData, setFormData] = useState<{
     name: string;
@@ -187,7 +191,13 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   };
 
   const nameError = formData.name.trim() ? null : 'Name is required';
-  const isValid = formData.name.trim() !== '' && formData.images.length > 0;
+  const hasWideImage = formData.images.some((image) => image.type === 'wide');
+  const hasBannerImage = formData.images.some((image) => image.type === 'banner');
+  const missingRequiredImages = [
+    !hasWideImage ? 'wide' : null,
+    !hasBannerImage ? 'banner' : null,
+  ].filter((value): value is 'wide' | 'banner' => value !== null);
+  const isValid = formData.name.trim() !== '' && missingRequiredImages.length === 0;
 
   return (
     <PopUp
@@ -195,6 +205,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
       open={props.open}
       setOpen={props.setOpen}
       onClose={handleClose}
+      dialogProps={{ fullWidth: true, maxWidth: 'lg', fullScreen: isMobile }}
       button={
         <Button
           variant="contained"
@@ -205,7 +216,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         </Button>
       }
     >
-      <Box display="flex" padding="10px" justifyContent="center" flexDirection="column" gap={2}>
+      <Box display="flex" padding={{ xs: '4px', sm: '12px', md: '16px' }} justifyContent="center" flexDirection="column" gap={2.5}>
         {error && (
           <Alert severity="error" onClose={() => setError(null)}>
             {error}
@@ -232,12 +243,12 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
         />
 
         <Box>
-          <ImageViewer images={formData.images} newImageCallback={handleImageChange} vertical={false} />
-          {formData.images.length === 0 && (
-            <Alert severity="info" sx={{ mt: 1 }}>
-              Please add at least one image for the series
-            </Alert>
-          )}
+          <ImageViewer
+            images={formData.images}
+            newImageCallback={handleImageChange}
+            vertical={false}
+            requiredTypes={['wide', 'banner']}
+          />
         </Box>
       </Box>
     </PopUp>
