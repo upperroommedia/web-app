@@ -29,7 +29,7 @@ import {
 import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
 import { getConfiguredMaxListSize } from './helpers/listCapacity';
-import { canReconstructRemoteRow, getRemoteRowResourceId } from './helpers/remoteChainItems';
+import { canReconstructRemoteRow, getRemoteRowResourceId, getRemoteRowTitle } from './helpers/remoteChainItems';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -106,6 +106,105 @@ const normalizeString = (value: unknown): string | undefined => {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+};
+
+const normalizeMatchWords = (value: string): string[] =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+const buildFlexibleWordPattern = (words: string[]): RegExp | null => {
+  if (words.length === 0) {
+    return null;
+  }
+
+  return new RegExp(words.map((word) => `\\b${word}\\b`).join('[\\s\\S]*'), 'i');
+};
+
+const MORE_SERMONS_PATTERN = /\bmore\b[\s\S]*\bsermons?\b/i;
+
+const looksLikeOverflowListName = ({
+  rootListName,
+  candidateTitle,
+}: {
+  rootListName: string;
+  candidateTitle: string;
+}): boolean => {
+  const normalizedCandidate = candidateTitle.trim();
+  if (!normalizedCandidate) {
+    return false;
+  }
+
+  if (MORE_SERMONS_PATTERN.test(normalizedCandidate)) {
+    return true;
+  }
+
+  const rootWords = normalizeMatchWords(rootListName);
+  const candidateWords = normalizeMatchWords(normalizedCandidate);
+  if (rootWords.length === 0 || candidateWords.length === 0) {
+    return false;
+  }
+
+  const rootPattern = buildFlexibleWordPattern(rootWords);
+  const candidatePattern = buildFlexibleWordPattern(candidateWords);
+  if (rootPattern?.test(normalizedCandidate) || candidatePattern?.test(rootListName)) {
+    return true;
+  }
+
+  const rootWordSet = new Set(rootWords);
+  const overlapCount = candidateWords.filter((word) => rootWordSet.has(word)).length;
+  const minimumOverlap = Math.max(2, Math.ceil(rootWords.length * 0.6));
+  return overlapCount >= minimumOverlap;
+};
+
+const findAdoptableOverflowListCandidate = async ({
+  rows,
+  rootListName,
+  token,
+}: {
+  rows: SubsplashListRow[];
+  rootListName: string;
+  token: string;
+}): Promise<{ listId: string; title: string }> => {
+  for (const row of rows) {
+    if (row.type !== 'list') {
+      continue;
+    }
+
+    const linkedListId = getRemoteRowResourceId(row);
+    if (!linkedListId) {
+      continue;
+    }
+
+    let linkedListTitle = getRemoteRowTitle(row);
+    if (!linkedListTitle) {
+      try {
+        const listDetails = await getListDetails(linkedListId, token);
+        linkedListTitle = normalizeString(listDetails.title);
+      } catch (error) {
+        listDebugWarn('addToList.findAdoptableOverflowListCandidate.skipUnresolvableList', {
+          linkedListId,
+          rootListName,
+          error,
+        });
+        continue;
+      }
+    }
+
+    if (!linkedListTitle || !looksLikeOverflowListName({ rootListName, candidateTitle: linkedListTitle })) {
+      continue;
+    }
+
+    return {
+      listId: linkedListId,
+      title: linkedListTitle,
+    };
+  }
+
+  throw new Error('NO_MATCHING_OVERFLOW_CANDIDATE');
 };
 
 const resolveListItemIdWithRetry = async (
@@ -203,6 +302,97 @@ const ensureListIsPatchableBeforeDestructiveMutation = async (
   }
 
   await patchListRows(listId, currentRows, token);
+};
+
+const applyRemoveOldestMutation = async ({
+  listId,
+  itemId,
+  currentRows,
+  finalRows,
+  token,
+}: {
+  listId: string;
+  itemId: string;
+  currentRows: SubsplashListRow[];
+  finalRows: SubsplashListRow[];
+  token: string;
+}): Promise<SubsplashListRow[]> => {
+  const finalRowIds = new Set(
+    finalRows
+      .map((row) => row.id)
+      .filter((rowId): rowId is string => typeof rowId === 'string' && rowId.trim().length > 0)
+  );
+  const rowsToDelete = currentRows.filter((row) => row.id && !finalRowIds.has(row.id));
+
+  listDebugLog('addToList.processListStep.removeOldest.start', {
+    listId,
+    itemId,
+    currentRows: summarizeSubsplashRows(currentRows),
+    finalRows: summarizeSubsplashRows(finalRows),
+    rowsToDelete: summarizeSubsplashRows(rowsToDelete),
+  });
+
+  await ensureListIsPatchableBeforeDestructiveMutation(listId, currentRows, token);
+
+  try {
+    await deleteExistingRowsMissingFromTarget(listId, currentRows, finalRows, token);
+    const finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+    listDebugLog('addToList.processListStep.removeOldest.complete', {
+      listId,
+      itemId,
+      finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
+    });
+    return finalRowsSnapshot;
+  } catch (error) {
+    listDebugWarn('addToList.processListStep.removeOldest.patchFailed', {
+      listId,
+      itemId,
+      error,
+      rowsToDelete: summarizeSubsplashRows(rowsToDelete),
+      finalRows: summarizeSubsplashRows(finalRows),
+    });
+
+    let rollbackSucceeded = false;
+    try {
+      const rollbackRowsSnapshot = await patchListRows(listId, currentRows, token, {
+        forceFullRows: true,
+      });
+      listDebugWarn('addToList.processListStep.removeOldest.rollbackSucceeded', {
+        listId,
+        itemId,
+        rollbackRowsSnapshot: summarizeSubsplashRows(rollbackRowsSnapshot),
+      });
+      rollbackSucceeded = true;
+    } catch (rollbackError) {
+      listDebugError('addToList.processListStep.removeOldest.rollbackFailed', {
+        listId,
+        itemId,
+        error,
+        rollbackError,
+        originalRows: summarizeSubsplashRows(currentRows),
+        finalRows: summarizeSubsplashRows(finalRows),
+        rowsToDelete: summarizeSubsplashRows(rowsToDelete),
+      });
+      throw new HttpsError(
+        'internal',
+        'Failed to update latest list in Subsplash and automatic rollback failed. Subsplash may need manual review.'
+      );
+    }
+
+    if (rollbackSucceeded) {
+      throw new HttpsError(
+        'internal',
+        'Failed to update latest list in Subsplash. The original list order was restored.'
+      );
+    }
+
+    throw new HttpsError(
+      'internal',
+      'Failed to update latest list in Subsplash and automatic rollback status could not be determined.'
+    );
+  }
+
+  throw new HttpsError('internal', 'Reached an unexpected REMOVEOLDEST completion state.');
 };
 
 const ensureImmediateOverflowListLinkInFirestore = async ({
@@ -452,6 +642,7 @@ async function processListStep(
               ref: DocumentReference;
               data: Record<string, unknown>;
               parentUpdate: Record<string, unknown>;
+              merge?: boolean;
             }
           | undefined;
 
@@ -497,64 +688,123 @@ async function processListStep(
           }
 
           const newOverflowDepth = currentDepth + 1;
+          const adoptedOverflowCandidate = await findAdoptableOverflowListCandidate({
+            rows: currentRows,
+            rootListName,
+            token,
+          }).catch((error) => {
+            if (error instanceof Error && error.message === 'NO_MATCHING_OVERFLOW_CANDIDATE') {
+              return null;
+            }
+            throw error;
+          });
           const newTitle = buildOverflowListTitle(rootListName);
           const subtitle = buildOverflowListSubtitle(newOverflowDepth);
-          listDebugLog('addToList.processListStep.createOverflowList.start', {
-            listId,
-            rootListId,
-            rootListName,
-            currentDepth,
-            newOverflowDepth,
-            newTitle,
-            subtitle,
-          });
-
-          const newList = await createNewList(newTitle, token, subtitle);
-          nextListId = newList.id;
-          listDebugLog('addToList.processListStep.createOverflowList.success', {
-            listId,
-            nextListId,
-            rootListId,
-            newOverflowDepth,
-          });
-
-          const newListRef = firestoreDB.collection('lists').doc();
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { id, ...dataToCopy } = listData;
           const now = Date.now();
 
-          pendingOverflowDoc = {
-            ref: newListRef,
-            data: {
-              ...dataToCopy,
-              id: newListRef.id,
-              subsplashId: nextListId,
-              name: newTitle,
-              createdAtMillis: now,
-              updatedAtMillis: now,
-              count: 0,
-              maxListSize,
-              images: [],
-              ...buildOverflowListMetadata({
-                rootListId,
-                overflowDepth: newOverflowDepth,
-              }),
-            },
-            parentUpdate: {
-              moreSermonsRef: nextListId,
-              maxListSize,
-              ...(isOverflowList
-                ? buildOverflowListMetadata({
-                    rootListId,
-                    overflowDepth: currentDepth,
-                  })
-                : buildRootListMetadata({
-                    rootListId: listDoc.id,
-                    logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
-                    hasOverflowPages: true,
+          if (adoptedOverflowCandidate) {
+            nextListId = adoptedOverflowCandidate.listId;
+            listDebugLog('addToList.processListStep.adoptOverflowList.success', {
+              listId,
+              nextListId,
+              rootListId,
+              newOverflowDepth,
+              adoptedOverflowTitle: adoptedOverflowCandidate.title,
+            });
+          } else {
+            listDebugLog('addToList.processListStep.createOverflowList.start', {
+              listId,
+              rootListId,
+              rootListName,
+              currentDepth,
+              newOverflowDepth,
+              newTitle,
+              subtitle,
+            });
+
+            const newList = await createNewList(newTitle, token, subtitle);
+            nextListId = newList.id;
+            listDebugLog('addToList.processListStep.createOverflowList.success', {
+              listId,
+              nextListId,
+              rootListId,
+              newOverflowDepth,
+            });
+          }
+
+          const existingOverflowSnapshot = await firestoreDB
+            .collection('lists')
+            .where('subsplashId', '==', nextListId)
+            .limit(1)
+            .get();
+          const existingOverflowDoc = existingOverflowSnapshot.docs[0];
+          const overflowListName = adoptedOverflowCandidate?.title ?? newTitle;
+
+          if (existingOverflowDoc) {
+            pendingOverflowDoc = {
+              ref: existingOverflowDoc.ref,
+              data: {
+                updatedAtMillis: now,
+                maxListSize,
+                name: overflowListName,
+                ...buildOverflowListMetadata({
+                  rootListId,
+                  overflowDepth: newOverflowDepth,
+                }),
+              },
+              parentUpdate: {
+                moreSermonsRef: nextListId,
+                maxListSize,
+                ...(isOverflowList
+                  ? buildOverflowListMetadata({
+                      rootListId,
+                      overflowDepth: currentDepth,
+                    })
+                  : buildRootListMetadata({
+                      rootListId: listDoc.id,
+                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+                      hasOverflowPages: true,
                   })),
-            },
-          };
+              },
+              merge: true,
+            };
+          } else {
+            const newListRef = firestoreDB.collection('lists').doc();
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { id, ...dataToCopy } = listData;
+            pendingOverflowDoc = {
+              ref: newListRef,
+              data: {
+                ...dataToCopy,
+                id: newListRef.id,
+                subsplashId: nextListId,
+                name: overflowListName,
+                createdAtMillis: now,
+                updatedAtMillis: now,
+                count: 0,
+                maxListSize,
+                images: [],
+                ...buildOverflowListMetadata({
+                  rootListId,
+                  overflowDepth: newOverflowDepth,
+                }),
+              },
+              parentUpdate: {
+                moreSermonsRef: nextListId,
+                maxListSize,
+                ...(isOverflowList
+                  ? buildOverflowListMetadata({
+                      rootListId,
+                      overflowDepth: currentDepth,
+                    })
+                  : buildRootListMetadata({
+                      rootListId: listDoc.id,
+                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+                      hasOverflowPages: true,
+                    })),
+              },
+            };
+          }
         }
 
         const contentRows = updatedRows.filter((r) => !(r.type === 'list' && r._embedded.list?.id === nextListId));
@@ -633,7 +883,11 @@ async function processListStep(
 
         if (pendingOverflowDoc) {
           const batch = firestoreDB.batch();
-          batch.set(pendingOverflowDoc.ref, pendingOverflowDoc.data);
+          if (pendingOverflowDoc.merge) {
+            batch.set(pendingOverflowDoc.ref, pendingOverflowDoc.data, { merge: true });
+          } else {
+            batch.set(pendingOverflowDoc.ref, pendingOverflowDoc.data);
+          }
           batch.update(listDoc.ref, pendingOverflowDoc.parentUpdate);
           await batch.commit();
           listDebugLog('addToList.processListStep.overflowFirestoreMetadata.created', {
@@ -645,16 +899,12 @@ async function processListStep(
         }
       } else if (listData.overflowBehavior === OverflowBehavior.REMOVEOLDEST) {
         const finalRows = updatedRows.slice(0, maxListSize);
-        listDebugLog('addToList.processListStep.removeOldest.start', {
+        finalRowsSnapshot = await applyRemoveOldestMutation({
           listId,
-          finalRows: summarizeSubsplashRows(finalRows),
-        });
-        await ensureListIsPatchableBeforeDestructiveMutation(listId, currentRows, token);
-        await deleteExistingRowsMissingFromTarget(listId, currentRows, finalRows, token);
-        finalRowsSnapshot = await patchListRows(listId, finalRows, token);
-        listDebugLog('addToList.processListStep.removeOldest.complete', {
-          listId,
-          finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
+          itemId: itemToAdd.id,
+          currentRows,
+          finalRows,
+          token,
         });
       } else {
         throw new HttpsError('failed-precondition', 'List overflowed and no valid behavior set');

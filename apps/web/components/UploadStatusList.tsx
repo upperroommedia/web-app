@@ -46,20 +46,37 @@ const UploadStatusList = ({
 }: UploadStatusListProps) => {
   const [loadingAction, setLoadingAction] = useState<'primary' | 'secondary' | null>(null);
   const [loadingListIds, setLoadingListIds] = useState<Set<string>>(new Set());
-  const [checked, setChecked] = useState<boolean[]>(new Array(sermonListItems.length).fill(false));
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setChecked(new Array(sermonListItems.length).fill(false));
+    const validIds = new Set(sermonListItems.map((item) => item.id));
+    setCheckedIds((previousCheckedIds) => {
+      let changed = false;
+      const nextCheckedIds = new Set<string>();
+
+      previousCheckedIds.forEach((id) => {
+        if (validIds.has(id)) {
+          nextCheckedIds.add(id);
+        } else {
+          changed = true;
+        }
+      });
+
+      return changed ? nextCheckedIds : previousCheckedIds;
+    });
   }, [sermonListItems]);
 
-  if (sermonListItems.length === 0 || checked.length === 0) {
+  if (sermonListItems.length === 0) {
     return <></>;
   }
 
-  const hasSelection = checked.some((value) => value === true);
+  const selectedCount = sermonListItems.filter((item) => checkedIds.has(item.id)).length;
+  const hasSelection = selectedCount > 0;
+  const allSelected = selectedCount === sermonListItems.length;
+  const someSelected = selectedCount > 0 && selectedCount < sermonListItems.length;
   const isLoading = loadingAction !== null;
   const runAction = async (action: 'primary' | 'secondary') => {
-    const selectedItems = sermonListItems.filter((_, index) => checked[index]);
+    const selectedItems = sermonListItems.filter((item) => checkedIds.has(item.id));
     if (selectedItems.length === 0) return;
 
     setLoadingAction(action);
@@ -96,25 +113,36 @@ const UploadStatusList = ({
           <Checkbox
             disableRipple
             inputProps={{ 'aria-label': 'controlled' }}
-            checked={checked.every((value) => value === true)}
-            indeterminate={checked.some((value) => value === true) && checked.some((value) => value === false)}
-            onChange={(event) => setChecked(checked.map(() => event.target.checked))}
+            checked={allSelected}
+            indeterminate={someSelected}
+            onChange={(event) =>
+              setCheckedIds(
+                event.target.checked
+                  ? new Set(sermonListItems.map((item) => item.id))
+                  : new Set()
+              )
+            }
           />
         }
       />
       <List sx={{ p: 0 }}>
-        {sermonListItems.map((sermonList, index) => {
+        {sermonListItems.map((sermonList) => {
           return (
             <ListItem key={sermonList.id} sx={{ display: 'flex', justifyContent: 'space-between' }}>
               <Stack gap={1} flexDirection="row" alignItems="center" marginRight={2}>
                 <Checkbox
                   disableRipple
                   inputProps={{ 'aria-label': 'controlled' }}
-                  checked={checked[index]}
+                  checked={checkedIds.has(sermonList.id)}
                   onChange={(event) =>
-                    setChecked((previousChecked) => {
-                      previousChecked[index] = event.target.checked;
-                      return [...previousChecked];
+                    setCheckedIds((previousCheckedIds) => {
+                      const nextCheckedIds = new Set(previousCheckedIds);
+                      if (event.target.checked) {
+                        nextCheckedIds.add(sermonList.id);
+                      } else {
+                        nextCheckedIds.delete(sermonList.id);
+                      }
+                      return nextCheckedIds;
                     })
                   }
                 />

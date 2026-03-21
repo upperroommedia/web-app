@@ -366,23 +366,24 @@ export const syncRootMembershipPlacements = async (
     }
 
     operations.push({
-      type: 'set',
+      type: 'update',
       ref: doc.ref,
       data: {
-        uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+        'uploadStatus.status': uploadStatus.NOT_UPLOADED,
+        'uploadStatus.listItemId': FieldValue.delete(),
         physicalPlacement: FieldValue.delete(),
         position: FieldValue.delete(),
       },
-      options: { merge: true },
     });
 
     operations.push({
-      type: 'set',
+      type: 'update',
       ref: firestore.collection('sermons').doc(doc.id).collection('sermonLists').doc(rootListId),
       data: {
-        uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+        'uploadStatus.status': uploadStatus.NOT_UPLOADED,
+        'uploadStatus.listItemId': FieldValue.delete(),
+        publishGeneration: FieldValue.increment(1),
       },
-      options: { merge: true },
     });
   });
 

@@ -24,6 +24,15 @@ jest.mock('../../helpers/publishedListDrift', () => {
 
 const addToListHandler = addToList as unknown as AddToListHandler;
 
+const loggerErrorMentionsList = (listId: string): boolean =>
+  (logger.error as jest.Mock).mock.calls.some(([message, payload]) => {
+    const serializedPayload = JSON.stringify(payload ?? {});
+    return (
+      (typeof message === 'string' && message.includes(listId)) ||
+      serializedPayload.includes(listId)
+    );
+  });
+
 describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () => {
   beforeEach(async () => {
     await clearFirestore();
@@ -271,6 +280,111 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(rows[0]._embedded['media-item']?.id).toBe('item-0');
   });
 
+  it('restores the original rows when the final REMOVEOLDEST patch fails after delete', async () => {
+    const listId = 'networkFailures-full-list-4b';
+    subsplashMock.createList(listId, 'Full List', 10);
+    const initialRows = Array.from({ length: 10 }, (_, i) => ({
+      id: `row-${i}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: i + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: listId },
+        'media-item': { id: `item-${i}` }
+      }
+    }));
+    subsplashMock.listRows.set(listId, initialRows);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Full List',
+      overflowBehavior: OverflowBehavior.REMOVEOLDEST,
+      count: 10,
+    });
+
+    let patchAttempts = 0;
+    networkFailureInjector.registerFailure(`patchList:${listId}`, () => {
+      patchAttempts += 1;
+      return patchAttempts === 2;
+    });
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem: { id: 'new-item', type: 'media-item' },
+        maxListSize: 10,
+      }
+    };
+
+    const result = await addToListHandler(request);
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('error');
+    if (result[0].status === 'error') {
+      expect(result[0].error).toContain('original list order was restored');
+    }
+
+    const rows = subsplashMock.getListRows(listId);
+    expect(rows.map((row) => row._embedded['media-item']?.id)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `item-${index}`)
+    );
+  });
+
+  it('logs a recovery failure when the final REMOVEOLDEST patch and rollback both fail', async () => {
+    const listId = 'networkFailures-full-list-4c';
+    subsplashMock.createList(listId, 'Full List', 10);
+    const initialRows = Array.from({ length: 10 }, (_, i) => ({
+      id: `row-${i}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: i + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: listId },
+        'media-item': { id: `item-${i}` }
+      }
+    }));
+    subsplashMock.listRows.set(listId, initialRows);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Full List',
+      overflowBehavior: OverflowBehavior.REMOVEOLDEST,
+      count: 10,
+    });
+
+    let patchAttempts = 0;
+    networkFailureInjector.registerFailure(`patchList:${listId}`, () => {
+      patchAttempts += 1;
+      return patchAttempts >= 2;
+    });
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem: { id: 'new-item', type: 'media-item' },
+        maxListSize: 10,
+      }
+    };
+
+    const result = await addToListHandler(request);
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('error');
+    if (result[0].status === 'error') {
+      expect(result[0].error).toContain('automatic rollback failed');
+    }
+
+    const rows = subsplashMock.getListRows(listId);
+    expect(rows).toHaveLength(9);
+    expect(rows.find((row) => row._embedded['media-item']?.id === 'item-9')).toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('[list-debug] addToList.processListStep.removeOldest.rollbackFailed'),
+      expect.any(Object)
+    );
+  });
+
   it('should handle network failure when patching overflow list during propagation', async () => {
     const listA = 'networkFailures-list-a';
     const listB = 'networkFailures-list-b';
@@ -506,16 +620,10 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(logger.error).toHaveBeenCalledTimes(3);
     
     // Verify logger.error was called with the correct list IDs
-    const errorCalls = (logger.error as jest.Mock).mock.calls;
-    const errorMessages = errorCalls.map(call => call[0] as string);
-    
-    // Should have error logs for list 2 and list 3
-    expect(errorMessages.some(msg => msg.includes(listId2))).toBe(true);
-    expect(errorMessages.some(msg => msg.includes(listId3))).toBe(true);
-    
-    // Verify that logger.error was NOT called for successful lists
-    expect(errorMessages.some(msg => msg.includes(listId1))).toBe(false);
-    expect(errorMessages.some(msg => msg.includes(listId4))).toBe(false);
+    expect(loggerErrorMentionsList(listId2)).toBe(true);
+    expect(loggerErrorMentionsList(listId3)).toBe(true);
+    expect(loggerErrorMentionsList(listId1)).toBe(false);
+    expect(loggerErrorMentionsList(listId4)).toBe(false);
   });
 
   it('should handle partial failures with proper error messages and logging', async () => {
@@ -620,14 +728,8 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(logger.error).toHaveBeenCalledTimes(3);
     
     // Verify logger.error was called with the correct list IDs
-    const errorCalls = (logger.error as jest.Mock).mock.calls;
-    const errorMessages = errorCalls.map(call => call[0] as string);
-    
-    // Should have error logs for list 2 and list 3
-    expect(errorMessages.some(msg => msg.includes(listId2))).toBe(true);
-    expect(errorMessages.some(msg => msg.includes(listId3))).toBe(true);
-    
-    // Verify that logger.error was NOT called for the successful list
-    expect(errorMessages.some(msg => msg.includes(listId1))).toBe(false);
+    expect(loggerErrorMentionsList(listId2)).toBe(true);
+    expect(loggerErrorMentionsList(listId3)).toBe(true);
+    expect(loggerErrorMentionsList(listId1)).toBe(false);
   });
 });

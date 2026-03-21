@@ -206,6 +206,118 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     expect(overflowMirrorSnapshot.size).toBe(0);
   });
 
+  it('adopts an existing nested list as the overflow list when its title matches the root list', async () => {
+    const rootListId = 'root-adopt-overflow';
+    const existingOverflowListId = 'existing-overflow-list';
+
+    subsplashMock.createList(rootListId, 'Fr. Anthony Messeh', 5);
+    subsplashMock.createList(existingOverflowListId, 'More Fr Anthony sermons archive', 0);
+    subsplashMock.listRows.set(rootListId, [
+      {
+        id: 'row-0',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-0' },
+        },
+      },
+      {
+        id: 'row-1',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-1' },
+        },
+      },
+      {
+        id: 'row-2',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 3,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-2' },
+        },
+      },
+      {
+        id: 'row-3',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 4,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-3' },
+        },
+      },
+      {
+        id: 'row-list',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 5,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'list': { id: existingOverflowListId, title: 'More Fr Anthony sermons archive' },
+        },
+      },
+    ]);
+
+    const rootFirestoreId = await createListDocument({
+      subsplashId: rootListId,
+      title: 'Fr. Anthony Messeh',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 5,
+    });
+    await createSermonDocument(buildSermon('sermon-new-overflow', 'new-overflow-item'));
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'new-overflow-item', type: 'media-item' },
+        maxListSize: 5,
+      },
+    };
+
+    await addToListHandler(request);
+
+    const rootRows = subsplashMock.getListRows(rootListId);
+    const adoptedLinkRow = rootRows[rootRows.length - 1];
+    expect(adoptedLinkRow.type).toBe('list');
+    expect(adoptedLinkRow._embedded.list?.id).toBe(existingOverflowListId);
+
+    const overflowRows = subsplashMock.getListRows(existingOverflowListId);
+    expect(overflowRows.map((row) => row._embedded['media-item']?.id)).toContain('item-3');
+
+    const createListEvents = subsplashMock.getHistory().filter((entry) => entry.event === 'create-list');
+    expect(createListEvents).toHaveLength(0);
+
+    const rootDoc = await getListBySubsplashId(rootListId);
+    const adoptedOverflowDoc = await getListBySubsplashId(existingOverflowListId);
+    expect(rootDoc!.data()).toMatchObject({
+      moreSermonsRef: existingOverflowListId,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 0,
+    });
+    expect(adoptedOverflowDoc!.data()).toMatchObject({
+      subsplashId: existingOverflowListId,
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+    });
+  });
+
   it('should propagate overflow down multiple lists in chain', async () => {
     const listA = 'basic-list-a';
     const listB = 'basic-list-b';
@@ -1221,12 +1333,68 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       subsplashMock.listRows.set(listId, initialRows);
       
       // Create Firestore document with REMOVEOLDEST behavior
-      await createListDocument({
+      const firestoreListId = await createListDocument({
         subsplashId: listId,
         title: 'Full Latest List',
         overflowBehavior: OverflowBehavior.REMOVEOLDEST,
         count: 4,
       });
+
+      await Promise.all([
+        createSermonDocument(buildSermon('sermon-1', 'item-1')),
+        createSermonDocument(buildSermon('sermon-2', 'item-2')),
+        createSermonDocument(buildSermon('sermon-3', 'item-3')),
+        createSermonDocument(buildSermon('sermon-4', 'item-4')),
+        createSermonDocument(buildSermon('sermon-new', 'new-item')),
+      ]);
+
+      const seedPublishedMembership = async (sermonId: string, subsplashId: string, rowId: string, position: number) => {
+        await firestoreDB
+          .collection('lists')
+          .doc(firestoreListId)
+          .collection('listItems')
+          .doc(sermonId)
+          .set({
+            subsplashId,
+            uploadStatus: {
+              status: uploadStatus.UPLOADED,
+              listItemId: rowId,
+            },
+            physicalPlacement: {
+              firestoreListId,
+              subsplashListId: listId,
+              overflowDepth: 0,
+              position,
+              listItemId: rowId,
+            },
+            position,
+          });
+
+        await firestoreDB
+          .collection('sermons')
+          .doc(sermonId)
+          .collection('sermonLists')
+          .doc(firestoreListId)
+          .set({
+            id: firestoreListId,
+            subsplashId: listId,
+            name: 'Full Latest List',
+            title: 'Full Latest List',
+            overflowBehavior: OverflowBehavior.REMOVEOLDEST,
+            uploadStatus: {
+              status: uploadStatus.UPLOADED,
+              listItemId: rowId,
+            },
+            publishGeneration: 0,
+          });
+      };
+
+      await Promise.all([
+        seedPublishedMembership('sermon-1', 'item-1', 'row-1', 1),
+        seedPublishedMembership('sermon-2', 'item-2', 'row-2', 2),
+        seedPublishedMembership('sermon-3', 'item-3', 'row-3', 3),
+        seedPublishedMembership('sermon-4', 'item-4', 'row-4', 4),
+      ]);
       
       const mediaItem = { id: 'new-item', type: 'media-item' as const };
       const request: TestRequest = {
@@ -1270,6 +1438,24 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       // Bottom item (item-4) should be removed
       const item4Row = rows.find(r => r._embedded['media-item']?.id === 'item-4');
       expect(item4Row).toBeUndefined();
+
+      const removedProjection = await firestoreDB
+        .collection('lists')
+        .doc(firestoreListId)
+        .collection('listItems')
+        .doc('sermon-4')
+        .get();
+      expect(removedProjection.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+      expect(removedProjection.data()?.physicalPlacement).toBeUndefined();
+
+      const removedCanonical = await firestoreDB
+        .collection('sermons')
+        .doc('sermon-4')
+        .collection('sermonLists')
+        .doc(firestoreListId)
+        .get();
+      expect(removedCanonical.data()?.uploadStatus).toEqual({ status: uploadStatus.NOT_UPLOADED });
+      expect(removedCanonical.data()?.publishGeneration).toBe(1);
     });
   });
 });

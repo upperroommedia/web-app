@@ -97,7 +97,10 @@ export function createListRow(
 export async function patchListRows(
   listId: string, 
   rows: SubsplashListRow[], 
-  token: string
+  token: string,
+  options?: {
+    forceFullRows?: boolean;
+  }
 ): Promise<SubsplashListRow[]> {
   logger.log(`Patching list ${listId} with ${rows.length} rows`);
   
@@ -110,7 +113,7 @@ export async function patchListRows(
     const position = index + 1;
     
     // If row has an ID, it's an existing row - send only {id, position} (matching HAR file)
-    if (row.id) {
+    if (row.id && !options?.forceFullRows) {
       return {
         id: row.id,
         position

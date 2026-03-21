@@ -78,6 +78,7 @@ interface ManagePublishingPopupProps {
   open: boolean;
   onClose: () => void;
   onUpdate?: () => void;
+  onBusyStateChange?: (busy: boolean) => void;
 }
 
 interface ListPublishResult {
@@ -121,6 +122,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   open,
   onClose,
   onUpdate,
+  onBusyStateChange,
 }) => {
   const { user } = useAuth();
   const theme = useTheme();
@@ -143,6 +145,16 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
   const [isPublishingToSeries, setIsPublishingToSeries] = useState(false);
   const [isUnpublishingFromSeries, setIsUnpublishingFromSeries] = useState(false);
   const [isPublishingEverywhere, setIsPublishingEverywhere] = useState(false);
+  const isBusy =
+    isUploadingToSoundCloud ||
+    isUploadingToSubsplash ||
+    isPublishingToSeries ||
+    isUnpublishingFromSeries ||
+    isPublishingEverywhere;
+
+  useEffect(() => {
+    onBusyStateChange?.(isBusy);
+  }, [isBusy, onBusyStateChange]);
 
   useEffect(() => {
     if (listArrayFirestore) {
@@ -1114,7 +1126,6 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
 
                 {/* Uploaded Lists */}
                 <UploadStatusList
-                  key={listItemsUploaded.map((list) => list.id).join('') + 'Uploaded'}
                   sectionTitle="Published to Lists"
                   sermonListItems={listItemsUploaded}
                   buttonAction={removeFromList}
@@ -1125,7 +1136,6 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
                 
                 {/* Not Uploaded Lists */}
                 <UploadStatusList
-                  key={listItemsNotUploaded.map((list) => list.id).join('') + 'NotUploaded'}
                   sectionTitle="Not Published"
                   sermonListItems={listItemsNotUploaded}
                   buttonAction={handlePublishToSubsplash}

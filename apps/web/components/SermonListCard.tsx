@@ -39,6 +39,7 @@ import { useDocument } from 'react-firebase-hooks/firestore';
 import database, { ref } from '../firebase/database';
 import firestore, { doc, getDoc } from '../firebase/firestore';
 import Tooltip from '@mui/material/Tooltip';
+import CircularProgress from '@mui/material/CircularProgress';
 import { User } from '../types/User';
 import { createFunctionV2 } from '../utils/createFunction';
 import UserAvatar from './UserAvatar';
@@ -237,6 +238,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const [uploaderLoading, setUploaderLoading] = useState(false);
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
   const [publishPopup, setPublishPopup] = useState(false);
+  const [publishTaskRunning, setPublishTaskRunning] = useState(false);
   const [series, setSeries] = useState<Series | null>(null);
   const seriesItemRef = useMemo(
     () => (
@@ -460,8 +462,12 @@ const SermonListCard: FunctionComponent<Props> = ({
   const renderSubsplashStatus = () => (
     <Tooltip title={`Published to ${subsplashUploaded} of ${subsplashTotal} lists`}>
       <Chip
-        icon={<CollectionsIcon sx={{ fontSize: 13 }} />}
-        label={`${subsplashUploaded}/${subsplashTotal}`}
+        icon={
+          publishTaskRunning
+            ? <CircularProgress size={13} color="inherit" />
+            : <CollectionsIcon sx={{ fontSize: 13 }} />
+        }
+        label={publishTaskRunning ? 'Publishing…' : `${subsplashUploaded}/${subsplashTotal}`}
         size="small"
         variant={isSubsplashComplete ? 'filled' : 'outlined'}
         color={isSubsplashComplete ? 'success' : isSubsplashPartial ? 'warning' : 'default'}
@@ -776,6 +782,17 @@ const SermonListCard: FunctionComponent<Props> = ({
                 }}
               />
             )}
+            {publishTaskRunning && (
+              <LinearProgress
+                sx={{
+                  height: 2,
+                  borderRadius: 1,
+                  mt: 0.5,
+                  bgcolor: alpha(theme.palette.info.main, 0.12),
+                  '& .MuiLinearProgress-bar': { bgcolor: 'info.main' }
+                }}
+              />
+            )}
           </Box>
 
           {/* Meta Row */}
@@ -783,15 +800,13 @@ const SermonListCard: FunctionComponent<Props> = ({
 
 
       </Card>
-
-      {publishPopup && (
-        <ManagePublishingPopup
-          sermon={currentSermon}
-          open={publishPopup}
-          onClose={() => setPublishPopup(false)}
-          onUpdate={onRefresh}
-        />
-      )}
+      <ManagePublishingPopup
+        sermon={currentSermon}
+        open={publishPopup}
+        onClose={() => setPublishPopup(false)}
+        onUpdate={onRefresh}
+        onBusyStateChange={setPublishTaskRunning}
+      />
     </ErrorBoundary>
   );
 };
