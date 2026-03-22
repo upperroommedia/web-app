@@ -128,6 +128,7 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
               altName={`Image of Series: ${series.name}`}
               width={1}
               height={1}
+              sizes="(max-width: 750px) 135px, 170px"
               borderRadius={0}
               sx={{
                 flexShrink: 0,

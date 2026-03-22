@@ -11,6 +11,7 @@ interface AvatarWithDefaultImageProps extends BoxProps {
   image?: ImageType;
   borderRadius?: number;
   defaultImageURL?: string;
+  sizes?: string;
 }
 
 function AvatarWithDefaultImage({
@@ -20,6 +21,7 @@ function AvatarWithDefaultImage({
   height,
   borderRadius = 0,
   defaultImageURL,
+  sizes,
   ...props
 }: AvatarWithDefaultImageProps) {
   const { sx, ...rest } = props;
@@ -49,7 +51,7 @@ function AvatarWithDefaultImage({
           src={image.downloadLink}
           alt={`Image of ${altName}`}
           fill
-          sizes={`${width}px`}
+          sizes={sizes ?? `${width}px`}
           style={{ objectFit: 'cover' }}
         />
       )}
