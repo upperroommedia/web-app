@@ -65,6 +65,7 @@ import {
   ReorderListItemsOutputType,
 } from '@upperroom/contracts/reorderListItems';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
+import DetailImageGallery from '../../../components/DetailImageGallery';
 import OverflowChainPanel from '../../../components/admin/lists/OverflowChainPanel';
 import useAuth from '../../../context/user/UserContext';
 import firestore, {
@@ -1321,23 +1322,10 @@ const ListDetailsPage = () => {
                 <Box
                   sx={{
                     display: 'flex',
-                    flexDirection: { xs: 'column', sm: 'row' },
-                    gap: { xs: 2, sm: 3, md: 4 },
+                    flexDirection: 'column',
+                    gap: { xs: 2, sm: 3 },
                   }}
                 >
-                  <AvatarWithDefaultImage
-                    image={list.images?.find((image) => image.type === 'square')}
-                    altName={list.name}
-                    width={140}
-                    height={140}
-                    borderRadius={12}
-                    sx={{
-                      flexShrink: 0,
-                      boxShadow: 3,
-                      alignSelf: { xs: 'center', sm: 'flex-start' },
-                    }}
-                  />
-
                   <Box sx={{ flex: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
                       <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 400 }}>
@@ -1474,6 +1462,9 @@ const ListDetailsPage = () => {
                       </Box>
                     </Box>
                   </Box>
+                  {list.images?.some((image) => Boolean(image.downloadLink)) && (
+                    <DetailImageGallery images={list.images} altName={list.name} />
+                  )}
                 </Box>
               </CardContent>
             </Card>

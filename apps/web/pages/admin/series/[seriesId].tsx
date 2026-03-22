@@ -67,6 +67,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import AppLayout from '../../../layout/AppLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
+import DetailImageGallery from '../../../components/DetailImageGallery';
 import NewSeriesPopup from '../../../components/NewSeriesPopup';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import firestore, { doc, getDoc, collection, getDocs, query, orderBy, where, limit, deleteDoc, setDoc, updateDoc, writeBatch } from '../../../firebase/firestore';
@@ -95,7 +96,6 @@ import type {
   GetSeriesRemoteStateRemoteItem,
 } from '../../../../../packages/contracts/getSeriesRemoteState';
 import { serverTimestamp, deleteField } from 'firebase/firestore';
-import { AspectRatio } from '../../../types/Image';
 
 interface SeriesItemWithSermon extends SeriesItem {
   sermon?: Sermon;
@@ -2119,28 +2119,10 @@ const SeriesDetailsPage = () => {
             <Box
               sx={{
                 display: 'flex',
-                flexDirection: { xs: 'column', sm: 'row' },
-                gap: { xs: 2, sm: 3, md: 4 },
+                flexDirection: 'column',
+                gap: { xs: 2, sm: 3 },
               }}
             >
-              <AvatarWithDefaultImage
-                image={
-                  series.images?.find((img) => img.type === 'wide')
-                  || series.images?.find((img) => img.type === 'banner')
-                  || series.images?.find((img) => img.type === 'square')
-                }
-                altName={series.name}
-                width={220}
-                height={Math.round(220 / AspectRatio.wide)}
-                borderRadius={12}
-                sx={{
-                  flexShrink: 0,
-                  boxShadow: 3,
-                  alignSelf: { xs: 'center', sm: 'flex-start' },
-                  width: { xs: 180, sm: 220 },
-                  height: { xs: Math.round(180 / AspectRatio.wide), sm: Math.round(220 / AspectRatio.wide) },
-                }}
-              />
               <Box sx={{ flex: 1 }}>
                 <Typography variant="h6" color="text.secondary" sx={{ mb: 1, fontWeight: 400 }}>
                   {derivedSeriesSubtitle}
@@ -2252,6 +2234,9 @@ const SeriesDetailsPage = () => {
                   </Box>
                 </Box>
               </Box>
+              {series.images?.some((image) => Boolean(image.downloadLink)) && (
+                <DetailImageGallery images={series.images} altName={series.name} />
+              )}
             </Box>
           </CardContent>
         </Card>

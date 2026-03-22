@@ -98,7 +98,7 @@ const MainContentSlot = memo(function MainContentSlot({
 
 const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   const muiTheme = useMuiTheme();
-  const { theme: currentTheme, setTheme } = useTheme();
+  const { theme: currentTheme, resolvedTheme, setTheme } = useTheme();
   const router = useRouter();
   const { user, logoutUser } = useAuth();
   const sidebarCollapsed = useMediaQuery(muiTheme.breakpoints.down('lg'));
@@ -113,9 +113,10 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    const activeTheme = resolvedTheme ?? currentTheme;
+    const nextTheme = activeTheme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-  }, [currentTheme, setTheme]);
+  }, [currentTheme, resolvedTheme, setTheme]);
 
   const isActivePath = useCallback(
     (path: string) => {
@@ -343,7 +344,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
           <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
             Theme
           </Typography>
-          <Tooltip title={currentTheme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+          <Tooltip title={(resolvedTheme ?? currentTheme) === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
             <IconButton
               onClick={toggleTheme}
               size="small"
@@ -358,7 +359,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
                 },
               }}
             >
-              {currentTheme === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+              {(resolvedTheme ?? currentTheme) === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
         </Box>
@@ -468,9 +469,9 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
               </Typography>
             </Link>
             {/* Mobile Theme Toggle */}
-            <Tooltip title={currentTheme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
+            <Tooltip title={(resolvedTheme ?? currentTheme) === 'dark' ? 'Light Mode' : 'Dark Mode'}>
               <IconButton onClick={toggleTheme} size="small" sx={{ color: 'text.primary' }}>
-                {currentTheme === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+                {(resolvedTheme ?? currentTheme) === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
               </IconButton>
             </Tooltip>
             <UserAvatar user={user} sx={{ width: 32, height: 32 }} />
