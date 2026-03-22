@@ -88,6 +88,7 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
   onDelete,
 }: SeriesListItemRowProps) {
   const theme = useTheme();
+  const compactSeriesRow = theme.breakpoints.down(750);
   const seriesImage = series.images?.find((image) => image.type === 'wide')
     || series.images?.find((image) => image.type === 'banner')
     || series.images?.find((image) => image.type === 'square');
@@ -100,6 +101,7 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
         <Box
           sx={{
             display: 'flex',
+            flexDirection: 'row',
             alignItems: 'stretch',
             justifyContent: 'space-between',
             minHeight: { xs: 88, sm: 96 },
@@ -107,9 +109,20 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
             cursor: 'pointer',
             transition: 'background-color 0.15s ease',
             '&:hover': { bgcolor: 'action.hover' },
+            [compactSeriesRow]: {
+              flexDirection: 'column',
+            },
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, flex: 1, minWidth: 0 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'stretch',
+              gap: 0,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
             <AvatarWithDefaultImage
               image={seriesImage}
               altName={`Image of Series: ${series.name}`}
@@ -121,6 +134,9 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                 width: 'auto',
                 height: '100%',
                 aspectRatio: '16 / 9',
+                [compactSeriesRow]: {
+                  height: 76,
+                },
               }}
             />
             <Box
@@ -131,6 +147,10 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                 justifyContent: 'center',
                 px: { xs: 1.5, sm: 2 },
                 py: { xs: 1.25, sm: 1.5 },
+                [compactSeriesRow]: {
+                  py: 0.75,
+                  px: 1,
+                },
               }}
             >
               <Typography
@@ -140,12 +160,37 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
+                  [compactSeriesRow]: {
+                    fontSize: '0.84rem',
+                    lineHeight: 1.2,
+                  },
                 }}
               >
                 {series.name}
               </Typography>
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
-                <Typography variant="body2" color="text.secondary">
+              <Box
+                sx={{
+                  display: 'flex',
+                  gap: { xs: 0.75, sm: 1 },
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  mt: 0.5,
+                  [compactSeriesRow]: {
+                    gap: 0.5,
+                    mt: 0.35,
+                  },
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{
+                    [compactSeriesRow]: {
+                      fontSize: '0.72rem',
+                      lineHeight: 1.2,
+                    },
+                  }}
+                >
                   {series.itemCount || 0} items
                 </Typography>
                 {series.subsplashId ? (
@@ -155,7 +200,24 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                     size="small"
                     color="success"
                     variant="outlined"
-                    sx={{ height: 22 }}
+                    sx={{
+                      height: 22,
+                      [compactSeriesRow]: {
+                        height: 18,
+                        '& .MuiChip-icon': {
+                          fontSize: '0.8rem',
+                          ml: '5px',
+                          mr: '-3px',
+                        },
+                        '& .MuiChip-label': {
+                          fontSize: '0.64rem',
+                          px: 0.5,
+                        },
+                      },
+                      '& .MuiChip-label': {
+                        px: 0.75,
+                      },
+                    }}
                   />
                 ) : (
                   <Chip
@@ -164,7 +226,24 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                     size="small"
                     color="warning"
                     variant="outlined"
-                    sx={{ height: 22 }}
+                    sx={{
+                      height: 22,
+                      [compactSeriesRow]: {
+                        height: 18,
+                        '& .MuiChip-icon': {
+                          fontSize: '0.8rem',
+                          ml: '5px',
+                          mr: '-3px',
+                        },
+                        '& .MuiChip-label': {
+                          fontSize: '0.64rem',
+                          px: 0.5,
+                        },
+                      },
+                      '& .MuiChip-label': {
+                        px: 0.75,
+                      },
+                    }}
                   />
                 )}
                 {isAdmin && series.ownerId !== currentUserId && (
@@ -184,16 +263,38 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                       borderRadius: 999,
                       pl: { xs: '1px', sm: '2px' },
                       bgcolor: alpha(theme.palette.primary.main, 0.08),
+                      maxWidth: {
+                        xs: '100%',
+                        sm: 'min(100%, 240px)',
+                      },
+                      [compactSeriesRow]: {
+                        height: 18,
+                        minWidth: 0,
+                        maxWidth: '100%',
+                        pl: '1px',
+                      },
                       '& .MuiChip-label': {
-                        fontSize: { xs: '0.62rem', sm: '0.7rem' },
+                        fontSize: { xs: '0.6rem', sm: '0.7rem' },
                         fontWeight: 700,
-                        px: { xs: '6px', sm: '8px' },
+                        px: { xs: '5px', sm: '8px' },
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        [compactSeriesRow]: {
+                          fontSize: '0.58rem',
+                          px: '4px',
+                        },
                       },
                       '& .MuiChip-avatar': {
                         ml: 0,
                         mr: { xs: '3px', sm: '4px' },
                         width: { xs: 18, sm: 20 },
                         height: { xs: 18, sm: 20 },
+                        [compactSeriesRow]: {
+                          width: 16,
+                          height: 16,
+                          mr: '2px',
+                        },
                       },
                     }}
                   />
@@ -209,6 +310,12 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
               flexShrink: 0,
               alignItems: 'center',
               px: { xs: 1, sm: 1.5 },
+              [compactSeriesRow]: {
+                justifyContent: 'flex-end',
+                px: 1,
+                pb: 0.75,
+                pt: 0,
+              },
             }}
           >
             <Tooltip title="Edit Series">
@@ -225,6 +332,13 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                     '&:hover': {
                       bgcolor: alpha(theme.palette.primary.main, 0.15),
                       color: 'primary.main',
+                    },
+                    [compactSeriesRow]: {
+                      width: 28,
+                      height: 28,
+                      '& svg': {
+                        fontSize: '1rem',
+                      },
                     },
                   }}
                 >
@@ -246,6 +360,13 @@ const SeriesListItemRow = memo(function SeriesListItemRow({
                     color: 'error.main',
                     '&:hover': {
                       bgcolor: alpha(theme.palette.error.main, 0.15),
+                    },
+                    [compactSeriesRow]: {
+                      width: 28,
+                      height: 28,
+                      '& svg': {
+                        fontSize: '1rem',
+                      },
                     },
                   }}
                 >
@@ -496,7 +617,7 @@ const AdminSeriesPage = () => {
                   ),
                 }}
               />
-              <FormControl size="small" sx={{ flex: 1, minWidth: 160 }}>
+              <FormControl size="small" sx={{ flex: 1, minWidth: { xs: 0, sm: 160 } }}>
                 <InputLabel id="status-filter-label">Status</InputLabel>
                 <Select
                   value={filter}

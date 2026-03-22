@@ -83,6 +83,7 @@ const MainContentSlot = memo(function MainContentSlot({
       component="main"
       sx={{
         flexGrow: 1,
+        minWidth: 0,
         minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',

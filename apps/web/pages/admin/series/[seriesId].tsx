@@ -350,8 +350,10 @@ const SortableItem = memo(({
       onClick={handleRowClick}
       sx={{
         display: 'flex',
-        alignItems: 'center',
-        gap: { xs: 1.25, sm: 1.5 },
+        alignItems: { xs: 'flex-start', sm: 'center' },
+        flexWrap: { xs: 'wrap', sm: 'nowrap' },
+        columnGap: { xs: 1, sm: 1.5 },
+        rowGap: { xs: 0.75, sm: 1.5 },
         p: { xs: 1.25, sm: 1.5 },
         cursor: isPlaceholder ? 'default' : item.sermonId ? 'pointer' : 'default',
         bgcolor: isPlaceholder ? placeholderBackground : isDragging ? 'action.selected' : firebaseRowBackground,
@@ -367,84 +369,167 @@ const SortableItem = memo(({
         },
       }}
     >
-      {/* Drag Handle */}
       <Box
-        {...attributes}
-        {...listeners}
-        data-no-row-nav="true"
         sx={{
-          display: 'flex',
-          alignItems: 'center',
-          cursor: isDragging ? 'grabbing' : 'grab',
-          color: 'text.disabled',
-          touchAction: 'none',
-          '&:hover': { color: 'text.secondary' },
+          display: { xs: 'flex', sm: 'none' },
+          flexDirection: 'column',
+          gap: 0.75,
+          width: '100%',
+          minWidth: 0,
         }}
       >
-        <DragIndicatorIcon />
-      </Box>
-
-      <Typography
-        variant="body2"
-        sx={{
-          width: { xs: 24, sm: 32 },
-          textAlign: 'center',
-          color: 'text.tertiary',
-          fontWeight: 600,
-          fontSize: '0.75rem',
-        }}
-      >
-        {index + 1}
-      </Typography>
-
-      {localImage ? (
-        <AvatarWithDefaultImage
-          image={localImage}
-          altName={item.sermon?.title || item.remoteTitle || 'Sermon'}
-          width={44}
-          height={44}
-          borderRadius={6}
-          sx={{ flexShrink: 0 }}
-        />
-      ) : item.remoteImageUrl ? (
         <Box
           sx={{
-            width: 44,
-            height: 44,
-            borderRadius: '6px',
-            flexShrink: 0,
-            overflow: 'hidden',
-            position: 'relative',
-            bgcolor: 'action.hover',
-          }}
-        >
-          <Image
-            src={item.remoteImageUrl}
-            alt={item.remoteTitle || 'Subsplash item'}
-            fill
-            sizes="44px"
-            style={{ objectFit: 'cover' }}
-          />
-        </Box>
-      ) : (
-        <Box
-          sx={{
-            width: 44,
-            height: 44,
-            borderRadius: 1.5,
-            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'action.hover',
-            color: 'text.secondary',
+            gap: 1,
+            minWidth: 0,
           }}
         >
-          <CollectionsIcon fontSize="small" />
-        </Box>
-      )}
+          <Box
+            {...attributes}
+            {...listeners}
+            data-no-row-nav="true"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              cursor: isDragging ? 'grabbing' : 'grab',
+              color: 'text.disabled',
+              touchAction: 'none',
+              flexShrink: 0,
+              '&:hover': { color: 'text.secondary' },
+            }}
+          >
+            <DragIndicatorIcon />
+          </Box>
 
-      <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              width: 20,
+              textAlign: 'center',
+              color: 'text.tertiary',
+              fontWeight: 600,
+              fontSize: '0.68rem',
+              flexShrink: 0,
+            }}
+          >
+            {index + 1}
+          </Typography>
+
+          {localImage ? (
+            <AvatarWithDefaultImage
+              image={localImage}
+              altName={item.sermon?.title || item.remoteTitle || 'Sermon'}
+              width={40}
+              height={40}
+              borderRadius={6}
+              sx={{ flexShrink: 0 }}
+            />
+          ) : item.remoteImageUrl ? (
+            <Box
+              sx={{
+                width: 40,
+                height: 40,
+                borderRadius: '6px',
+                flexShrink: 0,
+                overflow: 'hidden',
+                position: 'relative',
+                bgcolor: 'action.hover',
+              }}
+            >
+              <Image
+                src={item.remoteImageUrl}
+                alt={item.remoteTitle || 'Subsplash item'}
+                fill
+                sizes="40px"
+                style={{ objectFit: 'cover' }}
+              />
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                width: 40,
+                height: 40,
+                borderRadius: 1.5,
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: 'action.hover',
+                color: 'text.secondary',
+              }}
+            >
+              <CollectionsIcon fontSize="small" />
+            </Box>
+          )}
+
+          <Box sx={{ flex: 1 }} />
+
+          {item.publishedToSubsplash || item.isSubsplashOnlyPlaceholder ? (
+            <Button
+              size="small"
+              color="warning"
+              variant="outlined"
+              startIcon={isUnpublishing ? <CircularProgress size={14} /> : <CloudOffIcon fontSize="small" />}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRequestUnpublish(item);
+              }}
+              disabled={actionsDisabled || isUnpublishing}
+              sx={{
+                whiteSpace: 'nowrap',
+                minWidth: 0,
+                fontSize: '0.7rem',
+                px: 1,
+                flexShrink: 0,
+              }}
+            >
+              {item.isSubsplashOnlyPlaceholder ? 'Remove Remote' : 'Unpublish'}
+            </Button>
+          ) : (
+            <Button
+              size="small"
+              color="primary"
+              variant="contained"
+              startIcon={isPublishing ? <CircularProgress size={14} color="inherit" /> : <CloudUploadIcon fontSize="small" />}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRequestPublish(item);
+              }}
+              disabled={actionsDisabled || isPublishing || !canPublish || item.isSubsplashOnlyPlaceholder}
+              title={!canPublish ? (publishBlockedReason || SERIES_PUBLISH_BLOCKED_MESSAGE) : undefined}
+              sx={{
+                whiteSpace: 'nowrap',
+                minWidth: 0,
+                fontSize: '0.7rem',
+                px: 1,
+                flexShrink: 0,
+              }}
+            >
+              Publish
+            </Button>
+          )}
+
+          {(item.canRemoveLocally || item.isSubsplashOnlyPlaceholder) ? (
+            <Checkbox
+              checked={isSelected}
+              size="small"
+              data-no-row-nav="true"
+              onClick={(event) => {
+                event.stopPropagation();
+              }}
+              onChange={(event) => {
+                event.stopPropagation();
+                onToggleSelected(item.displayId, event.target.checked);
+              }}
+              sx={{ p: 0.25, ml: 0.25, flexShrink: 0 }}
+            />
+          ) : (
+            <Box sx={{ width: 26, flexShrink: 0 }} />
+          )}
+        </Box>
+
         <Typography
           variant="subtitle2"
           sx={{
@@ -453,13 +538,28 @@ const SortableItem = memo(({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            fontSize: '0.82rem',
+            minWidth: 0,
           }}
         >
           {item.sermon?.title || item.remoteTitle || `Sermon ${item.displayId}`}
         </Typography>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
+
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 0.5,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            minWidth: 0,
+          }}
+        >
           {(item.sermon?.dateString || item.remoteSubtitle) && (
-            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
+            <Typography
+              variant="caption"
+              color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}
+              sx={{ fontSize: '0.68rem' }}
+            >
               {item.sermon?.dateString || item.remoteSubtitle}
             </Typography>
           )}
@@ -470,8 +570,11 @@ const SortableItem = memo(({
               color="warning"
               variant="filled"
               sx={{
-                height: 22,
-                '& .MuiChip-label': { px: 1 },
+                height: 20,
+                '& .MuiChip-label': {
+                  px: 0.75,
+                  fontSize: '0.62rem',
+                },
                 color: isDarkMode ? alpha(theme.palette.warning.light, 0.95) : theme.palette.warning.dark,
                 borderColor: alpha(theme.palette.warning.main, isDarkMode ? 0.3 : 0.2),
                 bgcolor: alpha(theme.palette.warning.main, isDarkMode ? 0.14 : 0.12),
@@ -485,7 +588,16 @@ const SortableItem = memo(({
               size="small"
               color="success"
               variant="outlined"
-              sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
+              sx={{
+                height: 20,
+                '& .MuiChip-label': {
+                  px: 0.75,
+                  fontSize: '0.62rem',
+                },
+                '& .MuiChip-icon': {
+                  fontSize: '0.85rem',
+                },
+              }}
             />
           ) : (
             <Chip
@@ -494,60 +606,252 @@ const SortableItem = memo(({
               size="small"
               color="warning"
               variant="outlined"
-              sx={{ height: 22, '& .MuiChip-label': { px: 1 } }}
+              sx={{
+                height: 20,
+                '& .MuiChip-label': {
+                  px: 0.75,
+                  fontSize: '0.62rem',
+                },
+                '& .MuiChip-icon': {
+                  fontSize: '0.85rem',
+                },
+              }}
             />
           )}
         </Box>
       </Box>
 
-      {item.publishedToSubsplash || item.isSubsplashOnlyPlaceholder ? (
-        <Button
-          size="small"
-          color="warning"
-          variant="outlined"
-          startIcon={isUnpublishing ? <CircularProgress size={14} /> : <CloudOffIcon fontSize="small" />}
-          onClick={(event) => {
-            event.stopPropagation();
-            onRequestUnpublish(item);
-          }}
-          disabled={actionsDisabled || isUnpublishing}
-        >
-          {item.isSubsplashOnlyPlaceholder ? 'Remove Remote' : 'Unpublish'}
-        </Button>
-      ) : (
-        <Button
-          size="small"
-          color="primary"
-          variant="contained"
-          startIcon={isPublishing ? <CircularProgress size={14} color="inherit" /> : <CloudUploadIcon fontSize="small" />}
-          onClick={(event) => {
-            event.stopPropagation();
-            onRequestPublish(item);
-          }}
-          disabled={actionsDisabled || isPublishing || !canPublish || item.isSubsplashOnlyPlaceholder}
-          title={!canPublish ? (publishBlockedReason || SERIES_PUBLISH_BLOCKED_MESSAGE) : undefined}
-        >
-          Publish
-        </Button>
-      )}
-
-      {(item.canRemoveLocally || item.isSubsplashOnlyPlaceholder) ? (
-        <Checkbox
-          checked={isSelected}
-          size="small"
+      <Box
+        sx={{
+          display: { xs: 'none', sm: 'flex' },
+          alignItems: 'center',
+          width: '100%',
+          minWidth: 0,
+          gap: 1.5,
+        }}
+      >
+        {/* Drag Handle */}
+        <Box
+          {...attributes}
+          {...listeners}
           data-no-row-nav="true"
-          onClick={(event) => {
-            event.stopPropagation();
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            cursor: isDragging ? 'grabbing' : 'grab',
+            color: 'text.disabled',
+            touchAction: 'none',
+            '&:hover': { color: 'text.secondary' },
           }}
-          onChange={(event) => {
-            event.stopPropagation();
-            onToggleSelected(item.displayId, event.target.checked);
+        >
+          <DragIndicatorIcon />
+        </Box>
+
+        <Typography
+          variant="body2"
+          sx={{
+            width: 32,
+            textAlign: 'center',
+            color: 'text.tertiary',
+            fontWeight: 600,
+            fontSize: '0.75rem',
           }}
-          sx={{ p: 0.5, ml: 0.5, flexShrink: 0 }}
-        />
-      ) : (
-        <Box sx={{ width: 30, flexShrink: 0 }} />
-      )}
+        >
+          {index + 1}
+        </Typography>
+
+        {localImage ? (
+          <AvatarWithDefaultImage
+            image={localImage}
+            altName={item.sermon?.title || item.remoteTitle || 'Sermon'}
+            width={44}
+            height={44}
+            borderRadius={6}
+            sx={{ flexShrink: 0 }}
+          />
+        ) : item.remoteImageUrl ? (
+          <Box
+            sx={{
+              width: 44,
+              height: 44,
+              borderRadius: '6px',
+              flexShrink: 0,
+              overflow: 'hidden',
+              position: 'relative',
+              bgcolor: 'action.hover',
+            }}
+          >
+            <Image
+              src={item.remoteImageUrl}
+              alt={item.remoteTitle || 'Subsplash item'}
+              fill
+              sizes="44px"
+              style={{ objectFit: 'cover' }}
+            />
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              width: 44,
+              height: 44,
+              borderRadius: 1.5,
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'action.hover',
+              color: 'text.secondary',
+            }}
+          >
+            <CollectionsIcon fontSize="small" />
+          </Box>
+        )}
+
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography
+            variant="subtitle2"
+            sx={{
+              fontWeight: 600,
+              color: isPlaceholder ? placeholderPrimaryText : 'text.primary',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontSize: '0.875rem',
+            }}
+          >
+            {item.sermon?.title || item.remoteTitle || `Sermon ${item.displayId}`}
+          </Typography>
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 1,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              mt: 0.5,
+            }}
+          >
+            {(item.sermon?.dateString || item.remoteSubtitle) && (
+              <Typography
+                variant="caption"
+                color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}
+                sx={{ fontSize: '0.75rem' }}
+              >
+                {item.sermon?.dateString || item.remoteSubtitle}
+              </Typography>
+            )}
+            {item.isSubsplashOnlyPlaceholder && (
+              <Chip
+                label="Subsplash only"
+                size="small"
+                color="warning"
+                variant="filled"
+                sx={{
+                  height: 22,
+                  '& .MuiChip-label': {
+                    px: 1,
+                    fontSize: '0.7rem',
+                  },
+                  color: isDarkMode ? alpha(theme.palette.warning.light, 0.95) : theme.palette.warning.dark,
+                  borderColor: alpha(theme.palette.warning.main, isDarkMode ? 0.3 : 0.2),
+                  bgcolor: alpha(theme.palette.warning.main, isDarkMode ? 0.14 : 0.12),
+                }}
+              />
+            )}
+            {item.publishedToSubsplash ? (
+              <Chip
+                icon={<CheckCircleIcon />}
+                label="Published"
+                size="small"
+                color="success"
+                variant="outlined"
+                sx={{
+                  height: 22,
+                  '& .MuiChip-label': {
+                    px: 1,
+                    fontSize: '0.7rem',
+                  },
+                }}
+              />
+            ) : (
+              <Chip
+                icon={<PendingIcon />}
+                label="Not Published"
+                size="small"
+                color="warning"
+                variant="outlined"
+                sx={{
+                  height: 22,
+                  '& .MuiChip-label': {
+                    px: 1,
+                    fontSize: '0.7rem',
+                  },
+                }}
+              />
+            )}
+          </Box>
+        </Box>
+
+        {item.publishedToSubsplash || item.isSubsplashOnlyPlaceholder ? (
+          <Button
+            size="small"
+            color="warning"
+            variant="outlined"
+            startIcon={isUnpublishing ? <CircularProgress size={14} /> : <CloudOffIcon fontSize="small" />}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRequestUnpublish(item);
+            }}
+            disabled={actionsDisabled || isUnpublishing}
+            sx={{
+              whiteSpace: 'nowrap',
+              minWidth: 64,
+              fontSize: '0.8125rem',
+              px: 1.25,
+            }}
+          >
+            {item.isSubsplashOnlyPlaceholder ? 'Remove Remote' : 'Unpublish'}
+          </Button>
+        ) : (
+          <Button
+            size="small"
+            color="primary"
+            variant="contained"
+            startIcon={isPublishing ? <CircularProgress size={14} color="inherit" /> : <CloudUploadIcon fontSize="small" />}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRequestPublish(item);
+            }}
+            disabled={actionsDisabled || isPublishing || !canPublish || item.isSubsplashOnlyPlaceholder}
+            title={!canPublish ? (publishBlockedReason || SERIES_PUBLISH_BLOCKED_MESSAGE) : undefined}
+            sx={{
+              whiteSpace: 'nowrap',
+              minWidth: 64,
+              fontSize: '0.8125rem',
+              px: 1.25,
+            }}
+          >
+            Publish
+          </Button>
+        )}
+
+        {(item.canRemoveLocally || item.isSubsplashOnlyPlaceholder) ? (
+          <Checkbox
+            checked={isSelected}
+            size="small"
+            data-no-row-nav="true"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+            onChange={(event) => {
+              event.stopPropagation();
+              onToggleSelected(item.displayId, event.target.checked);
+            }}
+            sx={{ p: 0.5, ml: 0.25, flexShrink: 0 }}
+          />
+        ) : (
+          <Box sx={{ width: 30, flexShrink: 0 }} />
+        )}
+      </Box>
     </Box>
   );
 });
@@ -1685,7 +1989,16 @@ const SeriesDetailsPage = () => {
         {/* Breadcrumbs */}
         <Breadcrumbs
           separator={<NavigateNextIcon fontSize="small" />}
-          sx={{ mb: 3 }}
+          sx={{
+            mb: 3,
+            overflow: 'hidden',
+            '& .MuiBreadcrumbs-ol': {
+              flexWrap: 'nowrap',
+            },
+            '& .MuiBreadcrumbs-li': {
+              minWidth: 0,
+            },
+          }}
         >
           <Link href="/admin/series" passHref>
             <Typography
@@ -1704,7 +2017,19 @@ const SeriesDetailsPage = () => {
             </Typography>
           </Link>
           <Typography color="text.primary" fontWeight={500}>
-            {series.name}
+            <Box
+              component="span"
+              sx={{
+                display: 'inline-block',
+                maxWidth: { xs: 180, sm: 'none' },
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                verticalAlign: 'bottom',
+              }}
+            >
+              {series.name}
+            </Box>
           </Typography>
         </Breadcrumbs>
 
@@ -1719,7 +2044,7 @@ const SeriesDetailsPage = () => {
             mb: 4,
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, width: { xs: '100%', sm: 'auto' } }}>
             <Link href="/admin/series">
               <IconButton
                 sx={{
@@ -1732,16 +2057,27 @@ const SeriesDetailsPage = () => {
                 <ArrowBackIcon />
               </IconButton>
             </Link>
-            <Typography variant="h4" fontWeight={700}>
+            <Typography
+              variant="h4"
+              fontWeight={700}
+              sx={{
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontSize: { xs: '1.35rem', sm: '2.125rem' },
+              }}
+            >
               {series.name}
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
             <Button
               variant="outlined"
               startIcon={<EditIcon />}
               onClick={() => setEditPopup(true)}
               size="medium"
+              fullWidth
             >
               Edit
             </Button>
@@ -1751,6 +2087,7 @@ const SeriesDetailsPage = () => {
               startIcon={<DeleteIcon />}
               onClick={() => setDeletePopup(true)}
               size="medium"
+              fullWidth
             >
               Delete
             </Button>
@@ -1816,7 +2153,7 @@ const SeriesDetailsPage = () => {
                 <Box
                   sx={{
                     display: 'flex',
-                    gap: 4,
+                    gap: { xs: 1.5, sm: 4 },
                     pt: 2,
                     borderTop: 1,
                     borderColor: 'divider',
@@ -1826,14 +2163,16 @@ const SeriesDetailsPage = () => {
                     sx={{
                       width: 1,
                       display: 'flex',
-                      justifyContent: 'space-between',
+                      flexDirection: { xs: 'column', sm: 'row' },
+                      alignItems: { xs: 'flex-start', sm: 'stretch' },
+                      gap: { xs: 1.5, sm: 2 },
                     }}
                   >
 
                     <Box
                       sx={{
                         display: 'flex',
-                        gap: 4,
+                        gap: { xs: 2, sm: 4 },
                       }}
                     >
                       <Box>
@@ -1853,14 +2192,22 @@ const SeriesDetailsPage = () => {
                         </Typography>
                       </Box>
                     </Box>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: { xs: 0, sm: 2 }, minWidth: 0 }}>
                       {series.subsplashId ? (
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.75 }}>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.75, minWidth: 0 }}>
                           <Chip
                             icon={<CheckCircleIcon />}
                             label="Published to Subsplash"
                             color="success"
                             size="small"
+                            sx={{
+                              maxWidth: '100%',
+                              '& .MuiChip-label': {
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              },
+                            }}
                           />
                           <Box
                             component="a"
@@ -1873,12 +2220,21 @@ const SeriesDetailsPage = () => {
                               gap: 0.5,
                               color: 'primary.main',
                               textDecoration: 'none',
+                              maxWidth: '100%',
                               '&:hover': {
                                 textDecoration: 'underline',
                               },
                             }}
                           >
-                            <Typography variant="body2" color="inherit">
+                            <Typography
+                              variant="body2"
+                              color="inherit"
+                              sx={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
                               View in Subsplash
                             </Typography>
                             <OpenInNewIcon sx={{ fontSize: 16 }} />
@@ -1917,7 +2273,7 @@ const SeriesDetailsPage = () => {
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: { xs: '100%', sm: 'auto' } }}>
             {removableItemsCount > 0 && (
               <FormControlLabel
-                sx={{ mr: 0 }}
+                sx={{ mr: 0, minWidth: 0 }}
                 control={(
                   <Checkbox
                     checked={allRemovableItemsSelected}
