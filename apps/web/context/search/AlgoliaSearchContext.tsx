@@ -40,7 +40,7 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
   const { user } = useAuth();
   const appId = process.env.NEXT_PUBLIC_ALGOLIA_APP_ID ?? null;
   const adminApiKey = process.env.NEXT_PUBLIC_ALGOLIA_API_KEY ?? null;
-  const [apiKey, setApiKey] = useState<string | null>(adminApiKey);
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +49,7 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
 
     const initSearchKey = async () => {
       if (!appId || !user) {
-        setApiKey(adminApiKey);
+        setApiKey(null);
         setLoading(false);
         setError(null);
         return;

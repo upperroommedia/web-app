@@ -1,5 +1,6 @@
 import { algoliasearch } from 'algoliasearch';
-import { CallableRequest, onCall } from 'firebase-functions/v2/https';
+import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
+import { canUserRoleUpload } from '@upperroom/shared/types/User';
 import { algoliaSecretsWithRuntimeAlerts } from './algoliaSecrets';
 import handleError from './handleError';
 
@@ -12,6 +13,11 @@ const generateSecuredApiKey = onCall(
   { secrets: algoliaSecretsWithRuntimeAlerts },
   (request: CallableRequest<GenerateSecuredApiKeyInputType>): GenerateSecuredApiKeyOutputType => {
     try {
+      const authenticatedUid = request.auth?.uid;
+      if (!authenticatedUid || !canUserRoleUpload(request.auth?.token.role)) {
+        throw new HttpsError('permission-denied', 'You are not allowed to generate a restricted Algolia key.');
+      }
+
       // Algolia secure API keys are derived from the parent key + restrictions.
       // App ID is not part of the signature, so we fall back to a placeholder when
       // runtime env does not provide one.
@@ -26,9 +32,9 @@ const generateSecuredApiKey = onCall(
       const securedApiKey = client.generateSecuredApiKey({
         parentApiKey: apiKey,
         restrictions: {
-          filters: `uploaderId:${request.data.userId}`,
+          filters: `uploaderId:${authenticatedUid}`,
           restrictIndices: ['sermons'],
-          userToken: request.data.userId,
+          userToken: authenticatedUid,
         },
       });
 
