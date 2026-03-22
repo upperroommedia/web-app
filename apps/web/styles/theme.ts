@@ -110,6 +110,15 @@ const getThemeOptions = (mode: PaletteMode): ThemeOptions => {
       },
       divider: modeColors.border.default,
     },
+    breakpoints: {
+      values: {
+        xs: 0,
+        sm: 600,
+        md: 900,
+        lg: 1300,
+        xl: 1536,
+      },
+    },
     typography: {
       fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       h1: {

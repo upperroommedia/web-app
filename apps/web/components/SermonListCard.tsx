@@ -19,7 +19,6 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
-import Avatar from '@mui/material/Avatar';
 
 import { Sermon, sermonStatusType, uploadStatus } from '../types/SermonTypes';
 import { Series, seriesConverter } from '../types/Series';
@@ -46,6 +45,7 @@ import UserAvatar from './UserAvatar';
 import useAuth from '../context/user/UserContext';
 import LinearProgress from '@mui/material/LinearProgress';
 import { sermonConverter } from '../types/Sermon';
+import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
@@ -205,6 +205,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
   const isTablet = useMediaQuery(theme.breakpoints.up('sm'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const docRef = useMemo(
     () => (sermon.id ? doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter) : null),
@@ -411,9 +412,11 @@ const SermonListCard: FunctionComponent<Props> = ({
   };
 
   const processingProgress = snapshot?.val() ? Number(snapshot.val()) : 0;
-  const imageSize = isDesktop ? 150 : isTablet ? 90 : 64;
+  const imageSize = isDesktop ? 150 : isTablet ? 90 : 70;
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
-  const seriesImage = series?.images?.find((img) => img.type === 'square');
+  const seriesImage = series?.images?.find((img) => img.type === 'wide')
+    || series?.images?.find((img) => img.type === 'banner')
+    || series?.images?.find((img) => img.type === 'square');
 
   const renderUploaderAvatar = () => (
     <Tooltip
@@ -433,7 +436,7 @@ const SermonListCard: FunctionComponent<Props> = ({
         <UserAvatar
           user={uploader}
           fallbackLabel={uploaderName}
-          sx={{ width: { xs: 20, sm: 24, md: 40 }, height: { xs: 20, sm: 24, md: 40 } }}
+          sx={{ width: { xs: 18, sm: 24, md: 40 }, height: { xs: 18, sm: 24, md: 40 } }}
           loading={uploaderLoading}
         />
       </Box>
@@ -448,13 +451,13 @@ const SermonListCard: FunctionComponent<Props> = ({
         sx={{
           bgcolor: theme.palette.primary.main,
           color: theme.palette.primary.contrastText,
-          width: { xs: 20, md: 30 },
-          height: { xs: 20, md: 30 },
+          width: { xs: 18, md: 30 },
+          height: { xs: 18, md: 30 },
           flexShrink: 0,
           '&:hover': { bgcolor: theme.palette.primary.dark },
         }}
       >
-        {isCurrentlyPlaying ? <PauseIcon sx={{ fontSize: { xs: 14, md: 18 } }} /> : <PlayArrowIcon sx={{ fontSize: { xs: 14, md: 18 } }} />}
+        {isCurrentlyPlaying ? <PauseIcon sx={{ fontSize: { xs: 12, md: 18 } }} /> : <PlayArrowIcon sx={{ fontSize: { xs: 12, md: 18 } }} />}
       </IconButton>
     </Box>
   );
@@ -473,10 +476,10 @@ const SermonListCard: FunctionComponent<Props> = ({
         color={isSubsplashComplete ? 'success' : isSubsplashPartial ? 'warning' : 'default'}
         onClick={handlePublishClick}
         sx={{
-          height: { xs: 18, sm: 22 },
+          height: { xs: 16, sm: 22 },
           cursor: 'pointer',
-          '& .MuiChip-label': { fontSize: { xs: '0.6rem', sm: '0.65rem' }, px: 0.5 },
-          '& .MuiChip-icon': { fontSize: { xs: 12, sm: 13 }, ml: 0.5, mr: 0.5 },
+          '& .MuiChip-label': { fontSize: { xs: '0.52rem', sm: '0.65rem' }, px: { xs: 0.35, sm: 0.5 } },
+          '& .MuiChip-icon': { fontSize: { xs: 10, sm: 13 }, ml: { xs: 0.35, sm: 0.5 }, mr: { xs: 0.25, sm: 0.5 } },
           '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) }
         }}
       />
@@ -493,30 +496,103 @@ const SermonListCard: FunctionComponent<Props> = ({
         color={isSoundCloudUploaded ? 'success' : 'default'}
         onClick={handlePublishClick}
         sx={{
-          height: { xs: 18, sm: 22 },
+          height: { xs: 16, sm: 22 },
           cursor: 'pointer',
-          '& .MuiChip-label': { fontSize: { xs: '0.6rem', sm: '0.65rem' }, px: 0.5 },
-          '& .MuiChip-icon': { fontSize: { xs: 12, sm: 13 }, ml: 0.5, mr: 0.5 },
+          '& .MuiChip-label': { fontSize: { xs: '0.52rem', sm: '0.65rem' }, px: { xs: 0.35, sm: 0.5 } },
+          '& .MuiChip-icon': { fontSize: { xs: 10, sm: 13 }, ml: { xs: 0.35, sm: 0.5 }, mr: { xs: 0.25, sm: 0.5 } },
           '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) }
         }}
       />
     </Tooltip>
   );
-  // Mobile Actions Component (stacked vertically on right)
-  const renderMobileActions = () => (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: 0.5 }}>
-      {/* Publishing Status */}
-      {isProcessed && canPublish && (
-        <>
-          {renderSoundCloudStatus()}
-          {renderSubsplashStatus()}
-        </>
-      )}
-      {/* Play Button */}
-      {isProcessed && (
-        renderPlayButton()
-      )}
-    </Box>
+
+  const renderSeriesTag = (compact: boolean) => (
+    series ? (
+      <Link
+        href={`/admin/series/${series.id}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+      >
+        <Chip
+          avatar={
+            <AvatarWithDefaultImage
+              image={seriesImage}
+              altName={series.name}
+              width={compact ? 32 : 40}
+              height={compact ? 18 : 26}
+              borderRadius={0}
+            />
+          }
+          label={series.name}
+          size="small"
+          variant="filled"
+          sx={{
+            height: compact ? 18 : { sm: 22, md: 26 },
+            cursor: 'pointer',
+            overflow: 'hidden',
+            maxWidth: compact ? 120 : 'none',
+            bgcolor: seriesPublishedToSubsplash
+              ? alpha(theme.palette.success.main, 0.12)
+              : alpha(theme.palette.warning.main, 0.16),
+            border: `1px solid ${seriesPublishedToSubsplash
+              ? alpha(theme.palette.success.main, 0.35)
+              : alpha(theme.palette.warning.main, 0.4)}`,
+            '& .MuiChip-label': {
+              fontSize: compact ? '0.48rem' : { sm: '0.58rem', md: '0.68rem' },
+              pl: compact ? 0.2 : { sm: 0.35, md: 0.45 },
+              pr: compact ? 0.45 : { sm: 0.75, md: 1 },
+              fontWeight: 500,
+              color: seriesPublishedToSubsplash ? theme.palette.success.dark : theme.palette.warning.dark,
+            },
+            '& .MuiChip-avatar': {
+              ml: 0,
+              mr: compact ? 0.2 : { sm: 0.35, md: 0.45 },
+              width: compact ? 26 : { sm: 34, md: 40 },
+              height: compact ? 18 : { sm: 22, md: 26 },
+              borderRadius: 0,
+            },
+            '&:hover': {
+              bgcolor: seriesPublishedToSubsplash
+                ? alpha(theme.palette.success.main, 0.18)
+                : alpha(theme.palette.warning.main, 0.24),
+              borderColor: seriesPublishedToSubsplash ? theme.palette.success.main : theme.palette.warning.main,
+            }
+          }}
+        />
+      </Link>
+    ) : null
+  );
+
+  const renderProcessingChip = () => (
+    isProcessing ? (
+      <Chip
+        label={`Processing...${processingProgress > 0 ? `${processingProgress}%` : ''}`}
+        size="small"
+        color="warning"
+        variant="outlined"
+        sx={{
+          height: { xs: 16, sm: 20 },
+          width: 'fit-content',
+          maxWidth: 'none',
+          flexShrink: 0,
+          '& .MuiChip-label': {
+            fontSize: { xs: '0.5rem', sm: '0.6rem' },
+            px: 0.25,
+            mr: 0.25,
+            p: 1,
+            whiteSpace: 'nowrap',
+          },
+        }}
+      />
+    ) : null
+  );
+
+  const renderErrorIndicator = () => (
+    isError ? (
+      <Tooltip title={currentSermon.status.message || 'Error'}>
+        <ErrorIcon sx={{ fontSize: 12, color: 'error.main' }} />
+      </Tooltip>
+    ) : null
   );
 
   // Desktop Actions Component (horizontal bottom row)
@@ -559,7 +635,8 @@ const SermonListCard: FunctionComponent<Props> = ({
           cursor: 'pointer',
           overflow: 'hidden',
           mb: { xs: 1, sm: 1.5 },
-          height: imageSize,
+          height: isMobile ? 'auto' : imageSize,
+          minHeight: imageSize,
           width: '100%',
           position: 'relative',
           contentVisibility: 'auto',
@@ -611,37 +688,84 @@ const SermonListCard: FunctionComponent<Props> = ({
             overflow: 'hidden',
           }}
         >
-          {/* Text Content */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1, minHeight: 0, minWidth: 0, justifyContent: 'space-between' }}>
-            <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', minWidth: 0, overflow: 'hidden', width: '100%' }}>
-
-              <Stack gap={0.5} sx={{ flex: 1, minWidth: 0, width: 0, overflow: 'hidden' }}>
-
-                {/* Title */}
+          {isMobile ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.45, flex: 1, minWidth: 0, justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}>
                 <Typography
                   fontWeight={600}
                   noWrap
                   sx={{
                     lineHeight: 1.2,
-                    fontSize: { xs: '0.75rem', sm: '0.75rem', md: '0.8rem', lg: '1rem' },
+                    fontSize: '0.7rem',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                     minWidth: 0,
-                    width: '100%',
+                    flex: 1,
                   }}
                 >
                   {currentSermon.title}
                 </Typography>
+                {renderUploaderAvatar()}
+              </Box>
 
-                {/* Speaker */}
-                {currentSermon.speakers?.length > 0 && (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}>
+                <Typography
+                  color="text.secondary"
+                  noWrap
+                  sx={{
+                    lineHeight: 1.2,
+                    fontSize: '0.55rem',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    minWidth: 0,
+                    flex: 1,
+                  }}
+                >
+                  {currentSermon.speakers?.map((speaker) => speaker.name).join(', ') || 'Unknown Speaker'}
+                </Typography>
+                {isProcessed ? renderSeriesTag(true) : null}
+              </Box>
+
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}>
+                <Stack direction="row" spacing={0.35} alignItems="center" sx={{ minWidth: 0, flexShrink: 0 }}>
+                  {isProcessed ? renderPlayButton() : null}
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.55rem', whiteSpace: 'nowrap' }}>
+                    {formatDate(currentSermon.dateMillis)}
+                  </Typography>
+                  {currentSermon.durationSeconds > 0 ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.55rem', whiteSpace: 'nowrap' }}>
+                      • {formatDuration(currentSermon.durationSeconds)}
+                    </Typography>
+                  ) : null}
+                </Stack>
+
+                <Stack direction="row" spacing={0.35} alignItems="center" sx={{ minWidth: 0, flexShrink: 1 }}>
+                  {renderProcessingChip()}
+                  {renderErrorIndicator()}
+                </Stack>
+
+                {isProcessed && canPublish ? (
+                  <Stack direction="row" spacing={0.35} alignItems="center" sx={{ flexShrink: 0 }}>
+                    {renderSoundCloudStatus()}
+                    {renderSubsplashStatus()}
+                  </Stack>
+                ) : <Box sx={{ width: 1, minWidth: 0 }} />}
+              </Box>
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1, minHeight: 0, minWidth: 0, justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', minWidth: 0, overflow: 'hidden', width: '100%' }}>
+
+                <Stack gap={0.5} sx={{ flex: 1, minWidth: 0, width: 0, overflow: 'hidden' }}>
+
                   <Typography
-                    color="text.secondary"
+                    fontWeight={600}
                     noWrap
                     sx={{
                       lineHeight: 1.2,
-                      fontSize: { xs: '0.6rem', sm: '0.7rem', md: '0.75rem' },
+                      fontSize: { xs: '0.7rem', sm: '0.75rem', md: '0.8rem', lg: '1rem' },
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -649,154 +773,101 @@ const SermonListCard: FunctionComponent<Props> = ({
                       width: '100%',
                     }}
                   >
-                    {currentSermon.speakers.map(s => s.name).join(', ')}
+                    {currentSermon.title}
                   </Typography>
-                )}
-              </Stack>
-              {renderUploaderAvatar()}
-            </Box>
-            {isDesktop && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{
-                  fontSize: { xs: '0.55rem', sm: '0.65rem' },
-                  minHeight: 0,
-                  display: '-webkit-box',
-                  WebkitBoxOrient: 'vertical',
-                  WebkitLineClamp: 3,
-                  overflow: 'hidden',
-                  wordBreak: 'break-word',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {currentSermon.description}
-              </Typography>
-            )}
 
-            <Box sx={{ display: 'flex', flexDirection: 'row', gap: 0.5, flexShrink: 0 }}>
-              <Stack direction="row" spacing={0.5} alignItems="center" flex={1} sx={{ mt: 0.25, overflow: 'hidden', minWidth: 0 }}>
-                {isProcessed && isTablet && (
-                  renderPlayButton()
-                )}
+                  {currentSermon.speakers?.length > 0 && (
+                    <Typography
+                      color="text.secondary"
+                      noWrap
+                      sx={{
+                        lineHeight: 1.2,
+                        fontSize: { xs: '0.55rem', sm: '0.7rem', md: '0.75rem' },
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
+                      }}
+                    >
+                      {currentSermon.speakers.map((speaker) => speaker.name).join(', ')}
+                    </Typography>
+                  )}
+                </Stack>
+                {renderUploaderAvatar()}
+              </Box>
+              {isDesktop && (
                 <Typography
                   variant="caption"
                   color="text.secondary"
-                  sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' }, whiteSpace: 'nowrap' }}
+                  sx={{
+                    fontSize: { xs: '0.55rem', sm: '0.65rem' },
+                    minHeight: 0,
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 3,
+                    overflow: 'hidden',
+                    wordBreak: 'break-word',
+                    textOverflow: 'ellipsis',
+                  }}
                 >
-                  {formatDate(currentSermon.dateMillis)}
+                  {currentSermon.description}
                 </Typography>
-                {currentSermon.durationSeconds > 0 && (
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' } }}>
-                    • {formatDuration(currentSermon.durationSeconds)}
-                  </Typography>
-                )}
+              )}
 
-                {/* Series Tag - Only on tablet+ */}
-                {series && isTablet && (
-                  <Link href={`/admin/series/${series.id}`} onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none' }}>
-                    <Chip
-                      avatar={
-                        <Avatar 
-                          src={seriesImage?.downloadLink || '/URM_icon.png'} 
-                          alt={series.name} 
-                          sx={{ 
-                            width: { sm: 18, md: 22 }, 
-                            height: { sm: 18, md: 22 },
-                          }} 
-                        />
-                      }
-                      label={series.name}
-                      size="small"
-                      variant="filled"
-                        sx={{
-                          height: { sm: 22, md: 26 },
-                          cursor: 'pointer',
-                          maxWidth: { sm: 140, md: 180 },
-                          bgcolor: seriesPublishedToSubsplash
-                            ? alpha(theme.palette.success.main, 0.12)
-                            : alpha(theme.palette.warning.main, 0.16),
-                          border: `1px solid ${seriesPublishedToSubsplash
-                            ? alpha(theme.palette.success.main, 0.35)
-                            : alpha(theme.palette.warning.main, 0.4)}`,
-                          '& .MuiChip-label': { 
-                            fontSize: { sm: '0.65rem', md: '0.75rem' }, 
-                            px: { sm: 0.75, md: 1 }, 
-                            fontWeight: 500,
-                            overflow: 'hidden', 
-                            textOverflow: 'ellipsis',
-                            color: seriesPublishedToSubsplash ? theme.palette.success.dark : theme.palette.warning.dark,
-                          },
-                          '& .MuiChip-avatar': { 
-                            ml: 0.5,
-                            width: { sm: 18, md: 22 },
-                            height: { sm: 18, md: 22 },
-                          },
-                          '&:hover': { 
-                            bgcolor: seriesPublishedToSubsplash
-                              ? alpha(theme.palette.success.main, 0.18)
-                              : alpha(theme.palette.warning.main, 0.24),
-                            borderColor: seriesPublishedToSubsplash ? theme.palette.success.main : theme.palette.warning.main,
-                          }
-                        }}
-                    />
-                  </Link>
-                )}
+              <Box sx={{ display: 'flex', flexDirection: 'row', gap: { xs: 0.35, sm: 0.5 }, flexShrink: 0 }}>
+                <Stack direction="column" spacing={{ xs: 0.35, sm: 0.5 }} flex={1} sx={{ overflow: 'hidden', minWidth: 0 }}>
+                  <Stack direction="row" spacing={{ xs: 0.35, sm: 0.5 }} alignItems="center" sx={{ overflow: 'hidden', minWidth: 0 }}>
+                    {isProcessed ? renderPlayButton() : null}
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' }, whiteSpace: 'nowrap' }}
+                    >
+                      {formatDate(currentSermon.dateMillis)}
+                    </Typography>
+                    {currentSermon.durationSeconds > 0 && (
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' } }}>
+                        • {formatDuration(currentSermon.durationSeconds)}
+                      </Typography>
+                    )}
+                    {isProcessed && renderSeriesTag(false)}
+                    <Stack direction="row" spacing={{ xs: 0.35, sm: 0.5 }} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap', minWidth: 0 }}>
+                      {renderProcessingChip()}
+                      {renderErrorIndicator()}
+                    </Stack>
+                  </Stack>
+                </Stack>
+                <Stack direction="column" spacing={0.5} justifyContent="center" alignItems="center" flexShrink={0}>
+                  {isTablet ? renderDesktopActions() : null}
+                </Stack>
+              </Box>
 
-                {/* Processing Status */}
-                {isProcessing && (
-                  <Chip
-                    label={`Processing...${processingProgress > 0 ? `${processingProgress}%` : ''}`}
-                    size="small"
-                    color="warning"
-                    variant="outlined"
-                    sx={{
-                      height: { xs: 16, sm: 20 },
-                      '& .MuiChip-label': { fontSize: { xs: '0.5rem', sm: '0.6rem' }, px: 0.25, mr: 0.25, p: 1 }
-                    }}
-                  />
-                )}
-
-                {isError && (
-                  <Tooltip title={currentSermon.status.message || 'Error'}>
-                    <ErrorIcon sx={{ fontSize: 12, color: 'error.main' }} />
-                  </Tooltip>
-                )}
-              </Stack>
-              <Stack direction="column" spacing={0.5} justifyContent="space-between" alignItems="center" flexShrink={0}>
-                {!isTablet && renderMobileActions()}
-                {isTablet && renderDesktopActions()}
-              </Stack>
+              {isProcessing && processingProgress > 0 && (
+                <LinearProgress
+                  variant="determinate"
+                  value={processingProgress}
+                  sx={{
+                    height: 2,
+                    borderRadius: 1,
+                    mt: 0.5,
+                    bgcolor: alpha(theme.palette.warning.main, 0.15),
+                    '& .MuiLinearProgress-bar': { bgcolor: 'warning.main' }
+                  }}
+                />
+              )}
+              {publishTaskRunning && (
+                <LinearProgress
+                  sx={{
+                    height: 2,
+                    borderRadius: 1,
+                    mt: 0.5,
+                    bgcolor: alpha(theme.palette.info.main, 0.12),
+                    '& .MuiLinearProgress-bar': { bgcolor: 'info.main' }
+                  }}
+                />
+              )}
             </Box>
-
-            {/* Processing Progress Bar */}
-            {isProcessing && processingProgress > 0 && (
-              <LinearProgress
-                variant="determinate"
-                value={processingProgress}
-                sx={{
-                  height: 2,
-                  borderRadius: 1,
-                  mt: 0.5,
-                  bgcolor: alpha(theme.palette.warning.main, 0.15),
-                  '& .MuiLinearProgress-bar': { bgcolor: 'warning.main' }
-                }}
-              />
-            )}
-            {publishTaskRunning && (
-              <LinearProgress
-                sx={{
-                  height: 2,
-                  borderRadius: 1,
-                  mt: 0.5,
-                  bgcolor: alpha(theme.palette.info.main, 0.12),
-                  '& .MuiLinearProgress-bar': { bgcolor: 'info.main' }
-                }}
-              />
-            )}
-          </Box>
-
-          {/* Meta Row */}
+          )}
         </Box>
 
 

@@ -19,7 +19,7 @@ import { useAlgoliaSearch } from '../context/search/AlgoliaSearchContext';
 
 function FilterButton({ onToggle }: { onToggle: () => void }) {
   return (
-    <IconButton onClick={onToggle} sx={{ display: { xs: 'block', md: 'none' } }} aria-label="Toggle filters">
+    <IconButton onClick={onToggle} sx={{ display: { xs: 'block', lg: 'none' } }} aria-label="Toggle filters">
       <FilterIcon />
     </IconButton>
   );
@@ -33,19 +33,19 @@ function AdminSermonFilters({ sx }: { sx?: SxProps<Theme> }) {
         minWidth: 0,
         width: '100%',
         alignItems: 'stretch',
-        px: { xs: 1, md: 0 },
-        position: { md: 'sticky' },
-        top: { md: 16 },
-        alignSelf: { md: 'start' },
+        px: { xs: 1, lg: 0 },
+        position: { lg: 'sticky' },
+        top: { lg: 16 },
+        alignSelf: { lg: 'start' },
         ...sx,
       }}
     >
       <Stack
-        gap={{ xs: 1.5, md: 2 }}
+        gap={{ xs: 1.5, lg: 2 }}
         alignItems="start"
-        border={{ xs: 1, md: 0 }}
+        border={{ xs: 1, lg: 0 }}
         borderRadius={1}
-        p={{ xs: 1.5, md: 2 }}
+        p={{ xs: 1.5, lg: 2 }}
         width="100%"
         minWidth={0}
         boxSizing="border-box"
@@ -73,7 +73,7 @@ function MobileFilterSection({ onToggle }: { onToggle: () => void }) {
 
 function MobileFilterDrawer({ show }: { show: boolean }) {
   return (
-    <Stack sx={{ display: { xs: 'block', md: 'none' } }} style={{ gridArea: 'filters' }}>
+    <Stack sx={{ display: { xs: 'block', lg: 'none' } }} style={{ gridArea: 'filters' }}>
       <AnimateHeight duration={250} height={show ? 'auto' : 0}>
         <AdminSermonFilters />
       </AnimateHeight>
@@ -85,7 +85,7 @@ const SearchableAdminSermonList: FunctionComponent<{ refreshNonce?: number }> = 
   const { user } = useAuth();
   const { searchClient, loading: searchClientLoading, error: searchClientError } = useAlgoliaSearch();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const useMobileFilters = useMediaQuery(theme.breakpoints.down('lg'));
   const [showFilters, setShowFilters] = useState<boolean>(false);
 
   if (!user) {
@@ -113,14 +113,14 @@ const SearchableAdminSermonList: FunctionComponent<{ refreshNonce?: number }> = 
             <NoResultsBoundary fallback={<NoResults />}>
               <Box
                 display="grid"
-                gridTemplateAreas={{ xs: `"filters" "results"`, md: `"results filters"` }}
-                gridTemplateColumns={{ xs: '1fr', md: '1fr 300px' }}
+                gridTemplateAreas={{ xs: `"filters" "results"`, lg: `"results filters"` }}
+                gridTemplateColumns={{ xs: '1fr', lg: '1fr 300px' }}
                 width={1}
                 minWidth={0}
-                columnGap={{ md: 1 }}
+                columnGap={{ lg: 1 }}
               >
                 <SearchResultSermonList gridArea="results" />
-                {isMobile ? <MobileFilterDrawer show={showFilters} /> : <AdminSermonFilters />}
+                {useMobileFilters ? <MobileFilterDrawer show={showFilters} /> : <AdminSermonFilters />}
               </Box>
               <CustomPagination />
             </NoResultsBoundary>
