@@ -50,6 +50,8 @@ interface UpdateSubsplashSpeakerTagImageInputType {
   operationKey?: string;
 }
 
+const MAX_SUBSPLASH_SPEAKER_NAME_LENGTH = 30;
+
 const normalizeOptionalString = (value: unknown): string | undefined => {
   if (value === undefined || value === null) {
     return undefined;
@@ -102,6 +104,12 @@ export const requireTrimmedSpeakerName = (name: unknown, fieldName = 'speaker.na
   const trimmed = name.trim();
   if (!trimmed) {
     throw new HttpsError('invalid-argument', `${fieldName} is required.`);
+  }
+  if (trimmed.length > MAX_SUBSPLASH_SPEAKER_NAME_LENGTH) {
+    throw new HttpsError(
+      'invalid-argument',
+      `${fieldName} must be ${MAX_SUBSPLASH_SPEAKER_NAME_LENGTH} characters or fewer.`
+    );
   }
 
   return trimmed;

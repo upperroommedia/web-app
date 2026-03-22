@@ -46,6 +46,7 @@ interface CreateSpeakerPopupProps {
 
 const IMAGE_SAVE_TIMEOUT_MS = 30000;
 const IMAGE_NAME_MAX_ATTEMPTS = 50;
+const MAX_SPEAKER_NAME_LENGTH = 30;
 
 const buildIncrementedImageName = (name: string, increment: number): string => {
   const extensionIndex = name.lastIndexOf('.');
@@ -230,6 +231,8 @@ const CreateSpeakerPopup = ({
           required
           fullWidth
           error={nameTouched && normalizedName.length === 0}
+          helperText={`${normalizedName.length}/${MAX_SPEAKER_NAME_LENGTH} characters`}
+          inputProps={{ maxLength: MAX_SPEAKER_NAME_LENGTH }}
           onBlur={() => setNameTouched(true)}
           onChange={(event) => {
             if (!nameTouched) {

@@ -305,6 +305,23 @@ describe('speaker CRUD callables', () => {
     });
   });
 
+  it('rejects create requests when the speaker name exceeds the Subsplash tag limit', async () => {
+    await expect(
+      createSpeakerHandler({
+        auth: defaultAuth,
+        data: {
+          speaker: {
+            name: 'A very long speaker name over 30',
+            images: [createSquareImage()],
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: 'invalid-argument',
+      message: 'speaker.name must be 30 characters or fewer.',
+    });
+  });
+
   it('rejects update requests when selected images do not contain a square image', async () => {
     await speakersCollection.doc('speaker-update-no-square').set({
       id: 'speaker-update-no-square',
@@ -327,6 +344,31 @@ describe('speaker CRUD callables', () => {
     ).rejects.toMatchObject({
       code: 'invalid-argument',
       message: 'A square image is required.',
+    });
+  });
+
+  it('rejects update requests when the speaker name exceeds the Subsplash tag limit', async () => {
+    await speakersCollection.doc('speaker-update-name-too-long').set({
+      id: 'speaker-update-name-too-long',
+      name: 'Speaker Existing',
+      images: [createSquareImage('existing-square')],
+      sermonCount: 4,
+      tagId: 'speaker-tag-existing',
+    });
+
+    await expect(
+      updateSpeakerHandler({
+        auth: defaultAuth,
+        data: {
+          speakerId: 'speaker-update-name-too-long',
+          patch: {
+            name: 'A very long speaker name over 30',
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: 'invalid-argument',
+      message: 'patch.name must be 30 characters or fewer.',
     });
   });
 
