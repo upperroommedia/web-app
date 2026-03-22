@@ -107,11 +107,30 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
       />
 
       {/* Controls and Time Inputs */}
+      <Stack spacing={2} sx={{ display: { xs: 'flex', sm: 'none' } }}>
+        <Stack
+          direction="row"
+          spacing={2}
+          alignItems="stretch"
+          justifyContent="space-between"
+        >
+          <EditableTimeInput type="start" label="Trim Start" />
+          <EditableTimeInput type="end" label="Trim End" />
+        </Stack>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="center"
+        >
+          <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} />
+        </Stack>
+      </Stack>
       <Stack
-        direction={{ xs: 'column', sm: 'row' }}
+        direction="row"
         spacing={2}
-        alignItems={{ xs: 'stretch', sm: 'center' }}
+        alignItems="center"
         justifyContent="space-between"
+        sx={{ display: { xs: 'none', sm: 'flex' } }}
       >
         <EditableTimeInput type="start" label="Trim Start" />
         <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} />
