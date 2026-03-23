@@ -7,7 +7,7 @@
  * Firestore and refresh access tokens automatically for publish/edit/delete.
  */
 import axios, { isAxiosError } from 'axios';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { HttpsError } from 'firebase-functions/v2/https';
@@ -19,7 +19,9 @@ import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
 const SOUND_CLOUD_TOKEN_URL = 'https://secure.soundcloud.com/oauth/token';
 const SOUND_CLOUD_AUTH_STATE_COLLECTION = '_integrationAuth';
 const SOUND_CLOUD_AUTH_STATE_DOC = 'soundcloud';
+const SOUND_CLOUD_PENDING_AUTH_COLLECTION = 'pendingOAuthSessions';
 const SOUND_CLOUD_CALLBACK_PATH = '/auth/soundcloud/callback';
+const PENDING_SOUND_CLOUD_AUTH_TTL_MS = 15 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const REFRESH_LEASE_MS = 60 * 1000;
 const REFRESH_WAIT_MS = 750;
@@ -57,8 +59,7 @@ export type SoundCloudAuthStatus = {
 
 export type ExchangeSoundCloudAuthorizationCodeInput = {
   code: string;
-  codeVerifier: string;
-  redirectUri: string;
+  state: string;
   connectedByUid?: string;
   connectedByEmail?: string;
 };
@@ -70,6 +71,24 @@ export type ExchangeSoundCloudAuthorizationCodeResult = {
   connectedByEmail?: string;
 };
 
+type PendingSoundCloudAuthorizationSession = {
+  state: string;
+  codeVerifier: string;
+  redirectUri: string;
+  createdAtMillis: number;
+  expiresAtMillis: number;
+};
+
+export type CreateSoundCloudAuthorizationSessionInput = {
+  adminUid: string;
+  redirectUri: string;
+};
+
+export type CreateSoundCloudAuthorizationSessionResult = {
+  authorizeUrl: string;
+  expiresAtMillis: number;
+};
+
 const soundcloudClientIdSecret = defineSecret('SOUNDCLOUD_CLIENT_ID');
 const soundcloudClientSecretSecret = defineSecret('SOUNDCLOUD_CLIENT_SECRET');
 
@@ -77,6 +96,9 @@ const soundcloudAuthStateRef = firebaseAdmin
   .firestore()
   .collection(SOUND_CLOUD_AUTH_STATE_COLLECTION)
   .doc(SOUND_CLOUD_AUTH_STATE_DOC);
+
+const soundcloudPendingAuthSessionRef = (adminUid: string) =>
+  soundcloudAuthStateRef.collection(SOUND_CLOUD_PENDING_AUTH_COLLECTION).doc(adminUid);
 
 const readConfiguredValue = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
@@ -93,6 +115,21 @@ const getBootstrapRefreshToken = (): string | null =>
   readConfiguredValue(process.env.SOUNDCLOUD_REFRESH_TOKEN);
 
 const nowMillis = (): number => Date.now();
+
+const toBase64Url = (bytes: Uint8Array): string =>
+  Buffer.from(bytes)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+
+const createPkcePair = (): { codeVerifier: string; codeChallenge: string } => {
+  const codeVerifier = toBase64Url(randomBytes(64));
+  const codeChallenge = toBase64Url(createHash('sha256').update(codeVerifier).digest());
+  return { codeVerifier, codeChallenge };
+};
+
+const createOAuthState = (): string => toBase64Url(randomBytes(32));
 
 const isAccessTokenFresh = (
   state: SoundCloudAuthState | null,
@@ -145,6 +182,101 @@ const readAuthState = async (): Promise<SoundCloudAuthState | null> => {
     return null;
   }
   return snapshot.data() as SoundCloudAuthState;
+};
+
+const consumePendingSoundCloudAuthorizationSession = async (
+  adminUid: string,
+  state: string
+): Promise<PendingSoundCloudAuthorizationSession> => {
+  const currentTimeMillis = nowMillis();
+  const pendingSessionRef = soundcloudPendingAuthSessionRef(adminUid);
+  const snapshot = await pendingSessionRef.get();
+  if (!snapshot.exists) {
+    throw new HttpsError(
+      'failed-precondition',
+      'The SoundCloud login session was not found. Start the flow again from Admin > Advanced.'
+    );
+  }
+
+  const pendingSession = snapshot.data() as PendingSoundCloudAuthorizationSession | undefined;
+  const hasRequiredFields = Boolean(
+    pendingSession?.state &&
+      pendingSession.codeVerifier &&
+      pendingSession.redirectUri &&
+      typeof pendingSession.createdAtMillis === 'number' &&
+      typeof pendingSession.expiresAtMillis === 'number'
+  );
+
+  if (!hasRequiredFields) {
+    await pendingSessionRef.delete();
+    throw new HttpsError(
+      'failed-precondition',
+      'The SoundCloud login session was invalid. Start the flow again from Admin > Advanced.'
+    );
+  }
+
+  const validatedPendingSession = pendingSession as PendingSoundCloudAuthorizationSession;
+
+  if (validatedPendingSession.expiresAtMillis <= currentTimeMillis) {
+    await pendingSessionRef.delete();
+    throw new HttpsError(
+      'failed-precondition',
+      'The SoundCloud login session expired. Start the flow again from Admin > Advanced.'
+    );
+  }
+
+  if (validatedPendingSession.state !== state) {
+    await pendingSessionRef.delete();
+    throw new HttpsError(
+      'failed-precondition',
+      'The SoundCloud OAuth state did not match the original request. Start the flow again from Admin > Advanced.'
+    );
+  }
+
+  return firebaseAdmin.firestore().runTransaction(async (transaction) => {
+    const currentSnapshot = await transaction.get(pendingSessionRef);
+    if (!currentSnapshot.exists) {
+      throw new HttpsError(
+        'failed-precondition',
+        'The SoundCloud login session was not found. Start the flow again from Admin > Advanced.'
+      );
+    }
+
+    const currentPendingSession = currentSnapshot.data() as PendingSoundCloudAuthorizationSession | undefined;
+    const hasCurrentRequiredFields = Boolean(
+      currentPendingSession?.state &&
+        currentPendingSession.codeVerifier &&
+        currentPendingSession.redirectUri &&
+        typeof currentPendingSession.createdAtMillis === 'number' &&
+        typeof currentPendingSession.expiresAtMillis === 'number'
+    );
+
+    if (!hasCurrentRequiredFields) {
+      throw new HttpsError(
+        'failed-precondition',
+        'The SoundCloud login session expired. Start the flow again from Admin > Advanced.'
+      );
+    }
+
+    const validatedCurrentPendingSession = currentPendingSession as PendingSoundCloudAuthorizationSession;
+
+    if (validatedCurrentPendingSession.expiresAtMillis <= currentTimeMillis) {
+      throw new HttpsError(
+        'failed-precondition',
+        'The SoundCloud login session expired. Start the flow again from Admin > Advanced.'
+      );
+    }
+
+    if (validatedCurrentPendingSession.state !== state) {
+      throw new HttpsError(
+        'failed-precondition',
+        'The SoundCloud OAuth state did not match the original request. Start the flow again from Admin > Advanced.'
+      );
+    }
+
+    transaction.delete(pendingSessionRef);
+    return validatedCurrentPendingSession;
+  });
 };
 
 const createTokenPayload = (pairs: Record<string, string>): URLSearchParams => {
@@ -236,6 +368,48 @@ const writeTokenState = async (
   };
 };
 
+export const createSoundCloudAuthorizationSession = async (
+  input: CreateSoundCloudAuthorizationSessionInput
+): Promise<CreateSoundCloudAuthorizationSessionResult> => {
+  const clientId = getConfiguredClientId();
+  const clientSecret = getConfiguredClientSecret();
+  if (!clientId || !clientSecret) {
+    throw getSoundCloudSetupError();
+  }
+
+  const adminUid = readConfiguredValue(input.adminUid);
+  if (!adminUid) {
+    throw new HttpsError('permission-denied', 'Only admins can connect SoundCloud.');
+  }
+
+  const redirectUri = normalizeRedirectUri(input.redirectUri);
+  const { codeVerifier, codeChallenge } = createPkcePair();
+  const state = createOAuthState();
+  const createdAtMillis = nowMillis();
+  const expiresAtMillis = createdAtMillis + PENDING_SOUND_CLOUD_AUTH_TTL_MS;
+
+  await soundcloudPendingAuthSessionRef(adminUid).set({
+    state,
+    codeVerifier,
+    redirectUri,
+    createdAtMillis,
+    expiresAtMillis,
+  });
+
+  const authorizeUrl = new URL('https://secure.soundcloud.com/authorize');
+  authorizeUrl.searchParams.set('response_type', 'code');
+  authorizeUrl.searchParams.set('client_id', clientId);
+  authorizeUrl.searchParams.set('redirect_uri', redirectUri);
+  authorizeUrl.searchParams.set('code_challenge', codeChallenge);
+  authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+  authorizeUrl.searchParams.set('state', state);
+
+  return {
+    authorizeUrl: authorizeUrl.toString(),
+    expiresAtMillis,
+  };
+};
+
 export const exchangeSoundCloudAuthorizationCode = async (
   input: ExchangeSoundCloudAuthorizationCodeInput
 ): Promise<ExchangeSoundCloudAuthorizationCodeResult> => {
@@ -246,18 +420,23 @@ export const exchangeSoundCloudAuthorizationCode = async (
   }
 
   const code = readConfiguredValue(input.code);
-  const codeVerifier = readConfiguredValue(input.codeVerifier);
-  if (!code || !codeVerifier) {
-    throw new HttpsError('invalid-argument', 'SoundCloud authorization code and verifier are required.');
+  const state = readConfiguredValue(input.state);
+  if (!code || !state) {
+    throw new HttpsError('invalid-argument', 'SoundCloud authorization code and state are required.');
   }
 
-  const redirectUri = normalizeRedirectUri(input.redirectUri);
+  const connectedByUid = readConfiguredValue(input.connectedByUid ?? undefined);
+  if (!connectedByUid) {
+    throw new HttpsError('permission-denied', 'Only admins can connect SoundCloud.');
+  }
+
+  const pendingSession = await consumePendingSoundCloudAuthorizationSession(connectedByUid, state);
   const payload = createTokenPayload({
     grant_type: 'authorization_code',
     client_id: clientId,
     client_secret: clientSecret,
-    redirect_uri: redirectUri,
-    code_verifier: codeVerifier,
+    redirect_uri: pendingSession.redirectUri,
+    code_verifier: pendingSession.codeVerifier,
     code,
   });
 
@@ -268,7 +447,7 @@ export const exchangeSoundCloudAuthorizationCode = async (
 
   return writeTokenState(tokens, {
     connectedAtMillis: nowMillis(),
-    connectedByUid: readConfiguredValue(input.connectedByUid ?? undefined) ?? undefined,
+    connectedByUid,
     connectedByEmail: readConfiguredValue(input.connectedByEmail ?? undefined) ?? undefined,
   });
 };

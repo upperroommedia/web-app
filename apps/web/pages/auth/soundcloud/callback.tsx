@@ -11,7 +11,6 @@ import Typography from '@mui/material/Typography';
 import { useRouter } from 'next/router';
 import AppLayout from '../../../layout/AppLayout';
 import { createFunctionV2 } from '../../../utils/createFunction';
-import { clearPendingSoundCloudOAuth, readPendingSoundCloudOAuth } from '../../../utils/soundcloudOAuth';
 import type {
   ExchangeSoundCloudAuthCodeInput,
   ExchangeSoundCloudAuthCodeReturnType,
@@ -28,7 +27,7 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
     }
 
     const code = typeof router.query.code === 'string' ? router.query.code : null;
-    const returnedState = typeof router.query.state === 'string' ? router.query.state : null;
+    const state = typeof router.query.state === 'string' ? router.query.state : null;
     const providerError = typeof router.query.error === 'string' ? router.query.error : null;
     const providerErrorDescription =
       typeof router.query.error_description === 'string' ? router.query.error_description : null;
@@ -47,34 +46,19 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
       } as const;
     }
 
-    const pendingAuth = readPendingSoundCloudOAuth();
-    if (!pendingAuth) {
+    if (!state) {
       return {
         ready: true,
-        validationError: 'The SoundCloud login session was not found. Start the flow again from Admin > Advanced.',
-      } as const;
-    }
-
-    if (!returnedState || returnedState !== pendingAuth.state) {
-      return {
-        ready: true,
-        validationError: 'The SoundCloud OAuth state did not match the original request.',
-        shouldClearPendingAuth: true,
+        validationError: 'SoundCloud did not return the OAuth state for this authorization attempt.',
       } as const;
     }
 
     return {
       ready: true,
       code,
-      pendingAuth,
+      state,
     } as const;
   }, [router.isReady, router.query.code, router.query.error, router.query.error_description, router.query.state]);
-
-  useEffect(() => {
-    if (callbackState.ready && callbackState.shouldClearPendingAuth) {
-      clearPendingSoundCloudOAuth();
-    }
-  }, [callbackState]);
 
   useEffect(() => {
     if (!callbackState.ready || 'validationError' in callbackState) {
@@ -93,15 +77,13 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
         setStatusText('Exchanging SoundCloud authorization for runtime tokens...');
         await exchangeAuthCode({
           code: callbackState.code,
-          codeVerifier: callbackState.pendingAuth.codeVerifier,
-          redirectUri: callbackState.pendingAuth.redirectUri,
+          state: callbackState.state,
         });
 
         if (isCancelled) {
           return;
         }
 
-        clearPendingSoundCloudOAuth();
         setStatusText('SoundCloud is connected. Returning to Advanced settings...');
         await router.replace('/admin/advanced?soundcloud=connected');
       } catch (error) {
@@ -147,7 +129,6 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
               <Button
                 variant="contained"
                 onClick={() => {
-                  clearPendingSoundCloudOAuth();
                   router.push('/admin/advanced?soundcloud=error&message=' + encodeURIComponent(resolvedErrorText));
                 }}
               >

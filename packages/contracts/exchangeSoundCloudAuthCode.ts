@@ -7,8 +7,7 @@ export type ExchangeSoundCloudAuthorizationCodeResult = {
 
 export type ExchangeSoundCloudAuthCodeInput = {
   code: string;
-  codeVerifier: string;
-  redirectUri: string;
+  state: string;
 };
 
 export type ExchangeSoundCloudAuthCodeReturnType = ExchangeSoundCloudAuthorizationCodeResult;

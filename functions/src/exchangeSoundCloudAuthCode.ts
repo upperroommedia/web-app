@@ -9,8 +9,7 @@ import {
 
 export type ExchangeSoundCloudAuthCodeInput = {
   code: string;
-  codeVerifier: string;
-  redirectUri: string;
+  state: string;
 };
 
 export type ExchangeSoundCloudAuthCodeReturnType = ExchangeSoundCloudAuthorizationCodeResult;
@@ -25,8 +24,7 @@ const exchangeSoundCloudAuthCode = onCall(
 
     const input: ExchangeSoundCloudAuthorizationCodeInput = {
       code: request.data.code,
-      codeVerifier: request.data.codeVerifier,
-      redirectUri: request.data.redirectUri,
+      state: request.data.state,
       connectedByUid: request.auth?.uid,
       connectedByEmail: typeof request.auth?.token.email === 'string' ? request.auth.token.email : undefined,
     };

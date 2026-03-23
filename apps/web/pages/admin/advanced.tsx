@@ -15,12 +15,10 @@ import { useRouter } from 'next/router';
 import AppLayout from '../../layout/AppLayout';
 import useAuth from '../../context/user/UserContext';
 import { createFunctionV2 } from '../../utils/createFunction';
-import {
-  clearPendingSoundCloudOAuth,
-  createOAuthState,
-  createPkcePair,
-  storePendingSoundCloudOAuth,
-} from '../../utils/soundcloudOAuth';
+import type {
+  CreateSoundCloudAuthSessionInput,
+  CreateSoundCloudAuthSessionReturnType,
+} from '@upperroom/contracts/createSoundCloudAuthSession';
 import type {
   GetSoundCloudAuthStatusInput,
   GetSoundCloudAuthStatusReturnType,
@@ -147,7 +145,6 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
     const soundCloudStatus = typeof router.query.soundcloud === 'string' ? router.query.soundcloud : null;
     if (soundCloudStatus === 'connected') {
       setNotice({ severity: 'success', text: 'SoundCloud was connected successfully.' });
-      clearPendingSoundCloudOAuth();
       router.replace('/admin/advanced', undefined, { shallow: true });
       loadStatus();
       return;
@@ -176,25 +173,13 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
     setNotice(null);
 
     try {
-      const { codeVerifier, codeChallenge } = await createPkcePair();
-      const state = createOAuthState();
+      const createAuthSession = createFunctionV2<
+        CreateSoundCloudAuthSessionInput,
+        CreateSoundCloudAuthSessionReturnType
+      >('createSoundCloudAuthSession');
 
-      storePendingSoundCloudOAuth({
-        state,
-        codeVerifier,
-        redirectUri,
-        createdAtMillis: Date.now(),
-      });
-
-      const authorizeUrl = new URL('https://secure.soundcloud.com/authorize');
-      authorizeUrl.searchParams.set('response_type', 'code');
-      authorizeUrl.searchParams.set('client_id', status.clientId);
-      authorizeUrl.searchParams.set('redirect_uri', redirectUri);
-      authorizeUrl.searchParams.set('code_challenge', codeChallenge);
-      authorizeUrl.searchParams.set('code_challenge_method', 'S256');
-      authorizeUrl.searchParams.set('state', state);
-
-      window.location.assign(authorizeUrl.toString());
+      const { authorizeUrl } = await createAuthSession({ redirectUri });
+      window.location.assign(authorizeUrl);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to start the SoundCloud authorization flow.';
       setNotice({ severity: 'error', text: message });
