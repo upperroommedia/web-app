@@ -379,7 +379,7 @@ const updateRootProjectionAfterRemoval = async ({
   await batch.commit();
 };
 
-const rebalanceOverflowChainAfterRemoval = async ({
+export const rebalanceOverflowChainAfterRemoval = async ({
   rootSubsplashListId,
   removedMediaItemId,
   removedSermonId,

@@ -1,5 +1,5 @@
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
+import { authenticateSubsplash } from './subsplashUtils';
 import { SubsplashListRow, SubsplashMediaItem } from './types/Subsplash';
 import {
   createListRow,
@@ -8,13 +8,13 @@ import {
   patchListRows,
   createNewList,
   getListDetails,
+  deleteListRow,
 } from './helpers/addToListHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { Timestamp, type DocumentReference, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import handleError from './handleError';
-import axios from 'axios';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
@@ -30,6 +30,7 @@ import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedList
 import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
 import { getConfiguredMaxListSize } from './helpers/listCapacity';
 import { canReconstructRemoteRow, getRemoteRowResourceId, getRemoteRowTitle } from './helpers/remoteChainItems';
+import { rebalanceOverflowChainAfterRemoval } from './removeFromList';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -207,6 +208,27 @@ const findAdoptableOverflowListCandidate = async ({
   throw new Error('NO_MATCHING_OVERFLOW_CANDIDATE');
 };
 
+const canReuseExistingOverflowDoc = ({
+  existingData,
+  rootListId,
+}: {
+  existingData: Record<string, unknown>;
+  rootListId: string;
+}): boolean => {
+  const existingRootListId = normalizeString(existingData.rootListId);
+  const isOverflowList = existingData.isMoreSermonsList === true;
+
+  if (!isOverflowList) {
+    return false;
+  }
+
+  if (!existingRootListId) {
+    return true;
+  }
+
+  return existingRootListId === rootListId;
+};
+
 const resolveListItemIdWithRetry = async (
   listId: string,
   itemToAdd: SubsplashMediaItem,
@@ -269,6 +291,39 @@ const findItemInOverflowChain = async (
   return null;
 };
 
+const findAllItemPlacementsInOverflowChain = async (
+  rootListId: string,
+  itemToAdd: SubsplashMediaItem,
+  token: string
+): Promise<Array<{ listId: string; listItemId: string }>> => {
+  const visitedListIds = new Set<string>();
+  const placements: Array<{ listId: string; listItemId: string }> = [];
+  let currentListId: string | undefined = rootListId;
+
+  while (currentListId && !visitedListIds.has(currentListId)) {
+    visitedListIds.add(currentListId);
+
+    const rows = await getFullListRows(currentListId, token);
+    rows
+      .filter((row) => row.type === itemToAdd.type && getRemoteRowResourceId(row) === itemToAdd.id && row.id)
+      .forEach((row) => {
+        placements.push({
+          listId: currentListId!,
+          listItemId: row.id!,
+        });
+      });
+
+    const listQuery = await firestoreDB.collection('lists').where('subsplashId', '==', currentListId).limit(1).get();
+    if (listQuery.empty) {
+      break;
+    }
+
+    currentListId = normalizeString(listQuery.docs[0].data().moreSermonsRef);
+  }
+
+  return placements;
+};
+
 const deleteExistingRowsMissingFromTarget = async (
   listId: string,
   existingRows: SubsplashListRow[],
@@ -283,12 +338,7 @@ const deleteExistingRowsMissingFromTarget = async (
 
   const rowsToDelete = existingRows.filter((row) => row.id && !targetIds.has(row.id));
   for (const rowToDelete of rowsToDelete) {
-    const deleteConfig = createAxiosConfig(
-      `https://core.subsplash.com/builder/v1/list-rows/${rowToDelete.id}`,
-      token,
-      'DELETE'
-    );
-    await axios(deleteConfig);
+    await deleteListRow(rowToDelete.id!, listId, token);
   }
 };
 
@@ -302,6 +352,25 @@ const ensureListIsPatchableBeforeDestructiveMutation = async (
   }
 
   await patchListRows(listId, currentRows, token);
+};
+
+const ensureExistingRowCountDoesNotExceedConfiguredMax = ({
+  listId,
+  totalRowCount,
+  maxListSize,
+}: {
+  listId: string;
+  totalRowCount: number;
+  maxListSize: number;
+}): void => {
+  if (totalRowCount <= maxListSize) {
+    return;
+  }
+
+  throw new HttpsError(
+    'failed-precondition',
+    `List ${listId} currently has ${totalRowCount} rows in Subsplash, which exceeds the configured maxListSize of ${maxListSize}. No changes were made.`
+  );
 };
 
 const applyRemoveOldestMutation = async ({
@@ -534,8 +603,10 @@ async function processListStep(
   const isOverflowList = listData.isMoreSermonsList === true;
 
   let existingPlacementInChain: { listId: string; listItemId: string } | null = null;
+  let existingPlacementsInChain: Array<{ listId: string; listItemId: string }> = [];
   if (shouldSearchLogicalChain) {
     existingPlacementInChain = await findItemInOverflowChain(listId, itemToAdd, token);
+    existingPlacementsInChain = await findAllItemPlacementsInOverflowChain(listId, itemToAdd, token);
   }
 
   listDebugLog('addToList.processListStep.loadedList', {
@@ -548,10 +619,8 @@ async function processListStep(
     existingPlacementInChain,
   });
 
-  await listDoc.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
-
-  const { rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token);
-  const exists = currentRows.some((row) => getRemoteRowResourceId(row) === itemToAdd.id);
+  let { rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token);
+  let exists = currentRows.some((row) => getRemoteRowResourceId(row) === itemToAdd.id);
   listDebugLog('addToList.processListStep.remoteState', {
     listId,
     totalRowCount,
@@ -559,23 +628,54 @@ async function processListStep(
     currentRows: summarizeSubsplashRows(currentRows),
   });
 
-  if (existingPlacementInChain && !exists) {
-    await ensureImmediateOverflowListLinkInFirestore({
-      listDoc,
-      listData,
-      currentRows,
-      token,
-      totalRowCount,
-      maxListSize,
-    });
-    listDebugLog('addToList.processListStep.alreadyInLogicalChain', {
-      listId,
-      itemId: itemToAdd.id,
-      existingPlacementInChain,
-    });
-    return {
-      listItemId: existingPlacementInChain.listItemId,
-    };
+  ensureExistingRowCountDoesNotExceedConfiguredMax({
+    listId,
+    totalRowCount,
+    maxListSize,
+  });
+
+  await listDoc.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
+
+  if (existingPlacementsInChain.length > 0) {
+    const currentPlacements = currentRows
+      .filter((row) => row.type === itemToAdd.type && getRemoteRowResourceId(row) === itemToAdd.id && row.id)
+      .map((row) => ({ listId, listItemId: row.id! }));
+    const currentPlacementToKeep = currentPlacements[0]?.listItemId;
+    const placementsToDelete = existingPlacementsInChain.filter(
+      (placement) =>
+        placement.listId !== listId ||
+        (currentPlacementToKeep ? placement.listItemId !== currentPlacementToKeep : true)
+    );
+
+    if (placementsToDelete.length > 0) {
+      listDebugLog('addToList.processListStep.removeExistingPlacements.start', {
+        listId,
+        itemId: itemToAdd.id,
+        placementsToDelete,
+      });
+      for (const placement of placementsToDelete) {
+        await deleteListRow(placement.listItemId, placement.listId, token);
+      }
+      await rebalanceOverflowChainAfterRemoval({
+        rootSubsplashListId: listId,
+        removedMediaItemId: itemToAdd.id,
+        token,
+        maxListSize,
+      });
+      ({ rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token));
+      exists = currentRows.some((row) => getRemoteRowResourceId(row) === itemToAdd.id);
+      existingPlacementInChain = exists
+        ? {
+            listId,
+            listItemId: currentRows.find((row) => getRemoteRowResourceId(row) === itemToAdd.id)?.id ?? '',
+          }
+        : null;
+      listDebugLog('addToList.processListStep.removeExistingPlacements.complete', {
+        listId,
+        itemId: itemToAdd.id,
+        currentRows: summarizeSubsplashRows(currentRows),
+      });
+    }
   }
 
   if (exists) {
@@ -586,6 +686,20 @@ async function processListStep(
     itemExisted = true;
     const existingRow = currentRows.find((row) => getRemoteRowResourceId(row) === itemToAdd.id);
     existingListItemId = existingRow?.id;
+    if (existingRow && existingRow.position !== 1) {
+      const reorderedRows = [
+        existingRow,
+        ...currentRows.filter((row) => row.id !== existingRow.id),
+      ];
+      finalRowsSnapshot = await patchListRows(listId, reorderedRows, token);
+      currentRows = finalRowsSnapshot;
+      listDebugLog('addToList.processListStep.promoteExistingRow.complete', {
+        listId,
+        itemId: itemToAdd.id,
+        listItemId: existingListItemId,
+        finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
+      });
+    }
 
     const repairedOverflowMetadata = await ensureImmediateOverflowListLinkInFirestore({
       listDoc,
@@ -596,7 +710,11 @@ async function processListStep(
       maxListSize,
     });
 
-    if (repairedOverflowMetadata && existingListItemId) {
+    if (!finalRowsSnapshot) {
+      finalRowsSnapshot = currentRows;
+    }
+
+    if (repairedOverflowMetadata && existingListItemId && existingRow?.position === 1) {
       return {
         listItemId: existingListItemId,
       };
@@ -687,7 +805,7 @@ async function processListStep(
           }
 
           const newOverflowDepth = currentDepth + 1;
-          const adoptedOverflowCandidate = await findAdoptableOverflowListCandidate({
+          let adoptedOverflowCandidate = await findAdoptableOverflowListCandidate({
             rows: currentRows,
             rootListName,
             token,
@@ -700,6 +818,40 @@ async function processListStep(
           const newTitle = buildOverflowListTitle(rootListName);
           const subtitle = buildOverflowListSubtitle(newOverflowDepth);
           const now = Date.now();
+
+          let existingOverflowSnapshot = await firestoreDB
+            .collection('lists')
+            .where('subsplashId', '==', adoptedOverflowCandidate?.listId ?? '__missing__')
+            .limit(2)
+            .get();
+
+          if (existingOverflowSnapshot.docs.length > 1 && adoptedOverflowCandidate) {
+            throw new HttpsError(
+              'failed-precondition',
+              `Multiple Firestore lists already exist for Subsplash list ${adoptedOverflowCandidate.listId}.`
+            );
+          }
+
+          if (adoptedOverflowCandidate && existingOverflowSnapshot.docs[0]) {
+            const existingOverflowData = existingOverflowSnapshot.docs[0].data() as Record<string, unknown>;
+            if (!canReuseExistingOverflowDoc({ existingData: existingOverflowData, rootListId })) {
+              listDebugWarn('addToList.processListStep.adoptOverflowList.skipExistingStandaloneFirestoreDoc', {
+                listId,
+                candidateListId: adoptedOverflowCandidate.listId,
+                rootListId,
+                existingFirestoreListId: existingOverflowSnapshot.docs[0].id,
+                existingRootListId: normalizeString(existingOverflowData.rootListId),
+                isMoreSermonsList: existingOverflowData.isMoreSermonsList === true,
+                type: normalizeString(existingOverflowData.type),
+              });
+              adoptedOverflowCandidate = null;
+              existingOverflowSnapshot = await firestoreDB
+                .collection('lists')
+                .where('subsplashId', '==', '__missing__')
+                .limit(1)
+                .get();
+            }
+          }
 
           if (adoptedOverflowCandidate) {
             nextListId = adoptedOverflowCandidate.listId;
@@ -729,13 +881,19 @@ async function processListStep(
               rootListId,
               newOverflowDepth,
             });
-          }
 
-          const existingOverflowSnapshot = await firestoreDB
-            .collection('lists')
-            .where('subsplashId', '==', nextListId)
-            .limit(1)
-            .get();
+            existingOverflowSnapshot = await firestoreDB
+              .collection('lists')
+              .where('subsplashId', '==', nextListId)
+              .limit(2)
+              .get();
+            if (existingOverflowSnapshot.docs.length > 1) {
+              throw new HttpsError(
+                'failed-precondition',
+                `Multiple Firestore lists already exist for Subsplash list ${nextListId}.`
+              );
+            }
+          }
           const existingOverflowDoc = existingOverflowSnapshot.docs[0];
           const overflowListName = adoptedOverflowCandidate?.title ?? newTitle;
 
@@ -827,12 +985,7 @@ async function processListStep(
 
           const rowsToDelete = itemsToPropagate.filter((r) => r.id);
           for (const rowToDelete of rowsToDelete) {
-            const deleteConfig = createAxiosConfig(
-              `https://core.subsplash.com/builder/v1/list-rows/${rowToDelete.id}`,
-              token,
-              'DELETE'
-            );
-            await axios(deleteConfig);
+            await deleteListRow(rowToDelete.id!, listId, token);
           }
 
           const reversedPropagate = [...itemsToPropagate].reverse();
@@ -996,6 +1149,79 @@ async function processListStep(
   return { listItemId, actualPlacement };
 }
 
+const recoverPlacementAfterFailedMutation = async ({
+  rootListId,
+  mediaItem,
+  token,
+}: {
+  rootListId: string;
+  mediaItem: SubsplashMediaItem;
+  token: string;
+}): Promise<
+  | {
+      listItemId?: string;
+      actualPlacement?: {
+        firestoreListId: string;
+        subsplashListId: string;
+        overflowDepth: number;
+        position: number;
+        listItemId?: string;
+      };
+    }
+  | null
+> => {
+  const resolvedPlacement = await findItemInOverflowChain(rootListId, mediaItem, token);
+  if (!resolvedPlacement) {
+    return null;
+  }
+
+  const physicalListQuery = await firestoreDB
+    .collection('lists')
+    .where('subsplashId', '==', resolvedPlacement.listId)
+    .limit(1)
+    .get();
+  const physicalListDoc = physicalListQuery.docs[0];
+  const physicalRows = await getFullListRows(resolvedPlacement.listId, token);
+  const position = physicalRows.findIndex((row) => row.id === resolvedPlacement.listItemId) + 1;
+
+  let actualPlacement:
+    | {
+        firestoreListId: string;
+        subsplashListId: string;
+        overflowDepth: number;
+        position: number;
+        listItemId?: string;
+      }
+    | undefined;
+
+  if (physicalListDoc && position > 0) {
+    const physicalListData = physicalListDoc.data() as Record<string, unknown>;
+    actualPlacement = {
+      firestoreListId: physicalListDoc.id,
+      subsplashListId: resolvedPlacement.listId,
+      overflowDepth: typeof physicalListData.overflowDepth === 'number' ? physicalListData.overflowDepth : 0,
+      position,
+      listItemId: resolvedPlacement.listItemId,
+    };
+  }
+
+  try {
+    await syncOverflowChainMetadata(rootListId, token);
+    await syncRootMembershipPlacements(rootListId, token);
+  } catch (syncError) {
+    listDebugWarn('addToList.callable.runMutation.recoveredPlacement.syncFailed', {
+      rootListId,
+      mediaItemId: mediaItem.id,
+      syncError: getErrorPayload(syncError),
+    });
+  }
+
+  return {
+    listItemId: resolvedPlacement.listItemId,
+    actualPlacement,
+  };
+};
+
 const addToList = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
@@ -1042,7 +1268,7 @@ const addToList = onCall(
           })
         );
 
-        return results.map((result, index): OutputTypes => {
+        const outputs = await Promise.all(results.map(async (result, index): Promise<OutputTypes> => {
           if (result.status === 'fulfilled') {
             return {
               listId: destinationListIds[index],
@@ -1053,6 +1279,35 @@ const addToList = onCall(
           }
 
           const errorPayload = getErrorPayload(result.reason);
+          try {
+            const recoveredPlacement = await recoverPlacementAfterFailedMutation({
+              rootListId: destinationListIds[index],
+              mediaItem,
+              token,
+            });
+            if (recoveredPlacement) {
+              listDebugWarn('addToList.callable.runMutation.itemRecoveredAfterError', {
+                listId: destinationListIds[index],
+                mediaItemId: mediaItem.id,
+                errorPayload,
+                recoveredPlacement,
+              });
+              return {
+                listId: destinationListIds[index],
+                status: 'success',
+                ...(recoveredPlacement.listItemId ? { listItemId: recoveredPlacement.listItemId } : {}),
+                ...(recoveredPlacement.actualPlacement ? { actualPlacement: recoveredPlacement.actualPlacement } : {}),
+              };
+            }
+          } catch (recoveryError) {
+            listDebugWarn('addToList.callable.runMutation.itemRecoveryFailed', {
+              listId: destinationListIds[index],
+              mediaItemId: mediaItem.id,
+              errorPayload,
+              recoveryError: getErrorPayload(recoveryError),
+            });
+          }
+
           listDebugError('addToList.callable.runMutation.itemFailed', {
             listId: destinationListIds[index],
             mediaItemId: mediaItem.id,
@@ -1063,7 +1318,9 @@ const addToList = onCall(
             status: 'error',
             ...errorPayload,
           };
-        });
+        }));
+
+        return outputs;
       };
 
       const executeLockedMutation = async (): Promise<AddToListOutputType> => {

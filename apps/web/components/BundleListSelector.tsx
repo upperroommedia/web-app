@@ -16,6 +16,9 @@ import { Topic } from '../types/Topic';
 import { TOPIC_BUNDLE_CONFIG } from '../shared/bundleConfigs';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
+import firestore, { collection, getDocs, query, where } from '../firebase/firestore';
+import { isDiscoverableRootList } from '../utils/algolia/searchRecords';
+import { listConverter } from '../types/List';
 
 interface BundleListSelectorProps {
   sermonList: List[];
@@ -32,7 +35,6 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
   const [localTopicSearch, setLocalTopicSearch] = useState<LocalSearch<Topic> | null>(null);
   const [isLoadingBundles, setIsLoadingBundles] = useState<boolean>(false);
   const [isSearching, setIsSearching] = useState<boolean>(false);
-  const [cachedTopics, setCachedTopics] = useState<Topic[]>([]); // Store loaded topics data
 
   // Configuration constants for better scrolling
   const MAX_DROPDOWN_HEIGHT = 300;  // Max height for scrollable dropdown
@@ -65,15 +67,24 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
   };
 
   // Convert Topic to ListWithHighlight for compatibility
-  const topicToListWithHighlight = (topic: Topic): ListWithHighlight => ({
-    id: topic.id,
-    name: topic.title,
+  const topicToListWithHighlight = (topic: Topic, resolvedList: List): ListWithHighlight => ({
+    id: resolvedList.id,
+    name: resolvedList.name,
     type: ListType.TOPIC_LIST,
-    images: topic.images,
-    count: topic.itemsCount,
-    createdAtMillis: topic.createdAtMillis,
-    updatedAtMillis: topic.updatedAtMillis,
-    overflowBehavior: OverflowBehavior.CREATENEWLIST
+    images: resolvedList.images,
+    count: resolvedList.count ?? topic.itemsCount,
+    logicalCount: resolvedList.logicalCount,
+    hasOverflowPages: resolvedList.hasOverflowPages,
+    createdAtMillis: resolvedList.createdAtMillis ?? topic.createdAtMillis,
+    updatedAtMillis: resolvedList.updatedAtMillis ?? topic.updatedAtMillis,
+    overflowBehavior: resolvedList.overflowBehavior ?? OverflowBehavior.CREATENEWLIST,
+    subsplashId: resolvedList.subsplashId,
+    moreSermonsRef: resolvedList.moreSermonsRef,
+    isMoreSermonsList: resolvedList.isMoreSermonsList,
+    isRootList: resolvedList.isRootList,
+    rootListId: resolvedList.rootListId,
+    overflowDepth: resolvedList.overflowDepth,
+    listTagAndPosition: resolvedList.listTagAndPosition,
   });
 
   useEffect(() => {
@@ -84,20 +95,43 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
         try {
           const bundleManager = BundleManager.getInstance<Topic>(TOPIC_BUNDLE_CONFIG);
           let topics = await bundleManager.getData();
-          // update listId to id so that the list selector can use the listId
           topics = topics.filter((topic) => topic.listId !== undefined);
-          topics = topics.map((topic) => ({ ...topic, id: topic.listId } as Topic));
+
+          const topicListsSnapshot = await getDocs(
+            query(collection(firestore, 'lists'), where('type', '==', ListType.TOPIC_LIST)).withConverter(listConverter)
+          );
+          const topicLists = topicListsSnapshot.docs
+            .map((docSnapshot) => docSnapshot.data())
+            .filter(isDiscoverableRootList);
+          const listsByFirestoreId = new Map(topicLists.map((list) => [list.id, list]));
+          const listsBySubsplashId = new Map(
+            topicLists
+              .filter((list): list is List & { subsplashId: string } => typeof list.subsplashId === 'string' && list.subsplashId.length > 0)
+              .map((list) => [list.subsplashId, list])
+          );
+          const listsByName = new Map(topicLists.map((list) => [list.name.trim().toLowerCase(), list]));
          
           // Convert topics to the format expected by ListSelector
-          const topicLists = topics.map(topicToListWithHighlight);
-          setAllListArray(topicLists);
-          
+          const resolvedTopicLists = topics.flatMap((topic) => {
+            const resolvedList =
+              listsByFirestoreId.get(topic.listId!) ??
+              listsBySubsplashId.get(topic.listId!) ??
+              listsByName.get(topic.title.trim().toLowerCase()) ??
+              null;
+            if (!resolvedList) {
+              console.warn('Skipping topic with unresolved Firestore list', {
+                topicId: topic.id,
+                topicTitle: topic.title,
+                topicListId: topic.listId,
+              });
+              return [];
+            }
+            return [topicToListWithHighlight(topic, resolvedList)];
+          });
+          setAllListArray(resolvedTopicLists);
           // Initialize local search
           const searchInstance = new LocalSearch(topics, 'title', 'topics');
           setLocalTopicSearch(searchInstance);
-          
-          // Cache the topics data to avoid re-fetching when search is cleared
-          setCachedTopics(topics);
         } catch (error) {
           console.error('Error loading topics from bundle:', error);
         } finally {
@@ -116,10 +150,14 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
     try {
       if (!localTopicSearch || !query.trim()) {
         // Return more initial topics if no query
-        return cachedTopics.map(topicToListWithHighlight);
+        return allListArray;
       }
       const searchResults = localTopicSearch.search(query);
-      return searchResults.map((result) => topicToListWithHighlight(result.item));
+      const resolvedByLegacyId = new Map(allListArray.map((list) => [list.subsplashId ?? list.id, list]));
+      return searchResults.map((result) => {
+        const topic = result.item;
+        return resolvedByLegacyId.get(topic.listId ?? topic.id);
+      }).filter((list): list is ListWithHighlight => Boolean(list));
     } catch (error) {
       console.error('Error searching topics locally:', error);
       return [];

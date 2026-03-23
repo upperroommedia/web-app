@@ -28,7 +28,9 @@ export const createEmptySermonList = (type: ListType): SermonList => {
 
 export const sermonListConverter: FirestoreDataConverter<SermonList> = {
   toFirestore: (list: SermonList): SermonList => {
-    return list;
+    return Object.fromEntries(
+      Object.entries(list).filter(([, value]) => value !== undefined)
+    ) as SermonList;
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<SermonList>): SermonList => {
     return { ...emptyList, ...snapshot.data(), id: snapshot.id };

@@ -16,6 +16,82 @@ export const mediaTypes: SubsplashMediaType[] = [
   'event',
 ];
 
+type SubsplashRequestContext = {
+  operation: string;
+  url: string;
+  method: string;
+  listId?: string;
+  rowId?: string;
+};
+
+const getAxiosStatus = (error: unknown): number | undefined =>
+  error && typeof error === 'object' && 'response' in error
+    ? (error as { response?: { status?: number } }).response?.status
+    : undefined;
+
+const getAxiosData = (error: unknown): unknown =>
+  error && typeof error === 'object' && 'response' in error
+    ? (error as { response?: { data?: unknown } }).response?.data
+    : undefined;
+
+const isTransientSubsplashError = (status?: number): boolean =>
+  status === 429 || status === 502 || status === 503 || status === 504;
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const getConfigUrl = (config: ReturnType<typeof createAxiosConfig>): string => config.url ?? 'unknown-url';
+
+async function runSubsplashRequest<T>(
+  config: ReturnType<typeof createAxiosConfig>,
+  context: SubsplashRequestContext
+): Promise<T> {
+  const maxAttempts = 3;
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+    try {
+      const response = await axios(config);
+      return response.data as T;
+    } catch (error) {
+      lastError = error;
+      const upstreamStatus = getAxiosStatus(error);
+      const upstream = getAxiosData(error);
+      const isRetryable = isTransientSubsplashError(upstreamStatus);
+
+      logger.warn('Subsplash request failed', {
+        ...context,
+        attempt,
+        maxAttempts,
+        upstreamStatus,
+        upstream,
+        isRetryable,
+      });
+
+      if (!isRetryable || attempt >= maxAttempts) {
+        throw new HttpsError('internal', `Subsplash ${context.operation} failed for list ${context.listId ?? 'unknown'}`, {
+          code: 'SUBSPLASH_REQUEST_FAILED',
+          operation: context.operation,
+          method: context.method,
+          url: context.url,
+          ...(context.listId ? { listId: context.listId } : {}),
+          ...(context.rowId ? { rowId: context.rowId } : {}),
+          ...(typeof upstreamStatus === 'number' ? { upstream_status: upstreamStatus } : {}),
+          ...(upstream !== undefined ? { upstream } : {}),
+        });
+      }
+
+      await sleep(250 * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
 export async function getFullListRows(listId: string, token: string): Promise<SubsplashListRow[]> {
   // Max page size is 200, which is also the list limit, so one call is enough usually.
   // Include unlisted items to get the true total count (unlisted items count toward the 200 limit)
@@ -24,7 +100,12 @@ export async function getFullListRows(listId: string, token: string): Promise<Su
     token,
     'GET'
   );
-  const response = (await axios(listConfig)).data;
+  const response = await runSubsplashRequest<{ _embedded: { 'list-rows': SubsplashListRow[] } }>(listConfig, {
+    operation: 'getListRows',
+    method: 'GET',
+    url: getConfigUrl(listConfig),
+    listId,
+  });
   return response['_embedded']['list-rows'];
 }
 
@@ -36,8 +117,13 @@ export async function getFullListRowsWithTotal(listId: string, token: string): P
     token,
     'GET'
   );
-  const response = (await axios(listConfig)).data;
-  const rows = response['_embedded']['list-rows'] || [];
+  const response = await runSubsplashRequest<{ _embedded?: { 'list-rows'?: SubsplashListRow[] }; total?: number }>(listConfig, {
+    operation: 'getListRowsWithTotal',
+    method: 'GET',
+    url: getConfigUrl(listConfig),
+    listId,
+  });
+  const rows = response._embedded?.['list-rows'] || [];
   const total = response.total ?? rows.length;
   return {
     rows,
@@ -51,7 +137,12 @@ export async function getListDetails(listId: string, token: string): Promise<Sub
     token,
     'GET'
   );
-  return (await axios(config)).data;
+  return await runSubsplashRequest<SubsplashList>(config, {
+    operation: 'getListDetails',
+    method: 'GET',
+    url: getConfigUrl(config),
+    listId,
+  });
 }
 
 export async function createNewList(title: string, token: string, subtitle?: string): Promise<SubsplashList> {
@@ -72,9 +163,12 @@ export async function createNewList(title: string, token: string, subtitle?: str
     'POST',
     JSON.stringify(payload)
   );
-  
-  const response = await axios(config);
-  return response.data;
+
+  return await runSubsplashRequest<SubsplashList>(config, {
+    operation: 'createList',
+    method: 'POST',
+    url: getConfigUrl(config),
+  });
 }
 
 export function createListRow(
@@ -164,8 +258,13 @@ export async function patchListRows(
   );
 
   try {
-    const response = await axios(config);
-    const patchedRows = response?.data?._embedded?.['list-rows'];
+    const response = await runSubsplashRequest<{ _embedded?: { 'list-rows'?: SubsplashListRow[] } }>(config, {
+      operation: options?.forceFullRows ? 'patchListRowsRestore' : 'patchListRows',
+      method: 'PATCH',
+      url: getConfigUrl(config),
+      listId,
+    });
+    const patchedRows = response?._embedded?.['list-rows'];
     if (Array.isArray(patchedRows)) {
       return patchedRows as SubsplashListRow[];
     }
@@ -175,10 +274,23 @@ export async function patchListRows(
       position: index + 1,
     }));
   } catch (error: unknown) {
-    const errorMessage = error && typeof error === 'object' && 'response' in error 
-      ? (error as { response?: { data?: unknown } }).response?.data 
-      : error;
-    logger.error(`Failed to patch list ${listId}`, errorMessage);
-    throw new HttpsError('internal', `Failed to patch list ${listId}`);
+    logger.error(`Failed to patch list ${listId}`, getAxiosData(error) ?? error);
+    throw error;
   }
+}
+
+export async function deleteListRow(rowId: string, listId: string, token: string): Promise<void> {
+  const config = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/list-rows/${rowId}`,
+    token,
+    'DELETE'
+  );
+
+  await runSubsplashRequest<unknown>(config, {
+    operation: 'deleteListRow',
+    method: 'DELETE',
+    url: getConfigUrl(config),
+    listId,
+    rowId,
+  });
 }

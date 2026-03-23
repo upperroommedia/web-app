@@ -104,6 +104,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
 import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../../../utils/soundcloudAuthRecovery';
+import { resolveCanonicalFirestoreList } from '../../../utils/resolveCanonicalFirestoreList';
 
 const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
   const busyDetails = parseLockBusyDetails(error);
@@ -417,20 +418,31 @@ const SermonDetailsPage = () => {
 
       const listsMetadata = await Promise.all(
         listsToUploadTo.map(async (list) => {
-          if (list.subsplashId) {
-            subsplashIdToListIdMap.set(list.subsplashId, list.id);
-            return { listId: list.subsplashId, overflowBehavior: list.overflowBehavior, type: list.type };
+          const canonicalList = await resolveCanonicalFirestoreList(list);
+          if (!canonicalList) {
+            throw new Error(
+              `List "${list.name}" could not be resolved to a Firestore list document. Refusing to create or update a Subsplash list from a non-canonical list id.`
+            );
+          }
+
+          if (canonicalList.subsplashId) {
+            subsplashIdToListIdMap.set(canonicalList.subsplashId, canonicalList.id);
+            return {
+              listId: canonicalList.subsplashId,
+              overflowBehavior: canonicalList.overflowBehavior,
+              type: canonicalList.type,
+            };
           }
           const createNewSubsplashList = createFunctionV2<CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType>('createnewsubsplashlist');
           const { listId } = await createNewSubsplashList({
-            title: list.name,
+            title: canonicalList.name,
             subtitle: '',
-            images: list.images,
-            operationKey: createSubsplashListCreateIntentKey('sermon-admin-list-create', sermon.id, list.id),
+            images: canonicalList.images,
+            operationKey: createSubsplashListCreateIntentKey('sermon-admin-list-create', sermon.id, canonicalList.id),
           });
-          await updateDoc(doc(firestore, `lists/${list.id}`), { subsplashId: listId });
-          subsplashIdToListIdMap.set(listId, list.id);
-          return { listId, overflowBehavior: list.overflowBehavior, type: list.type };
+          await updateDoc(doc(firestore, `lists/${canonicalList.id}`), { subsplashId: listId });
+          subsplashIdToListIdMap.set(listId, canonicalList.id);
+          return { listId, overflowBehavior: canonicalList.overflowBehavior, type: canonicalList.type };
         })
       );
 
@@ -470,12 +482,16 @@ const SermonDetailsPage = () => {
               position: 1,
               listItemId: r.listItemId,
             };
+          const resolvedListItemId = actualPlacement.listItemId ?? r.listItemId;
+          if (!resolvedListItemId) {
+            throw new Error(`Successful list publish for ${listId} did not return a resolved listItemId.`);
+          }
           batch.set(
             docRef,
             {
               ...list,
               publishGeneration: list.publishGeneration ?? 0,
-              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId },
+              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: resolvedListItemId },
             },
             { merge: true }
           );
@@ -483,7 +499,7 @@ const SermonDetailsPage = () => {
             doc(firestore, 'lists', listId, 'listItems', sermon.id),
             {
               subsplashId: id,
-              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: r.listItemId },
+              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: resolvedListItemId },
               physicalPlacement: actualPlacement,
             },
             { merge: true }

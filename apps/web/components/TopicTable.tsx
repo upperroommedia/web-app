@@ -1,9 +1,11 @@
 import { ChangeEvent, MouseEvent } from 'react';
+import Link from 'next/link';
 import Image from 'next/image';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import InputAdornment from '@mui/material/InputAdornment';
 import LinearProgress from '@mui/material/LinearProgress';
+import MuiLink from '@mui/material/Link';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -209,7 +211,18 @@ const TopicTable = ({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {topic.listId || 'No list'}
+                        {topic.listId ? (
+                          <MuiLink
+                            component={Link}
+                            href={`/admin/lists/${topic.listId}`}
+                            underline="hover"
+                            sx={{ fontWeight: 500 }}
+                          >
+                            {topic.listId}
+                          </MuiLink>
+                        ) : (
+                          'No list'
+                        )}
                       </TableCell>
                       <TableCell sx={{ width: headCells[3].width }}>
                         <Box display="flex" justifyContent="center" gap={1}>

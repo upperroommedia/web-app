@@ -445,6 +445,102 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(rowsA_after[199].type).toBe('list');
   });
 
+  it('recovers success when an overflow patch applies in Subsplash but returns a transient 502 afterward', async () => {
+    const rootListId = 'networkFailures-recover-root';
+    const overflowListId = 'networkFailures-recover-overflow';
+
+    subsplashMock.createList(rootListId, 'Recover Root', 10);
+    subsplashMock.createList(overflowListId, 'More Recover Root', 1);
+
+    const rootRows: SubsplashListRow[] = Array.from({ length: 9 }, (_, i) => ({
+      id: `root-row-${i}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: i + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: rootListId },
+        'media-item': { id: `root-item-${i}` },
+      },
+    }));
+    rootRows.push({
+      id: 'root-link-row',
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: 10,
+      type: 'list' as const,
+      _embedded: {
+        'source-list': { id: rootListId },
+        list: { id: overflowListId, title: 'More Recover Root' },
+      },
+    });
+    subsplashMock.listRows.set(rootListId, rootRows);
+
+    subsplashMock.listRows.set(overflowListId, [
+      {
+        id: 'overflow-row-1',
+        app_key: '9XTSHD',
+        method: 'static' as const,
+        position: 1,
+        type: 'media-item' as const,
+        _embedded: {
+          'source-list': { id: overflowListId },
+          'media-item': { id: 'overflow-item-1' },
+        },
+      },
+    ]);
+
+    const rootFirestoreId = await createListDocument({
+      subsplashId: rootListId,
+      title: 'Recover Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      moreSermonsRef: overflowListId,
+      count: 10,
+      isRootList: true,
+      rootListId: rootListId,
+      overflowDepth: 0,
+      hasOverflowPages: true,
+      logicalCount: 10,
+    });
+
+    await createListDocument({
+      subsplashId: overflowListId,
+      title: 'More Recover Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      isMoreSermonsList: true,
+      isRootList: false,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+      count: 1,
+      logicalCount: 10,
+    });
+
+    networkFailureInjector.registerFailure(`patchListAfterMutation:${overflowListId}`, () => true);
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'brand-new-overflow-item', type: 'media-item' },
+        maxListSize: 10,
+      },
+    };
+
+    const result = await addToListHandler(request);
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+    if (result[0].status === 'success') {
+      expect(result[0].actualPlacement?.subsplashListId).toBe(rootListId);
+    }
+
+    const overflowRows = subsplashMock.getListRows(overflowListId);
+    expect(overflowRows.some((row) => row._embedded['media-item']?.id === 'root-item-8')).toBe(true);
+    expect(logger.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('[list-debug] addToList.callable.runMutation.itemFailed'),
+      expect.anything()
+    );
+  });
+
   it('should handle network failure on second call but succeed on retry', async () => {
     const listId = 'networkFailures-test-list-2';
     subsplashMock.createList(listId, 'Test List');
@@ -558,8 +654,8 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(result[1].status).toBe('error');
     if (result[1].status === 'error') {
       expect(result[1].error).toBeDefined();
-      expect(result[1].error).toContain('Network error');
-      expect(result[1].error).toContain('Failed to fetch list rows');
+      expect(result[1].error).toContain('Subsplash getListRows failed');
+      expect(result[1].error).toContain('multi-list-test-2');
       // Error responses should not have listItemId
       expect('listItemId' in result[1]).toBe(false);
     }
@@ -569,7 +665,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(result[2].status).toBe('error');
     if (result[2].status === 'error') {
       expect(result[2].error).toBeDefined();
-      expect(result[2].error).toMatch(/Network error|Failed to patch list/i);
+      expect(result[2].error).toMatch(/Subsplash patchListRows failed|Failed to patch list/i);
       // Error responses should not have listItemId
       expect('listItemId' in result[2]).toBe(false);
     }
@@ -689,7 +785,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
       expect(typeof result[1].error).toBe('string');
       expect(result[1].error.length).toBeGreaterThan(0);
       // Error should contain information about the failure
-      expect(result[1].error).toMatch(/Network error|Failed to fetch list rows/i);
+      expect(result[1].error).toMatch(/Subsplash getListRows failed|Failed to fetch list rows/i);
     }
     
     // Verify patchList failure case
@@ -700,7 +796,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
       expect(typeof result[2].error).toBe('string');
       expect(result[2].error.length).toBeGreaterThan(0);
       // Error should contain information about the failure
-      expect(result[2].error).toMatch(/Network error|Failed to patch list/i);
+      expect(result[2].error).toMatch(/Subsplash patchListRows failed|Failed to patch list/i);
     }
     
     // Verify that error messages are different for different failure types

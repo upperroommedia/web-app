@@ -349,6 +349,23 @@ jest.mock('axios', () => {
         ? JSON.parse(config.data) as SubsplashPatchPayload
         : config.data as SubsplashPatchPayload;
       const updatedList = subsplashMock.patchList(listId, payload);
+      const afterMutationFailureKey = `patchListAfterMutation:${listId}`;
+      if (networkFailureInjector.shouldFail(afterMutationFailureKey)) {
+        return Promise.reject({
+          message: 'Request failed with status code 502',
+          name: 'AxiosError',
+          code: 'ERR_BAD_RESPONSE',
+          response: {
+            status: 502,
+            statusText: 'Bad Gateway',
+            data: { errors: [{ code: 'bad_gateway', detail: `Upstream patch applied but connection failed for ${listId}` }] },
+            headers: {},
+            config: {}
+          },
+          isAxiosError: true,
+          toJSON: () => ({ message: 'Request failed with status code 502', name: 'AxiosError' })
+        });
+      }
       return Promise.resolve({ data: updatedList });
     }
     

@@ -318,6 +318,185 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     });
   });
 
+  it('should fail without making changes when the existing Subsplash list already exceeds maxListSize', async () => {
+    const listId = 'basic-too-large-for-configured-max';
+    subsplashMock.createList(listId, 'Too Large List', 10);
+    const initialRows = Array.from({ length: 10 }, (_, i) => ({
+      id: `row-${i}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: i + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: listId },
+        'media-item': { id: `item-${i}` }
+      }
+    }));
+    subsplashMock.listRows.set(listId, initialRows);
+
+    const firestoreListId = await createListDocument({
+      subsplashId: listId,
+      title: 'Too Large List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+    });
+    const beforeUpdatedAt = (await firestoreDB.collection('lists').doc(firestoreListId).get()).get('updatedAtMillis');
+
+    await createSermonDocument(buildSermon('sermon-too-large', 'media-too-large'));
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem: { id: 'media-too-large', type: 'media-item' as const },
+        maxListSize: 3
+      }
+    };
+
+    const result = await addToListHandler(request);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      status: 'error',
+      errorCode: 'failed-precondition',
+      error: expect.stringContaining('exceeds the configured maxListSize of 3'),
+    });
+
+    const afterRows = subsplashMock.getListRows(listId);
+    expect(afterRows).toHaveLength(10);
+    expect(afterRows.map((row) => row._embedded['media-item']?.id)).toEqual(
+      initialRows.map((row) => row._embedded['media-item']?.id)
+    );
+
+    const afterDoc = await firestoreDB.collection('lists').doc(firestoreListId).get();
+    expect(afterDoc.get('updatedAtMillis')).toBe(beforeUpdatedAt);
+
+    const mirroredListItem = await firestoreDB
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-too-large')
+      .get();
+    expect(mirroredListItem.exists).toBe(false);
+  });
+
+  it('does not hijack an existing standalone Firestore list when a matching nested list already exists', async () => {
+    const rootListId = 'root-existing-standalone';
+    const nestedExistingListId = 'nested-existing-standalone';
+
+    subsplashMock.createList(rootListId, 'Repentance', 5);
+    subsplashMock.createList(nestedExistingListId, 'More Repentance sermons archive', 0);
+    subsplashMock.listRows.set(rootListId, [
+      {
+        id: 'row-0',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-0' },
+        },
+      },
+      {
+        id: 'row-1',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-1' },
+        },
+      },
+      {
+        id: 'row-2',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 3,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-2' },
+        },
+      },
+      {
+        id: 'row-3',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 4,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: 'item-3' },
+        },
+      },
+      {
+        id: 'row-list',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 5,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: rootListId },
+          list: { id: nestedExistingListId, title: 'More Repentance sermons archive' },
+        },
+      },
+    ]);
+
+    const rootFirestoreId = await createListDocument({
+      subsplashId: rootListId,
+      title: 'Repentance',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 5,
+    });
+
+    const standaloneExistingFirestoreId = await createListDocument({
+      subsplashId: nestedExistingListId,
+      title: 'Repentance Archive',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 0,
+      isRootList: true,
+      rootListId: 'standalone-root-list',
+      overflowDepth: 0,
+    });
+
+    await createSermonDocument(buildSermon('sermon-new-overflow-standalone', 'new-overflow-item-standalone'));
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'new-overflow-item-standalone', type: 'media-item' },
+        maxListSize: 5,
+      },
+    };
+
+    await addToListHandler(request);
+
+    const rootDoc = await getListBySubsplashId(rootListId);
+    expect(rootDoc).not.toBeNull();
+
+    const linkedOverflowSubsplashId = rootDoc!.data().moreSermonsRef;
+    expect(linkedOverflowSubsplashId).toBeDefined();
+    expect(linkedOverflowSubsplashId).not.toBe(nestedExistingListId);
+
+    const originalStandaloneDoc = await firestoreDB.collection('lists').doc(standaloneExistingFirestoreId).get();
+    expect(originalStandaloneDoc.data()).toMatchObject({
+      subsplashId: nestedExistingListId,
+      isRootList: true,
+      rootListId: 'standalone-root-list',
+      overflowDepth: 0,
+    });
+
+    const newOverflowDoc = await getListBySubsplashId(linkedOverflowSubsplashId!);
+    expect(newOverflowDoc).not.toBeNull();
+    expect(newOverflowDoc!.id).not.toBe(standaloneExistingFirestoreId);
+    expect(newOverflowDoc!.data()).toMatchObject({
+      subsplashId: linkedOverflowSubsplashId,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+    });
+  });
+
   it('should propagate overflow down multiple lists in chain', async () => {
     const listA = 'basic-list-a';
     const listB = 'basic-list-b';
@@ -797,29 +976,39 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       }
     });
 
-    it('should return existing listItemId when item already exists', async () => {
+    it('should move an existing root item to the top without duplicating it', async () => {
       const listId = 'listitemid-test-2';
       subsplashMock.createList(listId, 'Test List');
       
-      // Create a list with an existing item
-      const existingRow: SubsplashListRow = {
-        id: 'existing-row-id-123',
+      const firstRow: SubsplashListRow = {
+        id: 'first-row-id',
         app_key: '9XTSHD',
         method: 'static',
         position: 1,
         type: 'media-item',
         _embedded: {
           'source-list': { id: listId },
+          'media-item': { id: 'first-item' }
+        }
+      };
+      const existingRow: SubsplashListRow = {
+        id: 'existing-row-id-123',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
           'media-item': { id: 'existing-item' }
         }
       };
-      subsplashMock.listRows.set(listId, [existingRow]);
+      subsplashMock.listRows.set(listId, [firstRow, existingRow]);
       
       await createListDocument({
         subsplashId: listId,
         title: 'Test List',
         overflowBehavior: OverflowBehavior.CREATENEWLIST,
-        count: 1,
+        count: 2,
       });
       
       // Try to add the same item again
@@ -838,13 +1027,13 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       expect(result).toHaveLength(1);
       expect(result[0].status).toBe('success');
       if (result[0].status === 'success') {
-        // Should return the existing listItemId
         expect(result[0].listItemId).toBe('existing-row-id-123');
-        
-        // Verify the list still has only one item
         const rows = subsplashMock.getListRows(listId);
-        expect(rows).toHaveLength(1);
+        expect(rows).toHaveLength(2);
         expect(rows[0].id).toBe('existing-row-id-123');
+        expect(rows[0]._embedded['media-item']?.id).toBe('existing-item');
+        expect(rows[1]._embedded['media-item']?.id).toBe('first-item');
+        expect(rows.filter((row) => row._embedded['media-item']?.id === 'existing-item')).toHaveLength(1);
       }
     });
 
@@ -970,7 +1159,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       }
     });
 
-    it('should handle listItemId when item exists in overflow list', async () => {
+    it('should move an item from overflow to the root page without duplicating it', async () => {
       const listId = 'listitemid-test-6';
       const overflowListId = 'listitemid-test-6-overflow';
       
@@ -1047,20 +1236,16 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       expect(result).toHaveLength(1);
       expect(result[0].status).toBe('success');
       if (result[0].status === 'success') {
-        // Should return the listItemId from the main list (where it was added)
-        // The item should be added to the main list first, then overflow logic handles it
         expect(result[0].listItemId).toBeDefined();
-        
-        // The item should be in the main list at position 1
         const mainListRows = subsplashMock.getListRows(listId);
-        const addedRow = mainListRows.find(r => 
-          r._embedded['media-item']?.id === 'existing-in-overflow'
-        );
-        // The item might have been moved to overflow, so we check if it exists
-        // If it's still in main list, verify the ID matches
-        if (addedRow) {
-          expect(addedRow.id).toBe(result[0].listItemId);
-        }
+        expect(mainListRows[0]._embedded['media-item']?.id).toBe('existing-in-overflow');
+        expect(mainListRows[0].id).toBe(result[0].listItemId);
+
+        const overflowListRows = subsplashMock.getListRows(overflowListId);
+        const allIds = [...mainListRows, ...overflowListRows]
+          .map((row) => row._embedded['media-item']?.id)
+          .filter((value): value is string => Boolean(value));
+        expect(allIds.filter((id) => id === 'existing-in-overflow')).toHaveLength(1);
       }
     });
 
