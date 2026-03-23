@@ -10,7 +10,7 @@ import type {
   ReorderListItemsOutputType,
 } from '../../packages/contracts/reorderListItems';
 import { firestoreAdminListConverter } from './firestoreDataConverter';
-import { createListRow, getFullListRows, patchListRows } from './helpers/addToListHelpers';
+import { createListRow, getFullListRows, getListDetails, patchListRows } from './helpers/addToListHelpers';
 import { getOverflowChainState } from './helpers/listOverflowChain';
 import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 import {
@@ -41,6 +41,7 @@ type ChainRemoteNode = {
   subsplashListId: string;
   overflowDepth: number;
   currentItemCount: number;
+  maxRowCount: number;
   remoteRows: SubsplashListRow[];
 };
 
@@ -162,6 +163,47 @@ const partitionLogicalRowsAcrossChain = (
       rows,
     };
   });
+};
+
+const rebalancePartitionsToFitPhysicalCapacities = (
+  partitions: ReturnType<typeof partitionLogicalRowsAcrossChain>
+): ReturnType<typeof partitionLogicalRowsAcrossChain> => {
+  for (let index = 0; index < partitions.length; index += 1) {
+    const partition = partitions[index];
+    const nextPartition = partitions[index + 1];
+    const hasContinuationLink = Boolean(nextPartition);
+    const hasIncomingRecreatedRows = partition.rows.some(
+      (row) => row.row._embedded?.['source-list']?.id !== partition.node.subsplashListId
+    );
+
+    const effectiveMaxTotalRows =
+      hasContinuationLink &&
+      partition.node.maxRowCount >= 200 &&
+      hasIncomingRecreatedRows &&
+      partition.rows.length + 1 >= partition.node.maxRowCount
+        ? partition.node.maxRowCount - 1
+        : partition.node.maxRowCount;
+
+    const maxContentRows = Math.max(0, effectiveMaxTotalRows - (hasContinuationLink ? 1 : 0));
+
+    while (partition.rows.length > maxContentRows) {
+      if (!nextPartition) {
+        throw new HttpsError(
+          'failed-precondition',
+          `List ${partition.node.firestoreListId} cannot fit the requested logical order within its physical Subsplash row limit.`
+        );
+      }
+
+      const rowToShift = partition.rows.pop();
+      if (!rowToShift) {
+        break;
+      }
+
+      nextPartition.rows.unshift(rowToShift);
+    }
+  }
+
+  return partitions;
 };
 
 const createAssignments = (
@@ -378,6 +420,7 @@ const reorderListItems = onCall(
                 }
 
                 const remoteRows = await getFullListRows(subsplashListId, token);
+                const listDetails = await getListDetails(subsplashListId, token);
                 const currentItemCount = countLogicalContentRows({
                   rows: remoteRows,
                   expectedNextSubsplashListId: chainState.nodes[nodeIndex + 1]?.subsplashId?.trim(),
@@ -388,6 +431,7 @@ const reorderListItems = onCall(
                   subsplashListId,
                   overflowDepth: node.depth,
                   currentItemCount,
+                  maxRowCount: listDetails.max_item_count ?? 200,
                   remoteRows,
                 } satisfies ChainRemoteNode;
               })
@@ -422,7 +466,9 @@ const reorderListItems = onCall(
               return { ...remoteRow };
             });
 
-            const partitions = partitionLogicalRowsAcrossChain(sortedRemoteRows, remoteNodes);
+            const partitions = rebalancePartitionsToFitPhysicalCapacities(
+              partitionLogicalRowsAcrossChain(sortedRemoteRows, remoteNodes)
+            );
             ensureMovedRowsAreReconstructible(partitions);
             const assignments = createAssignments(partitions, {
               includeRowId: sortedLogicalItemOrder.some((entry) => !entry.usedLegacyMediaItemId),

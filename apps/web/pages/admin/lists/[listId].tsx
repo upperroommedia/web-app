@@ -1,7 +1,7 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Accordion from '@mui/material/Accordion';
 import AccordionDetails from '@mui/material/AccordionDetails';
 import AccordionSummary from '@mui/material/AccordionSummary';
@@ -15,8 +15,6 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import CollectionsIcon from '@mui/icons-material/Collections';
-import Divider from '@mui/material/Divider';
-import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
@@ -40,10 +38,8 @@ import {
   SortableContext,
   arrayMove,
   sortableKeyboardCoordinates,
-  useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
 import {
   GetListOverflowChainInputType,
@@ -67,6 +63,7 @@ import {
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DetailImageGallery from '../../../components/DetailImageGallery';
 import OverflowChainPanel from '../../../components/admin/lists/OverflowChainPanel';
+import SortableListRow, { type SortableListRowViewModel } from '../../../components/admin/lists/SortableListRow';
 import useAuth from '../../../context/user/UserContext';
 import firestore, {
   collection,
@@ -138,18 +135,6 @@ interface LoadListDetailsPageResult {
 }
 
 const inFlightListDetailsLoads = new Map<string, Promise<LoadListDetailsPageResult>>();
-
-interface SortableItemProps {
-  item: ListPageItem;
-  index: number;
-  onOpenSermon: (id: string) => void;
-  onMarkOverflow?: (item: ListPageItem) => void;
-  dragDisabled?: boolean;
-  overflowMarkDisabled?: boolean;
-  overflowMarkLoading?: boolean;
-  placementDirty?: boolean;
-  showPhysicalPlacement?: boolean;
-}
 
 interface PersistListDetailsPageOrderDependencies {
   rootListId: string;
@@ -290,6 +275,32 @@ const getPreferredListItemImage = (images: ImageType[] | undefined): ImageType |
     images.find((image) => image.type === 'banner') ??
     images[0]
   );
+};
+
+const buildSortableListRowViewModel = (item: ListPageItem): SortableListRowViewModel => {
+  const isSyncedToList = item.uploadStatus?.status === uploadStatus.UPLOADED;
+  const isPlaceholder = item.isTrackedInFirebase === false;
+
+  return {
+    id: item.id,
+    rowId: item.rowId,
+    title: item.title || `Sermon ${item.id}`,
+    dateString: item.dateString,
+    speakerSummary: item.speakers?.map((speaker) => speaker.name).filter(Boolean).join(', ') || undefined,
+    rowTypeLabel: item.rowType && item.rowType !== 'media-item' ? formatListType(item.rowType) : undefined,
+    statusLabel: isPlaceholder ? 'Subsplash only' : isSyncedToList ? 'Synced' : 'Local only',
+    statusColor: isSyncedToList ? 'success' : isPlaceholder ? 'warning' : 'default',
+    statusVariant: isSyncedToList || isPlaceholder ? 'filled' : 'outlined',
+    preferredImage: getPreferredListItemImage(item.images),
+    isTrackedInFirebase: item.isTrackedInFirebase !== false,
+    isPlaceholder,
+    isSyncedToList,
+    isOverflowCandidate: Boolean(item.isOverflowCandidate && item.linkedListId),
+    rowNavigationDisabled: item.isTrackedInFirebase === false,
+    reconstructible: item.reconstructible !== false,
+    physicalListTagLabel: getPhysicalListTagLabel(item),
+    sourceDepth: item.sourceDepth,
+  };
 };
 
 export const canAutoResolvePublishedDrift = (
@@ -669,206 +680,6 @@ const formatListType = (value?: string): string => {
     .join(' ');
 };
 
-const SortableListSermonItem = ({
-  item,
-  index,
-  onOpenSermon,
-  onMarkOverflow,
-  dragDisabled = false,
-  overflowMarkDisabled = false,
-  overflowMarkLoading = false,
-  placementDirty = false,
-  showPhysicalPlacement = false,
-}: SortableItemProps) => {
-  const theme = useTheme();
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: item.id, disabled: dragDisabled });
-  const isSyncedToList = item.uploadStatus?.status === uploadStatus.UPLOADED;
-  const isPlaceholder = item.isTrackedInFirebase === false;
-  const speakerNames = item.speakers?.map((speaker) => speaker.name).filter(Boolean).join(', ');
-  const physicalListTagLabel = getPhysicalListTagLabel(item);
-  const isDarkMode = theme.palette.mode === 'dark';
-  const placeholderBackground = isDarkMode
-    ? alpha(theme.palette.common.black, 0.18)
-    : alpha(theme.palette.common.black, 0.03);
-  const firebaseRowBackground = isDarkMode ? alpha(theme.palette.common.white, 0.03) : 'background.paper';
-  const firebaseRowHoverBackground = isDarkMode ? alpha(theme.palette.common.white, 0.06) : 'action.hover';
-  const placeholderBorder = isDarkMode
-    ? alpha(theme.palette.common.white, 0.09)
-    : alpha(theme.palette.common.black, 0.08);
-  const placeholderPrimaryText = alpha(theme.palette.text.primary, 0.4);
-  const placeholderSecondaryText = isDarkMode
-    ? alpha(theme.palette.text.secondary, 0.82)
-    : alpha(theme.palette.text.secondary, 0.6);
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 1 : 0,
-    position: 'relative' as const,
-  };
-
-  const handleRowClick = (event: MouseEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    if (target.closest('button,a,[role="button"],[data-no-row-nav="true"]')) {
-      return;
-    }
-    if (item.isTrackedInFirebase === false) {
-      return;
-    }
-
-    onOpenSermon(item.id);
-  };
-
-  return (
-    <Box
-      ref={setNodeRef}
-      style={style}
-      onClick={handleRowClick}
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: { xs: 1.25, sm: 1.5 },
-        p: { xs: 1.25, sm: 1.5 },
-        cursor: isPlaceholder ? 'default' : 'pointer',
-        bgcolor: isPlaceholder ? placeholderBackground : isDragging ? 'action.selected' : firebaseRowBackground,
-        boxShadow: isDragging ? 4 : 0,
-        borderLeft: `3px solid ${placeholderBorder}`,
-        transition: 'background-color 0.15s ease',
-        '&:hover': {
-          bgcolor: isPlaceholder
-            ? placeholderBackground
-            : isDragging
-              ? 'action.selected'
-              : firebaseRowHoverBackground,
-        },
-      }}
-    >
-      <Box
-        {...attributes}
-        {...listeners}
-        data-no-row-nav="true"
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          cursor: dragDisabled ? 'default' : isDragging ? 'grabbing' : 'grab',
-          color: 'text.disabled',
-          touchAction: 'none',
-          '&:hover': { color: 'text.secondary' },
-        }}
-      >
-        <DragIndicatorIcon />
-      </Box>
-
-      <Typography
-        variant="body2"
-        sx={{
-          width: { xs: 24, sm: 32 },
-          textAlign: 'center',
-          color: 'text.secondary',
-          fontWeight: 600,
-          fontSize: '0.75rem',
-        }}
-      >
-        {index + 1}
-      </Typography>
-
-      <AvatarWithDefaultImage
-        image={getPreferredListItemImage(item.images)}
-        altName={item.title || 'Sermon'}
-        width={44}
-        height={44}
-        borderRadius={6}
-        sx={{ flexShrink: 0 }}
-      />
-
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography
-          variant="subtitle2"
-          sx={{
-            fontWeight: 600,
-            color: isPlaceholder ? placeholderPrimaryText : 'text.primary',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {item.title || `Sermon ${item.id}`}
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: 0.5 }}>
-          {item.dateString ? (
-            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
-              {item.dateString}
-            </Typography>
-          ) : null}
-          {speakerNames ? (
-            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
-              {speakerNames}
-            </Typography>
-          ) : null}
-          {item.rowType && item.rowType !== 'media-item' ? (
-            <Typography variant="caption" color={isPlaceholder ? placeholderSecondaryText : 'text.secondary'}>
-              {formatListType(item.rowType)}
-            </Typography>
-          ) : null}
-        </Box>
-      </Box>
-
-      <Chip
-        icon={isSyncedToList ? <CheckCircleIcon /> : <PendingIcon />}
-        label={isPlaceholder ? 'Subsplash only' : isSyncedToList ? 'Synced' : 'Local only'}
-        color={isSyncedToList ? 'success' : isPlaceholder ? 'warning' : 'default'}
-        size="small"
-        variant={isSyncedToList || isPlaceholder ? 'filled' : 'outlined'}
-        sx={
-          isPlaceholder
-            ? {
-              flexShrink: 0,
-              color: isDarkMode
-                ? alpha(theme.palette.warning.light, 0.95)
-                : theme.palette.warning.dark,
-              borderColor: alpha(theme.palette.warning.main, isDarkMode ? 0.3 : 0.2),
-              bgcolor: alpha(theme.palette.warning.main, isDarkMode ? 0.14 : 0.12),
-            }
-            : { flexShrink: 0 }
-        }
-      />
-      {showPhysicalPlacement ? (
-        <Chip
-          label={physicalListTagLabel}
-          size="small"
-          color={placementDirty ? 'default' : 'info'}
-          variant={placementDirty ? 'outlined' : 'filled'}
-          title={item.sourceListName}
-          sx={{ flexShrink: 0 }}
-        />
-      ) : null}
-      {item.isOverflowCandidate && item.linkedListId ? (
-        <Button
-          size="small"
-          variant="outlined"
-          data-no-row-nav="true"
-          onClick={() => onMarkOverflow?.(item)}
-          disabled={overflowMarkDisabled || overflowMarkLoading}
-          sx={{ flexShrink: 0, textTransform: 'none' }}
-        >
-          {overflowMarkLoading ? (
-            <CircularProgress size={14} />
-          ) : (
-            `Mark as overflow list ${item.sourceDepth + 1}`
-          )}
-        </Button>
-      ) : null}
-    </Box>
-  );
-};
-
 export const loadListDetailsPageData = async ({
   listId,
   getListOverflowChain,
@@ -1157,7 +968,7 @@ const ListDetailsPage = () => {
     })
   );
 
-  const restrictToContainer: Modifier = ({ transform, draggingNodeRect }) => {
+  const restrictToContainer = useCallback<Modifier>(({ transform, draggingNodeRect }) => {
     if (!containerRef.current || !draggingNodeRect) {
       return transform;
     }
@@ -1170,7 +981,9 @@ const ListDetailsPage = () => {
       ...transform,
       y: Math.min(Math.max(transform.y, minY), maxY),
     };
-  };
+  }, []);
+
+  const modifiers = useMemo(() => [restrictToVerticalAxis, restrictToContainer], [restrictToContainer]);
 
   const hasOrderChanges =
     items.length !== originalItemsRef.current.length ||
@@ -1186,13 +999,25 @@ const ListDetailsPage = () => {
     ignored: false,
   });
   const totalItemsCount = items.length;
-  const renderedItems = items.slice(0, visibleItemsCount);
+  const renderedItems = useMemo(() => items.slice(0, visibleItemsCount), [items, visibleItemsCount]);
+  const renderedSortableIds = useMemo(() => renderedItems.map((item) => item.id), [renderedItems]);
+  const renderedRowViewModels = useMemo(
+    () => renderedItems.map((item) => buildSortableListRowViewModel(item)),
+    [renderedItems]
+  );
+  const physicalListHasOverflowLink = useMemo(
+    () =>
+      new Map(
+        (chainView?.nodes ?? []).map((node) => [node.firestoreListId, Boolean(node.nextSubsplashListId)])
+      ),
+    [chainView?.nodes]
+  );
   const hasMoreVisibleItems = renderedItems.length < items.length;
   const subsplashListUrl = list?.subsplashId
     ? `https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`
     : undefined;
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
     if (isReadOnlySurface) {
       return;
     }
@@ -1209,13 +1034,13 @@ const ListDetailsPage = () => {
 
       return normalizeListItemPositions(arrayMove(previousItems, oldIndex, newIndex));
     });
-  };
+  }, [isReadOnlySurface]);
 
-  const revertOrder = () => {
+  const revertOrder = useCallback(() => {
     setItems(cloneListItems(originalItemsRef.current));
-  };
+  }, []);
 
-  const saveOrderChanges = async () => {
+  const saveOrderChanges = useCallback(async () => {
     if (!list || !hasOrderChanges || isReadOnlySurface || chainView?.canSaveOrder === false) {
       return;
     }
@@ -1242,9 +1067,9 @@ const ListDetailsPage = () => {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [chainView, hasOrderChanges, isReadOnlySurface, items, list, listId, publishedDrift]);
 
-  const markOverflowLink = async (item: ListPageItem) => {
+  const markOverflowLink = useCallback(async (item: ListPageItem) => {
     if (!chainView || !item.rowId) {
       return;
     }
@@ -1263,7 +1088,35 @@ const ListDetailsPage = () => {
     } finally {
       setMarkingOverflowRowId(null);
     }
-  };
+  }, [chainView]);
+
+  const handleOpenSermon = useCallback(
+    (sermonId: string) => {
+      void router.push(`/admin/sermons/${sermonId}`);
+    },
+    [router]
+  );
+
+  const itemByRowId = useMemo(
+    () =>
+      new Map(
+        renderedItems
+          .filter((item): item is ListPageItem & { rowId: string } => Boolean(item.rowId))
+          .map((item) => [item.rowId, item])
+      ),
+    [renderedItems]
+  );
+
+  const handleMarkOverflowByRowId = useCallback(
+    (rowId: string) => {
+      const item = itemByRowId.get(rowId);
+      if (!item) {
+        return;
+      }
+      void markOverflowLink(item);
+    },
+    [itemByRowId, markOverflowLink]
+  );
 
   const title = list?.name || listId || 'List Details';
 
@@ -1659,33 +1512,27 @@ const ListDetailsPage = () => {
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}
-                  modifiers={[restrictToVerticalAxis, restrictToContainer]}
+                  modifiers={modifiers}
                   onDragEnd={handleDragEnd}
                 >
-                  <SortableContext items={renderedItems.map((item) => item.id)} strategy={verticalListSortingStrategy}>
-                    {renderedItems.map((item, index) => (
-                      <Box key={item.id}>
-                        <SortableListSermonItem
-                          item={item}
-                          index={index}
-                          dragDisabled={isReadOnlySurface || item.reconstructible === false}
-                          overflowMarkDisabled={
-                            hasOrderChanges ||
-                            Boolean(
-                              chainView?.nodes.find((node) => node.firestoreListId === item.sourceListId)
-                                ?.nextSubsplashListId
-                            )
-                          }
-                          overflowMarkLoading={markingOverflowRowId === item.rowId}
-                          placementDirty={hasOrderChanges}
-                          showPhysicalPlacement={isAdvancedDebugOpen}
-                          onMarkOverflow={markOverflowLink}
-                          onOpenSermon={(sermonId) => {
-                            void router.push(`/admin/sermons/${sermonId}`);
-                          }}
-                        />
-                        {index < renderedItems.length - 1 ? <Divider /> : null}
-                      </Box>
+                  <SortableContext items={renderedSortableIds} strategy={verticalListSortingStrategy}>
+                    {renderedRowViewModels.map((item, index) => (
+                      <SortableListRow
+                        key={item.id}
+                        item={item}
+                        index={index}
+                        dragDisabled={isReadOnlySurface || item.reconstructible === false}
+                        overflowMarkDisabled={
+                          hasOrderChanges ||
+                          Boolean(physicalListHasOverflowLink.get(renderedItems[index]?.sourceListId ?? ''))
+                        }
+                        overflowMarkLoading={markingOverflowRowId === item.rowId}
+                        placementDirty={hasOrderChanges}
+                        showPhysicalPlacement={isAdvancedDebugOpen}
+                        onMarkOverflow={handleMarkOverflowByRowId}
+                        onOpenSermon={handleOpenSermon}
+                        showDivider={index < renderedRowViewModels.length - 1}
+                      />
                     ))}
                   </SortableContext>
                 </DndContext>

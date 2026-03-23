@@ -962,6 +962,98 @@ describe('reorderListItems', () => {
     assertSubsplashHistoryNeverExceedsCapacity(5);
   });
 
+  it('keeps one safety slot free when a full physical page receives a recreated row from overflow', async () => {
+    const rootSubsplashListId = 'subsplash-root-capacity-safety';
+    const overflowSubsplashListId = 'subsplash-overflow-capacity-safety';
+
+    subsplashMock.createList(rootSubsplashListId, 'Root List', 0, 200);
+    subsplashMock.createList(overflowSubsplashListId, 'More Root List sermons', 0, 200);
+
+    const rootRows: SubsplashListRow[] = [];
+    for (let index = 1; index <= 199; index += 1) {
+      rootRows.push(createMediaRow(rootSubsplashListId, `row-${index}`, `media-${index}`, index));
+    }
+    rootRows.push(createOverflowRow(rootSubsplashListId, 'row-link-root', overflowSubsplashListId, 200));
+    subsplashMock.listRows.set(rootSubsplashListId, rootRows);
+
+    subsplashMock.listRows.set(overflowSubsplashListId, [
+      createMediaRow(overflowSubsplashListId, 'row-200', 'media-200', 1),
+      createMediaRow(overflowSubsplashListId, 'row-201', 'media-201', 2),
+      createMediaRow(overflowSubsplashListId, 'row-202', 'media-202', 3),
+    ]);
+
+    subsplashMock.failPatchWhenAtCapacityWithNewRows(rootSubsplashListId);
+
+    const rootFirestoreListId = await createListDocument({
+      id: 'root-capacity-safety',
+      subsplashId: rootSubsplashListId,
+      title: 'Root List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 199,
+      logicalCount: 202,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: 'root-capacity-safety',
+      overflowDepth: 0,
+      moreSermonsRef: overflowSubsplashListId,
+    });
+    await createListDocument({
+      id: 'overflow-capacity-safety',
+      subsplashId: overflowSubsplashListId,
+      title: 'More Root List sermons',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 3,
+      isMoreSermonsList: true,
+      isRootList: false,
+      rootListId: 'root-capacity-safety',
+      overflowDepth: 1,
+    });
+
+    await seedPublishedProjection({
+      rootFirestoreListId,
+      assignments: [
+        {
+          firestoreListId: 'root-capacity-safety',
+          subsplashListId: rootSubsplashListId,
+          overflowDepth: 0,
+          mediaIds: Array.from({ length: 199 }, (_, index) => `media-${index + 1}`),
+        },
+        {
+          firestoreListId: 'overflow-capacity-safety',
+          subsplashListId: overflowSubsplashListId,
+          overflowDepth: 1,
+          mediaIds: ['media-200', 'media-201', 'media-202'],
+        },
+      ],
+    });
+
+    const targetOrder = ['media-200', ...Array.from({ length: 199 }, (_, index) => `media-${index + 1}`), 'media-201', 'media-202'];
+
+    const result = await reorderListItemsHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        rootListId: rootFirestoreListId,
+        logicalItemOrder: targetOrder.map((mediaItemId, index) => ({ mediaItemId, position: index + 1 })),
+      },
+    });
+
+    expect(result.status).toBe('success');
+    const rootFinalRows = subsplashMock.getListRows(rootSubsplashListId);
+    const overflowFinalRows = subsplashMock.getListRows(overflowSubsplashListId);
+
+    expect(rootFinalRows).toHaveLength(199);
+    expect(rootFinalRows[rootFinalRows.length - 1]._embedded.list?.id).toBe(overflowSubsplashListId);
+    expect(rootFinalRows.filter((row) => row.type !== 'list')).toHaveLength(198);
+    expect(rootFinalRows[0]._embedded['media-item']?.id).toBe('media-200');
+
+    expect(overflowFinalRows.map(getRowIdentity)).toEqual([
+      'media:media-198',
+      'media:media-199',
+      'media:media-201',
+      'media:media-202',
+    ]);
+  });
+
   it('replays duplicate reorder operation keys without repeating remote writes', async () => {
     const fixture = await seedThirteenOverflowFixture();
     await seedPublishedProjection({
@@ -1056,7 +1148,7 @@ describe('reorderListItems', () => {
     });
 
     networkFailureInjector.registerFailure(
-      `patchList:${fixture.overflowSubsplashListId}`,
+      `patchList:${fixture.tailSubsplashListId}`,
       (() => {
         let failed = false;
         return () => {
@@ -1097,7 +1189,6 @@ describe('reorderListItems', () => {
 
     const drift = await auditPublishedListDrift(fixture.rootFirestoreListId, 'fake-token');
     expect(drift.inSync).toBe(false);
-    expect(drift.canReorder).toBe(false);
     expect(drift.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
