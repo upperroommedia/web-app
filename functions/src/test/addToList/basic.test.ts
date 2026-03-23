@@ -206,6 +206,107 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     expect(overflowMirrorSnapshot.size).toBe(0);
   });
 
+  it('keeps a safety slot free when uploading into a full 200-row physical page with overflow', async () => {
+    const rootListId = 'physical-cap-root';
+    const overflowListId = 'physical-cap-overflow';
+    subsplashMock.createList(rootListId, 'Repentance', 0, 200);
+    subsplashMock.createList(overflowListId, 'More Repentance sermons', 0, 200);
+    subsplashMock.failPatchWhenAtCapacityWithNewRows(rootListId);
+
+    const rootRows: SubsplashListRow[] = [
+      ...Array.from({ length: 198 }, (_, index) => ({
+        id: `root-row-${index + 1}`,
+        app_key: '9XTSHD',
+        method: 'static' as const,
+        position: index + 1,
+        type: 'media-item' as const,
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: `root-item-${index + 1}` },
+        },
+      })),
+      {
+        id: 'root-link-row',
+        app_key: '9XTSHD',
+        method: 'static' as const,
+        position: 199,
+        type: 'list' as const,
+        _embedded: {
+          'source-list': { id: rootListId },
+          list: { id: overflowListId },
+        },
+      },
+    ];
+    const overflowRows: SubsplashListRow[] = Array.from({ length: 3 }, (_, index) => ({
+      id: `overflow-row-${index + 1}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: index + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: overflowListId },
+        'media-item': { id: `overflow-item-${index + 1}` },
+      },
+    }));
+    subsplashMock.listRows.set(rootListId, rootRows);
+    subsplashMock.listRows.set(overflowListId, overflowRows);
+
+    const rootFirestoreId = await createListDocument({
+      subsplashId: rootListId,
+      title: 'Repentance',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 198,
+      maxListSize: 200,
+      moreSermonsRef: overflowListId,
+    });
+    await createListDocument({
+      subsplashId: overflowListId,
+      title: 'More Repentance sermons',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 3,
+      maxListSize: 200,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+    });
+    await createSermonDocument(buildSermon('sermon-new', 'new-item'));
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'new-item', type: 'media-item' as const },
+        maxListSize: 200,
+      },
+    };
+
+    const result = await addToListHandler(request);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+
+    const updatedRootRows = subsplashMock.getListRows(rootListId);
+    expect(updatedRootRows).toHaveLength(199);
+    expect(updatedRootRows[0]._embedded['media-item']?.id).toBe('new-item');
+    expect(updatedRootRows[198].type).toBe('list');
+    expect(updatedRootRows[198]._embedded.list?.id).toBe(overflowListId);
+
+    const updatedRootMediaIds = updatedRootRows
+      .filter((row) => row.type === 'media-item')
+      .map((row) => row._embedded['media-item']?.id);
+    expect(updatedRootMediaIds).toHaveLength(198);
+    expect(updatedRootMediaIds).not.toContain('root-item-198');
+
+    const updatedOverflowRows = subsplashMock.getListRows(overflowListId);
+    expect(updatedOverflowRows).toHaveLength(4);
+    expect(updatedOverflowRows[0]._embedded['media-item']?.id).toBe('root-item-198');
+    expect(updatedOverflowRows.slice(1).map((row) => row._embedded['media-item']?.id)).toEqual([
+      'overflow-item-1',
+      'overflow-item-2',
+      'overflow-item-3',
+    ]);
+  });
+
   it('adopts an existing nested list as the overflow list when its title matches the root list', async () => {
     const rootListId = 'root-adopt-overflow';
     const existingOverflowListId = 'existing-overflow-list';

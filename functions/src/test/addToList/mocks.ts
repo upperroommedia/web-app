@@ -90,6 +90,7 @@ export class SubsplashMock {
   private staleListRowsAfterPatch: Map<string, number> = new Map();
   private staleListRowsSnapshots: Map<string, SubsplashListRow[]> = new Map();
   private history: MockSubsplashHistoryEntry[] = [];
+  private fullCapacityPatchCreateFailures: Set<string> = new Set();
 
   constructor() {
     this.reset();
@@ -105,6 +106,7 @@ export class SubsplashMock {
     this.staleListRowsAfterPatch.clear();
     this.staleListRowsSnapshots.clear();
     this.history = [];
+    this.fullCapacityPatchCreateFailures.clear();
   }
 
   createList(id: string, title: string, count: number = 0, maxItemCount?: number, subtitle?: string): SubsplashList {
@@ -157,6 +159,10 @@ export class SubsplashMock {
     this.history = [];
   }
 
+  failPatchWhenAtCapacityWithNewRows(listId: string) {
+    this.fullCapacityPatchCreateFailures.add(listId);
+  }
+
   setPatchRetainsOmittedRows(value: boolean) {
     this.patchRetainsOmittedRows = value;
   }
@@ -199,10 +205,26 @@ export class SubsplashMock {
     if (rowCount > maxAllowed) {
       throw new Error(`Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`);
     }
+
+    const existingRows = this.listRows.get(id) || [];
+    const containsNewRows = payload._embedded['list-rows'].some((row) => !('id' in row) || ('app_key' in row));
+    const existingRowsIncludeContinuationLink = existingRows.some((row) => row.type === 'list');
+    if (
+      this.fullCapacityPatchCreateFailures.has(id) &&
+      containsNewRows &&
+      (existingRows.length >= maxAllowed || (existingRowsIncludeContinuationLink && existingRows.length >= maxAllowed - 1)) &&
+      rowCount >= maxAllowed
+    ) {
+      const error = new Error(`Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`);
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamStatus = 400;
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamData = {
+        errors: [{ code: 'bad_request', detail: `max number of list rows exceeded: ${maxAllowed}` }],
+      };
+      throw error;
+    }
     
     list.list_rows_count = rowCount;
     
-    const existingRows = this.listRows.get(id) || [];
     const existingRowsSnapshot = JSON.parse(JSON.stringify(existingRows)) as SubsplashListRow[];
     
     const requestedRows: SubsplashListRow[] = payload._embedded['list-rows'].map((row: SubsplashListRow | SubsplashListRowReference, index: number): SubsplashListRow => {
@@ -348,7 +370,38 @@ jest.mock('axios', () => {
       const payload = typeof config.data === 'string' 
         ? JSON.parse(config.data) as SubsplashPatchPayload
         : config.data as SubsplashPatchPayload;
-      const updatedList = subsplashMock.patchList(listId, payload);
+      let updatedList;
+      try {
+        updatedList = subsplashMock.patchList(listId, payload);
+      } catch (error) {
+        const upstreamStatus =
+          error && typeof error === 'object' && 'upstreamStatus' in error
+            ? (error as { upstreamStatus?: number }).upstreamStatus
+            : undefined;
+        const upstreamData =
+          error && typeof error === 'object' && 'upstreamData' in error
+            ? (error as { upstreamData?: unknown }).upstreamData
+            : undefined;
+
+        if (upstreamStatus && upstreamData) {
+          return Promise.reject({
+            message: `Request failed with status code ${upstreamStatus}`,
+            name: 'AxiosError',
+            code: upstreamStatus >= 500 ? 'ERR_BAD_RESPONSE' : 'ERR_BAD_REQUEST',
+            response: {
+              status: upstreamStatus,
+              statusText: upstreamStatus === 400 ? 'Bad Request' : 'Error',
+              data: upstreamData,
+              headers: {},
+              config: {},
+            },
+            isAxiosError: true,
+            toJSON: () => ({ message: `Request failed with status code ${upstreamStatus}`, name: 'AxiosError' }),
+          });
+        }
+
+        throw error;
+      }
       const afterMutationFailureKey = `patchListAfterMutation:${listId}`;
       if (networkFailureInjector.shouldFail(afterMutationFailureKey)) {
         return Promise.reject({

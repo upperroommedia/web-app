@@ -373,6 +373,62 @@ const ensureExistingRowCountDoesNotExceedConfiguredMax = ({
   );
 };
 
+const computeOverflowContentKeepLimit = ({
+  listId,
+  maxListSize,
+  physicalMaxRowCount,
+  updatedRowCount,
+}: {
+  listId: string;
+  maxListSize: number;
+  physicalMaxRowCount: number;
+  updatedRowCount: number;
+}): number => {
+  const logicalKeepLimit = Math.max(0, maxListSize - 1);
+  if (physicalMaxRowCount < 200 || updatedRowCount < physicalMaxRowCount) {
+    return logicalKeepLimit;
+  }
+
+  const physicalKeepLimit = Math.max(0, physicalMaxRowCount - 2);
+  const adjustedKeepLimit = Math.min(logicalKeepLimit, physicalKeepLimit);
+
+  if (adjustedKeepLimit < logicalKeepLimit) {
+    listDebugLog('addToList.computeOverflowContentKeepLimit.reserveSafetySlot', {
+      listId,
+      maxListSize,
+      physicalMaxRowCount,
+      updatedRowCount,
+      logicalKeepLimit,
+      adjustedKeepLimit,
+    });
+  }
+
+  return adjustedKeepLimit;
+};
+
+const shouldOverflowAfterInsert = ({
+  totalRowCount,
+  maxListSize,
+  physicalMaxRowCount,
+  currentRows,
+}: {
+  totalRowCount: number;
+  maxListSize: number;
+  physicalMaxRowCount: number;
+  currentRows: SubsplashListRow[];
+}): boolean => {
+  if (totalRowCount >= maxListSize) {
+    return true;
+  }
+
+  const hasContinuationLink = currentRows.some((row) => row.type === 'list');
+  if (!hasContinuationLink || physicalMaxRowCount < 200) {
+    return false;
+  }
+
+  return totalRowCount + 1 >= physicalMaxRowCount;
+};
+
 const applyRemoveOldestMutation = async ({
   listId,
   itemId,
@@ -722,12 +778,20 @@ async function processListStep(
   } else {
     const newRow = createListRow(itemToAdd, listId, 1);
     const updatedRows = [newRow, ...currentRows];
-    const willOverflow = totalRowCount >= maxListSize;
+    const listDetails = await getListDetails(listId, token);
+    const physicalMaxRowCount = listDetails.max_item_count ?? maxListSize;
+    const willOverflow = shouldOverflowAfterInsert({
+      totalRowCount,
+      maxListSize,
+      physicalMaxRowCount,
+      currentRows,
+    });
     listDebugLog('addToList.processListStep.prePatchDecision', {
       listId,
       itemId: itemToAdd.id,
       willOverflow,
       maxListSize,
+      physicalMaxRowCount,
       updatedRows: summarizeSubsplashRows(updatedRows),
     });
 
@@ -965,11 +1029,19 @@ async function processListStep(
         }
 
         const contentRows = updatedRows.filter((r) => !(r.type === 'list' && r._embedded.list?.id === nextListId));
-        const itemsToKeep = contentRows.slice(0, maxListSize - 1);
-        const itemsToPropagate = contentRows.slice(maxListSize - 1);
+        const contentKeepLimit = computeOverflowContentKeepLimit({
+          listId,
+          maxListSize,
+          physicalMaxRowCount,
+          updatedRowCount: updatedRows.length,
+        });
+        const itemsToKeep = contentRows.slice(0, contentKeepLimit);
+        const itemsToPropagate = contentRows.slice(contentKeepLimit);
         listDebugLog('addToList.processListStep.overflowPartition', {
           listId,
           nextListId,
+          physicalMaxRowCount,
+          contentKeepLimit,
           itemsToKeep: summarizeSubsplashRows(itemsToKeep),
           itemsToPropagate: summarizeSubsplashRows(itemsToPropagate),
         });
