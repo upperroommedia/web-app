@@ -50,6 +50,8 @@ steps:
 
         POT_PROVIDER_URL="$$(cat /workspace/pot_provider_url.txt)"
         export POT_PROVIDER_URL
+        POT_PROVIDER_IDENTITY_TOKEN="$$(gcloud auth print-identity-token)"
+        export POT_PROVIDER_IDENTITY_TOKEN
 
         python3 - <<'PY'
         import json
@@ -57,7 +59,11 @@ steps:
         import urllib.request
 
         url = os.environ["POT_PROVIDER_URL"].rstrip("/") + "/ping"
-        with urllib.request.urlopen(url, timeout=30) as response:
+        request = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {os.environ['POT_PROVIDER_IDENTITY_TOKEN']}"},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
             payload = json.loads(response.read().decode("utf-8"))
             version = payload.get("version")
             if response.status != 200 or not version:
