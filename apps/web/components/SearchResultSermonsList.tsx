@@ -23,9 +23,13 @@ import firestore, {
   where,
 } from '../firebase/firestore';
 import { sermonConverter } from '../types/Sermon';
-import { Sermon, sermonStatusType } from '../types/SermonTypes';
+import { Sermon } from '../types/SermonTypes';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algolia/searchRecords';
+import {
+  getPendingSermonsReadyForAcknowledgement,
+  reconcileAdminSermonSearchResults,
+} from '../utils/sermonSearchResults';
 
 const FIRESTORE_IN_QUERY_LIMIT = 10;
 
@@ -40,31 +44,55 @@ const chunkIds = (ids: string[], chunkSize: number): string[][] => {
 };
 
 const useLiveVisibleSermons = (sermonIds: string[]) => {
-  const [liveSermonsById, setLiveSermonsById] = useState<Record<string, Sermon>>({});
+  const [state, setState] = useState<{
+    liveSermonsById: Record<string, Sermon>;
+    resolvedIds: Set<string>;
+  }>({
+    liveSermonsById: {},
+    resolvedIds: new Set<string>(),
+  });
 
   useEffect(() => {
     if (sermonIds.length === 0) {
       return;
     }
 
-    const chunkSnapshots = new Map<number, Record<string, Sermon>>();
+    const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon> }>();
+    const updateState = () => {
+      const nextLiveSermonsById: Record<string, Sermon> = {};
+      const nextResolvedIds = new Set<string>();
+
+      chunkSnapshots.forEach(({ ids, records }) => {
+        ids.forEach((id) => nextResolvedIds.add(id));
+        Object.assign(nextLiveSermonsById, records);
+      });
+
+      setState({
+        liveSermonsById: nextLiveSermonsById,
+        resolvedIds: nextResolvedIds,
+      });
+    };
+
     const unsubscribeCallbacks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
       const sermonsQuery = query(
         collection(firestore, 'sermons').withConverter(sermonConverter),
         where(documentId(), 'in', idChunk)
       );
 
-      return onSnapshot(sermonsQuery, (snapshot) => {
-        const nextChunkRecords: Record<string, Sermon> = {};
-        snapshot.docs.forEach((docSnapshot) => {
-          nextChunkRecords[docSnapshot.id] = docSnapshot.data();
-        });
-        chunkSnapshots.set(chunkIndex, nextChunkRecords);
-
-        const mergedRecords: Record<string, Sermon> = {};
-        chunkSnapshots.forEach((records) => Object.assign(mergedRecords, records));
-        setLiveSermonsById(mergedRecords);
-      });
+      return onSnapshot(
+        sermonsQuery,
+        (snapshot) => {
+          const nextChunkRecords: Record<string, Sermon> = {};
+          snapshot.docs.forEach((docSnapshot) => {
+            nextChunkRecords[docSnapshot.id] = docSnapshot.data();
+          });
+          chunkSnapshots.set(chunkIndex, { ids: idChunk, records: nextChunkRecords });
+          updateState();
+        },
+        (error) => {
+          console.error('Failed to hydrate visible sermon hits from Firestore', error);
+        }
+      );
     });
 
     return () => {
@@ -74,14 +102,20 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
 
   return useMemo(() => {
     if (sermonIds.length === 0) {
-      return {};
+      return {
+        liveSermonsById: {},
+        resolvedIds: new Set<string>(),
+      };
     }
 
     const visibleIdSet = new Set(sermonIds);
-    return Object.fromEntries(
-      Object.entries(liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
-    );
-  }, [liveSermonsById, sermonIds]);
+    return {
+      liveSermonsById: Object.fromEntries(
+        Object.entries(state.liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
+      ),
+      resolvedIds: new Set([...state.resolvedIds].filter((sermonId) => visibleIdSet.has(sermonId))),
+    };
+  }, [state, sermonIds]);
 };
 
 const SearchResultSermonList = (props: BoxProps) => {
@@ -107,45 +141,35 @@ const SearchResultSermonList = (props: BoxProps) => {
     () => hits.map((hit) => normalizeAlgoliaSermonHit(hit as AlgoliaSermonHit)),
     [hits]
   );
-  const visibleHitIds = useMemo(() => new Set(normalizedHits.map((hit) => hit.id)), [normalizedHits]);
+  const visibleHitIds = useMemo(() => normalizedHits.map((hit) => hit.id), [normalizedHits]);
   const refinementList = (indexUiState as { refinementList?: Record<string, string[]> }).refinementList ?? {};
   const hasActiveRefinements = Object.values(refinementList).some((values) => values.length > 0);
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
-  const visiblePendingSermons = useMemo(
+  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds);
+  const { confirmedVisibleHitIds, visiblePendingSermons, visibleAlgoliaHits, displayRows } = useMemo(
     () =>
-      (pendingSermons ?? []).filter(
-        (sermon) => sermon.status.audioStatus === sermonStatusType.PROCESSING || !visibleHitIds.has(sermon.id)
-      ),
-    [pendingSermons, visibleHitIds]
+      reconcileAdminSermonSearchResults({
+        algoliaHits: normalizedHits,
+        pendingSermons: pendingSermons ?? [],
+        showPendingOverlay,
+        hasSettledResults,
+        liveSermonsById,
+        resolvedLiveSermonIds,
+      }),
+    [hasSettledResults, liveSermonsById, normalizedHits, pendingSermons, resolvedLiveSermonIds, showPendingOverlay]
   );
-  const visiblePendingIds = useMemo(() => new Set(visiblePendingSermons.map((sermon) => sermon.id)), [visiblePendingSermons]);
-  const visibleAlgoliaHits = useMemo(
-    () => normalizedHits.filter((sermon) => !visiblePendingIds.has(sermon.id)),
-    [normalizedHits, visiblePendingIds]
-  );
-  const visibleAlgoliaHitIds = useMemo(
-    () => visibleAlgoliaHits.map((sermon) => sermon.id),
-    [visibleAlgoliaHits]
-  );
-  const liveVisibleSermonsById = useLiveVisibleSermons(visibleAlgoliaHitIds);
-  const hydratedVisibleAlgoliaHits = useMemo(
-    () => visibleAlgoliaHits.map((sermon) => liveVisibleSermonsById[sermon.id] ?? sermon),
-    [liveVisibleSermonsById, visibleAlgoliaHits]
-  );
-  const hasVisibleHits = hydratedVisibleAlgoliaHits.length > 0;
+  const hasVisibleHits = visibleAlgoliaHits.length > 0;
   const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
   const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
 
   useEffect(() => {
-    const indexedPendingSermons = (pendingSermons ?? []).filter(
-      (sermon) =>
-        sermon.searchPending &&
-        sermon.status.audioStatus !== sermonStatusType.PROCESSING &&
-        visibleHitIds.has(sermon.id) &&
-        !acknowledgedPendingIdsRef.current.has(sermon.id)
-    );
+    const indexedPendingSermons = getPendingSermonsReadyForAcknowledgement({
+      pendingSermons: pendingSermons ?? [],
+      hasSettledResults,
+      confirmedVisibleHitIds,
+    }).filter((sermon) => !acknowledgedPendingIdsRef.current.has(sermon.id));
 
     if (indexedPendingSermons.length === 0) {
       return;
@@ -167,7 +191,7 @@ const SearchResultSermonList = (props: BoxProps) => {
         }
       })
     );
-  }, [pendingSermons, visibleHitIds]);
+  }, [confirmedVisibleHitIds, hasSettledResults, pendingSermons]);
 
   return (
     <Box display="flex" justifyContent="start" flex={3} overflow="hidden" {...props}>
@@ -189,34 +213,8 @@ const SearchResultSermonList = (props: BoxProps) => {
         )}
         {isLoadingState &&
           [...Array(20)].map((_, i) => <SermonListCardSkeloten key={`sermonListCardSkeloten_${i}`} />)}
-        {showPendingOverlay &&
-          visiblePendingSermons.length > 0 &&
-          visiblePendingSermons.map((sermon) => (
-            <SermonListCard
-              key={`pending-${sermon.id}`}
-              sermon={sermon}
-              playing={currentSermonId === sermon.id ? playing : false}
-              remainingTimeComponent={
-                <RemainingTimeComponent
-                  playing={currentSermonId === sermon.id ? playing : false}
-                  duration={sermon.durationSeconds}
-                />
-              }
-              trackProgressComponent={
-                <TrackProgressComponent
-                  playing={currentSermonId === sermon.id ? playing : false}
-                  duration={sermon.durationSeconds}
-                />
-              }
-              audioPlayerCurrentSermonId={currentSermonId}
-              audioPlayerSetCurrentSermon={setCurrentSermon}
-              subscriptionOwnedByParent
-              enableProcessingProgress
-              enableSeriesRealtime={false}
-            />
-          ))}
         {shouldRenderHits &&
-          hydratedVisibleAlgoliaHits.map((sermon) => (
+          displayRows.map(({ sermon, enableProcessingProgress }) => (
             <SermonListCard
               key={sermon.id}
               sermon={sermon}
@@ -236,11 +234,11 @@ const SearchResultSermonList = (props: BoxProps) => {
               audioPlayerCurrentSermonId={currentSermonId}
               audioPlayerSetCurrentSermon={setCurrentSermon}
               subscriptionOwnedByParent
-              enableProcessingProgress={false}
+              enableProcessingProgress={enableProcessingProgress}
               enableSeriesRealtime={false}
             />
           ))}
-        {shouldRenderHits && hydratedVisibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
+        {shouldRenderHits && visibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
           <Typography sx={{ px: { xs: 0.5, sm: 1 } }} color="text.secondary">
             No sermons found. Upload a sermon to get started.
           </Typography>
