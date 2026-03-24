@@ -6,6 +6,9 @@
     "noUnusedLocals": true,
     "outDir": "lib",
     "paths": {
+      "@upperroom/contracts/*": [
+        "../packages/contracts/*"
+      ],
       "@upperroom/shared/*": [
         "../packages/shared/*"
       ]
@@ -19,7 +22,7 @@
   },
   "compileOnSave": true,
   "include": [
-    "src/index.ts",
+    "src/**/*.ts",
     "../functions/src/**/*.ts",
     "../packages/shared/**/*.ts",
     "../packages/contracts/**/*.ts"

@@ -70,6 +70,7 @@
     },
     "onlyBuiltDependencies": [
       "@firebase/util",
+      "protobufjs",
       "ffmpeg-static",
       "sharp"
     ]

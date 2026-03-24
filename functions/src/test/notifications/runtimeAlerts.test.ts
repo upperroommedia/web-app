@@ -8,8 +8,7 @@ import deleteFromSubsplash from '../../deleteFromSubsplash';
 import uploadToSoundCloud from '../../uploadToSoundCloud';
 import editSoundCloudSermon from '../../editSoundCloudSermon';
 import deleteFromSoundCloud from '../../deleteFromSoundCloud';
-import addintrooutrotaskgenerator from '../../addIntroOutro/addintrooutrotaskgenerator';
-import addintrooutrotaskhandler from '../../addIntroOutro/addintrooutrotaskhandler';
+import addintrooutrotaskgenerator from '../../../../functions-media/src/addIntroOutroTaskGenerator';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
@@ -19,10 +18,6 @@ const mockDeleteTrack = jest.fn();
 const mockSermonDocUpdate = jest.fn();
 const mockStorageFileExists = jest.fn();
 const mockTaskQueueEnqueue = jest.fn();
-const mockExecuteWithTimout = jest.fn();
-const mockValidateAddIntroOutroData = jest.fn();
-const mockGetAudioSource = jest.fn();
-const mockLogMemoryUsage = jest.fn();
 
 jest.mock('../../locks/withIdempotency', () => ({
   withIdempotency: jest.fn(async (_operationKey: string, run: () => Promise<unknown>) => run()),
@@ -63,17 +58,6 @@ jest.mock('../../soundcloudSecrets', () => ({
   runWithSoundCloudAccessToken: (operation: (token: string) => unknown) => operation('fake-soundcloud-token'),
   soundcloudSecretsWithRuntimeAlerts: [],
   soundcloudOAuthSecrets: [],
-}));
-jest.mock('../../addIntroOutro/utils', () => ({
-  logMemoryUsage: (...args: unknown[]) => mockLogMemoryUsage(...args),
-  secondsToTimeFormat: jest.fn(() => '00:00:00.000'),
-  loadStaticFFMPEG: jest.fn(() => ({})),
-  downloadFiles: jest.fn(async () => ({})),
-  getDurationSeconds: jest.fn(async () => 1),
-  executeWithTimout: (...args: unknown[]) => mockExecuteWithTimout(...args),
-  createTempFile: jest.fn((fileName: string) => `/tmp/${fileName}`),
-  validateAddIntroOutroData: (...args: unknown[]) => mockValidateAddIntroOutroData(...args),
-  getAudioSource: (...args: unknown[]) => mockGetAudioSource(...args),
 }));
 jest.mock('firebase-admin/functions', () => ({
   getFunctions: () => ({
@@ -125,15 +109,6 @@ jest.mock('firebase-functions/v2/https', () => {
     ),
   };
 });
-jest.mock('firebase-functions/v2/tasks', () => {
-  const actual = jest.requireActual('firebase-functions/v2/tasks');
-  return {
-    ...actual,
-    onTaskDispatched: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
-    ),
-  };
-});
 
 type RuntimeAlertTarget = {
   functionName: string;
@@ -180,11 +155,6 @@ const audioRuntimeAlertTargets: RuntimeAlertTarget[] = [
     alertCode: 'AUDIO_TASK_GENERATOR_RUNTIME_FAILURE',
     requiredContextFields: ['functionName', 'sermonId', 'audioSourceType', 'audioSource', 'taskRoute'],
   },
-  {
-    functionName: 'addintrooutrotaskhandler',
-    alertCode: 'AUDIO_TASK_HANDLER_RUNTIME_FAILURE',
-    requiredContextFields: ['functionName', 'sermonId', 'audioSourceType', 'audioSource', 'taskRoute'],
-  },
 ];
 
 const runtimeAlertTargets = [...publishRuntimeAlertTargets, ...audioRuntimeAlertTargets];
@@ -215,9 +185,6 @@ const deleteFromSoundCloudHandler = deleteFromSoundCloud as unknown as (
 const addIntroOutroTaskGeneratorHandler = addintrooutrotaskgenerator as unknown as (
   request: CallableRequestShape<Record<string, unknown>>
 ) => Promise<unknown>;
-const addIntroOutroTaskHandler = addintrooutrotaskhandler as unknown as (request: {
-  data: Record<string, unknown>;
-}) => Promise<unknown>;
 
 const mockAxios = axios as jest.MockedFunction<typeof axios>;
 const mockWithIdempotency = withIdempotency as jest.MockedFunction<typeof withIdempotency>;
@@ -270,27 +237,10 @@ describe('runtime alert taxonomy contract', () => {
     mockSermonDocUpdate.mockResolvedValue(undefined);
     mockStorageFileExists.mockResolvedValue([true]);
     mockTaskQueueEnqueue.mockResolvedValue(undefined);
-    mockExecuteWithTimout.mockResolvedValue(undefined);
-    mockValidateAddIntroOutroData.mockReturnValue(true);
-    mockGetAudioSource.mockImplementation((data: Record<string, unknown>) => {
-      if (typeof data.youtubeUrl === 'string') {
-        return {
-          id: data.id,
-          source: data.youtubeUrl,
-          type: 'YouTubeUrl',
-        };
-      }
-      return {
-        id: data.id,
-        source: data.storageFilePath,
-        type: 'StorageFilePath',
-      };
-    });
-    mockLogMemoryUsage.mockResolvedValue(undefined);
   });
 
   it('declares deterministic alert codes and context requirements for each targeted catch path', () => {
-    expect(runtimeAlertTargets).toHaveLength(8);
+    expect(runtimeAlertTargets).toHaveLength(7);
 
     for (const target of runtimeAlertTargets) {
       expect(target.alertCode).toMatch(/^[A-Z0-9_]+$/);
@@ -529,50 +479,10 @@ describe('runtime alert taxonomy contract', () => {
           sermonId: 'sermon-audio-123',
           audioSourceType: 'StorageFilePath',
           audioSource: 'raw-sermons/sermon-audio-123.mp3',
-          taskRoute: 'addintrooutrotaskhandler',
+          taskRoute: 'processaudiotask',
         }),
       })
     );
-  });
-
-  it('emits audio alert for addintrooutrotaskhandler catch path while preserving status update behavior', async () => {
-    mockExecuteWithTimout.mockRejectedValueOnce(new Error('task processing failed'));
-
-    await expect(
-      addIntroOutroTaskHandler({
-        data: buildAddIntroOutroPayload(),
-      })
-    ).resolves.toBeUndefined();
-
-    expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        alertCode: 'AUDIO_TASK_HANDLER_RUNTIME_FAILURE',
-        context: expect.objectContaining({
-          functionName: 'addintrooutrotaskhandler',
-          sermonId: 'sermon-audio-123',
-          audioSourceType: 'StorageFilePath',
-          audioSource: 'raw-sermons/sermon-audio-123.mp3',
-          taskRoute: 'process-audio',
-        }),
-      })
-    );
-
-    expect(mockSermonDocUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: expect.objectContaining({
-          message: 'task processing failed',
-        }),
-      })
-    );
-  });
-
-  it('does not dedupe repeated addintro/outro handler failures', async () => {
-    mockExecuteWithTimout.mockRejectedValue(new Error('task processing failed repeatedly'));
-
-    await expect(addIntroOutroTaskHandler({ data: buildAddIntroOutroPayload() })).resolves.toBeUndefined();
-    await expect(addIntroOutroTaskHandler({ data: buildAddIntroOutroPayload() })).resolves.toBeUndefined();
-
-    expect(mockEmitOperationalAlert).toHaveBeenCalledTimes(2);
   });
 
   it('preserves normalized error behavior via handleError in publish catch paths', async () => {

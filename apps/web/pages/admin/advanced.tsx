@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { NextPage } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -28,6 +28,15 @@ import type {
   UpdateAllSpeakerTagsOutputType,
 } from '@upperroom/contracts/updateAllSpeakerTags';
 import type { UpdateAllSpeakerTagsResultType } from '@upperroom/contracts/updateAllSpeakerTags';
+import type {
+  GetYouTubeCookieStatusInput,
+  GetYouTubeCookieStatusOutputType,
+} from '@upperroom/contracts/getYouTubeCookieStatus';
+import type {
+  SetYouTubeCookiesInput,
+  SetYouTubeCookiesOutputType,
+} from '@upperroom/contracts/setYouTubeCookies';
+import { uploadYouTubeCookiesFromFile } from '../../utils/youtubeCookies';
 
 type NoticeState = {
   severity: 'success' | 'error' | 'info' | 'warning';
@@ -91,12 +100,31 @@ const formatTimestamp = (value?: number): string => {
   }).format(new Date(value));
 };
 
+const formatIsoTimestamp = (value?: string | null): string => {
+  if (!value) {
+    return 'Not available';
+  }
+
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(parsed));
+};
+
 const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
   const router = useRouter();
   const { user } = useAuth();
   const [status, setStatus] = useState<GetSoundCloudAuthStatusReturnType | null>(null);
+  const [youtubeCookieStatus, setYouTubeCookieStatus] = useState<GetYouTubeCookieStatusOutputType | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [isLoadingCookieStatus, setIsLoadingCookieStatus] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isUploadingYouTubeCookies, setIsUploadingYouTubeCookies] = useState(false);
   const [isRunningSpeakerTagUpdate, setIsRunningSpeakerTagUpdate] = useState(false);
   const [speakerTagUpdateResult, setSpeakerTagUpdateResult] = useState<UpdateAllSpeakerTagsResultType | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
@@ -133,9 +161,32 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
     }
   }, [isAdmin]);
 
+  const loadYouTubeCookieStatus = useCallback(async () => {
+    if (!isAdmin) {
+      setIsLoadingCookieStatus(false);
+      setYouTubeCookieStatus(null);
+      return;
+    }
+
+    setIsLoadingCookieStatus(true);
+    try {
+      const getStatus = createFunctionV2<GetYouTubeCookieStatusInput, GetYouTubeCookieStatusOutputType>(
+        'getyoutubecookiestatus'
+      );
+      const nextStatus = await getStatus({});
+      setYouTubeCookieStatus(nextStatus);
+    } catch (error) {
+      const message = formatCallableError(error, 'Failed to load YouTube cookie status.');
+      setNotice({ severity: 'error', text: message });
+    } finally {
+      setIsLoadingCookieStatus(false);
+    }
+  }, [isAdmin]);
+
   useEffect(() => {
     loadStatus();
-  }, [loadStatus]);
+    loadYouTubeCookieStatus();
+  }, [loadStatus, loadYouTubeCookieStatus]);
 
   useEffect(() => {
     if (!router.isReady) {
@@ -225,6 +276,47 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       setIsRunningSpeakerTagUpdate(false);
     }
   }, [canRunScripts]);
+
+  const handleYouTubeCookieFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const file = input.files?.[0];
+      if (!file) {
+        return;
+      }
+
+      setIsUploadingYouTubeCookies(true);
+      setNotice({ severity: 'info', text: `Uploading ${file.name} and clearing the YouTube cookie breaker…` });
+
+      try {
+        const setYouTubeCookies = createFunctionV2<SetYouTubeCookiesInput, SetYouTubeCookiesOutputType>(
+          'setyoutubecookies'
+        );
+        const getYouTubeCookieStatus = createFunctionV2<
+          GetYouTubeCookieStatusInput,
+          GetYouTubeCookieStatusOutputType
+        >('getyoutubecookiestatus');
+        const nextStatus = await uploadYouTubeCookiesFromFile({
+          file,
+          setYouTubeCookies,
+          getYouTubeCookieStatus,
+        });
+
+        setYouTubeCookieStatus(nextStatus);
+        setNotice({
+          severity: 'success',
+          text: 'YouTube cookies were uploaded successfully and the cookie breaker was cleared.',
+        });
+      } catch (error) {
+        const message = formatCallableError(error, 'Failed to upload YouTube cookies.');
+        setNotice({ severity: 'error', text: message });
+      } finally {
+        input.value = '';
+        setIsUploadingYouTubeCookies(false);
+      }
+    },
+    []
+  );
 
   return (
     <Box sx={{ maxWidth: 960, mx: 'auto', width: '100%' }}>
@@ -332,6 +424,97 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
             </Stack>
           </CardContent>
         </Card>
+
+        {isAdmin ? (
+          <Card variant="outlined">
+            <CardContent>
+              <Stack spacing={2.5}>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  spacing={1.5}
+                >
+                  <Box>
+                    <Typography variant="h6" fontWeight={700}>
+                      YouTube Cookies
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Upload a fresh <code>cookies.txt</code> export for the dedicated YouTube account. The client
+                      base64-encodes the file immediately, the admin callable stores it in RTDB, and the cookie
+                      breaker is cleared in the same update.
+                    </Typography>
+                  </Box>
+                  {isLoadingCookieStatus ? (
+                    <CircularProgress size={24} />
+                  ) : (
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip
+                        color={youtubeCookieStatus?.hasCookies ? 'success' : 'default'}
+                        label={youtubeCookieStatus?.hasCookies ? 'Cookies configured' : 'Cookies missing'}
+                        variant={youtubeCookieStatus?.hasCookies ? 'filled' : 'outlined'}
+                      />
+                      <Chip
+                        color={youtubeCookieStatus?.cookieBreakerOpen ? 'warning' : 'success'}
+                        label={youtubeCookieStatus?.cookieBreakerOpen ? 'Breaker open' : 'Breaker clear'}
+                        variant="outlined"
+                      />
+                    </Stack>
+                  )}
+                </Stack>
+
+                <Divider />
+
+                <Stack spacing={1.25}>
+                  <Typography variant="subtitle2">Cookie status</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Disabled until: {formatIsoTimestamp(youtubeCookieStatus?.disabledUntil)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Uploaded at: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.uploadedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Uploaded by: {youtubeCookieStatus?.metadata?.uploadedByEmail ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Source file: {youtubeCookieStatus?.metadata?.sourceFileName ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Cookie hash: {youtubeCookieStatus?.metadata?.cookieHash ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last health status: {youtubeCookieStatus?.metadata?.lastHealthStatus ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last validated: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.lastValidatedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last used: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.lastUsedAt)}
+                  </Typography>
+                </Stack>
+
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                  <Button variant="contained" component="label" disabled={isUploadingYouTubeCookies || isLoadingCookieStatus}>
+                    {isUploadingYouTubeCookies ? 'Uploading…' : 'Upload cookies.txt'}
+                    <input hidden type="file" accept=".txt,text/plain" onChange={handleYouTubeCookieFileChange} />
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={loadYouTubeCookieStatus}
+                    disabled={isUploadingYouTubeCookies || isLoadingCookieStatus}
+                  >
+                    Refresh Status
+                  </Button>
+                </Stack>
+
+                <Alert severity="info">
+                  This page never reads raw cookie contents back to the browser. It only shows metadata from
+                  <code> yt-dlp-cookies-meta</code>.
+                </Alert>
+              </Stack>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {canRunScripts ? (
           <Card variant="outlined">

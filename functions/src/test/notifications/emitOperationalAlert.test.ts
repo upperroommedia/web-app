@@ -36,7 +36,7 @@ describe('emitOperationalAlert', () => {
       summary: 'Audio processing failed.',
       error: new Error('ffmpeg failed'),
       context: {
-        functionName: 'addintrooutrotaskhandler',
+        functionName: 'processaudiotask',
         operationKey: 'audio-op-1',
         mediaItemId: 'media-123',
       },
@@ -50,7 +50,7 @@ describe('emitOperationalAlert', () => {
         summary: 'Audio processing failed.',
         errorMessage: 'ffmpeg failed',
         context: {
-          functionName: 'addintrooutrotaskhandler',
+          functionName: 'processaudiotask',
           operationKey: 'audio-op-1',
           mediaItemId: 'media-123',
         },
