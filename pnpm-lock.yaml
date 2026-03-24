@@ -726,12 +726,6 @@ importers:
       '@ts-ffmpeg/fluent-ffmpeg':
         specifier: ^2.0.4
         version: 2.2.6
-      '@upperroom/contracts':
-        specifier: workspace:*
-        version: link:../packages/contracts
-      '@upperroom/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       axios:
         specifier: ^1.13.6
         version: 1.13.6
