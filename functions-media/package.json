@@ -11,8 +11,6 @@
     "build-watch": "concurrently --kill-others-on-fail --names tsc,alias --prefix '[{name}]' --prefix-colors 'blue,magenta' \"tsc -w --preserveWatchOutput -p tsconfig.json\" \"tsc-alias -w -p tsconfig.json\""
   },
   "dependencies": {
-    "@upperroom/contracts": "workspace:*",
-    "@upperroom/shared": "workspace:*",
     "@google-cloud/functions-framework": "^3.2.0",
     "@google-cloud/storage": "7.19.0",
     "@ts-ffmpeg/fluent-ffmpeg": "^2.0.4",
