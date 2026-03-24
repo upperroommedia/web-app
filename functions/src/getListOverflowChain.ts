@@ -12,7 +12,11 @@ import type {
 } from '../../packages/contracts/getListOverflowChain';
 
 const getlistoverflowchain = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
+  {
+    memory: '1GiB',
+    concurrency: 1,
+    secrets: subsplashSecretsWithRuntimeAlerts,
+  },
   async (request: CallableRequest<GetListOverflowChainInputType>): Promise<GetListOverflowChainOutputType> => {
     logger.log('getlistoverflowchain', {
       uid: request.auth?.uid,
