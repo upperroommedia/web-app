@@ -23,7 +23,7 @@ env:
       - RUNTIME
 
   - variable: NEXT_PUBLIC_ALGOLIA_APP_ID
-    value: PRYE69L8IB
+    secret: ALGOLIA_APP_ID
     availability:
       - BUILD
       - RUNTIME
