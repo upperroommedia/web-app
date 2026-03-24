@@ -382,6 +382,15 @@ jobs:
             printf -v "$__pid_var" '%s' "$!"
           }
 
+          delete_deprecated_media_function() {
+            local function_name="$1"
+            echo "Removing retired media function if present: $function_name"
+            pnpm exec firebase functions:delete "$function_name" \
+              --project "$FIREBASE_PROJECT" \
+              --region us-central1 \
+              --force >/dev/null 2>&1 || true
+          }
+
           if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
             pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
             deployed_targets+=("firestore:rules")
@@ -411,6 +420,7 @@ jobs:
           fi
 
           if [[ "$DEPLOY_FUNCTIONS_MEDIA" == "true" ]]; then
+            delete_deprecated_media_function "addintrooutrotaskhandler"
             function_names+=("functions:media")
             log_file="$(mktemp)"
             function_logs+=("$log_file")
