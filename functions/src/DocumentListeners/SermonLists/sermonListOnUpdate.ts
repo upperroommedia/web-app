@@ -1,10 +1,12 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { firestore, logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
-import { SermonList } from '../../../../types/SermonList';
-import { uploadStatus } from '../../../../types/SermonTypes';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { SermonList } from '@upperroom/shared/types/SermonList';
+import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
+import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
+import { syncRootProjectionStatusFromCanonical } from '../../helpers/syncRootProjectionStatusFromCanonical';
 
 const sermonListOnUpdate = firestore.onDocumentUpdated(
   'sermons/{sermonId}/sermonLists/{sermonListId}',
@@ -22,6 +24,7 @@ const sermonListOnUpdate = firestore.onDocumentUpdated(
 
     try {
       const sermonRef = firestoreDb.doc(`sermons/${sermonId}`).withConverter(firestoreAdminSermonConverter);
+      let didMutate = false;
 
       // Sermon was uploaded
       await firestoreDb.runTransaction(async (transaction) => {
@@ -41,10 +44,21 @@ const sermonListOnUpdate = firestore.onDocumentUpdated(
             transaction.update(sermonRef, {
               numberOfListsUploadedTo: FieldValue.increment(incrementValue),
             });
+            didMutate = true;
           } else {
-            logger.warn(`Sermon ${sermonId} does not exist, skipping increment`);
+            logger.log(`Upload status unchanged for sermon ${sermonId}, skipping counter increment`);
           }
+        } else {
+          logger.warn(`Sermon ${sermonId} does not exist, skipping increment`);
         }
+      });
+      if (didMutate) {
+        await ensureSermonCountInvariant(sermonId);
+      }
+      await syncRootProjectionStatusFromCanonical({
+        sermonId,
+        rootListId: updatedList?.rootListId ?? sermonListId,
+        canonicalMembership: updatedList,
       });
     } catch (error) {
       logger.error(`Error updating numberOfListsUploadedTo for sermon ${sermonId}:`, error);

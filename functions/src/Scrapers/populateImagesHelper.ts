@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 import { logger } from 'firebase-functions/v2';
-import { ImageType } from '../../../types/Image';
+import { ImageType } from '@upperroom/shared/types/Image';
 import { File, Bucket } from '@google-cloud/storage';
 import { Stream } from 'stream';
 import { existsSync, mkdirSync, unlinkSync } from 'fs';
@@ -11,6 +11,9 @@ import { v4 } from 'uuid';
 import sizeOf from 'image-size';
 import { firestoreAdminImagesConverter } from '../firestoreDataConverter';
 import { Firestore } from 'firebase-admin/firestore';
+import { SubsplashImage } from '../types/Subsplash';
+import { ensureFirebaseDownloadUrl } from '../storageDownloadUrl';
+import { extractStoragePathFromDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 
 const getImageDimensions = async (file: File): Promise<{ width: number; height: number }> => {
   if (!existsSync(os.tmpdir())) {
@@ -36,7 +39,7 @@ async function populateImages(
   bucket: Bucket,
   imageIds: Set<string>,
   db: Firestore,
-  subsplashImages: { image: any; imageName: string }[],
+  subsplashImages: { image: SubsplashImage; imageName: string }[],
   firestoreImagesMap: Map<string, ImageType>
 ): Promise<void> {
   const firestoreImages = db.collection('images').withConverter(firestoreAdminImagesConverter);
@@ -47,11 +50,16 @@ async function populateImages(
 
       if (firebaseImage.exists) {
         const image = firebaseImage.data();
-        const storagePath = decodeURIComponent(image?.downloadLink.split('/').pop() || '');
+        const storagePath = image?.downloadLink
+          ? extractStoragePathFromDownloadUrl(image.downloadLink, bucket.name)
+          : null;
+        if (!storagePath) {
+          logger.warn(`Unable to resolve storage path for existing image ${imageId}; re-uploading metadata.`);
+        }
         logger.log('storagePath', storagePath);
-        const file = bucket.file(storagePath);
-        if ((await file.exists())[0]) {
-          imageIds.add(storagePath);
+        const file = storagePath ? bucket.file(storagePath) : null;
+        if (file && (await file.exists())[0]) {
+          imageIds.add(file.name);
           logger.log(`${imageId} already exists, skipping download...`);
           if (image) {
             firestoreImagesMap.set(imageId, image);
@@ -108,15 +116,15 @@ async function populateImages(
       }
 
       // create firestore Image object
-      const publicUrl = file.publicUrl();
-      logger.log(`Public URL: ${publicUrl}`);
+      const downloadUrl = await ensureFirebaseDownloadUrl(file);
+      logger.log(`Download URL created for ${destinationFilePath}`);
       const finalImage: ImageType = {
         id: imageId,
         size: 'original',
         type: type,
         height: height,
         width: width,
-        downloadLink: publicUrl,
+        downloadLink: downloadUrl,
         dateAddedMillis: new Date().getTime(),
         name: `${imageName}-${type}.${contentType.split('/')[1]}`,
         subsplashId: imageId,

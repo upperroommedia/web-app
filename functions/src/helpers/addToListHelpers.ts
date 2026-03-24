@@ -1,217 +1,296 @@
 import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { ListType, OverflowBehavior } from '../../../types/List';
 import { createAxiosConfig } from '../subsplashUtils';
+import { SubsplashList, SubsplashListRow, SubsplashMediaType, SubsplashPatchPayload, SubsplashListRowPatch } from '../types/Subsplash';
 
-export const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list'] as const;
-export type MediaType = (typeof mediaTypes)[number];
-export type MediaItem = { id: string; type: MediaType };
+export const mediaTypes: SubsplashMediaType[] = [
+  'media-item',
+  'media-series',
+  'song',
+  'link',
+  'rss',
+  'list',
+  'album',
+  'calendar',
+  'event',
+];
 
-export type listMetaDataType = { overflowBehavior: OverflowBehavior; listId: string; type: ListType };
+type SubsplashRequestContext = {
+  operation: string;
+  url: string;
+  method: string;
+  listId?: string;
+  rowId?: string;
+};
 
-export interface SubsplashListRow {
-  id: string;
-  position: number;
-  created_at: string;
-  updated_at: string;
-  _embedded: {
-    [key in MediaType]: {
-      id: string;
-      title: string;
-    };
-  };
+const getAxiosStatus = (error: unknown): number | undefined =>
+  error && typeof error === 'object' && 'response' in error
+    ? (error as { response?: { status?: number } }).response?.status
+    : undefined;
+
+const getAxiosData = (error: unknown): unknown =>
+  error && typeof error === 'object' && 'response' in error
+    ? (error as { response?: { data?: unknown } }).response?.data
+    : undefined;
+
+const isTransientSubsplashError = (status?: number): boolean =>
+  status === 429 || status === 502 || status === 503 || status === 504;
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const getConfigUrl = (config: ReturnType<typeof createAxiosConfig>): string => config.url ?? 'unknown-url';
+
+async function runSubsplashRequest<T>(
+  config: ReturnType<typeof createAxiosConfig>,
+  context: SubsplashRequestContext
+): Promise<T> {
+  const maxAttempts = 3;
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+    try {
+      const response = await axios(config);
+      return response.data as T;
+    } catch (error) {
+      lastError = error;
+      const upstreamStatus = getAxiosStatus(error);
+      const upstream = getAxiosData(error);
+      const isRetryable = isTransientSubsplashError(upstreamStatus);
+
+      logger.warn('Subsplash request failed', {
+        ...context,
+        attempt,
+        maxAttempts,
+        upstreamStatus,
+        upstream,
+        isRetryable,
+      });
+
+      if (!isRetryable || attempt >= maxAttempts) {
+        throw new HttpsError('internal', `Subsplash ${context.operation} failed for list ${context.listId ?? 'unknown'}`, {
+          code: 'SUBSPLASH_REQUEST_FAILED',
+          operation: context.operation,
+          method: context.method,
+          url: context.url,
+          ...(context.listId ? { listId: context.listId } : {}),
+          ...(context.rowId ? { rowId: context.rowId } : {}),
+          ...(typeof upstreamStatus === 'number' ? { upstream_status: upstreamStatus } : {}),
+          ...(upstream !== undefined ? { upstream } : {}),
+        });
+      }
+
+      await sleep(250 * attempt);
+    }
+  }
+
+  throw lastError;
 }
 
-export interface ListData {
-  _links: {
-    self: {
-      href: string;
-    };
-    'list-rows': {
-      href: string;
-    };
-  };
-  id: string;
-  app_key: string;
-  type: string;
-  title: string;
-  status: string;
-  max_item_count: number;
-  generated: boolean;
-  include_seriesless_media_items: boolean;
-  short_code: string;
-  list_rows_count: number;
-  updated_at: string;
-}
-
-export type existingSubsplashListRow = Omit<SubsplashListRow, '_embedded'>;
-export interface newSubsplashListRow extends Omit<SubsplashListRow, 'id' | '_embedded'> {
-  app_key: '9XTSHD';
-  method: 'static';
-  type: MediaType;
-  _embedded: { [key in MediaType & 'source-list']: { id: string } };
-}
-export type sortType = 'position' | 'created_at';
-
-async function getFullList(listId: string, token: string, maxListCount: number): Promise<SubsplashListRow[]> {
+export async function getFullListRows(listId: string, token: string): Promise<SubsplashListRow[]> {
+  // Max page size is 200, which is also the list limit, so one call is enough usually.
+  // Include unlisted items to get the true total count (unlisted items count toward the 200 limit)
   const listConfig = createAxiosConfig(
-    `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${listId}&page[size]=${maxListCount}&sort=position`,
+    `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${listId}&filter[unlisted]=include&page[size]=200&sort=position`,
     token,
     'GET'
   );
-  const response = (await axios(listConfig)).data;
+  const response = await runSubsplashRequest<{ _embedded: { 'list-rows': SubsplashListRow[] } }>(listConfig, {
+    operation: 'getListRows',
+    method: 'GET',
+    url: getConfigUrl(listConfig),
+    listId,
+  });
   return response['_embedded']['list-rows'];
 }
 
-export async function isAlreadyInList(
-  mediaItem: MediaItem,
-  listId: string,
-  token: string,
-  maxListCount: number
-): Promise<{ isInList: true; listItemId: string } | { isInList: false }> {
-  // check if item is already in the list
-  const fullList = await getFullList(listId, token, maxListCount);
-  const listRow = fullList.find((listRow) => {
-    const listRowId = convertSubsplashListRowToMediaItem(listRow).id;
-    logger.log(`listRowId: ${listRowId}, mediaItem.id: ${mediaItem.id}`);
-    return listRowId === mediaItem.id;
+export async function getFullListRowsWithTotal(listId: string, token: string): Promise<{ rows: SubsplashListRow[]; total: number }> {
+  // Max page size is 200, which is also the list limit, so one call is enough usually.
+  // Include unlisted items to get the true total count (unlisted items count toward the 200 limit)
+  const listConfig = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/list-rows?filter[app_key]=9XTSHD&filter[source_list]=${listId}&filter[unlisted]=include&page[size]=200&sort=position`,
+    token,
+    'GET'
+  );
+  const response = await runSubsplashRequest<{ _embedded?: { 'list-rows'?: SubsplashListRow[] }; total?: number }>(listConfig, {
+    operation: 'getListRowsWithTotal',
+    method: 'GET',
+    url: getConfigUrl(listConfig),
+    listId,
   });
-  return listRow ? { isInList: true, listItemId: listRow.id } : { isInList: false };
+  const rows = response._embedded?.['list-rows'] || [];
+  const total = response.total ?? rows.length;
+  return {
+    rows,
+    total
+  };
 }
 
-export async function addItemToList(mediaItem: MediaItem, listId: string, newListCount: number, token: string) {
-  logger.log(`Adding item: ${JSON.stringify(mediaItem)} to subsplash list: ${listId}`);
-  const position = 1;
-  const listRow = {
+export async function getListDetails(listId: string, token: string): Promise<SubsplashList> {
+  const config = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/lists/${listId}`,
+    token,
+    'GET'
+  );
+  return await runSubsplashRequest<SubsplashList>(config, {
+    operation: 'getListDetails',
+    method: 'GET',
+    url: getConfigUrl(config),
+    listId,
+  });
+}
+
+export async function createNewList(title: string, token: string, subtitle?: string): Promise<SubsplashList> {
+  const payload: Record<string, unknown> = {
+    app_key: "9XTSHD",
+    title: title,
+    type: "standard",
+    status: "published"
+  };
+  
+  if (subtitle) {
+    payload.subtitle = subtitle;
+  }
+  
+  const config = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/lists`,
+    token,
+    'POST',
+    JSON.stringify(payload)
+  );
+
+  return await runSubsplashRequest<SubsplashList>(config, {
+    operation: 'createList',
+    method: 'POST',
+    url: getConfigUrl(config),
+  });
+}
+
+export function createListRow(
+  item: { id: string, type: SubsplashMediaType }, 
+  listId: string, 
+  position: number
+): SubsplashListRow {
+  return {
     app_key: '9XTSHD',
     method: 'static',
     position,
-    type: mediaItem.type,
+    type: item.type,
     _embedded: {
-      [mediaItem.type]: {
-        id: mediaItem.id,
-      },
-      'source-list': {
-        id: listId,
-      },
+      [item.type]: { id: item.id },
+      'source-list': { id: listId },
+    }
+  };
+}
+
+export async function patchListRows(
+  listId: string, 
+  rows: SubsplashListRow[], 
+  token: string,
+  options?: {
+    forceFullRows?: boolean;
+  }
+): Promise<SubsplashListRow[]> {
+  logger.log(`Patching list ${listId} with ${rows.length} rows`);
+  
+  // Get current list details to preserve display-options and images
+  const currentList = await getListDetails(listId, token);
+  
+  // Build list-rows array: existing rows use {id, position}, new rows use full object
+  // Ensure positions are correct 1..N
+  const reindexedRows: SubsplashListRowPatch[] = rows.map((row, index) => {
+    const position = index + 1;
+    
+    // If row has an ID, it's an existing row - send only {id, position} (matching HAR file)
+    if (row.id && !options?.forceFullRows) {
+      return {
+        id: row.id,
+        position
+      };
+    }
+    
+    // If row doesn't have an ID, it's a new row - send full object
+    return {
+      ...row,
+      position
+    };
+  });
+
+  // Build payload matching HAR file structure
+  const payload: SubsplashPatchPayload = {
+    id: listId,
+    _embedded: {
+      // Preserve existing display-options if they exist
+      ...(
+        currentList._embedded['display-options']
+          ? {
+              'display-options': currentList._embedded['display-options'].map((opt: { id: string }) => ({
+                id: opt.id,
+              })),
+            }
+          : {}
+      ),
+      // Preserve existing images if they exist
+      ...(
+        currentList._embedded.images
+          ? {
+              images: currentList._embedded.images.map((img: { id: string; type: string }) => ({
+                id: img.id,
+                type: img.type,
+              })),
+            }
+          : {}
+      ),
+      'list-rows': reindexedRows,
     },
   };
 
-  const payload = {
-    id: listId,
-    list_rows_count: newListCount,
-    _embedded: {
-      'list-rows': [listRow],
-    },
-  };
-  const patchListConfig = createAxiosConfig(
+  const config = createAxiosConfig(
     `https://core.subsplash.com/builder/v1/lists/${listId}`,
     token,
     'PATCH',
     payload
   );
-  const response = await axios(patchListConfig);
-  const data = response.data;
-  const listItemId = data._embedded['list-rows'][0].id;
-  if (!listItemId) {
-    throw new HttpsError('internal', 'The subsplash list you are adding to is corrupted: unable to find listItemId');
-  }
-  return listItemId;
-}
 
-async function getLastNOldestItems(
-  n: number,
-  listId: string,
-  token: string,
-  sort: sortType
-): Promise<SubsplashListRow[]> {
-  const sortOrder = sort === 'position' ? '-' : '';
-  const url = `https://core.subsplash.com/builder/v1/list-rows?filter%5Bapp_key%5D=9XTSHD&filter%5Bsource_list%5D=${listId}&sort=${`${sortOrder}${sort}`}&page%5Bnumber%5D=1&page%5Bsize%5D=${n}`;
-  const config = createAxiosConfig(url, token, 'GET');
-  const response = await axios(config);
-  const listRows: SubsplashListRow[] = response.data['_embedded']['list-rows'];
-  return listRows;
-}
-
-export async function removeListRows(listId: string, listRows: SubsplashListRow[], token: string): Promise<void> {
-  if (!listRows.length) {
-    return;
-  }
-  await Promise.all(
-    listRows.map(async (item) => {
-      const itemId = item['id'];
-      logger.log(`Deleting item with id: ${itemId}`);
-      const deleteConfig = createAxiosConfig(
-        `https://core.subsplash.com/builder/v1/list-rows/${itemId}`,
-        token,
-        'DELETE'
-      );
-      await axios(deleteConfig);
-    })
-  );
-  // TODO: remove from firebase list
-}
-
-export const removeNOldestItems = async (
-  numberToRemove: number,
-  listId: string,
-  token: string,
-  sort: sortType
-): Promise<void> => {
-  const listRows = await getLastNOldestItems(numberToRemove, listId, token, sort);
-  await removeListRows(listId, listRows, token);
-};
-
-export function convertSubsplashListRowToMediaItem(listRow: SubsplashListRow): MediaItem {
-  let mediaKey = undefined;
-  for (const key in listRow._embedded) {
-    mediaKey = mediaTypes.find((type) => type === key);
-    if (mediaKey) {
-      break;
+  try {
+    const response = await runSubsplashRequest<{ _embedded?: { 'list-rows'?: SubsplashListRow[] } }>(config, {
+      operation: options?.forceFullRows ? 'patchListRowsRestore' : 'patchListRows',
+      method: 'PATCH',
+      url: getConfigUrl(config),
+      listId,
+    });
+    const patchedRows = response?._embedded?.['list-rows'];
+    if (Array.isArray(patchedRows)) {
+      return patchedRows as SubsplashListRow[];
     }
+
+    return rows.map((row, index) => ({
+      ...row,
+      position: index + 1,
+    }));
+  } catch (error: unknown) {
+    logger.error(`Failed to patch list ${listId}`, getAxiosData(error) ?? error);
+    throw error;
   }
-  if (!mediaKey || !listRow._embedded[mediaKey]) {
-    throw new HttpsError('internal', 'The subsplash list you are adding to is corrupted');
-  }
-  const mediaItemFull = listRow._embedded[mediaKey];
-  if (!mediaItemFull) {
-    throw new HttpsError('internal', 'The subsplash list you are adding to is corrupted');
-  }
-  const mediaItem: MediaItem = {
-    id: mediaItemFull.id,
-    type: mediaKey,
-  };
-  return mediaItem;
-}
-export async function getListCount(listId: string, token: string): Promise<number> {
-  logger.log(`Getting list count for list: ${listId}`);
-  const currentListConfig = createAxiosConfig(`https://core.subsplash.com/builder/v1/lists/${listId}`, token, 'GET');
-  const response = (await axios(currentListConfig)).data;
-  const currentListCount: number = response.list_rows_count;
-  logger.log(`Current list count for list: ${listId} is: ${currentListCount}`);
-  return currentListCount;
 }
 
-export async function handleOverflow(
-  listId: string,
-  mediaItem: MediaItem,
-  maxListCount: number,
-  token: string,
-  _type: ListType
-) {
-  logger.log(
-    `handleOverflow(listId: ${listId}, itemsToAdd: ${JSON.stringify(mediaItem)}, maxListCount: ${maxListCount})`
+export async function deleteListRow(rowId: string, listId: string, token: string): Promise<void> {
+  const config = createAxiosConfig(
+    `https://core.subsplash.com/builder/v1/list-rows/${rowId}`,
+    token,
+    'DELETE'
   );
-  const currentListCount = await getListCount(listId, token);
-  const newListCount = currentListCount + 1;
 
-  // Base case: list is not full
-  if (newListCount <= maxListCount) {
-    await addItemToList(mediaItem, listId, newListCount, token);
-    return;
-  }
-
-  // Recursive case: list is full
-  //TODO: 'handle overflow';
+  await runSubsplashRequest<unknown>(config, {
+    operation: 'deleteListRow',
+    method: 'DELETE',
+    url: getConfigUrl(config),
+    listId,
+    rowId,
+  });
 }

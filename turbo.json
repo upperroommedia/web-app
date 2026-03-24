@@ -1,0 +1,49 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "app-dev": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": [
+        "functions-core#build",
+        "functions-media#build",
+        "functions-image#build",
+        "functions-integrations#build"
+      ],
+      "with": [
+        "//#emulators"
+      ]
+    },
+    "//#emulators": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "SKIP_FUNCTIONS_BUILD",
+        "FIREBASE_PROJECT_ID",
+        "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+        "EMULATE_EXTENSIONS",
+        "EMULATE_APPHOSTING"
+      ]
+    },
+    "build-watch": {
+      "cache": false,
+      "persistent": true
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "lib/**"]
+    },
+    "build:ci": {
+      "dependsOn": ["^build:ci"],
+      "outputs": [".next/**", "!.next/cache/**", "lib/**"]
+    },
+    "lint:ci": {
+      "dependsOn": ["^lint:ci"],
+      "outputs": []
+    },
+    "test:ci": {
+      "cache": false,
+      "outputs": []
+    }
+  }
+}

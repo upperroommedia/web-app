@@ -1,0 +1,26 @@
+/**
+ * Uploader Page - Main entry point for uploading sermons
+ * Uses AppLayout with sidebar for consistent navigation
+ */
+import type { NextPage } from 'next';
+import Head from 'next/head';
+import VerifiedUserUploader from '../components/uploaderComponents/VerifiedUserUploaderComponent';
+import AppLayout from '../layout/AppLayout';
+
+const Home: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
+  return (
+    <>
+      <Head>
+        <title>Upload Sermon | Upper Room Media</title>
+        <meta property="og:title" content="Upload Sermon | Upper Room Media" key="title" />
+        <meta name="description" content="Upload sermons to Upper Room Media" />
+      </Head>
+      <VerifiedUserUploader />
+    </>
+  );
+};
+
+// Use AppLayout for the sidebar navigation
+Home.PageLayout = AppLayout;
+
+export default Home;

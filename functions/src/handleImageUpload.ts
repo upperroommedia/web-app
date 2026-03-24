@@ -2,14 +2,14 @@ import axios, { AxiosRequestConfig } from 'axios';
 import { logger } from 'firebase-functions';
 import { onObjectFinalized } from 'firebase-functions/v2/storage';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import {
   ImageSizeType,
   ImageSizes,
   ImageType,
   // resizeType,
   // supportedContentTypes
-} from '../../types/Image';
+} from '@upperroom/shared/types/Image';
 import { HttpsError } from 'firebase-functions/v2/https';
 // import { FirestoreDataConverter } from '@google-cloud/firestore';
 // import { modifyImage, ResizedImageResult } from './resize-image';
@@ -19,6 +19,10 @@ import { mkdirp } from 'mkdirp';
 import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import { ensureFirebaseDownloadUrl } from './storageDownloadUrl';
+import handleError from './handleError';
 // import { resize } from 'imagemagick';
 
 // const adminImageConvertor = {
@@ -77,9 +81,10 @@ const uploadImageToSubsplash = async (name: string, originalFile: string): Promi
 
 const handleImageUpload = onObjectFinalized(
   {
-    bucket: 'urm-app-images',
+    bucket: getFirebaseImagesBucket(),
     timeoutSeconds: 300,
     memory: '1GiB',
+    secrets: subsplashSecretsWithRuntimeAlerts,
   },
   async (storageEvent): Promise<void> => {
     const object = storageEvent.data;
@@ -134,12 +139,11 @@ const handleImageUpload = onObjectFinalized(
       await remoteFile.download({ destination: originalFile });
       logger.log(`Downloaded image file: '${filePath}' to '${originalFile}'`);
 
-      // uploading to subsplash
-      const publicUrl = bucket.file(object.name).publicUrl();
+      const downloadUrl = await ensureFirebaseDownloadUrl(remoteFile);
       logger.log('uploading to subsplash');
       const [subsplashImageId, computedImageMetadata] = await Promise.all([
         uploadImageToSubsplash(imageName, originalFile),
-        computeMetadataForImage(publicUrl),
+        computeMetadataForImage(originalFile),
       ]);
 
       // uploading to firestore
@@ -149,7 +153,7 @@ const handleImageUpload = onObjectFinalized(
         subsplashId: subsplashImageId,
         size: 'original',
         type: metadata.type as ImageSizeType,
-        downloadLink: publicUrl,
+        downloadLink: downloadUrl,
         name: imageName,
         dateAddedMillis: new Date().getTime(),
       };
@@ -161,6 +165,11 @@ const handleImageUpload = onObjectFinalized(
         .doc(subsplashImageId)
         .set(image);
     } catch (e) {
+      handleError(e, {
+        alertCode: 'HANDLE_IMAGE_UPLOAD_RUNTIME_FAILURE',
+        summary: 'handleImageUpload failed while processing a finalized storage object.',
+        context: { functionName: 'handleImageUpload', filePath },
+      });
       return logger.error(e);
     } finally {
       if (originalFile) {

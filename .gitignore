@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.js
 
@@ -10,7 +11,9 @@
 
 # next.js
 /.next/
+**/.next/
 /out/
+next-env.d.ts
 
 # production
 /build
@@ -29,6 +32,7 @@
 .env.test.local
 .env.production.local
 .env*
+!.env.template
 
 # vercel
 .vercel
@@ -37,4 +41,25 @@
 sa.json
 
 .firebase/
+firebase.mail.json
 firestore-coverage.html
+*.har
+*.tsbuildinfo
+.vscode
+.cursor
+.turbo
+.agents
+.github/*
+!.github/workflows/
+!.github/workflows/*.yml
+*.secret*
+
+test-results/
+output/
+packages/**/*.d.ts
+packages/**/*.js
+packages/**/*.js.map
+
+# Firebase extension local secrets/config
+/extensions/*.env
+/extensions/*.secret.local

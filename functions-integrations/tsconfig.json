@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "module": "commonjs",
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "outDir": "lib",
+    "paths": {
+      "@upperroom/shared/*": [
+        "../packages/shared/*"
+      ]
+    },
+    "rootDir": "..",
+    "sourceMap": true,
+    "strict": true,
+    "target": "es2017",
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "compileOnSave": true,
+  "include": [
+    "src/index.ts",
+    "../functions/src/**/*.ts",
+    "../packages/shared/**/*.ts",
+    "../packages/contracts/**/*.ts"
+  ]
+}

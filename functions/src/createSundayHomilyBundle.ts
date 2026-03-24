@@ -1,6 +1,6 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { createBundleHandler } from './utils/bundleCreationUtils';
-import { SUNDAY_HOMILY_BUNDLE_CONFIG } from '../../shared/bundleConfigs';
+import { SUNDAY_HOMILY_BUNDLE_CONFIG } from '@upperroom/shared/shared/bundleConfigs';
 
 export const createSundayHomilyBundle = onRequest(
     {

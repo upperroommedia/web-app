@@ -1,9 +1,10 @@
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { https, logger } from 'firebase-functions/v2';
 import { CallableRequest } from 'firebase-functions/v2/https';
-import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User } from '../../types/User';
+import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User } from '@upperroom/shared/types/User';
 import { IdTokenResult } from 'firebase/auth';
-import { FunctionOutputType } from '../../types/Function';
+import { FunctionOutputType } from '@upperroom/shared/types/Function';
+import handleError from './handleError';
 
 export interface ListUsersInputType {
   maxResults?: number;
@@ -67,6 +68,12 @@ const listUsers = https.onCall(async (request: CallableRequest<ListUsersInputTyp
         result = result.concat(await listAllUsers(maxResults, listUsersResult.pageToken));
       }
     } catch (error) {
+      handleError(error, {
+        alertCode: 'LIST_USERS_RUNTIME_FAILURE',
+        summary: 'listUsers failed while paging Firebase Auth users.',
+        request,
+        context: { functionName: 'listUsers' },
+      });
       logger.error('Error listing users', error);
     }
     return result;

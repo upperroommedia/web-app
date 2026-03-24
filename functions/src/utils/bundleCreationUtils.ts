@@ -1,12 +1,25 @@
 import { logger } from 'firebase-functions/v2';
 import { FirestoreDataConverter, Query } from 'firebase-admin/firestore';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
-import { BundleConfig, BundleMetadata } from '../../../shared/bundleConfigs';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { BundleConfig, BundleMetadata } from '@upperroom/shared/shared/bundleConfigs';
+import { getFirebaseStorageBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { Writable } from 'stream';
+import handleError from '../handleError';
 
 const firestoreAdmin = firebaseAdmin.firestore();
 const storage = firebaseAdmin.storage();
 const database = firebaseAdmin.database();
-const BUNDLE_BUCKET = 'urm-app.appspot.com';
+const BUNDLE_BUCKET = getFirebaseStorageBucket();
+
+type BundleErrorResponse = {
+    json: (body: { error: string }) => void;
+};
+
+interface BundleHttpResponse extends Writable {
+    set: (field: string, value: string) => BundleHttpResponse;
+    send: (body: unknown) => void;
+    status: (code: number) => BundleErrorResponse;
+}
 
 export interface BundleCreationConfig<T> {
     collectionName: string;
@@ -18,12 +31,12 @@ export interface BundleCreationConfig<T> {
     countFieldName: string;
     displayName: string;
     orderByField?: string;
-    whereConditions?: Array<{ field: string; operator: any; value: any }>;
+    whereConditions?: Array<{ field: string; operator: unknown; value: unknown }>;
 }
 
 export async function serveBundleFromStorage<T>(
     config: BundleConfig<T>,
-    response: any
+    response: BundleHttpResponse
 ): Promise<boolean> {
     const bucket = storage.bucket(BUNDLE_BUCKET);
     const bundleFile = bucket.file(config.bundlePath);
@@ -78,15 +91,16 @@ export async function serveBundleFromStorage<T>(
 
 export async function generateAndStoreBundle<T>(
     config: BundleConfig<T>,
-    response?: any
+    response?: BundleHttpResponse
 ): Promise<number> {
     try {
         logger.info(`Generating new ${config.displayName} bundle`);
 
         // Build query
+        const adminConverter = config.converter as unknown as FirestoreDataConverter<T>;
         let query: Query<T> = firestoreAdmin
             .collection(config.collectionName)
-            .withConverter(config.converter);
+            .withConverter(adminConverter);
 
         // Add where conditions if specified
         if (config.whereConditions) {
@@ -157,8 +171,8 @@ export async function generateAndStoreBundle<T>(
 
 export async function createBundleHandler<T>(
     config: BundleConfig<T>,
-    request: any,
-    response: any
+    _request: unknown,
+    response: BundleHttpResponse
 ): Promise<void> {
     try {
         logger.info(`Serving ${config.displayName} bundle`);
@@ -176,6 +190,15 @@ export async function createBundleHandler<T>(
         }
 
     } catch (error) {
+        handleError(error, {
+            alertCode: 'BUNDLE_SERVE_RUNTIME_FAILURE',
+            summary: `createBundleHandler failed while serving ${config.displayName} bundle.`,
+            context: {
+                bundleType: config.bundleType,
+                displayName: config.displayName,
+                metadataPath: config.metadataDocPath,
+            },
+        });
         logger.error(`Error serving ${config.displayName} bundle:`, error);
         response.status(500).json({ error: `Failed to serve ${config.displayName} bundle` });
     }

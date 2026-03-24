@@ -1,0 +1,62 @@
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: urm-app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyCJKArKBX02ItsUD1zDJVC6JRA4sho7PTo
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: 1:747878690617:web:d29679a2961a60f31b82e8
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: '747878690617'
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: urm-app.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: urm-app.appspot.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_DATABASE_URL
+    value: https://urm-app-default-rtdb.firebaseio.com/
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_FUNCTIONS_URL
+    value: https://us-central1-urm-app.cloudfunctions.net
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_IMAGES_BUCKET
+    value: urm-app-images
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: FIREBASE_PROJECT_ID
+    value: urm-app
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_STORAGE_BUCKET
+    value: urm-app.appspot.com
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_DATABASE_URL
+    value: https://urm-app-default-rtdb.firebaseio.com/
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_IMAGES_BUCKET
+    value: urm-app-images
+    availability:
+      - RUNTIME

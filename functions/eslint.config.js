@@ -28,11 +28,12 @@ module.exports = [
         languageOptions: {
             globals: {
                 ...globals.node,
+                ...globals.jest,
             },
             parser: tsParser,
             parserOptions: {
                 tsconfigRootDir: __dirname,
-                project: ["tsconfig.json"],
+                project: ["tsconfig.json", "tsconfig.dev.json"],
             },
         },
         plugins: {

@@ -1,7 +1,7 @@
 import { firestore, logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../handleError';
-import { BundleConfig } from '../../../shared/bundleConfigs';
+import { BundleConfig } from '@upperroom/shared/shared/bundleConfigs';
 import { generateAndStoreBundle } from './bundleCreationUtils';
 
 const database = firebaseAdmin.database();
@@ -9,8 +9,8 @@ const database = firebaseAdmin.database();
 export function createBundleDocumentListener<T>(config: BundleConfig<T>) {
   return firestore.onDocumentWritten(config.collectionPath, async (event) => {
     // Get the data from before and after
-    const beforeData = event.data?.before?.data();
-    const afterData = event.data?.after?.data();
+    const beforeData = event.data?.before?.data() as T | undefined;
+    const afterData = event.data?.after?.data() as T | undefined;
     const dataDiff = {
       before: beforeData,
       after: afterData,

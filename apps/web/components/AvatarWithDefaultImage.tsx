@@ -1,0 +1,62 @@
+import { ImageType } from '../types/Image';
+import Image from 'next/image';
+import Box from '@mui/material/Box';
+import { BoxProps } from '@mui/system';
+import { memo } from 'react';
+
+interface AvatarWithDefaultImageProps extends BoxProps {
+  altName: string;
+  width: number;
+  height: number;
+  image?: ImageType;
+  borderRadius?: number;
+  defaultImageURL?: string;
+  sizes?: string;
+}
+
+function AvatarWithDefaultImage({
+  image,
+  altName,
+  width,
+  height,
+  borderRadius = 0,
+  defaultImageURL,
+  sizes,
+  ...props
+}: AvatarWithDefaultImageProps) {
+  const { sx, ...rest } = props;
+  return (
+    <Box
+      sx={{
+        borderRadius: `${borderRadius}px`,
+        flexShrink: 0,
+        overflow: 'hidden',
+        position: 'relative',
+        width,
+        height,
+        backgroundColor: image?.averageColorHex ? image.averageColorHex : undefined,
+        backgroundImage: image?.averageColorHex
+          ? undefined
+          : defaultImageURL
+          ? `url(${defaultImageURL})`
+          : 'url(/URM_icon.png)',
+        backgroundPosition: 'center center',
+        backgroundSize: 'cover',
+        ...sx,
+      }}
+      {...rest}
+    >
+      {image && (
+        <Image
+          src={image.downloadLink}
+          alt={`Image of ${altName}`}
+          fill
+          sizes={sizes ?? `${width}px`}
+          style={{ objectFit: 'cover' }}
+        />
+      )}
+    </Box>
+  );
+}
+
+export default memo(AvatarWithDefaultImage);

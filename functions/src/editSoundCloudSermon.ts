@@ -1,44 +1,84 @@
-import axios, { AxiosRequestConfig } from 'axios';
 import handleError from './handleError';
+import { normalizeSoundCloudApiError, updateTrack } from './soundcloudClient';
+import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { UploadToSoundCloudInputType } from './uploadToSoundCloud';
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
 
 export interface EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA
   extends Partial<Omit<UploadToSoundCloudInputType, 'audioStoragePath'>> {
   trackId: string;
 }
 
-function reformatedTags(tags: string[]) {
-  return tags.map((tag) => `"${tag}"`).join(' ');
+export interface EditSoundCloudSermonReturnType {
+  soundCloudTrackUrl?: string;
 }
 
 const editOnSoundCloud = onCall(
-  async (request: CallableRequest<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>): Promise<void> => {
+  { secrets: soundcloudSecretsWithRuntimeAlerts },
+  async (request: CallableRequest<EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA>): Promise<EditSoundCloudSermonReturnType> => {
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('permission-denied', 'You do not have the correct permissions for this action.');
     }
-    if (process.env.EMAIL == undefined || process.env.PASSWORD == undefined) {
-      throw new HttpsError('failed-precondition', 'Email or Password are not set in .env file');
-    }
-
     const data = request.data;
-    const config: AxiosRequestConfig = {
-      method: 'POST',
-      url: 'https://hook.eu1.make.com/o789j4wuq2vwl3ixpopysl88wky5ksnb',
-      data: {
-        trackId: data.trackId,
-        ...(data.imageStoragePath && { imageStoragePath: data.imageStoragePath }),
-        ...(data.title && { title: data.title }),
-        ...(data.tags && { tags: reformatedTags(data.tags) }),
-        ...(data.description && { description: data.description }),
-      },
-    };
-    logger.log('editOnSoundCloud', config);
+    const imageSource = data.imageSource ?? data.imageStoragePath;
+    const bucket = imageSource ? firebaseAdmin.storage().bucket() : undefined;
+    logger.log('editOnSoundCloud', { trackId: data.trackId });
     try {
-      await axios(config);
+      const updateResult = await runWithSoundCloudAccessToken((token) =>
+        updateTrack(token, data.trackId, {
+          ...(data.title != null && { title: data.title }),
+          ...(data.description != null && { description: data.description }),
+          ...(data.tags != null && { tags: data.tags }),
+          ...(imageSource != null &&
+            bucket != null && {
+              imageSource,
+              bucket,
+            }),
+        })
+      );
+      return {
+        ...(updateResult?.permalinkUrl ? { soundCloudTrackUrl: updateResult.permalinkUrl } : {}),
+      };
     } catch (error) {
+      if (error instanceof HttpsError) {
+        await emitSoundCloudReconnectAlertIfNeeded({
+          error,
+          alertCode: 'PUBLISH_SOUNDCLOUD_EDIT_RUNTIME_FAILURE',
+          summary: 'editSoundCloudSermon callable requires SoundCloud re-authorization.',
+          context: {
+            functionName: 'editSoundCloudSermon',
+            trackId: data.trackId,
+          },
+        });
+        throw error;
+      }
+
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SOUNDCLOUD_EDIT_RUNTIME_FAILURE',
+        summary: 'editSoundCloudSermon callable failed during publish edit flow.',
+        error: (() => {
+          try {
+            normalizeSoundCloudApiError(error);
+          } catch (normalizedError) {
+            return normalizedError;
+          }
+          return error;
+        })(),
+        context: {
+          functionName: 'editSoundCloudSermon',
+          trackId: data.trackId,
+        },
+      });
+      try {
+        normalizeSoundCloudApiError(error);
+      } catch (normalizedError) {
+        throw handleError(normalizedError);
+      }
       throw handleError(error);
     }
   }

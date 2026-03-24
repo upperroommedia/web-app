@@ -8,12 +8,12 @@ import { convertStringToMilliseconds, createTempFile, logMemoryUsage, throwError
 import { CustomMetadata, AudioSource } from './types';
 import { unlink } from 'fs/promises';
 import { Readable } from 'stream';
-import { sermonStatus, sermonStatusType } from '../../../types/SermonTypes';
+import { sermonStatus, sermonStatusType } from '@upperroom/shared/types/SermonTypes';
 import ytdl from 'ytdl-core';
 // import { HttpsProxyAgent } from 'https-proxy-agent';
 
 const trimAndTranscode = async (
-  ffmpeg: typeof import('fluent-ffmpeg'),
+  ffmpeg: typeof import('@ts-ffmpeg/fluent-ffmpeg'),
   cancelToken: CancelToken,
   bucket: Bucket,
   audioSource: AudioSource,

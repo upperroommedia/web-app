@@ -1,6 +1,6 @@
 {
   "[typescriptreact]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
+    "editor.defaultFormatter": "vscode.typescript-language-features"
   },
   "testing.openTesting": "neverOpen",
   "jest.outputConfig": {
@@ -8,5 +8,6 @@
     "revealWithFocus": "none",
     "clearOnRun": "none"
   },
-  "testing.automaticallyOpenTestResults": "neverOpen"
+  "testing.automaticallyOpenTestResults": "neverOpen",
+  "typescript.tsdk": "node_modules/typescript/lib"
 }

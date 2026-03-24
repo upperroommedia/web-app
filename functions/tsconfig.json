@@ -4,11 +4,16 @@
     "noImplicitReturns": true,
     "noUnusedLocals": true,
     "outDir": "lib",
+    "rootDir": "..",
     "sourceMap": true,
     "strict": true,
     "target": "es2017",
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": [
+      "node",
+      "jest"
+    ]
   },
   "compileOnSave": true,
   "include": [

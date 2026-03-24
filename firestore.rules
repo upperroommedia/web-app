@@ -47,12 +47,28 @@ service cloud.firestore {
       allow write: if (canUpload());
     }
     
+    // Series permissions: only owner or admin can access
+    match /series/{seriesId} {
+      // Admins can read/write all series
+      allow read, write: if isAdmin();
+      // Owners can read/write their own series
+      allow read, write: if canUpload() && resource.data.ownerId == request.auth.uid;
+      // Allow create if user can upload (they become the owner)
+      allow create: if canUpload() && request.resource.data.ownerId == request.auth.uid;
+      
+      // Series items subcollection - same ownership rules
+      match /seriesItems/{itemId} {
+        allow read, write: if isAdmin();
+        allow read, write: if canUpload() && get(/databases/$(database)/documents/series/$(seriesId)).data.ownerId == request.auth.uid;
+      }
+    }
     
-    // Sermon permissions: Admins have full access, uploaders/publishers can manage their own sermons
+    
+    // Sermon permissions: Admins have full access, uploaders/publishers can only access their own sermons
     match /sermons/{sermonId} {
       allow read, write: if isAdmin();
-      allow read, update: if resource == null || (canUpload() && resource.data.uploaderId == request.auth.uid);
-      allow delete: if canUpload() && resource.data.uploaderId == request.auth.uid && (resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED');
+      allow read, update: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid;
+      allow delete: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && (resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED');
       allow create: if canUpload();
     }
 

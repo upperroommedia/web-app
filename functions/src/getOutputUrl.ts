@@ -1,7 +1,7 @@
-import logger from 'firebase-functions/lib/logger';
+import { logger } from 'firebase-functions/v2';
 import { GetSignedUrlConfig } from '@google-cloud/storage';
-import { PROCESSED_SERMONS_BUCKET } from '../../constants/storage_constants';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import { PROCESSED_SERMONS_BUCKET } from '@upperroom/shared/constants/storage_constants';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 
 const getOutputUrl = async (fileBucket: string, fileName: string, transcodeTo: string): Promise<string> => {
   logger.log('Get Output Url with Parameters:', fileBucket, fileName, transcodeTo);

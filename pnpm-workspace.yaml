@@ -1,6 +1,44 @@
 packages:
-  - "."
-  - "functions"
+  - 'apps/*'
+  - 'packages/*'
+  - 'functions'
+  - 'functions-core'
+  - 'functions-media'
+  - 'functions-image'
+  - 'functions-integrations'
 
 onlyBuiltDependencies:
   - ffmpeg-static
+
+catalog:
+  '@google-cloud/functions-framework': ^3.2.0
+  '@google-cloud/storage': 7.19.0
+  '@ts-ffmpeg/fluent-ffmpeg': ^2.0.4
+  '@types/node': ^18.19.7
+  '@typescript-eslint/eslint-plugin': ^8.34.0
+  '@typescript-eslint/parser': ^8.34.0
+  algoliasearch: ^5.27.0
+  axios: ^1.13.6
+  buffer-image-size: ^0.6.4
+  eslint: ^9.28.0
+  eslint-plugin-import: ^2.29.1
+  fast-average-color-node: ^3.1.0
+  ffmpeg-static: ^5.2.0
+  ffprobe-static: ^3.1.0
+  firebase: ^12.10.0
+  firebase-admin: ^13.7.0
+  firebase-functions: ^7.1.1
+  form-data: ^4.0.0
+  google-auth-library: ^9.15.1
+  headers: ^0.9.6
+  https-proxy-agent: ^7.0.4
+  image-size: ^1.1.1
+  jest: ^29.7.0
+  lodash: ^4.17.23
+  mkdirp: ^2.1.6
+  node-fetch: 3.3.0
+  node-vibrant: ^4.0.3
+  p-limit: ^6.2.0
+  typescript: ^5.9.3
+  uuid: ^9.0.1
+  ytdl-core: ^4.11.5

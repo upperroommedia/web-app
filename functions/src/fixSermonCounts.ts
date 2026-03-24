@@ -1,6 +1,7 @@
 import { https, logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { recalculateSermonCounts, validateSermonCounts } from './utils/recalculateSermonCounts';
+import handleError from './handleError';
 
 interface FixSermonCountsRequest {
   sermonId?: string; // If provided, fix only this sermon. Otherwise, fix all sermons.
@@ -135,6 +136,11 @@ const fixSermonCounts = https.onCall<FixSermonCountsRequest, Promise<FixSermonCo
         results,
       };
     } catch (error) {
+      handleError(error, {
+        alertCode: 'FIX_SERMON_COUNTS_RUNTIME_FAILURE',
+        summary: 'fixSermonCounts failed while validating or repairing sermon counts.',
+        context: { functionName: 'fixSermonCounts', sermonId: sermonId ?? null, validateOnly },
+      });
       logger.error('Error in fixSermonCounts:', error);
       return {
         success: false,

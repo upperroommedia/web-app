@@ -1,7 +1,7 @@
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminSermonConverter } from '../firestoreDataConverter';
-import { uploadStatus } from '../../../types/SermonTypes';
-import { SermonList } from '../../../types/SermonList';
+import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
+import { SermonList } from '@upperroom/shared/types/SermonList';
 
 /**
  * Recalculates and updates the numberOfLists and numberOfListsUploadedTo counts for a sermon

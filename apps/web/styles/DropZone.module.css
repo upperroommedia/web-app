@@ -1,0 +1,66 @@
+/* DropZone - Dark theme compatible styles */
+.dropzone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 800px;
+  align-items: center;
+  padding: 40px 20px;
+  margin-bottom: 1rem;
+  border-width: 2px;
+  border-radius: 12px;
+  border-style: dashed;
+  background-color: var(--background-card, #242830);
+  color: var(--text-secondary, #94a3b8);
+  outline: none;
+  transition: all 0.24s ease-in-out;
+  cursor: pointer;
+}
+
+.dropzone:hover {
+  background-color: var(--accent-glow, rgba(249, 115, 22, 0.15));
+  border-color: var(--accent-primary, #f97316);
+}
+
+.dropzoneError {
+  border-color: #ef4444;
+}
+
+.dropzoneError:hover {
+  border-color: #f97316;
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.dropzoneNoError {
+  border-color: var(--border-color, rgba(255, 255, 255, 0.15));
+}
+
+.dropzoneNoError:hover {
+  border-color: var(--accent-primary, #f97316);
+}
+
+.dropzoneNoError:focus {
+  border-color: var(--accent-primary, #f97316);
+  box-shadow: 0 0 0 4px var(--accent-glow, rgba(249, 115, 22, 0.15));
+}
+
+.dropzoneContainer {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.dropzoneContainer p {
+  margin: 0;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.errorMessage {
+  color: #ef4444;
+  font-size: 0.8rem;
+  margin-top: 8px;
+}

@@ -1,5 +1,5 @@
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../../handleError';
 
 const listOnDelete = onDocumentDeleted('lists/{listId}', async (event) => {

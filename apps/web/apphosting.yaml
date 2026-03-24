@@ -1,0 +1,62 @@
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+  minInstances: 0
+  maxInstances: 20
+  concurrency: 80
+
+scripts:
+  runCommand: node apps/web/.next/standalone/apps/web/server.js
+
+outputFiles:
+  serverApp:
+    include:
+      - apps/web/.next/standalone
+      - apps/web/.next/static
+      - apps/web/public
+
+env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_ALGOLIA_APP_ID
+    value: PRYE69L8IB
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_ALGOLIA_API_KEY
+    secret: ALGOLIA_SEARCH_API_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: FIREBASE_FUNCTIONS_REGION
+    value: us-central1
+    availability:
+      - RUNTIME
+
+  - variable: ADMIN_REQUEST_RECIPIENTS
+    secret: ADMIN_REQUEST_RECIPIENTS
+    availability:
+      - RUNTIME
+  - variable: RUNTIME_ALERT_RECIPIENTS
+    secret: RUNTIME_ALERT_RECIPIENTS
+    availability:
+      - RUNTIME
+  - variable: ADMIN_BASE_URL
+    secret: ADMIN_BASE_URL
+    availability:
+      - RUNTIME
+  - variable: SUBSPLASH_EMAIL
+    secret: SUBSPLASH_EMAIL
+    availability:
+      - RUNTIME
+  - variable: SUBSPLASH_PASSWORD
+    secret: SUBSPLASH_PASSWORD
+    availability:
+      - RUNTIME
+  - variable: ALGOLIA_SEARCH_API_KEY
+    secret: ALGOLIA_SEARCH_API_KEY

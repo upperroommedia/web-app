@@ -1,8 +1,12 @@
-import axios, { AxiosRequestConfig } from 'axios';
 import handleError from './handleError';
+import { normalizeSoundCloudApiError, uploadTrack } from './soundcloudClient';
+import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
 
 export interface UploadToSoundCloudInputType {
   audioStoragePath: string;
@@ -10,37 +14,76 @@ export interface UploadToSoundCloudInputType {
   speakers: string[];
   tags: string[];
   description: string;
+  imageSource?: string;
   imageStoragePath?: string;
 }
 
 export type UploadToSoundCloudReturnType = {
   soundCloudTrackId: string;
+  soundCloudTrackUrl?: string;
 };
 
 const uploadToSoundCloudCall = onCall(
+  { secrets: soundcloudSecretsWithRuntimeAlerts },
   async (request: CallableRequest<UploadToSoundCloudInputType>): Promise<UploadToSoundCloudReturnType> => {
     logger.log('uploadToSoundCloud', request);
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     const data = request.data;
-    const reformatedTags = data.tags.map((tag) => `"${tag}"`).join(' ');
-    const config: AxiosRequestConfig = {
-      method: 'POST',
-      url: 'https://hook.eu1.make.com/q1tpo6rfktqe3a8cexb79n70j6sq0y65',
-      data: {
-        title: data.title,
-        audioStoragePath: data.audioStoragePath,
-        ...(data.imageStoragePath && { imageStoragePath: data.imageStoragePath }),
-        tags: reformatedTags,
-        description: data.description,
-      },
-    };
+    const bucket = firebaseAdmin.storage().bucket();
     try {
-      const response = (await axios(config)).data;
-      logger.log('SoundCloud response', response);
-      return { soundCloudTrackId: response };
+      const uploadResult = await runWithSoundCloudAccessToken((token) =>
+        uploadTrack(token, {
+          bucket,
+          audioStoragePath: data.audioStoragePath,
+          imageSource: data.imageSource ?? data.imageStoragePath,
+          title: data.title,
+          tags: data.tags,
+          description: data.description,
+        })
+      );
+      const soundCloudTrackId = uploadResult.trackIdentifier;
+      logger.log('SoundCloud upload response track id', soundCloudTrackId);
+      return {
+        soundCloudTrackId,
+        ...(uploadResult.permalinkUrl ? { soundCloudTrackUrl: uploadResult.permalinkUrl } : {}),
+      };
     } catch (error) {
+      if (error instanceof HttpsError) {
+        await emitSoundCloudReconnectAlertIfNeeded({
+          error,
+          alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
+          summary: 'uploadToSoundCloud callable requires SoundCloud re-authorization.',
+          context: {
+            functionName: 'uploadToSoundCloud',
+            audioStoragePath: data.audioStoragePath,
+          },
+        });
+        throw error;
+      }
+
+      await emitOperationalAlert({
+        alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
+        summary: 'uploadToSoundCloud callable failed during publish upload flow.',
+        error: (() => {
+          try {
+            normalizeSoundCloudApiError(error);
+          } catch (normalizedError) {
+            return normalizedError;
+          }
+          return error;
+        })(),
+        context: {
+          functionName: 'uploadToSoundCloud',
+          audioStoragePath: data.audioStoragePath,
+        },
+      });
+      try {
+        normalizeSoundCloudApiError(error);
+      } catch (normalizedError) {
+        throw handleError(normalizedError);
+      }
       throw handleError(error);
     }
   }

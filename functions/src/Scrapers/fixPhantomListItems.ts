@@ -1,14 +1,16 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
-import { Topic } from '../../../types/Topic';
-import { List, ListType, OverflowBehavior } from '../../../types/List';
-import { Sermon } from '../../../types/SermonTypes';
-import { emptyList } from '../../../types/List';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { Topic } from '@upperroom/shared/types/Topic';
+import { List, ListType, OverflowBehavior } from '@upperroom/shared/types/List';
+import { Sermon } from '@upperroom/shared/types/SermonTypes';
+import { emptyList } from '@upperroom/shared/types/List';
 import updateSubsplashSermonTopics from '../helpers/updateSubsplashTagsHelper';
 import { authenticateSubsplash } from '../subsplashUtils';
+import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
+import handleError from '../handleError';
 
-export const fixPhantomListItems = onRequest({ cors: true }, async (req, res) => {
+export const fixPhantomListItems = onRequest({ cors: true, secrets: subsplashSecretsWithRuntimeAlerts }, async (req, res) => {
     const db = firebaseAdmin.firestore();
 
     // Check if we should update Subsplash (default to false for safety)
@@ -209,6 +211,11 @@ export const fixPhantomListItems = onRequest({ cors: true }, async (req, res) =>
         res.status(200).json(result);
 
     } catch (error) {
+        handleError(error, {
+            alertCode: 'FIX_PHANTOM_LIST_ITEMS_RUNTIME_FAILURE',
+            summary: 'fixPhantomListItems failed during cleanup.',
+            context: { functionName: 'fixPhantomListItems', updateSubsplash },
+        });
         logger.error('Error during phantom listItems cleanup:', error);
         res.status(500).json({
             success: false,

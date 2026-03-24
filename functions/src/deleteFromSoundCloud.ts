@@ -1,9 +1,12 @@
-import axios, { AxiosRequestConfig } from 'axios';
-import FormData from 'form-data';
 import handleError from './handleError';
+import { deleteTrack, normalizeSoundCloudApiError } from './soundcloudClient';
+import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
+import { emitOperationalAlert } from './notifications/emitOperationalAlert';
+import { isAxiosError } from 'axios';
+import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
 
 export interface DeleteFromSoundCloudInputType {
   soundCloudTrackId: string;
@@ -11,32 +14,8 @@ export interface DeleteFromSoundCloudInputType {
 
 export type DeleteFromSoundCloudReturnType = void;
 
-const deleteFromSoundCloudHelper = async (soundCloudTrackId: string) => {
-  const formData = new FormData();
-  console.log('soundCloudTrackId', soundCloudTrackId);
-  formData.append('trackId', soundCloudTrackId);
-  const config: AxiosRequestConfig = {
-    method: 'POST',
-    url: 'https://hook.eu1.make.com/c7mnio0orvi8teayuo11nlrdocvwmsoj',
-    headers: {
-      ...formData.getHeaders(),
-    },
-    data: formData,
-  };
-  try {
-    console.log('Config', config);
-    const response = await axios(config);
-    logger.log('response status', response.status);
-    logger.log('response data', response.data);
-    if (response.status !== 200) {
-      throw new HttpsError('internal', response.data);
-    }
-  } catch (error) {
-    throw handleError(error);
-  }
-};
-
 const deleteFromSoundCloud = onCall(
+  { secrets: soundcloudSecretsWithRuntimeAlerts },
   async (request: CallableRequest<DeleteFromSoundCloudInputType>): Promise<DeleteFromSoundCloudReturnType> => {
     logger.log('deleteFromSoundCloud', request);
     if (!canUserRolePublish(request.auth?.token.role)) {
@@ -44,11 +23,52 @@ const deleteFromSoundCloud = onCall(
     }
     try {
       logger.log('Attempting to delete from SoundCloud', request.data);
-      await deleteFromSoundCloudHelper(request.data.soundCloudTrackId);
+      await runWithSoundCloudAccessToken((token) => deleteTrack(token, request.data.soundCloudTrackId));
       logger.log('Track deleted from SoundCloud');
     } catch (error) {
-      logger.error(error);
-      throw handleError(error);
+      if (error instanceof HttpsError) {
+        await emitSoundCloudReconnectAlertIfNeeded({
+          error,
+          alertCode: 'PUBLISH_SOUNDCLOUD_DELETE_RUNTIME_FAILURE',
+          summary: 'deleteFromSoundCloud callable requires SoundCloud re-authorization.',
+          context: {
+            functionName: 'deleteFromSoundCloud',
+            soundCloudTrackId: request.data.soundCloudTrackId,
+          },
+        });
+        throw error;
+      }
+
+      if (isAxiosError(error) && error.response?.status === 404) {
+        logger.warn(`SoundCloud track not found (already deleted): ${request.data.soundCloudTrackId}`);
+        return;
+      }
+
+      let normalizedError: unknown = error;
+      try {
+        normalizeSoundCloudApiError(error);
+      } catch (caughtError) {
+        normalizedError = caughtError;
+      }
+
+      logger.error(normalizedError);
+      try {
+        await emitOperationalAlert({
+          alertCode: 'PUBLISH_SOUNDCLOUD_DELETE_RUNTIME_FAILURE',
+          summary: 'deleteFromSoundCloud callable failed during publish delete flow.',
+          error: normalizedError,
+          context: {
+            functionName: 'deleteFromSoundCloud',
+            soundCloudTrackId: request.data.soundCloudTrackId,
+          },
+        });
+      } catch (alertError) {
+        logger.error('Failed to emit operational alert for deleteFromSoundCloud', {
+          soundCloudTrackId: request.data.soundCloudTrackId,
+          alertError,
+        });
+      }
+      throw handleError(normalizedError);
     }
   }
 );

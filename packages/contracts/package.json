@@ -1,0 +1,16 @@
+{
+  "name": "@upperroom/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build"
+  },
+  "dependencies": {
+    "@upperroom/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

@@ -1,9 +1,9 @@
  
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from '../subsplashUtils';
-import { ImageType } from '../../../types/Image';
+import { ImageType } from '@upperroom/shared/types/Image';
 import {
   firestoreAdminListConverter,
   firestoreAdminSpeakerConverter,
@@ -13,6 +13,8 @@ import populateLists from './populateListsHelper';
 import populateSpeakers from './populateSpeakersHelper';
 import populateTopics from './populateTopicsHelper';
 import handleError from '../handleError';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 
 const storage = firebaseAdmin.storage();
 const firestore = firebaseAdmin.firestore();
@@ -27,7 +29,7 @@ export interface populateDatabaseFromSubsplashOutputType {
 }
 
 const populateDatabaseFromSubsplash = onCall(
-  { timeoutSeconds: 540, memory: '1GiB' },
+  { timeoutSeconds: 540, memory: '1GiB', secrets: subsplashSecretsWithRuntimeAlerts },
   async (request: CallableRequest<populateDatabaseFromSubsplashInputType>): Promise<string> => {
     if (request.auth?.token.role !== 'admin') {
       throw new HttpsError('failed-precondition', 'The function must be called while authenticated.');
@@ -39,7 +41,7 @@ const populateDatabaseFromSubsplash = onCall(
       const listIdToImageIdMap = new Map<string, string[]>();
       const listNameToId = new Map<string, string>();
       const bearerToken = await authenticateSubsplash();
-      const bucket = storage.bucket('urm-app-images');
+      const bucket = storage.bucket(getFirebaseImagesBucket());
       const db = firestore;
       const firestoreLists = db.collection('lists').withConverter(firestoreAdminListConverter);
       const firestoreSpeakers = db.collection('speakers').withConverter(firestoreAdminSpeakerConverter);

@@ -1,0 +1,28 @@
+{
+  "name": "functions-image",
+  "private": true,
+  "main": "lib/functions-image/src/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    "build:ci": "pnpm run build",
+    "build-watch": "concurrently --kill-others-on-fail --names tsc,alias --prefix '[{name}]' --prefix-colors 'blue,magenta' \"tsc -w --preserveWatchOutput -p tsconfig.json\" \"tsc-alias -w -p tsconfig.json\""
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.2.0",
+    "@google-cloud/storage": "7.19.0",
+    "axios": "^1.13.6",
+    "buffer-image-size": "^0.6.4",
+    "fast-average-color-node": "^3.1.0",
+    "firebase-admin": "^13.7.0",
+    "firebase-functions": "^7.1.1",
+    "mkdirp": "^2.1.6",
+    "node-vibrant": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.7",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,209 @@
+import firestore, {
+  collection,
+  collectionGroup,
+  deleteField,
+  doc,
+  getDocs,
+  query,
+  where,
+  writeBatch,
+  runTransaction,
+  increment,
+  orderBy,
+  limit,
+  updateDoc,
+} from '../../firebase/firestore';
+
+import { sermonConverter } from '../../types/Sermon';
+import { Sermon } from '../../types/SermonTypes';
+import { createFunctionV2 } from '../../utils/createFunction';
+import { EDIT_SUBSPLASH_SERMON_INCOMING_DATA } from '@upperroom/contracts/editSubsplashSermon';
+import {
+  EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA,
+  EditSoundCloudSermonReturnType,
+} from '@upperroom/contracts/editSoundCloudSermon';
+import { getSquareImageDownloadLink } from '../../utils/utils';
+import { List, listConverter } from '../../types/List';
+import { sermonListConverter } from '../../types/SermonList';
+import { uploadStatus } from '../../types/SermonTypes';
+import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
+import { createOperationKey, parseLockBusyDetails } from '../../utils/callableConcurrency';
+import { resolveCanonicalSermonLists } from '../../utils/resolveCanonicalSermonLists';
+
+interface EditSermonOptions {
+  originalSeriesId?: string;
+}
+
+const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSermonOptions) => {
+  const canonicalSermonList = await resolveCanonicalSermonLists(sermon, sermonList);
+  const promises: Promise<unknown>[] = [];
+  const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
+  if (sermon.subsplashId) {
+    const editSubsplashSermon = createFunctionV2<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>('editSubsplashSermon');
+    const input: EDIT_SUBSPLASH_SERMON_INCOMING_DATA = {
+      subsplashId: sermon.subsplashId,
+      title: sermon.title,
+      subtitle: sermon.subtitle,
+      description: sermon.description,
+      speakers: sermon.speakers,
+      topics: sermon.topics,
+      images: sermon.images,
+      date: new Date(sermon.dateMillis),
+      operationKey: createOperationKey('edit-sermon-subsplash-edit', sermon.id),
+    };
+    promises.push(editSubsplashSermon(input));
+  }
+
+  if (sermon.soundCloudTrackId) {
+    const editSoundCloudSermon = createFunctionV2<
+      EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA,
+      EditSoundCloudSermonReturnType
+    >('editSoundCloudSermon');
+    const data: EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA = {
+      trackId: sermon.soundCloudTrackId,
+      title: sermon.title,
+      description: sermon.description,
+      tags: [sermon.subtitle, ...sermon.topics],
+      speakers: sermon.speakers.map((speaker) => speaker.name),
+      imageSource: getSquareImageDownloadLink(sermon),
+    };
+    promises.push(
+      editSoundCloudSermon(data).then((result) => {
+        if (result?.soundCloudTrackUrl) {
+          return updateDoc(sermonRef, { soundCloudTrackUrl: result.soundCloudTrackUrl });
+        }
+        return undefined;
+      })
+    );
+  }
+  promises.push(
+    updateDoc(sermonRef, {
+      ...buildEditableSermonPatch(sermon),
+      searchPending: true,
+      searchIndexedAtMillis: deleteField(),
+      searchSyncError: deleteField(),
+    })
+  );
+  const results = await Promise.allSettled(promises);
+  for (const result of results) {
+    if (result.status !== 'fulfilled') {
+      const busyDetails = parseLockBusyDetails(result.reason);
+      if (busyDetails) {
+        const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
+        const lockedKeys = busyDetails.locked_keys.length > 0 ? ` Locked keys: ${busyDetails.locked_keys.join(', ')}.` : '';
+        alert(`Subsplash is busy processing another mutation.${lockedKeys} Retry in about ${retryInSeconds}s.`);
+      } else {
+        const reason = result.reason;
+        alert(reason instanceof Error ? reason.message : String(reason));
+      }
+    }
+  }
+
+  // update sermonList
+  const sermonListQuery = query(collectionGroup(firestore, 'listItems'), where('id', '==', sermonRef.id)).withConverter(
+    listConverter
+  );
+
+  const sermonListDocs = await getDocs(sermonListQuery);
+  const seriesListFromFirebase = sermonListDocs.docs.map((doc) => doc.ref.parent.parent?.id || '');
+  const canonicalListIds = new Set(canonicalSermonList.map((list) => list.id));
+  const batch = writeBatch(firestore);
+
+  const staleListIds = seriesListFromFirebase.filter((listId) => !canonicalListIds.has(listId));
+  if (staleListIds.length > 0) {
+    console.warn('editSermon.autoDeletePrevented', {
+      sermonId: sermon.id,
+      staleListIds,
+      canonicalListIds: Array.from(canonicalListIds),
+    });
+  }
+
+  const seriesInFirebase = new Set(seriesListFromFirebase.filter((listId) => canonicalListIds.has(listId)));
+
+  // add any new series to firebase
+  canonicalSermonList.forEach((series) => {
+    if (!seriesInFirebase.has(series.id)) {
+      batch.set(doc(firestore, `lists/${series.id}/listItems/${sermon.id}`).withConverter(sermonConverter), sermon);
+      batch.set(
+        doc(firestore, `sermons/${sermon.id}/sermonLists/${series.id}`).withConverter(sermonListConverter),
+        {
+          ...series,
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+          publishGeneration: 0,
+        }
+      );
+    }
+  });
+  await batch.commit();
+
+  // Handle series (media series) changes - this is separate from lists
+  // Uses a transaction to ensure atomicity of all series-related operations
+  const originalSeriesId = options?.originalSeriesId;
+  const newSeriesId = sermon.seriesId;
+  
+  // Only process if series has changed
+  if (originalSeriesId !== newSeriesId) {
+    try {
+      let newSeriesPosition = 1;
+      if (newSeriesId) {
+        const latestPositionSnapshot = await getDocs(
+          query(
+            collection(firestore, `series/${newSeriesId}/seriesItems`),
+            orderBy('position', 'desc'),
+            limit(1)
+          )
+        );
+        const latestPosition = latestPositionSnapshot.docs[0]?.data()?.position;
+        newSeriesPosition = typeof latestPosition === 'number' ? latestPosition + 1 : 1;
+      }
+
+      await runTransaction(firestore, async (transaction) => {
+        // Prepare document references
+        const oldSeriesRef = originalSeriesId ? doc(firestore, 'series', originalSeriesId) : null;
+        const oldSeriesItemRef = originalSeriesId 
+          ? doc(firestore, 'series', originalSeriesId, 'seriesItems', sermon.id) 
+          : null;
+        const newSeriesRef = newSeriesId ? doc(firestore, 'series', newSeriesId) : null;
+        const newSeriesItemRef = newSeriesId 
+          ? doc(firestore, 'series', newSeriesId, 'seriesItems', sermon.id) 
+          : null;
+
+        // Read phase: get all documents we need to update
+        const oldSeriesDoc = oldSeriesRef ? await transaction.get(oldSeriesRef) : null;
+        const newSeriesDoc = newSeriesRef ? await transaction.get(newSeriesRef) : null;
+
+        // Write phase: perform all updates atomically
+        
+        // Remove from old series if it existed
+        if (oldSeriesItemRef) {
+          transaction.delete(oldSeriesItemRef);
+        }
+        if (oldSeriesDoc?.exists()) {
+          transaction.update(oldSeriesRef!, {
+            itemCount: increment(-1),
+            updatedAt: new Date(),
+          });
+        }
+
+        // Add to new series if one is selected
+        if (newSeriesItemRef && newSeriesDoc?.exists()) {
+          transaction.set(newSeriesItemRef, {
+            id: sermon.id,
+            position: newSeriesPosition,
+            publishedToSubsplash: false,
+            sermonSubsplashId: sermon.subsplashId || null,
+            addedAt: new Date(),
+          });
+          transaction.update(newSeriesRef!, {
+            itemCount: increment(1),
+            updatedAt: new Date(),
+          });
+        }
+      });
+    } catch (err) {
+      console.error('Error updating series membership:', err);
+      throw err; // Re-throw to let caller handle the error
+    }
+  }
+};
+export default editSermon;

@@ -1,8 +1,8 @@
 import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions/v2';
 import { isEqual } from 'lodash';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
-import { List } from '../../../../types/List';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { List } from '@upperroom/shared/types/List';
 import { firestoreAdminSermonListConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
 

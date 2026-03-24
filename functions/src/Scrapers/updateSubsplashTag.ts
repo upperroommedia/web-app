@@ -1,10 +1,12 @@
 import { onRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import updateSubsplashSermonTopics from '../helpers/updateSubsplashTagsHelper';
-import { Sermon } from '../../../types/SermonTypes';
-import { ListType } from '../../../types/List';
-import firebaseAdmin from '../../../firebase/firebaseAdmin';
+import { Sermon } from '@upperroom/shared/types/SermonTypes';
+import { ListType } from '@upperroom/shared/types/List';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { authenticateSubsplash } from '../subsplashUtils';
+import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
+import handleError from '../handleError';
 
 // Import retry IDs
 const retryIdsSet = new Set([
@@ -265,7 +267,8 @@ const retryIdsSet = new Set([
 
 export const updateSubsplashTag = onRequest({
     cors: true,
-    timeoutSeconds: 3600
+    timeoutSeconds: 3600,
+    secrets: subsplashSecretsWithRuntimeAlerts
 }, async (req, res) => {
     const db = firebaseAdmin.firestore();
 
@@ -435,6 +438,11 @@ export const updateSubsplashTag = onRequest({
         res.status(200).json(result);
 
     } catch (error) {
+        handleError(error, {
+            alertCode: 'UPDATE_SUBSPLASH_TAG_RUNTIME_FAILURE',
+            summary: 'updateSubsplashTag failed while syncing sermon topics.',
+            context: { functionName: 'updateSubsplashTag' },
+        });
         logger.error('Error during sermon topics update:', error);
         res.status(500).json({
             success: false,

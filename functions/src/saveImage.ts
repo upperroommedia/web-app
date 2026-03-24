@@ -1,12 +1,13 @@
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import axios, { AxiosRequestConfig } from 'axios';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { unlink } from 'fs/promises';
 import fs, { existsSync, mkdirSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import handleError from './handleError';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
 export interface SaveImageInputType {
   url: string;
   name: string;
@@ -53,7 +54,7 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     // Upload your data
     // const bucket = storage().bucket();
     const destinationFilePath = `speaker-images/${request.data.name}`;
-    const bucket = firebaseAdmin.storage().bucket('urm-app-images');
+    const bucket = firebaseAdmin.storage().bucket(getFirebaseImagesBucket());
     await bucket.upload(tempFilePath, {
       destination: destinationFilePath,
     });
@@ -61,7 +62,12 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     // Delete the temporary file (crucial)
     return { status: 'success' };
   } catch (error) {
-    handleError(error);
+    handleError(error, {
+      alertCode: 'SAVE_IMAGE_RUNTIME_FAILURE',
+      summary: 'saveImage failed while downloading or uploading an image.',
+      request,
+      context: { functionName: 'saveImage', url: request.data.url, name: request.data.name },
+    });
     return 'Error saving image';
   } finally {
     const promises: Promise<void>[] = [];

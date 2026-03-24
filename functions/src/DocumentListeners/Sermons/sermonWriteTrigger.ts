@@ -1,8 +1,8 @@
 import { DocumentData, QuerySnapshot } from 'firebase-admin/firestore';
 import { firestore, logger } from 'firebase-functions/v2';
 import { isEqual } from 'lodash';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
-import { Sermon } from '../../../../types/SermonTypes';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { Sermon } from '@upperroom/shared/types/SermonTypes';
 import handleError from '../../handleError';
 
 const firestoreAdmin = firebaseAdmin.firestore();

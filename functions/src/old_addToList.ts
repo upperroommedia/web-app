@@ -1,12 +1,12 @@
 // add sermon to series and handle condition when list is full
 import axios from 'axios';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
-import { List, ListType, OverflowBehavior } from '../../types/List';
-import { ListItem } from '../../types/ListItem';
-import { Sermon } from '../../types/SermonTypes';
+import { List, ListType, OverflowBehavior } from '@upperroom/shared/types/List';
+import { ListItem } from '@upperroom/shared/types/ListItem';
+import { Sermon } from '@upperroom/shared/types/SermonTypes';
 import { createNewSubsplashList } from './createNewSubsplashList';
 import {
   firestoreAdminListConverter,
@@ -15,7 +15,7 @@ import {
 } from './firestoreDataConverter';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
-import { canUserRolePublish } from '../../types/User';
+import { canUserRolePublish } from '@upperroom/shared/types/User';
 const firestore = firebaseAdmin.firestore();
 const mediaTypes = ['media-item', 'media-series', 'song', 'link', 'rss', 'list'] as const;
 type MediaType = (typeof mediaTypes)[number];

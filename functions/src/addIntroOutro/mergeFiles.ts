@@ -8,7 +8,7 @@ import { writeFileSync } from 'fs';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 const mergeFiles = async (
-  ffmpeg: typeof import('fluent-ffmpeg'),
+  ffmpeg: typeof import('@ts-ffmpeg/fluent-ffmpeg'),
   cancelToken: CancelToken,
   bucket: Bucket,
   filePaths: string[],

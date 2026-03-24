@@ -1,6 +1,7 @@
 import { logger, https } from 'firebase-functions';
 import { HttpsError } from 'firebase-functions/v2/https';
-import firebaseAdmin from '../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import handleError from './handleError';
 
 const updateCreatedAndEditedAtMillis = https.onCall(async (): Promise<HttpsError | number> => {
   try {
@@ -27,7 +28,11 @@ const updateCreatedAndEditedAtMillis = https.onCall(async (): Promise<HttpsError
     await batch.commit();
     return count;
   } catch (error) {
-    const httpsError = new HttpsError('unknown', `${error}`);
+    const httpsError = handleError(error, {
+      alertCode: 'UPDATE_CREATED_EDITED_AT_RUNTIME_FAILURE',
+      summary: 'updateCreatedAndEditedAtMillis failed while backfilling sermon timestamps.',
+      context: { functionName: 'updateCreatedAndEditedAtMillis' },
+    });
     logger.error(httpsError);
     throw httpsError;
   }

@@ -1,8 +1,12 @@
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions/v2';
-import firebaseAdmin from '../../../../firebase/firebaseAdmin';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../../handleError';
 import { firestoreAdminImagesConverter } from '../../firestoreDataConverter';
+import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { extractStoragePathFromDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
+
+const imagesBucket = getFirebaseImagesBucket();
 
 const imageOnDelete = onDocumentDeleted('images/{imageId}', async (event) => {
   const { imageId } = event.params;
@@ -15,16 +19,12 @@ const imageOnDelete = onDocumentDeleted('images/{imageId}', async (event) => {
 
   try {
     const image = firestoreAdminImagesConverter.fromFirestore(snapshot);
-    if (!image.downloadLink.includes('urm-app-images')) {
-      logger.warn(`Image ${imageId} does not have a valid download link for deletion: ${image.downloadLink}`);
-      return;
-    }
-    const storagePath = decodeURIComponent(image.downloadLink).split('urm-app-images/').pop();
+    const storagePath = extractStoragePathFromDownloadUrl(image.downloadLink, imagesBucket);
     if (!storagePath) {
-      logger.warn(`No storage path found for image ${imageId}`);
+      logger.warn(`No storage path found for image ${imageId}: ${image.downloadLink}`);
       return;
     }
-    const bucket = firebaseAdmin.storage().bucket('urm-app-images');
+    const bucket = firebaseAdmin.storage().bucket(imagesBucket);
     const file = bucket.file(storagePath);
     await file.delete();
 
