@@ -33,7 +33,7 @@ describe('createFunction helpers', () => {
       )
     ).resolves.toEqual({ ok: true });
 
-    expect(httpsCallableMock).toHaveBeenCalledWith({ app: 'functions-instance' }, 'setyoutubecookies');
+    expect(httpsCallableMock).toHaveBeenCalledWith({ app: 'functions-instance' }, 'setyoutubecookiestatus');
     expect(httpsCallableFromURLMock).not.toHaveBeenCalled();
     expect(callable).toHaveBeenCalledWith({
       id: 'cookie-upload',
