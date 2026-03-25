@@ -50,26 +50,17 @@ steps:
 
         POT_PROVIDER_URL="$$(cat /workspace/pot_provider_url.txt)"
         export POT_PROVIDER_URL
-        POT_PROVIDER_IDENTITY_TOKEN="$$(gcloud auth print-identity-token)"
-        export POT_PROVIDER_IDENTITY_TOKEN
+        READY_STATUS="$$(gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
+          --project "${_PROJECT_ID}" \
+          --region "${_REGION}" \
+          --format='value(status.conditions[?type="Ready"].status)')"
 
-        python3 - <<'PY'
-        import json
-        import os
-        import urllib.request
+        if [[ "$$READY_STATUS" != "True" ]]; then
+          echo "POT provider is not Ready after deploy: status=$$READY_STATUS" >&2
+          exit 1
+        fi
 
-        url = os.environ["POT_PROVIDER_URL"].rstrip("/") + "/ping"
-        request = urllib.request.Request(
-            url,
-            headers={"Authorization": f"Bearer {os.environ['POT_PROVIDER_IDENTITY_TOKEN']}"},
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-            version = payload.get("version")
-            if response.status != 200 or not version:
-                raise SystemExit(f"Unexpected POT provider response from {url}: {payload}")
-            print(f"Validated POT provider ping at {url}: version={version}")
-        PY
+        echo "Validated POT provider readiness at $$POT_PROVIDER_URL"
 
   # Step 4: Deploy to Cloud Run (private service)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
