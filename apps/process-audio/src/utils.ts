@@ -12,10 +12,13 @@ import { LogContext } from './context';
 const SAFE_LOCAL_PATH_ROOTS = [path.resolve(os.tmpdir()), path.resolve(process.cwd(), '.tmp')];
 
 export const sanitizeTempFileName = (fileName: string): string => {
-  const sanitized = path
-    .basename(fileName)
-    .replace(/[^A-Za-z0-9._-]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+  let sanitized = path.basename(fileName).replace(/[^A-Za-z0-9._-]+/g, '_');
+  while (sanitized.startsWith('_')) {
+    sanitized = sanitized.slice(1);
+  }
+  while (sanitized.endsWith('_')) {
+    sanitized = sanitized.slice(0, -1);
+  }
 
   if (!sanitized || sanitized === '.' || sanitized === '..') {
     throw new Error(`Invalid temp file name: ${fileName}`);
