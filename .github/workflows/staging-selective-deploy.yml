@@ -228,7 +228,7 @@ jobs:
             echo "deploy_storage=$deploy_storage"
             echo "deploy_functions_core=$deploy_functions_core"
             echo "deploy_functions_media=$deploy_functions_media"
-            echo "deploy_functions_image=$deploy_functions_IMAGE"
+            echo "deploy_functions_image=$deploy_functions_image"
             echo "deploy_functions_integrations=$deploy_functions_integrations"
             echo "anything_to_firebase_deploy=$anything_to_firebase_deploy"
             echo "anything_to_run=$anything_to_run"
