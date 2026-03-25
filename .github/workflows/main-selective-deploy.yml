@@ -35,10 +35,8 @@ jobs:
       deploy_functions_media: ${{ steps.detect.outputs.deploy_functions_media }}
       deploy_functions_image: ${{ steps.detect.outputs.deploy_functions_image }}
       deploy_functions_integrations: ${{ steps.detect.outputs.deploy_functions_integrations }}
-      deploy_process_audio: ${{ steps.detect.outputs.deploy_process_audio }}
       anything_to_firebase_deploy: ${{ steps.detect.outputs.anything_to_firebase_deploy }}
       anything_to_run: ${{ steps.detect.outputs.anything_to_run }}
-      anything_to_deploy: ${{ steps.detect.outputs.anything_to_deploy }}
       changed_files: ${{ steps.detect.outputs.changed_files }}
       diff_base_sha: ${{ steps.detect.outputs.diff_base_sha }}
       diff_head_sha: ${{ steps.detect.outputs.diff_head_sha }}
@@ -106,10 +104,7 @@ jobs:
                 [
                   .jobs[]?.steps[]?
                   | select(
-                      (
-                        .name == "Deploy selected production Firebase targets"
-                        or .name == "Deploy production process-audio Cloud Run"
-                      )
+                      .name == "Deploy selected production Firebase targets"
                       and .conclusion == "success"
                     )
                 ] | length > 0
@@ -161,7 +156,6 @@ jobs:
           deploy_functions_media=false
           deploy_functions_image=false
           deploy_functions_integrations=false
-          deploy_process_audio=false
           if [[ "$force_full" == "true" ]]; then
             deploy_firestore=true
             deploy_database=true
@@ -170,7 +164,6 @@ jobs:
             deploy_functions_media=true
             deploy_functions_image=true
             deploy_functions_integrations=true
-            deploy_process_audio=true
           else
             if contains_path '^firestore\.rules$|^firestore\.indexes\.json$'; then
               deploy_firestore=true
@@ -200,10 +193,6 @@ jobs:
               deploy_functions_integrations=true
             fi
 
-            if contains_path '^apps/process-audio/'; then
-              deploy_process_audio=true
-            fi
-
             if contains_path '^(functions/src/|apps/web/firebase/|apps/web/shared/|apps/web/types/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
               deploy_functions_core=true
               deploy_functions_media=true
@@ -216,7 +205,6 @@ jobs:
               deploy_functions_media=true
               deploy_functions_image=true
               deploy_functions_integrations=true
-              deploy_process_audio=true
             fi
           fi
 
@@ -224,12 +212,7 @@ jobs:
           if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
             anything_to_firebase_deploy=true
           fi
-          anything_to_deploy=false
-          anything_to_run=false
-          if [[ "$anything_to_firebase_deploy" == "true" || "$deploy_process_audio" == "true" ]]; then
-            anything_to_deploy=true
-            anything_to_run=true
-          fi
+          anything_to_run="$anything_to_firebase_deploy"
 
           {
             echo "deploy_firestore=$deploy_firestore"
@@ -239,10 +222,8 @@ jobs:
             echo "deploy_functions_media=$deploy_functions_media"
             echo "deploy_functions_image=$deploy_functions_image"
             echo "deploy_functions_integrations=$deploy_functions_integrations"
-            echo "deploy_process_audio=$deploy_process_audio"
             echo "anything_to_firebase_deploy=$anything_to_firebase_deploy"
             echo "anything_to_run=$anything_to_run"
-            echo "anything_to_deploy=$anything_to_deploy"
             echo "diff_base_sha=$base_sha"
             echo "diff_head_sha=$head_sha"
             echo "diff_source=$diff_source"
@@ -266,10 +247,8 @@ jobs:
           DEPLOY_FUNCTIONS_MEDIA: ${{ needs.detect-changes.outputs.deploy_functions_media }}
           DEPLOY_FUNCTIONS_IMAGE: ${{ needs.detect-changes.outputs.deploy_functions_image }}
           DEPLOY_FUNCTIONS_INTEGRATIONS: ${{ needs.detect-changes.outputs.deploy_functions_integrations }}
-          DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
           ANYTHING_TO_FIREBASE_DEPLOY: ${{ needs.detect-changes.outputs.anything_to_firebase_deploy }}
           ANYTHING_TO_RUN: ${{ needs.detect-changes.outputs.anything_to_run }}
-          ANYTHING_TO_DEPLOY: ${{ needs.detect-changes.outputs.anything_to_deploy }}
           DIFF_BASE_SHA: ${{ needs.detect-changes.outputs.diff_base_sha }}
           DIFF_HEAD_SHA: ${{ needs.detect-changes.outputs.diff_head_sha }}
           DIFF_SOURCE: ${{ needs.detect-changes.outputs.diff_source }}
@@ -288,10 +267,8 @@ jobs:
             echo "- Functions media: \`$DEPLOY_FUNCTIONS_MEDIA\`"
             echo "- Functions image: \`$DEPLOY_FUNCTIONS_IMAGE\`"
             echo "- Functions integrations: \`$DEPLOY_FUNCTIONS_INTEGRATIONS\`"
-            echo "- Process audio Cloud Run: \`$DEPLOY_PROCESS_AUDIO\`"
             echo "- Any workflow action needed: \`$ANYTHING_TO_RUN\`"
             echo "- Firebase backend deploy targets: \`$ANYTHING_TO_FIREBASE_DEPLOY\`"
-            echo "- Any deploy target: \`$ANYTHING_TO_DEPLOY\`"
             echo ""
             echo "### Changed Files"
             echo '\`\`\`'
@@ -439,12 +416,6 @@ jobs:
               done
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Deploy production process-audio Cloud Run
-        if: needs.detect-changes.outputs.deploy_process_audio == 'true'
-        env:
-          GITHUB_SHA: ${{ github.sha }}
-        run: bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
 
       - name: No-op for non-deployable changes
         if: needs.detect-changes.outputs.anything_to_run != 'true'
