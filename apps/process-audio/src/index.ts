@@ -12,6 +12,7 @@ import logger, { createLoggerWithContext } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
 import { classifyYouTubeFailure, toYouTubeAlertCode } from './youtubeExtractionPolicy';
+import { validateConfiguredYouTubeCookies } from './processYouTubeUrl';
 
 const app = express();
 app.use(express.json());
@@ -113,6 +114,35 @@ app.get('/healthz', (req, res) => {
     poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
     ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
   });
+});
+
+app.post('/validate-youtube-cookies', async (_req, res) => {
+  const ctx = createContext(undefined, 'validate-youtube-cookies');
+  const log = createLoggerWithContext(ctx);
+
+  try {
+    const result = await validateConfiguredYouTubeCookies(ytdlpPath, realtimeDB, isDevelopment, log);
+    res.status(result.ok ? 200 : result.status.hasCookies ? 422 : 400).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.error('Failed to validate uploaded YouTube cookies', {
+      error: message,
+      stack: error instanceof Error ? error.stack : undefined,
+      serviceRevision: process.env.K_REVISION || 'local',
+      ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
+    });
+    res.status(500).json({
+      ok: false,
+      message,
+      validationUrl: null,
+      status: {
+        hasCookies: false,
+        cookieBreakerOpen: false,
+        disabledUntil: null,
+        metadata: null,
+      },
+    });
+  }
 });
 
 app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioInputType }>, res) => {

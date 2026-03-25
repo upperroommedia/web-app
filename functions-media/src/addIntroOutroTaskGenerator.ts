@@ -12,35 +12,7 @@ import {
   PROCESS_AUDIO_TASK_TIMEOUT_SECONDS,
   validateAddIntroOutroData,
 } from './audioTaskPayload';
-
-const PROCESS_AUDIO_TARGETS = {
-  prod: 'https://process-audio-yshbijirxq-uc.a.run.app/process-audio',
-  staging: 'https://process-audio-staging-pvaq33fxyq-uc.a.run.app/process-audio',
-  local: 'http://127.0.0.1:8080/process-audio',
-};
-
-const getProcessAudioTargetUri = (): string => {
-  if (process.env.FUNCTIONS_EMULATOR === 'true') {
-    logger.debug('Running in development mode');
-    return PROCESS_AUDIO_TARGETS.local;
-  }
-
-  const configuredTarget =
-    process.env.PROCESS_AUDIO_TASK_TARGET_URI ||
-    process.env.PROCESS_AUDIO_SERVICE_URL ||
-    process.env.NEXT_PUBLIC_PROCESS_AUDIO_SERVICE_URL;
-
-  if (configuredTarget) {
-    return configuredTarget;
-  }
-
-  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;
-  if (projectId === 'urm-app-staging') {
-    return PROCESS_AUDIO_TARGETS.staging;
-  }
-
-  return PROCESS_AUDIO_TARGETS.prod;
-};
+import { getProcessAudioTargetUri } from './processAudioService';
 
 const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
   const data = request.data;

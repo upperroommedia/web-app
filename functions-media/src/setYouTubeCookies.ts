@@ -4,6 +4,7 @@ import type { SetYouTubeCookiesInput, SetYouTubeCookiesOutputType } from '@upper
 import { isUserRoleAdmin, type UserRoleType } from '@upperroom/shared/types/User';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import handleError from '../../functions/src/handleError';
+import { validateProcessAudioYouTubeCookies } from './processAudioService';
 import { writeYouTubeCookies } from './youtubeCookieStore';
 
 const getAdminActor = (request: CallableRequest<unknown>): { uid: string; email?: string } => {
@@ -23,10 +24,31 @@ const setyoutubecookies = onCall(
     const actor = getAdminActor(request);
 
     try {
-      return await writeYouTubeCookies(firebaseAdmin.database(), request.data, actor);
+      await writeYouTubeCookies(firebaseAdmin.database(), request.data, actor);
+
+      const validationResult = await validateProcessAudioYouTubeCookies();
+      if (!validationResult.ok) {
+        throw new HttpsError(
+          'failed-precondition',
+          validationResult.message || 'Uploaded YouTube cookies failed validation in process-audio.'
+        );
+      }
+
+      return validationResult.status;
     } catch (error) {
-      if (error instanceof HttpsError && (error.code === 'invalid-argument' || error.code === 'permission-denied')) {
+      if (
+        error instanceof HttpsError &&
+        (error.code === 'invalid-argument' || error.code === 'permission-denied' || error.code === 'failed-precondition')
+      ) {
         throw error;
+      }
+
+      const validationMessage =
+        error && typeof error === 'object'
+          ? ((error as { validationResponse?: { message?: string } }).validationResponse?.message ?? null)
+          : null;
+      if (validationMessage) {
+        throw new HttpsError('failed-precondition', validationMessage);
       }
 
       logger.error('Failed to update YouTube cookies', {

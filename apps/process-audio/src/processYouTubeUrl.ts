@@ -95,6 +95,18 @@ interface BrowserFallbackSectionResponse {
   ext?: string;
 }
 
+export interface ValidateYouTubeCookiesResult {
+  ok: boolean;
+  message?: string;
+  validationUrl: string;
+  status: {
+    hasCookies: boolean;
+    cookieBreakerOpen: boolean;
+    disabledUntil?: string | null;
+    metadata: YouTubeCookieMetadata | null;
+  };
+}
+
 export type YouTubeTrimRoutingStrategy = 'direct_url' | 'section_download';
 
 export interface YouTubeTrimRoutingDecision {
@@ -377,10 +389,16 @@ const COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,-web_c
 const POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,mweb,-web_creator';
 const COOKIE_KEY = 'yt-dlp-cookies';
 const COOKIE_META_KEY = 'yt-dlp-cookies-meta';
+const DEFAULT_YOUTUBE_COOKIE_VALIDATION_URL = 'https://www.youtube.com/watch?v=BaW_jenozKc';
 
 function getPoTokenProviderBaseUrl(): string | undefined {
   const value = process.env.YTDLP_POT_PROVIDER_BASE_URL?.trim();
   return value ? value.replace(/\/+$/, '') : undefined;
+}
+
+function getYouTubeCookieValidationUrl(): YouTubeUrl {
+  const value = process.env.YTDLP_COOKIE_VALIDATION_URL?.trim();
+  return (value || DEFAULT_YOUTUBE_COOKIE_VALIDATION_URL) as YouTubeUrl;
 }
 
 function shouldDisableInnertubeForPoTokenProvider(): boolean {
@@ -536,6 +554,23 @@ async function recordCookieAttemptOutcome(
   await updateCookieMetadata(realtimeDB, patch, log);
 }
 
+async function readYouTubeCookieStatus(realtimeDB: Database): Promise<ValidateYouTubeCookiesResult['status']> {
+  const [cookiesSnapshot, metadataSnapshot] = await Promise.all([
+    realtimeDB.ref(COOKIE_KEY).get(),
+    realtimeDB.ref(COOKIE_META_KEY).get(),
+  ]);
+  const metadata = metadataSnapshot.exists() ? (metadataSnapshot.val() as YouTubeCookieMetadata) : null;
+  const disabledUntil = metadata?.disabledUntil ?? null;
+  const cookieBreakerOpen = !!disabledUntil && Date.parse(disabledUntil) > Date.now();
+
+  return {
+    hasCookies: cookiesSnapshot.exists(),
+    cookieBreakerOpen,
+    disabledUntil,
+    metadata,
+  };
+}
+
 function applyYouTubeExtractorArgs(
   args: string[],
   mode: YouTubeExtractionMode,
@@ -597,6 +632,83 @@ async function runCookieHealthcheck(
   });
 
   await runCommandWithCapture(ytdlpPath, args, 'yt-dlp cookie healthcheck', 'cookie_provider');
+}
+
+export async function validateConfiguredYouTubeCookies(
+  ytdlpPath: string,
+  realtimeDB: Database,
+  isDevelopment: boolean,
+  log: ReturnType<typeof createLoggerWithContext>
+): Promise<ValidateYouTubeCookiesResult> {
+  const validationUrl = getYouTubeCookieValidationUrl();
+  const cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+
+  if (!cookieContext.hasCookies) {
+    return {
+      ok: false,
+      message: cookieContext.cookieBreakerOpen
+        ? 'Configured YouTube cookies are currently disabled by the cookie circuit breaker.'
+        : 'No YouTube cookies are configured for process-audio.',
+      validationUrl,
+      status: await readYouTubeCookieStatus(realtimeDB),
+    };
+  }
+
+  log.info('Validating uploaded YouTube cookies', {
+    validationUrl,
+    cookieBreakerOpen: cookieContext.cookieBreakerOpen ?? false,
+    disabledUntil: cookieContext.disabledUntil ?? null,
+    metadata: cookieContext.metadata,
+  });
+
+  try {
+    await runCookieHealthcheck(ytdlpPath, validationUrl, cookieContext, log);
+    await recordCookieAttemptOutcome(
+      realtimeDB,
+      'cookie_provider',
+      true,
+      undefined,
+      undefined,
+      cookieContext.metadata,
+      getYouTubeVideoId(validationUrl),
+      log
+    );
+
+    return {
+      ok: true,
+      validationUrl,
+      status: await readYouTubeCookieStatus(realtimeDB),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const failureClass = classifyYouTubeFailure(message, 'cookie_provider');
+    await recordCookieAttemptOutcome(
+      realtimeDB,
+      'cookie_provider',
+      false,
+      failureClass,
+      message,
+      cookieContext.metadata,
+      getYouTubeVideoId(validationUrl),
+      log
+    );
+
+    log.warn('Uploaded YouTube cookies failed validation', {
+      validationUrl,
+      failureClass,
+      error: message,
+      metadata: cookieContext.metadata,
+    });
+
+    return {
+      ok: false,
+      message,
+      validationUrl,
+      status: await readYouTubeCookieStatus(realtimeDB),
+    };
+  } finally {
+    cleanupCookiesFile(cookieContext.cookiesFilePath, { done: false });
+  }
 }
 
 function shouldPreferCookieProvider(cookieContext: YouTubeCookieContext | undefined): boolean {

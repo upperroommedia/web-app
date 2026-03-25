@@ -285,17 +285,20 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
         return;
       }
 
+      const getYouTubeCookieStatus = createFunctionV2<GetYouTubeCookieStatusInput, GetYouTubeCookieStatusOutputType>(
+        'getyoutubecookiestatus'
+      );
+      const setYouTubeCookies = createFunctionV2<SetYouTubeCookiesInput, SetYouTubeCookiesOutputType>(
+        'setyoutubecookies'
+      );
+
       setIsUploadingYouTubeCookies(true);
-      setNotice({ severity: 'info', text: `Uploading ${file.name} and clearing the YouTube cookie breaker…` });
+      setNotice({
+        severity: 'info',
+        text: `Uploading ${file.name}, clearing the YouTube cookie breaker, and validating the cookie session…`,
+      });
 
       try {
-        const setYouTubeCookies = createFunctionV2<SetYouTubeCookiesInput, SetYouTubeCookiesOutputType>(
-          'setyoutubecookies'
-        );
-        const getYouTubeCookieStatus = createFunctionV2<
-          GetYouTubeCookieStatusInput,
-          GetYouTubeCookieStatusOutputType
-        >('getyoutubecookiestatus');
         const nextStatus = await uploadYouTubeCookiesFromFile({
           file,
           setYouTubeCookies,
@@ -305,9 +308,15 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
         setYouTubeCookieStatus(nextStatus);
         setNotice({
           severity: 'success',
-          text: 'YouTube cookies were uploaded successfully and the cookie breaker was cleared.',
+          text: 'YouTube cookies were uploaded, validated successfully, and the cookie breaker was cleared.',
         });
       } catch (error) {
+        try {
+          const refreshedStatus = await getYouTubeCookieStatus({});
+          setYouTubeCookieStatus(refreshedStatus);
+        } catch (statusError) {
+          console.error('Failed to refresh YouTube cookie status after upload error', statusError);
+        }
         const message = formatCallableError(error, 'Failed to upload YouTube cookies.');
         setNotice({ severity: 'error', text: message });
       } finally {
@@ -510,6 +519,13 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                 <Alert severity="info">
                   This page never reads raw cookie contents back to the browser. It only shows metadata from
                   <code> yt-dlp-cookies-meta</code>.
+                </Alert>
+
+                <Alert severity="warning">
+                  yt-dlp recommends exporting YouTube cookies from a fresh private/incognito session that is only used
+                  for YouTube, navigating to <code>youtube.com/robots.txt</code>, exporting the Netscape
+                  <code>cookies.txt</code>, and then closing that private window immediately. A file that looks valid
+                  can still fail validation if YouTube has already rotated or challenged that session.
                 </Alert>
               </Stack>
             </CardContent>
