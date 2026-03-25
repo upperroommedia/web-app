@@ -17,6 +17,13 @@ function main() {
     'cookie_session_stale_or_challenged'
   );
   assert.equal(
+    classifyYouTubeFailure(
+      'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
+      'public_provider'
+    ),
+    'cookie_session_stale_or_challenged'
+  );
+  assert.equal(
     classifyYouTubeFailure('ERROR: LOGIN_REQUIRED private members-only age-restricted', 'public_provider'),
     'account_required_content'
   );

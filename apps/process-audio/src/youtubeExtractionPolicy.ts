@@ -27,6 +27,10 @@ export function classifyYouTubeFailure(message: string, mode: YouTubeExtractionM
     return 'provider_missing_or_unhealthy';
   }
 
+  if (lower.includes('cookie circuit breaker')) {
+    return 'cookie_session_stale_or_challenged';
+  }
+
   if (lower.includes('the page needs to be reloaded') || lower.includes('unplayable')) {
     return mode === 'cookie_provider' ? 'cookie_session_stale_or_challenged' : 'public_path_bot_blocked';
   }
