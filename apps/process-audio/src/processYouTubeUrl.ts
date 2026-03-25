@@ -10,7 +10,7 @@ import { mkdtemp, rm, unlink, writeFile } from 'fs/promises';
 import { Database } from 'firebase-admin/database';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
-import { getFFmpegPath } from './utils';
+import { ensureSafeTempPath, getFFmpegPath } from './utils';
 import dns from 'node:dns/promises';
 import {
   annotateYouTubeFailure,
@@ -645,7 +645,7 @@ async function downloadBrowserFallbackSection(
   fallbackResult: BrowserFallbackSectionResponse
 ): Promise<string> {
   const ext = fallbackResult.ext || 'm4a';
-  const finalPath = `${outputFilePath}.${ext.replace(/^\./, '')}`;
+  const finalPath = ensureSafeTempPath(`${outputFilePath}.${ext.replace(/^\./, '')}`);
   const response = await fetch(fallbackResult.downloadUrl, {
     headers: {
       'User-Agent': YTDLP_HTTP_USER_AGENT,
@@ -1896,7 +1896,7 @@ async function downloadYouTubeSectionFromFragments(
 
     const fragmentWindowStart = firstIndex * fragmentDuration;
     const localStart = Math.max(0, startTime - fragmentWindowStart);
-    const finalOutputPath = `${outputFilePath}.m4a`;
+    const finalOutputPath = ensureSafeTempPath(`${outputFilePath}.m4a`);
 
     const ffmpegArgs = ['-y'];
     for (const fragmentFile of fragmentFiles) {
@@ -2119,8 +2119,9 @@ export const downloadYouTubeSection = async (
 
       ytdlp.on('close', (code, signal) => {
         if (settled) return;
-        const dir = path.dirname(outputFilePath);
-        const baseName = path.basename(outputFilePath);
+        const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
+        const dir = path.dirname(safeOutputFilePath);
+        const baseName = path.basename(safeOutputFilePath);
         let files: string[] = [];
         try {
           files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
@@ -2138,7 +2139,7 @@ export const downloadYouTubeSection = async (
           });
 
           if (actualFile) {
-            const actualPath = path.join(dir, actualFile);
+            const actualPath = ensureSafeTempPath(path.join(dir, actualFile));
             log.info('yt-dlp section download completed with precise cuts', {
               outputFilePath: actualPath,
               format: path.extname(actualFile),
@@ -2151,13 +2152,13 @@ export const downloadYouTubeSection = async (
             resolveOnce(actualPath);
           } else {
             // Fallback: check if file exists without extension
-            if (fs.existsSync(outputFilePath)) {
+            if (fs.existsSync(safeOutputFilePath)) {
               log.info('yt-dlp section download completed successfully', {
-                outputFilePath,
+                outputFilePath: safeOutputFilePath,
                 attempt: mode,
                 usedCookies: mode === 'cookie_provider',
               });
-              resolveOnce(outputFilePath);
+              resolveOnce(safeOutputFilePath);
             } else {
               rejectOnce(new Error(`Output file was not created. Expected file starting with: ${baseName}`));
             }

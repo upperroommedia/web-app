@@ -240,7 +240,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
     } catch (updateError) {
       log.error('Failed to update document status', { error: updateError });
     }
-    res.status(500).send(message);
+    res.status(500).json({ error: message });
   } finally {
     await logMemoryUsage('Final Memory Usage', ctx);
   }

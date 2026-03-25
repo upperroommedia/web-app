@@ -1,12 +1,18 @@
 import path from 'path';
-import { unlink } from 'fs/promises';
 import { Bucket } from '@google-cloud/storage';
 import { Sermon, sermonStatus, sermonStatusType } from './types';
 import { Database } from 'firebase-admin/database';
 import { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import { CustomMetadata, FilePaths, AudioSource } from './types';
 import { CancelToken } from './CancelToken';
-import { logMemoryUsage, secondsToTimeFormat, downloadFiles, getDurationSeconds, createTempFile } from './utils';
+import {
+  logMemoryUsage,
+  secondsToTimeFormat,
+  downloadFiles,
+  getDurationSeconds,
+  createTempFile,
+  unlinkSafeTempFile,
+} from './utils';
 import trimAndTranscode from './trimAndTranscode';
 import mergeFiles from './mergeFiles';
 import { PROCESSED_SERMONS_BUCKET } from './consts';
@@ -364,7 +370,7 @@ export const processAudio = async (
     const promises: Promise<void>[] = [];
     tempFiles.forEach((file) => {
       promises.push(
-        unlink(file).catch((err) => {
+        unlinkSafeTempFile(file, tempFiles).catch((err) => {
           log.warn('Failed to delete temp file', { file, error: err });
         })
       );

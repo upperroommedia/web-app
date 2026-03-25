@@ -2,12 +2,68 @@ import os from 'os';
 import path from 'path';
 import { exec, spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync } from 'fs';
-import { stat } from 'fs/promises';
+import { stat, unlink } from 'fs/promises';
 import { ProcessAudioInputType, AudioSource, CustomMetadata, FilePaths } from './types';
 import { Bucket } from '@google-cloud/storage';
 import axios from 'axios';
 import logger, { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
+
+const SAFE_LOCAL_PATH_ROOTS = [path.resolve(os.tmpdir()), path.resolve(process.cwd(), '.tmp')];
+
+export const sanitizeTempFileName = (fileName: string): string => {
+  const sanitized = path
+    .basename(fileName)
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  if (!sanitized || sanitized === '.' || sanitized === '..') {
+    throw new Error(`Invalid temp file name: ${fileName}`);
+  }
+
+  return sanitized;
+};
+
+export const ensureSafeTempPath = (filePath: string): string => {
+  if (!filePath?.trim()) {
+    throw new Error('Temp file path must be a non-empty string');
+  }
+
+  const resolvedPath = path.resolve(filePath);
+  const isWithinAllowedRoot = SAFE_LOCAL_PATH_ROOTS.some((rootPath) => {
+    const relativePath = path.relative(rootPath, resolvedPath);
+    return relativePath === '' || (!!relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+  });
+
+  if (!isWithinAllowedRoot) {
+    throw new Error(`Unsafe temp file path outside tmpdir: ${filePath}`);
+  }
+
+  return resolvedPath;
+};
+
+export const unlinkSafeTempFile = async (filePath: string, tempFiles?: Set<string>): Promise<void> => {
+  const safePath = ensureSafeTempPath(filePath);
+  await unlink(safePath);
+  tempFiles?.delete(safePath);
+};
+
+export const isTrustedYouTubeLiveDvrManifestUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname !== 'manifest.googlevideo.com') {
+      return false;
+    }
+
+    return (
+      parsed.search.includes('playlist_type/DVR') ||
+      parsed.pathname.includes('/source/yt_live_broadcast') ||
+      parsed.search.includes('/source/yt_live_broadcast')
+    );
+  } catch {
+    return false;
+  }
+};
 
 export const throwErrorOnSpecificStderr = (stderrLine: string) => {
   const errorMessages = ['Output file is empty'];
@@ -34,7 +90,7 @@ export const logMemoryUsage = async (
   if (tempFiles && tempFiles.size > 0) {
     for (const filePath of tempFiles) {
       try {
-        const fileStats = await stat(filePath);
+        const fileStats = await stat(ensureSafeTempPath(filePath));
         tempDirMB += fileStats.size;
       } catch {
         /* ignore missing or inaccessible */
@@ -59,7 +115,7 @@ export const createTempFile = (fileName: string, tempFiles: Set<string>) => {
     if (!existsSync(os.tmpdir())) {
       mkdirSync(os.tmpdir());
     }
-    const filePath = path.join(os.tmpdir(), fileName);
+    const filePath = ensureSafeTempPath(path.join(os.tmpdir(), sanitizeTempFileName(fileName)));
     tempFiles.add(filePath);
     return filePath;
   } catch (err) {

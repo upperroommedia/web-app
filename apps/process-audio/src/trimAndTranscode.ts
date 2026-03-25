@@ -4,10 +4,13 @@ import { Database, Reference } from 'firebase-admin/database';
 import {
   convertStringToMilliseconds,
   createTempFile,
+  ensureSafeTempPath,
+  isTrustedYouTubeLiveDvrManifestUrl,
   logMemoryUsage,
   throwErrorOnSpecificStderr,
   getFFmpegPath,
   getDurationSeconds,
+  unlinkSafeTempFile,
 } from './utils';
 import { CustomMetadata, AudioSource } from './types';
 import {
@@ -16,7 +19,7 @@ import {
   getYouTubeAudioUrl,
   getYouTubeTrimRoutingDecision,
 } from './processYouTubeUrl';
-import { unlink, readdir } from 'fs/promises';
+import { readdir } from 'fs/promises';
 import { PassThrough, Readable, finished } from 'stream';
 import os from 'os';
 import path from 'path';
@@ -212,7 +215,7 @@ const trimAndTranscode = async (
 
             if (downloadedFile !== ytdlpOutputFile) {
               tempFiles.delete(ytdlpOutputFile);
-              tempFiles.add(downloadedFile);
+              tempFiles.add(ensureSafeTempPath(downloadedFile));
               log.debug('Updated tempFiles tracking for yt-dlp output', {
                 basePath: ytdlpOutputFile,
                 actualPath: downloadedFile,
@@ -224,7 +227,7 @@ const trimAndTranscode = async (
               const files = await readdir(tempDir);
               const orphanedFiles = files.filter((f) => f.startsWith(ytdlpOutputFileBase));
               for (const orphanedFile of orphanedFiles) {
-                const orphanedPath = path.join(tempDir, orphanedFile);
+                const orphanedPath = ensureSafeTempPath(path.join(tempDir, orphanedFile));
                 if (!tempFiles.has(orphanedPath)) {
                   tempFiles.add(orphanedPath);
                   log.debug('Added orphaned yt-dlp file to cleanup tracking', { file: orphanedPath });
@@ -383,9 +386,7 @@ const trimAndTranscode = async (
       // DIRECT URL APPROACH:
       // Most URLs work best with fast input seeking (-ss before -i).
       // For YouTube live DVR manifests, prefer output seeking (-ss after -i) for timestamp accuracy.
-      const isYouTubeLiveDvrManifest =
-        inputSource.includes('manifest.googlevideo.com') &&
-        (inputSource.includes('playlist_type/DVR') || inputSource.includes('/source/yt_live_broadcast'));
+      const isYouTubeLiveDvrManifest = isTrustedYouTubeLiveDvrManifestUrl(inputSource);
 
       if (startTime) {
         if (isYouTubeLiveDvrManifest) {
@@ -468,9 +469,7 @@ const trimAndTranscode = async (
 
     if (usedDirectUrlWithSeeking) {
       const isYouTubeLiveDvrManifest =
-        typeof inputSource === 'string' &&
-        inputSource.includes('manifest.googlevideo.com') &&
-        (inputSource.includes('playlist_type/DVR') || inputSource.includes('/source/yt_live_broadcast'));
+        typeof inputSource === 'string' && isTrustedYouTubeLiveDvrManifestUrl(inputSource);
       const seekMode = isYouTubeLiveDvrManifest ? 'output_seek' : 'input_seek';
       log.info('Transcoding from direct URL with seeking', {
         filters: audioFilters,
@@ -501,8 +500,7 @@ const trimAndTranscode = async (
     const usesDvrManifestOutputSeek =
       usedDirectUrlWithSeeking &&
       typeof inputSource === 'string' &&
-      inputSource.includes('manifest.googlevideo.com') &&
-      (inputSource.includes('playlist_type/DVR') || inputSource.includes('/source/yt_live_broadcast'));
+      isTrustedYouTubeLiveDvrManifestUrl(inputSource);
     log.info('FFmpeg command', {
       command: commandLine,
       inputType: usedDirectUrlWithSeeking ? 'http_url' : typeof inputSource === 'string' ? 'file' : 'pipe',
@@ -836,8 +834,7 @@ const trimAndTranscode = async (
     if (typeof inputSource === 'string' && !usedDirectUrlWithSeeking) {
       await logMemoryUsage('Before raw audio delete', ctx, tempFiles);
       log.debug('Deleting raw audio temp file', { file: inputSource });
-      await unlink(inputSource);
-      tempFiles.delete(inputSource);
+      await unlinkSafeTempFile(inputSource, tempFiles);
       await logMemoryUsage('After raw audio delete', ctx, tempFiles);
     } else if (usedDirectUrlWithSeeking) {
       log.debug('Skipping temp file deletion - input was direct URL, not local file');
@@ -871,8 +868,7 @@ const trimAndTranscode = async (
     // Cleanup: delete temp files - but NOT if using direct URL (URL is not a local file)
     if (inputSource && typeof inputSource === 'string' && !usedDirectUrlWithSeeking) {
       try {
-        await unlink(inputSource);
-        tempFiles.delete(inputSource);
+        await unlinkSafeTempFile(inputSource, tempFiles);
       } catch (unlinkError) {
         log.warn('Failed to delete temporary file during error cleanup', { file: inputSource, error: unlinkError });
       }
