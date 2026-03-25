@@ -18,6 +18,7 @@ const getAdminActor = (request: CallableRequest<unknown>): { uid: string; email?
 };
 
 const setyoutubecookies = onCall(
+  { invoker: 'public' },
   async (request: CallableRequest<SetYouTubeCookiesInput>): Promise<SetYouTubeCookiesOutputType> => {
     const actor = getAdminActor(request);
 

@@ -42,7 +42,7 @@ const getProcessAudioTargetUri = (): string => {
   return PROCESS_AUDIO_TARGETS.prod;
 };
 
-const addintrooutrotaskgenerator = onCall(async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
+const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
   const data = request.data;
 
   if (!validateAddIntroOutroData(data)) {

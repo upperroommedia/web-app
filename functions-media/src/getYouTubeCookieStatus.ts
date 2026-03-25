@@ -14,6 +14,7 @@ const assertAdmin = (request: CallableRequest<unknown>): void => {
 };
 
 const getyoutubecookiestatus = onCall(
+  { invoker: 'public' },
   async (request: CallableRequest<GetYouTubeCookieStatusInput>): Promise<GetYouTubeCookieStatusOutputType> => {
     assertAdmin(request);
 
