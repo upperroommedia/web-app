@@ -7,7 +7,7 @@ const { CancelToken } = require('../dist/CancelToken');
 
 process.env.NODE_ENV = 'production';
 
-const fakeYtdlpPath = '/usr/src/app/scripts/fake-ytdlp.sh';
+const fakeYtdlpPath = path.resolve(__dirname, 'fake-ytdlp.sh');
 const artifactsDir = path.join(process.cwd(), '.tmp', 'youtube-loop');
 fs.mkdirSync(artifactsDir, { recursive: true });
 fs.chmodSync(fakeYtdlpPath, 0o755);
@@ -65,6 +65,10 @@ async function runCase(testCase) {
   process.env.YOUTUBE_BROWSER_FALLBACK_URL = testCase.browserFallback ? 'http://browser-fallback:8090/fallback' : '';
   process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED = testCase.browserFallback ? 'true' : 'false';
   process.env.YOUTUBE_COOKIE_CIRCUIT_BREAKER_MINUTES = '30';
+  process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS = testCase.useCookiesForPublicVideos ? 'true' : 'false';
+  const logFile = path.join(artifactsDir, `${testCase.name}.attempts.jsonl`);
+  process.env.FAKE_YTDLP_LOG_FILE = logFile;
+  fs.rmSync(logFile, { force: true });
 
   const realtimeDb = createMockRealtimeDb(testCase.realtimeDb || {});
   const ctx = createContext(`local-${testCase.name}`, 'process-audio.trim');
@@ -102,17 +106,33 @@ async function runCase(testCase) {
     artifact.status = 'ok';
     artifact.result = result;
     artifact.cookieMeta = realtimeDb._store['yt-dlp-cookies-meta'] || null;
+    artifact.attempts = fs.existsSync(logFile)
+      ? fs
+          .readFileSync(logFile, 'utf8')
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : [];
 
     if (testCase.expectError) {
       throw new Error(`Expected failure but case succeeded: ${testCase.name}`);
     }
     if (testCase.assert) {
-      testCase.assert(result, artifact.cookieMeta);
+      testCase.assert(result, artifact.cookieMeta, artifact);
     }
   } catch (error) {
     artifact.status = 'error';
     artifact.error = error instanceof Error ? error.message : String(error);
     artifact.cookieMeta = realtimeDb._store['yt-dlp-cookies-meta'] || null;
+    artifact.attempts = fs.existsSync(logFile)
+      ? fs
+          .readFileSync(logFile, 'utf8')
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : [];
     if (!testCase.expectError) {
       throw error;
     }
@@ -120,6 +140,7 @@ async function runCase(testCase) {
       testCase.assertError(artifact.error, artifact.cookieMeta);
     }
   } finally {
+    delete process.env.FAKE_YTDLP_LOG_FILE;
     const artifactPath = path.join(artifactsDir, `${testCase.name}.json`);
     fs.writeFileSync(artifactPath, JSON.stringify(artifact, null, 2));
   }
@@ -193,6 +214,69 @@ const cases = [
     assert(result) {
       if (!fs.existsSync(result)) {
         throw new Error('browser-fallback-section did not write the fallback download to disk');
+      }
+    },
+  },
+  {
+    name: 'cookie-preferred-direct',
+    kind: 'direct',
+    scenario: 'public_bot_cookie_ok',
+    browserFallback: false,
+    useCookiesForPublicVideos: true,
+    realtimeDb: {
+      'yt-dlp-cookies': encodeCookies(),
+      'yt-dlp-cookies-meta': {
+        rotatedAt: new Date().toISOString(),
+      },
+    },
+    assert(result, cookieMeta, artifact) {
+      if (!String(result.url).includes('https://example.com/fake-audio.m4a')) {
+        throw new Error('cookie-preferred-direct did not return the expected direct URL');
+      }
+      if (!artifact?.attempts?.[0]?.hasCookies) {
+        throw new Error('cookie-preferred-direct did not start with the cookie-backed attempt');
+      }
+    },
+  },
+  {
+    name: 'cookie-preferred-routing',
+    kind: 'routing',
+    scenario: 'public_bot_cookie_ok',
+    browserFallback: false,
+    useCookiesForPublicVideos: true,
+    realtimeDb: {
+      'yt-dlp-cookies': encodeCookies(),
+      'yt-dlp-cookies-meta': {
+        rotatedAt: new Date().toISOString(),
+      },
+    },
+    assert(result, cookieMeta, artifact) {
+      if (!['direct_url', 'section_download'].includes(result.strategy)) {
+        throw new Error('cookie-preferred-routing did not return a routing decision');
+      }
+      if (!artifact?.attempts?.[0]?.hasCookies) {
+        throw new Error('cookie-preferred-routing did not start with the cookie-backed attempt');
+      }
+    },
+  },
+  {
+    name: 'cookie-preferred-section',
+    kind: 'section',
+    scenario: 'public_bot_cookie_ok',
+    browserFallback: false,
+    useCookiesForPublicVideos: true,
+    realtimeDb: {
+      'yt-dlp-cookies': encodeCookies(),
+      'yt-dlp-cookies-meta': {
+        rotatedAt: new Date().toISOString(),
+      },
+    },
+    assert(result, cookieMeta, artifact) {
+      if (!fs.existsSync(result)) {
+        throw new Error('cookie-preferred-section did not create the output file');
+      }
+      if (!artifact?.attempts?.[0]?.hasCookies) {
+        throw new Error('cookie-preferred-section did not start with the cookie-backed attempt');
       }
     },
   },

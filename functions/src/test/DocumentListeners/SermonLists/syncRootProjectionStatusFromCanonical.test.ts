@@ -136,4 +136,16 @@ describe('syncRootProjectionStatusFromCanonical', () => {
 
     expect(projectionSnapshot.exists).toBe(false);
   });
+
+  it('returns early when rootListId is missing instead of throwing', async () => {
+    await expect(
+      syncRootProjectionStatusFromCanonical({
+        sermonId: 'sermon-1',
+        rootListId: '',
+        canonicalMembership: {
+          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+        },
+      })
+    ).resolves.toBeUndefined();
+  });
 });

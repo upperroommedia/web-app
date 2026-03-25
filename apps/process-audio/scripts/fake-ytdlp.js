@@ -13,6 +13,14 @@ const sectionIndex = args.indexOf('--download-sections');
 const isSectionDownload = sectionIndex !== -1;
 const outputIndex = args.indexOf('-o');
 const outputTemplate = outputIndex !== -1 ? args[outputIndex + 1] : undefined;
+const logFile = process.env.FAKE_YTDLP_LOG_FILE;
+
+if (logFile) {
+  fs.appendFileSync(
+    logFile,
+    `${JSON.stringify({ args, hasCookies, isJson, isHealthcheck, isDirectUrl, isSectionDownload })}\n`
+  );
+}
 
 function writeStdout(value) {
   process.stdout.write(value);

@@ -100,17 +100,15 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \
 
 # Install pnpm and copy the prepared workspace from the build stage
 RUN npm install -g pnpm@${PNPM_VERSION}
-COPY --from=build /workspace/package.json ./package.json
-COPY --from=build /workspace/.npmrc ./.npmrc
-COPY --from=build /workspace/pnpm-lock.yaml ./pnpm-lock.yaml
-COPY --from=build /workspace/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=build /workspace/node_modules ./node_modules
-COPY --from=build /workspace/packages ./packages
-COPY --from=build /workspace/apps/process-audio ./apps/process-audio
+COPY --from=build --chown=node:node /workspace/package.json ./package.json
+COPY --from=build --chown=node:node /workspace/.npmrc ./.npmrc
+COPY --from=build --chown=node:node /workspace/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=build --chown=node:node /workspace/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
+COPY --from=build --chown=node:node /workspace/packages ./packages
+COPY --from=build --chown=node:node /workspace/apps/process-audio ./apps/process-audio
 
-# Change ownership to node user
 WORKDIR /workspace/apps/process-audio
-RUN chown -R node:node /workspace
 USER node
 
 # Start the app

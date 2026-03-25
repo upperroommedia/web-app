@@ -1,3 +1,4 @@
 #!/bin/sh
 set -eu
-exec node /usr/src/app/scripts/fake-ytdlp.js "$@"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec node "$SCRIPT_DIR/fake-ytdlp.js" "$@"

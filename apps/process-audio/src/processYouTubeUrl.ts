@@ -390,6 +390,7 @@ function shouldDisableInnertubeForPoTokenProvider(): boolean {
 
 function ensureProductionPoTokenProviderConfigured(isDevelopment: boolean): void {
   if (isDevelopment) return;
+  if (shouldUseCookiesForPublicVideos()) return;
   if (getPoTokenProviderBaseUrl()) return;
   throw new Error(
     'YTDLP_POT_PROVIDER_BASE_URL is required for production YouTube downloads. Deploy a bgutil PO-token provider and set this env var before retrying.'
@@ -540,15 +541,21 @@ function applyYouTubeExtractorArgs(
   mode: YouTubeExtractionMode,
   log: ReturnType<typeof createLoggerWithContext>
 ): void {
+  if (mode === 'cookie_provider') {
+    args.push('--extractor-args', COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS);
+
+    log.info('Applying yt-dlp extractor args for cookie-backed extraction', {
+      mode,
+      youtubeExtractorArgs: COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS,
+      poTokenProviderConfigured: !!getPoTokenProviderBaseUrl(),
+    });
+    return;
+  }
+
   const providerBaseUrl = getPoTokenProviderBaseUrl();
   if (!providerBaseUrl) {
-    if (mode === 'cookie_provider') {
-      args.push('--extractor-args', COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS);
-    }
-
     log.debug('Applying yt-dlp extractor args without PO token provider', {
       mode,
-      extractorArgs: mode === 'cookie_provider' ? COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS : undefined,
       poTokenProviderConfigured: false,
     });
     return;
@@ -590,6 +597,10 @@ async function runCookieHealthcheck(
   });
 
   await runCommandWithCapture(ytdlpPath, args, 'yt-dlp cookie healthcheck', 'cookie_provider');
+}
+
+function shouldPreferCookieProvider(cookieContext: YouTubeCookieContext | undefined): boolean {
+  return shouldUseCookiesForPublicVideos() && !!cookieContext?.hasCookies;
 }
 
 async function callBrowserFallback<T>(
@@ -770,6 +781,97 @@ export const getYouTubeTrimRoutingDecision = async (
   };
 
   try {
+    if (shouldUseCookiesForPublicVideos()) {
+      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+      if (cookieContext.cookieBreakerOpen) {
+        if (isBrowserFallbackEnabled()) {
+          setCachedAccessDecision(ctx, url, {
+            state: 'cookie_stale',
+            mode: 'browser_fallback',
+            reason: 'routing_preflight_cookie_circuit_breaker_open',
+            cookieBreakerOpen: true,
+            disabledUntil: cookieContext.disabledUntil,
+            cookieMetadata: cookieContext.metadata,
+            decidedAt: getNowIsoString(),
+          });
+          return {
+            strategy: 'direct_url',
+            reason: 'browser_fallback_required_cookie_breaker_open',
+            hasFragments: false,
+            likelyDvr: false,
+          };
+        }
+
+        throw buildAnnotatedYouTubeError(
+          'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
+          'cookie_provider'
+        );
+      }
+
+      if (shouldPreferCookieProvider(cookieContext)) {
+        const activeCookieContext = cookieContext;
+        try {
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          const result = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
+            runAttempt('cookie_provider', activeCookieContext.args)
+          );
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            true,
+            undefined,
+            undefined,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+          setCachedAccessDecision(ctx, url, {
+            state: 'cookie_ok',
+            mode: 'cookie_provider',
+            reason: 'routing_preflight_cookie_preferred_success',
+            cookieMetadata: activeCookieContext.metadata,
+            decidedAt: getNowIsoString(),
+          });
+          return result;
+        } catch (cookieError) {
+          const cookieMessage = cookieError instanceof Error ? cookieError.message : String(cookieError);
+          const cookieFailureClass = classifyYouTubeFailure(cookieMessage, 'cookie_provider');
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            false,
+            cookieFailureClass,
+            cookieMessage,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+
+          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
+            setCachedAccessDecision(ctx, url, {
+              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
+              mode: 'browser_fallback',
+              reason: 'routing_preflight_browser_fallback_after_cookie_preferred_failure',
+              cookieFailureClass,
+              cookieFailureMessage: cookieMessage,
+              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
+              disabledUntil: activeCookieContext.disabledUntil,
+              cookieMetadata: activeCookieContext.metadata,
+              decidedAt: getNowIsoString(),
+            });
+            return {
+              strategy: 'direct_url',
+              reason: 'browser_fallback_required_after_cookie_preferred_failure',
+              hasFragments: false,
+              likelyDvr: false,
+            };
+          }
+
+          throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
+        }
+      }
+    }
+
     try {
       const result = await runAttemptWithRetries(getYouTubePublicProviderMaxAttempts(), () => runAttempt('public_provider'));
       setCachedAccessDecision(ctx, url, {
@@ -1093,6 +1195,113 @@ export const getYouTubeAudioUrl = async (
         log
       );
       return cookieResult;
+    }
+
+    if (shouldUseCookiesForPublicVideos()) {
+      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+      if (cookieContext.cookieBreakerOpen) {
+        if (isBrowserFallbackEnabled()) {
+          setCachedAccessDecision(ctx, url, {
+            state: 'cookie_stale',
+            mode: 'browser_fallback',
+            reason: 'direct_url_cookie_circuit_breaker_open_preferred',
+            cookieBreakerOpen: true,
+            disabledUntil: cookieContext.disabledUntil,
+            cookieMetadata: cookieContext.metadata,
+            decidedAt: getNowIsoString(),
+          });
+          const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
+            {
+              action: 'resolve_audio_url',
+              youtubeUrl: url,
+              requestContext: ctx,
+            },
+            log
+          );
+
+          return {
+            url: fallback.url,
+            format: fallback.format || 'unknown',
+            duration: fallback.duration,
+          };
+        }
+
+        throw buildAnnotatedYouTubeError(
+          'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
+          'cookie_provider'
+        );
+      }
+
+      if (shouldPreferCookieProvider(cookieContext)) {
+        const activeCookieContext = cookieContext;
+        try {
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          const cookieResult = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
+            runExtractionAttempt('cookie_provider', buildArgs('cookie_provider', activeCookieContext.args))
+          );
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            true,
+            undefined,
+            undefined,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+          setCachedAccessDecision(ctx, url, {
+            state: 'cookie_ok',
+            mode: 'cookie_provider',
+            reason: 'direct_url_cookie_preferred_success',
+            cookieMetadata: activeCookieContext.metadata,
+            decidedAt: getNowIsoString(),
+          });
+          return cookieResult;
+        } catch (cookieAttemptError) {
+          const cookieMessage = cookieAttemptError instanceof Error ? cookieAttemptError.message : String(cookieAttemptError);
+          const cookieFailureClass = classifyYouTubeFailure(cookieMessage, 'cookie_provider');
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            false,
+            cookieFailureClass,
+            cookieMessage,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+
+          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
+            setCachedAccessDecision(ctx, url, {
+              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
+              mode: 'browser_fallback',
+              reason: 'direct_url_browser_fallback_after_cookie_preferred_failure',
+              cookieFailureClass,
+              cookieFailureMessage: cookieMessage,
+              cookieMetadata: activeCookieContext.metadata,
+              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
+              disabledUntil: activeCookieContext.disabledUntil,
+              decidedAt: getNowIsoString(),
+            });
+            const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
+              {
+                action: 'resolve_audio_url',
+                youtubeUrl: url,
+                requestContext: ctx,
+              },
+              log
+            );
+
+            return {
+              url: fallback.url,
+              format: fallback.format || 'unknown',
+              duration: fallback.duration,
+            };
+          }
+
+          throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
+        }
+      }
     }
 
     try {
@@ -1500,6 +1709,51 @@ async function getYouTubeAudioFragments(
   };
 
   try {
+    if (shouldUseCookiesForPublicVideos()) {
+      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+      if (cookieContext.cookieBreakerOpen) {
+        throw buildAnnotatedYouTubeError(
+          'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
+          'cookie_provider'
+        );
+      }
+
+      if (shouldPreferCookieProvider(cookieContext)) {
+        const activeCookieContext = cookieContext;
+        try {
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          const result = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
+            tryAttempt('cookie_provider', activeCookieContext.args)
+          );
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            true,
+            undefined,
+            undefined,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+          return result;
+        } catch (cookieError) {
+          const cookieMessage = cookieError instanceof Error ? cookieError.message : String(cookieError);
+          const cookieFailureClass = classifyYouTubeFailure(cookieMessage, 'cookie_provider');
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            false,
+            cookieFailureClass,
+            cookieMessage,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+          throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
+        }
+      }
+    }
+
     try {
       return await tryAttempt('public_provider');
     } catch (publicError) {
@@ -2025,6 +2279,107 @@ export const downloadYouTubeSection = async (
 
   const cleaned = { done: false };
   try {
+    if (shouldUseCookiesForPublicVideos()) {
+      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+      if (cookieContext.cookieBreakerOpen) {
+        if (isBrowserFallbackEnabled()) {
+          setCachedAccessDecision(ctx, url, {
+            state: 'cookie_stale',
+            mode: 'browser_fallback',
+            reason: 'section_download_cookie_circuit_breaker_open_preferred',
+            cookieBreakerOpen: true,
+            disabledUntil: cookieContext.disabledUntil,
+            cookieMetadata: cookieContext.metadata,
+            decidedAt: getNowIsoString(),
+          });
+          const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
+            {
+              action: 'download_section',
+              youtubeUrl: url,
+              startTime,
+              duration,
+              requestContext: ctx,
+            },
+            log
+          );
+          return await downloadBrowserFallbackSection(outputFilePath, fallback);
+        }
+
+        throw buildAnnotatedYouTubeError(
+          'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
+          'cookie_provider'
+        );
+      }
+
+      if (shouldPreferCookieProvider(cookieContext)) {
+        const activeCookieContext = cookieContext;
+        try {
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          const cookieResult = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
+            runSectionDownloadAttempt('cookie_provider', buildAttemptArgs('cookie_provider', activeCookieContext.args))
+          );
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            true,
+            undefined,
+            undefined,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+          setCachedAccessDecision(ctx, url, {
+            state: 'cookie_ok',
+            mode: 'cookie_provider',
+            reason: 'section_download_cookie_preferred_success',
+            cookieMetadata: activeCookieContext.metadata,
+            decidedAt: getNowIsoString(),
+          });
+          return cookieResult;
+        } catch (cookieError) {
+          const cookieMessage = cookieError instanceof Error ? cookieError.message : String(cookieError);
+          const cookieFailureClass = classifyYouTubeFailure(cookieMessage, 'cookie_provider');
+          await recordCookieAttemptOutcome(
+            realtimeDB,
+            'cookie_provider',
+            false,
+            cookieFailureClass,
+            cookieMessage,
+            activeCookieContext.metadata,
+            getYouTubeVideoId(url),
+            log
+          );
+
+          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
+            setCachedAccessDecision(ctx, url, {
+              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
+              mode: 'browser_fallback',
+              reason: 'section_download_browser_fallback_after_cookie_preferred_failure',
+              cookieFailureClass,
+              cookieFailureMessage: cookieMessage,
+              cookieMetadata: activeCookieContext.metadata,
+              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
+              disabledUntil: activeCookieContext.disabledUntil,
+              decidedAt: getNowIsoString(),
+            });
+            const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
+              {
+                action: 'download_section',
+                youtubeUrl: url,
+                startTime,
+                duration,
+                requestContext: ctx,
+              },
+              log
+            );
+            return await downloadBrowserFallbackSection(outputFilePath, fallback);
+          }
+
+          throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
+        }
+      }
+    }
+
     try {
       const publicResult = await runAttemptWithRetries(getYouTubePublicProviderMaxAttempts(), () =>
         runSectionDownloadAttempt('public_provider', buildAttemptArgs('public_provider'))

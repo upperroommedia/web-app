@@ -53,7 +53,7 @@ steps:
         READY_STATUS="$$(gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
           --project "${_PROJECT_ID}" \
           --region "${_REGION}" \
-          --format='value(status.conditions[?type="Ready"].status)')"
+          --format=json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((condition.get("status","") for condition in data.get("status", {}).get("conditions", []) if condition.get("type") == "Ready"), ""))')"
 
         if [[ "$$READY_STATUS" != "True" ]]; then
           echo "POT provider is not Ready after deploy: status=$$READY_STATUS" >&2
@@ -114,7 +114,7 @@ substitutions:
   _MIN_INSTANCES: '0'
   _MAX_INSTANCES: '10'
   _TIMEOUT: '3600'
-  _YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS: 'false'
+  _YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS: 'true'
   _YTDLP_CONCURRENT_FRAGMENTS: '1'
   _YOUTUBE_RETRY_DELAY_MS: '1500'
   _YTDLP_COOKIE_HEALTHCHECK_ENABLED: 'true'
