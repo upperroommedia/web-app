@@ -204,20 +204,20 @@ jobs:
             if contains_path '^(functions/src/|apps/web/firebase/|apps/web/shared/|apps/web/types/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
               deploy_functions_core=true
               deploy_functions_media=true
-              deploy_functions_IMAGE=true
+              deploy_functions_image=true
               deploy_functions_integrations=true
             fi
 
             if contains_path '^(packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
               deploy_functions_core=true
               deploy_functions_media=true
-              deploy_functions_IMAGE=true
+              deploy_functions_image=true
               deploy_functions_integrations=true
             fi
           fi
 
           anything_to_firebase_deploy=false
-          if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_IMAGE" == "true" || "$deploy_functions_integrations" == "true" ]]; then
+          if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
             anything_to_firebase_deploy=true
           fi
           anything_to_run="$anything_to_firebase_deploy"
@@ -228,7 +228,7 @@ jobs:
             echo "deploy_storage=$deploy_storage"
             echo "deploy_functions_core=$deploy_functions_core"
             echo "deploy_functions_media=$deploy_functions_media"
-            echo "deploy_functions_image=$deploy_functions_image"
+            echo "deploy_functions_image=$deploy_functions_IMAGE"
             echo "deploy_functions_integrations=$deploy_functions_integrations"
             echo "anything_to_firebase_deploy=$anything_to_firebase_deploy"
             echo "anything_to_run=$anything_to_run"
