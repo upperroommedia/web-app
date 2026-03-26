@@ -2,6 +2,7 @@ import {
   computeProcessAudioRequestVersion,
   computeProcessAudioTaskId,
   normalizeProcessAudioRequest,
+  sanitizeProcessAudioPayload,
 } from '@upperroom/contracts/processAudioQueue';
 
 describe('processAudioQueue contract helpers', () => {
@@ -49,6 +50,28 @@ describe('processAudioQueue contract helpers', () => {
     });
 
     expect(first).toBe(second);
+  });
+
+  it('sanitizes optional payload fields before queue state persistence', () => {
+    expect(
+      sanitizeProcessAudioPayload({
+        id: 'sermon-123',
+        youtubeUrl: 'https://www.youtube.com/watch?v=abc123',
+        startTime: 0,
+        duration: 120,
+        deleteOriginal: undefined,
+        skipTranscode: undefined,
+        introUrl: undefined,
+        outroUrl: undefined,
+      })
+    ).toEqual({
+      id: 'sermon-123',
+      youtubeUrl: 'https://www.youtube.com/watch?v=abc123',
+      startTime: 0,
+      duration: 120,
+      deleteOriginal: false,
+      skipTranscode: false,
+    });
   });
 
   it('changes the request version when the trim window changes', () => {

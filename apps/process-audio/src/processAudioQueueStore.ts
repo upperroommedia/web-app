@@ -10,6 +10,7 @@ import {
   PROCESS_AUDIO_REQUESTS_PATH,
   PROCESS_AUDIO_TASK_QUEUE_NAME,
   PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS,
+  sanitizeProcessAudioPayload,
   type StoredDeferredYouTubeRequest,
   type StoredProcessAudioRequestState,
   type StoredYouTubeQueueState,
@@ -56,23 +57,26 @@ const buildProcessAudioRequestState = (
   payload: AddIntroOutroInputType,
   requestVersion: string,
   updatedAt: string
-): StoredProcessAudioRequestState => ({
-  sermonId: payload.id,
-  sourceType: getProcessAudioSourceType(payload),
-  currentPayload: payload,
-  currentRequestVersion: requestVersion,
-  queuedTaskId: null,
-  queuedAt: null,
-  runningRequestId: null,
-  runningTaskId: null,
-  runningRequestVersion: null,
-  runningAt: null,
-  nextPayload: null,
-  nextRequestVersion: null,
-  nextUpdatedAt: null,
-  deferredAt: null,
-  updatedAt,
-});
+): StoredProcessAudioRequestState => {
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
+  return {
+    sermonId: sanitizedPayload.id,
+    sourceType: getProcessAudioSourceType(sanitizedPayload),
+    currentPayload: sanitizedPayload,
+    currentRequestVersion: requestVersion,
+    queuedTaskId: null,
+    queuedAt: null,
+    runningRequestId: null,
+    runningTaskId: null,
+    runningRequestVersion: null,
+    runningAt: null,
+    nextPayload: null,
+    nextRequestVersion: null,
+    nextUpdatedAt: null,
+    deferredAt: null,
+    updatedAt,
+  };
+};
 
 const normalizeBaseUrl = (value: string): string => value.replace(/\/process-audio\/?$/u, '').replace(/\/+$/u, '');
 
@@ -190,7 +194,8 @@ async function enqueueTask(
   payload: AddIntroOutroInputType,
   taskId: string
 ): Promise<void> {
-  await queue.enqueue(payload, {
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
+  await queue.enqueue(sanitizedPayload, {
     id: taskId,
     dispatchDeadlineSeconds: PROCESS_AUDIO_TASK_TIMEOUT_SECONDS,
     uri: getProcessAudioTargetUri(),
@@ -221,7 +226,7 @@ async function enqueueDeferredRequestIgnoringPause(
         ...state,
         sermonId: entry.sermonId,
         sourceType: 'youtube',
-        currentPayload: entry.payload,
+        currentPayload: sanitizeProcessAudioPayload(entry.payload),
         currentRequestVersion: entry.requestVersion,
         queuedTaskId: taskId,
         queuedAt: now,
@@ -270,22 +275,23 @@ export async function markProcessAudioRequestRunning(args: {
   ctx?: LogContext;
 }): Promise<void> {
   const { database, payload, requestId, taskId, ctx } = args;
-  const requestVersion = computeProcessAudioRequestVersion(payload);
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
+  const requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
   const now = getNowIsoString();
   const log = createLoggerWithContext(ctx);
 
-  await withProcessAudioQueueClaim(database, payload.id, `running:${requestId}`, async () => {
-    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${payload.id}`);
+  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `running:${requestId}`, async () => {
+    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const requestSnapshot = await requestRef.get();
     const existingState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(payload, requestVersion, now);
+      : buildProcessAudioRequestState(sanitizedPayload, requestVersion, now);
 
     await requestRef.set({
       ...existingState,
-      sermonId: payload.id,
-      sourceType: getProcessAudioSourceType(payload),
-      currentPayload: payload,
+      sermonId: sanitizedPayload.id,
+      sourceType: getProcessAudioSourceType(sanitizedPayload),
+      currentPayload: sanitizedPayload,
       currentRequestVersion: requestVersion,
       queuedTaskId: taskId ?? existingState.queuedTaskId,
       runningRequestId: requestId,
@@ -296,7 +302,7 @@ export async function markProcessAudioRequestRunning(args: {
     } satisfies StoredProcessAudioRequestState);
 
     log.info('Marked process-audio request as running', {
-      sermonId: payload.id,
+      sermonId: sanitizedPayload.id,
       requestVersion,
       taskId,
     });
@@ -311,11 +317,12 @@ export async function completeProcessAudioSuccess(args: {
   ctx?: LogContext;
 }): Promise<void> {
   const { database, payload, requestId, taskId, ctx } = args;
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const log = createLoggerWithContext(ctx);
   const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
 
-  await withProcessAudioQueueClaim(database, payload.id, `success:${requestId}`, async () => {
-    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${payload.id}`);
+  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `success:${requestId}`, async () => {
+    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const [requestSnapshot, queueSnapshot] = await Promise.all([
       requestRef.get(),
       database.ref(YOUTUBE_QUEUE_STATE_PATH).get(),
@@ -323,16 +330,16 @@ export async function completeProcessAudioSuccess(args: {
     const now = getNowIsoString();
     const requestState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(payload, computeProcessAudioRequestVersion(payload), now);
+      : buildProcessAudioRequestState(sanitizedPayload, computeProcessAudioRequestVersion(sanitizedPayload), now);
     const queueState = parseYouTubeQueueState(queueSnapshot.val());
     const shouldResolveProbe =
-      getProcessAudioSourceType(payload) === 'youtube' &&
+      getProcessAudioSourceType(sanitizedPayload) === 'youtube' &&
       queueState.probeStatus === 'probing' &&
-      queueState.probeTaskSermonId === payload.id &&
+      queueState.probeTaskSermonId === sanitizedPayload.id &&
       queueState.probeRequestVersion === requestState.runningRequestVersion;
 
-      if (shouldResolveProbe) {
-      const youtubePayload = 'youtubeUrl' in payload ? payload : null;
+    if (shouldResolveProbe) {
+      const youtubePayload = 'youtubeUrl' in sanitizedPayload ? sanitizedPayload : null;
       const cookieProbeSucceeded = await didCookieProbeSucceed(
         database,
         youtubePayload?.youtubeUrl ?? '',
@@ -342,7 +349,7 @@ export async function completeProcessAudioSuccess(args: {
       if (cookieProbeSucceeded) {
         const { deferredEntries } = await getQueueStateAndDeferredEntries(database);
         const remainingEntries = deferredEntries
-          .filter((entry) => entry.sermonId !== payload.id)
+          .filter((entry) => entry.sermonId !== sanitizedPayload.id)
           .sort((left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt));
 
         await database.ref(YOUTUBE_QUEUE_STATE_PATH).set({
@@ -435,7 +442,7 @@ export async function completeProcessAudioSuccess(args: {
     } satisfies StoredProcessAudioRequestState);
 
     log.info('Completed process-audio request successfully', {
-      sermonId: payload.id,
+      sermonId: sanitizedPayload.id,
       taskId,
     });
   });
@@ -448,14 +455,15 @@ export async function completeProcessAudioFailure(args: {
   taskId: string | null;
 }): Promise<void> {
   const { database, payload, requestId, taskId } = args;
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
 
-  await withProcessAudioQueueClaim(database, payload.id, `failure:${requestId}`, async () => {
-    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${payload.id}`);
+  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `failure:${requestId}`, async () => {
+    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const requestSnapshot = await requestRef.get();
     const now = getNowIsoString();
     const requestState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(payload, computeProcessAudioRequestVersion(payload), now);
+      : buildProcessAudioRequestState(sanitizedPayload, computeProcessAudioRequestVersion(sanitizedPayload), now);
 
     await requestRef.set({
       ...requestState,
@@ -478,12 +486,13 @@ export async function deferStaleYouTubeRequest(args: {
   failureMessage: string;
 }): Promise<{ shouldAlert: boolean; blockerEpisodeId: string | null }> {
   const { database, payload, requestId, failureClass, failureMessage } = args;
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const now = getNowIsoString();
   let shouldAlert = false;
   let blockerEpisodeId: string | null = null;
 
-  await withProcessAudioQueueClaim(database, payload.id, `stale:${requestId}`, async () => {
-    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${payload.id}`);
+  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `stale:${requestId}`, async () => {
+    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
     const [requestSnapshot, queueStateSnapshot, deferredSnapshot] = await Promise.all([
       requestRef.get(),
       database.ref(YOUTUBE_QUEUE_STATE_PATH).get(),
@@ -491,22 +500,22 @@ export async function deferStaleYouTubeRequest(args: {
     ]);
     const requestState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(payload, computeProcessAudioRequestVersion(payload), now);
+      : buildProcessAudioRequestState(sanitizedPayload, computeProcessAudioRequestVersion(sanitizedPayload), now);
     const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
-    const latestPayload = requestState.nextPayload ?? requestState.currentPayload ?? payload;
+    const latestPayload = sanitizeProcessAudioPayload(requestState.nextPayload ?? requestState.currentPayload ?? sanitizedPayload);
     const latestVersion =
       requestState.nextRequestVersion ??
       requestState.currentRequestVersion ??
       computeProcessAudioRequestVersion(latestPayload);
     const deferredCount = countChildren(deferredSnapshot.val());
 
-    blockerEpisodeId = queueState.blockerEpisodeId || `${payload.id}:${Date.now()}`;
+    blockerEpisodeId = queueState.blockerEpisodeId || `${sanitizedPayload.id}:${Date.now()}`;
     shouldAlert = !queueState.alertSentAt;
-    const existingDeferredForSermon = asRecord(deferredSnapshot.val())?.[payload.id];
+    const existingDeferredForSermon = asRecord(deferredSnapshot.val())?.[sanitizedPayload.id];
 
     await Promise.all([
-      database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${payload.id}`).set({
-        sermonId: payload.id,
+      database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`).set({
+        sermonId: sanitizedPayload.id,
         payload: latestPayload,
         requestVersion: latestVersion,
         deferredAt: now,

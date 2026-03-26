@@ -97,6 +97,38 @@ export const normalizeProcessAudioRequest = (payload: AddIntroOutroInputType): N
   };
 };
 
+export const sanitizeProcessAudioPayload = (payload: AddIntroOutroInputType): AddIntroOutroInputType => {
+  const basePayload = {
+    id: payload.id,
+    startTime: payload.startTime,
+    duration: payload.duration,
+    deleteOriginal: payload.deleteOriginal ?? false,
+    skipTranscode: payload.skipTranscode ?? false,
+  };
+
+  const introOutro =
+    typeof payload.introUrl === 'string' || typeof payload.outroUrl === 'string'
+      ? {
+          ...(typeof payload.introUrl === 'string' ? { introUrl: payload.introUrl } : {}),
+          ...(typeof payload.outroUrl === 'string' ? { outroUrl: payload.outroUrl } : {}),
+        }
+      : {};
+
+  if ('youtubeUrl' in payload) {
+    return {
+      ...basePayload,
+      ...introOutro,
+      youtubeUrl: payload.youtubeUrl,
+    };
+  }
+
+  return {
+    ...basePayload,
+    ...introOutro,
+    storageFilePath: payload.storageFilePath,
+  };
+};
+
 export const computeProcessAudioRequestVersion = (payload: AddIntroOutroInputType): string => {
   const normalized = normalizeProcessAudioRequest(payload);
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
