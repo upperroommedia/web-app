@@ -147,7 +147,7 @@ jobs:
               deploy_process_audio=true
             fi
 
-            if contains_path '^(packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-process-audio\.sh)'; then
+            if contains_path '^(\.github/workflows/staging-process-audio-deploy\.yml|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-process-audio\.sh|scripts/ensure-public-cloud-run-invoker\.sh)'; then
               deploy_process_audio=true
             fi
           fi
@@ -249,6 +249,10 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
         run: bash scripts/deploy-process-audio.sh staging "$GITHUB_SHA"
+
+      - name: Ensure staging POT provider public invoker
+        if: needs.detect-changes.outputs.deploy_process_audio == 'true'
+        run: bash scripts/ensure-public-cloud-run-invoker.sh "${GCP_PROJECT}" us-central1 ytdlp-pot-provider
 
       - name: No-op for non-deployable changes
         if: needs.detect-changes.outputs.anything_to_run != 'true'
