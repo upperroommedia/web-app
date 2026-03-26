@@ -33,13 +33,28 @@ steps:
           --region "${_REGION}" \
           --platform managed \
           --port "${_POT_PROVIDER_PORT}" \
-          --allow-unauthenticated \
           --min-instances "${_POT_PROVIDER_MIN_INSTANCES}" \
           --max-instances "${_POT_PROVIDER_MAX_INSTANCES}" \
           --cpu "${_POT_PROVIDER_CPU}" \
           --memory "${_POT_PROVIDER_MEMORY}" \
           --concurrency "${_POT_PROVIDER_CONCURRENCY}" \
           --timeout "${_POT_PROVIDER_TIMEOUT}"
+
+        gcloud beta run services add-iam-policy-binding "${_POT_PROVIDER_SERVICE_NAME}" \
+          --project "${_PROJECT_ID}" \
+          --region "${_REGION}" \
+          --member "allUsers" \
+          --role "roles/run.invoker" >/dev/null
+
+        INVOKER_BINDING_PRESENT="$$(gcloud run services get-iam-policy "${_POT_PROVIDER_SERVICE_NAME}" \
+          --project "${_PROJECT_ID}" \
+          --region "${_REGION}" \
+          --format=json | python3 -c 'import json,sys; policy=json.load(sys.stdin); print(any(binding.get("role") == "roles/run.invoker" and "allUsers" in binding.get("members", []) for binding in policy.get("bindings", [])))')"
+
+        if [[ "$$INVOKER_BINDING_PRESENT" != "True" ]]; then
+          echo "Failed to grant public invoker access to ${_POT_PROVIDER_SERVICE_NAME}" >&2
+          exit 1
+        fi
 
         gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
           --project "${_PROJECT_ID}" \
