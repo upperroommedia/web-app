@@ -39,6 +39,12 @@ describe('youtubeCookies utils', () => {
         hasCookies: true,
         cookieBreakerOpen: false,
         disabledUntil: null,
+        youtubeQueueBlocked: false,
+        probeStatus: 'idle',
+        deferredYouTubeTaskCount: 0,
+        blockerReason: null,
+        blockerEpisodeId: null,
+        blockerUpdatedAt: null,
         metadata: null,
       }
     );
@@ -46,11 +52,17 @@ describe('youtubeCookies utils', () => {
       hasCookies: true,
       cookieBreakerOpen: false,
       disabledUntil: null,
+      youtubeQueueBlocked: true,
+      probeStatus: 'probing',
+      deferredYouTubeTaskCount: 2,
+      blockerReason: null,
+      blockerEpisodeId: 'episode-1',
+      blockerUpdatedAt: '2026-03-26T18:09:43.380Z',
       metadata: {
         sourceFileName: 'cookies.txt',
         uploadedAt: '2026-03-24T18:09:43.380Z',
         uploadedByEmail: 'admin@example.com',
-        lastHealthStatus: 'uploaded',
+        lastHealthStatus: 'uploaded_unverified',
       },
     };
     const getYouTubeCookieStatus = jest

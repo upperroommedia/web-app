@@ -1,4 +1,3 @@
-import { TaskOptions, getFunctions } from 'firebase-admin/functions';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
@@ -9,10 +8,10 @@ import { emitOperationalAlert } from '../../functions/src/notifications/emitOper
 import {
   getAudioSource,
   PROCESS_AUDIO_TASK_QUEUE_NAME,
-  PROCESS_AUDIO_TASK_TIMEOUT_SECONDS,
   validateAddIntroOutroData,
 } from './audioTaskPayload';
 import { getProcessAudioTargetUri } from './processAudioService';
+import { queueOrReplaceProcessAudioRequest } from './processAudioQueueStore';
 
 const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
   const data = request.data;
@@ -48,19 +47,23 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
 
     await docRef.update({ 'status.audioStatus': sermonStatusType.PENDING });
 
-    const queue = getFunctions().taskQueue(PROCESS_AUDIO_TASK_QUEUE_NAME);
-    const taskOptions: TaskOptions = {
-      dispatchDeadlineSeconds: PROCESS_AUDIO_TASK_TIMEOUT_SECONDS,
-      uri: targetUri,
-    };
+    const queueResult = await queueOrReplaceProcessAudioRequest({
+      database: firebaseAdmin.database(),
+      payload: data,
+      targetUri,
+      ownerId: `enqueue:${data.id}:${Date.now()}`,
+    });
 
-    logger.info('Enqueueing process-audio task', {
-      queueName: PROCESS_AUDIO_TASK_QUEUE_NAME,
+    logger.info('Updated process-audio queue state', {
+      action: queueResult.action,
+      requestVersion: queueResult.requestVersion,
+      taskId: 'taskId' in queueResult ? queueResult.taskId : null,
+      sourceType: queueResult.sourceType,
       targetUri,
       projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID,
     });
 
-    return await queue.enqueue(data, taskOptions);
+    return;
   } catch (error) {
     logger.error(error);
 

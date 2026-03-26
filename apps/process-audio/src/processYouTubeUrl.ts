@@ -60,7 +60,7 @@ interface YouTubeCookieMetadata {
   profileType?: string;
   cookieHash?: string;
   sourceAccount?: string;
-  lastHealthStatus?: 'healthy' | 'stale_or_challenged' | 'unknown';
+  lastHealthStatus?: 'uploaded_unverified' | 'healthy' | 'stale_or_challenged' | 'unknown';
   lastHealthCheckAt?: string;
   lastFailureClass?: YouTubeFailureClass;
   lastFailureAt?: string;

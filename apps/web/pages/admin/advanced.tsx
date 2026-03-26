@@ -295,7 +295,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       setIsUploadingYouTubeCookies(true);
       setNotice({
         severity: 'info',
-        text: `Uploading ${file.name}, clearing the YouTube cookie breaker, and validating the cookie session…`,
+        text: `Uploading ${file.name} and preparing a single deferred YouTube probe before the queue resumes…`,
       });
 
       try {
@@ -308,7 +308,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
         setYouTubeCookieStatus(nextStatus);
         setNotice({
           severity: 'success',
-          text: 'YouTube cookies were uploaded, validated successfully, and the cookie breaker was cleared.',
+          text: 'YouTube cookies were uploaded. Public videos stay on PO tokens, and the YouTube queue will only resume after a cookie-backed probe succeeds.',
         });
       } catch (error) {
         try {
@@ -450,8 +450,9 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                       Upload a fresh <code>cookies.txt</code> export for the dedicated YouTube account. The client
-                      base64-encodes the file immediately, the admin callable stores it in RTDB, and the cookie
-                      breaker is cleared in the same update.
+                      base64-encodes the file immediately, the admin callable stores it in RTDB, and a single deferred
+                      auth-required YouTube job is used as the resume probe. Public YouTube extraction stays on PO
+                      tokens and does not depend on these cookies.
                     </Typography>
                   </Box>
                   {isLoadingCookieStatus ? (
@@ -465,7 +466,12 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                       />
                       <Chip
                         color={youtubeCookieStatus?.cookieBreakerOpen ? 'warning' : 'success'}
-                        label={youtubeCookieStatus?.cookieBreakerOpen ? 'Breaker open' : 'Breaker clear'}
+                        label={youtubeCookieStatus?.cookieBreakerOpen ? 'Cookie breaker open' : 'Cookie breaker clear'}
+                        variant="outlined"
+                      />
+                      <Chip
+                        color={youtubeCookieStatus?.youtubeQueueBlocked ? 'warning' : 'success'}
+                        label={youtubeCookieStatus?.youtubeQueueBlocked ? 'YouTube queue paused' : 'YouTube queue active'}
                         variant="outlined"
                       />
                     </Stack>
@@ -478,6 +484,21 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   <Typography variant="subtitle2">Cookie status</Typography>
                   <Typography variant="body2" color="text.secondary">
                     Disabled until: {formatIsoTimestamp(youtubeCookieStatus?.disabledUntil)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue probe status: {youtubeCookieStatus?.probeStatus ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Deferred YouTube requests: {youtubeCookieStatus?.deferredYouTubeTaskCount ?? 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue blocker reason: {youtubeCookieStatus?.blockerReason ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue blocker episode: {youtubeCookieStatus?.blockerEpisodeId ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue blocker updated: {formatIsoTimestamp(youtubeCookieStatus?.blockerUpdatedAt)}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Uploaded at: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.uploadedAt)}
@@ -518,7 +539,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
 
                 <Alert severity="info">
                   This page never reads raw cookie contents back to the browser. It only shows metadata from
-                  <code> yt-dlp-cookies-meta</code>.
+                  <code> yt-dlp-cookies-meta</code> plus queue state stored under <code>processAudioQueues/youtube</code>.
                 </Alert>
 
                 <Alert severity="warning">

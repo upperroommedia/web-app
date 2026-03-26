@@ -19,6 +19,14 @@ export type YouTubeAlertCode =
 export function classifyYouTubeFailure(message: string, mode: YouTubeExtractionMode): YouTubeFailureClass {
   const lower = message.toLowerCase();
 
+  if (lower.includes('configured youtube cookie session appears stale or challenged')) {
+    return 'cookie_session_stale_or_challenged';
+  }
+
+  if (lower.includes('this video appears to require an authenticated youtube session')) {
+    return 'account_required_content';
+  }
+
   if (
     lower.includes('po token providers: none') ||
     lower.includes('ytdlp_pot_provider_base_url is required') ||

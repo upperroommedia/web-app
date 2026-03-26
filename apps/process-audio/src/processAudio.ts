@@ -19,6 +19,7 @@ import { PROCESSED_SERMONS_BUCKET } from './consts';
 import trim from './trim';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext, createChildContext, createContext } from './context';
+import { markProcessAudioRequestRunning } from './processAudioQueueStore';
 
 const PROCESS_AUDIO_LOCK_TTL_MS = 30 * 60 * 1000;
 
@@ -96,7 +97,8 @@ export const processAudio = async (
   skipTranscode?: boolean,
   introUrl?: string,
   outroUrl?: string,
-  ctx?: LogContext
+  ctx?: LogContext,
+  taskId?: string | null
 ): Promise<void> => {
   const fileName = audioSource.id;
   // Use provided context or create a new one with sermonId
@@ -188,6 +190,34 @@ export const processAudio = async (
     if (!lockAcquired) {
       throw new Error(`A process-audio request is already running for sermon ${fileName}`);
     }
+
+    await markProcessAudioRequestRunning({
+      database: realtimeDB,
+      payload: audioSource.type === 'YouTubeUrl'
+        ? {
+            id: audioSource.id,
+            youtubeUrl: audioSource.source,
+            startTime,
+            duration,
+            deleteOriginal,
+            skipTranscode,
+            introUrl,
+            outroUrl,
+          }
+        : {
+            id: audioSource.id,
+            storageFilePath: audioSource.source,
+            startTime,
+            duration,
+            deleteOriginal,
+            skipTranscode,
+            introUrl,
+            outroUrl,
+          },
+      requestId: lockRequestId,
+      taskId: taskId ?? null,
+      ctx: contextWithSermonId,
+    });
 
     if (cancelToken.isCancellationRequested) return;
     await docRef.update({

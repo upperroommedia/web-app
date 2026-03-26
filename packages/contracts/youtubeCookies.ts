@@ -1,4 +1,12 @@
-export type YouTubeCookieHealthStatus = 'missing' | 'uploaded' | 'healthy' | 'stale_or_challenged' | 'unknown';
+import type { YouTubeQueueProbeStatus } from './processAudioQueue';
+
+export type YouTubeCookieHealthStatus =
+  | 'missing'
+  | 'uploaded'
+  | 'uploaded_unverified'
+  | 'healthy'
+  | 'stale_or_challenged'
+  | 'unknown';
 
 export interface YouTubeCookieMetadata {
   cookieHash?: string;
@@ -24,5 +32,11 @@ export interface YouTubeCookieStatus {
   hasCookies: boolean;
   cookieBreakerOpen: boolean;
   disabledUntil?: string | null;
+  youtubeQueueBlocked: boolean;
+  probeStatus: YouTubeQueueProbeStatus;
+  deferredYouTubeTaskCount: number;
+  blockerReason?: string | null;
+  blockerEpisodeId?: string | null;
+  blockerUpdatedAt?: string | null;
   metadata: YouTubeCookieMetadata | null;
 }

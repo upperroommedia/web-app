@@ -12,7 +12,12 @@ import logger, { createLoggerWithContext } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
 import { classifyYouTubeFailure, toYouTubeAlertCode } from './youtubeExtractionPolicy';
-import { validateConfiguredYouTubeCookies } from './processYouTubeUrl';
+import {
+  completeProcessAudioFailure,
+  completeProcessAudioSuccess,
+  deferStaleYouTubeRequest,
+  extractCloudTaskId,
+} from './processAudioQueueStore';
 
 const app = express();
 app.use(express.json());
@@ -116,35 +121,6 @@ app.get('/healthz', (req, res) => {
   });
 });
 
-app.post('/validate-youtube-cookies', async (_req, res) => {
-  const ctx = createContext(undefined, 'validate-youtube-cookies');
-  const log = createLoggerWithContext(ctx);
-
-  try {
-    const result = await validateConfiguredYouTubeCookies(ytdlpPath, realtimeDB, isDevelopment, log);
-    res.status(result.ok ? 200 : result.status.hasCookies ? 422 : 400).json(result);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log.error('Failed to validate uploaded YouTube cookies', {
-      error: message,
-      stack: error instanceof Error ? error.stack : undefined,
-      serviceRevision: process.env.K_REVISION || 'local',
-      ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
-    });
-    res.status(500).json({
-      ok: false,
-      message,
-      validationUrl: null,
-      status: {
-        hasCookies: false,
-        cookieBreakerOpen: false,
-        disabledUntil: null,
-        metadata: null,
-      },
-    });
-  }
-});
-
 app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioInputType }>, res) => {
   const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
   const data = request.body?.data;
@@ -174,6 +150,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
   }
 
   const audioSource = getAudioSource(data);
+  const taskId = extractCloudTaskId(request.headers['x-cloudtasks-taskname']);
   const docRef = db.collection('sermons').withConverter(firestoreAdminSermonConverter).doc(data.id);
   const sermonStatus: sermonStatus = {
     subsplash: uploadStatus.NOT_UPLOADED,
@@ -200,11 +177,19 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
           data.skipTranscode,
           data.introUrl,
           data.outroUrl,
-          ctx
+          ctx,
+          taskId
         ),
       cancelToken.cancel,
       timeoutMillis
     );
+    await completeProcessAudioSuccess({
+      database: realtimeDB,
+      payload: data,
+      requestId: ctx.requestId,
+      taskId,
+      ctx,
+    });
     log.info('Request completed successfully');
     res.status(200).send();
   } catch (e) {
@@ -232,6 +217,73 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       youtubeFailureClass && alertCode !== 'youtube_runtime_failure'
         ? `process-audio Cloud Run request failed during YouTube extraction (${alertCode}).`
         : 'process-audio Cloud Run request failed while processing sermon audio.';
+
+    if (audioSource.type === 'YouTubeUrl' && youtubeFailureClass === 'cookie_session_stale_or_challenged') {
+      const staleResult = await deferStaleYouTubeRequest({
+        database: realtimeDB,
+        payload: data,
+        requestId: ctx.requestId,
+        failureClass: youtubeFailureClass,
+        failureMessage: message,
+      });
+
+      if (staleResult.shouldAlert) {
+        try {
+          await emitOperationalAlertEmail({
+            alertCode,
+            summary: alertSummary,
+            error: e,
+            sermonId: data?.id,
+            context: {
+              requestId: ctx.requestId,
+              operation: ctx.operation,
+              audioSourceType: audioSource.type,
+              audioSource: audioSource.source,
+              serviceRevision: process.env.K_REVISION || 'local',
+              browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+              poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
+              youtubeFailureClass: youtubeFailureClass ?? null,
+              blockerEpisodeId: staleResult.blockerEpisodeId,
+              requesterEmail: request.auth?.email ?? null,
+              requesterUid: request.auth?.sub ?? null,
+              requesterName: request.auth?.name ?? null,
+            },
+          });
+        } catch (alertError) {
+          log.error('Failed to queue operational alert email', {
+            error: alertError instanceof Error ? alertError.message : String(alertError),
+          });
+        }
+      }
+
+      try {
+        await docRef.update({
+          status: {
+            ...sermonStatus,
+            audioStatus: sermonStatusType.PENDING,
+            message: 'Waiting for refreshed YouTube cookies before retrying.',
+          },
+        });
+      } catch (updateError) {
+        log.error('Failed to update document status after stale cookie defer', { error: updateError });
+      }
+
+      res.status(202).json({ deferred: true, reason: youtubeFailureClass });
+      return;
+    }
+
+    try {
+      await completeProcessAudioFailure({
+        database: realtimeDB,
+        payload: data,
+        requestId: ctx.requestId,
+        taskId,
+      });
+    } catch (queueStateError) {
+      log.error('Failed to update process-audio queue state after failure', {
+        error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
+      });
+    }
 
     try {
       await emitOperationalAlertEmail({

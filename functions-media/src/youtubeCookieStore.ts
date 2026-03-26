@@ -4,6 +4,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import type { GetYouTubeCookieStatusOutputType } from '@upperroom/contracts/getYouTubeCookieStatus';
 import type { SetYouTubeCookiesInput } from '@upperroom/contracts/setYouTubeCookies';
 import type { YouTubeCookieMetadata } from '@upperroom/contracts/youtubeCookies';
+import { buildYouTubeCookieStatus, getYouTubeQueueSnapshot } from './processAudioQueueStore';
 
 const COOKIE_KEY = 'yt-dlp-cookies';
 const COOKIE_META_KEY = 'yt-dlp-cookies-meta';
@@ -59,21 +60,6 @@ const validateCookiesText = (decodedCookies: string): void => {
   }
 };
 
-const buildStatus = (
-  hasCookies: boolean,
-  metadata: YouTubeCookieMetadata | null
-): GetYouTubeCookieStatusOutputType => {
-  const disabledUntil = metadata?.disabledUntil ?? null;
-  const cookieBreakerOpen = !!disabledUntil && Date.parse(disabledUntil) > Date.now();
-
-  return {
-    hasCookies,
-    cookieBreakerOpen,
-    disabledUntil,
-    metadata,
-  };
-};
-
 export const getYouTubeCookieStatus = async (database: Database): Promise<GetYouTubeCookieStatusOutputType> => {
   const [cookiesSnapshot, metadataSnapshot] = await Promise.all([
     database.ref(COOKIE_KEY).get(),
@@ -81,7 +67,8 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
   ]);
 
   const metadata = metadataSnapshot.exists() ? (metadataSnapshot.val() as YouTubeCookieMetadata) : null;
-  return buildStatus(cookiesSnapshot.exists(), metadata);
+  const { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
+  return buildYouTubeCookieStatus(cookiesSnapshot.exists(), metadata, queueState, deferredCount);
 };
 
 export const writeYouTubeCookies = async (
@@ -110,7 +97,7 @@ export const writeYouTubeCookies = async (
     lastFailureClass: null,
     lastFailureMessage: null,
     lastHealthCheckAt: null,
-    lastHealthStatus: 'uploaded',
+    lastHealthStatus: 'uploaded_unverified',
     consecutiveFailures: 0,
     disabledUntil: null,
   };
@@ -120,5 +107,6 @@ export const writeYouTubeCookies = async (
     database.ref(COOKIE_META_KEY).set(metadata),
   ]);
 
-  return buildStatus(true, metadata);
+  const { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
+  return buildYouTubeCookieStatus(true, metadata, queueState, deferredCount);
 };
