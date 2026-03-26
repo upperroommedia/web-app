@@ -11,7 +11,7 @@ import firebaseAdmin from './firebaseAdmin';
 import logger, { createLoggerWithContext } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
-import { classifyYouTubeFailure, toYouTubeAlertCode } from './youtubeExtractionPolicy';
+import { analyzeYouTubeFailure } from './youtubeExtractionPolicy';
 import {
   completeProcessAudioFailure,
   completeProcessAudioSuccess,
@@ -50,12 +50,26 @@ function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string 
 }
 
 const ytDlpJsRuntimeInfo = validateConfiguredYtDlpJsRuntime();
+const ytDlpSleepRequestsSeconds = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null;
+const ytDlpSleepIntervalSeconds = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null;
+const ytDlpMaxSleepIntervalSeconds = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim() || null;
+const browserFallbackEnabled = ['1', 'true', 'yes'].includes(
+  process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim().toLowerCase() || ''
+);
 
 logger.info('Service initializing', {
   ytdlpPath,
   configuredYtDlpJsRuntime,
   ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
   ytDlpJsRuntimeVersion: ytDlpJsRuntimeInfo.version,
+  ytDlpUseCookiesForPublicVideos: process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false',
+  ytDlpConcurrentFragments: process.env.YTDLP_CONCURRENT_FRAGMENTS || '1',
+  ytDlpSleepRequestsSeconds,
+  ytDlpSleepIntervalSeconds,
+  ytDlpMaxSleepIntervalSeconds,
+  browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+  browserFallbackEnabled,
+  poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
 });
 
 logger.info('Loading storage, realtimeDB and firestore');
@@ -116,8 +130,13 @@ app.get('/healthz', (req, res) => {
     service: 'process-audio-cloud-run',
     revision: process.env.K_REVISION || 'local',
     browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+    browserFallbackEnabled,
     poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
     ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
+    ytDlpUseCookiesForPublicVideos: process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false',
+    ytDlpSleepRequestsSeconds,
+    ytDlpSleepIntervalSeconds,
+    ytDlpMaxSleepIntervalSeconds,
   });
 });
 
@@ -201,18 +220,37 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       message = e.message;
     }
 
+    const youtubeFailureAnalysis =
+      audioSource.type === 'YouTubeUrl' ? analyzeYouTubeFailure(message, 'public_provider') : undefined;
+
     log.error('Request failed', {
       error: message,
       errorType: e?.constructor?.name,
       stack: e instanceof Error ? e.stack : undefined,
       serviceRevision: process.env.K_REVISION || 'local',
       browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+      browserFallbackEnabled,
       poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
+      youtubeFailureAnalysis: youtubeFailureAnalysis ?? null,
+      ytDlpSleepRequestsSeconds,
+      ytDlpSleepIntervalSeconds,
+      ytDlpMaxSleepIntervalSeconds,
     });
 
-    const youtubeFailureClass =
-      audioSource.type === 'YouTubeUrl' ? classifyYouTubeFailure(message, 'public_provider') : undefined;
-    const alertCode = youtubeFailureClass ? toYouTubeAlertCode(youtubeFailureClass) : 'PROCESS_AUDIO_RUNTIME_FAILURE';
+    if (youtubeFailureAnalysis) {
+      log.warn('Analyzed YouTube extraction failure', {
+        ...youtubeFailureAnalysis,
+        browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+        browserFallbackEnabled,
+        poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
+        ytDlpSleepRequestsSeconds,
+        ytDlpSleepIntervalSeconds,
+        ytDlpMaxSleepIntervalSeconds,
+      });
+    }
+
+    const youtubeFailureClass = youtubeFailureAnalysis?.failureClass;
+    const alertCode = youtubeFailureAnalysis?.alertCode ?? 'PROCESS_AUDIO_RUNTIME_FAILURE';
     const alertSummary =
       youtubeFailureClass && alertCode !== 'youtube_runtime_failure'
         ? `process-audio Cloud Run request failed during YouTube extraction (${alertCode}).`
@@ -241,8 +279,11 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
               audioSource: audioSource.source,
               serviceRevision: process.env.K_REVISION || 'local',
               browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+              browserFallbackEnabled,
               poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
               youtubeFailureClass: youtubeFailureClass ?? null,
+              youtubeFailureStage: youtubeFailureAnalysis?.stage ?? null,
+              youtubeFailureSignals: youtubeFailureAnalysis ?? null,
               blockerEpisodeId: staleResult.blockerEpisodeId,
               requesterEmail: request.auth?.email ?? null,
               requesterUid: request.auth?.sub ?? null,
@@ -298,8 +339,11 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
           audioSource: audioSource.source,
           serviceRevision: process.env.K_REVISION || 'local',
           browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+          browserFallbackEnabled,
           poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
           youtubeFailureClass: youtubeFailureClass ?? null,
+          youtubeFailureStage: youtubeFailureAnalysis?.stage ?? null,
+          youtubeFailureSignals: youtubeFailureAnalysis ?? null,
           requesterEmail: request.auth?.email ?? null,
           requesterUid: request.auth?.sub ?? null,
           requesterName: request.auth?.name ?? null,

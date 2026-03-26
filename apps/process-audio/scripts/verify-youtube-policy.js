@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 
 const {
+  analyzeYouTubeFailure,
   classifyYouTubeFailure,
   shouldEscalateToBrowserFallback,
   shouldEscalateToCookieProvider,
@@ -37,6 +38,23 @@ function main() {
   assert.equal(shouldEscalateToBrowserFallback('cookie_session_stale_or_challenged', true), true);
   assert.equal(shouldEscalateToBrowserFallback('provider_missing_or_unhealthy', true), false);
   assert.equal(shouldEscalateToBrowserFallback('unknown_youtube_extractor_failure', false), false);
+
+  const analyzedPublicBotBlock = analyzeYouTubeFailure(
+    'WARNING: [youtube] Unable to download webpage: HTTP Error 429: Too Many Requests\nERROR: [youtube] abc123: Sign in to confirm you’re not a bot',
+    'public_provider'
+  );
+  assert.equal(analyzedPublicBotBlock.failureClass, 'public_path_bot_blocked');
+  assert.equal(analyzedPublicBotBlock.alertCode, 'public_ip_or_reputation_block');
+  assert.equal(analyzedPublicBotBlock.stage, 'webpage_request');
+  assert.equal(analyzedPublicBotBlock.sawHttp429, true);
+  assert.equal(analyzedPublicBotBlock.sawBotPrompt, true);
+
+  const analyzedCookieFailure = analyzeYouTubeFailure(
+    'ERROR: [youtube] abc123: The page needs to be reloaded.',
+    'cookie_provider'
+  );
+  assert.equal(analyzedCookieFailure.failureClass, 'cookie_session_stale_or_challenged');
+  assert.equal(analyzedCookieFailure.stage, 'cookie_session');
 
   const annotated = annotateYouTubeFailure(
     'ERROR: [youtube] The page needs to be reloaded.',

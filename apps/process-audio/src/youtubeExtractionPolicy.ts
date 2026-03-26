@@ -16,6 +16,25 @@ export type YouTubeAlertCode =
   | 'provider_unhealthy'
   | 'youtube_runtime_failure';
 
+export type YouTubeFailureStage =
+  | 'webpage_request'
+  | 'player_response'
+  | 'cookie_session'
+  | 'browser_fallback'
+  | 'unknown';
+
+export interface YouTubeFailureAnalysis {
+  failureClass: YouTubeFailureClass;
+  alertCode: YouTubeAlertCode;
+  stage: YouTubeFailureStage;
+  sawHttp429: boolean;
+  sawUnableToDownloadWebpage: boolean;
+  sawLoginRequired: boolean;
+  sawBotPrompt: boolean;
+  sawUnplayable: boolean;
+  sawPageReload: boolean;
+}
+
 export function classifyYouTubeFailure(message: string, mode: YouTubeExtractionMode): YouTubeFailureClass {
   const lower = message.toLowerCase();
 
@@ -131,4 +150,39 @@ export function toYouTubeAlertCode(failureClass: YouTubeFailureClass): YouTubeAl
     default:
       return 'youtube_runtime_failure';
   }
+}
+
+export function analyzeYouTubeFailure(message: string, mode: YouTubeExtractionMode): YouTubeFailureAnalysis {
+  const lower = message.toLowerCase();
+  const failureClass = classifyYouTubeFailure(message, mode);
+  const sawHttp429 = lower.includes('http error 429') || lower.includes('too many requests');
+  const sawUnableToDownloadWebpage = lower.includes('unable to download webpage');
+  const sawLoginRequired = lower.includes('login_required');
+  const sawBotPrompt =
+    lower.includes("sign in to confirm you're not a bot") || lower.includes('sign in to confirm you’re not a bot');
+  const sawUnplayable = lower.includes('unplayable');
+  const sawPageReload = lower.includes('the page needs to be reloaded');
+
+  let stage: YouTubeFailureStage = 'unknown';
+  if (mode === 'browser_fallback') {
+    stage = 'browser_fallback';
+  } else if (mode === 'cookie_provider' && (sawPageReload || lower.includes('cookie circuit breaker'))) {
+    stage = 'cookie_session';
+  } else if (sawHttp429 || sawUnableToDownloadWebpage) {
+    stage = 'webpage_request';
+  } else if (sawLoginRequired || sawBotPrompt || sawUnplayable) {
+    stage = 'player_response';
+  }
+
+  return {
+    failureClass,
+    alertCode: toYouTubeAlertCode(failureClass),
+    stage,
+    sawHttp429,
+    sawUnableToDownloadWebpage,
+    sawLoginRequired,
+    sawBotPrompt,
+    sawUnplayable,
+    sawPageReload,
+  };
 }
