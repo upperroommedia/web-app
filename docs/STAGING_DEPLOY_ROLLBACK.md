@@ -10,8 +10,6 @@
 
 App Hosting rollouts use `apps/web` as the backend root directory.
 
-If App Hosting staging starts failing because a secret version was disabled after the last rollout, run the `staging-web-rollout` GitHub Actions workflow against the desired commit to repin secrets to the latest enabled versions.
-
 ## Functions/rules rollback
 
 1. Re-run `staging-selective-deploy` workflow against the target rollback commit.
