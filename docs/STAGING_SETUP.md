@@ -35,6 +35,8 @@ App Hosting should continue rolling out from Firebase Console on pushes to the `
 - Confirm the backend is connected to the `staging` branch.
 - Confirm automatic rollouts remain enabled.
 
+For secret-only recoveries where no app files changed, use the `staging-web-rollout` GitHub Actions workflow to create a fresh App Hosting rollout from the current staging commit so secrets are repinned to the latest enabled versions.
+
 ## 3. Configure App Hosting secrets for staging
 
 Create/grant each secret in `urm-app-staging`:

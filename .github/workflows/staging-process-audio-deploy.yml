@@ -258,7 +258,7 @@ jobs:
           bash scripts/ensure-private-cloud-run-invoker.sh "${GCP_PROJECT}" us-central1 browser-fallback-staging "${process_audio_runtime_sa}"
           browser_fallback_service_url="$(gcloud run services describe browser-fallback-staging --project "${GCP_PROJECT}" --region us-central1 --format='value(status.url)')"
           node scripts/set-browser-fallback-runtime-config.mjs "${GCP_PROJECT}" "https://urm-app-staging-default-rtdb.firebaseio.com/" "${browser_fallback_service_url}" true
-          bash scripts/deploy-process-audio.sh staging "$GITHUB_SHA"
+          BROWSER_FALLBACK_SERVICE_URL="${browser_fallback_service_url}" bash scripts/deploy-process-audio.sh staging "$GITHUB_SHA"
 
       - name: Ensure staging POT provider public invoker
         if: needs.detect-changes.outputs.deploy_process_audio == 'true'

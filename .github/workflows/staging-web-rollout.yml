@@ -1,0 +1,76 @@
+name: staging-web-rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_commit:
+        description: "Commit SHA to roll out to App Hosting staging"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: staging-web-rollout
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT: urm-app-staging
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate GCP OIDC secrets
+        env:
+          PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$PROVIDER" ]]; then
+            echo "::error::Missing secret GCP_WORKLOAD_IDENTITY_PROVIDER"
+            exit 1
+          fi
+          if [[ -z "$SERVICE_ACCOUNT" ]]; then
+            echo "::error::Missing secret GCP_SERVICE_ACCOUNT_EMAIL"
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Select rollout commit
+        id: commit
+        env:
+          INPUT_COMMIT: ${{ github.event.inputs.git_commit }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          rollout_commit="$INPUT_COMMIT"
+          if [[ -z "$rollout_commit" ]]; then
+            rollout_commit="$GITHUB_SHA"
+          fi
+          echo "rollout_commit=$rollout_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Create App Hosting staging rollout
+        env:
+          ROLLOUT_COMMIT: ${{ steps.commit.outputs.rollout_commit }}
+        run: bash scripts/create-apphosting-rollout.sh staging "$ROLLOUT_COMMIT"

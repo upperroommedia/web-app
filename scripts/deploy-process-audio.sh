@@ -40,12 +40,15 @@ case "$target_environment" in
     ;;
 esac
 
-browser_fallback_service_url="$(
-  gcloud run services describe "$browser_fallback_service_name" \
-    --project "$project_id" \
-    --region "$region" \
-    --format='value(status.url)' 2>/dev/null || true
-)"
+browser_fallback_service_url="${BROWSER_FALLBACK_SERVICE_URL:-}"
+if [[ -z "$browser_fallback_service_url" ]]; then
+  browser_fallback_service_url="$(
+    gcloud run services describe "$browser_fallback_service_name" \
+      --project "$project_id" \
+      --region "$region" \
+      --format='value(status.url)' 2>/dev/null || true
+  )"
+fi
 
 browser_fallback_endpoint=""
 browser_fallback_enabled="false"
