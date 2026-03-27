@@ -1,0 +1,13 @@
+.git
+.github
+.turbo
+dir
+logs
+vendor
+*.jar
+**/.DS_Store
+**/.git
+**/.next
+**/dist
+**/node_modules
+**/test-results

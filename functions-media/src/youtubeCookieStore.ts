@@ -3,8 +3,11 @@ import type { Database } from 'firebase-admin/database';
 import { HttpsError } from 'firebase-functions/v2/https';
 import type { GetYouTubeCookieStatusOutputType } from '@upperroom/contracts/getYouTubeCookieStatus';
 import type { SetYouTubeCookiesInput } from '@upperroom/contracts/setYouTubeCookies';
+import { YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON } from '@upperroom/contracts/processAudioQueue';
 import type { YouTubeCookieMetadata } from '@upperroom/contracts/youtubeCookies';
-import { buildYouTubeCookieStatus, getYouTubeQueueSnapshot } from './processAudioQueueStore';
+import { getBrowserFallbackSessionStatus } from './browserFallbackService';
+import { beginYouTubeQueueProbe, buildYouTubeCookieStatus, getYouTubeQueueSnapshot } from './processAudioQueueStore';
+import { getProcessAudioTargetUri } from './processAudioService';
 
 const COOKIE_KEY = 'yt-dlp-cookies';
 const COOKIE_META_KEY = 'yt-dlp-cookies-meta';
@@ -67,8 +70,29 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
   ]);
 
   const metadata = metadataSnapshot.exists() ? (metadataSnapshot.val() as YouTubeCookieMetadata) : null;
-  const { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
-  return buildYouTubeCookieStatus(cookiesSnapshot.exists(), metadata, queueState, deferredCount);
+  let { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
+  const browserFallbackStatus = await getBrowserFallbackSessionStatus(database);
+
+  if (
+    queueState.blockerReason === YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON &&
+    browserFallbackStatus.reachable &&
+    browserFallbackStatus.sessionState === 'authenticated'
+  ) {
+    await beginYouTubeQueueProbe({
+      database,
+      targetUri: getProcessAudioTargetUri(),
+      ownerId: `browser-status:${Date.now()}`,
+      probeMode: 'browser_fallback',
+    });
+    ({ queueState, deferredCount } = await getYouTubeQueueSnapshot(database));
+  }
+
+  return buildYouTubeCookieStatus(cookiesSnapshot.exists(), metadata, queueState, deferredCount, {
+    configured: browserFallbackStatus.configured,
+    reachable: browserFallbackStatus.reachable,
+    sessionState: browserFallbackStatus.sessionState,
+    profileUpdatedAt: browserFallbackStatus.profileUpdatedAt,
+  });
 };
 
 export const writeYouTubeCookies = async (

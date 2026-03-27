@@ -18,6 +18,8 @@ import {
   deferStaleYouTubeRequest,
   extractCloudTaskId,
 } from './processAudioQueueStore';
+import { YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON } from '@upperroom/contracts/processAudioQueue';
+import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
 
 const app = express();
 app.use(express.json());
@@ -222,6 +224,8 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
 
     const youtubeFailureAnalysis =
       audioSource.type === 'YouTubeUrl' ? analyzeYouTubeFailure(message, 'public_provider') : undefined;
+    const browserFallbackError = (e as Error & { browserFallbackError?: Partial<BrowserFallbackErrorResponse> })
+      ?.browserFallbackError;
 
     log.error('Request failed', {
       error: message,
@@ -232,6 +236,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       browserFallbackEnabled,
       poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
       youtubeFailureAnalysis: youtubeFailureAnalysis ?? null,
+      browserFallbackError: browserFallbackError ?? null,
       ytDlpSleepRequestsSeconds,
       ytDlpSleepIntervalSeconds,
       ytDlpMaxSleepIntervalSeconds,
@@ -240,6 +245,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
     if (youtubeFailureAnalysis) {
       log.warn('Analyzed YouTube extraction failure', {
         ...youtubeFailureAnalysis,
+        browserFallbackError: browserFallbackError ?? null,
         browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
         browserFallbackEnabled,
         poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
@@ -250,6 +256,8 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
     }
 
     const youtubeFailureClass = youtubeFailureAnalysis?.failureClass;
+    const browserFallbackUnavailable =
+      browserFallbackError?.code === 'auth_required' || browserFallbackError?.code === 'session_unhealthy';
     const alertCode = youtubeFailureAnalysis?.alertCode ?? 'PROCESS_AUDIO_RUNTIME_FAILURE';
     const alertSummary =
       youtubeFailureClass && alertCode !== 'youtube_runtime_failure'
@@ -310,6 +318,65 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       }
 
       res.status(202).json({ deferred: true, reason: youtubeFailureClass });
+      return;
+    }
+
+    if (audioSource.type === 'YouTubeUrl' && browserFallbackUnavailable) {
+      const browserFallbackResult = await deferStaleYouTubeRequest({
+        database: realtimeDB,
+        payload: data,
+        requestId: ctx.requestId,
+        failureClass: YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON,
+        failureMessage: message,
+        probeMode: 'browser_fallback',
+      });
+
+      if (browserFallbackResult.shouldAlert) {
+        try {
+          await emitOperationalAlertEmail({
+            alertCode: 'browser_fallback_failed',
+            summary: 'process-audio deferred a YouTube request because the browser fallback session is unavailable.',
+            error: e,
+            sermonId: data?.id,
+            context: {
+              requestId: ctx.requestId,
+              operation: ctx.operation,
+              audioSourceType: audioSource.type,
+              audioSource: audioSource.source,
+              serviceRevision: process.env.K_REVISION || 'local',
+              browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+              browserFallbackEnabled,
+              poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
+              youtubeFailureClass: youtubeFailureClass ?? null,
+              youtubeFailureStage: youtubeFailureAnalysis?.stage ?? null,
+              youtubeFailureSignals: youtubeFailureAnalysis ?? null,
+              browserFallbackError: browserFallbackError ?? null,
+              blockerEpisodeId: browserFallbackResult.blockerEpisodeId,
+              requesterEmail: request.auth?.email ?? null,
+              requesterUid: request.auth?.sub ?? null,
+              requesterName: request.auth?.name ?? null,
+            },
+          });
+        } catch (alertError) {
+          log.error('Failed to queue operational alert email', {
+            error: alertError instanceof Error ? alertError.message : String(alertError),
+          });
+        }
+      }
+
+      try {
+        await docRef.update({
+          status: {
+            ...sermonStatus,
+            audioStatus: sermonStatusType.PENDING,
+            message: 'Waiting for the browser fallback session to be refreshed before retrying.',
+          },
+        });
+      } catch (updateError) {
+        log.error('Failed to update document status after browser fallback defer', { error: updateError });
+      }
+
+      res.status(202).json({ deferred: true, reason: YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON });
       return;
     }
 

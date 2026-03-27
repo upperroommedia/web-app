@@ -1,0 +1,30 @@
+{
+  "name": "@upperroom/browser-fallback",
+  "description": "Authenticated browser fallback worker for YouTube extraction challenges",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node ./dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build",
+    "bootstrap:profile": "node ./scripts/bootstrap-browser-profile.js"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@upperroom/contracts": "workspace:*",
+    "@google-cloud/storage": "catalog:",
+    "express": "^4.18.2",
+    "firebase-admin": "catalog:",
+    "playwright": "^1.58.0",
+    "uuid": "catalog:"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

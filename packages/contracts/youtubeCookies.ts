@@ -1,4 +1,5 @@
 import type { YouTubeQueueProbeStatus } from './processAudioQueue';
+import type { BrowserFallbackSessionState } from './browserFallback';
 
 export type YouTubeCookieHealthStatus =
   | 'missing'
@@ -33,10 +34,15 @@ export interface YouTubeCookieStatus {
   cookieBreakerOpen: boolean;
   disabledUntil?: string | null;
   youtubeQueueBlocked: boolean;
+  browserFallbackBlocked: boolean;
   probeStatus: YouTubeQueueProbeStatus;
   deferredYouTubeTaskCount: number;
   blockerReason?: string | null;
   blockerEpisodeId?: string | null;
   blockerUpdatedAt?: string | null;
+  browserFallbackConfigured: boolean;
+  browserFallbackReachable: boolean;
+  browserFallbackSessionState: BrowserFallbackSessionState;
+  browserFallbackProfileUpdatedAt?: string | null;
   metadata: YouTubeCookieMetadata | null;
 }

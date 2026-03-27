@@ -1,0 +1,39 @@
+{
+  "name": "public-success-direct",
+  "scenario": "public_success",
+  "browserFallback": false,
+  "status": "ok",
+  "result": {
+    "url": "https://example.com/fake-audio.m4a",
+    "format": "m4a",
+    "duration": 20
+  },
+  "cookieMeta": null,
+  "attempts": [
+    {
+      "args": [
+        "-f",
+        "bestaudio/best",
+        "-g",
+        "--no-playlist",
+        "--print",
+        "%(duration)s",
+        "--print",
+        "%(ext)s",
+        "--no-js-runtimes",
+        "--js-runtimes",
+        "deno",
+        "--extractor-args",
+        "youtube:player_client=default,mweb,-web_creator",
+        "--extractor-args",
+        "youtubepot-bgutilhttp:base_url=http://ytdlp-pot-provider:4416",
+        "https://www.youtube.com/watch?v=testvideo"
+      ],
+      "hasCookies": false,
+      "isJson": false,
+      "isHealthcheck": false,
+      "isDirectUrl": true,
+      "isSectionDownload": false
+    }
+  ]
+}

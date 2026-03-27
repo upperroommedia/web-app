@@ -21,6 +21,7 @@ case "$target_environment" in
   staging)
     project_id="urm-app-staging"
     service_name="process-audio-staging"
+    browser_fallback_service_name="browser-fallback-staging"
     firebase_project_id="urm-app-staging"
     firebase_storage_bucket="urm-app-staging.firebasestorage.app"
     firebase_database_url="https://urm-app-staging-default-rtdb.firebaseio.com/"
@@ -28,6 +29,7 @@ case "$target_environment" in
   production|prod|main)
     project_id="urm-app"
     service_name="process-audio"
+    browser_fallback_service_name="browser-fallback"
     firebase_project_id="urm-app"
     firebase_storage_bucket="urm-app.appspot.com"
     firebase_database_url="https://urm-app-default-rtdb.firebaseio.com/"
@@ -38,8 +40,22 @@ case "$target_environment" in
     ;;
 esac
 
+browser_fallback_service_url="$(
+  gcloud run services describe "$browser_fallback_service_name" \
+    --project "$project_id" \
+    --region "$region" \
+    --format='value(status.url)' 2>/dev/null || true
+)"
+
+browser_fallback_endpoint=""
+browser_fallback_enabled="false"
+if [[ -n "$browser_fallback_service_url" ]]; then
+  browser_fallback_endpoint="${browser_fallback_service_url}/fallback"
+  browser_fallback_enabled="true"
+fi
+
 gcloud builds submit . \
   --project="$project_id" \
   --config="apps/process-audio/cloudbuild.yaml" \
   --ignore-file="apps/process-audio/.gcloudignore" \
-  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url}"
+  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url},_YOUTUBE_BROWSER_FALLBACK_ENABLED=${browser_fallback_enabled},_YOUTUBE_BROWSER_FALLBACK_URL=${browser_fallback_endpoint}"

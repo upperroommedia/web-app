@@ -1,6 +1,7 @@
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
+import type { BrowserFallbackSessionState } from '@upperroom/contracts/browserFallback';
 import type { GetYouTubeCookieStatusOutputType } from '@upperroom/contracts/getYouTubeCookieStatus';
 import {
   buildInitialYouTubeQueueState,
@@ -18,6 +19,8 @@ import {
   type StoredDeferredYouTubeRequest,
   type StoredProcessAudioRequestState,
   type StoredYouTubeQueueState,
+  type YouTubeQueueProbeMode,
+  YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON,
   YOUTUBE_QUEUE_DEFERRED_PATH,
   YOUTUBE_QUEUE_STATE_PATH,
 } from '@upperroom/contracts/processAudioQueue';
@@ -185,22 +188,40 @@ export function buildYouTubeCookieStatus(
   hasCookies: boolean,
   metadata: YouTubeCookieMetadata | null,
   queueState: StoredYouTubeQueueState,
-  deferredCount: number
+  deferredCount: number,
+  browserFallbackStatus: {
+    configured: boolean;
+    reachable: boolean;
+    sessionState: BrowserFallbackSessionState;
+    profileUpdatedAt: string | null;
+  } = {
+    configured: false,
+    reachable: false,
+    sessionState: 'unknown',
+    profileUpdatedAt: null,
+  }
 ): GetYouTubeCookieStatusOutputType {
   const disabledUntil = metadata?.disabledUntil ?? null;
   const cookieBreakerOpen = !!disabledUntil && Date.parse(disabledUntil) > Date.now();
   const youtubeQueueBlocked = isYouTubeQueuePaused(queueState);
+  const browserFallbackBlocked =
+    youtubeQueueBlocked && queueState.blockerReason === YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON;
 
   return {
     hasCookies,
     cookieBreakerOpen,
     disabledUntil,
     youtubeQueueBlocked,
+    browserFallbackBlocked,
     probeStatus: queueState.probeStatus,
     deferredYouTubeTaskCount: deferredCount,
     blockerReason: queueState.blockerReason,
     blockerEpisodeId: queueState.blockerEpisodeId,
     blockerUpdatedAt: queueState.blockedAt ?? queueState.probeStartedAt ?? null,
+    browserFallbackConfigured: browserFallbackStatus.configured,
+    browserFallbackReachable: browserFallbackStatus.reachable,
+    browserFallbackSessionState: browserFallbackStatus.sessionState,
+    browserFallbackProfileUpdatedAt: browserFallbackStatus.profileUpdatedAt,
     metadata,
   };
 }
@@ -209,7 +230,8 @@ async function writeDeferredYouTubeRequest(
   database: Database,
   payload: AddIntroOutroInputType,
   requestVersion: string,
-  reason: string
+  reason: string,
+  probeMode: YouTubeQueueProbeMode
 ): Promise<void> {
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const deferredRequest: StoredDeferredYouTubeRequest = {
@@ -218,7 +240,7 @@ async function writeDeferredYouTubeRequest(
     requestVersion,
     deferredAt: getNowIsoString(),
     reason,
-    requiresCookieProbe: true,
+    probeMode,
     blockerEpisodeId: null,
     lastFailureClass: null,
   };
@@ -295,7 +317,8 @@ export async function queueOrReplaceProcessAudioRequest(args: {
         database,
         sanitizedPayload,
         requestVersion,
-        queueState.blockerReason || queueState.probeStatus
+        queueState.blockerReason || queueState.probeStatus,
+        queueState.probeMode ?? 'cookie_provider'
       );
       nextState.queuedTaskId = null;
       nextState.queuedAt = null;
@@ -339,13 +362,14 @@ export async function beginYouTubeQueueProbe(args: {
   database: Database;
   targetUri: string;
   ownerId: string;
+  probeMode: YouTubeQueueProbeMode;
 }): Promise<void> {
-  const { database, targetUri, ownerId } = args;
+  const { database, targetUri, ownerId, probeMode } = args;
   const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
   const deferredSnapshot = await database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get();
   const deferredEntries = Object.values((deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {});
   const probeCandidate = deferredEntries
-    .filter((entry) => entry.requiresCookieProbe)
+    .filter((entry) => entry.probeMode === probeMode)
     .sort((left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt))[0];
   const deferredCount = deferredEntries.length;
 
@@ -357,6 +381,7 @@ export async function beginYouTubeQueueProbe(args: {
             ...currentState,
             blocked: false,
             probeStatus: 'waiting_for_auth_required_request',
+            probeMode: null,
             deferredYouTubeTaskCount: deferredCount,
             probeTaskSermonId: null,
             probeRequestVersion: null,
@@ -403,6 +428,7 @@ export async function beginYouTubeQueueProbe(args: {
         blocked: false,
         blockerReason: null,
         blockedAt: null,
+        probeMode,
         probeStatus: 'probing',
         probeTaskSermonId: probeCandidate.sermonId,
         probeRequestVersion: probeCandidate.requestVersion,

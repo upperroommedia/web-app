@@ -97,16 +97,17 @@ export function shouldEscalateToCookieProvider(
 }
 
 export function shouldEscalateToBrowserFallback(
-  failureClass: YouTubeFailureClass,
+  analysis: YouTubeFailureAnalysis,
   browserFallbackEnabled: boolean
 ): boolean {
   if (!browserFallbackEnabled) return false;
 
-  return (
-    failureClass === 'public_path_bot_blocked' ||
-    failureClass === 'cookie_session_stale_or_challenged' ||
-    failureClass === 'account_required_content' ||
-    failureClass === 'unknown_youtube_extractor_failure'
+  return analysis.failureClass === 'public_path_bot_blocked' && (
+    analysis.sawHttp429 ||
+    analysis.sawBotPrompt ||
+    analysis.sawUnableToDownloadWebpage ||
+    analysis.sawLoginRequired ||
+    analysis.sawUnplayable
   );
 }
 

@@ -1,0 +1,68 @@
+{
+  "name": "cookie-stale-error",
+  "scenario": "public_bot_cookie_stale",
+  "browserFallback": false,
+  "status": "error",
+  "error": "yt-dlp failed after public and cookie direct URL attempts. public-provider error: yt-dlp exited with code 1: WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing\nERROR: [youtube] testvideo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.\n The public YouTube extraction path was challenged. Verify provider health and the worker's outbound IP reputation.; cookie-provider error: yt-dlp cookie healthcheck exited with code 1. stderr: ERROR: [youtube] testvideo: The page needs to be reloaded. The configured YouTube cookie session appears stale or challenged. Rotate the yt-dlp cookies from a fresh private browsing session and retry. The configured YouTube cookie session appears stale or challenged. Rotate the yt-dlp cookies from a fresh private browsing session and retry.",
+  "cookieMeta": {
+    "rotatedAt": "2026-03-27T00:17:27.099Z",
+    "exportMethod": "manual-private-window",
+    "profileType": "incognito",
+    "lastUsedAt": "2026-03-27T00:17:27.131Z",
+    "cookieHash": "1edb4b3ca725b525",
+    "lastHealthCheckAt": "2026-03-27T00:17:27.142Z",
+    "lastHealthStatus": "stale_or_challenged",
+    "lastFailureAt": "2026-03-27T00:17:27.142Z",
+    "lastFailureClass": "cookie_session_stale_or_challenged",
+    "lastFailureMessage": "yt-dlp cookie healthcheck exited with code 1. stderr: ERROR: [youtube] testvideo: The page needs to be reloaded. The configured YouTube cookie session appears stale or challenged. Rotate the yt-dlp cookies from a fresh private browsing session and retry.",
+    "consecutiveFailures": 1,
+    "disabledUntil": "2026-03-27T00:47:27.142Z"
+  },
+  "attempts": [
+    {
+      "args": [
+        "-f",
+        "bestaudio/best",
+        "-g",
+        "--no-playlist",
+        "--print",
+        "%(duration)s",
+        "--print",
+        "%(ext)s",
+        "--no-js-runtimes",
+        "--js-runtimes",
+        "deno",
+        "--extractor-args",
+        "youtube:player_client=default,mweb,-web_creator",
+        "--extractor-args",
+        "youtubepot-bgutilhttp:base_url=http://ytdlp-pot-provider:4416",
+        "https://www.youtube.com/watch?v=testvideo"
+      ],
+      "hasCookies": false,
+      "isJson": false,
+      "isHealthcheck": false,
+      "isDirectUrl": true,
+      "isSectionDownload": false
+    },
+    {
+      "args": [
+        "-J",
+        "--no-playlist",
+        "--skip-download",
+        "--no-js-runtimes",
+        "--js-runtimes",
+        "deno",
+        "--cookies",
+        "/tmp/yt-dlp-cookies-1774570647130-6ld42i8mrvf.txt",
+        "--extractor-args",
+        "youtube:player_client=default,-web_creator",
+        "https://www.youtube.com/watch?v=testvideo"
+      ],
+      "hasCookies": true,
+      "isJson": true,
+      "isHealthcheck": true,
+      "isDirectUrl": false,
+      "isSectionDownload": false
+    }
+  ]
+}

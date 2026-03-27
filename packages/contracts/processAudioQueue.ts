@@ -10,8 +10,12 @@ export const PROCESS_AUDIO_QUEUE_CLAIMS_PATH = 'processAudioQueueClaims';
 export const PROCESS_AUDIO_QUEUES_PATH = 'processAudioQueues';
 export const YOUTUBE_QUEUE_STATE_PATH = `${PROCESS_AUDIO_QUEUES_PATH}/youtube/state`;
 export const YOUTUBE_QUEUE_DEFERRED_PATH = `${PROCESS_AUDIO_QUEUES_PATH}/youtube/deferred`;
+export const YOUTUBE_BROWSER_FALLBACK_STATE_PATH = `${PROCESS_AUDIO_QUEUES_PATH}/youtube/browserFallback`;
+export const YOUTUBE_BROWSER_FALLBACK_LEASE_PATH = `${YOUTUBE_BROWSER_FALLBACK_STATE_PATH}/profileLease`;
+export const YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON = 'browser_fallback_unavailable';
 
 export type ProcessAudioSourceType = 'youtube' | 'storage';
+export type YouTubeQueueProbeMode = 'cookie_provider' | 'browser_fallback';
 
 export type YouTubeQueueProbeStatus =
   | 'idle'
@@ -57,7 +61,7 @@ export interface StoredDeferredYouTubeRequest {
   requestVersion: string;
   deferredAt: string;
   reason: string;
-  requiresCookieProbe: boolean;
+  probeMode: YouTubeQueueProbeMode;
   blockerEpisodeId: string | null;
   lastFailureClass: string | null;
 }
@@ -67,6 +71,7 @@ export interface StoredYouTubeQueueState {
   blockerReason: string | null;
   blockedAt: string | null;
   blockerEpisodeId: string | null;
+  probeMode: YouTubeQueueProbeMode | null;
   probeStatus: YouTubeQueueProbeStatus;
   probeTaskSermonId: string | null;
   probeRequestVersion: string | null;
@@ -144,6 +149,7 @@ export const buildInitialYouTubeQueueState = (): StoredYouTubeQueueState => ({
   blockerReason: null,
   blockedAt: null,
   blockerEpisodeId: null,
+  probeMode: null,
   probeStatus: 'idle',
   probeTaskSermonId: null,
   probeRequestVersion: null,

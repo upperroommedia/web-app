@@ -12,6 +12,7 @@ services:
     volumes:
       - ../../:/workspace
     working_dir: /workspace/apps/process-audio
+    ports: []
     depends_on:
       browser-fallback:
         condition: service_started
@@ -19,12 +20,15 @@ services:
         condition: service_started
 
   browser-fallback:
-    image: node:22-slim
-    working_dir: /workspace/apps/process-audio
-    command: ["node", "scripts/mock-browser-fallback-server.js"]
+    build:
+      context: ../..
+      dockerfile: apps/browser-fallback/Dockerfile
+    working_dir: /workspace/apps/browser-fallback
     environment:
-      BROWSER_FALLBACK_PORT: 8090
-      BROWSER_FALLBACK_BASE_URL: http://browser-fallback:8090
+      BROWSER_FALLBACK_FAKE_MODE: "true"
+      FIREBASE_PROJECT_ID: urm-app-staging
+      FIREBASE_STORAGE_BUCKET: urm-app-staging.firebasestorage.app
+      FIREBASE_DATABASE_URL: https://urm-app-staging-default-rtdb.firebaseio.com/
     volumes:
       - ../../:/workspace
 

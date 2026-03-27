@@ -35,10 +35,6 @@ function main() {
   assert.equal(shouldEscalateToCookieProvider('account_required_content', false, false), false);
   assert.equal(shouldEscalateToCookieProvider('unknown_youtube_extractor_failure', true, true), true);
 
-  assert.equal(shouldEscalateToBrowserFallback('cookie_session_stale_or_challenged', true), true);
-  assert.equal(shouldEscalateToBrowserFallback('provider_missing_or_unhealthy', true), false);
-  assert.equal(shouldEscalateToBrowserFallback('unknown_youtube_extractor_failure', false), false);
-
   const analyzedPublicBotBlock = analyzeYouTubeFailure(
     'WARNING: [youtube] Unable to download webpage: HTTP Error 429: Too Many Requests\nERROR: [youtube] abc123: Sign in to confirm you’re not a bot',
     'public_provider'
@@ -48,6 +44,7 @@ function main() {
   assert.equal(analyzedPublicBotBlock.stage, 'webpage_request');
   assert.equal(analyzedPublicBotBlock.sawHttp429, true);
   assert.equal(analyzedPublicBotBlock.sawBotPrompt, true);
+  assert.equal(shouldEscalateToBrowserFallback(analyzedPublicBotBlock, true), true);
 
   const analyzedCookieFailure = analyzeYouTubeFailure(
     'ERROR: [youtube] abc123: The page needs to be reloaded.',
@@ -55,6 +52,11 @@ function main() {
   );
   assert.equal(analyzedCookieFailure.failureClass, 'cookie_session_stale_or_challenged');
   assert.equal(analyzedCookieFailure.stage, 'cookie_session');
+  assert.equal(shouldEscalateToBrowserFallback(analyzedCookieFailure, true), false);
+
+  const analyzedUnknownFailure = analyzeYouTubeFailure('ERROR: [youtube] extractor exploded', 'public_provider');
+  assert.equal(shouldEscalateToBrowserFallback(analyzedUnknownFailure, true), false);
+  assert.equal(shouldEscalateToBrowserFallback(analyzedPublicBotBlock, false), false);
 
   const annotated = annotateYouTubeFailure(
     'ERROR: [youtube] The page needs to be reloaded.',

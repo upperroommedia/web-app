@@ -32,6 +32,7 @@ const setyoutubecookies = onCall(
           database,
           targetUri: getProcessAudioTargetUri(),
           ownerId: `cookie-upload:${actor.uid}:${Date.now()}`,
+          probeMode: 'cookie_provider',
         });
       } catch (probeError) {
         logger.error('Failed to schedule YouTube queue probe after cookie upload', {

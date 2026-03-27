@@ -8,11 +8,13 @@ import path from 'path';
 import os from 'os';
 import { mkdtemp, rm, unlink, writeFile } from 'fs/promises';
 import { Database } from 'firebase-admin/database';
+import { GoogleAuth } from 'google-auth-library';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
 import { ensureSafeTempPath, getFFmpegPath } from './utils';
 import dns from 'node:dns/promises';
 import {
+  analyzeYouTubeFailure,
   annotateYouTubeFailure,
   classifyYouTubeFailure,
   shouldEscalateToBrowserFallback,
@@ -20,6 +22,12 @@ import {
   YouTubeExtractionMode,
   YouTubeFailureClass,
 } from './youtubeExtractionPolicy';
+import type {
+  BrowserFallbackDownloadSectionResponse,
+  BrowserFallbackErrorResponse,
+  BrowserFallbackRequest,
+  BrowserFallbackResolveAudioUrlResponse,
+} from '@upperroom/contracts/browserFallback';
 
 /**
  * Result from getYouTubeAudioUrl containing the direct stream URL and metadata
@@ -82,17 +90,6 @@ interface YouTubeCookieContext {
   loadedFromRealtimeDb: boolean;
   cookieBreakerOpen?: boolean;
   disabledUntil?: string;
-}
-
-interface BrowserFallbackResolveResponse {
-  url: string;
-  format?: string;
-  duration?: number;
-}
-
-interface BrowserFallbackSectionResponse {
-  downloadUrl: string;
-  ext?: string;
 }
 
 export interface ValidateYouTubeCookiesResult {
@@ -260,9 +257,73 @@ function getBrowserFallbackUrl(): string | undefined {
   return endpoint ? endpoint.replace(/\/+$/, '') : undefined;
 }
 
+function getBrowserFallbackAudience(): string | undefined {
+  const fallbackUrl = getBrowserFallbackUrl();
+  if (!fallbackUrl) return undefined;
+
+  try {
+    const parsed = new URL(fallbackUrl);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function getBrowserFallbackTimeoutMs(): number {
   const raw = Number.parseInt(process.env.YOUTUBE_BROWSER_FALLBACK_TIMEOUT_MS || '45000', 10);
   return Number.isFinite(raw) && raw > 0 ? raw : 45000;
+}
+
+async function fetchWithIdToken(url: string, init: RequestInit): Promise<Response> {
+  let audience: string | undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') {
+      return await fetch(url, init);
+    }
+    audience = `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    audience = getBrowserFallbackAudience();
+  }
+
+  if (process.env.NODE_ENV === 'development' || process.env.FUNCTIONS_EMULATOR === 'true' || !audience) {
+    return await fetch(url, init);
+  }
+
+  const auth = new GoogleAuth();
+  const client = await auth.getIdTokenClient(audience);
+  const headers = new Headers(init.headers || {});
+  const authHeaders = await client.getRequestHeaders(url);
+  Object.entries(authHeaders).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      headers.set(key, value);
+    }
+  });
+
+  return await fetch(url, {
+    ...init,
+    headers,
+  });
+}
+
+async function fetchBrowserFallback(url: string, init: RequestInit): Promise<Response> {
+  return await fetchWithIdToken(url, init);
+}
+
+async function fetchBrowserFallbackDownload(url: string, init: RequestInit): Promise<Response> {
+  const audience = getBrowserFallbackAudience();
+  if (audience) {
+    try {
+      const parsed = new URL(url);
+      if (`${parsed.protocol}//${parsed.host}` === audience) {
+        return await fetchWithIdToken(url, init);
+      }
+    } catch {
+      // fall through to unsigned fetch
+    }
+  }
+
+  return await fetch(url, init);
 }
 
 function getRetryDelayMs(): number {
@@ -342,6 +403,10 @@ async function runAttemptWithRetries<T>(
 function buildAnnotatedYouTubeError(message: string, mode: YouTubeExtractionMode): Error {
   const failureClass = classifyYouTubeFailure(message, mode);
   return new Error(annotateYouTubeFailure(message, failureClass, mode));
+}
+
+function shouldUseBrowserFallbackForPublicFailure(message: string): boolean {
+  return shouldEscalateToBrowserFallback(analyzeYouTubeFailure(message, 'public_provider'), isBrowserFallbackEnabled());
 }
 
 async function runCommandWithCapture(
@@ -716,7 +781,7 @@ function shouldPreferCookieProvider(cookieContext: YouTubeCookieContext | undefi
 }
 
 async function callBrowserFallback<T>(
-  payload: Record<string, unknown>,
+  payload: BrowserFallbackRequest,
   log: ReturnType<typeof createLoggerWithContext>
 ): Promise<T> {
   const fallbackUrl = getBrowserFallbackUrl();
@@ -728,7 +793,7 @@ async function callBrowserFallback<T>(
   const timeout = setTimeout(() => controller.abort(), getBrowserFallbackTimeoutMs());
 
   try {
-    const response = await fetch(fallbackUrl, {
+    const response = await fetchBrowserFallback(fallbackUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -738,15 +803,26 @@ async function callBrowserFallback<T>(
     });
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Browser fallback HTTP ${response.status}: ${body}`);
+      const body = (await response.json().catch(async () => ({ message: await response.text() }))) as Partial<
+        BrowserFallbackErrorResponse
+      >;
+      const errorMessage = body.message || `Browser fallback HTTP ${response.status}`;
+      const error = new Error(errorMessage);
+      (error as Error & { browserFallbackError?: Partial<BrowserFallbackErrorResponse> }).browserFallbackError = body;
+      throw error;
     }
 
     return (await response.json()) as T;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.error('Browser fallback request failed', { error: message, fallbackUrl, payload });
-    throw buildAnnotatedYouTubeError(`Browser fallback failed: ${message}`, 'browser_fallback');
+    const browserFallbackError = (err as Error & { browserFallbackError?: Partial<BrowserFallbackErrorResponse> })
+      .browserFallbackError;
+    log.error('Browser fallback request failed', { error: message, fallbackUrl, payload, browserFallbackError });
+    const error = buildAnnotatedYouTubeError(`Browser fallback failed: ${message}`, 'browser_fallback') as Error & {
+      browserFallbackError?: Partial<BrowserFallbackErrorResponse>;
+    };
+    error.browserFallbackError = browserFallbackError;
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -754,11 +830,11 @@ async function callBrowserFallback<T>(
 
 async function downloadBrowserFallbackSection(
   outputFilePath: string,
-  fallbackResult: BrowserFallbackSectionResponse
+  fallbackResult: BrowserFallbackDownloadSectionResponse
 ): Promise<string> {
   const ext = fallbackResult.ext || 'm4a';
   const finalPath = ensureSafeTempPath(`${outputFilePath}.${ext.replace(/^\./, '')}`);
-  const response = await fetch(fallbackResult.downloadUrl, {
+  const response = await fetchBrowserFallbackDownload(fallbackResult.downloadUrl, {
     headers: {
       'User-Agent': YTDLP_HTTP_USER_AGENT,
     },
@@ -959,26 +1035,6 @@ export const getYouTubeTrimRoutingDecision = async (
             log
           );
 
-          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
-            setCachedAccessDecision(ctx, url, {
-              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
-              mode: 'browser_fallback',
-              reason: 'routing_preflight_browser_fallback_after_cookie_preferred_failure',
-              cookieFailureClass,
-              cookieFailureMessage: cookieMessage,
-              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
-              disabledUntil: activeCookieContext.disabledUntil,
-              cookieMetadata: activeCookieContext.metadata,
-              decidedAt: getNowIsoString(),
-            });
-            return {
-              strategy: 'direct_url',
-              reason: 'browser_fallback_required_after_cookie_preferred_failure',
-              hasFragments: false,
-              likelyDvr: false,
-            };
-          }
-
           throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
         }
       }
@@ -996,10 +1052,12 @@ export const getYouTubeTrimRoutingDecision = async (
     } catch (publicError) {
       const publicMessage = publicError instanceof Error ? publicError.message : String(publicError);
       const publicFailureClass = classifyYouTubeFailure(publicMessage, 'public_provider');
+      const shouldUseBrowserFallback = shouldUseBrowserFallbackForPublicFailure(publicMessage);
       log.warn('Public YouTube routing preflight failed', {
         url,
         failureClass: publicFailureClass,
         error: publicMessage,
+        shouldUseBrowserFallback,
       });
 
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
@@ -1049,9 +1107,9 @@ export const getYouTubeTrimRoutingDecision = async (
             getYouTubeVideoId(url),
             log
           );
-          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled()) || cookieContext.cookieBreakerOpen) {
+          if (shouldUseBrowserFallback) {
             setCachedAccessDecision(ctx, url, {
-              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
+              state: 'browser_required',
               mode: 'browser_fallback',
               reason: 'routing_preflight_browser_fallback_required',
               publicFailureClass,
@@ -1071,21 +1129,18 @@ export const getYouTubeTrimRoutingDecision = async (
         }
       }
 
-      if (cookieContext.cookieBreakerOpen && isBrowserFallbackEnabled()) {
+      if (shouldUseBrowserFallback) {
         setCachedAccessDecision(ctx, url, {
-          state: 'cookie_stale',
+          state: 'browser_required',
           mode: 'browser_fallback',
-          reason: 'cookie_circuit_breaker_open',
+          reason: 'routing_preflight_browser_fallback_after_public_failure',
           publicFailureClass,
           publicFailureMessage: publicMessage,
-          cookieBreakerOpen: true,
-          disabledUntil: cookieContext.disabledUntil,
-          cookieMetadata: cookieContext.metadata,
           decidedAt: getNowIsoString(),
         });
         return {
           strategy: 'direct_url',
-          reason: 'browser_fallback_required_cookie_breaker_open',
+          reason: 'browser_fallback_required_after_public_failure',
           hasFragments: false,
           likelyDvr: false,
         };
@@ -1253,7 +1308,7 @@ export const getYouTubeAudioUrl = async (
   try {
     if (cachedDecision?.mode === 'browser_fallback') {
       log.info('Using cached browser fallback decision for direct URL extraction', cachedDecision);
-      const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
+      const fallback = await callBrowserFallback<BrowserFallbackResolveAudioUrlResponse>(
         {
           action: 'resolve_audio_url',
           youtubeUrl: url,
@@ -1273,22 +1328,6 @@ export const getYouTubeAudioUrl = async (
       log.info('Using cached cookie-backed decision for direct URL extraction', cachedDecision);
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (cookieContext.cookieBreakerOpen) {
-        if (isBrowserFallbackEnabled()) {
-          const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
-            {
-              action: 'resolve_audio_url',
-              youtubeUrl: url,
-              requestContext: ctx,
-            },
-            log
-          );
-
-          return {
-            url: fallback.url,
-            format: fallback.format || 'unknown',
-            duration: fallback.duration,
-          };
-        }
         throw buildAnnotatedYouTubeError(
           'Cached cookie-backed YouTube session is disabled by the cookie circuit breaker.',
           'cookie_provider'
@@ -1312,32 +1351,6 @@ export const getYouTubeAudioUrl = async (
     if (shouldUseCookiesForPublicVideos()) {
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (cookieContext.cookieBreakerOpen) {
-        if (isBrowserFallbackEnabled()) {
-          setCachedAccessDecision(ctx, url, {
-            state: 'cookie_stale',
-            mode: 'browser_fallback',
-            reason: 'direct_url_cookie_circuit_breaker_open_preferred',
-            cookieBreakerOpen: true,
-            disabledUntil: cookieContext.disabledUntil,
-            cookieMetadata: cookieContext.metadata,
-            decidedAt: getNowIsoString(),
-          });
-          const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
-            {
-              action: 'resolve_audio_url',
-              youtubeUrl: url,
-              requestContext: ctx,
-            },
-            log
-          );
-
-          return {
-            url: fallback.url,
-            format: fallback.format || 'unknown',
-            duration: fallback.duration,
-          };
-        }
-
         throw buildAnnotatedYouTubeError(
           'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
           'cookie_provider'
@@ -1383,34 +1396,6 @@ export const getYouTubeAudioUrl = async (
             log
           );
 
-          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
-            setCachedAccessDecision(ctx, url, {
-              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
-              mode: 'browser_fallback',
-              reason: 'direct_url_browser_fallback_after_cookie_preferred_failure',
-              cookieFailureClass,
-              cookieFailureMessage: cookieMessage,
-              cookieMetadata: activeCookieContext.metadata,
-              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
-              disabledUntil: activeCookieContext.disabledUntil,
-              decidedAt: getNowIsoString(),
-            });
-            const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
-              {
-                action: 'resolve_audio_url',
-                youtubeUrl: url,
-                requestContext: ctx,
-              },
-              log
-            );
-
-            return {
-              url: fallback.url,
-              format: fallback.format || 'unknown',
-              duration: fallback.duration,
-            };
-          }
-
           throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
         }
       }
@@ -1430,10 +1415,12 @@ export const getYouTubeAudioUrl = async (
     } catch (publicError) {
       const publicMessage = publicError instanceof Error ? publicError.message : String(publicError);
       const publicFailureClass = classifyYouTubeFailure(publicMessage, 'public_provider');
+      const shouldUseBrowserFallback = shouldUseBrowserFallbackForPublicFailure(publicMessage);
       log.warn('Public YouTube direct URL extraction failed', {
         url,
         failureClass: publicFailureClass,
         error: publicMessage,
+        shouldUseBrowserFallback,
       });
 
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
@@ -1484,9 +1471,9 @@ export const getYouTubeAudioUrl = async (
             log
           );
 
-          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
+          if (shouldUseBrowserFallback) {
             setCachedAccessDecision(ctx, url, {
-              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
+              state: 'browser_required',
               mode: 'browser_fallback',
               reason: 'direct_url_browser_fallback_after_cookie_failure',
               publicFailureClass,
@@ -1498,7 +1485,7 @@ export const getYouTubeAudioUrl = async (
               disabledUntil: activeCookieContext.disabledUntil,
               decidedAt: getNowIsoString(),
             });
-            const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
+            const fallback = await callBrowserFallback<BrowserFallbackResolveAudioUrlResponse>(
               {
                 action: 'resolve_audio_url',
                 youtubeUrl: url,
@@ -1521,35 +1508,7 @@ export const getYouTubeAudioUrl = async (
         }
       }
 
-      if (cookieContext.cookieBreakerOpen && isBrowserFallbackEnabled()) {
-        setCachedAccessDecision(ctx, url, {
-          state: 'cookie_stale',
-          mode: 'browser_fallback',
-          reason: 'direct_url_cookie_circuit_breaker_open',
-          publicFailureClass,
-          publicFailureMessage: publicMessage,
-          cookieBreakerOpen: true,
-          disabledUntil: cookieContext.disabledUntil,
-          cookieMetadata: cookieContext.metadata,
-          decidedAt: getNowIsoString(),
-        });
-        const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
-          {
-            action: 'resolve_audio_url',
-            youtubeUrl: url,
-            requestContext: ctx,
-          },
-          log
-        );
-
-        return {
-          url: fallback.url,
-          format: fallback.format || 'unknown',
-          duration: fallback.duration,
-        };
-      }
-
-      if (shouldEscalateToBrowserFallback(publicFailureClass, isBrowserFallbackEnabled())) {
+      if (shouldUseBrowserFallback) {
         setCachedAccessDecision(ctx, url, {
           state: 'browser_required',
           mode: 'browser_fallback',
@@ -1558,7 +1517,7 @@ export const getYouTubeAudioUrl = async (
           publicFailureMessage: publicMessage,
           decidedAt: getNowIsoString(),
         });
-        const fallback = await callBrowserFallback<BrowserFallbackResolveResponse>(
+        const fallback = await callBrowserFallback<BrowserFallbackResolveAudioUrlResponse>(
           {
             action: 'resolve_audio_url',
             youtubeUrl: url,
@@ -2092,7 +2051,7 @@ export const downloadYouTubeSection = async (
 
   if (cachedDecision?.mode === 'browser_fallback') {
     log.info('Using cached browser fallback decision for section download', cachedDecision);
-    const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
+    const fallback = await callBrowserFallback<BrowserFallbackDownloadSectionResponse>(
       {
         action: 'download_section',
         youtubeUrl: url,
@@ -2395,29 +2354,6 @@ export const downloadYouTubeSection = async (
     if (shouldUseCookiesForPublicVideos()) {
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (cookieContext.cookieBreakerOpen) {
-        if (isBrowserFallbackEnabled()) {
-          setCachedAccessDecision(ctx, url, {
-            state: 'cookie_stale',
-            mode: 'browser_fallback',
-            reason: 'section_download_cookie_circuit_breaker_open_preferred',
-            cookieBreakerOpen: true,
-            disabledUntil: cookieContext.disabledUntil,
-            cookieMetadata: cookieContext.metadata,
-            decidedAt: getNowIsoString(),
-          });
-          const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
-            {
-              action: 'download_section',
-              youtubeUrl: url,
-              startTime,
-              duration,
-              requestContext: ctx,
-            },
-            log
-          );
-          return await downloadBrowserFallbackSection(outputFilePath, fallback);
-        }
-
         throw buildAnnotatedYouTubeError(
           'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
           'cookie_provider'
@@ -2463,31 +2399,6 @@ export const downloadYouTubeSection = async (
             log
           );
 
-          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
-            setCachedAccessDecision(ctx, url, {
-              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
-              mode: 'browser_fallback',
-              reason: 'section_download_browser_fallback_after_cookie_preferred_failure',
-              cookieFailureClass,
-              cookieFailureMessage: cookieMessage,
-              cookieMetadata: activeCookieContext.metadata,
-              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
-              disabledUntil: activeCookieContext.disabledUntil,
-              decidedAt: getNowIsoString(),
-            });
-            const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
-              {
-                action: 'download_section',
-                youtubeUrl: url,
-                startTime,
-                duration,
-                requestContext: ctx,
-              },
-              log
-            );
-            return await downloadBrowserFallbackSection(outputFilePath, fallback);
-          }
-
           throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
         }
       }
@@ -2507,6 +2418,7 @@ export const downloadYouTubeSection = async (
     } catch (publicError) {
       const publicMessage = publicError instanceof Error ? publicError.message : String(publicError);
       const publicFailureClass = classifyYouTubeFailure(publicMessage, 'public_provider');
+      const shouldUseBrowserFallback = shouldUseBrowserFallbackForPublicFailure(publicMessage);
 
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (
@@ -2556,9 +2468,9 @@ export const downloadYouTubeSection = async (
             log
           );
 
-          if (shouldEscalateToBrowserFallback(cookieFailureClass, isBrowserFallbackEnabled())) {
+          if (shouldUseBrowserFallback) {
             setCachedAccessDecision(ctx, url, {
-              state: cookieFailureClass === 'cookie_session_stale_or_challenged' ? 'cookie_stale' : 'browser_required',
+              state: 'browser_required',
               mode: 'browser_fallback',
               reason: 'section_download_browser_fallback_after_cookie_failure',
               publicFailureClass,
@@ -2570,7 +2482,7 @@ export const downloadYouTubeSection = async (
               disabledUntil: activeCookieContext.disabledUntil,
               decidedAt: getNowIsoString(),
             });
-            const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
+            const fallback = await callBrowserFallback<BrowserFallbackDownloadSectionResponse>(
               {
                 action: 'download_section',
                 youtubeUrl: url,
@@ -2590,32 +2502,7 @@ export const downloadYouTubeSection = async (
         }
       }
 
-      if (cookieContext.cookieBreakerOpen && isBrowserFallbackEnabled()) {
-        setCachedAccessDecision(ctx, url, {
-          state: 'cookie_stale',
-          mode: 'browser_fallback',
-          reason: 'section_download_cookie_circuit_breaker_open',
-          publicFailureClass,
-          publicFailureMessage: publicMessage,
-          cookieBreakerOpen: true,
-          disabledUntil: cookieContext.disabledUntil,
-          cookieMetadata: cookieContext.metadata,
-          decidedAt: getNowIsoString(),
-        });
-        const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
-          {
-            action: 'download_section',
-            youtubeUrl: url,
-            startTime,
-            duration,
-            requestContext: ctx,
-          },
-          log
-        );
-        return await downloadBrowserFallbackSection(outputFilePath, fallback);
-      }
-
-      if (shouldEscalateToBrowserFallback(publicFailureClass, isBrowserFallbackEnabled())) {
+      if (shouldUseBrowserFallback) {
         setCachedAccessDecision(ctx, url, {
           state: 'browser_required',
           mode: 'browser_fallback',
@@ -2624,7 +2511,7 @@ export const downloadYouTubeSection = async (
           publicFailureMessage: publicMessage,
           decidedAt: getNowIsoString(),
         });
-        const fallback = await callBrowserFallback<BrowserFallbackSectionResponse>(
+        const fallback = await callBrowserFallback<BrowserFallbackDownloadSectionResponse>(
           {
             action: 'download_section',
             youtubeUrl: url,

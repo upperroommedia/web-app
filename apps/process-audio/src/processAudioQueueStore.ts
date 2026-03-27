@@ -14,6 +14,7 @@ import {
   type StoredDeferredYouTubeRequest,
   type StoredProcessAudioRequestState,
   type StoredYouTubeQueueState,
+  type YouTubeQueueProbeMode,
   YOUTUBE_QUEUE_DEFERRED_PATH,
   YOUTUBE_QUEUE_STATE_PATH,
 } from '@upperroom/contracts/processAudioQueue';
@@ -243,6 +244,15 @@ function getYouTubeVideoId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+function didBrowserProbeSucceed(queueState: StoredYouTubeQueueState, payload: AddIntroOutroInputType): boolean {
+  return (
+    getProcessAudioSourceType(payload) === 'youtube' &&
+    queueState.probeMode === 'browser_fallback' &&
+    queueState.probeStatus === 'probing' &&
+    queueState.probeTaskSermonId === payload.id
+  );
+}
+
 async function didCookieProbeSucceed(
   database: Database,
   youtubeUrl: string,
@@ -355,6 +365,7 @@ export async function completeProcessAudioSuccess(args: {
         await database.ref(YOUTUBE_QUEUE_STATE_PATH).set({
           ...buildInitialYouTubeQueueState(),
           probeStatus: 'probe_succeeded',
+          probeMode: 'cookie_provider',
           probeLastSucceededAt: now,
           deferredYouTubeTaskCount: remainingEntries.length,
         } satisfies StoredYouTubeQueueState);
@@ -370,12 +381,35 @@ export async function completeProcessAudioSuccess(args: {
       } else {
         await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
           blocked: false,
+          probeMode: null,
           probeStatus: 'waiting_for_auth_required_request',
           probeTaskSermonId: null,
           probeRequestVersion: null,
           probeStartedAt: null,
         });
       }
+    } else if (didBrowserProbeSucceed(queueState, sanitizedPayload)) {
+      const { deferredEntries } = await getQueueStateAndDeferredEntries(database);
+      const remainingEntries = deferredEntries
+        .filter((entry) => entry.sermonId !== sanitizedPayload.id)
+        .sort((left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt));
+
+      await database.ref(YOUTUBE_QUEUE_STATE_PATH).set({
+        ...buildInitialYouTubeQueueState(),
+        probeStatus: 'probe_succeeded',
+        probeMode: 'browser_fallback',
+        probeLastSucceededAt: now,
+        deferredYouTubeTaskCount: remainingEntries.length,
+      } satisfies StoredYouTubeQueueState);
+
+      for (const entry of remainingEntries) {
+        await enqueueDeferredRequestIgnoringPause(database, entry, `drain:${requestId}:${entry.sermonId}`);
+      }
+
+      await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
+        ...buildInitialYouTubeQueueState(),
+        deferredYouTubeTaskCount: 0,
+      });
     }
 
     if (requestState.nextPayload && requestState.nextRequestVersion) {
@@ -395,7 +429,7 @@ export async function completeProcessAudioSuccess(args: {
           requestVersion: requestState.nextRequestVersion,
           deferredAt: now,
           reason: activeQueueState.blockerReason || activeQueueState.probeStatus,
-          requiresCookieProbe: true,
+          probeMode: activeQueueState.probeMode ?? 'cookie_provider',
           blockerEpisodeId: activeQueueState.blockerEpisodeId,
           lastFailureClass: null,
         } satisfies StoredDeferredYouTubeRequest);
@@ -484,8 +518,9 @@ export async function deferStaleYouTubeRequest(args: {
   requestId: string;
   failureClass: string;
   failureMessage: string;
+  probeMode?: YouTubeQueueProbeMode;
 }): Promise<{ shouldAlert: boolean; blockerEpisodeId: string | null }> {
-  const { database, payload, requestId, failureClass, failureMessage } = args;
+  const { database, payload, requestId, failureClass, failureMessage, probeMode = 'cookie_provider' } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const now = getNowIsoString();
   let shouldAlert = false;
@@ -520,7 +555,7 @@ export async function deferStaleYouTubeRequest(args: {
         requestVersion: latestVersion,
         deferredAt: now,
         reason: failureClass,
-        requiresCookieProbe: true,
+        probeMode,
         blockerEpisodeId,
         lastFailureClass: failureClass,
       } satisfies StoredDeferredYouTubeRequest),
@@ -546,6 +581,7 @@ export async function deferStaleYouTubeRequest(args: {
         blockerReason: failureClass,
         blockedAt: now,
         blockerEpisodeId,
+        probeMode,
         probeStatus: 'blocked',
         probeTaskSermonId: null,
         probeRequestVersion: null,

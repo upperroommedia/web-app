@@ -474,6 +474,15 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                         label={youtubeCookieStatus?.youtubeQueueBlocked ? 'YouTube queue paused' : 'YouTube queue active'}
                         variant="outlined"
                       />
+                      <Chip
+                        color={youtubeCookieStatus?.browserFallbackReachable ? 'success' : 'default'}
+                        label={
+                          youtubeCookieStatus?.browserFallbackReachable
+                            ? 'Browser fallback reachable'
+                            : 'Browser fallback unavailable'
+                        }
+                        variant="outlined"
+                      />
                     </Stack>
                   )}
                 </Stack>
@@ -499,6 +508,21 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Queue blocker updated: {formatIsoTimestamp(youtubeCookieStatus?.blockerUpdatedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback configured: {youtubeCookieStatus?.browserFallbackConfigured ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback reachable: {youtubeCookieStatus?.browserFallbackReachable ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback session: {youtubeCookieStatus?.browserFallbackSessionState ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback profile updated: {formatIsoTimestamp(youtubeCookieStatus?.browserFallbackProfileUpdatedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback blocker active: {youtubeCookieStatus?.browserFallbackBlocked ? 'Yes' : 'No'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Uploaded at: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.uploadedAt)}
