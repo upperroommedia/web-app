@@ -8,10 +8,21 @@ import type {
   YouTubeUrl,
 } from '@upperroom/contracts/addIntroOutro/types';
 import type { Sermon as SharedSermon, sermonStatus } from '@upperroom/shared/types/SermonTypes';
-import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
 
 export type { ProcessAudioInputType, AudioSource, CustomMetadata, FilePaths, YouTubeUrl, sermonStatus };
-export { sermonStatusType, uploadStatus };
+
+export enum sermonStatusType {
+  ERROR = 'ERROR',
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  PROCESSED = 'PROCESSED',
+}
+
+export enum uploadStatus {
+  ERROR = 'ERROR',
+  NOT_UPLOADED = 'NOT_UPLOADED',
+  UPLOADED = 'UPLOADED',
+}
 
 export type Sermon = SharedSermon;
 
