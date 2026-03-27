@@ -14,7 +14,7 @@ if [[ -z "$commit_sha" ]]; then
 fi
 
 region="us-central1"
-artifact_registry_repo="browser-fallback-repo"
+artifact_registry_repo="process-audio-repo"
 image_name="browser-fallback"
 
 case "$target_environment" in

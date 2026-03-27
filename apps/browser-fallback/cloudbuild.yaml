@@ -52,7 +52,7 @@ images:
 substitutions:
   _PROJECT_ID: 'urm-app'
   _REGION: 'us-central1'
-  _AR_REPO: 'browser-fallback-repo'
+  _AR_REPO: 'process-audio-repo'
   _IMAGE_NAME: 'browser-fallback'
   _SERVICE_NAME: 'browser-fallback'
   _SERVICE_ACCOUNT: ''
