@@ -15,23 +15,32 @@ if [[ -z "$project_id" ]]; then
 fi
 
 if ! gcloud compute addresses describe "$address_name" --project "$project_id" --region "$region" >/dev/null 2>&1; then
-  gcloud compute addresses create "$address_name" --project "$project_id" --region "$region"
+  if ! gcloud compute addresses create "$address_name" --project "$project_id" --region "$region"; then
+    echo "Warning: unable to create reserved address ${address_name}. Browser fallback will deploy without deterministic static egress until networking is pre-provisioned." >&2
+    exit 0
+  fi
 fi
 
 if ! gcloud compute routers describe "$router_name" --project "$project_id" --region "$region" >/dev/null 2>&1; then
-  gcloud compute routers create "$router_name" \
+  if ! gcloud compute routers create "$router_name" \
     --project "$project_id" \
     --region "$region" \
-    --network "$network"
+    --network "$network"; then
+    echo "Warning: unable to create router ${router_name}. Browser fallback will deploy without deterministic static egress until networking is pre-provisioned." >&2
+    exit 0
+  fi
 fi
 
 if ! gcloud compute routers nats describe "$nat_name" --project "$project_id" --router "$router_name" --region "$region" >/dev/null 2>&1; then
-  gcloud compute routers nats create "$nat_name" \
+  if ! gcloud compute routers nats create "$nat_name" \
     --project "$project_id" \
     --router "$router_name" \
     --region "$region" \
     --nat-custom-subnet-ip-ranges "$subnet" \
-    --nat-external-ip-pool "$address_name"
+    --nat-external-ip-pool "$address_name"; then
+    echo "Warning: unable to create NAT ${nat_name}. Browser fallback will deploy without deterministic static egress until networking is pre-provisioned." >&2
+    exit 0
+  fi
 fi
 
 reserved_ip="$(
