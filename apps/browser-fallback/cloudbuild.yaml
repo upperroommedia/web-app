@@ -4,20 +4,35 @@ options:
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: bash
+    args:
+      [
+        '-ceu',
+        'docker pull ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG} || exit 0',
+      ]
+
+  - name: 'gcr.io/cloud-builders/docker'
     args:
       [
         'build',
         '--build-arg',
         'CACHEBUST=${COMMIT_SHA}',
+        '--cache-from',
+        '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}',
         '-f',
         'apps/browser-fallback/Dockerfile',
         '-t',
         '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}',
+        '-t',
+        '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}',
         '.',
       ]
 
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}']
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: bash
@@ -48,12 +63,14 @@ steps:
 
 images:
   - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}'
 
 substitutions:
   _PROJECT_ID: 'urm-app'
   _REGION: 'us-central1'
   _AR_REPO: 'process-audio-repo'
   _IMAGE_NAME: 'browser-fallback'
+  _CACHE_TAG: 'buildcache'
   _SERVICE_NAME: 'browser-fallback'
   _SERVICE_ACCOUNT: ''
   _CPU: '2'

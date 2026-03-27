@@ -4,16 +4,29 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 steps:
+  # Step 0: Pull previously cached image layers when available.
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: bash
+    args:
+      [
+        '-ceu',
+        'docker pull ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG} || exit 0',
+      ]
+
   # Step 1: Build Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args: [
         'build',
         '--build-arg',
         'CACHEBUST=${COMMIT_SHA}', # force latest yt-dlp layer
+        '--cache-from',
+        '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}',
         '-f',
         'apps/process-audio/Dockerfile',
         '-t',
         '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}',
+        '-t',
+        '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}',
         '.',
       ]
 
@@ -21,29 +34,37 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}']
 
-  # Step 3: Deploy the dedicated PO-token provider service and persist its URL
+  # Step 3: Refresh the shared cache tag with the freshly built image.
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}']
+
+  # Step 4: Deploy the dedicated PO-token provider service when needed and persist its URL.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: bash
     args:
       - -ceu
       - |
-        gcloud run deploy "${_POT_PROVIDER_SERVICE_NAME}" \
-          --project "${_PROJECT_ID}" \
-          --image "${_POT_PROVIDER_IMAGE}" \
-          --region "${_REGION}" \
-          --platform managed \
-          --port "${_POT_PROVIDER_PORT}" \
-          --min-instances "${_POT_PROVIDER_MIN_INSTANCES}" \
-          --max-instances "${_POT_PROVIDER_MAX_INSTANCES}" \
-          --cpu "${_POT_PROVIDER_CPU}" \
-          --memory "${_POT_PROVIDER_MEMORY}" \
-          --concurrency "${_POT_PROVIDER_CONCURRENCY}" \
-          --timeout "${_POT_PROVIDER_TIMEOUT}"
+        if [[ "${_DEPLOY_POT_PROVIDER}" == "true" ]]; then
+          gcloud run deploy "${_POT_PROVIDER_SERVICE_NAME}" \
+            --project "${_PROJECT_ID}" \
+            --image "${_POT_PROVIDER_IMAGE}" \
+            --region "${_REGION}" \
+            --platform managed \
+            --port "${_POT_PROVIDER_PORT}" \
+            --min-instances "${_POT_PROVIDER_MIN_INSTANCES}" \
+            --max-instances "${_POT_PROVIDER_MAX_INSTANCES}" \
+            --cpu "${_POT_PROVIDER_CPU}" \
+            --memory "${_POT_PROVIDER_MEMORY}" \
+            --concurrency "${_POT_PROVIDER_CONCURRENCY}" \
+            --timeout "${_POT_PROVIDER_TIMEOUT}"
 
-        gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
-          --project "${_PROJECT_ID}" \
-          --region "${_REGION}" \
-          --format='value(status.url)' > /workspace/pot_provider_url.txt
+          gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
+            --project "${_PROJECT_ID}" \
+            --region "${_REGION}" \
+            --format='value(status.url)' > /workspace/pot_provider_url.txt
+        else
+          printf '%s' "${_POT_PROVIDER_URL}" > /workspace/pot_provider_url.txt
+        fi
 
         test -s /workspace/pot_provider_url.txt
 
@@ -61,7 +82,7 @@ steps:
 
         echo "Validated POT provider readiness at $$POT_PROVIDER_URL"
 
-  # Step 4: Deploy to Cloud Run (private service)
+  # Step 5: Deploy to Cloud Run (private service)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: bash
     args:
@@ -87,12 +108,14 @@ steps:
 
 images:
   - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}'
 
 substitutions:
   _PROJECT_ID: 'urm-app'
   _REGION: 'us-central1'
   _AR_REPO: 'process-audio-repo'
   _IMAGE_NAME: 'process-audio'
+  _CACHE_TAG: 'buildcache'
   _SERVICE_NAME: 'process-audio'
   _POT_PROVIDER_SERVICE_NAME: 'ytdlp-pot-provider'
   _POT_PROVIDER_IMAGE: 'docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1'
@@ -103,6 +126,8 @@ substitutions:
   _POT_PROVIDER_MIN_INSTANCES: '0'
   _POT_PROVIDER_MAX_INSTANCES: '3'
   _POT_PROVIDER_TIMEOUT: '300'
+  _DEPLOY_POT_PROVIDER: 'true'
+  _POT_PROVIDER_URL: ''
   _FIREBASE_PROJECT_ID: 'urm-app'
   _FIREBASE_STORAGE_BUCKET: 'urm-app.appspot.com'
   _FIREBASE_DATABASE_URL: 'https://urm-app-default-rtdb.firebaseio.com/'
