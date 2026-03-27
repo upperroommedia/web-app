@@ -4,11 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { BrowserFallbackSessionState, BrowserFallbackSessionStatusResponse } from '@upperroom/contracts/browserFallback';
-import { YOUTUBE_BROWSER_FALLBACK_LEASE_PATH } from '@upperroom/contracts/processAudioQueue';
 import type { Database } from 'firebase-admin/database';
 import type { Bucket } from '@google-cloud/storage';
 
 const PROFILE_LEASE_TTL_MS = 10 * 60 * 1000;
+const YOUTUBE_BROWSER_FALLBACK_LEASE_PATH = 'processAudioQueues/youtube/browserFallback/profileLease';
 
 type BrowserFallbackProfileMetadata = {
   sessionState: BrowserFallbackSessionState;
