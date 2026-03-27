@@ -1,26 +1,24 @@
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
+import { createHash } from 'node:crypto';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
-import {
-  buildInitialYouTubeQueueState,
-  computeProcessAudioRequestVersion,
-  computeProcessAudioTaskId,
-  getProcessAudioSourceType,
-  PROCESS_AUDIO_QUEUE_CLAIMS_PATH,
-  PROCESS_AUDIO_REQUESTS_PATH,
-  PROCESS_AUDIO_TASK_QUEUE_NAME,
-  PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS,
-  sanitizeProcessAudioPayload,
-  type StoredDeferredYouTubeRequest,
-  type StoredProcessAudioRequestState,
-  type StoredYouTubeQueueState,
-  type YouTubeQueueProbeMode,
-  YOUTUBE_QUEUE_DEFERRED_PATH,
-  YOUTUBE_QUEUE_STATE_PATH,
+import type {
+  StoredDeferredYouTubeRequest,
+  StoredProcessAudioRequestState,
+  StoredYouTubeQueueState,
+  YouTubeQueueProbeMode,
 } from '@upperroom/contracts/processAudioQueue';
 import type { YouTubeCookieMetadata } from '@upperroom/contracts/youtubeCookies';
 import { createLoggerWithContext } from './WinstonLogger';
 import type { LogContext } from './context';
+
+const PROCESS_AUDIO_TASK_QUEUE_NAME = 'processaudiotask';
+const PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS = 60 * 1000;
+const PROCESS_AUDIO_REQUESTS_PATH = 'processAudioRequests';
+const PROCESS_AUDIO_QUEUE_CLAIMS_PATH = 'processAudioQueueClaims';
+const PROCESS_AUDIO_QUEUES_PATH = 'processAudioQueues';
+const YOUTUBE_QUEUE_STATE_PATH = `${PROCESS_AUDIO_QUEUES_PATH}/youtube/state`;
+const YOUTUBE_QUEUE_DEFERRED_PATH = `${PROCESS_AUDIO_QUEUES_PATH}/youtube/deferred`;
 
 const PROCESS_AUDIO_BASE_URLS = {
   prod: 'https://process-audio-yshbijirxq-uc.a.run.app',
@@ -40,6 +38,81 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
 };
 
 const getNowIsoString = (): string => new Date().toISOString();
+
+const getProcessAudioSourceType = (payload: AddIntroOutroInputType): 'youtube' | 'storage' => {
+  return 'youtubeUrl' in payload ? 'youtube' : 'storage';
+};
+
+const sanitizeProcessAudioPayload = (payload: AddIntroOutroInputType): AddIntroOutroInputType => {
+  const basePayload = {
+    id: payload.id,
+    startTime: payload.startTime,
+    duration: payload.duration,
+    deleteOriginal: payload.deleteOriginal ?? false,
+    skipTranscode: payload.skipTranscode ?? false,
+  };
+
+  const introOutro =
+    typeof payload.introUrl === 'string' || typeof payload.outroUrl === 'string'
+      ? {
+          ...(typeof payload.introUrl === 'string' ? { introUrl: payload.introUrl } : {}),
+          ...(typeof payload.outroUrl === 'string' ? { outroUrl: payload.outroUrl } : {}),
+        }
+      : {};
+
+  if ('youtubeUrl' in payload) {
+    return {
+      ...basePayload,
+      ...introOutro,
+      youtubeUrl: payload.youtubeUrl,
+    };
+  }
+
+  return {
+    ...basePayload,
+    ...introOutro,
+    storageFilePath: payload.storageFilePath,
+  };
+};
+
+const computeProcessAudioRequestVersion = (payload: AddIntroOutroInputType): string => {
+  const normalized = {
+    sermonId: payload.id,
+    sourceType: getProcessAudioSourceType(payload),
+    sourceValue: 'youtubeUrl' in payload ? payload.youtubeUrl : payload.storageFilePath,
+    startTime: payload.startTime,
+    duration: payload.duration,
+    deleteOriginal: payload.deleteOriginal ?? false,
+    skipTranscode: payload.skipTranscode ?? false,
+    introUrl: payload.introUrl ?? null,
+    outroUrl: payload.outroUrl ?? null,
+  };
+
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
+};
+
+const computeProcessAudioTaskId = (sermonId: string, requestVersion: string): string => {
+  const sermonHash = createHash('sha256').update(sermonId).digest('hex').slice(0, 8);
+  return `pa-${sermonHash}-${requestVersion}`;
+};
+
+const buildInitialYouTubeQueueState = (): StoredYouTubeQueueState => ({
+  blocked: false,
+  blockerReason: null,
+  blockedAt: null,
+  blockerEpisodeId: null,
+  probeMode: null,
+  probeStatus: 'idle',
+  probeTaskSermonId: null,
+  probeRequestVersion: null,
+  probeStartedAt: null,
+  probeLastSucceededAt: null,
+  probeLastFailedAt: null,
+  probeLastFailureClass: null,
+  probeLastFailureMessage: null,
+  alertSentAt: null,
+  deferredYouTubeTaskCount: 0,
+});
 
 const countChildren = (value: unknown): number => {
   const record = asRecord(value);

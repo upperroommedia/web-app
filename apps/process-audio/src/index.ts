@@ -18,8 +18,9 @@ import {
   deferStaleYouTubeRequest,
   extractCloudTaskId,
 } from './processAudioQueueStore';
-import { YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON } from '@upperroom/contracts/processAudioQueue';
 import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
+
+const YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON = 'browser_fallback_unavailable';
 
 const app = express();
 app.use(express.json());
