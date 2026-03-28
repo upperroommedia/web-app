@@ -1,7 +1,7 @@
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
-import type { BrowserFallbackSessionState } from '@upperroom/contracts/browserFallback';
+import type { BrowserFallbackErrorCode, BrowserFallbackSessionState } from '@upperroom/contracts/browserFallback';
 import type { GetYouTubeCookieStatusOutputType } from '@upperroom/contracts/getYouTubeCookieStatus';
 import {
   buildInitialYouTubeQueueState,
@@ -259,13 +259,23 @@ export function buildYouTubeCookieStatus(
   browserFallbackStatus: {
     configured: boolean;
     reachable: boolean;
+    healthy: boolean;
     sessionState: BrowserFallbackSessionState;
+    healthcheckConfigured: boolean;
     profileUpdatedAt: string | null;
+    lastCheckedAt: string | null;
+    lastErrorCode: BrowserFallbackErrorCode | null;
+    lastErrorMessage: string | null;
   } = {
     configured: false,
     reachable: false,
+    healthy: false,
     sessionState: 'unknown',
+    healthcheckConfigured: false,
     profileUpdatedAt: null,
+    lastCheckedAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
   }
 ): GetYouTubeCookieStatusOutputType {
   const disabledUntil = metadata?.disabledUntil ?? null;
@@ -287,8 +297,13 @@ export function buildYouTubeCookieStatus(
     blockerUpdatedAt: queueState.blockedAt ?? queueState.probeStartedAt ?? null,
     browserFallbackConfigured: browserFallbackStatus.configured,
     browserFallbackReachable: browserFallbackStatus.reachable,
+    browserFallbackHealthy: browserFallbackStatus.healthy,
     browserFallbackSessionState: browserFallbackStatus.sessionState,
+    browserFallbackHealthcheckConfigured: browserFallbackStatus.healthcheckConfigured,
     browserFallbackProfileUpdatedAt: browserFallbackStatus.profileUpdatedAt,
+    browserFallbackLastCheckedAt: browserFallbackStatus.lastCheckedAt,
+    browserFallbackLastErrorCode: browserFallbackStatus.lastErrorCode,
+    browserFallbackLastErrorMessage: browserFallbackStatus.lastErrorMessage,
     metadata,
   };
 }

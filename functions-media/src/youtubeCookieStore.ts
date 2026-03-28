@@ -78,8 +78,9 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
   const metadata = metadataSnapshot.exists() ? (metadataSnapshot.val() as YouTubeCookieMetadata) : null;
   let { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
   const browserFallbackStatus = await getBrowserFallbackSessionStatus(database);
+  const browserFallbackReady = browserFallbackStatus.reachable && browserFallbackStatus.ok;
 
-  if (browserFallbackStatus.reachable && browserFallbackStatus.sessionState === 'authenticated') {
+  if (browserFallbackReady) {
     const staleProbeRecovery = await recoverStaleYouTubeQueueProbe(database);
     if (staleProbeRecovery.recovered) {
       queueState = staleProbeRecovery.queueState;
@@ -89,8 +90,7 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
 
   if (
     queueState.blockerReason === YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON &&
-    browserFallbackStatus.reachable &&
-    browserFallbackStatus.sessionState === 'authenticated'
+    browserFallbackReady
   ) {
     try {
       await beginYouTubeQueueProbe({
@@ -111,8 +111,13 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
   return buildYouTubeCookieStatus(cookiesSnapshot.exists(), metadata, queueState, deferredCount, {
     configured: browserFallbackStatus.configured,
     reachable: browserFallbackStatus.reachable,
+    healthy: browserFallbackStatus.ok,
     sessionState: browserFallbackStatus.sessionState,
+    healthcheckConfigured: browserFallbackStatus.healthcheckConfigured,
     profileUpdatedAt: browserFallbackStatus.profileUpdatedAt,
+    lastCheckedAt: browserFallbackStatus.lastCheckedAt,
+    lastErrorCode: browserFallbackStatus.lastErrorCode,
+    lastErrorMessage: browserFallbackStatus.lastErrorMessage,
   });
 };
 

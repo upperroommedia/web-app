@@ -366,7 +366,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
         try {
           await emitOperationalAlertEmail({
             alertCode: 'browser_fallback_failed',
-            summary: 'process-audio deferred a YouTube request because the browser fallback session is unavailable.',
+            summary: 'process-audio deferred a YouTube request because the browser fallback worker is unavailable or unhealthy.',
             error: e,
             sermonId: data?.id,
             context: {
@@ -400,7 +400,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
           status: {
             ...sermonStatus,
             audioStatus: sermonStatusType.PENDING,
-            message: 'Waiting for the browser fallback session to be refreshed before retrying.',
+            message: 'Waiting for the browser fallback worker to become healthy before retrying.',
           },
         });
       } catch (updateError) {

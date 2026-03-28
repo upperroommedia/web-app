@@ -31,6 +31,7 @@ const ffmpegPath = process.env.FFMPEG_PATH?.trim() || 'ffmpeg';
 const ytDlpJsRuntime = process.env.YTDLP_JS_RUNTIME?.trim() || 'deno';
 const artifactPrefix = process.env.BROWSER_FALLBACK_ARTIFACT_PREFIX || 'browser-fallback/artifacts';
 const signedUrlTtlMs = Number.parseInt(process.env.BROWSER_FALLBACK_SIGNED_URL_TTL_SECONDS || '900', 10) * 1000;
+const healthcheckYoutubeUrl = process.env.BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL?.trim() || '';
 const userAgent =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 
@@ -78,7 +79,7 @@ function isAuthCookie(name: string): boolean {
 function classifyWorkerFailure(message: string): { code: BrowserFallbackErrorCode; sessionState: BrowserFallbackSessionState; retryable: boolean } {
   const lower = message.toLowerCase();
   if (lower.includes('page needs to be reloaded')) {
-    return { code: 'session_unhealthy', sessionState: 'auth_required', retryable: false };
+    return { code: 'session_unhealthy', sessionState: 'authenticated', retryable: false };
   }
   if (
     lower.includes("sign in to confirm you're not a bot") ||
@@ -273,24 +274,30 @@ async function withCookies<T>(run: (cookiesFilePath: string, sessionState: Brows
 }
 
 async function getLiveSessionStatus(): Promise<{
+  ok: boolean;
   sessionState: BrowserFallbackSessionState;
   profileUpdatedAt: string | null;
   profileGeneration: string | null;
+  healthcheckConfigured: boolean;
+  lastCheckedAt: string | null;
+  lastErrorCode: BrowserFallbackErrorCode | null;
+  lastErrorMessage: string | null;
 }> {
   const state = await ensureBrowserState();
   if (!state) {
     return {
+      ok: true,
       sessionState: 'fake_mode',
       profileUpdatedAt: new Date().toISOString(),
       profileGeneration: 'fake-mode',
+      healthcheckConfigured: false,
+      lastCheckedAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
     };
   }
 
   const { cookiesFilePath, sessionState } = await exportCookiesFile(state.context);
-  if (cookiesFilePath) {
-    await rm(path.dirname(cookiesFilePath), { recursive: true, force: true });
-  }
-
   if (sessionState !== state.metadata.sessionState) {
     state.metadata = await checkpointBrowserProfile({
       bucket: getBucket(),
@@ -300,11 +307,63 @@ async function getLiveSessionStatus(): Promise<{
     });
   }
 
-  return {
-    sessionState,
-    profileUpdatedAt: state.metadata.profileUpdatedAt,
-    profileGeneration: state.metadata.profileGeneration,
-  };
+  if (!cookiesFilePath) {
+    return {
+      ok: false,
+      sessionState,
+      profileUpdatedAt: state.metadata.profileUpdatedAt,
+      profileGeneration: state.metadata.profileGeneration,
+      healthcheckConfigured: !!healthcheckYoutubeUrl,
+      lastCheckedAt: null,
+      lastErrorCode: 'auth_required',
+      lastErrorMessage: 'Browser profile is not authenticated.',
+    };
+  }
+
+  try {
+    if (!healthcheckYoutubeUrl) {
+      return {
+        ok: sessionState === 'authenticated',
+        sessionState,
+        profileUpdatedAt: state.metadata.profileUpdatedAt,
+        profileGeneration: state.metadata.profileGeneration,
+        healthcheckConfigured: false,
+        lastCheckedAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+      };
+    }
+
+    const checkedAt = new Date().toISOString();
+    await resolveAudioUrlWithCookies(healthcheckYoutubeUrl, cookiesFilePath);
+    await checkpointContext(state, sessionState);
+    return {
+      ok: true,
+      sessionState,
+      profileUpdatedAt: state.metadata.profileUpdatedAt,
+      profileGeneration: state.metadata.profileGeneration,
+      healthcheckConfigured: true,
+      lastCheckedAt: checkedAt,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const classified = classifyWorkerFailure(message);
+    await checkpointContext(state, sessionState);
+    return {
+      ok: false,
+      sessionState: classified.sessionState === 'auth_required' ? 'auth_required' : sessionState,
+      profileUpdatedAt: state.metadata.profileUpdatedAt,
+      profileGeneration: state.metadata.profileGeneration,
+      healthcheckConfigured: !!healthcheckYoutubeUrl,
+      lastCheckedAt: new Date().toISOString(),
+      lastErrorCode: classified.code,
+      lastErrorMessage: message,
+    };
+  } finally {
+    await rm(path.dirname(cookiesFilePath), { recursive: true, force: true });
+  }
 }
 
 app.get('/healthz', async (_req, res) => {
@@ -323,9 +382,14 @@ app.get('/session-status', async (_req, res) => {
     const liveStatus = await getLiveSessionStatus();
     res.status(200).json({
       ...baseStatus,
+      ok: liveStatus.ok,
       sessionState: liveStatus.sessionState,
       profileUpdatedAt: liveStatus.profileUpdatedAt,
       profileGeneration: liveStatus.profileGeneration,
+      healthcheckConfigured: liveStatus.healthcheckConfigured,
+      lastCheckedAt: liveStatus.lastCheckedAt,
+      lastErrorCode: liveStatus.lastErrorCode,
+      lastErrorMessage: liveStatus.lastErrorMessage,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -333,7 +397,10 @@ app.get('/session-status', async (_req, res) => {
     res.status(classified.retryable ? 502 : 200).json({
       ...baseStatus,
       sessionState: classified.sessionState,
-      ok: classified.sessionState === 'authenticated',
+      ok: false,
+      lastCheckedAt: new Date().toISOString(),
+      lastErrorCode: classified.code,
+      lastErrorMessage: message,
     });
   }
 });

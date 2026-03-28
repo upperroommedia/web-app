@@ -515,6 +515,15 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                         }
                         variant="outlined"
                       />
+                      <Chip
+                        color={youtubeCookieStatus?.browserFallbackHealthy ? 'success' : 'warning'}
+                        label={
+                          youtubeCookieStatus?.browserFallbackHealthy
+                            ? 'Browser fallback healthy'
+                            : 'Browser fallback unhealthy'
+                        }
+                        variant="outlined"
+                      />
                     </Stack>
                   )}
                 </Stack>
@@ -565,8 +574,9 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   <Typography variant="subtitle2">Browser fallback recovery</Typography>
                   <Typography variant="body2" color="text.secondary">
                     If browser fallback shows <code>auth_required</code> or <code>missing_profile</code>, rerun the
-                    local bootstrap below. This captures a portable Playwright storage state that Cloud Run can
-                    actually reuse.
+                    local bootstrap below. If the session still shows <code>authenticated</code> but health stays
+                    unhealthy or the last error is <code>session_unhealthy</code>, bootstrap alone is not the fix: the
+                    staging runtime or egress path is still failing extraction.
                   </Typography>
                   <Box
                     component="pre"
@@ -626,10 +636,26 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                     Browser fallback reachable: {youtubeCookieStatus?.browserFallbackReachable ? 'Yes' : 'No'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
+                    Browser fallback healthy: {youtubeCookieStatus?.browserFallbackHealthy ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
                     Browser fallback session: {youtubeCookieStatus?.browserFallbackSessionState ?? 'Not available'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
+                    Browser fallback healthcheck configured:{' '}
+                    {youtubeCookieStatus?.browserFallbackHealthcheckConfigured ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
                     Browser fallback profile updated: {formatIsoTimestamp(youtubeCookieStatus?.browserFallbackProfileUpdatedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback last checked: {formatIsoTimestamp(youtubeCookieStatus?.browserFallbackLastCheckedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback last error code: {youtubeCookieStatus?.browserFallbackLastErrorCode ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback last error: {youtubeCookieStatus?.browserFallbackLastErrorMessage ?? 'Not available'}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Browser fallback blocker active: {youtubeCookieStatus?.browserFallbackBlocked ? 'Yes' : 'No'}

@@ -17,6 +17,7 @@ region="us-central1"
 artifact_registry_repo="process-audio-repo"
 image_name="browser-fallback"
 profile_object="${BROWSER_FALLBACK_PROFILE_OBJECT:-browser-fallback/profile/storage-state.json}"
+healthcheck_youtube_url="${BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL:-}"
 
 case "$target_environment" in
   staging)
@@ -63,4 +64,4 @@ gcloud builds submit . \
   --project="$project_id" \
   --config="apps/browser-fallback/cloudbuild.yaml" \
   --ignore-file="apps/browser-fallback/.gcloudignore" \
-  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_SERVICE_ACCOUNT=${runtime_service_account},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url},_PROFILE_BUCKET=${firebase_storage_bucket},_PROFILE_OBJECT=${profile_object},_NETWORK=${network},_SUBNET=${subnet}"
+  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_SERVICE_ACCOUNT=${runtime_service_account},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url},_PROFILE_BUCKET=${firebase_storage_bucket},_PROFILE_OBJECT=${profile_object},_HEALTHCHECK_YOUTUBE_URL=${healthcheck_youtube_url},_NETWORK=${network},_SUBNET=${subnet}"

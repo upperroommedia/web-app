@@ -48,8 +48,13 @@ describe('youtubeCookies utils', () => {
         blockerUpdatedAt: null,
         browserFallbackConfigured: false,
         browserFallbackReachable: false,
+        browserFallbackHealthy: false,
         browserFallbackSessionState: 'unknown',
+        browserFallbackHealthcheckConfigured: false,
         browserFallbackProfileUpdatedAt: null,
+        browserFallbackLastCheckedAt: null,
+        browserFallbackLastErrorCode: null,
+        browserFallbackLastErrorMessage: null,
         metadata: null,
       }
     );
@@ -66,8 +71,13 @@ describe('youtubeCookies utils', () => {
       blockerUpdatedAt: '2026-03-26T18:09:43.380Z',
       browserFallbackConfigured: true,
       browserFallbackReachable: true,
+      browserFallbackHealthy: false,
       browserFallbackSessionState: 'authenticated',
+      browserFallbackHealthcheckConfigured: true,
       browserFallbackProfileUpdatedAt: '2026-03-26T18:10:43.380Z',
+      browserFallbackLastCheckedAt: '2026-03-26T18:10:45.000Z',
+      browserFallbackLastErrorCode: 'session_unhealthy',
+      browserFallbackLastErrorMessage: 'ERROR: [youtube] dKaZ89SkVYY: The page needs to be reloaded.',
       metadata: {
         sourceFileName: 'cookies.txt',
         uploadedAt: '2026-03-24T18:09:43.380Z',

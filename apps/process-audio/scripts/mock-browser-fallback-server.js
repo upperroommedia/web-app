@@ -14,7 +14,19 @@ app.get('/healthz', (req, res) => {
 });
 
 app.get('/session-status', (req, res) => {
-  res.json({ sessionState, ok: sessionState === 'authenticated' });
+  res.json({
+    sessionState,
+    ok: sessionState === 'authenticated',
+    service: 'browser-fallback',
+    configured: true,
+    profileUpdatedAt: null,
+    profileGeneration: null,
+    fakeMode: true,
+    healthcheckConfigured: false,
+    lastCheckedAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+  });
 });
 
 app.get('/downloads/mock-section.m4a', (req, res) => {

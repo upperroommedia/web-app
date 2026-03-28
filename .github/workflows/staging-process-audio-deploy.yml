@@ -254,6 +254,7 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           DEPLOY_BROWSER_FALLBACK: ${{ needs.detect-changes.outputs.deploy_browser_fallback }}
           DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
+          BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL: https://youtu.be/dKaZ89SkVYY
         run: |
           set -euo pipefail
           project_number="$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')"

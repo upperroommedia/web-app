@@ -43,6 +43,10 @@ export async function getBrowserFallbackSessionStatus(
       profileUpdatedAt: null,
       profileGeneration: null,
       fakeMode: false,
+      healthcheckConfigured: false,
+      lastCheckedAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
       reachable: false,
       serviceUrl: null,
     };
@@ -82,6 +86,10 @@ export async function getBrowserFallbackSessionStatus(
       profileUpdatedAt: null,
       profileGeneration: null,
       fakeMode: false,
+      healthcheckConfigured: false,
+      lastCheckedAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
       reachable: false,
       serviceUrl,
     };

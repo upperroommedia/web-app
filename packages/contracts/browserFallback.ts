@@ -62,6 +62,10 @@ export interface BrowserFallbackSessionStatusResponse {
   profileUpdatedAt: string | null;
   profileGeneration: string | null;
   fakeMode: boolean;
+  healthcheckConfigured: boolean;
+  lastCheckedAt: string | null;
+  lastErrorCode: BrowserFallbackErrorCode | null;
+  lastErrorMessage: string | null;
 }
 
 export interface BrowserFallbackRuntimeConfig {

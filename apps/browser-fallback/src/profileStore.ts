@@ -167,12 +167,16 @@ export async function buildBrowserFallbackSessionStatus(
         };
 
   return {
-    ok: true,
+    ok: fakeMode || metadata.sessionState === 'authenticated',
     service: 'browser-fallback',
     configured: fakeMode || !!process.env.BROWSER_FALLBACK_PROFILE_BUCKET,
     sessionState: metadata.sessionState,
     profileUpdatedAt: metadata.profileUpdatedAt,
     profileGeneration: metadata.profileGeneration,
     fakeMode,
+    healthcheckConfigured: false,
+    lastCheckedAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
   };
 }

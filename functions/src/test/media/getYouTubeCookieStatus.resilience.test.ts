@@ -82,9 +82,13 @@ describe('getYouTubeCookieStatus resilience', () => {
       reachable: true,
       serviceUrl: 'https://browser-fallback-staging.example.com',
       sessionState: 'authenticated',
+      healthcheckConfigured: true,
       profileUpdatedAt: '2026-03-28T00:26:07.228Z',
       profileGeneration: '1774657567188905',
       fakeMode: false,
+      lastCheckedAt: '2026-03-28T00:41:00.000Z',
+      lastErrorCode: null,
+      lastErrorMessage: null,
     });
 
     mockedGetYouTubeQueueSnapshot
@@ -144,10 +148,58 @@ describe('getYouTubeCookieStatus resilience', () => {
       blockerReason: 'browser_fallback_unavailable',
       browserFallbackConfigured: true,
       browserFallbackReachable: true,
+      browserFallbackHealthy: true,
       browserFallbackSessionState: 'authenticated',
+      browserFallbackHealthcheckConfigured: true,
+      browserFallbackLastCheckedAt: '2026-03-28T00:41:00.000Z',
+      browserFallbackLastErrorCode: null,
+      browserFallbackLastErrorMessage: null,
       metadata: expect.objectContaining({
         cookieHash: '265428c85a803368',
       }),
+    });
+  });
+
+  it('does not auto-resume the queue when the browser fallback is reachable but unhealthy', async () => {
+    const database = createDatabase();
+
+    mockedGetBrowserFallbackSessionStatus.mockResolvedValue({
+      ok: false,
+      service: 'browser-fallback',
+      configured: true,
+      reachable: true,
+      serviceUrl: 'https://browser-fallback-staging.example.com',
+      sessionState: 'authenticated',
+      healthcheckConfigured: true,
+      profileUpdatedAt: '2026-03-28T00:26:07.228Z',
+      profileGeneration: '1774657567188905',
+      fakeMode: false,
+      lastCheckedAt: '2026-03-28T00:41:00.000Z',
+      lastErrorCode: 'session_unhealthy',
+      lastErrorMessage: 'ERROR: [youtube] dKaZ89SkVYY: The page needs to be reloaded.',
+    });
+
+    mockedGetYouTubeQueueSnapshot.mockResolvedValue({
+      queueState: {
+        ...buildInitialYouTubeQueueState(),
+        blocked: true,
+        blockerReason: 'browser_fallback_unavailable',
+        blockerEpisodeId: 'episode-1',
+        blockedAt: '2026-03-28T00:40:00.000Z',
+        deferredYouTubeTaskCount: 1,
+      },
+      deferredCount: 1,
+    });
+
+    const result = await getYouTubeCookieStatus(database);
+
+    expect(mockedRecoverStaleYouTubeQueueProbe).not.toHaveBeenCalled();
+    expect(mockedBeginYouTubeQueueProbe).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      browserFallbackReachable: true,
+      browserFallbackHealthy: false,
+      browserFallbackSessionState: 'authenticated',
+      browserFallbackLastErrorCode: 'session_unhealthy',
     });
   });
 });
