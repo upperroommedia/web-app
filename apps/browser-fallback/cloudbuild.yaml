@@ -83,7 +83,7 @@ substitutions:
   _FIREBASE_STORAGE_BUCKET: 'urm-app.appspot.com'
   _FIREBASE_DATABASE_URL: 'https://urm-app-default-rtdb.firebaseio.com/'
   _PROFILE_BUCKET: 'urm-app.appspot.com'
-  _PROFILE_OBJECT: 'browser-fallback/profile/latest.tar.gz'
+  _PROFILE_OBJECT: 'browser-fallback/profile/storage-state.json'
   _PROFILE_META_OBJECT: 'browser-fallback/profile/latest.json'
   _ARTIFACT_PREFIX: 'browser-fallback/artifacts'
   _SIGNED_URL_TTL_SECONDS: '900'
