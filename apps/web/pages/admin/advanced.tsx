@@ -37,6 +37,11 @@ import type {
   SetYouTubeCookiesOutputType,
 } from '@upperroom/contracts/setYouTubeCookies';
 import { uploadYouTubeCookiesFromFile } from '../../utils/youtubeCookies';
+import {
+  getFirebaseDatabaseUrl,
+  getFirebaseProjectId,
+  getFirebaseStorageBucket,
+} from '../../shared/firebaseProjectConfig';
 
 type NoticeState = {
   severity: 'success' | 'error' | 'info' | 'warning';
@@ -44,6 +49,8 @@ type NoticeState = {
 } | null;
 
 const SCRIPT_RUNNER_EMAIL = 'youssef.a.asaad@gmail.com';
+const YOUTUBE_COOKIE_EXPORT_URL = 'https://www.youtube.com/robots.txt';
+const YTDLP_COOKIE_DOCS_URL = 'https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies';
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -116,6 +123,20 @@ const formatIsoTimestamp = (value?: string | null): string => {
   }).format(new Date(parsed));
 };
 
+const buildBrowserFallbackBootstrapCommand = (): string => {
+  const projectId = getFirebaseProjectId();
+  const storageBucket = getFirebaseStorageBucket();
+  const databaseUrl = getFirebaseDatabaseUrl();
+
+  return [
+    `FIREBASE_PROJECT_ID=${projectId}`,
+    `FIREBASE_STORAGE_BUCKET=${storageBucket}`,
+    `FIREBASE_DATABASE_URL=${databaseUrl}`,
+    `BROWSER_FALLBACK_PROFILE_BUCKET=${storageBucket}`,
+    './scripts/with-node22.sh pnpm --dir apps/browser-fallback exec node scripts/bootstrap-browser-profile.js',
+  ].join(' \\\n');
+};
+
 const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
   const router = useRouter();
   const { user } = useAuth();
@@ -131,6 +152,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
 
   const isAdmin = user?.isAdmin() ?? false;
   const canRunScripts = isAdmin && user?.email?.trim().toLowerCase() === SCRIPT_RUNNER_EMAIL;
+  const browserFallbackBootstrapCommand = useMemo(() => buildBrowserFallbackBootstrapCommand(), []);
   const redirectUri = useMemo(() => {
     if (typeof window === 'undefined') {
       return '';
@@ -187,6 +209,16 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
     loadStatus();
     loadYouTubeCookieStatus();
   }, [loadStatus, loadYouTubeCookieStatus]);
+
+  const copyToClipboard = useCallback(async (value: string, successText: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice({ severity: 'success', text: successText });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to copy text to the clipboard.';
+      setNotice({ severity: 'error', text: message });
+    }
+  }, []);
 
   useEffect(() => {
     if (!router.isReady) {
@@ -489,6 +521,84 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
 
                 <Divider />
 
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">Guided refresh flow</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    1. Open a fresh private/incognito browser window manually.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    2. Log into the dedicated YouTube account in that private window only.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    3. In the same private tab, go directly to <code>youtube.com/robots.txt</code>.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    4. Export only the <code>youtube.com</code> cookies as Netscape <code>cookies.txt</code>.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    5. Close the private window immediately after export so YouTube does not rotate the session.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    6. Upload that exported <code>cookies.txt</code> here, then refresh status.
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                    <Button
+                      variant="outlined"
+                      onClick={() => copyToClipboard(YOUTUBE_COOKIE_EXPORT_URL, 'Copied youtube.com/robots.txt URL.')}
+                    >
+                      Copy robots.txt URL
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      href={YTDLP_COOKIE_DOCS_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open yt-dlp cookie docs
+                    </Button>
+                  </Stack>
+                </Stack>
+
+                <Divider />
+
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">Browser fallback recovery</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    If browser fallback shows <code>auth_required</code> or <code>missing_profile</code>, rerun the
+                    local bootstrap below. This captures a portable Playwright storage state that Cloud Run can
+                    actually reuse.
+                  </Typography>
+                  <Box
+                    component="pre"
+                    sx={{
+                      m: 0,
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: 'background.default',
+                      overflowX: 'auto',
+                      fontSize: '0.8rem',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {browserFallbackBootstrapCommand}
+                  </Box>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                    <Button
+                      variant="outlined"
+                      onClick={() =>
+                        copyToClipboard(
+                          browserFallbackBootstrapCommand,
+                          'Copied browser fallback bootstrap command.'
+                        )
+                      }
+                    >
+                      Copy bootstrap command
+                    </Button>
+                  </Stack>
+                </Stack>
+
+                <Divider />
+
                 <Stack spacing={1.25}>
                   <Typography variant="subtitle2">Cookie status</Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -571,6 +681,12 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   for YouTube, navigating to <code>youtube.com/robots.txt</code>, exporting the Netscape
                   <code>cookies.txt</code>, and then closing that private window immediately. A file that looks valid
                   can still fail validation if YouTube has already rotated or challenged that session.
+                </Alert>
+
+                <Alert severity="warning">
+                  This page can guide the operator, but it does not and should not read browser cookies directly. The
+                  actual YouTube login and cookie export must happen in a separate private/incognito browser session so
+                  the exported file stays compatible with yt-dlp and avoids immediate rotation.
                 </Alert>
               </Stack>
             </CardContent>
