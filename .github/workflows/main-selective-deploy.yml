@@ -342,11 +342,11 @@ jobs:
       - name: Deploy Storage rules
         run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage --non-interactive
 
-  deploy-functions-core:
+  deploy-functions:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: detect-changes
-    if: needs.detect-changes.outputs.deploy_functions_core == 'true'
+    if: needs.detect-changes.outputs.deploy_functions_core == 'true' || needs.detect-changes.outputs.deploy_functions_media == 'true' || needs.detect-changes.outputs.deploy_functions_image == 'true' || needs.detect-changes.outputs.deploy_functions_integrations == 'true'
     steps:
       - uses: actions/checkout@v5
 
@@ -358,24 +358,11 @@ jobs:
           materialize_catalog: 'true'
 
       - name: Deploy functions:core
-        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive
-
-  deploy-functions-media:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: detect-changes
-    if: needs.detect-changes.outputs.deploy_functions_media == 'true'
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: ./.github/actions/setup-backend-deploy
-        with:
-          gcp_project: ${{ env.FIREBASE_PROJECT }}
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-          materialize_catalog: 'true'
+        if: needs.detect-changes.outputs.deploy_functions_core == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive
 
       - name: Remove retired media function
+        if: needs.detect-changes.outputs.deploy_functions_media == 'true'
         run: |
           pnpm exec firebase functions:delete addintrooutrotaskhandler \
             --project "$FIREBASE_PROJECT" \
@@ -383,40 +370,13 @@ jobs:
             --force >/dev/null 2>&1 || true
 
       - name: Deploy functions:media
-        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive
-
-  deploy-functions-image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: detect-changes
-    if: needs.detect-changes.outputs.deploy_functions_image == 'true'
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: ./.github/actions/setup-backend-deploy
-        with:
-          gcp_project: ${{ env.FIREBASE_PROJECT }}
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-          materialize_catalog: 'true'
+        if: needs.detect-changes.outputs.deploy_functions_media == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive
 
       - name: Deploy functions:image
-        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive
-
-  deploy-functions-integrations:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: detect-changes
-    if: needs.detect-changes.outputs.deploy_functions_integrations == 'true'
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: ./.github/actions/setup-backend-deploy
-        with:
-          gcp_project: ${{ env.FIREBASE_PROJECT }}
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-          materialize_catalog: 'true'
+        if: needs.detect-changes.outputs.deploy_functions_image == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive
 
       - name: Deploy functions:integrations
-        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive
+        if: needs.detect-changes.outputs.deploy_functions_integrations == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive
