@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Database } from 'firebase-admin/database';
+import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
 import type { GetYouTubeCookieStatusOutputType } from '@upperroom/contracts/getYouTubeCookieStatus';
 import type { SetYouTubeCookiesInput } from '@upperroom/contracts/setYouTubeCookies';
@@ -78,13 +79,20 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
     browserFallbackStatus.reachable &&
     browserFallbackStatus.sessionState === 'authenticated'
   ) {
-    await beginYouTubeQueueProbe({
-      database,
-      targetUri: getProcessAudioTargetUri(),
-      ownerId: `browser-status:${Date.now()}`,
-      probeMode: 'browser_fallback',
-    });
-    ({ queueState, deferredCount } = await getYouTubeQueueSnapshot(database));
+    try {
+      await beginYouTubeQueueProbe({
+        database,
+        targetUri: getProcessAudioTargetUri(),
+        ownerId: `browser-status:${Date.now()}`,
+        probeMode: 'browser_fallback',
+      });
+      ({ queueState, deferredCount } = await getYouTubeQueueSnapshot(database));
+    } catch (error) {
+      logger.warn('Failed to schedule browser fallback YouTube queue probe while reading status', {
+        error,
+      });
+      ({ queueState, deferredCount } = await getYouTubeQueueSnapshot(database));
+    }
   }
 
   return buildYouTubeCookieStatus(cookiesSnapshot.exists(), metadata, queueState, deferredCount, {

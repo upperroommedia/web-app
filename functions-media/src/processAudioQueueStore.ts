@@ -99,6 +99,12 @@ const isTaskMissingError = (error: unknown): boolean => {
   return normalized.includes('task') && normalized.includes('not found');
 };
 
+const isTaskAlreadyExistsError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('task') && normalized.includes('already exists');
+};
+
 async function deleteExistingTask(queue: TaskQueue<AddIntroOutroInputType>, taskId: string | null | undefined): Promise<void> {
   if (!taskId) return;
 
@@ -394,22 +400,79 @@ export async function beginYouTubeQueueProbe(args: {
     return;
   }
 
+  const currentQueueState = parseYouTubeQueueState((await database.ref(YOUTUBE_QUEUE_STATE_PATH).get()).val());
+  if (
+    currentQueueState.probeStatus === 'probing' &&
+    currentQueueState.probeMode === probeMode &&
+    currentQueueState.probeTaskSermonId === probeCandidate.sermonId &&
+    currentQueueState.probeRequestVersion === probeCandidate.requestVersion
+  ) {
+    return;
+  }
+
   await withProcessAudioQueueClaim(database, probeCandidate.sermonId, ownerId, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${probeCandidate.sermonId}`);
-    const requestSnapshot = await requestRef.get();
+    const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
+    const [requestSnapshot, queueStateSnapshot] = await Promise.all([requestRef.get(), queueStateRef.get()]);
     const existingState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(probeCandidate.payload, probeCandidate.requestVersion, getNowIsoString());
+    const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
     const taskId = computeProcessAudioTaskId(probeCandidate.sermonId, probeCandidate.requestVersion);
     const now = getNowIsoString();
     const sanitizedPayload = sanitizeProcessAudioPayload(probeCandidate.payload);
+    const nextQueueState = {
+      blocked: false,
+      blockerReason: null,
+      blockedAt: null,
+      probeMode,
+      probeStatus: 'probing' as const,
+      probeTaskSermonId: probeCandidate.sermonId,
+      probeRequestVersion: probeCandidate.requestVersion,
+      probeStartedAt: now,
+      deferredYouTubeTaskCount: Math.max(0, deferredCount - 1),
+    };
+
+    if (
+      queueState.probeStatus === 'probing' &&
+      queueState.probeMode === probeMode &&
+      queueState.probeTaskSermonId === probeCandidate.sermonId &&
+      queueState.probeRequestVersion === probeCandidate.requestVersion
+    ) {
+      return;
+    }
+
+    if (existingState.queuedTaskId === taskId) {
+      await Promise.all([
+        requestRef.set({
+          ...existingState,
+          sermonId: probeCandidate.sermonId,
+          sourceType: 'youtube',
+          currentPayload: sanitizedPayload,
+          currentRequestVersion: probeCandidate.requestVersion,
+          queuedTaskId: taskId,
+          queuedAt: existingState.queuedAt ?? now,
+          deferredAt: null,
+          updatedAt: now,
+        } satisfies StoredProcessAudioRequestState),
+        database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${probeCandidate.sermonId}`).remove(),
+        queueStateRef.update(nextQueueState),
+      ]);
+      return;
+    }
 
     await deleteExistingTask(queue, existingState.queuedTaskId);
-    await queue.enqueue(sanitizedPayload, {
-      id: taskId,
-      dispatchDeadlineSeconds: 1800,
-      uri: targetUri,
-    });
+    try {
+      await queue.enqueue(sanitizedPayload, {
+        id: taskId,
+        dispatchDeadlineSeconds: 1800,
+        uri: targetUri,
+      });
+    } catch (error) {
+      if (!isTaskAlreadyExistsError(error)) {
+        throw error;
+      }
+    }
 
     await Promise.all([
       requestRef.set({
@@ -424,17 +487,7 @@ export async function beginYouTubeQueueProbe(args: {
         updatedAt: now,
       } satisfies StoredProcessAudioRequestState),
       database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${probeCandidate.sermonId}`).remove(),
-      database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
-        blocked: false,
-        blockerReason: null,
-        blockedAt: null,
-        probeMode,
-        probeStatus: 'probing',
-        probeTaskSermonId: probeCandidate.sermonId,
-        probeRequestVersion: probeCandidate.requestVersion,
-        probeStartedAt: now,
-        deferredYouTubeTaskCount: Math.max(0, deferredCount - 1),
-      }),
+      queueStateRef.update(nextQueueState),
     ]);
   });
 }
