@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +15,8 @@ type BrowserFallbackProfileMetadata = {
   profileGeneration: string | null;
 };
 
-const getProfileArchiveObject = (): string => process.env.BROWSER_FALLBACK_PROFILE_OBJECT || 'browser-fallback/profile/latest.tar.gz';
+const getProfileStateObject = (): string =>
+  process.env.BROWSER_FALLBACK_PROFILE_OBJECT || 'browser-fallback/profile/storage-state.json';
 const getProfileMetaObject = (): string => process.env.BROWSER_FALLBACK_PROFILE_META_OBJECT || 'browser-fallback/profile/latest.json';
 
 function getNowIsoString(): string {
@@ -30,20 +30,6 @@ function getProfileLeaseTtlMs(): number {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-async function runCommand(command: string, args: string[]): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const proc = spawn(command, args, { stdio: 'inherit' });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`${command} exited with code ${code}`));
-    });
-  });
 }
 
 async function withProfileLease<T>(database: Database, ownerId: string, run: () => Promise<T>): Promise<T> {
@@ -105,81 +91,59 @@ export async function readBrowserFallbackProfileMetadata(bucket: Bucket): Promis
   };
 }
 
-async function removeTransientProfileLocks(profileDir: string): Promise<void> {
-  const candidates = [
-    'SingletonCookie',
-    'SingletonLock',
-    'SingletonSocket',
-    'lockfile',
-    'Crashpad',
-    'chrome_debug.log',
-  ];
-
-  await Promise.all(
-    candidates.map(async (entry) => {
-      await rm(path.join(profileDir, entry), { recursive: true, force: true });
-      await rm(path.join(profileDir, 'Default', entry), { recursive: true, force: true });
-    })
-  );
-}
-
 export async function hydrateBrowserProfile(args: {
   bucket: Bucket;
   database: Database;
-}): Promise<{ profileDir: string; metadata: BrowserFallbackProfileMetadata }> {
+}): Promise<{ profileDir: string; metadata: BrowserFallbackProfileMetadata; storageStatePath: string | null }> {
   const { bucket, database } = args;
   const profileDir = await mkdtemp(path.join(os.tmpdir(), 'browser-profile-'));
   const metadata = await readBrowserFallbackProfileMetadata(bucket);
-  const archiveFile = bucket.file(getProfileArchiveObject());
-  const [exists] = await archiveFile.exists();
+  const stateFile = bucket.file(getProfileStateObject());
+  const [exists] = await stateFile.exists();
   if (!exists) {
     await mkdir(profileDir, { recursive: true });
-    return { profileDir, metadata };
+    return { profileDir, metadata, storageStatePath: null };
   }
 
-  const archivePath = path.join(os.tmpdir(), `${randomUUID()}.tar.gz`);
+  const storageStatePath = path.join(profileDir, 'storage-state.json');
 
   await withProfileLease(database, `hydrate:${randomUUID()}`, async () => {
-    await archiveFile.download({ destination: archivePath });
-    await runCommand('tar', ['-xzf', archivePath, '-C', profileDir]);
+    await mkdir(profileDir, { recursive: true });
+    await stateFile.download({ destination: storageStatePath });
   });
 
-  await removeTransientProfileLocks(profileDir);
-  await rm(archivePath, { force: true });
-  return { profileDir, metadata };
+  return { profileDir, metadata, storageStatePath };
 }
 
 export async function checkpointBrowserProfile(args: {
   bucket: Bucket;
   database: Database;
-  profileDir: string;
+  storageState: Record<string, unknown>;
   sessionState: BrowserFallbackSessionState;
 }): Promise<BrowserFallbackProfileMetadata> {
-  const { bucket, database, profileDir, sessionState } = args;
-  await stat(profileDir);
-  await removeTransientProfileLocks(profileDir);
-  const archivePath = path.join(os.tmpdir(), `${randomUUID()}.tar.gz`);
+  const { bucket, database, storageState, sessionState } = args;
+  const statePath = path.join(os.tmpdir(), `${randomUUID()}.json`);
   const ownerId = `checkpoint:${randomUUID()}`;
 
   return await withProfileLease(database, ownerId, async () => {
-    await runCommand('tar', ['-czf', archivePath, '-C', profileDir, '.']);
-    const archiveFile = bucket.file(getProfileArchiveObject());
-    await archiveFile.save(await readFile(archivePath), {
+    await writeFile(statePath, JSON.stringify(storageState, null, 2), 'utf8');
+    const stateFile = bucket.file(getProfileStateObject());
+    await stateFile.save(await readFile(statePath), {
       resumable: false,
-      contentType: 'application/gzip',
+      contentType: 'application/json',
     });
-    const [archiveMetadata] = await archiveFile.getMetadata();
+    const [stateMetadata] = await stateFile.getMetadata();
 
     const metadata: BrowserFallbackProfileMetadata = {
       sessionState,
       profileUpdatedAt: getNowIsoString(),
-      profileGeneration: archiveMetadata.generation ? String(archiveMetadata.generation) : null,
+      profileGeneration: stateMetadata.generation ? String(stateMetadata.generation) : null,
     };
     await bucket.file(getProfileMetaObject()).save(JSON.stringify(metadata, null, 2), {
       resumable: false,
       contentType: 'application/json',
     });
-    await rm(archivePath, { force: true });
+    await rm(statePath, { force: true });
     return metadata;
   });
 }

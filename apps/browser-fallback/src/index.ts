@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { chromium, type BrowserContext } from 'playwright';
+import { chromium, type Browser, type BrowserContext } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import type { Bucket } from '@google-cloud/storage';
 import type { Database } from 'firebase-admin/database';
@@ -35,7 +35,7 @@ const userAgent =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 
 type WorkerState = {
-  profileDir: string;
+  browser: Browser;
   context: BrowserContext;
   metadata: {
     sessionState: BrowserFallbackSessionState;
@@ -135,12 +135,19 @@ async function ensureBrowserState(): Promise<WorkerState> {
   }
   if (!workerStatePromise) {
     workerStatePromise = (async () => {
-      const { profileDir, metadata } = await hydrateBrowserProfile({ bucket: getBucket(), database: getDatabase() });
-      const context = await chromium.launchPersistentContext(profileDir, {
+      const { metadata, storageStatePath } = await hydrateBrowserProfile({
+        bucket: getBucket(),
+        database: getDatabase(),
+      });
+      const browser = await chromium.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
       });
-      return { profileDir, context, metadata };
+      const context = await browser.newContext({
+        userAgent,
+        storageState: storageStatePath || undefined,
+      });
+      return { browser, context, metadata };
     })().catch(async (error) => {
       workerStatePromise = null;
       throw error;
@@ -236,10 +243,11 @@ async function uploadArtifactAndSign(outputFilePath: string): Promise<string> {
 
 async function checkpointContext(state: WorkerState, sessionState: BrowserFallbackSessionState): Promise<void> {
   if (!state) return;
+  const storageState = (await state.context.storageState()) as Record<string, unknown>;
   state.metadata = await checkpointBrowserProfile({
     bucket: getBucket(),
     database: getDatabase(),
-    profileDir: state.profileDir,
+    storageState,
     sessionState,
   });
 }
@@ -264,14 +272,70 @@ async function withCookies<T>(run: (cookiesFilePath: string, sessionState: Brows
   }
 }
 
+async function getLiveSessionStatus(): Promise<{
+  sessionState: BrowserFallbackSessionState;
+  profileUpdatedAt: string | null;
+  profileGeneration: string | null;
+}> {
+  const state = await ensureBrowserState();
+  if (!state) {
+    return {
+      sessionState: 'fake_mode',
+      profileUpdatedAt: new Date().toISOString(),
+      profileGeneration: 'fake-mode',
+    };
+  }
+
+  const { cookiesFilePath, sessionState } = await exportCookiesFile(state.context);
+  if (cookiesFilePath) {
+    await rm(path.dirname(cookiesFilePath), { recursive: true, force: true });
+  }
+
+  if (sessionState !== state.metadata.sessionState) {
+    state.metadata = await checkpointBrowserProfile({
+      bucket: getBucket(),
+      database: getDatabase(),
+      storageState: (await state.context.storageState()) as Record<string, unknown>,
+      sessionState,
+    });
+  }
+
+  return {
+    sessionState,
+    profileUpdatedAt: state.metadata.profileUpdatedAt,
+    profileGeneration: state.metadata.profileGeneration,
+  };
+}
+
 app.get('/healthz', async (_req, res) => {
   const status = await buildBrowserFallbackSessionStatus(fakeMode ? null : getBucket(), fakeMode);
   res.status(200).json(status);
 });
 
 app.get('/session-status', async (_req, res) => {
-  const status = await buildBrowserFallbackSessionStatus(fakeMode ? null : getBucket(), fakeMode);
-  res.status(200).json(status);
+  const baseStatus = await buildBrowserFallbackSessionStatus(fakeMode ? null : getBucket(), fakeMode);
+  if (fakeMode || !baseStatus.configured) {
+    res.status(200).json(baseStatus);
+    return;
+  }
+
+  try {
+    const liveStatus = await getLiveSessionStatus();
+    res.status(200).json({
+      ...baseStatus,
+      sessionState: liveStatus.sessionState,
+      profileUpdatedAt: liveStatus.profileUpdatedAt,
+      profileGeneration: liveStatus.profileGeneration,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const classified = classifyWorkerFailure(message);
+    res.status(classified.retryable ? 502 : 200).json({
+      ...baseStatus,
+      sessionState: classified.sessionState,
+      ok: classified.sessionState === 'authenticated',
+    });
+  }
 });
 
 app.get('/artifacts/mock-section.m4a', (_req, res) => {

@@ -10,23 +10,9 @@ const admin = require('firebase-admin');
 const { Storage } = require('@google-cloud/storage');
 
 const profileBucketName = process.env.BROWSER_FALLBACK_PROFILE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET;
-const profileObject = process.env.BROWSER_FALLBACK_PROFILE_OBJECT || 'browser-fallback/profile/latest.tar.gz';
+const profileObject = process.env.BROWSER_FALLBACK_PROFILE_OBJECT || 'browser-fallback/profile/storage-state.json';
 const profileMetaObject = process.env.BROWSER_FALLBACK_PROFILE_META_OBJECT || 'browser-fallback/profile/latest.json';
-
-async function runTar(args) {
-  const { spawn } = require('node:child_process');
-  await new Promise((resolve, reject) => {
-    const proc = spawn('tar', args, { stdio: 'inherit' });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`tar exited with code ${code}`));
-    });
-  });
-}
+const authCookieNames = new Set(['SID', 'SAPISID', '__Secure-1PSID', '__Secure-3PSID']);
 
 async function main() {
   if (!profileBucketName) {
@@ -44,7 +30,7 @@ async function main() {
   const storage = new Storage();
   const bucket = storage.bucket(profileBucketName);
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'browser-fallback-bootstrap-'));
-  const archivePath = path.join(os.tmpdir(), `browser-fallback-profile-${Date.now()}.tar.gz`);
+  const statePath = path.join(os.tmpdir(), `browser-fallback-storage-state-${Date.now()}.json`);
   const context = await chromium.launchPersistentContext(tmpDir, {
     headless: false,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
@@ -57,13 +43,19 @@ async function main() {
   await rl.question('Press Enter after the session is fully authenticated and stable...');
   await rl.close();
 
+  const storageState = await context.storageState({ path: statePath });
+  const authCookies = (storageState.cookies || []).filter((cookie) => authCookieNames.has(cookie.name));
+  if (authCookies.length === 0) {
+    await context.close();
+    throw new Error('The captured browser session does not contain YouTube auth cookies. Log in fully before pressing Enter.');
+  }
+
   await context.close();
-  await runTar(['-czf', archivePath, '-C', tmpDir, '.']);
 
   const file = bucket.file(profileObject);
-  await file.save(await fs.readFile(archivePath), {
+  await file.save(await fs.readFile(statePath), {
     resumable: false,
-    contentType: 'application/gzip',
+    contentType: 'application/json',
   });
 
   const metadata = {
@@ -77,7 +69,7 @@ async function main() {
     contentType: 'application/json',
   });
 
-  output.write(`Uploaded browser fallback profile snapshot to gs://${profileBucketName}/${profileObject}\n`);
+  output.write(`Uploaded portable browser fallback storage state to gs://${profileBucketName}/${profileObject}\n`);
 }
 
 main().catch((error) => {
