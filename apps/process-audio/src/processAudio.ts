@@ -23,6 +23,22 @@ import { markProcessAudioRequestRunning } from './processAudioQueueStore';
 
 const PROCESS_AUDIO_LOCK_TTL_MS = 30 * 60 * 1000;
 
+export class MissingSermonDocumentError extends Error {
+  readonly sermonId: string;
+  readonly documentPath: string;
+
+  constructor(sermonId: string, documentPath: string) {
+    super(`Sermon Document ${sermonId} Not Found at path: ${documentPath}`);
+    this.name = 'MissingSermonDocumentError';
+    this.sermonId = sermonId;
+    this.documentPath = documentPath;
+  }
+}
+
+export const isMissingSermonDocumentError = (error: unknown): error is MissingSermonDocumentError => {
+  return error instanceof MissingSermonDocumentError;
+};
+
 async function acquireProcessAudioLock(
   realtimeDB: Database,
   sermonId: string,
@@ -177,7 +193,7 @@ export const processAudio = async (
       firestoreEmulatorHost: firestoreEmulatorHost || 'production',
       firestoreUrl: firestoreEmulatorHost ? `http://${firestoreEmulatorHost}` : 'https://firestore.googleapis.com',
     });
-    throw new Error(`Sermon Document ${fileName} Not Found at path: ${documentPath}`);
+    throw new MissingSermonDocumentError(fileName, documentPath);
   }
 
   if (existingStatus?.audioStatus === sermonStatusType.PROCESSED) {

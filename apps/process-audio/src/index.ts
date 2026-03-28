@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { executeWithTimeout, getAudioSource, getFFmpegPath, logMemoryUsage, validateAddIntroOutroData } from './utils';
 import { ProcessAudioInputType, sermonStatusType, uploadStatus, sermonStatus } from './types';
 import { isAxiosError } from 'axios';
-import { processAudio } from './processAudio';
+import { isMissingSermonDocumentError, processAudio } from './processAudio';
 import { CancelToken } from './CancelToken';
 import { firestoreAdminSermonConverter } from './firestoreAdminDataConverter';
 import { TIMEOUT_SECONDS } from './consts';
@@ -13,6 +13,7 @@ import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
 import { analyzeYouTubeFailure } from './youtubeExtractionPolicy';
 import {
+  cleanupDeletedSermonProcessAudioState,
   completeProcessAudioFailure,
   completeProcessAudioSuccess,
   deferStaleYouTubeRequest,
@@ -221,6 +222,35 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       message = e.message;
     } else if (e instanceof Error) {
       message = e.message;
+    }
+
+    if (isMissingSermonDocumentError(e)) {
+      log.warn('Sermon document disappeared before audio processing could begin; clearing queue state and skipping task', {
+        sermonId: data.id,
+        documentPath: e.documentPath,
+        taskId,
+      });
+
+      try {
+        await cleanupDeletedSermonProcessAudioState({
+          database: realtimeDB,
+          payload: data,
+          requestId: ctx.requestId,
+          taskId,
+          ctx,
+        });
+      } catch (cleanupError) {
+        log.error('Failed to clear process-audio queue state for deleted sermon', {
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          sermonId: data.id,
+          taskId,
+        });
+        res.status(500).json({ error: message });
+        return;
+      }
+
+      res.status(200).json({ skipped: true, reason: 'sermon_deleted' });
+      return;
     }
 
     const youtubeFailureAnalysis =
