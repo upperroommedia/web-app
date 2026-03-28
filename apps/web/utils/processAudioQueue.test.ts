@@ -95,9 +95,12 @@ describe('processAudioQueue contract helpers', () => {
     const sermonId = 'sermon-123';
     const firstId = computeProcessAudioTaskId(sermonId, 'abcdef1234567890');
     const secondId = computeProcessAudioTaskId(sermonId, 'fedcba0987654321');
+    const replayId = computeProcessAudioTaskId(sermonId, 'abcdef1234567890', 'retry-1');
 
     expect(firstId).toMatch(/^pa-[a-f0-9]{8}-[a-f0-9]{16}$/);
     expect(secondId).toMatch(/^pa-[a-f0-9]{8}-[a-f0-9]{16}$/);
+    expect(replayId).toMatch(/^pa-[a-f0-9]{8}-[a-f0-9]{16}-[a-f0-9]{8}$/);
     expect(firstId).not.toBe(secondId);
+    expect(firstId).not.toBe(replayId);
   });
 });

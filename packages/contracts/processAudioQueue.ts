@@ -139,9 +139,16 @@ export const computeProcessAudioRequestVersion = (payload: AddIntroOutroInputTyp
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
 };
 
-export const computeProcessAudioTaskId = (sermonId: string, requestVersion: string): string => {
+export const computeProcessAudioTaskId = (
+  sermonId: string,
+  requestVersion: string,
+  enqueueToken?: string | null
+): string => {
   const sermonHash = createHash('sha256').update(sermonId).digest('hex').slice(0, 8);
-  return `pa-${sermonHash}-${requestVersion}`;
+  const enqueueHash = enqueueToken
+    ? `-${createHash('sha256').update(enqueueToken).digest('hex').slice(0, 8)}`
+    : '';
+  return `pa-${sermonHash}-${requestVersion}${enqueueHash}`;
 };
 
 export const buildInitialYouTubeQueueState = (): StoredYouTubeQueueState => ({

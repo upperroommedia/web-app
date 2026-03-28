@@ -91,9 +91,16 @@ const computeProcessAudioRequestVersion = (payload: AddIntroOutroInputType): str
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
 };
 
-const computeProcessAudioTaskId = (sermonId: string, requestVersion: string): string => {
+const computeProcessAudioTaskId = (
+  sermonId: string,
+  requestVersion: string,
+  enqueueToken?: string | null
+): string => {
   const sermonHash = createHash('sha256').update(sermonId).digest('hex').slice(0, 8);
-  return `pa-${sermonHash}-${requestVersion}`;
+  const enqueueHash = enqueueToken
+    ? `-${createHash('sha256').update(enqueueToken).digest('hex').slice(0, 8)}`
+    : '';
+  return `pa-${sermonHash}-${requestVersion}${enqueueHash}`;
 };
 
 const buildInitialYouTubeQueueState = (): StoredYouTubeQueueState => ({
@@ -290,7 +297,7 @@ async function enqueueDeferredRequestIgnoringPause(
     const state = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(entry.payload, entry.requestVersion, now);
-    const taskId = computeProcessAudioTaskId(entry.sermonId, entry.requestVersion);
+    const taskId = computeProcessAudioTaskId(entry.sermonId, entry.requestVersion, `${ownerId}:${now}`);
 
     await deleteExistingTask(queue, state.queuedTaskId);
     await enqueueTask(queue, entry.payload, taskId);
@@ -487,7 +494,7 @@ export async function completeProcessAudioSuccess(args: {
 
     if (requestState.nextPayload && requestState.nextRequestVersion) {
       const nextPayload = requestState.nextPayload;
-      const nextTaskId = computeProcessAudioTaskId(nextPayload.id, requestState.nextRequestVersion);
+      const nextTaskId = computeProcessAudioTaskId(nextPayload.id, requestState.nextRequestVersion, `${requestId}:${now}`);
       const activeQueueState = parseYouTubeQueueState((await database.ref(YOUTUBE_QUEUE_STATE_PATH).get()).val());
       const nextSourceType = getProcessAudioSourceType(nextPayload);
       let queuedTaskId: string | null = nextTaskId;

@@ -7,7 +7,12 @@ import type { SetYouTubeCookiesInput } from '@upperroom/contracts/setYouTubeCook
 import { YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON } from '@upperroom/contracts/processAudioQueue';
 import type { YouTubeCookieMetadata } from '@upperroom/contracts/youtubeCookies';
 import { getBrowserFallbackSessionStatus } from './browserFallbackService';
-import { beginYouTubeQueueProbe, buildYouTubeCookieStatus, getYouTubeQueueSnapshot } from './processAudioQueueStore';
+import {
+  beginYouTubeQueueProbe,
+  buildYouTubeCookieStatus,
+  getYouTubeQueueSnapshot,
+  recoverStaleYouTubeQueueProbe,
+} from './processAudioQueueStore';
 import { getProcessAudioTargetUri } from './processAudioService';
 
 const COOKIE_KEY = 'yt-dlp-cookies';
@@ -73,6 +78,14 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
   const metadata = metadataSnapshot.exists() ? (metadataSnapshot.val() as YouTubeCookieMetadata) : null;
   let { queueState, deferredCount } = await getYouTubeQueueSnapshot(database);
   const browserFallbackStatus = await getBrowserFallbackSessionStatus(database);
+
+  if (browserFallbackStatus.reachable && browserFallbackStatus.sessionState === 'authenticated') {
+    const staleProbeRecovery = await recoverStaleYouTubeQueueProbe(database);
+    if (staleProbeRecovery.recovered) {
+      queueState = staleProbeRecovery.queueState;
+      deferredCount = staleProbeRecovery.deferredCount;
+    }
+  }
 
   if (
     queueState.blockerReason === YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON &&

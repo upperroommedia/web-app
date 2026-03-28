@@ -8,6 +8,7 @@ jest.mock('../../../../functions-media/src/processAudioQueueStore', () => {
     ...actual,
     beginYouTubeQueueProbe: jest.fn(),
     getYouTubeQueueSnapshot: jest.fn(),
+    recoverStaleYouTubeQueueProbe: jest.fn(),
   };
 });
 
@@ -15,11 +16,16 @@ import { buildInitialYouTubeQueueState } from '../../../../packages/contracts/pr
 import type { YouTubeCookieMetadata } from '../../../../packages/contracts/youtubeCookies';
 import { getYouTubeCookieStatus } from '../../../../functions-media/src/youtubeCookieStore';
 import { getBrowserFallbackSessionStatus } from '../../../../functions-media/src/browserFallbackService';
-import { beginYouTubeQueueProbe, getYouTubeQueueSnapshot } from '../../../../functions-media/src/processAudioQueueStore';
+import {
+  beginYouTubeQueueProbe,
+  getYouTubeQueueSnapshot,
+  recoverStaleYouTubeQueueProbe,
+} from '../../../../functions-media/src/processAudioQueueStore';
 
 const mockedGetBrowserFallbackSessionStatus = jest.mocked(getBrowserFallbackSessionStatus);
 const mockedBeginYouTubeQueueProbe = jest.mocked(beginYouTubeQueueProbe);
 const mockedGetYouTubeQueueSnapshot = jest.mocked(getYouTubeQueueSnapshot);
+const mockedRecoverStaleYouTubeQueueProbe = jest.mocked(recoverStaleYouTubeQueueProbe);
 
 const metadata: YouTubeCookieMetadata = {
   cookieHash: '265428c85a803368',
@@ -104,6 +110,19 @@ describe('getYouTubeCookieStatus resilience', () => {
         },
         deferredCount: 1,
       });
+
+    mockedRecoverStaleYouTubeQueueProbe.mockResolvedValue({
+      recovered: false,
+      queueState: {
+        ...buildInitialYouTubeQueueState(),
+        blocked: true,
+        blockerReason: 'browser_fallback_unavailable',
+        blockerEpisodeId: 'episode-1',
+        blockedAt: '2026-03-28T00:40:00.000Z',
+        deferredYouTubeTaskCount: 1,
+      },
+      deferredCount: 1,
+    });
 
     mockedBeginYouTubeQueueProbe.mockRejectedValue(
       Object.assign(new Error('A task with ID pa-f669e7ba-141dbb566dfd76b4 already exists'), {
