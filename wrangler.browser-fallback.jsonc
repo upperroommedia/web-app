@@ -25,6 +25,7 @@
         {
           "class_name": "BrowserFallbackContainer",
           "image": "./Dockerfile.browser-fallback-cloudflare",
+          "instance_type": "standard-1",
           "max_instances": 1
         }
       ],
@@ -71,6 +72,7 @@
         {
           "class_name": "BrowserFallbackContainer",
           "image": "./Dockerfile.browser-fallback-cloudflare",
+          "instance_type": "standard-1",
           "max_instances": 1
         }
       ],
