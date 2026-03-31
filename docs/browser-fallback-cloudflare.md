@@ -37,11 +37,21 @@ The service-account JSON must belong to a principal that can:
 `staging-process-audio-deploy.yml` and `main-process-audio-deploy.yml` can deploy the Cloudflare browser-fallback automatically when all of the following are true:
 
 - `apps/browser-fallback-cloudflare`, `apps/browser-fallback`, `wrangler.browser-fallback.jsonc`, or the deploy scripts changed
-- `STAGING_BROWSER_FALLBACK_SERVICE_URL` or `PRODUCTION_BROWSER_FALLBACK_SERVICE_URL` already points at the stable Cloudflare Worker URL for that branch
+- `STAGING_BROWSER_FALLBACK_SERVICE_URL` or `PRODUCTION_BROWSER_FALLBACK_SERVICE_URL` already points at the stable Cloudflare hostname for that branch
 - `CLOUDFLARE_API_TOKEN` is configured in the GitHub repo secrets
 - the matching Firebase project contains `BROWSER_FALLBACK_FIREBASE_SERVICE_ACCOUNT_JSON` and `BROWSER_FALLBACK_SHARED_SECRET` in Secret Manager
+- the matching GitHub OIDC secrets are configured for the branch:
+  - `GCP_WORKLOAD_IDENTITY_PROVIDER_STAGING` and `GCP_SERVICE_ACCOUNT_EMAIL_STAGING`
+  - `GCP_WORKLOAD_IDENTITY_PROVIDER_PRODUCTION` and `GCP_SERVICE_ACCOUNT_EMAIL_PRODUCTION`
 
 Without `CLOUDFLARE_API_TOKEN`, the workflows keep the current behavior and reuse the configured external browser-fallback URL without trying to publish a new Cloudflare runtime.
+
+The Worker config binds each environment to the stable zone routes:
+
+- staging: `browser-fallback-staging.upperroommedia.org/*`
+- production: `browser-fallback.upperroommedia.org/*`
+
+This lets the Worker take over the existing proxied hostnames without depending on a separate `workers.dev` URL.
 
 ## Deploy Staging
 

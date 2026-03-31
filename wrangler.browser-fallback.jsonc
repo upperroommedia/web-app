@@ -15,6 +15,12 @@
   "env": {
     "staging": {
       "name": "browser-fallback-staging",
+      "routes": [
+        {
+          "pattern": "browser-fallback-staging.upperroommedia.org/*",
+          "zone_name": "upperroommedia.org"
+        }
+      ],
       "containers": [
         {
           "class_name": "BrowserFallbackContainer",
@@ -55,6 +61,12 @@
     },
     "production": {
       "name": "browser-fallback",
+      "routes": [
+        {
+          "pattern": "browser-fallback.upperroommedia.org/*",
+          "zone_name": "upperroommedia.org"
+        }
+      ],
       "containers": [
         {
           "class_name": "BrowserFallbackContainer",
