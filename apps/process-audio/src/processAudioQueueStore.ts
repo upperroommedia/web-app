@@ -448,14 +448,13 @@ export async function completeProcessAudioSuccess(args: {
       queueState.probeRequestVersion === requestState.runningRequestVersion;
 
     if (shouldResolveProbe) {
+      const browserProbeSucceeded = didBrowserProbeSucceed(queueState, sanitizedPayload);
       const youtubePayload = 'youtubeUrl' in sanitizedPayload ? sanitizedPayload : null;
-      const cookieProbeSucceeded = await didCookieProbeSucceed(
-        database,
-        youtubePayload?.youtubeUrl ?? '',
-        queueState.probeStartedAt
-      );
+      const cookieProbeSucceeded = browserProbeSucceeded
+        ? false
+        : await didCookieProbeSucceed(database, youtubePayload?.youtubeUrl ?? '', queueState.probeStartedAt);
 
-      if (cookieProbeSucceeded) {
+      if (browserProbeSucceeded || cookieProbeSucceeded) {
         const { deferredEntries } = await getQueueStateAndDeferredEntries(database);
         const remainingEntries = deferredEntries
           .filter((entry) => entry.sermonId !== sanitizedPayload.id)
@@ -464,7 +463,7 @@ export async function completeProcessAudioSuccess(args: {
         await database.ref(YOUTUBE_QUEUE_STATE_PATH).set({
           ...buildInitialYouTubeQueueState(),
           probeStatus: 'probe_succeeded',
-          probeMode: 'cookie_provider',
+          probeMode: browserProbeSucceeded ? 'browser_fallback' : 'cookie_provider',
           probeLastSucceededAt: now,
           deferredYouTubeTaskCount: remainingEntries.length,
         } satisfies StoredYouTubeQueueState);

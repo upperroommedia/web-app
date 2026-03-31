@@ -50,6 +50,8 @@ YouTube extraction:
 - `YOUTUBE_BROWSER_FALLBACK_URL`
 - `YOUTUBE_BROWSER_FALLBACK_ENABLED`
 - `YOUTUBE_BROWSER_FALLBACK_TIMEOUT_MS`
+- `BROWSER_FALLBACK_SHARED_SECRET` optional shared secret for non-Google fallback hosts
+- `BROWSER_FALLBACK_AUTH_MODE=auto|id_token|shared_secret|none`
 - `YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=false`
 - `YTDLP_CONCURRENT_FRAGMENTS=1`
 - `YTDLP_COOKIE_HEALTHCHECK_ENABLED=true`
@@ -205,6 +207,7 @@ Recommended production defaults:
 - set `YTDLP_MAX_SLEEP_INTERVAL_SECONDS=3`
 - keep `YTDLP_JS_RUNTIME=deno`
 - configure `YOUTUBE_BROWSER_FALLBACK_URL`
+- keep `BROWSER_FALLBACK_AUTH_MODE=auto` unless a custom auth path requires override
 - pin the provider image digest before promoting to production
 - prefer deterministic egress for Cloud Run so outbound IP reputation is measurable
 
@@ -229,6 +232,8 @@ Operational endpoints expected on the worker:
 
 - `GET /healthz`
 - `GET /session-status`
+
+For non-Google fallback hosts such as Cloudflare, `process-audio` can authenticate with the optional `BROWSER_FALLBACK_SHARED_SECRET` header instead of Google ID tokens.
 
 ## Cookie Rotation Workflow
 

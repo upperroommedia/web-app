@@ -254,22 +254,29 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           DEPLOY_BROWSER_FALLBACK: ${{ needs.detect-changes.outputs.deploy_browser_fallback }}
           DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
+          EXTERNAL_BROWSER_FALLBACK_SERVICE_URL: ${{ secrets.PRODUCTION_BROWSER_FALLBACK_SERVICE_URL }}
         run: |
           set -euo pipefail
           project_number="$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')"
           process_audio_runtime_sa="${project_number}-compute@developer.gserviceaccount.com"
           browser_fallback_service_url=""
+          external_browser_fallback_service_url="${EXTERNAL_BROWSER_FALLBACK_SERVICE_URL:-}"
+          external_browser_fallback_service_url="${external_browser_fallback_service_url%/}"
 
-          if [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' ]]; then
+          if [[ -n "${external_browser_fallback_service_url}" ]]; then
+            browser_fallback_service_url="${external_browser_fallback_service_url}"
+            echo "Using external production browser fallback URL override: ${browser_fallback_service_url}"
+          elif [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' ]]; then
             bash scripts/ensure-browser-fallback-static-egress.sh "${GCP_PROJECT}" us-central1 default default
             bash scripts/deploy-browser-fallback.sh production "$GITHUB_SHA"
             bash scripts/ensure-service-account-self-token-creator.sh "${GCP_PROJECT}" "${process_audio_runtime_sa}"
             bash scripts/ensure-private-cloud-run-invoker.sh "${GCP_PROJECT}" us-central1 browser-fallback "${process_audio_runtime_sa}"
             browser_fallback_service_url="$(gcloud run services describe browser-fallback --project "${GCP_PROJECT}" --region us-central1 --format='value(status.url)')"
-            bash scripts/set-browser-fallback-runtime-config.sh "${GCP_PROJECT}" "https://urm-app-default-rtdb.firebaseio.com/" "${browser_fallback_service_url}" true
           else
             browser_fallback_service_url="$(gcloud run services describe browser-fallback --project "${GCP_PROJECT}" --region us-central1 --format='value(status.url)' 2>/dev/null || true)"
           fi
+
+          bash scripts/set-browser-fallback-runtime-config.sh "${GCP_PROJECT}" "https://urm-app-default-rtdb.firebaseio.com/" "${browser_fallback_service_url}" true
 
           if [[ "${DEPLOY_PROCESS_AUDIO}" == 'true' ]]; then
             BROWSER_FALLBACK_SERVICE_URL="${browser_fallback_service_url}" bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"

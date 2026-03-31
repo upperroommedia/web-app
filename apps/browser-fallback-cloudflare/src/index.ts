@@ -1,0 +1,58 @@
+import { Container } from '@cloudflare/containers';
+
+const CONTAINER_INSTANCE_NAME = 'singleton';
+
+export class BrowserFallbackContainer extends Container {
+  defaultPort = 8080;
+  sleepAfter = '20m';
+}
+
+type Env = {
+  BROWSER_FALLBACK: DurableObjectNamespace<BrowserFallbackContainer>;
+  CONTAINER_INSTANCE_NAME?: string;
+  NODE_ENV?: string;
+  PORT?: string;
+  FIREBASE_PROJECT_ID?: string;
+  FIREBASE_STORAGE_BUCKET?: string;
+  FIREBASE_DATABASE_URL?: string;
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+  BROWSER_FALLBACK_PROFILE_BUCKET?: string;
+  BROWSER_FALLBACK_PROFILE_OBJECT?: string;
+  BROWSER_FALLBACK_PROFILE_META_OBJECT?: string;
+  BROWSER_FALLBACK_ARTIFACT_PREFIX?: string;
+  BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL?: string;
+  BROWSER_FALLBACK_SHARED_SECRET?: string;
+  YTDLP_JS_RUNTIME?: string;
+};
+
+function buildContainerEnvVars(env: Env): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries({
+      NODE_ENV: env.NODE_ENV,
+      PORT: env.PORT,
+      FIREBASE_PROJECT_ID: env.FIREBASE_PROJECT_ID,
+      FIREBASE_STORAGE_BUCKET: env.FIREBASE_STORAGE_BUCKET,
+      FIREBASE_DATABASE_URL: env.FIREBASE_DATABASE_URL,
+      FIREBASE_SERVICE_ACCOUNT_JSON: env.FIREBASE_SERVICE_ACCOUNT_JSON,
+      BROWSER_FALLBACK_PROFILE_BUCKET: env.BROWSER_FALLBACK_PROFILE_BUCKET,
+      BROWSER_FALLBACK_PROFILE_OBJECT: env.BROWSER_FALLBACK_PROFILE_OBJECT,
+      BROWSER_FALLBACK_PROFILE_META_OBJECT: env.BROWSER_FALLBACK_PROFILE_META_OBJECT,
+      BROWSER_FALLBACK_ARTIFACT_PREFIX: env.BROWSER_FALLBACK_ARTIFACT_PREFIX,
+      BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL: env.BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL,
+      BROWSER_FALLBACK_SHARED_SECRET: env.BROWSER_FALLBACK_SHARED_SECRET,
+      YTDLP_JS_RUNTIME: env.YTDLP_JS_RUNTIME,
+    }).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0)
+  );
+}
+
+export default {
+  async fetch(request: Request, workerEnv: Env): Promise<Response> {
+    const instance = workerEnv.BROWSER_FALLBACK.getByName(workerEnv.CONTAINER_INSTANCE_NAME || CONTAINER_INSTANCE_NAME);
+    await instance.startAndWaitForPorts({
+      startOptions: {
+        envVars: buildContainerEnvVars(workerEnv),
+      },
+    });
+    return await instance.fetch(request);
+  },
+};

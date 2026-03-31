@@ -1,0 +1,96 @@
+{
+  "name": "browser-fallback",
+  "main": "./apps/browser-fallback-cloudflare/src/index.ts",
+  "compatibility_date": "2026-03-31",
+  "workers_dev": true,
+  "vars": {
+    "NODE_ENV": "production",
+    "PORT": "8080",
+    "CONTAINER_INSTANCE_NAME": "singleton",
+    "BROWSER_FALLBACK_PROFILE_OBJECT": "browser-fallback/profile/storage-state.json",
+    "BROWSER_FALLBACK_PROFILE_META_OBJECT": "browser-fallback/profile/latest.json",
+    "BROWSER_FALLBACK_ARTIFACT_PREFIX": "browser-fallback/artifacts",
+    "YTDLP_JS_RUNTIME": "deno"
+  },
+  "env": {
+    "staging": {
+      "name": "browser-fallback-staging",
+      "containers": [
+        {
+          "class_name": "BrowserFallbackContainer",
+          "image": "./Dockerfile.browser-fallback-cloudflare",
+          "max_instances": 1
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BROWSER_FALLBACK",
+            "class_name": "BrowserFallbackContainer"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "BrowserFallbackContainer"
+          ]
+        }
+      ],
+      "vars": {
+        "NODE_ENV": "production",
+        "PORT": "8080",
+        "CONTAINER_INSTANCE_NAME": "singleton",
+        "FIREBASE_PROJECT_ID": "urm-app-staging",
+        "FIREBASE_STORAGE_BUCKET": "urm-app-staging.firebasestorage.app",
+        "FIREBASE_DATABASE_URL": "https://urm-app-staging-default-rtdb.firebaseio.com/",
+        "BROWSER_FALLBACK_PROFILE_BUCKET": "urm-app-staging.firebasestorage.app",
+        "BROWSER_FALLBACK_PROFILE_OBJECT": "browser-fallback/profile/storage-state.json",
+        "BROWSER_FALLBACK_PROFILE_META_OBJECT": "browser-fallback/profile/latest.json",
+        "BROWSER_FALLBACK_ARTIFACT_PREFIX": "browser-fallback/artifacts",
+        "BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL": "https://youtu.be/dKaZ89SkVYY",
+        "YTDLP_JS_RUNTIME": "deno"
+      }
+    },
+    "production": {
+      "name": "browser-fallback",
+      "containers": [
+        {
+          "class_name": "BrowserFallbackContainer",
+          "image": "./Dockerfile.browser-fallback-cloudflare",
+          "max_instances": 1
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "BROWSER_FALLBACK",
+            "class_name": "BrowserFallbackContainer"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "BrowserFallbackContainer"
+          ]
+        }
+      ],
+      "vars": {
+        "NODE_ENV": "production",
+        "PORT": "8080",
+        "CONTAINER_INSTANCE_NAME": "singleton",
+        "FIREBASE_PROJECT_ID": "urm-app",
+        "FIREBASE_STORAGE_BUCKET": "urm-app.appspot.com",
+        "FIREBASE_DATABASE_URL": "https://urm-app-default-rtdb.firebaseio.com/",
+        "BROWSER_FALLBACK_PROFILE_BUCKET": "urm-app.appspot.com",
+        "BROWSER_FALLBACK_PROFILE_OBJECT": "browser-fallback/profile/storage-state.json",
+        "BROWSER_FALLBACK_PROFILE_META_OBJECT": "browser-fallback/profile/latest.json",
+        "BROWSER_FALLBACK_ARTIFACT_PREFIX": "browser-fallback/artifacts",
+        "YTDLP_JS_RUNTIME": "deno"
+      }
+    }
+  }
+}

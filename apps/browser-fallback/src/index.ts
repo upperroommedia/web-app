@@ -32,6 +32,7 @@ const ytDlpJsRuntime = process.env.YTDLP_JS_RUNTIME?.trim() || 'deno';
 const artifactPrefix = process.env.BROWSER_FALLBACK_ARTIFACT_PREFIX || 'browser-fallback/artifacts';
 const signedUrlTtlMs = Number.parseInt(process.env.BROWSER_FALLBACK_SIGNED_URL_TTL_SECONDS || '900', 10) * 1000;
 const healthcheckYoutubeUrl = process.env.BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL?.trim() || '';
+const sharedSecret = process.env.BROWSER_FALLBACK_SHARED_SECRET?.trim() || '';
 const userAgent =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 
@@ -56,6 +57,13 @@ function buildErrorResponse(
   retryable: boolean
 ): BrowserFallbackErrorResponse {
   return { code, message, sessionState, retryable };
+}
+
+function requestHasSharedSecret(req: express.Request): boolean {
+  if (!sharedSecret) {
+    return true;
+  }
+  return req.get('x-browser-fallback-secret')?.trim() === sharedSecret;
 }
 
 function getBucket(): Bucket {
@@ -414,6 +422,11 @@ app.post('/fallback', async (req, res) => {
   const payload = req.body as BrowserFallbackRequest;
 
   try {
+    if (!requestHasSharedSecret(req)) {
+      res.status(401).json(buildErrorResponse('auth_required', 'Missing or invalid browser fallback secret.', 'unknown', false));
+      return;
+    }
+
     if (payload?.action === 'resolve_audio_url') {
       if (fakeMode) {
         const response: BrowserFallbackResolveAudioUrlResponse = {

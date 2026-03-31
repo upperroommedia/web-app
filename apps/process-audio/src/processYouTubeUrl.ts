@@ -269,6 +269,28 @@ function getBrowserFallbackAudience(): string | undefined {
   }
 }
 
+function getBrowserFallbackAuthMode(): string {
+  return process.env.BROWSER_FALLBACK_AUTH_MODE?.trim().toLowerCase() || 'auto';
+}
+
+function getBrowserFallbackSharedSecret(): string | undefined {
+  const value = process.env.BROWSER_FALLBACK_SHARED_SECRET?.trim();
+  return value || undefined;
+}
+
+function shouldUseGoogleIdToken(url: string, audience: string | undefined): boolean {
+  if (!audience) return false;
+  const authMode = getBrowserFallbackAuthMode();
+  if (authMode === 'id_token') return true;
+  if (authMode === 'shared_secret' || authMode === 'none') return false;
+
+  try {
+    return new URL(url).hostname.toLowerCase().endsWith('.run.app');
+  } catch {
+    return false;
+  }
+}
+
 function getBrowserFallbackTimeoutMs(): number {
   const raw = Number.parseInt(process.env.YOUTUBE_BROWSER_FALLBACK_TIMEOUT_MS || '45000', 10);
   return Number.isFinite(raw) && raw > 0 ? raw : 45000;
@@ -286,13 +308,29 @@ async function fetchWithIdToken(url: string, init: RequestInit): Promise<Respons
     audience = getBrowserFallbackAudience();
   }
 
-  if (process.env.NODE_ENV === 'development' || process.env.FUNCTIONS_EMULATOR === 'true' || !audience) {
+  const headers = new Headers(init.headers || {});
+  const sharedSecret = getBrowserFallbackSharedSecret();
+  if (sharedSecret) {
+    headers.set('x-browser-fallback-secret', sharedSecret);
+  }
+
+  if (
+    process.env.NODE_ENV === 'development' ||
+    process.env.FUNCTIONS_EMULATOR === 'true' ||
+    !shouldUseGoogleIdToken(url, audience)
+  ) {
+    return await fetch(url, {
+      ...init,
+      headers,
+    });
+  }
+
+  if (!audience) {
     return await fetch(url, init);
   }
 
   const auth = new GoogleAuth();
   const client = await auth.getIdTokenClient(audience);
-  const headers = new Headers(init.headers || {});
   const authHeaders = await client.getRequestHeaders(url);
   Object.entries(authHeaders).forEach(([key, value]) => {
     if (typeof value === 'string') {
