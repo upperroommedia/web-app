@@ -219,6 +219,20 @@ jobs:
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: actions/checkout@v5
 
+      - name: Set up Node.js
+        if: needs.detect-changes.outputs.deploy_browser_fallback == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        if: needs.detect-changes.outputs.deploy_browser_fallback == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Install Cloudflare browser-fallback workspace dependencies
+        if: needs.detect-changes.outputs.deploy_browser_fallback == 'true'
+        run: pnpm install --frozen-lockfile --filter @upperroom/browser-fallback-cloudflare... --ignore-scripts
+
       - name: Validate GCP OIDC secrets
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         env:
