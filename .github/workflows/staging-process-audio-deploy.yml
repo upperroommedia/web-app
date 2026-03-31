@@ -145,7 +145,7 @@ jobs:
           if [[ "$force_redeploy" == "true" ]]; then
             deploy_process_audio=true
           else
-            if contains_path '^apps/browser-fallback/'; then
+            if contains_path '^apps/browser-fallback/|^apps/browser-fallback-cloudflare/'; then
               deploy_browser_fallback=true
             fi
 
@@ -153,7 +153,7 @@ jobs:
               deploy_process_audio=true
             fi
 
-            if contains_path '^(\.github/workflows/staging-process-audio-deploy\.yml|packages/contracts/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-browser-fallback\.sh|scripts/ensure-private-cloud-run-invoker\.sh|scripts/ensure-service-account-self-token-creator\.sh|scripts/ensure-browser-fallback-static-egress\.sh|scripts/set-browser-fallback-runtime-config\.mjs|scripts/set-browser-fallback-runtime-config\.sh)'; then
+            if contains_path '^(\.github/workflows/staging-process-audio-deploy\.yml|packages/contracts/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|wrangler\.browser-fallback\.jsonc|Dockerfile\.browser-fallback-cloudflare|scripts/deploy-browser-fallback\.sh|scripts/deploy-cloudflare-browser-fallback\.sh|scripts/ensure-private-cloud-run-invoker\.sh|scripts/ensure-service-account-self-token-creator\.sh|scripts/ensure-browser-fallback-static-egress\.sh|scripts/set-browser-fallback-runtime-config\.mjs|scripts/set-browser-fallback-runtime-config\.sh)'; then
               deploy_browser_fallback=true
             fi
 
@@ -256,6 +256,8 @@ jobs:
           DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
           BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL: https://youtu.be/dKaZ89SkVYY
           EXTERNAL_BROWSER_FALLBACK_SERVICE_URL: ${{ secrets.STAGING_BROWSER_FALLBACK_SERVICE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 465e1a48ef2e28a1f4227860735e84d5
         run: |
           set -euo pipefail
           project_number="$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')"
@@ -264,9 +266,16 @@ jobs:
           external_browser_fallback_service_url="${EXTERNAL_BROWSER_FALLBACK_SERVICE_URL:-}"
           external_browser_fallback_service_url="${external_browser_fallback_service_url%/}"
 
-          if [[ -n "${external_browser_fallback_service_url}" ]]; then
+          if [[ -n "${external_browser_fallback_service_url}" && "${DEPLOY_BROWSER_FALLBACK}" == 'true' && -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            bash scripts/deploy-cloudflare-browser-fallback.sh staging "${GCP_PROJECT}"
+            browser_fallback_service_url="${external_browser_fallback_service_url}"
+            echo "Using hosted staging Cloudflare browser fallback URL: ${browser_fallback_service_url}"
+          elif [[ -n "${external_browser_fallback_service_url}" ]]; then
             browser_fallback_service_url="${external_browser_fallback_service_url}"
             echo "Using external staging browser fallback URL override: ${browser_fallback_service_url}"
+            if [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' && -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+              echo "::warning::Skipping Cloudflare browser fallback deploy because CLOUDFLARE_API_TOKEN is not configured."
+            fi
           elif [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' ]]; then
             bash scripts/ensure-browser-fallback-static-egress.sh "${GCP_PROJECT}" us-central1 default default
             bash scripts/deploy-browser-fallback.sh staging "$GITHUB_SHA"
