@@ -23,12 +23,25 @@ This deploy path moves only the `browser-fallback` worker off Google Cloud while
 - Cloudflare Worker secret: `FIREBASE_SERVICE_ACCOUNT_JSON`
 - Cloudflare Worker secret: `BROWSER_FALLBACK_SHARED_SECRET`
 - GCP Secret Manager secret for `process-audio`: `BROWSER_FALLBACK_SHARED_SECRET`
+- GCP Secret Manager secret for Cloudflare deploy automation: `BROWSER_FALLBACK_FIREBASE_SERVICE_ACCOUNT_JSON`
+- GitHub Actions repo secret for hosted deploys: `CLOUDFLARE_API_TOKEN`
 
 The service-account JSON must belong to a principal that can:
 
 - read and write the staging or production profile objects in Firebase Storage
 - read and write `processAudioQueues/youtube/browserFallback/profileLease` in RTDB
 - upload fallback artifacts to the configured Firebase Storage bucket
+
+## Branch-Based GitHub Actions
+
+`staging-process-audio-deploy.yml` and `main-process-audio-deploy.yml` can deploy the Cloudflare browser-fallback automatically when all of the following are true:
+
+- `apps/browser-fallback-cloudflare`, `apps/browser-fallback`, `wrangler.browser-fallback.jsonc`, or the deploy scripts changed
+- `STAGING_BROWSER_FALLBACK_SERVICE_URL` or `PRODUCTION_BROWSER_FALLBACK_SERVICE_URL` already points at the stable Cloudflare Worker URL for that branch
+- `CLOUDFLARE_API_TOKEN` is configured in the GitHub repo secrets
+- the matching Firebase project contains `BROWSER_FALLBACK_FIREBASE_SERVICE_ACCOUNT_JSON` and `BROWSER_FALLBACK_SHARED_SECRET` in Secret Manager
+
+Without `CLOUDFLARE_API_TOKEN`, the workflows keep the current behavior and reuse the configured external browser-fallback URL without trying to publish a new Cloudflare runtime.
 
 ## Deploy Staging
 

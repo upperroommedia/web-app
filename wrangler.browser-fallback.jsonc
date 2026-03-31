@@ -89,6 +89,7 @@
         "BROWSER_FALLBACK_PROFILE_OBJECT": "browser-fallback/profile/storage-state.json",
         "BROWSER_FALLBACK_PROFILE_META_OBJECT": "browser-fallback/profile/latest.json",
         "BROWSER_FALLBACK_ARTIFACT_PREFIX": "browser-fallback/artifacts",
+        "BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL": "https://youtu.be/dKaZ89SkVYY",
         "YTDLP_JS_RUNTIME": "deno"
       }
     }
