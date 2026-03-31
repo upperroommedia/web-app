@@ -6,6 +6,11 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      force_browser_fallback_redeploy:
+        description: "Deploy production browser-fallback regardless of changed files"
+        required: false
+        default: false
+        type: boolean
       force_process_audio_redeploy:
         description: "Deploy production process-audio regardless of changed files"
         required: false
@@ -49,9 +54,15 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           WORKFLOW_FILE: main-process-audio-deploy.yml
           GITHUB_TOKEN: ${{ github.token }}
+          FORCE_BROWSER_FALLBACK_REDEPLOY: ${{ github.event.inputs.force_browser_fallback_redeploy || 'false' }}
           FORCE_PROCESS_AUDIO_REDEPLOY: ${{ github.event.inputs.force_process_audio_redeploy || 'false' }}
         run: |
           set -euo pipefail
+
+          force_browser_fallback_redeploy="${FORCE_BROWSER_FALLBACK_REDEPLOY}"
+          if [[ "$force_browser_fallback_redeploy" != "true" && "$force_browser_fallback_redeploy" != "false" ]]; then
+            force_browser_fallback_redeploy="false"
+          fi
 
           force_redeploy="${FORCE_PROCESS_AUDIO_REDEPLOY}"
           if [[ "$force_redeploy" != "true" && "$force_redeploy" != "false" ]]; then
@@ -142,9 +153,15 @@ jobs:
 
           deploy_browser_fallback=false
           deploy_process_audio=false
+          if [[ "$force_browser_fallback_redeploy" == "true" ]]; then
+            deploy_browser_fallback=true
+          fi
+
           if [[ "$force_redeploy" == "true" ]]; then
             deploy_process_audio=true
-          else
+          fi
+
+          if [[ "$force_browser_fallback_redeploy" != "true" && "$force_redeploy" != "true" ]]; then
             if contains_path '^apps/browser-fallback/|^apps/browser-fallback-cloudflare/'; then
               deploy_browser_fallback=true
             fi
@@ -201,7 +218,7 @@ jobs:
             echo "- Event: \`$EVENT_NAME\`"
             echo "- Diff source: \`$DIFF_SOURCE\`"
             echo "- Diff range: \`$DIFF_BASE_SHA..$DIFF_HEAD_SHA\`"
-            echo "- Browser fallback Cloud Run: \`$DEPLOY_BROWSER_FALLBACK\`"
+            echo "- Browser fallback hosted deploy: \`$DEPLOY_BROWSER_FALLBACK\`"
             echo "- Process audio Cloud Run: \`$DEPLOY_PROCESS_AUDIO\`"
             echo "- Any workflow action needed: \`$ANYTHING_TO_RUN\`"
             echo ""
@@ -262,7 +279,8 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT }}
 
-      - name: Deploy production process-audio Cloud Run
+      - id: deploy
+        name: Deploy production browser-fallback and process-audio
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         env:
           GITHUB_SHA: ${{ github.sha }}
@@ -301,11 +319,36 @@ jobs:
 
           bash scripts/set-browser-fallback-runtime-config.sh "${GCP_PROJECT}" "https://urm-app-default-rtdb.firebaseio.com/" "${browser_fallback_service_url}" true
 
+          {
+            echo "browser_fallback_service_url=${browser_fallback_service_url}"
+            echo "expected_route_pattern=browser-fallback.upperroommedia.org/*"
+            echo "expected_worker_name=browser-fallback"
+          } >> "$GITHUB_OUTPUT"
+
           if [[ "${DEPLOY_PROCESS_AUDIO}" == 'true' ]]; then
             BROWSER_FALLBACK_SERVICE_URL="${browser_fallback_service_url}" bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
           else
             echo "Skipping process-audio Cloud Run deploy; no relevant changes detected."
           fi
+
+      - name: Verify production browser-fallback routing and YouTube resolution
+        if: needs.detect-changes.outputs.anything_to_run == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL: https://youtu.be/dKaZ89SkVYY
+          CLOUDFLARE_ZONE_NAME: upperroommedia.org
+        run: |
+          set -euo pipefail
+          chmod +x scripts/verify-browser-fallback-deployment.sh
+          bash scripts/verify-browser-fallback-deployment.sh \
+            production \
+            "${GCP_PROJECT}" \
+            "https://urm-app-default-rtdb.firebaseio.com/" \
+            process-audio \
+            urm-app \
+            "${{ steps.deploy.outputs.browser_fallback_service_url }}" \
+            "${{ steps.deploy.outputs.expected_route_pattern }}" \
+            "${{ steps.deploy.outputs.expected_worker_name }}"
 
       - name: Ensure production POT provider public invoker
         if: needs.detect-changes.outputs.deploy_process_audio == 'true'
