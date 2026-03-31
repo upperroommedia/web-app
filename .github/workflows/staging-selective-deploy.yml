@@ -35,8 +35,8 @@ jobs:
       deploy_functions_media: ${{ steps.detect.outputs.deploy_functions_media }}
       deploy_functions_image: ${{ steps.detect.outputs.deploy_functions_image }}
       deploy_functions_integrations: ${{ steps.detect.outputs.deploy_functions_integrations }}
+      anything_to_firebase_deploy: ${{ steps.detect.outputs.anything_to_firebase_deploy }}
       anything_to_run: ${{ steps.detect.outputs.anything_to_run }}
-      anything_to_deploy: ${{ steps.detect.outputs.anything_to_deploy }}
       changed_files: ${{ steps.detect.outputs.changed_files }}
       diff_base_sha: ${{ steps.detect.outputs.diff_base_sha }}
       diff_head_sha: ${{ steps.detect.outputs.diff_head_sha }}
@@ -104,7 +104,15 @@ jobs:
                 [
                   .jobs[]?.steps[]?
                   | select(
-                      (.name == "Deploy selected staging targets")
+                      (
+                        .name == "Deploy Firestore rules and indexes"
+                        or .name == "Deploy Realtime Database rules"
+                        or .name == "Deploy Storage rules"
+                        or .name == "Deploy functions:core"
+                        or .name == "Deploy functions:media"
+                        or .name == "Deploy functions:image"
+                        or .name == "Deploy functions:integrations"
+                      )
                       and .conclusion == "success"
                     )
                 ] | length > 0
@@ -156,7 +164,6 @@ jobs:
           deploy_functions_media=false
           deploy_functions_image=false
           deploy_functions_integrations=false
-
           if [[ "$force_full" == "true" ]]; then
             deploy_firestore=true
             deploy_database=true
@@ -200,16 +207,20 @@ jobs:
               deploy_functions_image=true
               deploy_functions_integrations=true
             fi
+
+            if contains_path '^(packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
+              deploy_functions_core=true
+              deploy_functions_media=true
+              deploy_functions_image=true
+              deploy_functions_integrations=true
+            fi
           fi
 
-          anything_to_deploy=false
-          anything_to_run=false
+          anything_to_firebase_deploy=false
           if [[ "$deploy_firestore" == "true" || "$deploy_database" == "true" || "$deploy_storage" == "true" || "$deploy_functions_core" == "true" || "$deploy_functions_media" == "true" || "$deploy_functions_image" == "true" || "$deploy_functions_integrations" == "true" ]]; then
-            anything_to_deploy=true
+            anything_to_firebase_deploy=true
           fi
-          if [[ "$anything_to_deploy" == "true" ]]; then
-            anything_to_run=true
-          fi
+          anything_to_run="$anything_to_firebase_deploy"
 
           {
             echo "deploy_firestore=$deploy_firestore"
@@ -219,8 +230,8 @@ jobs:
             echo "deploy_functions_media=$deploy_functions_media"
             echo "deploy_functions_image=$deploy_functions_image"
             echo "deploy_functions_integrations=$deploy_functions_integrations"
+            echo "anything_to_firebase_deploy=$anything_to_firebase_deploy"
             echo "anything_to_run=$anything_to_run"
-            echo "anything_to_deploy=$anything_to_deploy"
             echo "diff_base_sha=$base_sha"
             echo "diff_head_sha=$head_sha"
             echo "diff_source=$diff_source"
@@ -229,9 +240,8 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-  deploy-or-skip:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     needs: detect-changes
     steps:
       - name: Publish planned deploy targets
@@ -244,8 +254,8 @@ jobs:
           DEPLOY_FUNCTIONS_MEDIA: ${{ needs.detect-changes.outputs.deploy_functions_media }}
           DEPLOY_FUNCTIONS_IMAGE: ${{ needs.detect-changes.outputs.deploy_functions_image }}
           DEPLOY_FUNCTIONS_INTEGRATIONS: ${{ needs.detect-changes.outputs.deploy_functions_integrations }}
+          ANYTHING_TO_FIREBASE_DEPLOY: ${{ needs.detect-changes.outputs.anything_to_firebase_deploy }}
           ANYTHING_TO_RUN: ${{ needs.detect-changes.outputs.anything_to_run }}
-          ANYTHING_TO_DEPLOY: ${{ needs.detect-changes.outputs.anything_to_deploy }}
           DIFF_BASE_SHA: ${{ needs.detect-changes.outputs.diff_base_sha }}
           DIFF_HEAD_SHA: ${{ needs.detect-changes.outputs.diff_head_sha }}
           DIFF_SOURCE: ${{ needs.detect-changes.outputs.diff_source }}
@@ -265,7 +275,7 @@ jobs:
             echo "- Functions image: \`$DEPLOY_FUNCTIONS_IMAGE\`"
             echo "- Functions integrations: \`$DEPLOY_FUNCTIONS_INTEGRATIONS\`"
             echo "- Any workflow action needed: \`$ANYTHING_TO_RUN\`"
-            echo "- Firebase backend deploy targets: \`$ANYTHING_TO_DEPLOY\`"
+            echo "- Firebase backend deploy targets: \`$ANYTHING_TO_FIREBASE_DEPLOY\`"
             echo ""
             echo "### Changed Files"
             echo '\`\`\`'
@@ -277,164 +287,96 @@ jobs:
             echo '\`\`\`'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Checkout repository
-        if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: actions/checkout@v5
-
-      - name: Validate GCP OIDC secrets
-        if: needs.detect-changes.outputs.anything_to_run == 'true'
-        env:
-          PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$PROVIDER" ]]; then
-            echo "::error::Missing secret GCP_WORKLOAD_IDENTITY_PROVIDER"
-            exit 1
-          fi
-          if [[ -z "$SERVICE_ACCOUNT" ]]; then
-            echo "::error::Missing secret GCP_SERVICE_ACCOUNT_EMAIL"
-            exit 1
-          fi
-
-      - name: Authenticate to Google Cloud (OIDC)
-        if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-
-      - name: Set up Node.js
-        if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Set up pnpm
-        if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: pnpm/action-setup@v4
-
-      - name: Install dependencies
-        if: needs.detect-changes.outputs.anything_to_run == 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Materialize catalog dependencies for Firebase deploy
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
-        run: node scripts/materialize-catalog-for-firebase.mjs
-
-      - name: Deploy selected staging targets
-        if: needs.detect-changes.outputs.anything_to_deploy == 'true'
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          DEPLOY_FIRESTORE: ${{ needs.detect-changes.outputs.deploy_firestore }}
-          DEPLOY_DATABASE: ${{ needs.detect-changes.outputs.deploy_database }}
-          DEPLOY_STORAGE: ${{ needs.detect-changes.outputs.deploy_storage }}
-          DEPLOY_FUNCTIONS_CORE: ${{ needs.detect-changes.outputs.deploy_functions_core }}
-          DEPLOY_FUNCTIONS_MEDIA: ${{ needs.detect-changes.outputs.deploy_functions_media }}
-          DEPLOY_FUNCTIONS_IMAGE: ${{ needs.detect-changes.outputs.deploy_functions_image }}
-          DEPLOY_FUNCTIONS_INTEGRATIONS: ${{ needs.detect-changes.outputs.deploy_functions_integrations }}
-        run: |
-          set -euo pipefail
-
-          deployed_targets=()
-          failed_targets=()
-
-          run_function_deploy() {
-            local codebase="$1"
-            local log_file="$2"
-            local __pid_var="$3"
-            (
-              set -euo pipefail
-              pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only "$codebase" --non-interactive
-            ) >"$log_file" 2>&1 &
-            printf -v "$__pid_var" '%s' "$!"
-          }
-
-          if [[ "$DEPLOY_FIRESTORE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
-            deployed_targets+=("firestore:rules")
-            deployed_targets+=("firestore:indexes")
-          fi
-
-          if [[ "$DEPLOY_DATABASE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database:rtdb --non-interactive
-            deployed_targets+=("database:rtdb")
-          fi
-
-          if [[ "$DEPLOY_STORAGE" == "true" ]]; then
-            pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage --non-interactive
-            deployed_targets+=("storage")
-          fi
-
-          function_names=()
-          function_pids=()
-          function_logs=()
-
-          if [[ "$DEPLOY_FUNCTIONS_CORE" == "true" ]]; then
-            function_names+=("functions:core")
-            log_file="$(mktemp)"
-            function_logs+=("$log_file")
-            run_function_deploy "functions:core" "$log_file" pid
-            function_pids+=("$pid")
-          fi
-
-          if [[ "$DEPLOY_FUNCTIONS_MEDIA" == "true" ]]; then
-            function_names+=("functions:media")
-            log_file="$(mktemp)"
-            function_logs+=("$log_file")
-            run_function_deploy "functions:media" "$log_file" pid
-            function_pids+=("$pid")
-          fi
-
-          if [[ "$DEPLOY_FUNCTIONS_IMAGE" == "true" ]]; then
-            function_names+=("functions:image")
-            log_file="$(mktemp)"
-            function_logs+=("$log_file")
-            run_function_deploy "functions:image" "$log_file" pid
-            function_pids+=("$pid")
-          fi
-
-          if [[ "$DEPLOY_FUNCTIONS_INTEGRATIONS" == "true" ]]; then
-            function_names+=("functions:integrations")
-            log_file="$(mktemp)"
-            function_logs+=("$log_file")
-            run_function_deploy "functions:integrations" "$log_file" pid
-            function_pids+=("$pid")
-          fi
-
-          for i in "${!function_pids[@]}"; do
-            name="${function_names[$i]}"
-            pid="${function_pids[$i]}"
-            log_file="${function_logs[$i]}"
-
-            if wait "$pid"; then
-              deployed_targets+=("$name")
-              cat "$log_file"
-            else
-              failed_targets+=("$name")
-              echo "::error::Deploy failed for $name"
-              cat "$log_file"
-            fi
-            rm -f "$log_file"
-          done
-
-          if [[ "${#failed_targets[@]}" -gt 0 ]]; then
-            echo "::error::Failed backend deploy targets: ${failed_targets[*]}"
-            exit 1
-          fi
-
-          {
-            echo "### Deployed Targets"
-            echo ""
-            if [[ "${#deployed_targets[@]}" -eq 0 ]]; then
-              echo "No targets deployed."
-            else
-              for target in "${deployed_targets[@]}"; do
-                printf '%s\n' "- \`$target\`"
-              done
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: No-op for non-deployable changes
         if: needs.detect-changes.outputs.anything_to_run != 'true'
         run: echo "No deployable changes detected for staging."
+
+  deploy-firestore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy_firestore == 'true'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-backend-deploy
+        with:
+          gcp_project: ${{ env.FIREBASE_PROJECT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Deploy Firestore rules and indexes
+        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
+
+  deploy-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy_database == 'true'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-backend-deploy
+        with:
+          gcp_project: ${{ env.FIREBASE_PROJECT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Deploy Realtime Database rules
+        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database:rtdb --non-interactive
+
+  deploy-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy_storage == 'true'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-backend-deploy
+        with:
+          gcp_project: ${{ env.FIREBASE_PROJECT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Deploy Storage rules
+        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage --non-interactive
+
+  deploy-functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy_functions_core == 'true' || needs.detect-changes.outputs.deploy_functions_media == 'true' || needs.detect-changes.outputs.deploy_functions_image == 'true' || needs.detect-changes.outputs.deploy_functions_integrations == 'true'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-backend-deploy
+        with:
+          gcp_project: ${{ env.FIREBASE_PROJECT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          materialize_catalog: 'true'
+
+      - name: Deploy functions:core
+        if: needs.detect-changes.outputs.deploy_functions_core == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:core --non-interactive
+
+      - name: Remove retired media function
+        if: needs.detect-changes.outputs.deploy_functions_media == 'true'
+        run: |
+          pnpm exec firebase functions:delete addintrooutrotaskhandler \
+            --project "$FIREBASE_PROJECT" \
+            --region us-central1 \
+            --force >/dev/null 2>&1 || true
+
+      - name: Deploy functions:media
+        if: needs.detect-changes.outputs.deploy_functions_media == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive
+
+      - name: Deploy functions:image
+        if: needs.detect-changes.outputs.deploy_functions_image == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:image --non-interactive
+
+      - name: Deploy functions:integrations
+        if: needs.detect-changes.outputs.deploy_functions_integrations == 'true'
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive

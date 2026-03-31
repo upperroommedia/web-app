@@ -1,0 +1,64 @@
+name: Setup Backend Deploy
+description: Authenticate to GCP and prepare the monorepo for Firebase backend deploy commands.
+
+inputs:
+  gcp_project:
+    description: GCP project id for setup-gcloud
+    required: true
+  workload_identity_provider:
+    description: Workload identity provider resource name
+    required: true
+  service_account:
+    description: Service account email used for OIDC auth
+    required: true
+  materialize_catalog:
+    description: Whether to materialize catalog dependencies for Firebase function deploys
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate GCP OIDC secrets
+      shell: bash
+      env:
+        PROVIDER: ${{ inputs.workload_identity_provider }}
+        SERVICE_ACCOUNT: ${{ inputs.service_account }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$PROVIDER" ]]; then
+          echo "::error::Missing workload identity provider input"
+          exit 1
+        fi
+        if [[ -z "$SERVICE_ACCOUNT" ]]; then
+          echo "::error::Missing service account input"
+          exit 1
+        fi
+
+    - name: Authenticate to Google Cloud (OIDC)
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
+
+    - name: Set up gcloud
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ inputs.gcp_project }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    - name: Materialize catalog dependencies for Firebase deploy
+      if: ${{ inputs.materialize_catalog == 'true' }}
+      shell: bash
+      run: node scripts/materialize-catalog-for-firebase.mjs

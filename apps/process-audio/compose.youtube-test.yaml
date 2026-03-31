@@ -1,0 +1,36 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: apps/process-audio/Dockerfile
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      YTDLP_POT_PROVIDER_BASE_URL: http://ytdlp-pot-provider:4416
+      YOUTUBE_BROWSER_FALLBACK_URL: http://browser-fallback:8090/fallback
+      YOUTUBE_BROWSER_FALLBACK_ENABLED: "true"
+    volumes:
+      - ../../:/workspace
+    working_dir: /workspace/apps/process-audio
+    ports: []
+    depends_on:
+      browser-fallback:
+        condition: service_started
+      ytdlp-pot-provider:
+        condition: service_started
+
+  browser-fallback:
+    build:
+      context: ../..
+      dockerfile: apps/browser-fallback/Dockerfile
+    working_dir: /workspace/apps/browser-fallback
+    environment:
+      BROWSER_FALLBACK_FAKE_MODE: "true"
+      FIREBASE_PROJECT_ID: urm-app-staging
+      FIREBASE_STORAGE_BUCKET: urm-app-staging.firebasestorage.app
+      FIREBASE_DATABASE_URL: https://urm-app-staging-default-rtdb.firebaseio.com/
+    volumes:
+      - ../../:/workspace
+
+  ytdlp-pot-provider:
+    image: docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1

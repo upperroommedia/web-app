@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "module": "commonjs",
     "noImplicitReturns": true,
     "noUnusedLocals": true,
@@ -10,6 +11,14 @@
     "target": "es2017",
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "paths": {
+      "@upperroom/contracts/*": [
+        "../packages/contracts/*"
+      ],
+      "@upperroom/shared/*": [
+        "../packages/shared/*"
+      ]
+    },
     "types": [
       "node",
       "jest"

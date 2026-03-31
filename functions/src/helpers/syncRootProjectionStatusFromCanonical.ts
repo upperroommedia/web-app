@@ -15,7 +15,22 @@ export const syncRootProjectionStatusFromCanonical = async ({
   rootListId: string;
   canonicalMembership?: CanonicalMembershipStatus;
 }): Promise<void> => {
-  const projectionRef = firestore.collection('lists').doc(rootListId).collection('listItems').doc(sermonId);
+  const normalizedSermonId = sermonId?.trim();
+  const normalizedRootListId = rootListId?.trim();
+
+  if (!normalizedSermonId || !normalizedRootListId) {
+    console.warn('Skipping root projection status sync because sermonId or rootListId is missing', {
+      sermonId,
+      rootListId,
+    });
+    return;
+  }
+
+  const projectionRef = firestore
+    .collection('lists')
+    .doc(normalizedRootListId)
+    .collection('listItems')
+    .doc(normalizedSermonId);
   const projectionSnapshot = await projectionRef.get();
 
   if (!projectionSnapshot.exists) {

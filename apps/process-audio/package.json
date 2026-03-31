@@ -1,0 +1,40 @@
+{
+  "name": "@upperroom/process-audio",
+  "description": "Processes audio files (both uploaded and from Youtube) for the upper room media uploader",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node ./dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build",
+    "dev": "just dev",
+    "verify:youtube:routing": "NODE_ENV=development node scripts/verify-youtube-routing.js",
+    "verify:youtube:loop": "bash scripts/test-youtube-loop.sh",
+    "verify:youtube:policy": "node scripts/verify-youtube-policy.js",
+    "verify:alerts": "node scripts/verify-operational-alert-recipients.js"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "author": "Google LLC",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@upperroom/contracts": "workspace:*",
+    "@upperroom/shared": "workspace:*",
+    "@google-cloud/logging-winston": "^6.0.1",
+    "@google-cloud/storage": "catalog:",
+    "google-auth-library": "^9.15.1",
+    "axios": "catalog:",
+    "express": "^4.18.2",
+    "firebase-admin": "catalog:",
+    "uuid": "catalog:",
+    "winston": "^3.18.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

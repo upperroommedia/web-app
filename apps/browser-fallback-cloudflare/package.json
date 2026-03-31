@@ -1,0 +1,16 @@
+{
+  "name": "@upperroom/browser-fallback-cloudflare",
+  "description": "Cloudflare Worker and Container wrapper for browser-fallback",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:staging": "npx wrangler deploy --config ../../wrangler.browser-fallback.jsonc --env staging",
+    "deploy:production": "npx wrangler deploy --config ../../wrangler.browser-fallback.jsonc --env production",
+    "tail:staging": "npx wrangler tail browser-fallback-staging",
+    "tail:production": "npx wrangler tail browser-fallback"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.2.1"
+  }
+}

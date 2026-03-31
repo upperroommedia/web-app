@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { NextPage } from 'next';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -28,6 +28,20 @@ import type {
   UpdateAllSpeakerTagsOutputType,
 } from '@upperroom/contracts/updateAllSpeakerTags';
 import type { UpdateAllSpeakerTagsResultType } from '@upperroom/contracts/updateAllSpeakerTags';
+import type {
+  GetYouTubeCookieStatusInput,
+  GetYouTubeCookieStatusOutputType,
+} from '@upperroom/contracts/getYouTubeCookieStatus';
+import type {
+  SetYouTubeCookiesInput,
+  SetYouTubeCookiesOutputType,
+} from '@upperroom/contracts/setYouTubeCookies';
+import { uploadYouTubeCookiesFromFile } from '../../utils/youtubeCookies';
+import {
+  getFirebaseDatabaseUrl,
+  getFirebaseProjectId,
+  getFirebaseStorageBucket,
+} from '../../shared/firebaseProjectConfig';
 
 type NoticeState = {
   severity: 'success' | 'error' | 'info' | 'warning';
@@ -35,6 +49,8 @@ type NoticeState = {
 } | null;
 
 const SCRIPT_RUNNER_EMAIL = 'youssef.a.asaad@gmail.com';
+const YOUTUBE_COOKIE_EXPORT_URL = 'https://www.youtube.com/robots.txt';
+const YTDLP_COOKIE_DOCS_URL = 'https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies';
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -91,18 +107,52 @@ const formatTimestamp = (value?: number): string => {
   }).format(new Date(value));
 };
 
+const formatIsoTimestamp = (value?: string | null): string => {
+  if (!value) {
+    return 'Not available';
+  }
+
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(parsed));
+};
+
+const buildBrowserFallbackBootstrapCommand = (): string => {
+  const projectId = getFirebaseProjectId();
+  const storageBucket = getFirebaseStorageBucket();
+  const databaseUrl = getFirebaseDatabaseUrl();
+
+  return [
+    `FIREBASE_PROJECT_ID=${projectId}`,
+    `FIREBASE_STORAGE_BUCKET=${storageBucket}`,
+    `FIREBASE_DATABASE_URL=${databaseUrl}`,
+    `BROWSER_FALLBACK_PROFILE_BUCKET=${storageBucket}`,
+    './scripts/with-node22.sh pnpm --dir apps/browser-fallback exec node scripts/bootstrap-browser-profile.js',
+  ].join(' \\\n');
+};
+
 const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
   const router = useRouter();
   const { user } = useAuth();
   const [status, setStatus] = useState<GetSoundCloudAuthStatusReturnType | null>(null);
+  const [youtubeCookieStatus, setYouTubeCookieStatus] = useState<GetYouTubeCookieStatusOutputType | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [isLoadingCookieStatus, setIsLoadingCookieStatus] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isUploadingYouTubeCookies, setIsUploadingYouTubeCookies] = useState(false);
   const [isRunningSpeakerTagUpdate, setIsRunningSpeakerTagUpdate] = useState(false);
   const [speakerTagUpdateResult, setSpeakerTagUpdateResult] = useState<UpdateAllSpeakerTagsResultType | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
 
   const isAdmin = user?.isAdmin() ?? false;
   const canRunScripts = isAdmin && user?.email?.trim().toLowerCase() === SCRIPT_RUNNER_EMAIL;
+  const browserFallbackBootstrapCommand = useMemo(() => buildBrowserFallbackBootstrapCommand(), []);
   const redirectUri = useMemo(() => {
     if (typeof window === 'undefined') {
       return '';
@@ -133,9 +183,42 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
     }
   }, [isAdmin]);
 
+  const loadYouTubeCookieStatus = useCallback(async () => {
+    if (!isAdmin) {
+      setIsLoadingCookieStatus(false);
+      setYouTubeCookieStatus(null);
+      return;
+    }
+
+    setIsLoadingCookieStatus(true);
+    try {
+      const getStatus = createFunctionV2<GetYouTubeCookieStatusInput, GetYouTubeCookieStatusOutputType>(
+        'getyoutubecookiestatus'
+      );
+      const nextStatus = await getStatus({});
+      setYouTubeCookieStatus(nextStatus);
+    } catch (error) {
+      const message = formatCallableError(error, 'Failed to load YouTube cookie status.');
+      setNotice({ severity: 'error', text: message });
+    } finally {
+      setIsLoadingCookieStatus(false);
+    }
+  }, [isAdmin]);
+
   useEffect(() => {
     loadStatus();
-  }, [loadStatus]);
+    loadYouTubeCookieStatus();
+  }, [loadStatus, loadYouTubeCookieStatus]);
+
+  const copyToClipboard = useCallback(async (value: string, successText: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice({ severity: 'success', text: successText });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to copy text to the clipboard.';
+      setNotice({ severity: 'error', text: message });
+    }
+  }, []);
 
   useEffect(() => {
     if (!router.isReady) {
@@ -225,6 +308,56 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       setIsRunningSpeakerTagUpdate(false);
     }
   }, [canRunScripts]);
+
+  const handleYouTubeCookieFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const file = input.files?.[0];
+      if (!file) {
+        return;
+      }
+
+      const getYouTubeCookieStatus = createFunctionV2<GetYouTubeCookieStatusInput, GetYouTubeCookieStatusOutputType>(
+        'getyoutubecookiestatus'
+      );
+      const setYouTubeCookies = createFunctionV2<SetYouTubeCookiesInput, SetYouTubeCookiesOutputType>(
+        'setyoutubecookies'
+      );
+
+      setIsUploadingYouTubeCookies(true);
+      setNotice({
+        severity: 'info',
+        text: `Uploading ${file.name} and preparing a single deferred YouTube probe before the queue resumes…`,
+      });
+
+      try {
+        const nextStatus = await uploadYouTubeCookiesFromFile({
+          file,
+          setYouTubeCookies,
+          getYouTubeCookieStatus,
+        });
+
+        setYouTubeCookieStatus(nextStatus);
+        setNotice({
+          severity: 'success',
+          text: 'YouTube cookies were uploaded. Public videos stay on PO tokens, and the YouTube queue will only resume after a cookie-backed probe succeeds.',
+        });
+      } catch (error) {
+        try {
+          const refreshedStatus = await getYouTubeCookieStatus({});
+          setYouTubeCookieStatus(refreshedStatus);
+        } catch (statusError) {
+          console.error('Failed to refresh YouTube cookie status after upload error', statusError);
+        }
+        const message = formatCallableError(error, 'Failed to upload YouTube cookies.');
+        setNotice({ severity: 'error', text: message });
+      } finally {
+        input.value = '';
+        setIsUploadingYouTubeCookies(false);
+      }
+    },
+    []
+  );
 
   return (
     <Box sx={{ maxWidth: 960, mx: 'auto', width: '100%' }}>
@@ -332,6 +465,259 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
             </Stack>
           </CardContent>
         </Card>
+
+        {isAdmin ? (
+          <Card variant="outlined">
+            <CardContent>
+              <Stack spacing={2.5}>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  spacing={1.5}
+                >
+                  <Box>
+                    <Typography variant="h6" fontWeight={700}>
+                      YouTube Cookies
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Upload a fresh <code>cookies.txt</code> export for the dedicated YouTube account. The client
+                      base64-encodes the file immediately, the admin callable stores it in RTDB, and a single deferred
+                      auth-required YouTube job is used as the resume probe. Public YouTube extraction stays on PO
+                      tokens and does not depend on these cookies.
+                    </Typography>
+                  </Box>
+                  {isLoadingCookieStatus ? (
+                    <CircularProgress size={24} />
+                  ) : (
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip
+                        color={youtubeCookieStatus?.hasCookies ? 'success' : 'default'}
+                        label={youtubeCookieStatus?.hasCookies ? 'Cookies configured' : 'Cookies missing'}
+                        variant={youtubeCookieStatus?.hasCookies ? 'filled' : 'outlined'}
+                      />
+                      <Chip
+                        color={youtubeCookieStatus?.cookieBreakerOpen ? 'warning' : 'success'}
+                        label={youtubeCookieStatus?.cookieBreakerOpen ? 'Cookie breaker open' : 'Cookie breaker clear'}
+                        variant="outlined"
+                      />
+                      <Chip
+                        color={youtubeCookieStatus?.youtubeQueueBlocked ? 'warning' : 'success'}
+                        label={youtubeCookieStatus?.youtubeQueueBlocked ? 'YouTube queue paused' : 'YouTube queue active'}
+                        variant="outlined"
+                      />
+                      <Chip
+                        color={youtubeCookieStatus?.browserFallbackReachable ? 'success' : 'default'}
+                        label={
+                          youtubeCookieStatus?.browserFallbackReachable
+                            ? 'Browser fallback reachable'
+                            : 'Browser fallback unavailable'
+                        }
+                        variant="outlined"
+                      />
+                      <Chip
+                        color={youtubeCookieStatus?.browserFallbackHealthy ? 'success' : 'warning'}
+                        label={
+                          youtubeCookieStatus?.browserFallbackHealthy
+                            ? 'Browser fallback healthy'
+                            : 'Browser fallback unhealthy'
+                        }
+                        variant="outlined"
+                      />
+                    </Stack>
+                  )}
+                </Stack>
+
+                <Divider />
+
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">Guided refresh flow</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    1. Open a fresh private/incognito browser window manually.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    2. Log into the dedicated YouTube account in that private window only.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    3. In the same private tab, go directly to <code>youtube.com/robots.txt</code>.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    4. Export only the <code>youtube.com</code> cookies as Netscape <code>cookies.txt</code>.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    5. Close the private window immediately after export so YouTube does not rotate the session.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    6. Upload that exported <code>cookies.txt</code> here, then refresh status.
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                    <Button
+                      variant="outlined"
+                      onClick={() => copyToClipboard(YOUTUBE_COOKIE_EXPORT_URL, 'Copied youtube.com/robots.txt URL.')}
+                    >
+                      Copy robots.txt URL
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      href={YTDLP_COOKIE_DOCS_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open yt-dlp cookie docs
+                    </Button>
+                  </Stack>
+                </Stack>
+
+                <Divider />
+
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2">Browser fallback recovery</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    If browser fallback shows <code>auth_required</code> or <code>missing_profile</code>, rerun the
+                    local bootstrap below. If the session still shows <code>authenticated</code> but health stays
+                    unhealthy or the last error is <code>session_unhealthy</code>, bootstrap alone is not the fix: the
+                    staging runtime or egress path is still failing extraction.
+                  </Typography>
+                  <Box
+                    component="pre"
+                    sx={{
+                      m: 0,
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: 'background.default',
+                      overflowX: 'auto',
+                      fontSize: '0.8rem',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {browserFallbackBootstrapCommand}
+                  </Box>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                    <Button
+                      variant="outlined"
+                      onClick={() =>
+                        copyToClipboard(
+                          browserFallbackBootstrapCommand,
+                          'Copied browser fallback bootstrap command.'
+                        )
+                      }
+                    >
+                      Copy bootstrap command
+                    </Button>
+                  </Stack>
+                </Stack>
+
+                <Divider />
+
+                <Stack spacing={1.25}>
+                  <Typography variant="subtitle2">Cookie status</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Disabled until: {formatIsoTimestamp(youtubeCookieStatus?.disabledUntil)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue probe status: {youtubeCookieStatus?.probeStatus ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Deferred YouTube requests: {youtubeCookieStatus?.deferredYouTubeTaskCount ?? 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue blocker reason: {youtubeCookieStatus?.blockerReason ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue blocker episode: {youtubeCookieStatus?.blockerEpisodeId ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Queue blocker updated: {formatIsoTimestamp(youtubeCookieStatus?.blockerUpdatedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback configured: {youtubeCookieStatus?.browserFallbackConfigured ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback reachable: {youtubeCookieStatus?.browserFallbackReachable ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback healthy: {youtubeCookieStatus?.browserFallbackHealthy ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback session: {youtubeCookieStatus?.browserFallbackSessionState ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback healthcheck configured:{' '}
+                    {youtubeCookieStatus?.browserFallbackHealthcheckConfigured ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback profile updated: {formatIsoTimestamp(youtubeCookieStatus?.browserFallbackProfileUpdatedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback last checked: {formatIsoTimestamp(youtubeCookieStatus?.browserFallbackLastCheckedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback last error code: {youtubeCookieStatus?.browserFallbackLastErrorCode ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback last error: {youtubeCookieStatus?.browserFallbackLastErrorMessage ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Browser fallback blocker active: {youtubeCookieStatus?.browserFallbackBlocked ? 'Yes' : 'No'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Uploaded at: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.uploadedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Uploaded by: {youtubeCookieStatus?.metadata?.uploadedByEmail ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Source file: {youtubeCookieStatus?.metadata?.sourceFileName ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Cookie hash: {youtubeCookieStatus?.metadata?.cookieHash ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last health status: {youtubeCookieStatus?.metadata?.lastHealthStatus ?? 'Not available'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last validated: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.lastValidatedAt)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last used: {formatIsoTimestamp(youtubeCookieStatus?.metadata?.lastUsedAt)}
+                  </Typography>
+                </Stack>
+
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                  <Button variant="contained" component="label" disabled={isUploadingYouTubeCookies || isLoadingCookieStatus}>
+                    {isUploadingYouTubeCookies ? 'Uploading…' : 'Upload cookies.txt'}
+                    <input hidden type="file" accept=".txt,text/plain" onChange={handleYouTubeCookieFileChange} />
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={loadYouTubeCookieStatus}
+                    disabled={isUploadingYouTubeCookies || isLoadingCookieStatus}
+                  >
+                    Refresh Status
+                  </Button>
+                </Stack>
+
+                <Alert severity="info">
+                  This page never reads raw cookie contents back to the browser. It only shows metadata from
+                  <code> yt-dlp-cookies-meta</code> plus queue state stored under <code>processAudioQueues/youtube</code>.
+                </Alert>
+
+                <Alert severity="warning">
+                  yt-dlp recommends exporting YouTube cookies from a fresh private/incognito session that is only used
+                  for YouTube, navigating to <code>youtube.com/robots.txt</code>, exporting the Netscape
+                  <code>cookies.txt</code>, and then closing that private window immediately. A file that looks valid
+                  can still fail validation if YouTube has already rotated or challenged that session.
+                </Alert>
+
+                <Alert severity="warning">
+                  This page can guide the operator, but it does not and should not read browser cookies directly. The
+                  actual YouTube login and cookie export must happen in a separate private/incognito browser session so
+                  the exported file stays compatible with yt-dlp and avoids immediate rotation.
+                </Alert>
+              </Stack>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {canRunScripts ? (
           <Card variant="outlined">
