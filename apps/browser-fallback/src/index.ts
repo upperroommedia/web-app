@@ -33,6 +33,8 @@ const artifactPrefix = process.env.BROWSER_FALLBACK_ARTIFACT_PREFIX || 'browser-
 const signedUrlTtlMs = Number.parseInt(process.env.BROWSER_FALLBACK_SIGNED_URL_TTL_SECONDS || '900', 10) * 1000;
 const healthcheckYoutubeUrl = process.env.BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL?.trim() || '';
 const sharedSecret = process.env.BROWSER_FALLBACK_SHARED_SECRET?.trim() || '';
+const cookieSafeYouTubeExtractorArgs = 'youtube:player_client=default,-web_creator';
+const poTokenEnabledYouTubeExtractorArgs = 'youtube:player_client=default,mweb,-web_creator';
 const userAgent =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 
@@ -101,6 +103,86 @@ function classifyWorkerFailure(message: string): { code: BrowserFallbackErrorCod
     return { code: 'browser_launch_failed', sessionState: 'unknown', retryable: true };
   }
   return { code: 'temporary_upstream_failure', sessionState: 'authenticated', retryable: true };
+}
+
+function getPoTokenProviderBaseUrl(): string | undefined {
+  const value = process.env.YTDLP_POT_PROVIDER_BASE_URL?.trim();
+  return value ? value.replace(/\/+$/, '') : undefined;
+}
+
+function shouldDisableInnertubeForPoTokenProvider(): boolean {
+  const value = process.env.YTDLP_POT_DISABLE_INNERTUBE?.trim()?.toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+function shouldUsePoTokenProviderWithCookies(): boolean {
+  const value = process.env.YTDLP_USE_POT_PROVIDER_WITH_COOKIES?.trim()?.toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+function getYtDlpSleepRequestsSeconds(): string | undefined {
+  const value = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim();
+  return value || undefined;
+}
+
+function getYtDlpSleepIntervalSeconds(): string | undefined {
+  const value = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim();
+  return value || undefined;
+}
+
+function getYtDlpMaxSleepIntervalSeconds(): string | undefined {
+  const value = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim();
+  return value || undefined;
+}
+
+function applyYtDlpRequestPacingArgs(args: string[]): void {
+  const sleepRequests = getYtDlpSleepRequestsSeconds();
+  const sleepInterval = getYtDlpSleepIntervalSeconds();
+  const maxSleepInterval = getYtDlpMaxSleepIntervalSeconds();
+
+  if (sleepRequests) {
+    args.push('--sleep-requests', sleepRequests);
+  }
+  if (sleepInterval) {
+    args.push('--sleep-interval', sleepInterval);
+  }
+  if (sleepInterval && maxSleepInterval) {
+    args.push('--max-sleep-interval', maxSleepInterval);
+  }
+}
+
+function applyCookieExtractorArgs(args: string[]): {
+  usePoTokenProvider: boolean;
+  poTokenProviderBaseUrl: string | null;
+  poTokenProviderDisableInnertube: boolean;
+  youtubeExtractorArgs: string;
+} {
+  const poTokenProviderBaseUrl = getPoTokenProviderBaseUrl();
+  const poTokenProviderDisableInnertube = shouldDisableInnertubeForPoTokenProvider();
+  const usePoTokenProvider = shouldUsePoTokenProviderWithCookies() && !!poTokenProviderBaseUrl;
+
+  if (!usePoTokenProvider) {
+    args.push('--extractor-args', cookieSafeYouTubeExtractorArgs);
+    return {
+      usePoTokenProvider: false,
+      poTokenProviderBaseUrl: poTokenProviderBaseUrl || null,
+      poTokenProviderDisableInnertube,
+      youtubeExtractorArgs: cookieSafeYouTubeExtractorArgs,
+    };
+  }
+
+  args.push('--extractor-args', poTokenEnabledYouTubeExtractorArgs);
+  const providerArgs = [`base_url=${poTokenProviderBaseUrl}`];
+  if (poTokenProviderDisableInnertube) {
+    providerArgs.push('disable_innertube=1');
+  }
+  args.push('--extractor-args', `youtubepot-bgutilhttp:${providerArgs.join(';')}`);
+  return {
+    usePoTokenProvider: true,
+    poTokenProviderBaseUrl,
+    poTokenProviderDisableInnertube,
+    youtubeExtractorArgs: poTokenEnabledYouTubeExtractorArgs,
+  };
 }
 
 async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -195,10 +277,26 @@ async function resolveAudioUrlWithCookies(youtubeUrl: string, cookiesFilePath: s
     ytDlpJsRuntime,
     '--cookies',
     cookiesFilePath,
-    '--extractor-args',
-    'youtube:player_client=default,-web_creator',
-    youtubeUrl,
   ];
+  applyYtDlpRequestPacingArgs(args);
+  const extractorConfig = applyCookieExtractorArgs(args);
+  args.push(youtubeUrl);
+
+  console.log(
+    JSON.stringify({
+      event: 'browser_fallback_ytdlp_extract',
+      youtubeUrl,
+      jsRuntime: ytDlpJsRuntime,
+      usePoTokenProvider: extractorConfig.usePoTokenProvider,
+      poTokenProviderBaseUrl: extractorConfig.poTokenProviderBaseUrl,
+      poTokenProviderDisableInnertube: extractorConfig.poTokenProviderDisableInnertube,
+      youtubeExtractorArgs: extractorConfig.youtubeExtractorArgs,
+      sleepRequestsSeconds: getYtDlpSleepRequestsSeconds() || null,
+      sleepIntervalSeconds: getYtDlpSleepIntervalSeconds() || null,
+      maxSleepIntervalSeconds: getYtDlpMaxSleepIntervalSeconds() || null,
+    })
+  );
+
   const { stdout } = await runCommand(ytdlpPath, args);
   const parsed = JSON.parse(stdout) as YtDlpJson;
   const selected = selectPreferredAudioFormat(parsed.formats || []);

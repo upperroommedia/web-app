@@ -2,6 +2,7 @@ ARG NODE_VERSION=22
 ARG PNPM_VERSION=10.10.0
 ARG PLAYWRIGHT_VERSION=1.58.0
 ARG YT_DLP_VERSION=2026.03.03
+ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
 ARG DENO_VERSION=2.2.7
 
 FROM node:${NODE_VERSION}-bookworm AS build
@@ -25,6 +26,7 @@ FROM node:${NODE_VERSION}-bookworm-slim AS production
 ARG PNPM_VERSION
 ARG PLAYWRIGHT_VERSION
 ARG YT_DLP_VERSION
+ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION
 ARG DENO_VERSION
 
 ENV NODE_ENV=production
@@ -38,8 +40,11 @@ RUN export DENO_INSTALL=/usr/local \
     && curl -fsSL https://deno.land/install.sh | sh -s -- v${DENO_VERSION} \
     && deno --version
 
-RUN python3 -m pip install --break-system-packages --no-cache-dir "yt-dlp[default]==${YT_DLP_VERSION}" \
-    && echo "yt-dlp version: $(yt-dlp --version)"
+RUN python3 -m pip install --break-system-packages --no-cache-dir \
+      "yt-dlp[default]==${YT_DLP_VERSION}" \
+      "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
+    && echo "yt-dlp version: $(yt-dlp --version)" \
+    && python3 -m pip show bgutil-ytdlp-pot-provider
 
 RUN npm install -g pnpm@${PNPM_VERSION}
 RUN npm install -g playwright@${PLAYWRIGHT_VERSION} \
