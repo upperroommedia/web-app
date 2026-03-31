@@ -26,6 +26,50 @@ if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
   exit 64
 fi
 
+verify_cloudflare_containers_auth() {
+  local url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/me"
+  local response_file
+  response_file="$(mktemp)"
+  local http_status
+
+  http_status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "$url")"
+
+  if [[ "$http_status" == "200" ]]; then
+    rm -f "$response_file"
+    return 0
+  fi
+
+  local response_body
+  response_body="$(cat "$response_file")"
+  rm -f "$response_file"
+
+  if [[ "$http_status" == "401" || "$http_status" == "403" ]]; then
+    cat >&2 <<EOF
+Cloudflare Containers registry preflight failed for account ${CLOUDFLARE_ACCOUNT_ID}.
+Endpoint: GET ${url}
+HTTP status: ${http_status}
+Response: ${response_body}
+
+The Worker deploy path is configured correctly, but this account/token is not currently authorized to publish Cloudflare Containers images.
+This is typically an account-level Containers entitlement/support issue rather than a repo or branch-routing issue.
+EOF
+    exit 65
+  fi
+
+  cat >&2 <<EOF
+Cloudflare Containers registry preflight failed unexpectedly.
+Endpoint: GET ${url}
+HTTP status: ${http_status}
+Response: ${response_body}
+EOF
+  exit 65
+}
+
+verify_cloudflare_containers_auth
+
 firebase_service_account_json="$(gcloud secrets versions access latest --secret="$SECRET_NAME" --project "$GCP_PROJECT")"
 browser_fallback_shared_secret="$(gcloud secrets versions access latest --secret=BROWSER_FALLBACK_SHARED_SECRET --project "$GCP_PROJECT")"
 
