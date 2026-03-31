@@ -222,16 +222,16 @@ jobs:
       - name: Validate GCP OIDC secrets
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         env:
-          PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_PRODUCTION || secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_PRODUCTION || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
         run: |
           set -euo pipefail
           if [[ -z "$PROVIDER" ]]; then
-            echo "::error::Missing secret GCP_WORKLOAD_IDENTITY_PROVIDER"
+            echo "::error::Missing secret GCP_WORKLOAD_IDENTITY_PROVIDER_PRODUCTION (or fallback GCP_WORKLOAD_IDENTITY_PROVIDER)"
             exit 1
           fi
           if [[ -z "$SERVICE_ACCOUNT" ]]; then
-            echo "::error::Missing secret GCP_SERVICE_ACCOUNT_EMAIL"
+            echo "::error::Missing secret GCP_SERVICE_ACCOUNT_EMAIL_PRODUCTION (or fallback GCP_SERVICE_ACCOUNT_EMAIL)"
             exit 1
           fi
 
@@ -239,8 +239,8 @@ jobs:
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_PRODUCTION || secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_PRODUCTION || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up gcloud
         if: needs.detect-changes.outputs.anything_to_run == 'true'
