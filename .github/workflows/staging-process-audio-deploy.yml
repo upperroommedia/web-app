@@ -162,7 +162,7 @@ jobs:
           fi
 
           if [[ "$force_browser_fallback_redeploy" != "true" && "$force_redeploy" != "true" ]]; then
-            if contains_path '^apps/browser-fallback/|^apps/browser-fallback-cloudflare/'; then
+            if contains_path '^apps/browser-fallback/'; then
               deploy_browser_fallback=true
             fi
 
@@ -170,7 +170,7 @@ jobs:
               deploy_process_audio=true
             fi
 
-            if contains_path '^(\.github/workflows/staging-process-audio-deploy\.yml|packages/contracts/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|wrangler\.browser-fallback\.jsonc|Dockerfile\.browser-fallback-cloudflare|scripts/deploy-browser-fallback\.sh|scripts/deploy-cloudflare-browser-fallback\.sh|scripts/ensure-private-cloud-run-invoker\.sh|scripts/ensure-service-account-self-token-creator\.sh|scripts/ensure-browser-fallback-static-egress\.sh|scripts/set-browser-fallback-runtime-config\.mjs|scripts/set-browser-fallback-runtime-config\.sh)'; then
+            if contains_path '^(\.github/workflows/staging-process-audio-deploy\.yml|packages/contracts/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-browser-fallback\.sh|scripts/ensure-private-cloud-run-invoker\.sh|scripts/ensure-service-account-self-token-creator\.sh|scripts/ensure-browser-fallback-static-egress\.sh|scripts/set-browser-fallback-runtime-config\.mjs|scripts/set-browser-fallback-runtime-config\.sh|scripts/verify-browser-fallback-deployment\.sh)'; then
               deploy_browser_fallback=true
             fi
 
@@ -235,20 +235,6 @@ jobs:
       - name: Checkout repository
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        if: needs.detect-changes.outputs.deploy_browser_fallback == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Set up pnpm
-        if: needs.detect-changes.outputs.deploy_browser_fallback == 'true'
-        uses: pnpm/action-setup@v4
-
-      - name: Install Cloudflare browser-fallback workspace dependencies
-        if: needs.detect-changes.outputs.deploy_browser_fallback == 'true'
-        run: pnpm install --frozen-lockfile --filter @upperroom/browser-fallback-cloudflare... --ignore-scripts
 
       - name: Validate GCP OIDC secrets
         if: needs.detect-changes.outputs.anything_to_run == 'true'
@@ -339,7 +325,8 @@ jobs:
             "${{ steps.deploy.outputs.browser_fallback_service_url }}" \
             "${{ steps.deploy.outputs.expected_route_pattern }}" \
             "${{ steps.deploy.outputs.expected_worker_name }}" \
-            "${{ steps.deploy.outputs.final_browser_fallback_service_url }}"
+            "${{ steps.deploy.outputs.final_browser_fallback_service_url }}" \
+            browser-fallback-staging
 
       - name: Ensure staging POT provider public invoker
         if: needs.detect-changes.outputs.deploy_browser_fallback == 'true' || needs.detect-changes.outputs.deploy_process_audio == 'true'

@@ -79,6 +79,8 @@ const trimAndTranscode = async (
   let transcodingStarted = false;
   let usedYtdlpSectionDownload = false;
   let usedDirectUrlWithSeeking = false; // NEW: Track if using direct URL + FFmpeg seeking approach
+  let ffmpegStderrBuffer = '';
+  const MAX_FFMPEG_STDERR_BUFFER = 20_000;
 
   // Duration verification state - used to determine if secondary trim is needed
   // Secondary trim uses the KNOWN user-specified duration, NOT arbitrary values
@@ -627,7 +629,11 @@ const trimAndTranscode = async (
         log.debug('FFmpeg process closed', { exitCode: code, signal });
 
         if (code !== 0) {
-          log.error('FFmpeg process failed', { exitCode: code, signal });
+          log.error('FFmpeg process failed', {
+            exitCode: code,
+            signal,
+            ffmpegStderrTail: ffmpegStderrBuffer.trim() || null,
+          });
           // Catch writeStreamDone rejection to avoid unhandled promise rejection.
           // If GCS write stream errored (which may have triggered this FFmpeg failure),
           // writeStreamDone will reject. We must handle it even though we're already
@@ -684,11 +690,19 @@ const trimAndTranscode = async (
 
       ffmpegProc.stderr.on('data', async (data: Buffer) => {
         const stderrLine = data.toString();
+        ffmpegStderrBuffer += stderrLine;
+        if (ffmpegStderrBuffer.length > MAX_FFMPEG_STDERR_BUFFER) {
+          ffmpegStderrBuffer = ffmpegStderrBuffer.slice(-MAX_FFMPEG_STDERR_BUFFER);
+        }
 
         try {
           throwErrorOnSpecificStderr(stderrLine);
         } catch (err) {
-          log.error('FFmpeg error detected in stderr', { stderrLine, error: err });
+          log.error('FFmpeg error detected in stderr', {
+            stderrLine,
+            ffmpegStderrTail: ffmpegStderrBuffer.trim() || null,
+            error: err,
+          });
           ffmpegProc.kill('SIGTERM');
           reject(err);
           return;

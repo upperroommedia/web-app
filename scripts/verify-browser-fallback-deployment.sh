@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 8 ]]; then
-  echo "Usage: $0 <staging|production> <gcp-project> <database-url> <process-audio-service> <expected-firebase-project> <expected-browser-fallback-url> <expected-route-pattern> <expected-worker-name> [expected-final-browser-fallback-url]" >&2
+  echo "Usage: $0 <staging|production> <gcp-project> <database-url> <process-audio-service> <expected-firebase-project> <expected-browser-fallback-url> <expected-route-pattern> <expected-worker-name> [expected-final-browser-fallback-url] [browser-fallback-service-name]" >&2
   exit 64
 fi
 
@@ -16,6 +16,7 @@ EXPECTED_BROWSER_FALLBACK_URL="${6%/}"
 EXPECTED_ROUTE_PATTERN="$7"
 EXPECTED_WORKER_NAME="$8"
 EXPECTED_FINAL_BROWSER_FALLBACK_URL="${9:-}"
+PRIMARY_BROWSER_FALLBACK_SERVICE_NAME="${10:-}"
 EXPECTED_FINAL_BROWSER_FALLBACK_URL="${EXPECTED_FINAL_BROWSER_FALLBACK_URL%/}"
 
 EXPECTED_YOUTUBE_BROWSER_FALLBACK_URL="${EXPECTED_BROWSER_FALLBACK_URL}/fallback"
@@ -65,29 +66,103 @@ maybe_get_identity_token() {
   gcloud auth print-identity-token --audiences="$audience"
 }
 
+PROXY_PID=""
+PROXY_LOG=""
+PROXY_PORT=""
+
+cleanup_proxy() {
+  if [[ -n "$PROXY_PID" ]]; then
+    kill "$PROXY_PID" >/dev/null 2>&1 || true
+    wait "$PROXY_PID" >/dev/null 2>&1 || true
+    PROXY_PID=""
+  fi
+  if [[ -n "$PROXY_LOG" ]]; then
+    rm -f "$PROXY_LOG"
+    PROXY_LOG=""
+  fi
+}
+
+start_run_proxy() {
+  local service_name="$1"
+  local port="$2"
+
+  cleanup_proxy
+  PROXY_LOG="$(mktemp)"
+  PROXY_PORT="$port"
+  gcloud run services proxy "$service_name" \
+    --project "$GCP_PROJECT" \
+    --region us-central1 \
+    --port "$PROXY_PORT" >"$PROXY_LOG" 2>&1 &
+  PROXY_PID=$!
+
+  for _ in {1..30}; do
+    if curl -fsS "http://127.0.0.1:${PROXY_PORT}/" >/dev/null 2>&1; then
+      return 0
+    fi
+    if ! kill -0 "$PROXY_PID" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
+  local proxy_output="<missing>"
+  if [[ -f "$PROXY_LOG" ]]; then
+    proxy_output="$(cat "$PROXY_LOG")"
+  fi
+  cleanup_proxy
+  fail "Failed to start gcloud run services proxy for ${service_name}. Output: ${proxy_output}"
+}
+
+proxy_url_if_needed() {
+  local url="$1"
+  if [[ "$url" == *".run.app"* && -n "$PRIMARY_BROWSER_FALLBACK_SERVICE_NAME" ]]; then
+    if [[ -z "$PROXY_PID" ]]; then
+      start_run_proxy "$PRIMARY_BROWSER_FALLBACK_SERVICE_NAME" "${BROWSER_FALLBACK_PROXY_PORT:-18098}"
+    fi
+    python3 - "$url" "$PROXY_PORT" <<'PY'
+import sys
+from urllib.parse import urlparse
+url = sys.argv[1]
+port = sys.argv[2]
+parsed = urlparse(url)
+path = parsed.path or "/"
+if parsed.query:
+    path += "?" + parsed.query
+print(f"http://127.0.0.1:{port}{path}")
+PY
+    return 0
+  fi
+  printf '%s\n' "$url"
+}
+
 curl_browser_fallback() {
   local url="$1"
   shift
 
+  local target_url
+  target_url="$(proxy_url_if_needed "$url")"
   local args=("$@")
   local headers=()
   if [[ -n "${BROWSER_FALLBACK_SHARED_SECRET:-}" ]]; then
     headers+=(-H "x-browser-fallback-secret: ${BROWSER_FALLBACK_SHARED_SECRET}")
   fi
 
-  local identity_token=""
-  if identity_token="$(maybe_get_identity_token "$url" 2>/dev/null)"; then
-    if [[ -n "$identity_token" ]]; then
-      headers+=(-H "Authorization: Bearer ${identity_token}")
+  if [[ "$target_url" == "$url" ]]; then
+    local identity_token=""
+    if identity_token="$(maybe_get_identity_token "$url" 2>/dev/null)"; then
+      if [[ -n "$identity_token" ]]; then
+        headers+=(-H "Authorization: Bearer ${identity_token}")
+      fi
     fi
   fi
 
-  curl "${headers[@]}" "${args[@]}" "$url"
+  curl "${headers[@]}" "${args[@]}" "$target_url"
 }
 
 require_command curl
 require_command jq
 require_command gcloud
+trap cleanup_proxy EXIT
 
 if [[ -z "$EXPECTED_BROWSER_FALLBACK_URL" ]]; then
   fail "Expected browser fallback URL is empty for ${DEPLOY_ENV}."
