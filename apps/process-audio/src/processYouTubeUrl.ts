@@ -13,6 +13,7 @@ import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
 import { ensureSafeTempPath, getFFmpegPath } from './utils';
 import dns from 'node:dns/promises';
+import firebaseAdmin from './firebaseAdmin';
 import {
   analyzeYouTubeFailure,
   annotateYouTubeFailure,
@@ -40,6 +41,7 @@ export interface YouTubeAudioUrlResult {
 
 interface YouTubeFragmentFormat {
   format_id?: string;
+  url?: string;
   ext?: string;
   vcodec?: string;
   protocol?: string;
@@ -140,14 +142,19 @@ interface YouTubeAccessDecision {
 const YTDLP_HTTP_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 const YOUTUBE_ACCESS_DECISION_CACHE_TTL_MS = 10 * 60 * 1000;
+const PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_LEASE_PATH = 'processAudioQueues/youtube/browserFallback/profileLease';
+const PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT = 'browser-fallback/profile/chromium-profile.tar.gz';
+const PROCESS_AUDIO_BROWSER_FALLBACK_LEASE_TTL_MS = 10 * 60 * 1000;
 const youtubeAccessDecisionCache = new Map<string, { expiresAt: number; decision: YouTubeAccessDecision }>();
 
 type BrowserFallbackEndpointKind = 'primary' | 'final_resort';
+type BrowserFallbackInvocationKind = 'in_process' | 'external_http';
 
 type BrowserFallbackInvocationResult<T> = {
   response: T;
   fallbackUrl: string;
   endpointKind: BrowserFallbackEndpointKind;
+  invocationKind: BrowserFallbackInvocationKind;
 };
 
 function logSelectedYouTubeServingPath(
@@ -260,11 +267,17 @@ function shouldUseCookiesForPublicVideos(): boolean {
   return value === '1' || value === 'true' || value === 'yes';
 }
 
+function isInProcessBrowserFallbackEnabled(): boolean {
+  const explicit = process.env.PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED?.trim()?.toLowerCase();
+  if (explicit === '0' || explicit === 'false' || explicit === 'no') return false;
+  return !!(process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim());
+}
+
 function isBrowserFallbackEnabled(): boolean {
   const endpoint = process.env.YOUTUBE_BROWSER_FALLBACK_URL?.trim();
   const explicit = process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim()?.toLowerCase();
   if (explicit === '0' || explicit === 'false' || explicit === 'no') return false;
-  return !!endpoint;
+  return isInProcessBrowserFallbackEnabled() || !!endpoint;
 }
 
 function normalizeBrowserFallbackUrl(endpoint: string | undefined): string | undefined {
@@ -296,7 +309,7 @@ function getBrowserFallbackTargets(): Array<{ url: string; endpointKind: Browser
   const primary = getBrowserFallbackUrl();
   const finalResort = getFinalResortBrowserFallbackUrl();
 
-  if (primary) {
+  if (primary && !isInProcessBrowserFallbackEnabled()) {
     targets.push({ url: primary, endpointKind: 'primary' });
   }
 
@@ -314,6 +327,36 @@ function getBrowserFallbackAuthMode(): string {
 function getBrowserFallbackSharedSecret(): string | undefined {
   const value = process.env.BROWSER_FALLBACK_SHARED_SECRET?.trim();
   return value || undefined;
+}
+
+function getBrowserFallbackProfileBucketName(): string | undefined {
+  return process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim() || undefined;
+}
+
+function getBrowserFallbackProfileArchiveObject(): string {
+  return process.env.BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT?.trim() || PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT;
+}
+
+function getBrowserFallbackProfileLeaseTtlMs(): number {
+  const raw = Number.parseInt(
+    process.env.BROWSER_FALLBACK_PROFILE_LEASE_TTL_MS || `${PROCESS_AUDIO_BROWSER_FALLBACK_LEASE_TTL_MS}`,
+    10
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : PROCESS_AUDIO_BROWSER_FALLBACK_LEASE_TTL_MS;
+}
+
+function getInProcessBrowserFallbackServiceRole(): string | null {
+  return (
+    process.env.PROCESS_AUDIO_BROWSER_FALLBACK_SERVICE_ROLE?.trim() ||
+    process.env.BROWSER_FALLBACK_SERVICE_ROLE?.trim() ||
+    'gcp_primary_browser_fallback'
+  );
+}
+
+function getInProcessBrowserFallbackStrategy(): 'session_backed' | 'public_only' {
+  return process.env.PROCESS_AUDIO_BROWSER_FALLBACK_STRATEGY?.trim()?.toLowerCase() === 'public_only'
+    ? 'public_only'
+    : 'session_backed';
 }
 
 function shouldUseGoogleIdToken(url: string, audience: string | undefined): boolean {
@@ -518,6 +561,78 @@ async function runCommandWithCapture(
       );
     });
   });
+}
+
+async function runSystemCommand(command: string, args: string[], errorPrefix: string): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args);
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    proc.on('error', (err) => {
+      reject(new Error(`${errorPrefix} spawn error: ${err}`));
+    });
+    proc.on('close', (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(
+        new Error(
+          `${errorPrefix} exited with code ${code}${signal ? ` (signal: ${signal})` : ''}. stderr: ${stderr.trim()}`
+        )
+      );
+    });
+  });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+async function withBrowserProfileLease<T>(database: Database, ownerId: string, run: () => Promise<T>): Promise<T> {
+  const leaseRef = database.ref(PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_LEASE_PATH);
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const now = Date.now();
+    const transaction = await leaseRef.transaction((current) => {
+      const record = asRecord(current);
+      const acquiredAt = typeof record?.acquiredAt === 'number' ? record.acquiredAt : 0;
+      const requestId = typeof record?.requestId === 'string' ? record.requestId : null;
+      const expired = !acquiredAt || now - acquiredAt > getBrowserFallbackProfileLeaseTtlMs();
+
+      if (requestId && requestId !== ownerId && !expired) {
+        return;
+      }
+
+      return {
+        requestId: ownerId,
+        acquiredAt: now,
+        acquiredAtIso: new Date(now).toISOString(),
+      };
+    });
+
+    if (transaction.committed && transaction.snapshot.val()?.requestId === ownerId) {
+      try {
+        return await run();
+      } finally {
+        const snapshot = await leaseRef.get();
+        if (snapshot.val()?.requestId === ownerId) {
+          await leaseRef.remove();
+        }
+      }
+    }
+
+    await sleep(200);
+  }
+
+  throw new Error('Timed out acquiring process-audio browser profile lease.');
 }
 
 function cleanupCookiesFile(cookiesFilePath: string | undefined, cleaned: { done: boolean }): void {
@@ -895,6 +1010,7 @@ async function callBrowserFallbackEndpoint<T>(
       response: (await response.json()) as T,
       fallbackUrl,
       endpointKind,
+      invocationKind: 'external_http',
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -944,6 +1060,91 @@ async function callBrowserFallback<T>(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+async function invokeBrowserFallbackResolveAudioUrl(
+  ytdlpPath: string,
+  url: YouTubeUrl,
+  realtimeDB: Database,
+  payload: BrowserFallbackRequest,
+  log: ReturnType<typeof createLoggerWithContext>
+): Promise<BrowserFallbackInvocationResult<BrowserFallbackResolveAudioUrlResponse>> {
+  let primaryError: unknown;
+
+  if (isInProcessBrowserFallbackEnabled()) {
+    try {
+      return {
+        response: await resolveAudioUrlWithInProcessBrowserFallback(ytdlpPath, url, realtimeDB, log),
+        fallbackUrl: 'in-process://process-audio',
+        endpointKind: 'primary',
+        invocationKind: 'in_process',
+      };
+    } catch (error) {
+      primaryError = error;
+      if (getBrowserFallbackTargets().length > 0) {
+        log.warn('Primary in-process browser fallback failed; attempting external final-resort browser fallback', {
+          youtubeUrl: url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  try {
+    return await callBrowserFallback<BrowserFallbackResolveAudioUrlResponse>(payload, log);
+  } catch (error) {
+    throw primaryError instanceof Error ? primaryError : error;
+  }
+}
+
+async function invokeBrowserFallbackDownloadSection(
+  ytdlpPath: string,
+  url: YouTubeUrl,
+  outputFilePath: string,
+  realtimeDB: Database,
+  startTime: number,
+  duration: number | undefined,
+  payload: BrowserFallbackRequest,
+  log: ReturnType<typeof createLoggerWithContext>
+): Promise<
+  | (BrowserFallbackInvocationResult<BrowserFallbackDownloadSectionResponse> & { localFilePath?: string })
+> {
+  let primaryError: unknown;
+
+  if (isInProcessBrowserFallbackEnabled()) {
+    try {
+      const local = await downloadSectionWithInProcessBrowserFallback(
+        ytdlpPath,
+        url,
+        outputFilePath,
+        realtimeDB,
+        startTime,
+        duration,
+        log
+      );
+      return {
+        response: local.response,
+        localFilePath: local.localFilePath,
+        fallbackUrl: 'in-process://process-audio',
+        endpointKind: 'primary',
+        invocationKind: 'in_process',
+      };
+    } catch (error) {
+      primaryError = error;
+      if (getBrowserFallbackTargets().length > 0) {
+        log.warn('Primary in-process browser fallback section download failed; attempting external final-resort browser fallback', {
+          youtubeUrl: url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  try {
+    return await callBrowserFallback<BrowserFallbackDownloadSectionResponse>(payload, log);
+  } catch (error) {
+    throw primaryError instanceof Error ? primaryError : error;
+  }
+}
+
 async function downloadBrowserFallbackSection(
   outputFilePath: string,
   fallbackResult: BrowserFallbackDownloadSectionResponse
@@ -982,6 +1183,171 @@ function selectPreferredAudioFormat(formats: YouTubeFragmentFormat[]): YouTubeFr
   });
 
   return candidates[0];
+}
+
+function buildInProcessBrowserFallbackResolution(
+  credentialSource: 'chromium_profile' | 'none'
+): NonNullable<BrowserFallbackResolveAudioUrlResponse['resolution']> {
+  return {
+    serviceRole: getInProcessBrowserFallbackServiceRole(),
+    strategy: getInProcessBrowserFallbackStrategy(),
+    credentialSource,
+  };
+}
+
+async function hydrateInProcessBrowserProfile(realtimeDB: Database): Promise<{ profileDir: string; browserProfileDir: string }> {
+  const bucketName = getBrowserFallbackProfileBucketName();
+  if (!bucketName) {
+    throw buildAnnotatedYouTubeError(
+      'In-process browser fallback is not configured because no browser profile bucket is set.',
+      'browser_fallback'
+    );
+  }
+
+  const bucket = firebaseAdmin.storage().bucket(bucketName);
+  const archiveFile = bucket.file(getBrowserFallbackProfileArchiveObject());
+  const profileDir = await mkdtemp(path.join(os.tmpdir(), 'process-audio-browser-profile-'));
+  const browserProfileDir = path.join(profileDir, 'chromium-profile');
+  const archivePath = path.join(profileDir, 'chromium-profile.tar.gz');
+  const ownerId = `process-audio:${createHash('sha1').update(profileDir).digest('hex')}`;
+
+  try {
+    const [archiveExists] = await archiveFile.exists();
+    if (!archiveExists) {
+      throw buildAnnotatedYouTubeError(
+        `In-process browser fallback profile archive ${getBrowserFallbackProfileArchiveObject()} is missing in bucket ${bucketName}.`,
+        'browser_fallback'
+      );
+    }
+
+    await withBrowserProfileLease(realtimeDB, ownerId, async () => {
+      await archiveFile.download({ destination: archivePath });
+    });
+
+    fs.mkdirSync(browserProfileDir, { recursive: true });
+    await runSystemCommand('tar', ['-xzf', archivePath, '-C', browserProfileDir], 'browser profile extract');
+
+    return { profileDir, browserProfileDir };
+  } catch (error) {
+    await rm(profileDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function resolveAudioUrlWithInProcessBrowserFallback(
+  ytdlpPath: string,
+  youtubeUrl: string,
+  realtimeDB: Database,
+  log: ReturnType<typeof createLoggerWithContext>
+): Promise<BrowserFallbackResolveAudioUrlResponse> {
+  const resolution = buildInProcessBrowserFallbackResolution(
+    getInProcessBrowserFallbackStrategy() === 'public_only' ? 'none' : 'chromium_profile'
+  );
+
+  const fullArgs =
+    resolution.credentialSource === 'none'
+      ? ['-J', '--no-playlist', '--skip-download', '--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime()]
+      : ['-J', '--no-playlist', '--skip-download'];
+  let hydratedProfile: { profileDir: string; browserProfileDir: string } | null = null;
+
+  try {
+    if (resolution.credentialSource === 'chromium_profile') {
+      hydratedProfile = await hydrateInProcessBrowserProfile(realtimeDB);
+      fullArgs.push('--cookies-from-browser', `chromium:${hydratedProfile.browserProfileDir}`);
+    }
+
+    applyYtDlpRequestPacingArgs(fullArgs);
+    fullArgs.push(youtubeUrl);
+
+    log.info('Executing in-process browser fallback yt-dlp extraction', {
+      youtubeUrl,
+      credentialSource: resolution.credentialSource,
+      browserFallbackStrategy: resolution.strategy,
+      browserFallbackServiceRole: resolution.serviceRole,
+      browserFallbackInvocationKind: 'in_process',
+      ytDlpJsRuntime: getPreferredYtDlpJsRuntime(),
+      sleepRequestsSeconds: getYtDlpSleepRequestsSeconds() || null,
+      sleepIntervalSeconds: getYtDlpSleepIntervalSeconds() || null,
+      maxSleepIntervalSeconds: getYtDlpMaxSleepIntervalSeconds() || null,
+    });
+
+    const { stdout } = await runCommandWithCapture(
+      ytdlpPath,
+      fullArgs,
+      'In-process browser fallback yt-dlp extraction',
+      'browser_fallback'
+    );
+    const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
+    const selected = selectPreferredAudioFormat(parsed.formats || []);
+
+    if (!selected?.url) {
+      throw buildAnnotatedYouTubeError('yt-dlp did not return an audio-only format URL.', 'browser_fallback');
+    }
+
+    return {
+      url: selected.url,
+      format: selected.ext || selected.format_id || 'unknown',
+      duration: parsed.duration ?? selected.duration,
+      resolution,
+    };
+  } finally {
+    if (hydratedProfile) {
+      await rm(hydratedProfile.profileDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
+async function downloadSectionWithInProcessBrowserFallback(
+  ytdlpPath: string,
+  youtubeUrl: string,
+  outputFilePath: string,
+  realtimeDB: Database,
+  startTime: number,
+  duration: number | undefined,
+  log: ReturnType<typeof createLoggerWithContext>
+): Promise<{
+  localFilePath: string;
+  response: BrowserFallbackDownloadSectionResponse;
+}> {
+  const resolved = await resolveAudioUrlWithInProcessBrowserFallback(ytdlpPath, youtubeUrl, realtimeDB, log);
+  const effectiveDuration = duration ?? resolved.duration;
+
+  if (!effectiveDuration || effectiveDuration <= 0) {
+    throw buildAnnotatedYouTubeError(
+      'In-process browser fallback could not determine a valid download duration.',
+      'browser_fallback'
+    );
+  }
+
+  const finalPath = ensureSafeTempPath(`${outputFilePath}.m4a`);
+  await runSystemCommand(
+    getFFmpegPath(),
+    [
+      '-y',
+      '-user_agent',
+      YTDLP_HTTP_USER_AGENT,
+      '-ss',
+      `${startTime}`,
+      '-i',
+      resolved.url,
+      '-t',
+      `${effectiveDuration}`,
+      '-vn',
+      '-acodec',
+      'copy',
+      finalPath,
+    ],
+    'In-process browser fallback ffmpeg trim'
+  );
+
+  return {
+    localFilePath: finalPath,
+    response: {
+      downloadUrl: `file://${finalPath}`,
+      ext: 'm4a',
+      resolution: resolved.resolution,
+    },
+  };
 }
 
 export const getYouTubeTrimRoutingDecision = async (
@@ -1436,7 +1802,10 @@ export const getYouTubeAudioUrl = async (
   try {
     if (cachedDecision?.mode === 'browser_fallback') {
       log.info('Using cached browser fallback decision for direct URL extraction', cachedDecision);
-      const fallback = await callBrowserFallback<BrowserFallbackResolveAudioUrlResponse>(
+      const fallback = await invokeBrowserFallbackResolveAudioUrl(
+        ytdlpPath,
+        url,
+        realtimeDB,
         {
           action: 'resolve_audio_url',
           youtubeUrl: url,
@@ -1455,6 +1824,7 @@ export const getYouTubeAudioUrl = async (
           selectedMode: 'browser_fallback',
           endpointKind: fallback.endpointKind,
           fallbackUrl: fallback.fallbackUrl,
+          browserFallbackInvocationKind: fallback.invocationKind,
           credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
           browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
           browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
@@ -1644,7 +2014,10 @@ export const getYouTubeAudioUrl = async (
               disabledUntil: activeCookieContext.disabledUntil,
               decidedAt: getNowIsoString(),
             });
-            const fallback = await callBrowserFallback<BrowserFallbackResolveAudioUrlResponse>(
+            const fallback = await invokeBrowserFallbackResolveAudioUrl(
+              ytdlpPath,
+              url,
+              realtimeDB,
               {
                 action: 'resolve_audio_url',
                 youtubeUrl: url,
@@ -1663,6 +2036,7 @@ export const getYouTubeAudioUrl = async (
                 selectedMode: 'browser_fallback',
                 endpointKind: fallback.endpointKind,
                 fallbackUrl: fallback.fallbackUrl,
+                browserFallbackInvocationKind: fallback.invocationKind,
                 credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
                 browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
                 browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
@@ -1689,7 +2063,10 @@ export const getYouTubeAudioUrl = async (
           publicFailureMessage: publicMessage,
           decidedAt: getNowIsoString(),
         });
-        const fallback = await callBrowserFallback<BrowserFallbackResolveAudioUrlResponse>(
+        const fallback = await invokeBrowserFallbackResolveAudioUrl(
+          ytdlpPath,
+          url,
+          realtimeDB,
           {
             action: 'resolve_audio_url',
             youtubeUrl: url,
@@ -1708,6 +2085,7 @@ export const getYouTubeAudioUrl = async (
             selectedMode: 'browser_fallback',
             endpointKind: fallback.endpointKind,
             fallbackUrl: fallback.fallbackUrl,
+            browserFallbackInvocationKind: fallback.invocationKind,
             credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
             browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
             browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
@@ -2235,7 +2613,13 @@ export const downloadYouTubeSection = async (
 
   if (cachedDecision?.mode === 'browser_fallback') {
     log.info('Using cached browser fallback decision for section download', cachedDecision);
-    const fallback = await callBrowserFallback<BrowserFallbackDownloadSectionResponse>(
+    const fallback = await invokeBrowserFallbackDownloadSection(
+      ytdlpPath,
+      url,
+      outputFilePath,
+      realtimeDB,
+      startTime,
+      duration,
       {
         action: 'download_section',
         youtubeUrl: url,
@@ -2251,12 +2635,13 @@ export const downloadYouTubeSection = async (
       selectedMode: 'browser_fallback',
       endpointKind: fallback.endpointKind,
       fallbackUrl: fallback.fallbackUrl,
+      browserFallbackInvocationKind: fallback.invocationKind,
       credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
       browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
       browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
       decisionReason: cachedDecision.reason,
     });
-    return await downloadBrowserFallbackSection(outputFilePath, fallback.response);
+    return fallback.localFilePath || (await downloadBrowserFallbackSection(outputFilePath, fallback.response));
   }
 
   // Preferred strategy for post-live DVR manifests: download only the required fragment window,
@@ -2701,7 +3086,13 @@ export const downloadYouTubeSection = async (
               disabledUntil: activeCookieContext.disabledUntil,
               decidedAt: getNowIsoString(),
             });
-            const fallback = await callBrowserFallback<BrowserFallbackDownloadSectionResponse>(
+            const fallback = await invokeBrowserFallbackDownloadSection(
+              ytdlpPath,
+              url,
+              outputFilePath,
+              realtimeDB,
+              startTime,
+              duration,
               {
                 action: 'download_section',
                 youtubeUrl: url,
@@ -2717,6 +3108,7 @@ export const downloadYouTubeSection = async (
               selectedMode: 'browser_fallback',
               endpointKind: fallback.endpointKind,
               fallbackUrl: fallback.fallbackUrl,
+              browserFallbackInvocationKind: fallback.invocationKind,
               credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
               browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
               browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
@@ -2724,7 +3116,7 @@ export const downloadYouTubeSection = async (
               publicFailureClass,
               cookieFailureClass,
             });
-            return await downloadBrowserFallbackSection(outputFilePath, fallback.response);
+            return fallback.localFilePath || (await downloadBrowserFallbackSection(outputFilePath, fallback.response));
           }
 
           throw buildAnnotatedYouTubeError(
@@ -2743,7 +3135,13 @@ export const downloadYouTubeSection = async (
           publicFailureMessage: publicMessage,
           decidedAt: getNowIsoString(),
         });
-        const fallback = await callBrowserFallback<BrowserFallbackDownloadSectionResponse>(
+        const fallback = await invokeBrowserFallbackDownloadSection(
+          ytdlpPath,
+          url,
+          outputFilePath,
+          realtimeDB,
+          startTime,
+          duration,
           {
             action: 'download_section',
             youtubeUrl: url,
@@ -2759,13 +3157,14 @@ export const downloadYouTubeSection = async (
           selectedMode: 'browser_fallback',
           endpointKind: fallback.endpointKind,
           fallbackUrl: fallback.fallbackUrl,
+          browserFallbackInvocationKind: fallback.invocationKind,
           credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
           browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
           browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
           decisionReason: 'section_download_browser_fallback_after_public_failure',
           publicFailureClass,
         });
-        return await downloadBrowserFallbackSection(outputFilePath, fallback.response);
+        return fallback.localFilePath || (await downloadBrowserFallbackSection(outputFilePath, fallback.response));
       }
 
       throw buildAnnotatedYouTubeError(publicMessage, 'public_provider');
