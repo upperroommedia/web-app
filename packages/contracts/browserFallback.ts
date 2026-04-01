@@ -5,7 +5,12 @@ export type BrowserFallbackSessionState =
   | 'missing_profile'
   | 'authenticated'
   | 'auth_required'
-  | 'fake_mode';
+  | 'fake_mode'
+  | 'public_only';
+
+export type BrowserFallbackStrategy = 'session_backed' | 'public_only';
+
+export type BrowserFallbackCredentialSource = 'none' | 'chromium_profile' | 'legacy_cookies_file';
 
 export type BrowserFallbackErrorCode =
   | 'auth_required'
@@ -36,15 +41,23 @@ export interface BrowserFallbackDownloadSectionRequest {
 
 export type BrowserFallbackRequest = BrowserFallbackResolveAudioUrlRequest | BrowserFallbackDownloadSectionRequest;
 
+export interface BrowserFallbackResolutionMetadata {
+  serviceRole: string | null;
+  strategy: BrowserFallbackStrategy;
+  credentialSource: BrowserFallbackCredentialSource;
+}
+
 export interface BrowserFallbackResolveAudioUrlResponse {
   url: string;
   format?: string;
   duration?: number;
+  resolution?: BrowserFallbackResolutionMetadata;
 }
 
 export interface BrowserFallbackDownloadSectionResponse {
   downloadUrl: string;
   ext?: string;
+  resolution?: BrowserFallbackResolutionMetadata;
 }
 
 export interface BrowserFallbackErrorResponse {
@@ -62,6 +75,9 @@ export interface BrowserFallbackSessionStatusResponse {
   profileUpdatedAt: string | null;
   profileGeneration: string | null;
   fakeMode: boolean;
+  strategy: BrowserFallbackStrategy;
+  serviceRole: string | null;
+  credentialSource: BrowserFallbackCredentialSource | null;
   healthcheckConfigured: boolean;
   lastCheckedAt: string | null;
   lastErrorCode: BrowserFallbackErrorCode | null;

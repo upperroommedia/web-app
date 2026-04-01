@@ -286,28 +286,16 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           DEPLOY_BROWSER_FALLBACK: ${{ needs.detect-changes.outputs.deploy_browser_fallback }}
           DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
-          EXTERNAL_BROWSER_FALLBACK_SERVICE_URL: ${{ secrets.PRODUCTION_BROWSER_FALLBACK_SERVICE_URL }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: 465e1a48ef2e28a1f4227860735e84d5
+          FINAL_BROWSER_FALLBACK_SERVICE_URL: ${{ secrets.PRODUCTION_BROWSER_FALLBACK_SERVICE_URL }}
         run: |
           set -euo pipefail
           project_number="$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')"
           process_audio_runtime_sa="${project_number}-compute@developer.gserviceaccount.com"
           browser_fallback_service_url=""
-          external_browser_fallback_service_url="${EXTERNAL_BROWSER_FALLBACK_SERVICE_URL:-}"
-          external_browser_fallback_service_url="${external_browser_fallback_service_url%/}"
+          final_browser_fallback_service_url="${FINAL_BROWSER_FALLBACK_SERVICE_URL:-}"
+          final_browser_fallback_service_url="${final_browser_fallback_service_url%/}"
 
-          if [[ -n "${external_browser_fallback_service_url}" && "${DEPLOY_BROWSER_FALLBACK}" == 'true' && -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-            bash scripts/deploy-cloudflare-browser-fallback.sh production "${GCP_PROJECT}"
-            browser_fallback_service_url="${external_browser_fallback_service_url}"
-            echo "Using hosted production Cloudflare browser fallback URL: ${browser_fallback_service_url}"
-          elif [[ -n "${external_browser_fallback_service_url}" ]]; then
-            browser_fallback_service_url="${external_browser_fallback_service_url}"
-            echo "Using external production browser fallback URL override: ${browser_fallback_service_url}"
-            if [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' && -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-              echo "::warning::Skipping Cloudflare browser fallback deploy because CLOUDFLARE_API_TOKEN is not configured."
-            fi
-          elif [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' ]]; then
+          if [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' ]]; then
             bash scripts/ensure-browser-fallback-static-egress.sh "${GCP_PROJECT}" us-central1 default default
             bash scripts/deploy-browser-fallback.sh production "$GITHUB_SHA"
             bash scripts/ensure-service-account-self-token-creator.sh "${GCP_PROJECT}" "${process_audio_runtime_sa}"
@@ -321,12 +309,13 @@ jobs:
 
           {
             echo "browser_fallback_service_url=${browser_fallback_service_url}"
-            echo "expected_route_pattern=browser-fallback.upperroommedia.org/*"
-            echo "expected_worker_name=browser-fallback"
+            echo "final_browser_fallback_service_url=${final_browser_fallback_service_url}"
+            echo "expected_route_pattern="
+            echo "expected_worker_name="
           } >> "$GITHUB_OUTPUT"
 
           if [[ "${DEPLOY_PROCESS_AUDIO}" == 'true' ]]; then
-            BROWSER_FALLBACK_SERVICE_URL="${browser_fallback_service_url}" bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
+            BROWSER_FALLBACK_SERVICE_URL="${browser_fallback_service_url}" FINAL_BROWSER_FALLBACK_SERVICE_URL="${final_browser_fallback_service_url}" bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
           else
             echo "Skipping process-audio Cloud Run deploy; no relevant changes detected."
           fi
@@ -348,7 +337,8 @@ jobs:
             urm-app \
             "${{ steps.deploy.outputs.browser_fallback_service_url }}" \
             "${{ steps.deploy.outputs.expected_route_pattern }}" \
-            "${{ steps.deploy.outputs.expected_worker_name }}"
+            "${{ steps.deploy.outputs.expected_worker_name }}" \
+            "${{ steps.deploy.outputs.final_browser_fallback_service_url }}"
 
       - name: Ensure production POT provider public invoker
         if: needs.detect-changes.outputs.deploy_browser_fallback == 'true' || needs.detect-changes.outputs.deploy_process_audio == 'true'

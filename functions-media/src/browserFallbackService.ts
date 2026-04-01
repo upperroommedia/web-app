@@ -57,6 +57,9 @@ export async function getBrowserFallbackSessionStatus(
       profileUpdatedAt: null,
       profileGeneration: null,
       fakeMode: false,
+      strategy: 'session_backed',
+      serviceRole: null,
+      credentialSource: null,
       healthcheckConfigured: false,
       lastCheckedAt: null,
       lastErrorCode: null,
@@ -77,11 +80,11 @@ export async function getBrowserFallbackSessionStatus(
     if (process.env.FUNCTIONS_EMULATOR === 'true' || !shouldUseGoogleIdToken(serviceUrl)) {
       const response = await fetch(statusUrl, { headers });
       const data = (await response.json()) as BrowserFallbackSessionStatusResponse;
-      return {
-        ...data,
-        configured: true,
-        reachable: response.ok,
-        serviceUrl,
+    return {
+      ...data,
+      configured: true,
+      reachable: response.ok,
+      serviceUrl,
       };
     }
 
@@ -107,6 +110,9 @@ export async function getBrowserFallbackSessionStatus(
       profileUpdatedAt: null,
       profileGeneration: null,
       fakeMode: false,
+      strategy: 'session_backed',
+      serviceRole: null,
+      credentialSource: null,
       healthcheckConfigured: false,
       lastCheckedAt: null,
       lastErrorCode: null,

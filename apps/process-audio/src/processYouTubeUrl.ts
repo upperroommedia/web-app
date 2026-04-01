@@ -142,6 +142,21 @@ const YTDLP_HTTP_USER_AGENT =
 const YOUTUBE_ACCESS_DECISION_CACHE_TTL_MS = 10 * 60 * 1000;
 const youtubeAccessDecisionCache = new Map<string, { expiresAt: number; decision: YouTubeAccessDecision }>();
 
+type BrowserFallbackEndpointKind = 'primary' | 'final_resort';
+
+type BrowserFallbackInvocationResult<T> = {
+  response: T;
+  fallbackUrl: string;
+  endpointKind: BrowserFallbackEndpointKind;
+};
+
+function logSelectedYouTubeServingPath(
+  log: ReturnType<typeof createLoggerWithContext>,
+  fields: Record<string, unknown>
+): void {
+  log.info('Selected YouTube serving path', fields);
+}
+
 function isRunningInDocker(): boolean {
   try {
     return fs.existsSync('/.dockerenv') || fs.existsSync('/run/.containerenv') || process.env.DOCKER === 'true';
@@ -252,13 +267,20 @@ function isBrowserFallbackEnabled(): boolean {
   return !!endpoint;
 }
 
-function getBrowserFallbackUrl(): string | undefined {
-  const endpoint = process.env.YOUTUBE_BROWSER_FALLBACK_URL?.trim();
-  return endpoint ? endpoint.replace(/\/+$/, '') : undefined;
+function normalizeBrowserFallbackUrl(endpoint: string | undefined): string | undefined {
+  const trimmed = endpoint?.trim();
+  return trimmed ? trimmed.replace(/\/+$/, '') : undefined;
 }
 
-function getBrowserFallbackAudience(): string | undefined {
-  const fallbackUrl = getBrowserFallbackUrl();
+function getBrowserFallbackUrl(): string | undefined {
+  return normalizeBrowserFallbackUrl(process.env.YOUTUBE_BROWSER_FALLBACK_URL);
+}
+
+function getFinalResortBrowserFallbackUrl(): string | undefined {
+  return normalizeBrowserFallbackUrl(process.env.YOUTUBE_FINAL_BROWSER_FALLBACK_URL);
+}
+
+function getBrowserFallbackAudience(fallbackUrl: string | undefined = getBrowserFallbackUrl()): string | undefined {
   if (!fallbackUrl) return undefined;
 
   try {
@@ -267,6 +289,22 @@ function getBrowserFallbackAudience(): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function getBrowserFallbackTargets(): Array<{ url: string; endpointKind: BrowserFallbackEndpointKind }> {
+  const targets: Array<{ url: string; endpointKind: BrowserFallbackEndpointKind }> = [];
+  const primary = getBrowserFallbackUrl();
+  const finalResort = getFinalResortBrowserFallbackUrl();
+
+  if (primary) {
+    targets.push({ url: primary, endpointKind: 'primary' });
+  }
+
+  if (finalResort && finalResort !== primary) {
+    targets.push({ url: finalResort, endpointKind: 'final_resort' });
+  }
+
+  return targets;
 }
 
 function getBrowserFallbackAuthMode(): string {
@@ -818,19 +856,22 @@ function shouldPreferCookieProvider(cookieContext: YouTubeCookieContext | undefi
   return shouldUseCookiesForPublicVideos() && !!cookieContext?.hasCookies;
 }
 
-async function callBrowserFallback<T>(
+async function callBrowserFallbackEndpoint<T>(
+  fallbackUrl: string,
+  endpointKind: BrowserFallbackEndpointKind,
   payload: BrowserFallbackRequest,
   log: ReturnType<typeof createLoggerWithContext>
-): Promise<T> {
-  const fallbackUrl = getBrowserFallbackUrl();
-  if (!fallbackUrl) {
-    throw new Error('YOUTUBE_BROWSER_FALLBACK_URL is not configured');
-  }
-
+): Promise<BrowserFallbackInvocationResult<T>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), getBrowserFallbackTimeoutMs());
 
   try {
+    log.info('Invoking browser fallback endpoint', {
+      endpointKind,
+      fallbackUrl,
+      action: payload.action,
+      requestContext: payload.requestContext,
+    });
     const response = await fetchBrowserFallback(fallbackUrl, {
       method: 'POST',
       headers: {
@@ -850,12 +891,22 @@ async function callBrowserFallback<T>(
       throw error;
     }
 
-    return (await response.json()) as T;
+    return {
+      response: (await response.json()) as T,
+      fallbackUrl,
+      endpointKind,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const browserFallbackError = (err as Error & { browserFallbackError?: Partial<BrowserFallbackErrorResponse> })
       .browserFallbackError;
-    log.error('Browser fallback request failed', { error: message, fallbackUrl, payload, browserFallbackError });
+    log.error('Browser fallback request failed', {
+      error: message,
+      endpointKind,
+      fallbackUrl,
+      payload,
+      browserFallbackError,
+    });
     const error = buildAnnotatedYouTubeError(`Browser fallback failed: ${message}`, 'browser_fallback') as Error & {
       browserFallbackError?: Partial<BrowserFallbackErrorResponse>;
     };
@@ -864,6 +915,33 @@ async function callBrowserFallback<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function callBrowserFallback<T>(
+  payload: BrowserFallbackRequest,
+  log: ReturnType<typeof createLoggerWithContext>
+): Promise<BrowserFallbackInvocationResult<T>> {
+  const targets = getBrowserFallbackTargets();
+  if (targets.length === 0) {
+    throw new Error('No browser fallback endpoints are configured');
+  }
+
+  let lastError: unknown;
+  for (const target of targets) {
+    try {
+      return await callBrowserFallbackEndpoint<T>(target.url, target.endpointKind, payload, log);
+    } catch (error) {
+      lastError = error;
+      if (target.endpointKind === 'primary' && targets.length > 1) {
+        log.warn('Primary browser fallback failed; attempting final-resort browser fallback', {
+          primaryFallbackUrl: target.url,
+          action: payload.action,
+        });
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 async function downloadBrowserFallbackSection(
@@ -1343,6 +1421,18 @@ export const getYouTubeAudioUrl = async (
     throw buildAnnotatedYouTubeError(`yt-dlp exited with code ${result.code}: ${result.stderr}`, mode);
   };
 
+  const logAndReturnResolvedAudio = (
+    result: YouTubeAudioUrlResult,
+    fields: Record<string, unknown>
+  ): YouTubeAudioUrlResult => {
+    logSelectedYouTubeServingPath(log, {
+      youtubeUrl: url,
+      outputType: 'resolve_audio_url',
+      ...fields,
+    });
+    return result;
+  };
+
   try {
     if (cachedDecision?.mode === 'browser_fallback') {
       log.info('Using cached browser fallback decision for direct URL extraction', cachedDecision);
@@ -1355,11 +1445,22 @@ export const getYouTubeAudioUrl = async (
         log
       );
 
-      return {
-        url: fallback.url,
-        format: fallback.format || 'unknown',
-        duration: fallback.duration,
-      };
+      return logAndReturnResolvedAudio(
+        {
+          url: fallback.response.url,
+          format: fallback.response.format || 'unknown',
+          duration: fallback.response.duration,
+        },
+        {
+          selectedMode: 'browser_fallback',
+          endpointKind: fallback.endpointKind,
+          fallbackUrl: fallback.fallbackUrl,
+          credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+          browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+          browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+          decisionReason: cachedDecision.reason,
+        }
+      );
     }
 
     if (cachedDecision?.mode === 'cookie_provider') {
@@ -1383,7 +1484,12 @@ export const getYouTubeAudioUrl = async (
         getYouTubeVideoId(url),
         log
       );
-      return cookieResult;
+      return logAndReturnResolvedAudio(cookieResult, {
+        selectedMode: 'cookie_provider',
+        credentialSource: 'rtdb_cookie_file',
+        cookieMetadata: cookieContext.metadata,
+        decisionReason: cachedDecision.reason,
+      });
     }
 
     if (shouldUseCookiesForPublicVideos()) {
@@ -1419,7 +1525,12 @@ export const getYouTubeAudioUrl = async (
             cookieMetadata: activeCookieContext.metadata,
             decidedAt: getNowIsoString(),
           });
-          return cookieResult;
+          return logAndReturnResolvedAudio(cookieResult, {
+            selectedMode: 'cookie_provider',
+            credentialSource: 'rtdb_cookie_file',
+            cookieMetadata: activeCookieContext.metadata,
+            decisionReason: 'direct_url_cookie_preferred_success',
+          });
         } catch (cookieAttemptError) {
           const cookieMessage = cookieAttemptError instanceof Error ? cookieAttemptError.message : String(cookieAttemptError);
           const cookieFailureClass = classifyYouTubeFailure(cookieMessage, 'cookie_provider');
@@ -1449,7 +1560,11 @@ export const getYouTubeAudioUrl = async (
         reason: 'direct_url_public_success',
         decidedAt: getNowIsoString(),
       });
-      return publicResult;
+      return logAndReturnResolvedAudio(publicResult, {
+        selectedMode: 'public_provider',
+        credentialSource: 'none',
+        decisionReason: 'direct_url_public_success',
+      });
     } catch (publicError) {
       const publicMessage = publicError instanceof Error ? publicError.message : String(publicError);
       const publicFailureClass = classifyYouTubeFailure(publicMessage, 'public_provider');
@@ -1494,7 +1609,13 @@ export const getYouTubeAudioUrl = async (
             cookieMetadata: activeCookieContext.metadata,
             decidedAt: getNowIsoString(),
           });
-          return cookieResult;
+          return logAndReturnResolvedAudio(cookieResult, {
+            selectedMode: 'cookie_provider',
+            credentialSource: 'rtdb_cookie_file',
+            cookieMetadata: activeCookieContext.metadata,
+            decisionReason: 'direct_url_cookie_success',
+            publicFailureClass,
+          });
         } catch (cookieAttemptError) {
           const cookieMessage = cookieAttemptError instanceof Error ? cookieAttemptError.message : String(cookieAttemptError);
           const cookieFailureClass = classifyYouTubeFailure(cookieMessage, 'cookie_provider');
@@ -1532,11 +1653,24 @@ export const getYouTubeAudioUrl = async (
               log
             );
 
-            return {
-              url: fallback.url,
-              format: fallback.format || 'unknown',
-              duration: fallback.duration,
-            };
+            return logAndReturnResolvedAudio(
+              {
+                url: fallback.response.url,
+                format: fallback.response.format || 'unknown',
+                duration: fallback.response.duration,
+              },
+              {
+                selectedMode: 'browser_fallback',
+                endpointKind: fallback.endpointKind,
+                fallbackUrl: fallback.fallbackUrl,
+                credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+                browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+                browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+                decisionReason: 'direct_url_browser_fallback_after_cookie_failure',
+                publicFailureClass,
+                cookieFailureClass,
+              }
+            );
           }
 
           throw buildAnnotatedYouTubeError(
@@ -1564,11 +1698,23 @@ export const getYouTubeAudioUrl = async (
           log
         );
 
-        return {
-          url: fallback.url,
-          format: fallback.format || 'unknown',
-          duration: fallback.duration,
-        };
+        return logAndReturnResolvedAudio(
+          {
+            url: fallback.response.url,
+            format: fallback.response.format || 'unknown',
+            duration: fallback.response.duration,
+          },
+          {
+            selectedMode: 'browser_fallback',
+            endpointKind: fallback.endpointKind,
+            fallbackUrl: fallback.fallbackUrl,
+            credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+            browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+            browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+            decisionReason: 'direct_url_browser_fallback_after_public_failure',
+            publicFailureClass,
+          }
+        );
       }
 
       throw buildAnnotatedYouTubeError(publicMessage, 'public_provider');
@@ -2099,7 +2245,18 @@ export const downloadYouTubeSection = async (
       },
       log
     );
-    return await downloadBrowserFallbackSection(outputFilePath, fallback);
+    logSelectedYouTubeServingPath(log, {
+      youtubeUrl: url,
+      outputType: 'download_section',
+      selectedMode: 'browser_fallback',
+      endpointKind: fallback.endpointKind,
+      fallbackUrl: fallback.fallbackUrl,
+      credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+      browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+      browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+      decisionReason: cachedDecision.reason,
+    });
+    return await downloadBrowserFallbackSection(outputFilePath, fallback.response);
   }
 
   // Preferred strategy for post-live DVR manifests: download only the required fragment window,
@@ -2422,6 +2579,14 @@ export const downloadYouTubeSection = async (
             cookieMetadata: activeCookieContext.metadata,
             decidedAt: getNowIsoString(),
           });
+          logSelectedYouTubeServingPath(log, {
+            youtubeUrl: url,
+            outputType: 'download_section',
+            selectedMode: 'cookie_provider',
+            credentialSource: 'rtdb_cookie_file',
+            cookieMetadata: activeCookieContext.metadata,
+            decisionReason: 'section_download_cookie_preferred_success',
+          });
           return cookieResult;
         } catch (cookieError) {
           const cookieMessage = cookieError instanceof Error ? cookieError.message : String(cookieError);
@@ -2451,6 +2616,13 @@ export const downloadYouTubeSection = async (
         mode: 'public_provider',
         reason: 'section_download_public_success',
         decidedAt: getNowIsoString(),
+      });
+      logSelectedYouTubeServingPath(log, {
+        youtubeUrl: url,
+        outputType: 'download_section',
+        selectedMode: 'public_provider',
+        credentialSource: 'none',
+        decisionReason: 'section_download_public_success',
       });
       return publicResult;
     } catch (publicError) {
@@ -2491,6 +2663,15 @@ export const downloadYouTubeSection = async (
             cookieMetadata: activeCookieContext.metadata,
             decidedAt: getNowIsoString(),
           });
+          logSelectedYouTubeServingPath(log, {
+            youtubeUrl: url,
+            outputType: 'download_section',
+            selectedMode: 'cookie_provider',
+            credentialSource: 'rtdb_cookie_file',
+            cookieMetadata: activeCookieContext.metadata,
+            decisionReason: 'section_download_cookie_success',
+            publicFailureClass,
+          });
           return cookieResult;
         } catch (cookieError) {
           const cookieMessage = cookieError instanceof Error ? cookieError.message : String(cookieError);
@@ -2530,7 +2711,20 @@ export const downloadYouTubeSection = async (
               },
               log
             );
-            return await downloadBrowserFallbackSection(outputFilePath, fallback);
+            logSelectedYouTubeServingPath(log, {
+              youtubeUrl: url,
+              outputType: 'download_section',
+              selectedMode: 'browser_fallback',
+              endpointKind: fallback.endpointKind,
+              fallbackUrl: fallback.fallbackUrl,
+              credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+              browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+              browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+              decisionReason: 'section_download_browser_fallback_after_cookie_failure',
+              publicFailureClass,
+              cookieFailureClass,
+            });
+            return await downloadBrowserFallbackSection(outputFilePath, fallback.response);
           }
 
           throw buildAnnotatedYouTubeError(
@@ -2559,7 +2753,19 @@ export const downloadYouTubeSection = async (
           },
           log
         );
-        return await downloadBrowserFallbackSection(outputFilePath, fallback);
+        logSelectedYouTubeServingPath(log, {
+          youtubeUrl: url,
+          outputType: 'download_section',
+          selectedMode: 'browser_fallback',
+          endpointKind: fallback.endpointKind,
+          fallbackUrl: fallback.fallbackUrl,
+          credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+          browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+          browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+          decisionReason: 'section_download_browser_fallback_after_public_failure',
+          publicFailureClass,
+        });
+        return await downloadBrowserFallbackSection(outputFilePath, fallback.response);
       }
 
       throw buildAnnotatedYouTubeError(publicMessage, 'public_provider');

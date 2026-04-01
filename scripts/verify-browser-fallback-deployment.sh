@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 8 ]]; then
-  echo "Usage: $0 <staging|production> <gcp-project> <database-url> <process-audio-service> <expected-firebase-project> <expected-browser-fallback-url> <expected-route-pattern> <expected-worker-name>" >&2
+  echo "Usage: $0 <staging|production> <gcp-project> <database-url> <process-audio-service> <expected-firebase-project> <expected-browser-fallback-url> <expected-route-pattern> <expected-worker-name> [expected-final-browser-fallback-url]" >&2
   exit 64
 fi
 
@@ -15,6 +15,8 @@ EXPECTED_FIREBASE_PROJECT="$5"
 EXPECTED_BROWSER_FALLBACK_URL="${6%/}"
 EXPECTED_ROUTE_PATTERN="$7"
 EXPECTED_WORKER_NAME="$8"
+EXPECTED_FINAL_BROWSER_FALLBACK_URL="${9:-}"
+EXPECTED_FINAL_BROWSER_FALLBACK_URL="${EXPECTED_FINAL_BROWSER_FALLBACK_URL%/}"
 
 EXPECTED_YOUTUBE_BROWSER_FALLBACK_URL="${EXPECTED_BROWSER_FALLBACK_URL}/fallback"
 HEALTHCHECK_YOUTUBE_URL="${BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL:-https://youtu.be/dKaZ89SkVYY}"
@@ -44,6 +46,45 @@ get_json_field() {
   ' | head -n 1
 }
 
+get_url_origin() {
+  python3 - "$1" <<'PY'
+import sys
+from urllib.parse import urlparse
+parsed = urlparse(sys.argv[1])
+print(f"{parsed.scheme}://{parsed.netloc}")
+PY
+}
+
+maybe_get_identity_token() {
+  local url="$1"
+  if [[ "$url" != *".run.app"* ]]; then
+    return 0
+  fi
+  local audience
+  audience="$(get_url_origin "$url")"
+  gcloud auth print-identity-token --audiences="$audience"
+}
+
+curl_browser_fallback() {
+  local url="$1"
+  shift
+
+  local args=("$@")
+  local headers=()
+  if [[ -n "${BROWSER_FALLBACK_SHARED_SECRET:-}" ]]; then
+    headers+=(-H "x-browser-fallback-secret: ${BROWSER_FALLBACK_SHARED_SECRET}")
+  fi
+
+  local identity_token=""
+  if identity_token="$(maybe_get_identity_token "$url" 2>/dev/null)"; then
+    if [[ -n "$identity_token" ]]; then
+      headers+=(-H "Authorization: Bearer ${identity_token}")
+    fi
+  fi
+
+  curl "${headers[@]}" "${args[@]}" "$url"
+}
+
 require_command curl
 require_command jq
 require_command gcloud
@@ -52,7 +93,7 @@ if [[ -z "$EXPECTED_BROWSER_FALLBACK_URL" ]]; then
   fail "Expected browser fallback URL is empty for ${DEPLOY_ENV}."
 fi
 
-if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+if [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "$EXPECTED_ROUTE_PATTERN" && -n "$EXPECTED_WORKER_NAME" ]]; then
   note "Checking Cloudflare route attachment for ${EXPECTED_ROUTE_PATTERN}"
   zone_response="$(
     curl -fsSL \
@@ -102,6 +143,7 @@ fi
 
 note "Checking Firebase runtime config"
 access_token="$(gcloud auth print-access-token)"
+BROWSER_FALLBACK_SHARED_SECRET="$(gcloud secrets versions access latest --secret=BROWSER_FALLBACK_SHARED_SECRET --project "${GCP_PROJECT}")"
 runtime_config_response="$(
   curl -fsSL \
     -H "Authorization: Bearer ${access_token}" \
@@ -139,8 +181,9 @@ session_status_code=""
 for attempt in {1..20}; do
   session_status_body="$(mktemp)"
   session_status_code="$(
-    curl -sS -o "$session_status_body" -w '%{http_code}' \
-      "${EXPECTED_BROWSER_FALLBACK_URL}/session-status" || true
+    curl_browser_fallback \
+      "${EXPECTED_BROWSER_FALLBACK_URL}/session-status" \
+      -sS -o "$session_status_body" -w '%{http_code}' || true
   )"
   if [[ "$session_status_code" == "200" ]] && jq -e '.ok == true' "$session_status_body" >/dev/null 2>&1; then
     break
@@ -163,7 +206,6 @@ fi
 rm -f "$session_status_body"
 
 note "Resolving YouTube audio URL through the public browser-fallback endpoint"
-browser_fallback_shared_secret="$(gcloud secrets versions access latest --secret=BROWSER_FALLBACK_SHARED_SECRET --project "${GCP_PROJECT}")"
 resolve_payload="$(
   jq -cn \
     --arg youtubeUrl "$HEALTHCHECK_YOUTUBE_URL" \
@@ -179,12 +221,11 @@ resolve_payload="$(
 
 resolve_body="$(mktemp)"
 resolve_code="$(
-  curl -sS -o "$resolve_body" -w '%{http_code}' \
+  curl_browser_fallback "${EXPECTED_BROWSER_FALLBACK_URL}/fallback" \
+    -sS -o "$resolve_body" -w '%{http_code}' \
     -X POST \
     -H 'Content-Type: application/json' \
-    -H "x-browser-fallback-secret: ${browser_fallback_shared_secret}" \
-    --data "$resolve_payload" \
-    "${EXPECTED_BROWSER_FALLBACK_URL}/fallback" || true
+    --data "$resolve_payload" || true
 )"
 
 if [[ "$resolve_code" != "200" ]] || ! jq -e '.url | strings | length > 0' "$resolve_body" >/dev/null 2>&1; then
@@ -193,6 +234,37 @@ if [[ "$resolve_code" != "200" ]] || ! jq -e '.url | strings | length > 0' "$res
   fail "Signed YouTube fallback verification failed for ${DEPLOY_ENV}. HTTP ${resolve_code:-<none>} body: ${resolve_response}"
 fi
 rm -f "$resolve_body"
+
+if [[ -n "$EXPECTED_FINAL_BROWSER_FALLBACK_URL" ]]; then
+  note "Checking final-resort browser-fallback endpoint at ${EXPECTED_FINAL_BROWSER_FALLBACK_URL}"
+  final_status_body="$(mktemp)"
+  final_status_code="$(
+    curl_browser_fallback \
+      "${EXPECTED_FINAL_BROWSER_FALLBACK_URL}/session-status" \
+      -sS -o "$final_status_body" -w '%{http_code}' || true
+  )"
+  if [[ "$final_status_code" != "200" ]] || ! jq -e '.ok == true' "$final_status_body" >/dev/null 2>&1; then
+    final_body="$(cat "$final_status_body")"
+    rm -f "$final_status_body"
+    fail "Final-resort session-status unhealthy for ${DEPLOY_ENV}. HTTP ${final_status_code:-<none>} body: ${final_body}"
+  fi
+  rm -f "$final_status_body"
+
+  final_resolve_body="$(mktemp)"
+  final_resolve_code="$(
+    curl_browser_fallback "${EXPECTED_FINAL_BROWSER_FALLBACK_URL}/fallback" \
+      -sS -o "$final_resolve_body" -w '%{http_code}' \
+      -X POST \
+      -H 'Content-Type: application/json' \
+      --data "$resolve_payload" || true
+  )"
+  if [[ "$final_resolve_code" != "200" ]] || ! jq -e '.url | strings | length > 0' "$final_resolve_body" >/dev/null 2>&1; then
+    final_resolve_response="$(cat "$final_resolve_body")"
+    rm -f "$final_resolve_body"
+    fail "Final-resort YouTube fallback verification failed for ${DEPLOY_ENV}. HTTP ${final_resolve_code:-<none>} body: ${final_resolve_response}"
+  fi
+  rm -f "$final_resolve_body"
+fi
 
 note "Checking queue health in RTDB"
 queue_state="$(
