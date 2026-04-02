@@ -18,6 +18,7 @@ import {
   downloadYouTubeSection,
   getYouTubeAudioUrl,
   getYouTubeTrimRoutingDecision,
+  YTDLP_HTTP_USER_AGENT,
 } from './processYouTubeUrl';
 import { readdir } from 'fs/promises';
 import { PassThrough, Readable, finished } from 'stream';
@@ -79,6 +80,8 @@ const trimAndTranscode = async (
   let transcodingStarted = false;
   let usedYtdlpSectionDownload = false;
   let usedDirectUrlWithSeeking = false; // NEW: Track if using direct URL + FFmpeg seeking approach
+  let directUrlHttpHeaders: Record<string, string> | undefined;
+  let directUrlRequestUserAgent: string | null = null;
   let ffmpegStderrBuffer = '';
   const MAX_FFMPEG_STDERR_BUFFER = 20_000;
 
@@ -325,17 +328,21 @@ const trimAndTranscode = async (
               videoDuration: urlResult.duration,
               requestedStart: startTime,
               requestedDuration: duration,
+              httpHeaderKeys: urlResult.httpHeaders ? Object.keys(urlResult.httpHeaders) : [],
+              userAgentHeader: urlResult.httpHeaders?.['User-Agent'] || null,
             });
 
             updateDownloadProgress(100);
             inputSource = urlResult.url;
             usedDirectUrlWithSeeking = true;
+            directUrlHttpHeaders = urlResult.httpHeaders;
 
             log.info('YouTube audio URL ready for FFmpeg processing', {
               approach: 'direct_url_with_input_seeking',
               inputType: 'url',
               seekTo: startTime,
               duration,
+              headerPropagationEnabled: !!urlResult.httpHeaders,
             });
           } catch (urlError) {
             log.warn('Direct URL extraction failed; falling back to section download strategy', {
@@ -385,10 +392,24 @@ const trimAndTranscode = async (
       audioSource.type === 'YouTubeUrl' && startTime !== undefined && startTime !== null && usedYtdlpSectionDownload;
 
     if (usedDirectUrlWithSeeking && typeof inputSource === 'string' && inputSource.startsWith('http')) {
+      const ffmpegRequestUserAgent = directUrlHttpHeaders?.['User-Agent'] || directUrlHttpHeaders?.['user-agent'] || null;
+      directUrlRequestUserAgent = ffmpegRequestUserAgent || YTDLP_HTTP_USER_AGENT;
+      const propagatedHeaders = directUrlHttpHeaders
+        ? Object.entries(directUrlHttpHeaders).filter(
+            ([name]) => name.toLowerCase() !== 'user-agent' && name.toLowerCase() !== 'accept-encoding'
+          )
+        : [];
+      const ffmpegHeaders = propagatedHeaders.length > 0 ? propagatedHeaders.map(([name, value]) => `${name}: ${value}`).join('\r\n') : null;
+
       // DIRECT URL APPROACH:
       // Most URLs work best with fast input seeking (-ss before -i).
       // For YouTube live DVR manifests, prefer output seeking (-ss after -i) for timestamp accuracy.
       const isYouTubeLiveDvrManifest = isTrustedYouTubeLiveDvrManifestUrl(inputSource);
+
+      args.push('-user_agent', directUrlRequestUserAgent);
+      if (ffmpegHeaders) {
+        args.push('-headers', `${ffmpegHeaders}\r\n`);
+      }
 
       if (startTime) {
         if (isYouTubeLiveDvrManifest) {
@@ -480,9 +501,11 @@ const trimAndTranscode = async (
         dvrManifestDetected: isYouTubeLiveDvrManifest,
         startTime,
         duration,
+        httpHeaderKeys: directUrlHttpHeaders ? Object.keys(directUrlHttpHeaders) : [],
+        userAgentHeader: directUrlRequestUserAgent,
         note: isYouTubeLiveDvrManifest
           ? 'Using FFmpeg output seeking (-ss after -i) for YouTube DVR manifest timestamp accuracy'
-          : 'Using FFmpeg input seeking (-ss before -i) for efficient HTTP range-based seeking',
+          : 'Using FFmpeg input seeking (-ss before -i) for efficient HTTP range-based seeking with yt-dlp-provided request headers',
       });
     } else if (usingYtdlpSectionDownload) {
       log.info('Transcoding yt-dlp section (fallback) and applying audio filters', {

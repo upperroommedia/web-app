@@ -37,6 +37,7 @@ export interface YouTubeAudioUrlResult {
   url: string;
   format: string;
   duration?: number;
+  httpHeaders?: Record<string, string>;
 }
 
 interface YouTubeFragmentFormat {
@@ -48,6 +49,7 @@ interface YouTubeFragmentFormat {
   abr?: number;
   duration?: number;
   fragments?: Array<{ url?: string }>;
+  http_headers?: Record<string, string>;
 }
 
 interface YouTubeJsonInfo {
@@ -139,7 +141,7 @@ interface YouTubeAccessDecision {
   decidedAt: string;
 }
 
-const YTDLP_HTTP_USER_AGENT =
+export const YTDLP_HTTP_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 const YOUTUBE_ACCESS_DECISION_CACHE_TTL_MS = 10 * 60 * 1000;
 const PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_LEASE_PATH = 'processAudioQueues/youtube/browserFallback/profileLease';
@@ -1659,19 +1661,14 @@ export const getYouTubeAudioUrl = async (
 
   log.info('Extracting YouTube audio stream URL', { url, isDevelopment });
 
-  // Build yt-dlp command to get direct URL
-  // -g (--get-url): Print the actual media URL
-  // -f bestaudio: Get best audio format
-  // --print format: Print format info
+  // Build yt-dlp command to get direct URL plus request metadata.
+  // We need the selected format's http_headers so ffmpeg can replay
+  // the media request with the same header shape yt-dlp resolved.
   const baseArgs = [
+    '-J',
     '-f',
     'bestaudio/best',
-    '-g', // Get URL only, don't download
     '--no-playlist',
-    '--print',
-    '%(duration)s', // Print duration
-    '--print',
-    '%(ext)s', // Print extension/format
     '--no-js-runtimes',
     '--js-runtimes',
     getPreferredYtDlpJsRuntime(),
@@ -1718,49 +1715,52 @@ export const getYouTubeAudioUrl = async (
     result: { code: number | null; stdout: string; stderr: string },
     attemptUsesCookies: boolean
   ): YouTubeAudioUrlResult => {
-    const lines = result.stdout
-      .trim()
-      .split('\n')
-      .filter((line) => line.trim());
-
-    // Output format: duration, ext, url (based on --print order)
-    if (lines.length >= 3) {
-      const duration = parseFloat(lines[0]) || undefined;
-      const format = lines[1] || 'unknown';
-      const streamUrl = lines[2];
-
-      if (streamUrl && streamUrl.startsWith('http')) {
-        log.info('Successfully extracted YouTube audio URL', {
-          format,
-          duration,
-          urlLength: streamUrl.length,
-          urlPreview: streamUrl.substring(0, 100) + '...',
-          usedCookies: attemptUsesCookies,
-        });
-        return { url: streamUrl, format, duration };
-      }
-
-      log.error('Invalid URL in yt-dlp output', { lines, usedCookies: attemptUsesCookies });
-      throw new Error('yt-dlp did not return a valid URL');
-    }
-
-    if (lines.length >= 1 && lines[lines.length - 1].startsWith('http')) {
-      // Fallback: just a URL
-      const streamUrl = lines[lines.length - 1];
-      log.info('Extracted YouTube audio URL (minimal info)', {
-        urlLength: streamUrl.length,
+    let parsed: YouTubeJsonInfo;
+    try {
+      parsed = JSON.parse(result.stdout) as YouTubeJsonInfo;
+    } catch (err) {
+      log.error('Unexpected yt-dlp JSON output format', {
+        stdout: result.stdout,
+        stderr: result.stderr,
         usedCookies: attemptUsesCookies,
+        error: err instanceof Error ? err.message : String(err),
       });
-      return { url: streamUrl, format: 'unknown' };
+      throw new Error(`Failed to parse yt-dlp JSON output: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    log.error('Unexpected yt-dlp output format', {
-      stdout: result.stdout,
+    const selected = selectPreferredAudioFormat(parsed.formats || []);
+    const streamUrl = selected?.url;
+
+    if (streamUrl && streamUrl.startsWith('http')) {
+      const httpHeaders = selected?.http_headers && Object.keys(selected.http_headers).length > 0 ? selected.http_headers : undefined;
+      log.info('Successfully extracted YouTube audio URL', {
+        format: selected?.ext || selected?.format_id || 'unknown',
+        duration: parsed.duration ?? selected?.duration,
+        urlLength: streamUrl.length,
+        urlPreview: streamUrl.substring(0, 100) + '...',
+        usedCookies: attemptUsesCookies,
+        httpHeaderKeys: httpHeaders ? Object.keys(httpHeaders) : [],
+        userAgentHeader: httpHeaders?.['User-Agent'] || null,
+      });
+      return {
+        url: streamUrl,
+        format: selected?.ext || selected?.format_id || 'unknown',
+        duration: parsed.duration ?? selected?.duration,
+        httpHeaders,
+      };
+    }
+
+    log.error('yt-dlp JSON output did not include a valid audio URL', {
       stderr: result.stderr,
-      lines,
       usedCookies: attemptUsesCookies,
+      selectedFormatId: selected?.format_id || null,
+      selectedProtocol: selected?.protocol || null,
+      availableAudioFormats: (parsed.formats || [])
+        .filter((format) => format?.vcodec === 'none')
+        .map((format) => format?.format_id)
+        .filter(Boolean),
     });
-    throw new Error(`Failed to parse yt-dlp output: ${result.stdout}`);
+    throw new Error('yt-dlp did not return a valid audio URL');
   };
 
   const runExtractionAttempt = async (
