@@ -6,11 +6,6 @@ on:
       - staging
   workflow_dispatch:
     inputs:
-      force_browser_fallback_redeploy:
-        description: "Deploy staging browser-fallback regardless of changed files"
-        required: false
-        default: false
-        type: boolean
       force_process_audio_redeploy:
         description: "Deploy staging process-audio regardless of changed files"
         required: false
@@ -33,7 +28,6 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      deploy_browser_fallback: ${{ steps.detect.outputs.deploy_browser_fallback }}
       deploy_process_audio: ${{ steps.detect.outputs.deploy_process_audio }}
       anything_to_run: ${{ steps.detect.outputs.anything_to_run }}
       changed_files: ${{ steps.detect.outputs.changed_files }}
@@ -54,15 +48,9 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           WORKFLOW_FILE: staging-process-audio-deploy.yml
           GITHUB_TOKEN: ${{ github.token }}
-          FORCE_BROWSER_FALLBACK_REDEPLOY: ${{ github.event.inputs.force_browser_fallback_redeploy || 'false' }}
           FORCE_PROCESS_AUDIO_REDEPLOY: ${{ github.event.inputs.force_process_audio_redeploy || 'false' }}
         run: |
           set -euo pipefail
-
-          force_browser_fallback_redeploy="${FORCE_BROWSER_FALLBACK_REDEPLOY}"
-          if [[ "$force_browser_fallback_redeploy" != "true" && "$force_browser_fallback_redeploy" != "false" ]]; then
-            force_browser_fallback_redeploy="false"
-          fi
 
           force_redeploy="${FORCE_PROCESS_AUDIO_REDEPLOY}"
           if [[ "$force_redeploy" != "true" && "$force_redeploy" != "false" ]]; then
@@ -151,27 +139,14 @@ jobs:
             return 1
           }
 
-          deploy_browser_fallback=false
           deploy_process_audio=false
-          if [[ "$force_browser_fallback_redeploy" == "true" ]]; then
-            deploy_browser_fallback=true
-          fi
-
           if [[ "$force_redeploy" == "true" ]]; then
             deploy_process_audio=true
           fi
 
-          if [[ "$force_browser_fallback_redeploy" != "true" && "$force_redeploy" != "true" ]]; then
-            if contains_path '^apps/browser-fallback/'; then
-              deploy_browser_fallback=true
-            fi
-
+          if [[ "$force_redeploy" != "true" ]]; then
             if contains_path '^apps/process-audio/'; then
               deploy_process_audio=true
-            fi
-
-            if contains_path '^(\.github/workflows/staging-process-audio-deploy\.yml|packages/contracts/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-browser-fallback\.sh|scripts/ensure-private-cloud-run-invoker\.sh|scripts/ensure-service-account-self-token-creator\.sh|scripts/ensure-browser-fallback-static-egress\.sh|scripts/set-browser-fallback-runtime-config\.mjs|scripts/set-browser-fallback-runtime-config\.sh|scripts/verify-browser-fallback-deployment\.sh)'; then
-              deploy_browser_fallback=true
             fi
 
             if contains_path '^(\.github/workflows/staging-process-audio-deploy\.yml|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-process-audio\.sh|scripts/ensure-public-cloud-run-invoker\.sh)'; then
@@ -180,12 +155,11 @@ jobs:
           fi
 
           anything_to_run=false
-          if [[ "$deploy_browser_fallback" == "true" || "$deploy_process_audio" == "true" ]]; then
+          if [[ "$deploy_process_audio" == "true" ]]; then
             anything_to_run=true
           fi
 
           {
-            echo "deploy_browser_fallback=$deploy_browser_fallback"
             echo "deploy_process_audio=$deploy_process_audio"
             echo "anything_to_run=$anything_to_run"
             echo "diff_base_sha=$base_sha"
@@ -204,7 +178,6 @@ jobs:
       - name: Publish planned deploy targets
         env:
           EVENT_NAME: ${{ github.event_name }}
-          DEPLOY_BROWSER_FALLBACK: ${{ needs.detect-changes.outputs.deploy_browser_fallback }}
           DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
           ANYTHING_TO_RUN: ${{ needs.detect-changes.outputs.anything_to_run }}
           DIFF_BASE_SHA: ${{ needs.detect-changes.outputs.diff_base_sha }}
@@ -218,7 +191,6 @@ jobs:
             echo "- Event: \`$EVENT_NAME\`"
             echo "- Diff source: \`$DIFF_SOURCE\`"
             echo "- Diff range: \`$DIFF_BASE_SHA..$DIFF_HEAD_SHA\`"
-            echo "- Browser fallback hosted deploy: \`$DEPLOY_BROWSER_FALLBACK\`"
             echo "- Process audio Cloud Run: \`$DEPLOY_PROCESS_AUDIO\`"
             echo "- Any workflow action needed: \`$ANYTHING_TO_RUN\`"
             echo ""
@@ -266,70 +238,30 @@ jobs:
           project_id: ${{ env.GCP_PROJECT }}
 
       - id: deploy
-        name: Deploy staging browser-fallback and process-audio
+        name: Deploy staging process-audio
         if: needs.detect-changes.outputs.anything_to_run == 'true'
         env:
           GITHUB_SHA: ${{ github.sha }}
-          DEPLOY_BROWSER_FALLBACK: ${{ needs.detect-changes.outputs.deploy_browser_fallback }}
           DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
-          BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL: https://youtu.be/dKaZ89SkVYY
           FINAL_BROWSER_FALLBACK_SERVICE_URL: ${{ secrets.STAGING_BROWSER_FALLBACK_SERVICE_URL }}
         run: |
           set -euo pipefail
-          project_number="$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')"
-          process_audio_runtime_sa="${project_number}-compute@developer.gserviceaccount.com"
-          browser_fallback_service_url=""
           final_browser_fallback_service_url="${FINAL_BROWSER_FALLBACK_SERVICE_URL:-}"
           final_browser_fallback_service_url="${final_browser_fallback_service_url%/}"
 
-          if [[ "${DEPLOY_BROWSER_FALLBACK}" == 'true' ]]; then
-            bash scripts/ensure-browser-fallback-static-egress.sh "${GCP_PROJECT}" us-central1 default default
-            bash scripts/deploy-browser-fallback.sh staging "$GITHUB_SHA"
-            bash scripts/ensure-service-account-self-token-creator.sh "${GCP_PROJECT}" "${process_audio_runtime_sa}"
-            bash scripts/ensure-private-cloud-run-invoker.sh "${GCP_PROJECT}" us-central1 browser-fallback-staging "${process_audio_runtime_sa}"
-            browser_fallback_service_url="$(gcloud run services describe browser-fallback-staging --project "${GCP_PROJECT}" --region us-central1 --format='value(status.url)')"
-          else
-            browser_fallback_service_url="$(gcloud run services describe browser-fallback-staging --project "${GCP_PROJECT}" --region us-central1 --format='value(status.url)' 2>/dev/null || true)"
-          fi
-
-          bash scripts/set-browser-fallback-runtime-config.sh "${GCP_PROJECT}" "https://urm-app-staging-default-rtdb.firebaseio.com/" "${browser_fallback_service_url}" true
-
           {
-            echo "browser_fallback_service_url=${browser_fallback_service_url}"
             echo "final_browser_fallback_service_url=${final_browser_fallback_service_url}"
-            echo "expected_route_pattern="
-            echo "expected_worker_name="
           } >> "$GITHUB_OUTPUT"
 
           if [[ "${DEPLOY_PROCESS_AUDIO}" == 'true' ]]; then
-            BROWSER_FALLBACK_SERVICE_URL="${browser_fallback_service_url}" FINAL_BROWSER_FALLBACK_SERVICE_URL="${final_browser_fallback_service_url}" bash scripts/deploy-process-audio.sh staging "$GITHUB_SHA"
+            bash scripts/ensure-browser-fallback-static-egress.sh "${GCP_PROJECT}" us-central1 default default
+            FINAL_BROWSER_FALLBACK_SERVICE_URL="${final_browser_fallback_service_url}" bash scripts/deploy-process-audio.sh staging "$GITHUB_SHA"
           else
             echo "Skipping process-audio Cloud Run deploy; no relevant changes detected."
           fi
 
-      - name: Verify staging browser-fallback routing and YouTube resolution
-        if: needs.detect-changes.outputs.anything_to_run == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL: https://youtu.be/dKaZ89SkVYY
-          CLOUDFLARE_ZONE_NAME: upperroommedia.org
-        run: |
-          set -euo pipefail
-          chmod +x scripts/verify-browser-fallback-deployment.sh
-          bash scripts/verify-browser-fallback-deployment.sh \
-            staging \
-            "${GCP_PROJECT}" \
-            "https://urm-app-staging-default-rtdb.firebaseio.com/" \
-            process-audio-staging \
-            urm-app-staging \
-            "${{ steps.deploy.outputs.browser_fallback_service_url }}" \
-            "${{ steps.deploy.outputs.expected_route_pattern }}" \
-            "${{ steps.deploy.outputs.expected_worker_name }}" \
-            "${{ steps.deploy.outputs.final_browser_fallback_service_url }}" \
-            browser-fallback-staging
-
       - name: Ensure staging POT provider public invoker
-        if: needs.detect-changes.outputs.deploy_browser_fallback == 'true' || needs.detect-changes.outputs.deploy_process_audio == 'true'
+        if: needs.detect-changes.outputs.deploy_process_audio == 'true'
         run: bash scripts/ensure-public-cloud-run-invoker.sh "${GCP_PROJECT}" us-central1 ytdlp-pot-provider
 
       - name: No-op for non-deployable changes

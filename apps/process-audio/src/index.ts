@@ -57,9 +57,15 @@ const ytDlpJsRuntimeInfo = validateConfiguredYtDlpJsRuntime();
 const ytDlpSleepRequestsSeconds = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null;
 const ytDlpSleepIntervalSeconds = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null;
 const ytDlpMaxSleepIntervalSeconds = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim() || null;
-const browserFallbackEnabled = ['1', 'true', 'yes'].includes(
-  process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim().toLowerCase() || ''
+const browserFallbackExplicit = process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim().toLowerCase() || '';
+const inProcessBrowserFallbackConfigured = !!(
+  process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim()
 );
+const finalBrowserFallbackConfigured = !!process.env.YOUTUBE_FINAL_BROWSER_FALLBACK_URL?.trim();
+const browserFallbackEnabled =
+  !['0', 'false', 'no'].includes(browserFallbackExplicit) &&
+  (inProcessBrowserFallbackConfigured || finalBrowserFallbackConfigured || !!process.env.YOUTUBE_BROWSER_FALLBACK_URL?.trim());
+const browserFallbackConfigured = browserFallbackEnabled || finalBrowserFallbackConfigured;
 
 logger.info('Service initializing', {
   ytdlpPath,
@@ -71,8 +77,10 @@ logger.info('Service initializing', {
   ytDlpSleepRequestsSeconds,
   ytDlpSleepIntervalSeconds,
   ytDlpMaxSleepIntervalSeconds,
-  browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+  browserFallbackConfigured,
   browserFallbackEnabled,
+  inProcessBrowserFallbackConfigured,
+  finalBrowserFallbackConfigured,
   poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
 });
 
@@ -133,8 +141,10 @@ app.get('/healthz', (req, res) => {
     ok: true,
     service: 'process-audio-cloud-run',
     revision: process.env.K_REVISION || 'local',
-    browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+    browserFallbackConfigured,
     browserFallbackEnabled,
+    inProcessBrowserFallbackConfigured,
+    finalBrowserFallbackConfigured,
     poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
     ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
     ytDlpUseCookiesForPublicVideos: process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false',
@@ -263,7 +273,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       errorType: e?.constructor?.name,
       stack: e instanceof Error ? e.stack : undefined,
       serviceRevision: process.env.K_REVISION || 'local',
-      browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+      browserFallbackConfigured,
       browserFallbackEnabled,
       poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
       youtubeFailureAnalysis: youtubeFailureAnalysis ?? null,
@@ -277,7 +287,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       log.warn('Analyzed YouTube extraction failure', {
         ...youtubeFailureAnalysis,
         browserFallbackError: browserFallbackError ?? null,
-        browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+        browserFallbackConfigured,
         browserFallbackEnabled,
         poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
         ytDlpSleepRequestsSeconds,
@@ -317,7 +327,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
               audioSourceType: audioSource.type,
               audioSource: audioSource.source,
               serviceRevision: process.env.K_REVISION || 'local',
-              browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+              browserFallbackConfigured,
               browserFallbackEnabled,
               poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
               youtubeFailureClass: youtubeFailureClass ?? null,
@@ -375,7 +385,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
               audioSourceType: audioSource.type,
               audioSource: audioSource.source,
               serviceRevision: process.env.K_REVISION || 'local',
-              browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+              browserFallbackConfigured,
               browserFallbackEnabled,
               poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
               youtubeFailureClass: youtubeFailureClass ?? null,
@@ -436,7 +446,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
           audioSourceType: audioSource.type,
           audioSource: audioSource.source,
           serviceRevision: process.env.K_REVISION || 'local',
-          browserFallbackConfigured: !!process.env.YOUTUBE_BROWSER_FALLBACK_URL,
+          browserFallbackConfigured,
           browserFallbackEnabled,
           poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
           youtubeFailureClass: youtubeFailureClass ?? null,

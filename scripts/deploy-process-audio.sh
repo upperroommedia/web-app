@@ -24,7 +24,6 @@ case "$target_environment" in
   staging)
     project_id="urm-app-staging"
     service_name="process-audio-staging"
-    browser_fallback_service_name="browser-fallback-staging"
     firebase_project_id="urm-app-staging"
     firebase_storage_bucket="urm-app-staging.firebasestorage.app"
     firebase_database_url="https://urm-app-staging-default-rtdb.firebaseio.com/"
@@ -32,7 +31,6 @@ case "$target_environment" in
   production|prod|main)
     project_id="urm-app"
     service_name="process-audio"
-    browser_fallback_service_name="browser-fallback"
     firebase_project_id="urm-app"
     firebase_storage_bucket="urm-app.appspot.com"
     firebase_database_url="https://urm-app-default-rtdb.firebaseio.com/"
@@ -60,40 +58,26 @@ if [[ -z "$runtime_service_account" ]]; then
   runtime_service_account="${project_number}-compute@developer.gserviceaccount.com"
 fi
 
-browser_fallback_service_url="${BROWSER_FALLBACK_SERVICE_URL:-}"
-if [[ -z "$browser_fallback_service_url" ]]; then
-  browser_fallback_service_url="$(
-    gcloud run services describe "$browser_fallback_service_name" \
-      --project "$project_id" \
-      --region "$region" \
-      --format='value(status.url)' 2>/dev/null || true
-  )"
-fi
-
 if [[ -z "$network" && -z "$subnet" ]]; then
-  browser_fallback_network_interface_json="$(
-    gcloud run services describe "$browser_fallback_service_name" \
+  process_audio_network_interface_json="$(
+    gcloud run services describe "$service_name" \
       --project "$project_id" \
       --region "$region" \
       --format='value(spec.template.metadata.annotations.run.googleapis.com/network-interfaces)' 2>/dev/null || true
   )"
 
-  if [[ -n "$browser_fallback_network_interface_json" ]]; then
+  if [[ -n "$process_audio_network_interface_json" ]]; then
     network="$(
-      printf '%s' "$browser_fallback_network_interface_json" | python3 -c 'import json,sys; value=sys.stdin.read().strip(); data=json.loads(value) if value else []; print((data[0].get("network") if data else "") or "")'
+      printf '%s' "$process_audio_network_interface_json" | python3 -c 'import json,sys; value=sys.stdin.read().strip(); data=json.loads(value) if value else []; print((data[0].get("network") if data else "") or "")'
     )"
     subnet="$(
-      printf '%s' "$browser_fallback_network_interface_json" | python3 -c 'import json,sys; value=sys.stdin.read().strip(); data=json.loads(value) if value else []; print((data[0].get("subnetwork") if data else "") or "")'
+      printf '%s' "$process_audio_network_interface_json" | python3 -c 'import json,sys; value=sys.stdin.read().strip(); data=json.loads(value) if value else []; print((data[0].get("subnetwork") if data else "") or "")'
     )"
   fi
 fi
 
 browser_fallback_endpoint=""
-browser_fallback_enabled="false"
-if [[ -n "$browser_fallback_service_url" ]]; then
-  browser_fallback_endpoint="${browser_fallback_service_url}/fallback"
-  browser_fallback_enabled="true"
-fi
+browser_fallback_enabled="${YOUTUBE_BROWSER_FALLBACK_ENABLED_OVERRIDE:-true}"
 
 final_browser_fallback_service_url="${FINAL_BROWSER_FALLBACK_SERVICE_URL:-${EXTERNAL_BROWSER_FALLBACK_SERVICE_URL:-}}"
 final_browser_fallback_service_url="${final_browser_fallback_service_url%/}"

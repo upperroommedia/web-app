@@ -19,6 +19,8 @@ import {
   getYouTubeAudioUrl,
   getYouTubeTrimRoutingDecision,
   YTDLP_HTTP_USER_AGENT,
+  extractMediaUrlBindingDetails,
+  logObservedOutboundNetworkIdentity,
 } from './processYouTubeUrl';
 import { readdir } from 'fs/promises';
 import { PassThrough, Readable, finished } from 'stream';
@@ -82,6 +84,10 @@ const trimAndTranscode = async (
   let usedDirectUrlWithSeeking = false; // NEW: Track if using direct URL + FFmpeg seeking approach
   let directUrlHttpHeaders: Record<string, string> | undefined;
   let directUrlRequestUserAgent: string | null = null;
+  let observedDirectUrlOutboundIdentity:
+    | Awaited<ReturnType<typeof logObservedOutboundNetworkIdentity>>
+    | undefined;
+  let directUrlMediaBindingDetails: ReturnType<typeof extractMediaUrlBindingDetails> | undefined;
   let ffmpegStderrBuffer = '';
   const MAX_FFMPEG_STDERR_BUFFER = 20_000;
 
@@ -392,6 +398,8 @@ const trimAndTranscode = async (
       audioSource.type === 'YouTubeUrl' && startTime !== undefined && startTime !== null && usedYtdlpSectionDownload;
 
     if (usedDirectUrlWithSeeking && typeof inputSource === 'string' && inputSource.startsWith('http')) {
+      observedDirectUrlOutboundIdentity = await logObservedOutboundNetworkIdentity(log, 'before_ffmpeg_direct_url_fetch');
+      directUrlMediaBindingDetails = extractMediaUrlBindingDetails(inputSource);
       const ffmpegRequestUserAgent = directUrlHttpHeaders?.['User-Agent'] || directUrlHttpHeaders?.['user-agent'] || null;
       directUrlRequestUserAgent = ffmpegRequestUserAgent || YTDLP_HTTP_USER_AGENT;
       const propagatedHeaders = directUrlHttpHeaders
@@ -503,6 +511,11 @@ const trimAndTranscode = async (
         duration,
         httpHeaderKeys: directUrlHttpHeaders ? Object.keys(directUrlHttpHeaders) : [],
         userAgentHeader: directUrlRequestUserAgent,
+        observedIpv4: observedDirectUrlOutboundIdentity?.ipv4 || null,
+        observedIpv6: observedDirectUrlOutboundIdentity?.ipv6 || null,
+        mediaHost: directUrlMediaBindingDetails?.host || null,
+        mediaBoundIp: directUrlMediaBindingDetails?.boundIp || null,
+        mediaBoundIpFamily: directUrlMediaBindingDetails?.boundIpFamily || null,
         note: isYouTubeLiveDvrManifest
           ? 'Using FFmpeg output seeking (-ss after -i) for YouTube DVR manifest timestamp accuracy'
           : 'Using FFmpeg input seeking (-ss before -i) for efficient HTTP range-based seeking with yt-dlp-provided request headers',

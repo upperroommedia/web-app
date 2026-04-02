@@ -30,6 +30,19 @@ import type {
   BrowserFallbackResolveAudioUrlResponse,
 } from '@upperroom/contracts/browserFallback';
 
+interface ObservedOutboundIdentity {
+  ipv4: string | null;
+  ipv6: string | null;
+  checkedAt: string;
+  cacheHit: boolean;
+}
+
+interface MediaUrlBindingDetails {
+  host: string | null;
+  boundIp: string | null;
+  boundIpFamily: 'ipv4' | 'ipv6' | 'unknown' | null;
+}
+
 /**
  * Result from getYouTubeAudioUrl containing the direct stream URL and metadata
  */
@@ -147,7 +160,14 @@ const YOUTUBE_ACCESS_DECISION_CACHE_TTL_MS = 10 * 60 * 1000;
 const PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_LEASE_PATH = 'processAudioQueues/youtube/browserFallback/profileLease';
 const PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT = 'browser-fallback/profile/chromium-profile.tar.gz';
 const PROCESS_AUDIO_BROWSER_FALLBACK_LEASE_TTL_MS = 10 * 60 * 1000;
+const OBSERVED_OUTBOUND_IDENTITY_TTL_MS = 5 * 60 * 1000;
 const youtubeAccessDecisionCache = new Map<string, { expiresAt: number; decision: YouTubeAccessDecision }>();
+let observedOutboundIdentityCache:
+  | {
+      expiresAt: number;
+      value: Omit<ObservedOutboundIdentity, 'cacheHit'>;
+    }
+  | undefined;
 
 type BrowserFallbackEndpointKind = 'primary' | 'final_resort';
 type BrowserFallbackInvocationKind = 'in_process' | 'external_http';
@@ -264,6 +284,103 @@ function getYtDlpMaxSleepIntervalSeconds(): string | undefined {
   return value || undefined;
 }
 
+function classifyIpFamily(ip: string | null | undefined): 'ipv4' | 'ipv6' | 'unknown' | null {
+  if (!ip) return null;
+  if (ip.includes(':')) return 'ipv6';
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) return 'ipv4';
+  return 'unknown';
+}
+
+async function fetchPublicIp(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': YTDLP_HTTP_USER_AGENT },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const value = (await response.text()).trim();
+    return value || null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function getObservedOutboundIdentity(): Promise<ObservedOutboundIdentity> {
+  const now = Date.now();
+  if (observedOutboundIdentityCache && observedOutboundIdentityCache.expiresAt > now) {
+    return {
+      ...observedOutboundIdentityCache.value,
+      cacheHit: true,
+    };
+  }
+
+  const [ipv4, ipv6] = await Promise.all([
+    fetchPublicIp('https://api.ipify.org'),
+    fetchPublicIp('https://api6.ipify.org'),
+  ]);
+  const value = {
+    ipv4,
+    ipv6,
+    checkedAt: new Date().toISOString(),
+  };
+  observedOutboundIdentityCache = {
+    expiresAt: now + OBSERVED_OUTBOUND_IDENTITY_TTL_MS,
+    value,
+  };
+
+  return {
+    ...value,
+    cacheHit: false,
+  };
+}
+
+export async function logObservedOutboundNetworkIdentity(
+  log: ReturnType<typeof createLoggerWithContext>,
+  phase: string
+): Promise<ObservedOutboundIdentity> {
+  const observed = await getObservedOutboundIdentity();
+  log.info('Observed outbound network identity', {
+    phase,
+    observedIpv4: observed.ipv4,
+    observedIpv6: observed.ipv6,
+    observedIpv4Family: classifyIpFamily(observed.ipv4),
+    observedIpv6Family: classifyIpFamily(observed.ipv6),
+    checkedAt: observed.checkedAt,
+    cacheHit: observed.cacheHit,
+  });
+  return observed;
+}
+
+export function extractMediaUrlBindingDetails(mediaUrl: string | undefined): MediaUrlBindingDetails {
+  if (!mediaUrl) {
+    return {
+      host: null,
+      boundIp: null,
+      boundIpFamily: null,
+    };
+  }
+
+  try {
+    const parsed = new URL(mediaUrl);
+    const boundIp = parsed.searchParams.get('ip');
+    return {
+      host: parsed.hostname || null,
+      boundIp,
+      boundIpFamily: classifyIpFamily(boundIp),
+    };
+  } catch {
+    return {
+      host: null,
+      boundIp: null,
+      boundIpFamily: null,
+    };
+  }
+}
+
 function shouldUseCookiesForPublicVideos(): boolean {
   const value = process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS?.trim()?.toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
@@ -276,10 +393,9 @@ function isInProcessBrowserFallbackEnabled(): boolean {
 }
 
 function isBrowserFallbackEnabled(): boolean {
-  const endpoint = process.env.YOUTUBE_BROWSER_FALLBACK_URL?.trim();
   const explicit = process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim()?.toLowerCase();
   if (explicit === '0' || explicit === 'false' || explicit === 'no') return false;
-  return isInProcessBrowserFallbackEnabled() || !!endpoint;
+  return isInProcessBrowserFallbackEnabled() || !!getFinalResortBrowserFallbackUrl();
 }
 
 function normalizeBrowserFallbackUrl(endpoint: string | undefined): string | undefined {
@@ -287,15 +403,13 @@ function normalizeBrowserFallbackUrl(endpoint: string | undefined): string | und
   return trimmed ? trimmed.replace(/\/+$/, '') : undefined;
 }
 
-function getBrowserFallbackUrl(): string | undefined {
-  return normalizeBrowserFallbackUrl(process.env.YOUTUBE_BROWSER_FALLBACK_URL);
-}
-
 function getFinalResortBrowserFallbackUrl(): string | undefined {
   return normalizeBrowserFallbackUrl(process.env.YOUTUBE_FINAL_BROWSER_FALLBACK_URL);
 }
 
-function getBrowserFallbackAudience(fallbackUrl: string | undefined = getBrowserFallbackUrl()): string | undefined {
+function getBrowserFallbackAudience(
+  fallbackUrl: string | undefined = getFinalResortBrowserFallbackUrl()
+): string | undefined {
   if (!fallbackUrl) return undefined;
 
   try {
@@ -308,14 +422,9 @@ function getBrowserFallbackAudience(fallbackUrl: string | undefined = getBrowser
 
 function getBrowserFallbackTargets(): Array<{ url: string; endpointKind: BrowserFallbackEndpointKind }> {
   const targets: Array<{ url: string; endpointKind: BrowserFallbackEndpointKind }> = [];
-  const primary = getBrowserFallbackUrl();
   const finalResort = getFinalResortBrowserFallbackUrl();
 
-  if (primary && !isInProcessBrowserFallbackEnabled()) {
-    targets.push({ url: primary, endpointKind: 'primary' });
-  }
-
-  if (finalResort && finalResort !== primary) {
+  if (finalResort) {
     targets.push({ url: finalResort, endpointKind: 'final_resort' });
   }
 
@@ -1253,6 +1362,8 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
   let hydratedProfile: { profileDir: string; browserProfileDir: string } | null = null;
 
   try {
+    await logObservedOutboundNetworkIdentity(log, 'before_in_process_browser_fallback_ytdlp');
+
     if (resolution.credentialSource === 'chromium_profile') {
       hydratedProfile = await hydrateInProcessBrowserProfile(realtimeDB);
       fullArgs.push('--cookies-from-browser', `chromium:${hydratedProfile.browserProfileDir}`);
@@ -1660,6 +1771,7 @@ export const getYouTubeAudioUrl = async (
   const cachedDecision = getCachedAccessDecision(ctx, url);
 
   log.info('Extracting YouTube audio stream URL', { url, isDevelopment });
+  await logObservedOutboundNetworkIdentity(log, 'before_ytdlp_direct_url_extraction');
 
   // Build yt-dlp command to get direct URL plus request metadata.
   // We need the selected format's http_headers so ffmpeg can replay
@@ -1733,6 +1845,7 @@ export const getYouTubeAudioUrl = async (
 
     if (streamUrl && streamUrl.startsWith('http')) {
       const httpHeaders = selected?.http_headers && Object.keys(selected.http_headers).length > 0 ? selected.http_headers : undefined;
+      const bindingDetails = extractMediaUrlBindingDetails(streamUrl);
       log.info('Successfully extracted YouTube audio URL', {
         format: selected?.ext || selected?.format_id || 'unknown',
         duration: parsed.duration ?? selected?.duration,
@@ -1741,6 +1854,9 @@ export const getYouTubeAudioUrl = async (
         usedCookies: attemptUsesCookies,
         httpHeaderKeys: httpHeaders ? Object.keys(httpHeaders) : [],
         userAgentHeader: httpHeaders?.['User-Agent'] || null,
+        mediaHost: bindingDetails.host,
+        mediaBoundIp: bindingDetails.boundIp,
+        mediaBoundIpFamily: bindingDetails.boundIpFamily,
       });
       return {
         url: streamUrl,
