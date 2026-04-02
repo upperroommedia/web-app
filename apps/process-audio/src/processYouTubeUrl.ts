@@ -386,6 +386,17 @@ function shouldUseCookiesForPublicVideos(): boolean {
   return value === '1' || value === 'true' || value === 'yes';
 }
 
+export function shouldForceIpv4ForYouTube(): boolean {
+  const value = process.env.YOUTUBE_FORCE_IPV4?.trim()?.toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+function applyPreferredIpFamilyArgs(args: string[]): void {
+  if (shouldForceIpv4ForYouTube()) {
+    args.push('-4');
+  }
+}
+
 function isInProcessBrowserFallbackEnabled(): boolean {
   const explicit = process.env.PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED?.trim()?.toLowerCase();
   if (explicit === '0' || explicit === 'false' || explicit === 'no') return false;
@@ -988,6 +999,7 @@ async function runCookieHealthcheck(
   if (!cookieContext.hasCookies || !shouldEnableCookieHealthcheck()) return;
 
   const args = ['-J', '--no-playlist', '--skip-download', '--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime()];
+  applyPreferredIpFamilyArgs(args);
   applyYtDlpRequestPacingArgs(args);
   args.push(...cookieContext.args);
   applyYouTubeExtractorArgs(args, 'cookie_provider', log);
@@ -1363,6 +1375,7 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
 
   try {
     await logObservedOutboundNetworkIdentity(log, 'before_in_process_browser_fallback_ytdlp');
+    applyPreferredIpFamilyArgs(fullArgs);
 
     if (resolution.credentialSource === 'chromium_profile') {
       hydratedProfile = await hydrateInProcessBrowserProfile(realtimeDB);
@@ -1483,6 +1496,7 @@ export const getYouTubeTrimRoutingDecision = async (
     };
   }
   const baseArgs = ['-J', '--no-playlist', '-f', 'bestaudio/best', '--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime()];
+  applyPreferredIpFamilyArgs(baseArgs);
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
 
@@ -1785,6 +1799,7 @@ export const getYouTubeAudioUrl = async (
     '--js-runtimes',
     getPreferredYtDlpJsRuntime(),
   ];
+  applyPreferredIpFamilyArgs(baseArgs);
   applyYtDlpRequestPacingArgs(baseArgs);
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
@@ -2244,6 +2259,7 @@ export const processYouTubeUrl = async (
   // Pipes output to stdout - downloads FULL stream, seeking handled by our FFmpeg
   // NOTE: For precise section downloads with seeking, use getYouTubeAudioUrl + FFmpeg input seeking instead
   const args = ['-f', 'bestaudio/best', '-N', getYtDlpConcurrentFragments(), '--no-playlist', '-o', '-'];
+  applyPreferredIpFamilyArgs(args);
   applyYtDlpRequestPacingArgs(args);
   let cookieContext: YouTubeCookieContext | undefined;
   if (shouldUseCookiesForPublicVideos()) {
@@ -2387,6 +2403,7 @@ async function getYouTubeAudioFragments(
 ): Promise<YouTubeAudioFragmentsResult> {
   ensureProductionPoTokenProviderConfigured(isDevelopment);
   const baseArgs = ['-J', '--no-playlist', '-f', 'bestaudio/best', '--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime()];
+  applyPreferredIpFamilyArgs(baseArgs);
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
 
@@ -2821,6 +2838,7 @@ export const downloadYouTubeSection = async (
     '-o',
     `${outputFilePath}.%(ext)s`, // Let yt-dlp add extension based on format (webm, m4a, etc.)
   ];
+  applyPreferredIpFamilyArgs(baseArgs);
   applyYtDlpRequestPacingArgs(baseArgs);
 
   // yt-dlp needs ffmpeg for --download-sections and --force-keyframes-at-cuts

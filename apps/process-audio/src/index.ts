@@ -57,6 +57,7 @@ const ytDlpJsRuntimeInfo = validateConfiguredYtDlpJsRuntime();
 const ytDlpSleepRequestsSeconds = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null;
 const ytDlpSleepIntervalSeconds = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null;
 const ytDlpMaxSleepIntervalSeconds = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim() || null;
+const ytDlpForceIpv4 = process.env.YOUTUBE_FORCE_IPV4?.trim() || 'false';
 const browserFallbackExplicit = process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim().toLowerCase() || '';
 const inProcessBrowserFallbackConfigured = !!(
   process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim()
@@ -77,6 +78,7 @@ logger.info('Service initializing', {
   ytDlpSleepRequestsSeconds,
   ytDlpSleepIntervalSeconds,
   ytDlpMaxSleepIntervalSeconds,
+  ytDlpForceIpv4,
   browserFallbackConfigured,
   browserFallbackEnabled,
   inProcessBrowserFallbackConfigured,
@@ -151,6 +153,7 @@ app.get('/healthz', (req, res) => {
     ytDlpSleepRequestsSeconds,
     ytDlpSleepIntervalSeconds,
     ytDlpMaxSleepIntervalSeconds,
+    ytDlpForceIpv4,
   });
 });
 

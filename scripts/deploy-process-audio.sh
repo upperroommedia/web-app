@@ -84,6 +84,7 @@ fi
 
 browser_fallback_endpoint=""
 browser_fallback_enabled="${YOUTUBE_BROWSER_FALLBACK_ENABLED_OVERRIDE:-true}"
+youtube_force_ipv4="${YOUTUBE_FORCE_IPV4_OVERRIDE:-true}"
 
 final_browser_fallback_service_url="${FINAL_BROWSER_FALLBACK_SERVICE_URL:-${EXTERNAL_BROWSER_FALLBACK_SERVICE_URL:-}}"
 final_browser_fallback_service_url="${final_browser_fallback_service_url%/}"
@@ -132,4 +133,4 @@ gcloud builds submit . \
   --project="$project_id" \
   --config="apps/process-audio/cloudbuild.yaml" \
   --ignore-file="apps/process-audio/.gcloudignore" \
-  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url},_YOUTUBE_BROWSER_FALLBACK_ENABLED=${browser_fallback_enabled},_YOUTUBE_BROWSER_FALLBACK_URL=${browser_fallback_endpoint},_YOUTUBE_FINAL_BROWSER_FALLBACK_URL=${final_browser_fallback_endpoint},_DEPLOY_POT_PROVIDER=${deploy_pot_provider},_POT_PROVIDER_URL=${pot_provider_url},_BROWSER_FALLBACK_SHARED_SECRET_SECRET=${browser_fallback_shared_secret_secret},_NETWORK=${network},_SUBNET=${subnet}"
+  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url},_YOUTUBE_BROWSER_FALLBACK_ENABLED=${browser_fallback_enabled},_YOUTUBE_BROWSER_FALLBACK_URL=${browser_fallback_endpoint},_YOUTUBE_FINAL_BROWSER_FALLBACK_URL=${final_browser_fallback_endpoint},_YOUTUBE_FORCE_IPV4=${youtube_force_ipv4},_DEPLOY_POT_PROVIDER=${deploy_pot_provider},_POT_PROVIDER_URL=${pot_provider_url},_BROWSER_FALLBACK_SHARED_SECRET_SECRET=${browser_fallback_shared_secret_secret},_NETWORK=${network},_SUBNET=${subnet}"
