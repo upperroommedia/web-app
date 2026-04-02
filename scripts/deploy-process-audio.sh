@@ -76,6 +76,12 @@ if [[ -z "$network" && -z "$subnet" ]]; then
   fi
 fi
 
+if [[ -z "$network" && -z "$subnet" ]]; then
+  network="default"
+  subnet="default"
+  echo "Defaulting process-audio direct VPC egress to ${network}/${subnet}." >&2
+fi
+
 browser_fallback_endpoint=""
 browser_fallback_enabled="${YOUTUBE_BROWSER_FALLBACK_ENABLED_OVERRIDE:-true}"
 
