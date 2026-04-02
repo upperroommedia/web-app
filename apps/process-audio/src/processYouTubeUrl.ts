@@ -2394,6 +2394,191 @@ export const processYouTubeUrl = async (
   return ytdlp;
 };
 
+export const downloadYouTubeAudioToFile = async (
+  ytdlpPath: string,
+  url: YouTubeUrl,
+  outputFilePath: string,
+  cancelToken: CancelToken,
+  updateProgressCallback: (progress: number) => void,
+  realtimeDB: Database,
+  ctx?: LogContext
+): Promise<string> => {
+  const log = createLoggerWithContext(ctx);
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  ensureProductionPoTokenProviderConfigured(isDevelopment);
+
+  if (cancelToken.isCancellationRequested) {
+    throw new Error('Download operation was cancelled');
+  }
+
+  const baseArgs = [
+    '-f',
+    'bestaudio/best',
+    '-N',
+    getYtDlpConcurrentFragments(),
+    '--no-playlist',
+    '-o',
+    `${outputFilePath}.%(ext)s`,
+  ];
+  applyPreferredIpFamilyArgs(baseArgs);
+  applyYtDlpRequestPacingArgs(baseArgs);
+  baseArgs.push('--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());
+
+  let cookieContext: YouTubeCookieContext | undefined;
+  const cleaned = { done: false };
+
+  const buildAttemptArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
+    const args = [...baseArgs];
+    if (extraCookieArgs.length > 0) {
+      args.push(...extraCookieArgs);
+    }
+    applyYouTubeExtractorArgs(args, mode, log);
+    args.push(url);
+    return args;
+  };
+
+  const runDownloadAttempt = async (mode: YouTubeExtractionMode, attemptArgs: string[]): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      let previousPercent = -1;
+      let stderrBuffer = '';
+      let settled = false;
+
+      const rejectOnce = (error: Error): void => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+
+      const resolveOnce = (filePath: string): void => {
+        if (settled) return;
+        settled = true;
+        resolve(filePath);
+      };
+
+      const command = `${ytdlpPath} ${attemptArgs.join(' ')}`;
+      log.info('Executing yt-dlp full audio download', {
+        command,
+        outputFilePath,
+        attempt: mode,
+        usedCookies: mode === 'cookie_provider',
+      });
+
+      const ytdlp = spawn(ytdlpPath, attemptArgs);
+
+      ytdlp.on('error', (err) => {
+        rejectOnce(new Error(`yt-dlp spawn error: ${err}`));
+      });
+
+      ytdlp.on('close', (code, signal) => {
+        if (settled) return;
+        const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
+        const dir = path.dirname(safeOutputFilePath);
+        const baseName = path.basename(safeOutputFilePath);
+        let files: string[] = [];
+        try {
+          files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+        } catch {
+          // Ignore readdir errors
+        }
+
+        if (code === 0) {
+          const actualFile = files.find((f) => {
+            const fileBase = path.basename(f, path.extname(f));
+            return fileBase === baseName || f.startsWith(baseName);
+          });
+
+          if (actualFile) {
+            resolveOnce(ensureSafeTempPath(path.join(dir, actualFile)));
+            return;
+          }
+          if (fs.existsSync(safeOutputFilePath)) {
+            resolveOnce(safeOutputFilePath);
+            return;
+          }
+          rejectOnce(new Error(`Output file was not created. Expected file starting with: ${baseName}`));
+          return;
+        }
+
+        rejectOnce(
+          buildAnnotatedYouTubeError(
+            `yt-dlp full download exited with code ${code}${signal ? ` (signal: ${signal})` : ''}. stderr: ${stderrBuffer}`,
+            mode
+          )
+        );
+      });
+
+      ytdlp.stderr.on('data', (data) => {
+        if (cancelToken.isCancellationRequested) {
+          ytdlp.kill('SIGTERM');
+          rejectOnce(new Error('Download operation was cancelled'));
+          return;
+        }
+
+        const stderrStr = data.toString();
+        if (stderrBuffer.length < 50_000) {
+          stderrBuffer += stderrStr;
+        }
+        if (stderrStr.includes('download')) {
+          const percent = extractPercent(stderrStr);
+          if (percent !== null) {
+            const percentInt = Math.floor(percent);
+            if (percentInt !== previousPercent) {
+              previousPercent = percentInt;
+              updateProgressCallback(percent);
+            }
+          }
+        }
+      });
+    });
+
+  try {
+    if (shouldUseCookiesForPublicVideos()) {
+      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+      if (cookieContext.cookieBreakerOpen) {
+        throw buildAnnotatedYouTubeError(
+          'Configured cookie-backed YouTube session is disabled by the cookie circuit breaker.',
+          'cookie_provider'
+        );
+      }
+
+      if (shouldPreferCookieProvider(cookieContext)) {
+        const activeCookieContext = cookieContext;
+        await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+        return await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
+          runDownloadAttempt('cookie_provider', buildAttemptArgs('cookie_provider', activeCookieContext.args))
+        );
+      }
+    }
+
+    try {
+      return await runAttemptWithRetries(getYouTubePublicProviderMaxAttempts(), () =>
+        runDownloadAttempt('public_provider', buildAttemptArgs('public_provider'))
+      );
+    } catch (publicError) {
+      const publicMessage = publicError instanceof Error ? publicError.message : String(publicError);
+      const publicFailureClass = classifyYouTubeFailure(publicMessage, 'public_provider');
+      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+      if (
+        shouldEscalateToCookieProvider(
+          publicFailureClass,
+          cookieContext.hasCookies,
+          shouldUseCookiesForPublicVideos()
+        )
+      ) {
+        const activeCookieContext = cookieContext;
+        await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+        return await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
+          runDownloadAttempt('cookie_provider', buildAttemptArgs('cookie_provider', activeCookieContext.args))
+        );
+      }
+
+      throw buildAnnotatedYouTubeError(publicMessage, 'public_provider');
+    }
+  } finally {
+    cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);
+  }
+};
+
 async function getYouTubeAudioFragments(
   ytdlpPath: string,
   url: YouTubeUrl,
