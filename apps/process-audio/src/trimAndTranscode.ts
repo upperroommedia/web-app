@@ -21,7 +21,6 @@ import {
   YTDLP_HTTP_USER_AGENT,
   extractMediaUrlBindingDetails,
   logObservedOutboundNetworkIdentity,
-  shouldForceIpv4ForYouTube,
 } from './processYouTubeUrl';
 import { readdir } from 'fs/promises';
 import { PassThrough, Readable, finished } from 'stream';
@@ -415,9 +414,6 @@ const trimAndTranscode = async (
       // For YouTube live DVR manifests, prefer output seeking (-ss after -i) for timestamp accuracy.
       const isYouTubeLiveDvrManifest = isTrustedYouTubeLiveDvrManifestUrl(inputSource);
 
-      if (shouldForceIpv4ForYouTube()) {
-        args.push('-4');
-      }
       args.push('-user_agent', directUrlRequestUserAgent);
       if (ffmpegHeaders) {
         args.push('-headers', `${ffmpegHeaders}\r\n`);
