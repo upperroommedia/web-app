@@ -17,6 +17,8 @@ region="us-central1"
 artifact_registry_repo="process-audio-repo"
 image_name="process-audio"
 runtime_service_account="${RUNTIME_SERVICE_ACCOUNT:-}"
+network="${PROCESS_AUDIO_NETWORK:-}"
+subnet="${PROCESS_AUDIO_SUBNET:-}"
 
 case "$target_environment" in
   staging)
@@ -66,6 +68,24 @@ if [[ -z "$browser_fallback_service_url" ]]; then
       --region "$region" \
       --format='value(status.url)' 2>/dev/null || true
   )"
+fi
+
+if [[ -z "$network" && -z "$subnet" ]]; then
+  browser_fallback_network_interface_json="$(
+    gcloud run services describe "$browser_fallback_service_name" \
+      --project "$project_id" \
+      --region "$region" \
+      --format='value(spec.template.metadata.annotations.run.googleapis.com/network-interfaces)' 2>/dev/null || true
+  )"
+
+  if [[ -n "$browser_fallback_network_interface_json" ]]; then
+    network="$(
+      printf '%s' "$browser_fallback_network_interface_json" | python3 -c 'import json,sys; value=sys.stdin.read().strip(); data=json.loads(value) if value else []; print((data[0].get("network") if data else "") or "")'
+    )"
+    subnet="$(
+      printf '%s' "$browser_fallback_network_interface_json" | python3 -c 'import json,sys; value=sys.stdin.read().strip(); data=json.loads(value) if value else []; print((data[0].get("subnetwork") if data else "") or "")'
+    )"
+  fi
 fi
 
 browser_fallback_endpoint=""
@@ -122,4 +142,4 @@ gcloud builds submit . \
   --project="$project_id" \
   --config="apps/process-audio/cloudbuild.yaml" \
   --ignore-file="apps/process-audio/.gcloudignore" \
-  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url},_YOUTUBE_BROWSER_FALLBACK_ENABLED=${browser_fallback_enabled},_YOUTUBE_BROWSER_FALLBACK_URL=${browser_fallback_endpoint},_YOUTUBE_FINAL_BROWSER_FALLBACK_URL=${final_browser_fallback_endpoint},_DEPLOY_POT_PROVIDER=${deploy_pot_provider},_POT_PROVIDER_URL=${pot_provider_url},_BROWSER_FALLBACK_SHARED_SECRET_SECRET=${browser_fallback_shared_secret_secret}"
+  --substitutions="COMMIT_SHA=${commit_sha},_PROJECT_ID=${project_id},_REGION=${region},_AR_REPO=${artifact_registry_repo},_IMAGE_NAME=${image_name},_SERVICE_NAME=${service_name},_FIREBASE_PROJECT_ID=${firebase_project_id},_FIREBASE_STORAGE_BUCKET=${firebase_storage_bucket},_FIREBASE_DATABASE_URL=${firebase_database_url},_YOUTUBE_BROWSER_FALLBACK_ENABLED=${browser_fallback_enabled},_YOUTUBE_BROWSER_FALLBACK_URL=${browser_fallback_endpoint},_YOUTUBE_FINAL_BROWSER_FALLBACK_URL=${final_browser_fallback_endpoint},_DEPLOY_POT_PROVIDER=${deploy_pot_provider},_POT_PROVIDER_URL=${pot_provider_url},_BROWSER_FALLBACK_SHARED_SECRET_SECRET=${browser_fallback_shared_secret_secret},_NETWORK=${network},_SUBNET=${subnet}"
