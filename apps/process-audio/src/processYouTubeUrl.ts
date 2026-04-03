@@ -1357,6 +1357,18 @@ async function hydrateInProcessBrowserProfile(realtimeDB: Database): Promise<{ p
   }
 }
 
+async function withHydratedInProcessBrowserProfile<T>(
+  realtimeDB: Database,
+  run: (profile: { profileDir: string; browserProfileDir: string }) => Promise<T>
+): Promise<T> {
+  const hydratedProfile = await hydrateInProcessBrowserProfile(realtimeDB);
+  try {
+    return await run(hydratedProfile);
+  } finally {
+    await rm(hydratedProfile.profileDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function resolveAudioUrlWithInProcessBrowserFallback(
   ytdlpPath: string,
   youtubeUrl: string,
@@ -2437,6 +2449,19 @@ export const downloadYouTubeAudioToFile = async (
     return args;
   };
 
+  const runBrowserProfileAttempt = async (): Promise<string> =>
+    await withHydratedInProcessBrowserProfile(realtimeDB, async ({ browserProfileDir }) => {
+      const attemptArgs = buildAttemptArgs('browser_fallback', ['--cookies-from-browser', `chromium:${browserProfileDir}`]);
+      log.info('Executing yt-dlp full audio download with in-process browser profile', {
+        url,
+        outputFilePath,
+        credentialSource: 'chromium_profile',
+        browserFallbackInvocationKind: 'in_process',
+        command: `${ytdlpPath} ${attemptArgs.join(' ')}`,
+      });
+      return await runDownloadAttempt('browser_fallback', attemptArgs);
+    });
+
   const runDownloadAttempt = async (mode: YouTubeExtractionMode, attemptArgs: string[]): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       let previousPercent = -1;
@@ -2557,6 +2582,18 @@ export const downloadYouTubeAudioToFile = async (
     } catch (publicError) {
       const publicMessage = publicError instanceof Error ? publicError.message : String(publicError);
       const publicFailureClass = classifyYouTubeFailure(publicMessage, 'public_provider');
+      if (isInProcessBrowserFallbackEnabled()) {
+        try {
+          return await runBrowserProfileAttempt();
+        } catch (browserProfileError) {
+          log.warn('In-process browser profile full audio download failed after public provider failure', {
+            url,
+            publicFailureClass,
+            publicError: publicMessage,
+            browserProfileError: browserProfileError instanceof Error ? browserProfileError.message : String(browserProfileError),
+          });
+        }
+      }
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (
         shouldEscalateToCookieProvider(
@@ -2659,6 +2696,16 @@ async function getYouTubeAudioFragments(
     return parseJson(stdout);
   };
 
+  const tryBrowserProfileAttempt = async (): Promise<YouTubeAudioFragmentsResult> =>
+    await withHydratedInProcessBrowserProfile(realtimeDB, async ({ browserProfileDir }) => {
+      log.info('Extracting YouTube fragment metadata with in-process browser profile', {
+        url,
+        credentialSource: 'chromium_profile',
+        browserFallbackInvocationKind: 'in_process',
+      });
+      return await tryAttempt('browser_fallback', ['--cookies-from-browser', `chromium:${browserProfileDir}`]);
+    });
+
   try {
     if (shouldUseCookiesForPublicVideos()) {
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
@@ -2715,6 +2762,19 @@ async function getYouTubeAudioFragments(
         failureClass: publicFailureClass,
         error: publicMessage,
       });
+
+      if (isInProcessBrowserFallbackEnabled()) {
+        try {
+          return await tryBrowserProfileAttempt();
+        } catch (browserProfileError) {
+          log.warn('In-process browser profile fragment metadata extraction failed after public provider failure', {
+            url,
+            publicFailureClass,
+            publicError: publicMessage,
+            browserProfileError: browserProfileError instanceof Error ? browserProfileError.message : String(browserProfileError),
+          });
+        }
+      }
 
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (
@@ -3049,6 +3109,21 @@ export const downloadYouTubeSection = async (
     return args;
   };
 
+  const runBrowserProfileSectionAttempt = async (): Promise<string> =>
+    await withHydratedInProcessBrowserProfile(realtimeDB, async ({ browserProfileDir }) => {
+      const attemptArgs = buildAttemptArgs('browser_fallback', ['--cookies-from-browser', `chromium:${browserProfileDir}`]);
+      log.info('Executing yt-dlp section download with in-process browser profile', {
+        url,
+        sectionRange,
+        outputFilePath,
+        credentialSource: 'chromium_profile',
+        browserFallbackInvocationKind: 'in_process',
+        command: `${ytdlpPath} ${attemptArgs.join(' ')}`,
+        note: 'Using --force-keyframes-at-cuts for frame-accurate cuts at exact start/end times',
+      });
+      return await runSectionDownloadAttempt('browser_fallback', attemptArgs);
+    });
+
   const runSectionDownloadAttempt = async (
     mode: YouTubeExtractionMode,
     attemptArgs: string[]
@@ -3333,6 +3408,40 @@ export const downloadYouTubeSection = async (
       const publicMessage = publicError instanceof Error ? publicError.message : String(publicError);
       const publicFailureClass = classifyYouTubeFailure(publicMessage, 'public_provider');
       const shouldUseBrowserFallback = shouldUseBrowserFallbackForPublicFailure(publicMessage);
+
+      if (isInProcessBrowserFallbackEnabled()) {
+        try {
+          const browserProfileResult = await runBrowserProfileSectionAttempt();
+          setCachedAccessDecision(ctx, url, {
+            state: 'browser_required',
+            mode: 'browser_fallback',
+            reason: 'section_download_in_process_browser_profile_success',
+            publicFailureClass,
+            publicFailureMessage: publicMessage,
+            decidedAt: getNowIsoString(),
+          });
+          logSelectedYouTubeServingPath(log, {
+            youtubeUrl: url,
+            outputType: 'download_section',
+            selectedMode: 'browser_fallback',
+            browserFallbackInvocationKind: 'in_process',
+            credentialSource: 'chromium_profile',
+            browserFallbackStrategy: getInProcessBrowserFallbackStrategy(),
+            browserFallbackServiceRole: getInProcessBrowserFallbackServiceRole(),
+            decisionReason: 'section_download_in_process_browser_profile_success',
+            publicFailureClass,
+          });
+          return browserProfileResult;
+        } catch (browserProfileError) {
+          log.warn('In-process browser profile section download failed after public provider failure', {
+            url,
+            sectionRange,
+            publicFailureClass,
+            publicError: publicMessage,
+            browserProfileError: browserProfileError instanceof Error ? browserProfileError.message : String(browserProfileError),
+          });
+        }
+      }
 
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (
