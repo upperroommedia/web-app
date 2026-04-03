@@ -9,12 +9,14 @@ services:
 
   browser-auth:
     image: lscr.io/linuxserver/chromium:latest
+    profiles:
+      - browser-auth
     shm_size: "1gb"
     environment:
       PUID: 1000
       PGID: 1000
       TZ: UTC
-      CHROME_CLI: --password-store=basic
+      CHROME_CLI: /config/.config/chromium
     volumes:
       - ./state/shared-browser-profile:/config
     ports:

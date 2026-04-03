@@ -77,10 +77,9 @@ Then run:
 The deploy script will:
 
 1. pull Firebase and runtime secrets from GCP
-2. resolve the existing `ytdlp-pot-provider` URL for both staging and production
-3. generate both env files
-4. sync the stack to the VM
-5. build and start the requested containers with Docker Compose
+2. generate both env files
+3. sync the stack to the VM
+4. build and start the requested containers with Docker Compose
 
 ## Deploying Production
 
@@ -106,17 +105,41 @@ Then run one authenticated or public YouTube request against `/process-audio` an
 - `yt-dlp` stderr
 - `ffmpeg` stderr tail on failure
 
+## Temporary Browser Login
+
+The `browser-auth` service is manual-only and should only be started when you need to refresh the shared browser profile.
+
+Start it:
+
+```bash
+ssh root@<hetzner-ip> "cd /opt/upperroom/process-audio-hetzner && docker compose --profile browser-auth up -d browser-auth"
+```
+
+Tunnel it locally:
+
+```bash
+ssh -L 3010:127.0.0.1:3010 root@<hetzner-ip>
+```
+
+Then open `http://127.0.0.1:3010` in your local browser.
+
+Stop it after login so CPU usage returns to normal:
+
+```bash
+ssh root@<hetzner-ip> "cd /opt/upperroom/process-audio-hetzner && docker compose stop browser-auth"
+```
+
 ## Important Runtime Defaults
 
 This VM stack intentionally restores the direct URL + `ffmpeg` model.
 
-- `YOUTUBE_BROWSER_FALLBACK_ENABLED=false`
+- `YOUTUBE_BROWSER_FALLBACK_ENABLED=true`
 - `YOUTUBE_BROWSER_FALLBACK_URL=`
 - `YOUTUBE_FINAL_BROWSER_FALLBACK_URL=`
 - `YOUTUBE_FORCE_IPV4=false`
-- `YTDLP_POT_PROVIDER_BASE_URL=<resolved from the target GCP project>`
+- `YTDLP_POT_PROVIDER_BASE_URL=http://ytdlp-pot-provider:4416`
 
-The VM itself is the dedicated runtime. Do not point it at another fallback worker unless you intentionally add a second-tier fallback later.
+The VM itself is the dedicated runtime. The in-process browser fallback reads the shared Chromium profile from the local persistent volume.
 
 Staging and production share the same VM, but they do not share runtime env:
 
