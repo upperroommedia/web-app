@@ -16,6 +16,7 @@ describe('reconcileAdminSermonSearchResults', () => {
       algoliaHits: [pendingSermon],
       pendingSermons: [pendingSermon],
       showPendingOverlay: true,
+      liveHitHydrationSettled: false,
       hasSettledResults: false,
       liveSermonsById: { [pendingSermon.id]: pendingSermon },
       resolvedLiveSermonIds: new Set([pendingSermon.id]),
@@ -26,7 +27,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     expect(result.displayRows).toEqual([
       {
         sermon: pendingSermon,
-        enableProcessingProgress: true,
+        enableProcessingProgress: false,
       },
     ]);
   });
@@ -40,6 +41,7 @@ describe('reconcileAdminSermonSearchResults', () => {
       algoliaHits: [deletedSermonHit],
       pendingSermons: [],
       showPendingOverlay: true,
+      liveHitHydrationSettled: true,
       hasSettledResults: true,
       liveSermonsById: {},
       resolvedLiveSermonIds: new Set([deletedSermonHit.id]),
@@ -67,6 +69,7 @@ describe('reconcileAdminSermonSearchResults', () => {
       algoliaHits: [pendingSermon, indexedSermon],
       pendingSermons: [pendingSermon],
       showPendingOverlay: true,
+      liveHitHydrationSettled: true,
       hasSettledResults: true,
       liveSermonsById: {
         [pendingSermon.id]: pendingSermon,
@@ -78,6 +81,54 @@ describe('reconcileAdminSermonSearchResults', () => {
     expect(result.displayRows.map((row) => [row.sermon.id, row.enableProcessingProgress])).toEqual([
       [pendingSermon.id, true],
       [indexedSermon.id, false],
+    ]);
+  });
+
+  it('suppresses Algolia rows until live hydration settles on the default first page', () => {
+    const indexedSermon = createSermon({
+      id: 'indexed-sermon',
+    });
+
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [indexedSermon],
+      pendingSermons: [],
+      showPendingOverlay: true,
+      liveHitHydrationSettled: false,
+      hasSettledResults: true,
+      liveSermonsById: {},
+      resolvedLiveSermonIds: new Set<string>(),
+    });
+
+    expect(result.visibleAlgoliaHits).toHaveLength(0);
+    expect(result.displayRows).toEqual([]);
+  });
+
+  it('keeps processing progress enabled for processing sermons rendered from Algolia hits', () => {
+    const processingSermon = createSermon({
+      id: 'processing-sermon',
+      status: {
+        ...createSermon().status,
+        audioStatus: sermonStatusType.PROCESSING,
+      },
+    });
+
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [processingSermon],
+      pendingSermons: [],
+      showPendingOverlay: false,
+      liveHitHydrationSettled: true,
+      hasSettledResults: true,
+      liveSermonsById: {
+        [processingSermon.id]: processingSermon,
+      },
+      resolvedLiveSermonIds: new Set([processingSermon.id]),
+    });
+
+    expect(result.displayRows).toEqual([
+      {
+        sermon: processingSermon,
+        enableProcessingProgress: true,
+      },
     ]);
   });
 });

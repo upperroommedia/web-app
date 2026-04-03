@@ -4,6 +4,7 @@ interface ReconcileAdminSermonSearchResultsInput {
   algoliaHits: Sermon[];
   pendingSermons: Sermon[];
   showPendingOverlay: boolean;
+  liveHitHydrationSettled: boolean;
   hasSettledResults: boolean;
   liveSermonsById: Record<string, Sermon>;
   resolvedLiveSermonIds: Set<string>;
@@ -29,13 +30,16 @@ export const reconcileAdminSermonSearchResults = ({
   algoliaHits,
   pendingSermons,
   showPendingOverlay,
+  liveHitHydrationSettled,
   hasSettledResults,
   liveSermonsById,
   resolvedLiveSermonIds,
 }: ReconcileAdminSermonSearchResultsInput): ReconcileAdminSermonSearchResultsOutput => {
-  const confirmedAlgoliaHits = algoliaHits
-    .filter((sermon) => !resolvedLiveSermonIds.has(sermon.id) || Boolean(liveSermonsById[sermon.id]))
-    .map((sermon) => liveSermonsById[sermon.id] ?? sermon);
+  const confirmedAlgoliaHits = (!showPendingOverlay || liveHitHydrationSettled)
+    ? algoliaHits
+      .filter((sermon) => !resolvedLiveSermonIds.has(sermon.id) || Boolean(liveSermonsById[sermon.id]))
+      .map((sermon) => liveSermonsById[sermon.id] ?? sermon)
+    : [];
 
   const confirmedVisibleHitIds = new Set(confirmedAlgoliaHits.map((sermon) => sermon.id));
   const visibleHitIdsForPendingDedup = hasSettledResults ? confirmedVisibleHitIds : new Set<string>();
@@ -56,13 +60,13 @@ export const reconcileAdminSermonSearchResults = ({
     displayRows: [
       ...visiblePendingSermons.map((sermon) => ({
         sermon,
-        enableProcessingProgress: true,
+        enableProcessingProgress: sermon.status.audioStatus === sermonStatusType.PROCESSING,
       })),
       ...confirmedAlgoliaHits
         .filter((sermon) => !visiblePendingIds.has(sermon.id))
         .map((sermon) => ({
           sermon,
-          enableProcessingProgress: false,
+          enableProcessingProgress: sermon.status.audioStatus === sermonStatusType.PROCESSING,
         })),
     ],
   };

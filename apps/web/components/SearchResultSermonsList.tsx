@@ -15,8 +15,8 @@ import firestore, {
   deleteField,
   doc,
   documentId,
+  getDocs,
   limit,
-  onSnapshot,
   orderBy,
   query,
   updateDoc,
@@ -43,68 +43,75 @@ const chunkIds = (ids: string[], chunkSize: number): string[][] => {
   return chunks;
 };
 
-const useLiveVisibleSermons = (sermonIds: string[]) => {
+const useLiveVisibleSermons = (sermonIds: string[], enabled: boolean) => {
   const [state, setState] = useState<{
+    hydratedKey: string;
     liveSermonsById: Record<string, Sermon>;
     resolvedIds: Set<string>;
   }>({
+    hydratedKey: '',
     liveSermonsById: {},
     resolvedIds: new Set<string>(),
   });
+  const visibleIdsKey = useMemo(() => sermonIds.join(','), [sermonIds]);
 
   useEffect(() => {
-    if (sermonIds.length === 0) {
+    if (!enabled || sermonIds.length === 0) {
       return;
     }
 
-    const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon> }>();
-    const updateState = () => {
+    let cancelled = false;
+    const idChunks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT);
+    const hydrateVisibleHits = async () => {
       const nextLiveSermonsById: Record<string, Sermon> = {};
       const nextResolvedIds = new Set<string>();
 
-      chunkSnapshots.forEach(({ ids, records }) => {
-        ids.forEach((id) => nextResolvedIds.add(id));
-        Object.assign(nextLiveSermonsById, records);
-      });
+      await Promise.all(
+        idChunks.map(async (idChunk) => {
+          const sermonsQuery = query(
+            collection(firestore, 'sermons').withConverter(sermonConverter),
+            where(documentId(), 'in', idChunk)
+          );
+          const snapshot = await getDocs(sermonsQuery);
+
+          const nextChunkRecords: Record<string, Sermon> = {};
+          snapshot.docs.forEach((docSnapshot) => {
+            nextChunkRecords[docSnapshot.id] = docSnapshot.data();
+          });
+
+          idChunk.forEach((id) => nextResolvedIds.add(id));
+          Object.assign(nextLiveSermonsById, nextChunkRecords);
+        })
+      );
+
+      if (cancelled) {
+        return;
+      }
 
       setState({
+        hydratedKey: visibleIdsKey,
         liveSermonsById: nextLiveSermonsById,
         resolvedIds: nextResolvedIds,
       });
     };
 
-    const unsubscribeCallbacks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
-      const sermonsQuery = query(
-        collection(firestore, 'sermons').withConverter(sermonConverter),
-        where(documentId(), 'in', idChunk)
-      );
-
-      return onSnapshot(
-        sermonsQuery,
-        (snapshot) => {
-          const nextChunkRecords: Record<string, Sermon> = {};
-          snapshot.docs.forEach((docSnapshot) => {
-            nextChunkRecords[docSnapshot.id] = docSnapshot.data();
-          });
-          chunkSnapshots.set(chunkIndex, { ids: idChunk, records: nextChunkRecords });
-          updateState();
-        },
-        (error) => {
-          console.error('Failed to hydrate visible sermon hits from Firestore', error);
-        }
-      );
+    hydrateVisibleHits().catch((error) => {
+      if (!cancelled) {
+        console.error('Failed to hydrate visible sermon hits from Firestore', error);
+      }
     });
 
     return () => {
-      unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
+      cancelled = true;
     };
-  }, [sermonIds]);
+  }, [enabled, sermonIds, visibleIdsKey]);
 
   return useMemo(() => {
-    if (sermonIds.length === 0) {
+    if (!enabled || sermonIds.length === 0) {
       return {
         liveSermonsById: {},
         resolvedIds: new Set<string>(),
+        liveHitHydrationSettled: true,
       };
     }
 
@@ -114,8 +121,10 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
         Object.entries(state.liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
       ),
       resolvedIds: new Set([...state.resolvedIds].filter((sermonId) => visibleIdSet.has(sermonId))),
+      liveHitHydrationSettled:
+        state.hydratedKey === visibleIdsKey && sermonIds.every((sermonId) => state.resolvedIds.has(sermonId)),
     };
-  }, [state, sermonIds]);
+  }, [enabled, state, sermonIds, visibleIdsKey]);
 };
 
 const SearchResultSermonList = (props: BoxProps) => {
@@ -146,22 +155,36 @@ const SearchResultSermonList = (props: BoxProps) => {
   const hasActiveRefinements = Object.values(refinementList).some((values) => values.length > 0);
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
-  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds);
+  const hydrateVisibleHits = showPendingOverlay && visibleHitIds.length > 0;
+  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds, liveHitHydrationSettled } = useLiveVisibleSermons(
+    visibleHitIds,
+    hydrateVisibleHits
+  );
   const { confirmedVisibleHitIds, visiblePendingSermons, visibleAlgoliaHits, displayRows } = useMemo(
     () =>
       reconcileAdminSermonSearchResults({
         algoliaHits: normalizedHits,
         pendingSermons: pendingSermons ?? [],
         showPendingOverlay,
+        liveHitHydrationSettled,
         hasSettledResults,
         liveSermonsById,
         resolvedLiveSermonIds,
       }),
-    [hasSettledResults, liveSermonsById, normalizedHits, pendingSermons, resolvedLiveSermonIds, showPendingOverlay]
+    [
+      hasSettledResults,
+      liveHitHydrationSettled,
+      liveSermonsById,
+      normalizedHits,
+      pendingSermons,
+      resolvedLiveSermonIds,
+      showPendingOverlay,
+    ]
   );
   const hasVisibleHits = visibleAlgoliaHits.length > 0;
   const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
-  const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending;
+  const isHydratingVisibleHits = hydrateVisibleHits && !liveHitHydrationSettled && !hasVisiblePending;
+  const isLoadingState = (status === 'stalled' || isHydratingVisibleHits) && !hasVisibleHits && !hasVisiblePending;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
 
   useEffect(() => {
@@ -238,11 +261,14 @@ const SearchResultSermonList = (props: BoxProps) => {
               enableSeriesRealtime={false}
             />
           ))}
-        {shouldRenderHits && visibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
+        {shouldRenderHits
+          && !isHydratingVisibleHits
+          && visibleAlgoliaHits.length === 0
+          && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
           <Typography sx={{ px: { xs: 0.5, sm: 1 } }} color="text.secondary">
             No sermons found. Upload a sermon to get started.
           </Typography>
-        )}
+          )}
       </List>
     </Box>
   );
