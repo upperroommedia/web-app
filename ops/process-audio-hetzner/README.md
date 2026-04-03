@@ -164,7 +164,8 @@ Useful checks from the VM:
 
 ```bash
 ssh root@<hetzner-ip> "systemctl status process-audio-browser-{xvfb,openbox,x11vnc,novnc,chrome}.service --no-pager"
-ssh root@<hetzner-ip> "ss -ltnp | egrep '3010|5900|9222'"
+ssh root@<hetzner-ip> "systemctl status process-audio-browser-refresh.service --no-pager"
+ssh root@<hetzner-ip> "ss -ltnp | egrep '3010|5900'"
 ```
 
 The auth stack is enabled to start on reboot. If you want to stop it manually after a login refresh:
@@ -173,13 +174,14 @@ The auth stack is enabled to start on reboot. If you want to stop it manually af
 ssh root@<hetzner-ip> "systemctl stop process-audio-browser-auth.target"
 ```
 
-The host Chrome instance also exposes DevTools on the VM at `:9222`. The containers use:
+Cookie refresh retries do not rely on Chrome DevTools. Instead, the host runs a refresh watcher against the live `ytauth` browser session and the containers communicate through a shared control directory:
 
 ```text
-PROCESS_AUDIO_BROWSER_REFRESH_CDP_BASE_URL=http://host.docker.internal:9222
+host control dir: /opt/upperroom/process-audio-hetzner/state/browser-refresh-control
+container control dir: /workspace/browser-refresh-control
 ```
 
-to open/reload `https://www.youtube.com/` in the same shared profile when `yt-dlp` gets classified cookie/session failures.
+When `yt-dlp` gets classified cookie/session failures, the container writes a refresh request file into that shared directory. The host watcher opens a fresh `youtube.com` tab in the same shared Chrome profile, waits for cookies to settle, and writes a result file that the container waits on before retrying once.
 
 ## Nightly yt-dlp updates
 

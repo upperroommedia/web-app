@@ -113,7 +113,7 @@ YOUTUBE_FORCE_IPV4=false
 PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED=true
 PROCESS_AUDIO_BROWSER_PROFILE_BROWSER=chrome
 PROCESS_AUDIO_BROWSER_PROFILE_DIR=/workspace/shared-browser-profile/.config/google-chrome
-PROCESS_AUDIO_BROWSER_REFRESH_CDP_BASE_URL=http://host.docker.internal:9222
+PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR=/workspace/browser-refresh-control
 PROCESS_AUDIO_BROWSER_FALLBACK_STRATEGY=session_backed
 EOF
 }
@@ -128,7 +128,7 @@ EOF
 
 rsync -az --delete --exclude '/state/' "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
 
-ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs ${REMOTE_DIR}/state/shared-browser-profile && chmod 755 ${REMOTE_DIR} ${REMOTE_DIR}/state && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production ${REMOTE_DIR}/state/shared-browser-profile"
+ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs ${REMOTE_DIR}/state/shared-browser-profile ${REMOTE_DIR}/state/browser-refresh-control && chmod 755 ${REMOTE_DIR} ${REMOTE_DIR}/state && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production ${REMOTE_DIR}/state/shared-browser-profile ${REMOTE_DIR}/state/browser-refresh-control"
 if [[ "$TARGET_ENV" == "all" ]]; then
   ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build --remove-orphans"
 else

@@ -6,7 +6,7 @@ import { Writable } from 'stream';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { mkdtemp, rm, stat, unlink, writeFile } from 'fs/promises';
+import { mkdtemp, readFile, rm, stat, unlink, writeFile } from 'fs/promises';
 import { Database } from 'firebase-admin/database';
 import { GoogleAuth } from 'google-auth-library';
 import { createLoggerWithContext } from './WinstonLogger';
@@ -466,9 +466,14 @@ function getLocalBrowserProfileBrowser(): 'chrome' | 'chromium' {
     : 'chromium';
 }
 
-function getBrowserRefreshCdpBaseUrl(): string | undefined {
-  const value = process.env.PROCESS_AUDIO_BROWSER_REFRESH_CDP_BASE_URL?.trim();
+function getBrowserRefreshUrl(): string | undefined {
+  const value = process.env.PROCESS_AUDIO_BROWSER_REFRESH_URL?.trim();
   return value ? value.replace(/\/+$/, '') : undefined;
+}
+
+function getBrowserRefreshControlDir(): string | undefined {
+  const value = process.env.PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR?.trim();
+  return value || undefined;
 }
 
 function getBrowserRefreshWaitMs(): number {
@@ -690,41 +695,24 @@ function shouldAttemptBrowserCookieRefresh(message: string, mode: YouTubeExtract
   if (!ctx) return false;
   if (ctx.youtubeCookieRefreshAttempted) return false;
   if (mode !== 'cookie_provider') return false;
-  if (!getBrowserRefreshCdpBaseUrl()) return false;
+  if (!getBrowserRefreshControlDir() && !getBrowserRefreshUrl()) return false;
   if (!getLocalBrowserProfileDir()) return false;
 
   const analysis = analyzeYouTubeFailure(message, mode);
   return analysis.sawLoginRequired || analysis.sawPageReload || analysis.failureClass === 'cookie_session_stale_or_challenged';
 }
 
-async function waitForChromeDebugger(baseUrl: string): Promise<void> {
-  const deadline = Date.now() + 10_000;
-
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${baseUrl}/json/version`);
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // Retry until deadline.
-    }
-
-    await sleep(500);
-  }
-
-  throw new Error(`Timed out waiting for Chrome DevTools at ${baseUrl}`);
-}
-
 async function triggerBrowserYoutubeRefresh(log: ReturnType<typeof createLoggerWithContext>, ctx: LogContext): Promise<void> {
-  const baseUrl = getBrowserRefreshCdpBaseUrl();
-  if (!baseUrl) {
-    throw new Error('PROCESS_AUDIO_BROWSER_REFRESH_CDP_BASE_URL is not configured.');
+  const beforeStats = await readBrowserCookieDbStats();
+  const controlDir = getBrowserRefreshControlDir();
+  const refreshUrl = getBrowserRefreshUrl();
+  if (!controlDir && !refreshUrl) {
+    throw new Error('Neither PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR nor PROCESS_AUDIO_BROWSER_REFRESH_URL is configured.');
   }
 
-  const beforeStats = await readBrowserCookieDbStats();
   log.warn('Refreshing shared browser YouTube session after classified yt-dlp auth failure', {
-    cdpBaseUrl: baseUrl,
+    controlDir: controlDir || null,
+    refreshUrl,
     browserProfileBrowser: getLocalBrowserProfileBrowser(),
     browserProfileDir: getLocalBrowserProfileDir() || null,
     cookieDbExists: beforeStats.exists,
@@ -732,27 +720,66 @@ async function triggerBrowserYoutubeRefresh(log: ReturnType<typeof createLoggerW
     cookieDbSizeBefore: beforeStats.size,
   });
 
-  await waitForChromeDebugger(baseUrl);
+  if (controlDir) {
+    const requestId = `refresh-${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2, 10)}`;
+    const requestPath = path.join(controlDir, `${requestId}.request.json`);
+    const resultPath = path.join(controlDir, `${requestId}.result.json`);
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        reason: 'classified_yt_dlp_auth_failure',
+        requestId: ctx.requestId || null,
+        createdAt: new Date().toISOString(),
+      })
+    );
 
-  const targetsResponse = await fetch(`${baseUrl}/json/list`);
-  if (!targetsResponse.ok) {
-    throw new Error(`Failed to list Chrome DevTools targets: HTTP ${targetsResponse.status}`);
-  }
+    const deadline = Date.now() + 20_000;
+    try {
+      while (Date.now() < deadline) {
+        try {
+          const responseText = await readFile(resultPath, 'utf8');
+          const responseJson = JSON.parse(responseText) as { ok?: boolean; error?: string };
+          if (!responseJson.ok) {
+            throw new Error(responseJson.error || 'Browser refresh watcher reported failure.');
+          }
+          break;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+            throw error;
+          }
+        }
 
-  const targets = (await targetsResponse.json()) as Array<{ id?: string; type?: string; url?: string }>;
-  const youtubeTarget = targets.find((target) => target.type === 'page' && target.url?.includes('youtube.com'));
-  if (youtubeTarget?.id) {
-    const activateResponse = await fetch(`${baseUrl}/json/activate/${youtubeTarget.id}`);
-    if (!activateResponse.ok) {
-      throw new Error(`Failed to activate Chrome YouTube target: HTTP ${activateResponse.status}`);
+        await sleep(500);
+      }
+
+      try {
+        await stat(resultPath);
+      } catch {
+        throw new Error(`Timed out waiting for shared browser refresh result in ${controlDir}`);
+      }
+    } finally {
+      await Promise.all([
+        unlink(requestPath).catch(() => undefined),
+        unlink(resultPath).catch(() => undefined),
+      ]);
     }
-  }
-
-  const navigateResponse = await fetch(`${baseUrl}/json/new?https://www.youtube.com/`, {
-    method: 'PUT',
-  });
-  if (!navigateResponse.ok) {
-    throw new Error(`Failed to open YouTube in shared Chrome session: HTTP ${navigateResponse.status}`);
+  } else {
+    const refreshResponse = await fetch(refreshUrl!, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        reason: 'classified_yt_dlp_auth_failure',
+        requestId: ctx.requestId || null,
+      }),
+    });
+    if (!refreshResponse.ok) {
+      const responseText = await refreshResponse.text().catch(() => '');
+      throw new Error(
+        `Failed to refresh YouTube in shared Chrome session: HTTP ${refreshResponse.status}${responseText ? ` body: ${responseText}` : ''}`
+      );
+    }
   }
 
   await sleep(getBrowserRefreshWaitMs());
@@ -761,7 +788,7 @@ async function triggerBrowserYoutubeRefresh(log: ReturnType<typeof createLoggerW
   ctx.youtubeCookieRefreshAttempted = true;
   ctx.youtubeCookieRefreshSucceeded = true;
   log.info('Shared browser YouTube session refresh completed', {
-    cdpBaseUrl: baseUrl,
+    refreshUrl,
     cookieDbExists: afterStats.exists,
     cookieDbMtimeMsAfter: afterStats.mtimeMs,
     cookieDbSizeAfter: afterStats.size,

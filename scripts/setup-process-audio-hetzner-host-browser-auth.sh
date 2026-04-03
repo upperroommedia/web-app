@@ -16,6 +16,7 @@ set -euo pipefail
 REMOTE_DIR="$1"
 PROFILE_HOME="${REMOTE_DIR}/state/shared-browser-profile"
 PROFILE_DIR="${PROFILE_HOME}/.config/google-chrome"
+REFRESH_CONTROL_DIR="${REMOTE_DIR}/state/browser-refresh-control"
 USER_NAME="ytauth"
 NOVNC_PROXY_BIN=""
 
@@ -49,8 +50,10 @@ install -d -o "$USER_NAME" -g "$USER_NAME" \
   "$PROFILE_HOME/.cache" \
   "$PROFILE_HOME/.local/share/applications" \
   "$PROFILE_HOME/.dbus/session-bus" \
-  "$PROFILE_HOME/.vnc"
+  "$PROFILE_HOME/.vnc" \
+  "$REFRESH_CONTROL_DIR"
 chown -R "$USER_NAME:$USER_NAME" "$PROFILE_HOME"
+chown -R "$USER_NAME:$USER_NAME" "$REFRESH_CONTROL_DIR"
 
 if command -v novnc_proxy >/dev/null 2>&1; then
   NOVNC_PROXY_BIN="$(command -v novnc_proxy)"
@@ -82,6 +85,111 @@ exec /usr/bin/dbus-launch --exit-with-session \
     https://www.youtube.com/
 EOF
 chmod 0755 /usr/local/bin/process-audio-browser-auth-launch-chrome
+
+cat >/usr/local/bin/process-audio-browser-auth-refresh-watcher <<EOF
+#!/usr/bin/env python3
+import fcntl
+import json
+import os
+import subprocess
+import time
+
+PROFILE_HOME = "$PROFILE_HOME"
+PROFILE_DIR = "$PROFILE_DIR"
+REFRESH_CONTROL_DIR = "$REFRESH_CONTROL_DIR"
+USER_NAME = "$USER_NAME"
+COOKIE_DB_PATH = os.path.join(PROFILE_DIR, "Default", "Cookies")
+LOCK_PATH = os.path.join(REFRESH_CONTROL_DIR, ".refresh.lock")
+
+
+def cookie_stats():
+    try:
+        stats = os.stat(COOKIE_DB_PATH)
+        return {"exists": True, "mtimeMs": stats.st_mtime_ns / 1_000_000, "size": stats.st_size}
+    except FileNotFoundError:
+        return {"exists": False, "mtimeMs": None, "size": None}
+
+
+def refresh_browser():
+    subprocess.run(["/usr/bin/systemctl", "start", "process-audio-browser-auth.target"], check=True)
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": PROFILE_HOME,
+            "DISPLAY": ":99",
+            "XDG_CONFIG_HOME": os.path.join(PROFILE_HOME, ".config"),
+            "XDG_CACHE_HOME": os.path.join(PROFILE_HOME, ".cache"),
+        }
+    )
+    refresh_url = f"https://www.youtube.com/?process_audio_refresh={int(time.time())}"
+    subprocess.run(
+        [
+            "/usr/sbin/runuser",
+            "-u",
+            USER_NAME,
+            "--",
+            "/usr/bin/google-chrome-stable",
+            "--user-data-dir=" + PROFILE_DIR,
+            "--new-tab",
+            refresh_url,
+        ],
+        check=True,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    time.sleep(5)
+
+def process_request(request_path: str):
+    with open(LOCK_PATH, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        before = cookie_stats()
+        result_path = request_path.replace(".request.json", ".result.json")
+        try:
+            refresh_browser()
+            payload = {
+                "ok": True,
+                "before": before,
+                "after": cookie_stats(),
+            }
+        except subprocess.CalledProcessError as exc:
+            payload = {
+                "ok": False,
+                "before": before,
+                "after": cookie_stats(),
+                "error": f"refresh command failed with exit code {exc.returncode}",
+            }
+        except Exception as exc:  # noqa: BLE001
+            payload = {
+                "ok": False,
+                "before": before,
+                "after": cookie_stats(),
+                "error": str(exc),
+            }
+        with open(result_path, "w", encoding="utf-8") as result_file:
+            json.dump(payload, result_file)
+        try:
+            os.remove(request_path)
+        except FileNotFoundError:
+            pass
+
+
+if __name__ == "__main__":
+    os.makedirs(REFRESH_CONTROL_DIR, exist_ok=True)
+    while True:
+        request_files = sorted(
+            file_name
+            for file_name in os.listdir(REFRESH_CONTROL_DIR)
+            if file_name.endswith(".request.json")
+        )
+        if not request_files:
+            time.sleep(0.5)
+            continue
+
+        for file_name in request_files:
+          process_request(os.path.join(REFRESH_CONTROL_DIR, file_name))
+EOF
+chmod 0755 /usr/local/bin/process-audio-browser-auth-refresh-watcher
 
 cat >/etc/systemd/system/process-audio-browser-xvfb.service <<EOF
 [Unit]
@@ -147,6 +255,23 @@ Restart=on-failure
 WantedBy=process-audio-browser-auth.target
 EOF
 
+cat >/etc/systemd/system/process-audio-browser-refresh.service <<EOF
+[Unit]
+Description=Process Audio browser auth refresh watcher
+After=process-audio-browser-chrome.service
+Requires=process-audio-browser-chrome.service
+PartOf=process-audio-browser-auth.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/process-audio-browser-auth-refresh-watcher
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=process-audio-browser-auth.target
+EOF
+
 cat >/etc/systemd/system/process-audio-browser-chrome.service <<EOF
 [Unit]
 Description=Process Audio browser auth Chrome
@@ -161,7 +286,8 @@ Environment=DISPLAY=:99
 Environment=XDG_CONFIG_HOME=$PROFILE_HOME/.config
 Environment=XDG_CACHE_HOME=$PROFILE_HOME/.cache
 ExecStart=/usr/local/bin/process-audio-browser-auth-launch-chrome
-Restart=on-failure
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=process-audio-browser-auth.target
@@ -175,16 +301,17 @@ Wants=process-audio-browser-openbox.service
 Wants=process-audio-browser-x11vnc.service
 Wants=process-audio-browser-novnc.service
 Wants=process-audio-browser-chrome.service
+Wants=process-audio-browser-refresh.service
 EOF
 
 systemctl daemon-reload
-systemctl enable process-audio-browser-xvfb.service process-audio-browser-openbox.service process-audio-browser-x11vnc.service process-audio-browser-novnc.service process-audio-browser-chrome.service process-audio-browser-auth.target
+systemctl enable process-audio-browser-xvfb.service process-audio-browser-openbox.service process-audio-browser-x11vnc.service process-audio-browser-novnc.service process-audio-browser-chrome.service process-audio-browser-refresh.service process-audio-browser-auth.target
 systemctl restart process-audio-browser-auth.target
 
 echo "Host browser auth setup complete."
 echo "Profile home: $PROFILE_HOME"
 echo "Chrome user data dir: $PROFILE_DIR"
-echo "Chrome DevTools endpoint: http://127.0.0.1:9222/json/version"
+echo "Chrome refresh control dir: $REFRESH_CONTROL_DIR"
 REMOTE_SCRIPT
 
 echo "Configured host-native browser auth on ${SSH_TARGET}"
