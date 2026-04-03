@@ -53,10 +53,12 @@ COPY packages/contracts ./packages/contracts
 COPY packages/shared ./packages/shared
 COPY apps/process-audio ./apps/process-audio
 
-# Build only the service. It imports checked-in JS/types from workspace
-# packages, so rebuilding broader monorepo packages inside the image is
-# unnecessary and pulls in browser-only transitive deps.
-RUN pnpm --dir apps/process-audio build
+# Build the two local workspace packages that process-audio imports at runtime,
+# then build the service itself. This avoids depending on generated JS artifacts
+# being checked into git for Cloud Run images.
+RUN pnpm --dir packages/shared build \
+    && pnpm --dir packages/contracts build \
+    && pnpm --dir apps/process-audio build
 
 # ---------- FFmpeg build stage ----------
 FROM debian:bookworm AS ffmpeg-build
