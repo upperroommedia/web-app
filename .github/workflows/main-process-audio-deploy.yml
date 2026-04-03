@@ -149,7 +149,7 @@ jobs:
               deploy_process_audio=true
             fi
 
-            if contains_path '^(\.github/workflows/main-process-audio-deploy\.yml|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-process-audio\.sh|scripts/ensure-public-cloud-run-invoker\.sh)'; then
+            if contains_path '^(\.github/workflows/main-process-audio-deploy\.yml|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc|scripts/deploy-process-audio\.sh|apps/process-audio/cloudbuild\.yaml)'; then
               deploy_process_audio=true
             fi
           fi
@@ -243,26 +243,16 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
           DEPLOY_PROCESS_AUDIO: ${{ needs.detect-changes.outputs.deploy_process_audio }}
-          FINAL_BROWSER_FALLBACK_SERVICE_URL: ${{ secrets.PRODUCTION_BROWSER_FALLBACK_SERVICE_URL }}
         run: |
           set -euo pipefail
-          final_browser_fallback_service_url="${FINAL_BROWSER_FALLBACK_SERVICE_URL:-}"
-          final_browser_fallback_service_url="${final_browser_fallback_service_url%/}"
-
-          {
-            echo "final_browser_fallback_service_url=${final_browser_fallback_service_url}"
-          } >> "$GITHUB_OUTPUT"
-
           if [[ "${DEPLOY_PROCESS_AUDIO}" == 'true' ]]; then
-            bash scripts/ensure-browser-fallback-static-egress.sh "${GCP_PROJECT}" us-central1 default default
-            FINAL_BROWSER_FALLBACK_SERVICE_URL="${final_browser_fallback_service_url}" bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
+            DEPLOY_POT_PROVIDER=false \
+            YOUTUBE_BROWSER_FALLBACK_ENABLED_OVERRIDE=false \
+            YOUTUBE_FORCE_IPV4_OVERRIDE=false \
+            bash scripts/deploy-process-audio.sh production "$GITHUB_SHA"
           else
             echo "Skipping process-audio Cloud Run deploy; no relevant changes detected."
           fi
-
-      - name: Ensure production POT provider public invoker
-        if: needs.detect-changes.outputs.deploy_process_audio == 'true'
-        run: bash scripts/ensure-public-cloud-run-invoker.sh "${GCP_PROJECT}" us-central1 ytdlp-pot-provider
 
       - name: No-op for non-deployable changes
         if: needs.detect-changes.outputs.anything_to_run != 'true'

@@ -83,8 +83,8 @@ if [[ -z "$network" && -z "$subnet" ]]; then
 fi
 
 browser_fallback_endpoint=""
-browser_fallback_enabled="${YOUTUBE_BROWSER_FALLBACK_ENABLED_OVERRIDE:-true}"
-youtube_force_ipv4="${YOUTUBE_FORCE_IPV4_OVERRIDE:-true}"
+browser_fallback_enabled="${YOUTUBE_BROWSER_FALLBACK_ENABLED_OVERRIDE:-false}"
+youtube_force_ipv4="${YOUTUBE_FORCE_IPV4_OVERRIDE:-false}"
 
 final_browser_fallback_service_url="${FINAL_BROWSER_FALLBACK_SERVICE_URL:-${EXTERNAL_BROWSER_FALLBACK_SERVICE_URL:-}}"
 final_browser_fallback_service_url="${final_browser_fallback_service_url%/}"
@@ -108,11 +108,7 @@ if [[ -z "$pot_provider_url" ]]; then
 fi
 
 if [[ -z "$deploy_pot_provider" ]]; then
-  if [[ -n "$pot_provider_url" ]]; then
-    deploy_pot_provider="false"
-  else
-    deploy_pot_provider="true"
-  fi
+  deploy_pot_provider="false"
 fi
 
 if [[ -z "$browser_fallback_shared_secret_secret" ]]; then

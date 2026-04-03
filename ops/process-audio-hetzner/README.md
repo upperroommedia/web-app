@@ -10,6 +10,11 @@ This stack runs `process-audio` on a single Hetzner Cloud VM with:
 
 The goal is to keep `yt-dlp` and `ffmpeg` in one stable runtime with a dedicated public IP.
 
+Runtime split:
+
+- Cloud Run `process-audio` continues to handle normal file uploads.
+- Hetzner `yt-worker-*` handles YouTube processing only.
+
 ## Layout
 
 - `compose.yaml`
@@ -115,12 +120,25 @@ Use the host-native browser auth setup script:
 ./scripts/setup-process-audio-hetzner-host-browser-auth.sh
 ```
 
-That script installs a dedicated `ytauth` user plus a temporary local-only GUI stack for Chrome login:
+That script installs a dedicated `ytauth` user plus a local-only GUI stack for Chrome login:
 
 - Xvfb on `:99`
 - Openbox
 - x11vnc on `127.0.0.1:5900`
 - noVNC on `127.0.0.1:3010`
+
+The shared host Chrome profile lives at:
+
+```text
+/opt/upperroom/process-audio-hetzner/state/shared-browser-profile/.config/google-chrome
+```
+
+Start or verify the auth stack on the VM:
+
+```bash
+ssh root@<hetzner-ip> "systemctl start process-audio-browser-auth.target"
+ssh root@<hetzner-ip> "systemctl status process-audio-browser-auth.target --no-pager"
+```
 
 Then tunnel it locally:
 
@@ -128,7 +146,27 @@ Then tunnel it locally:
 ssh -L 3010:127.0.0.1:3010 root@<hetzner-ip>
 ```
 
-Open `http://127.0.0.1:3010`, sign into the shared Google/YouTube account, and then stop the auth stack:
+Open:
+
+```text
+http://127.0.0.1:3010/vnc.html
+```
+
+In that remote desktop:
+
+1. Open Chrome if it is not already visible.
+2. Sign into the shared Google account.
+3. Confirm YouTube shows you as signed in.
+4. Open the exact video you need to validate and make sure it plays.
+
+Useful checks from the VM:
+
+```bash
+ssh root@<hetzner-ip> "systemctl status process-audio-browser-{xvfb,openbox,x11vnc,novnc,chrome}.service --no-pager"
+ssh root@<hetzner-ip> "ss -ltnp | egrep '3010|5900'"
+```
+
+The auth stack is enabled to start on reboot. If you want to stop it manually after a login refresh:
 
 ```bash
 ssh root@<hetzner-ip> "systemctl stop process-audio-browser-auth.target"

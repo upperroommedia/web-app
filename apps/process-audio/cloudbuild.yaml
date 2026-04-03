@@ -64,21 +64,24 @@ steps:
           printf '%s' "${_POT_PROVIDER_URL}" > /workspace/pot_provider_url.txt
         fi
 
-        test -s /workspace/pot_provider_url.txt
-
         POT_PROVIDER_URL="$$(cat /workspace/pot_provider_url.txt)"
         export POT_PROVIDER_URL
-        READY_STATUS="$$(gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
-          --project "${_PROJECT_ID}" \
-          --region "${_REGION}" \
-          --format=json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((condition.get("status","") for condition in data.get("status", {}).get("conditions", []) if condition.get("type") == "Ready"), ""))')"
 
-        if [[ "$$READY_STATUS" != "True" ]]; then
-          echo "POT provider is not Ready after deploy: status=$$READY_STATUS" >&2
-          exit 1
+        if [[ "${_DEPLOY_POT_PROVIDER}" == "true" ]]; then
+          READY_STATUS="$$(gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
+            --project "${_PROJECT_ID}" \
+            --region "${_REGION}" \
+            --format=json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((condition.get("status","") for condition in data.get("status", {}).get("conditions", []) if condition.get("type") == "Ready"), ""))')"
+
+          if [[ "$$READY_STATUS" != "True" ]]; then
+            echo "POT provider is not Ready after deploy: status=$$READY_STATUS" >&2
+            exit 1
+          fi
+
+          echo "Validated POT provider readiness at $$POT_PROVIDER_URL"
+        else
+          echo "Skipping POT provider deploy for this process-audio deployment."
         fi
-
-        echo "Validated POT provider readiness at $$POT_PROVIDER_URL"
 
   # Step 5: Deploy to Cloud Run (private service)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -136,7 +139,7 @@ substitutions:
   _POT_PROVIDER_MIN_INSTANCES: '0'
   _POT_PROVIDER_MAX_INSTANCES: '3'
   _POT_PROVIDER_TIMEOUT: '300'
-  _DEPLOY_POT_PROVIDER: 'true'
+  _DEPLOY_POT_PROVIDER: 'false'
   _POT_PROVIDER_URL: ''
   _FIREBASE_PROJECT_ID: 'urm-app'
   _FIREBASE_STORAGE_BUCKET: 'urm-app.appspot.com'
