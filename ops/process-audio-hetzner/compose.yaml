@@ -27,6 +27,8 @@ services:
       - ./state/staging/tmp:/tmp
       - ./state/staging/logs:/workspace/logs
       - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     expose:
       - "8080"
@@ -51,6 +53,8 @@ services:
       - ./state/production/tmp:/tmp
       - ./state/production/logs:/workspace/logs
       - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     expose:
       - "8080"

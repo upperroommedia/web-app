@@ -4,7 +4,7 @@ import { Sermon } from './types';
 import logger from './WinstonLogger';
 
 const MAIL_COLLECTION = 'mail';
-const ALERT_SOURCE = 'process-audio-cloud-run';
+const ALERT_SOURCE = 'process-audio-runtime';
 
 type AlertUserDetails = {
   uid: string;

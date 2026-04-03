@@ -14,6 +14,7 @@ Runtime split:
 
 - Cloud Run `process-audio` continues to handle normal file uploads.
 - Hetzner `yt-worker-*` handles YouTube processing only.
+- The host Chrome profile is shared by both Hetzner containers and is the source of truth for `--cookies-from-browser`.
 
 ## Layout
 
@@ -163,13 +164,48 @@ Useful checks from the VM:
 
 ```bash
 ssh root@<hetzner-ip> "systemctl status process-audio-browser-{xvfb,openbox,x11vnc,novnc,chrome}.service --no-pager"
-ssh root@<hetzner-ip> "ss -ltnp | egrep '3010|5900'"
+ssh root@<hetzner-ip> "ss -ltnp | egrep '3010|5900|9222'"
 ```
 
 The auth stack is enabled to start on reboot. If you want to stop it manually after a login refresh:
 
 ```bash
 ssh root@<hetzner-ip> "systemctl stop process-audio-browser-auth.target"
+```
+
+The host Chrome instance also exposes DevTools on the VM at `:9222`. The containers use:
+
+```text
+PROCESS_AUDIO_BROWSER_REFRESH_CDP_BASE_URL=http://host.docker.internal:9222
+```
+
+to open/reload `https://www.youtube.com/` in the same shared profile when `yt-dlp` gets classified cookie/session failures.
+
+## Nightly yt-dlp updates
+
+GitHub Actions owns the pinned `yt-dlp` version in [apps/process-audio/Dockerfile](/Users/yasaad/Projects/upper-room-media/web-app/apps/process-audio/Dockerfile).
+
+The nightly updater workflow:
+
+1. checks the latest stable `yt-dlp` GitHub release
+2. bumps the pinned Dockerfile version if needed
+3. commits and pushes the bump to `staging`
+4. deploys the staging Hetzner worker
+5. runs a remote `yt-dlp` smoke test against the live staging container
+6. deploys production only if staging passes
+
+The workflow expects these GitHub secrets:
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT_EMAIL`
+- `HETZNER_PROCESS_AUDIO_SSH_TARGET`
+- `HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY`
+
+The smoke test uses the live shared Chrome profile on Hetzner and runs:
+
+```bash
+bash scripts/verify-hetzner-ytdlp-smoke.sh staging
+bash scripts/verify-hetzner-ytdlp-smoke.sh production
 ```
 
 ## Important Runtime Defaults

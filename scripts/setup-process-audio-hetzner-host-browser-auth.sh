@@ -74,6 +74,8 @@ exec /usr/bin/dbus-launch --exit-with-session \
     --no-default-browser-check \
     --password-store=basic \
     --disable-crash-reporter \
+    --remote-debugging-address=0.0.0.0 \
+    --remote-debugging-port=9222 \
     --user-data-dir="$PROFILE_DIR" \
     --disable-features=Translate,MediaRouter \
     --disable-dev-shm-usage \
@@ -176,12 +178,13 @@ Wants=process-audio-browser-chrome.service
 EOF
 
 systemctl daemon-reload
-systemctl stop process-audio-browser-auth.target || true
-systemctl disable process-audio-browser-xvfb.service process-audio-browser-openbox.service process-audio-browser-x11vnc.service process-audio-browser-novnc.service process-audio-browser-chrome.service || true
+systemctl enable process-audio-browser-xvfb.service process-audio-browser-openbox.service process-audio-browser-x11vnc.service process-audio-browser-novnc.service process-audio-browser-chrome.service process-audio-browser-auth.target
+systemctl restart process-audio-browser-auth.target
 
 echo "Host browser auth setup complete."
 echo "Profile home: $PROFILE_HOME"
 echo "Chrome user data dir: $PROFILE_DIR"
+echo "Chrome DevTools endpoint: http://127.0.0.1:9222/json/version"
 REMOTE_SCRIPT
 
 echo "Configured host-native browser auth on ${SSH_TARGET}"

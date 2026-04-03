@@ -30,6 +30,9 @@ const ytdlpPath = 'yt-dlp';
 const configuredYtDlpJsRuntime = process.env.YTDLP_JS_RUNTIME?.trim() || 'deno';
 const localBrowserProfileDir = process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.trim() || '';
 const localBrowserProfileBrowser = process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER?.trim() || 'chromium';
+const runtimeHost = process.env.PROCESS_AUDIO_RUNTIME_HOST?.trim() || 'cloud-run';
+const runtimeEnv = process.env.PROCESS_AUDIO_RUNTIME_ENV?.trim() || process.env.NODE_ENV || 'unknown';
+const ytDlpVersion = process.env.PROCESS_AUDIO_YT_DLP_VERSION?.trim() || 'unknown';
 
 function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string } {
   const primaryRuntime = configuredYtDlpJsRuntime.split(',')[0]?.trim().split(':')[0]?.trim() || 'deno';
@@ -87,6 +90,9 @@ logger.info('Service initializing', {
   inProcessBrowserFallbackConfigured,
   localBrowserProfileDir: localBrowserProfileDir || null,
   localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
+  runtimeHost,
+  runtimeEnv,
+  ytDlpVersion,
   finalBrowserFallbackConfigured,
   poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
 });
@@ -336,12 +342,18 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
               audioSourceType: audioSource.type,
               audioSource: audioSource.source,
               serviceRevision: process.env.K_REVISION || 'local',
+              runtimeHost,
+              runtimeEnv,
+              ytDlpVersion,
               browserFallbackConfigured,
               browserFallbackEnabled,
+              localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
               poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
               youtubeFailureClass: youtubeFailureClass ?? null,
               youtubeFailureStage: youtubeFailureAnalysis?.stage ?? null,
               youtubeFailureSignals: youtubeFailureAnalysis ?? null,
+              cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
+              cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
               blockerEpisodeId: staleResult.blockerEpisodeId,
               requesterEmail: request.auth?.email ?? null,
               requesterUid: request.auth?.sub ?? null,
@@ -394,12 +406,18 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
               audioSourceType: audioSource.type,
               audioSource: audioSource.source,
               serviceRevision: process.env.K_REVISION || 'local',
+              runtimeHost,
+              runtimeEnv,
+              ytDlpVersion,
               browserFallbackConfigured,
               browserFallbackEnabled,
+              localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
               poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
               youtubeFailureClass: youtubeFailureClass ?? null,
               youtubeFailureStage: youtubeFailureAnalysis?.stage ?? null,
               youtubeFailureSignals: youtubeFailureAnalysis ?? null,
+              cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
+              cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
               browserFallbackError: browserFallbackError ?? null,
               blockerEpisodeId: browserFallbackResult.blockerEpisodeId,
               requesterEmail: request.auth?.email ?? null,
@@ -455,12 +473,18 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
           audioSourceType: audioSource.type,
           audioSource: audioSource.source,
           serviceRevision: process.env.K_REVISION || 'local',
+          runtimeHost,
+          runtimeEnv,
+          ytDlpVersion,
           browserFallbackConfigured,
           browserFallbackEnabled,
+          localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
           poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
           youtubeFailureClass: youtubeFailureClass ?? null,
           youtubeFailureStage: youtubeFailureAnalysis?.stage ?? null,
           youtubeFailureSignals: youtubeFailureAnalysis ?? null,
+          cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
+          cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
           requesterEmail: request.auth?.email ?? null,
           requesterUid: request.auth?.sub ?? null,
           requesterName: request.auth?.name ?? null,

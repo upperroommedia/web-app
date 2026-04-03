@@ -6,7 +6,7 @@ import { Writable } from 'stream';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { mkdtemp, rm, unlink, writeFile } from 'fs/promises';
+import { mkdtemp, rm, stat, unlink, writeFile } from 'fs/promises';
 import { Database } from 'firebase-admin/database';
 import { GoogleAuth } from 'google-auth-library';
 import { createLoggerWithContext } from './WinstonLogger';
@@ -466,6 +466,40 @@ function getLocalBrowserProfileBrowser(): 'chrome' | 'chromium' {
     : 'chromium';
 }
 
+function getBrowserRefreshCdpBaseUrl(): string | undefined {
+  const value = process.env.PROCESS_AUDIO_BROWSER_REFRESH_CDP_BASE_URL?.trim();
+  return value ? value.replace(/\/+$/, '') : undefined;
+}
+
+function getBrowserRefreshWaitMs(): number {
+  const raw = Number.parseInt(process.env.PROCESS_AUDIO_BROWSER_REFRESH_WAIT_MS || '6000', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 6000;
+}
+
+function getLocalBrowserCookiesDbPath(): string | undefined {
+  const profileDir = getLocalBrowserProfileDir();
+  if (!profileDir) return undefined;
+  return path.join(profileDir, 'Default', 'Cookies');
+}
+
+async function readBrowserCookieDbStats(): Promise<{ exists: boolean; mtimeMs: number | null; size: number | null }> {
+  const cookiesDbPath = getLocalBrowserCookiesDbPath();
+  if (!cookiesDbPath) {
+    return { exists: false, mtimeMs: null, size: null };
+  }
+
+  try {
+    const fileStats = await stat(cookiesDbPath);
+    return {
+      exists: true,
+      mtimeMs: fileStats.mtimeMs,
+      size: fileStats.size,
+    };
+  } catch {
+    return { exists: false, mtimeMs: null, size: null };
+  }
+}
+
 function getBrowserFallbackProfileArchiveObject(): string {
   return process.env.BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT?.trim() || PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT;
 }
@@ -652,6 +686,89 @@ async function runAttemptWithRetries<T>(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+function shouldAttemptBrowserCookieRefresh(message: string, mode: YouTubeExtractionMode, ctx?: LogContext): boolean {
+  if (!ctx) return false;
+  if (ctx.youtubeCookieRefreshAttempted) return false;
+  if (mode !== 'cookie_provider') return false;
+  if (!getBrowserRefreshCdpBaseUrl()) return false;
+  if (!getLocalBrowserProfileDir()) return false;
+
+  const analysis = analyzeYouTubeFailure(message, mode);
+  return analysis.sawLoginRequired || analysis.sawPageReload || analysis.failureClass === 'cookie_session_stale_or_challenged';
+}
+
+async function waitForChromeDebugger(baseUrl: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseUrl}/json/version`);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // Retry until deadline.
+    }
+
+    await sleep(500);
+  }
+
+  throw new Error(`Timed out waiting for Chrome DevTools at ${baseUrl}`);
+}
+
+async function triggerBrowserYoutubeRefresh(log: ReturnType<typeof createLoggerWithContext>, ctx: LogContext): Promise<void> {
+  const baseUrl = getBrowserRefreshCdpBaseUrl();
+  if (!baseUrl) {
+    throw new Error('PROCESS_AUDIO_BROWSER_REFRESH_CDP_BASE_URL is not configured.');
+  }
+
+  const beforeStats = await readBrowserCookieDbStats();
+  log.warn('Refreshing shared browser YouTube session after classified yt-dlp auth failure', {
+    cdpBaseUrl: baseUrl,
+    browserProfileBrowser: getLocalBrowserProfileBrowser(),
+    browserProfileDir: getLocalBrowserProfileDir() || null,
+    cookieDbExists: beforeStats.exists,
+    cookieDbMtimeMsBefore: beforeStats.mtimeMs,
+    cookieDbSizeBefore: beforeStats.size,
+  });
+
+  await waitForChromeDebugger(baseUrl);
+
+  const targetsResponse = await fetch(`${baseUrl}/json/list`);
+  if (!targetsResponse.ok) {
+    throw new Error(`Failed to list Chrome DevTools targets: HTTP ${targetsResponse.status}`);
+  }
+
+  const targets = (await targetsResponse.json()) as Array<{ id?: string; type?: string; url?: string }>;
+  const youtubeTarget = targets.find((target) => target.type === 'page' && target.url?.includes('youtube.com'));
+  if (youtubeTarget?.id) {
+    const activateResponse = await fetch(`${baseUrl}/json/activate/${youtubeTarget.id}`);
+    if (!activateResponse.ok) {
+      throw new Error(`Failed to activate Chrome YouTube target: HTTP ${activateResponse.status}`);
+    }
+  }
+
+  const navigateResponse = await fetch(`${baseUrl}/json/new?https://www.youtube.com/`, {
+    method: 'PUT',
+  });
+  if (!navigateResponse.ok) {
+    throw new Error(`Failed to open YouTube in shared Chrome session: HTTP ${navigateResponse.status}`);
+  }
+
+  await sleep(getBrowserRefreshWaitMs());
+
+  const afterStats = await readBrowserCookieDbStats();
+  ctx.youtubeCookieRefreshAttempted = true;
+  ctx.youtubeCookieRefreshSucceeded = true;
+  log.info('Shared browser YouTube session refresh completed', {
+    cdpBaseUrl: baseUrl,
+    cookieDbExists: afterStats.exists,
+    cookieDbMtimeMsAfter: afterStats.mtimeMs,
+    cookieDbSizeAfter: afterStats.size,
+    cookieDbTouched: beforeStats.mtimeMs !== afterStats.mtimeMs || beforeStats.size !== afterStats.size,
+  });
+}
+
 function buildAnnotatedYouTubeError(message: string, mode: YouTubeExtractionMode): Error {
   const failureClass = classifyYouTubeFailure(message, mode);
   return new Error(annotateYouTubeFailure(message, failureClass, mode));
@@ -665,12 +782,14 @@ async function runCommandWithCapture(
   command: string,
   args: string[],
   errorPrefix: string,
-  mode: YouTubeExtractionMode = 'public_provider'
+  mode: YouTubeExtractionMode = 'public_provider',
+  ctx?: LogContext
 ): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(command, args);
-    let stdout = '';
-    let stderr = '';
+  const execute = (): Promise<{ stdout: string; stderr: string }> =>
+    new Promise((resolve, reject) => {
+      const proc = spawn(command, args);
+      let stdout = '';
+      let stderr = '';
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -694,6 +813,34 @@ async function runCommandWithCapture(
       );
     });
   });
+
+  try {
+    return await execute();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!shouldAttemptBrowserCookieRefresh(message, mode, ctx)) {
+      throw error;
+    }
+
+    const log = createLoggerWithContext(ctx);
+    try {
+      await triggerBrowserYoutubeRefresh(log, ctx as LogContext);
+    } catch (refreshError) {
+      log.error('Shared browser YouTube session refresh failed', {
+        refreshError: refreshError instanceof Error ? refreshError.message : String(refreshError),
+        originalError: message,
+      });
+      throw error;
+    }
+
+    log.warn('Retrying yt-dlp command after shared browser YouTube session refresh', {
+      command,
+      errorPrefix,
+      mode,
+    });
+
+    return await execute();
+  }
 }
 
 async function runSystemCommand(command: string, args: string[], errorPrefix: string): Promise<{ stdout: string; stderr: string }> {
@@ -1005,7 +1152,8 @@ async function runCookieHealthcheck(
   ytdlpPath: string,
   url: YouTubeUrl,
   cookieContext: YouTubeCookieContext,
-  log: ReturnType<typeof createLoggerWithContext>
+  log: ReturnType<typeof createLoggerWithContext>,
+  ctx?: LogContext
 ): Promise<void> {
   if (!cookieContext.hasCookies || !shouldEnableCookieHealthcheck()) return;
 
@@ -1021,7 +1169,7 @@ async function runCookieHealthcheck(
     command: `${ytdlpPath} ${args.join(' ')}`,
   });
 
-  await runCommandWithCapture(ytdlpPath, args, 'yt-dlp cookie healthcheck', 'cookie_provider');
+  await runCommandWithCapture(ytdlpPath, args, 'yt-dlp cookie healthcheck', 'cookie_provider', ctx);
 }
 
 export async function validateConfiguredYouTubeCookies(
@@ -1603,7 +1751,7 @@ export const getYouTubeTrimRoutingDecision = async (
       usedCookies: mode === 'cookie_provider',
       command: `${ytdlpPath} ${args.join(' ')}`,
     });
-    const { stdout, stderr } = await runCommandWithCapture(ytdlpPath, args, 'yt-dlp routing preflight', mode);
+    const { stdout, stderr } = await runCommandWithCapture(ytdlpPath, args, 'yt-dlp routing preflight', mode, ctx);
     if (stderr.trim()) {
       log.debug('yt-dlp routing preflight stderr', { attempt: mode, stderr: stderr.trim() });
     }
@@ -1641,7 +1789,7 @@ export const getYouTubeTrimRoutingDecision = async (
       if (shouldPreferCookieProvider(cookieContext)) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const result = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             runAttempt('cookie_provider', activeCookieContext.args)
           );
@@ -1712,7 +1860,7 @@ export const getYouTubeTrimRoutingDecision = async (
       ) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const result = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             runAttempt('cookie_provider', activeCookieContext.args)
           );
@@ -1847,32 +1995,8 @@ export const getYouTubeAudioUrl = async (
     return args;
   };
 
-  const runYtDlp = (args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> =>
-    new Promise((resolve, reject) => {
-      const ytdlp = spawn(ytdlpPath, args);
-      let stdout = '';
-      let stderr = '';
-
-      ytdlp.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      ytdlp.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      ytdlp.on('error', (err) => {
-        log.error('yt-dlp spawn error while getting URL', { error: err });
-        reject(new Error(`yt-dlp spawn error: ${err}`));
-      });
-
-      ytdlp.on('close', (code) => {
-        resolve({ code, stdout, stderr });
-      });
-    });
-
   const extractFromResult = (
-    result: { code: number | null; stdout: string; stderr: string },
+    result: { stdout: string; stderr: string },
     attemptUsesCookies: boolean
   ): YouTubeAudioUrlResult => {
     let parsed: YouTubeJsonInfo;
@@ -1937,18 +2061,8 @@ export const getYouTubeAudioUrl = async (
       usedCookies: mode === 'cookie_provider',
     });
 
-    const result = await runYtDlp(attemptArgs);
-    if (result.code === 0) {
-      return extractFromResult(result, mode === 'cookie_provider');
-    }
-
-    log.error('yt-dlp failed to get URL', {
-      code: result.code,
-      stderr: result.stderr,
-      attempt: mode,
-      usedCookies: mode === 'cookie_provider',
-    });
-    throw buildAnnotatedYouTubeError(`yt-dlp exited with code ${result.code}: ${result.stderr}`, mode);
+    const result = await runCommandWithCapture(ytdlpPath, attemptArgs, 'yt-dlp direct URL extraction', mode, ctx);
+    return extractFromResult(result, mode === 'cookie_provider');
   };
 
   const logAndReturnResolvedAudio = (
@@ -2038,7 +2152,7 @@ export const getYouTubeAudioUrl = async (
       if (shouldPreferCookieProvider(cookieContext)) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const cookieResult = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             runExtractionAttempt('cookie_provider', buildArgs('cookie_provider', activeCookieContext.args))
           );
@@ -2120,7 +2234,7 @@ export const getYouTubeAudioUrl = async (
       ) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const cookieResult = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             runExtractionAttempt('cookie_provider', buildArgs('cookie_provider', activeCookieContext.args))
           );
@@ -2432,7 +2546,8 @@ async function getYouTubeAudioFragments(
   url: YouTubeUrl,
   realtimeDB: Database,
   isDevelopment: boolean,
-  log: ReturnType<typeof createLoggerWithContext>
+  log: ReturnType<typeof createLoggerWithContext>,
+  ctx?: LogContext
 ): Promise<YouTubeAudioFragmentsResult> {
   ensureProductionPoTokenProviderConfigured(isDevelopment);
   const baseArgs = ['-J', '--no-playlist', '-f', 'bestaudio/best', '--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime()];
@@ -2499,7 +2614,8 @@ async function getYouTubeAudioFragments(
       ytdlpPath,
       args,
       'yt-dlp fragment metadata extraction',
-      mode
+      mode,
+      ctx
     );
     if (stderr.trim()) {
       log.debug('yt-dlp fragment metadata stderr', { attempt: mode, stderr: stderr.trim() });
@@ -2520,7 +2636,7 @@ async function getYouTubeAudioFragments(
       if (shouldPreferCookieProvider(cookieContext)) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const result = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             tryAttempt('cookie_provider', activeCookieContext.args)
           );
@@ -2574,7 +2690,7 @@ async function getYouTubeAudioFragments(
       ) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const result = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             tryAttempt('cookie_provider', activeCookieContext.args)
           );
@@ -2633,7 +2749,7 @@ async function downloadYouTubeSectionFromFragments(
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'yt-frag-'));
 
   try {
-    const info = await getYouTubeAudioFragments(ytdlpPath, url, realtimeDB, isDevelopment, log);
+    const info = await getYouTubeAudioFragments(ytdlpPath, url, realtimeDB, isDevelopment, log, ctx);
     const fragmentCount = info.fragmentUrls.length;
     const fragmentDuration = info.fragmentDurationSeconds;
     const requestedEndForBoundedDownload = duration !== undefined ? startTime + duration : undefined;
@@ -3110,7 +3226,7 @@ export const downloadYouTubeSection = async (
       if (shouldPreferCookieProvider(cookieContext)) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const cookieResult = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             runSectionDownloadAttempt('cookie_provider', buildAttemptArgs('cookie_provider', activeCookieContext.args))
           );
@@ -3192,7 +3308,7 @@ export const downloadYouTubeSection = async (
       ) {
         const activeCookieContext = cookieContext;
         try {
-          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log);
+          await runCookieHealthcheck(ytdlpPath, url, activeCookieContext, log, ctx);
           const cookieResult = await runAttemptWithRetries(getYouTubeCookieProviderMaxAttempts(), () =>
             runSectionDownloadAttempt('cookie_provider', buildAttemptArgs('cookie_provider', activeCookieContext.args))
           );
