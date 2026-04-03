@@ -18,7 +18,8 @@ services:
         credential_path=/workspace/logs/firebase-service-account.json
         printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_path"
         export GOOGLE_APPLICATION_CREDENTIALS="$$credential_path"
-        exec pnpm start
+        cd /workspace/apps/process-audio
+        exec node ./dist/index.js
     env_file:
       - ./env/process-audio-staging.env
     depends_on:
@@ -45,7 +46,8 @@ services:
         credential_path=/workspace/logs/firebase-service-account.json
         printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_path"
         export GOOGLE_APPLICATION_CREDENTIALS="$$credential_path"
-        exec pnpm start
+        cd /workspace/apps/process-audio
+        exec node ./dist/index.js
     env_file:
       - ./env/process-audio-production.env
     depends_on:

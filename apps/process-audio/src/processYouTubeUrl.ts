@@ -61,12 +61,19 @@ interface YouTubeFragmentFormat {
   protocol?: string;
   abr?: number;
   duration?: number;
+  language?: string;
+  language_preference?: number;
+  format_note?: string;
+  source_preference?: number;
+  preference?: number;
+  format?: string;
   fragments?: Array<{ url?: string }>;
   http_headers?: Record<string, string>;
 }
 
 interface YouTubeJsonInfo {
   duration?: number;
+  language?: string;
   formats?: YouTubeFragmentFormat[];
 }
 
@@ -1475,15 +1482,41 @@ async function downloadBrowserFallbackSection(
   return finalPath;
 }
 
-function selectPreferredAudioFormat(formats: YouTubeFragmentFormat[]): YouTubeFragmentFormat | undefined {
+function selectPreferredAudioFormat(
+  formats: YouTubeFragmentFormat[],
+  originalLanguage?: string
+): YouTubeFragmentFormat | undefined {
   const candidates = formats.filter((f) => f && f.vcodec === 'none');
   if (candidates.length === 0) return undefined;
+
+  const normalize = (value: string | undefined): string => value?.trim().toLowerCase() || '';
+  const targetLanguage = normalize(originalLanguage);
+  const getCombinedDescriptor = (fmt: YouTubeFragmentFormat): string =>
+    `${fmt.format_note || ''} ${fmt.format || ''}`.trim().toLowerCase();
+  const isOriginalAudioTrack = (fmt: YouTubeFragmentFormat): boolean => {
+    const descriptor = getCombinedDescriptor(fmt);
+    if (descriptor.includes('original')) return true;
+    if (targetLanguage && normalize(fmt.language) === targetLanguage) return true;
+    return false;
+  };
+
+  const originalCandidates = candidates.filter(isOriginalAudioTrack);
+  const effectiveCandidates = originalCandidates.length > 0 ? originalCandidates : candidates;
 
   candidates.sort((a, b) => {
     const score = (fmt: YouTubeFragmentFormat): number => {
       let s = 0;
+      const descriptor = getCombinedDescriptor(fmt);
+      const language = normalize(fmt.language);
+      if (descriptor.includes('original')) s += 1000;
+      if (descriptor.includes('default')) s += 300;
+      if (targetLanguage && language === targetLanguage) s += 200;
       if (fmt.ext === 'm4a') s += 100;
       if (fmt.format_id === '140') s += 50;
+      if (descriptor.includes('drc')) s -= 25;
+      if (typeof fmt.language_preference === 'number') s += fmt.language_preference * 10;
+      if (typeof fmt.source_preference === 'number') s += fmt.source_preference;
+      if (typeof fmt.preference === 'number') s += fmt.preference;
       if (typeof fmt.abr === 'number') s += Math.min(fmt.abr, 320);
       if (Array.isArray(fmt.fragments) && fmt.fragments.length > 0) s += 10;
       return s;
@@ -1491,7 +1524,26 @@ function selectPreferredAudioFormat(formats: YouTubeFragmentFormat[]): YouTubeFr
     return score(b) - score(a);
   });
 
-  return candidates[0];
+  return effectiveCandidates.sort((a, b) => {
+    const score = (fmt: YouTubeFragmentFormat): number => {
+      let s = 0;
+      const descriptor = getCombinedDescriptor(fmt);
+      const language = normalize(fmt.language);
+      if (descriptor.includes('original')) s += 1000;
+      if (descriptor.includes('default')) s += 300;
+      if (targetLanguage && language === targetLanguage) s += 200;
+      if (fmt.ext === 'm4a') s += 100;
+      if (fmt.format_id === '140') s += 50;
+      if (descriptor.includes('drc')) s -= 25;
+      if (typeof fmt.language_preference === 'number') s += fmt.language_preference * 10;
+      if (typeof fmt.source_preference === 'number') s += fmt.source_preference;
+      if (typeof fmt.preference === 'number') s += fmt.preference;
+      if (typeof fmt.abr === 'number') s += Math.min(fmt.abr, 320);
+      if (Array.isArray(fmt.fragments) && fmt.fragments.length > 0) s += 10;
+      return s;
+    };
+    return score(b) - score(a);
+  })[0];
 }
 
 function buildInProcessBrowserFallbackResolution(
@@ -1612,7 +1664,7 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
       'browser_fallback'
     );
     const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
-    const selected = selectPreferredAudioFormat(parsed.formats || []);
+    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
 
     if (!selected?.url) {
       throw buildAnnotatedYouTubeError('yt-dlp did not return an audio-only format URL.', 'browser_fallback');
@@ -1728,7 +1780,7 @@ export const getYouTubeTrimRoutingDecision = async (
     }
 
     const formats = Array.isArray(parsed.formats) ? parsed.formats : [];
-    const selected = selectPreferredAudioFormat(formats);
+    const selected = selectPreferredAudioFormat(formats, parsed.language);
     if (!selected) {
       return {
         strategy: 'direct_url',
@@ -2039,7 +2091,7 @@ export const getYouTubeAudioUrl = async (
       throw new Error(`Failed to parse yt-dlp JSON output: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    const selected = selectPreferredAudioFormat(parsed.formats || []);
+    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
     const streamUrl = selected?.url;
 
     if (streamUrl && streamUrl.startsWith('http')) {
@@ -2047,6 +2099,10 @@ export const getYouTubeAudioUrl = async (
       const bindingDetails = extractMediaUrlBindingDetails(streamUrl);
       log.info('Successfully extracted YouTube audio URL', {
         format: selected?.ext || selected?.format_id || 'unknown',
+        selectedFormatId: selected?.format_id || null,
+        selectedLanguage: selected?.language || null,
+        selectedFormatNote: selected?.format_note || null,
+        videoLanguage: parsed.language || null,
         duration: parsed.duration ?? selected?.duration,
         urlLength: streamUrl.length,
         urlPreview: streamUrl.substring(0, 100) + '...',
@@ -2602,7 +2658,7 @@ async function getYouTubeAudioFragments(
     }
 
     const formats = Array.isArray(parsed.formats) ? parsed.formats : [];
-    const selected = selectPreferredAudioFormat(formats);
+    const selected = selectPreferredAudioFormat(formats, parsed.language);
     if (!selected) {
       throw new Error('No audio format was returned by yt-dlp');
     }
