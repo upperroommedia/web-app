@@ -58,7 +58,7 @@ cp "$ROOT_DIR/ops/process-audio-hetzner/README.md" "$WORK_DIR/README.md"
 
 write_env_file() {
   local env_name="$1"
-  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients pot_provider_url service_account_json_b64
+  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64
 
   if [[ "$env_name" == "staging" ]]; then
     project_id="urm-app-staging"
@@ -75,9 +75,8 @@ write_env_file() {
   fi
 
   runtime_alert_recipients="$(gcloud secrets versions access latest --secret=RUNTIME_ALERT_RECIPIENTS --project "$project_id")"
-  pot_provider_url="$(gcloud run services describe ytdlp-pot-provider --region=us-central1 --project "$project_id" --format='value(status.url)')"
   service_account_json_b64="$(
-    gcloud secrets versions access latest --secret=BROWSER_FALLBACK_FIREBASE_SERVICE_ACCOUNT_JSON --project "$project_id" \
+    gcloud secrets versions access latest --secret=PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON --project "$project_id" \
     | python3 -c 'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())'
   )"
 
@@ -92,7 +91,7 @@ FIREBASE_STORAGE_BUCKET=${bucket}
 FIREBASE_DATABASE_URL=${database_url}
 FIREBASE_SERVICE_ACCOUNT_JSON=${service_account_json_b64}
 RUNTIME_ALERT_RECIPIENTS=${runtime_alert_recipients}
-YTDLP_POT_PROVIDER_BASE_URL=${pot_provider_url}
+YTDLP_POT_PROVIDER_BASE_URL=http://ytdlp-pot-provider:4416
 YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=false
 YTDLP_CONCURRENT_FRAGMENTS=1
 YOUTUBE_RETRY_DELAY_MS=1500

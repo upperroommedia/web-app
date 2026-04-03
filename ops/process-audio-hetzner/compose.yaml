@@ -1,6 +1,12 @@
 name: process-audio-hetzner
 
 services:
+  ytdlp-pot-provider:
+    image: docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    restart: unless-stopped
+    expose:
+      - "4416"
+
   process-audio-staging:
     build:
       context: ./context
@@ -15,6 +21,8 @@ services:
         exec pnpm start
     env_file:
       - ./env/process-audio-staging.env
+    depends_on:
+      - ytdlp-pot-provider
     volumes:
       - ./state/staging/tmp:/tmp
       - ./state/staging/logs:/workspace/logs
@@ -36,6 +44,8 @@ services:
         exec pnpm start
     env_file:
       - ./env/process-audio-production.env
+    depends_on:
+      - ytdlp-pot-provider
     volumes:
       - ./state/production/tmp:/tmp
       - ./state/production/logs:/workspace/logs
