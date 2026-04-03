@@ -105,28 +105,33 @@ Then run one authenticated or public YouTube request against `/process-audio` an
 - `yt-dlp` stderr
 - `ffmpeg` stderr tail on failure
 
-## Temporary Browser Login
+## Native Browser Auth
 
-The `browser-auth` service is manual-only and should only be started when you need to refresh the shared browser profile.
+The shared browser profile now lives on the VM itself under the persistent stack state directory.
 
-Start it:
+Use the host-native browser auth setup script:
 
 ```bash
-ssh root@<hetzner-ip> "cd /opt/upperroom/process-audio-hetzner && docker compose --profile browser-auth up -d browser-auth"
+./scripts/setup-process-audio-hetzner-host-browser-auth.sh
 ```
 
-Tunnel it locally:
+That script installs a dedicated `ytauth` user plus a temporary local-only GUI stack for Chrome login:
+
+- Xvfb on `:99`
+- Openbox
+- x11vnc on `127.0.0.1:5900`
+- noVNC on `127.0.0.1:3010`
+
+Then tunnel it locally:
 
 ```bash
 ssh -L 3010:127.0.0.1:3010 root@<hetzner-ip>
 ```
 
-Then open `http://127.0.0.1:3010` in your local browser.
-
-Stop it after login so CPU usage returns to normal:
+Open `http://127.0.0.1:3010`, sign into the shared Google/YouTube account, and then stop the auth stack:
 
 ```bash
-ssh root@<hetzner-ip> "cd /opt/upperroom/process-audio-hetzner && docker compose stop browser-auth"
+ssh root@<hetzner-ip> "systemctl stop process-audio-browser-auth.target"
 ```
 
 ## Important Runtime Defaults
@@ -139,7 +144,7 @@ This VM stack intentionally restores the direct URL + `ffmpeg` model.
 - `YOUTUBE_FORCE_IPV4=false`
 - `YTDLP_POT_PROVIDER_BASE_URL=http://ytdlp-pot-provider:4416`
 
-The VM itself is the dedicated runtime. The in-process browser fallback reads the shared Chromium profile from the local persistent volume.
+The VM itself is the dedicated runtime. The in-process browser fallback reads the shared Chrome profile from the local persistent volume.
 
 Staging and production share the same VM, but they do not share runtime env:
 

@@ -104,12 +104,13 @@ YOUTUBE_COOKIE_CIRCUIT_BREAKER_MINUTES=30
 YTDLP_SLEEP_REQUESTS_SECONDS=2
 YTDLP_SLEEP_INTERVAL_SECONDS=1
 YTDLP_MAX_SLEEP_INTERVAL_SECONDS=3
-YOUTUBE_BROWSER_FALLBACK_ENABLED=false
+YOUTUBE_BROWSER_FALLBACK_ENABLED=true
 YOUTUBE_BROWSER_FALLBACK_URL=
 YOUTUBE_FINAL_BROWSER_FALLBACK_URL=
 YOUTUBE_FORCE_IPV4=false
 PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED=true
-PROCESS_AUDIO_BROWSER_PROFILE_DIR=/workspace/shared-browser-profile
+PROCESS_AUDIO_BROWSER_PROFILE_BROWSER=chrome
+PROCESS_AUDIO_BROWSER_PROFILE_DIR=/workspace/shared-browser-profile/.config/google-chrome
 PROCESS_AUDIO_BROWSER_FALLBACK_STRATEGY=session_backed
 EOF
 }
@@ -122,13 +123,13 @@ PROCESS_AUDIO_STAGING_HOSTNAME=${staging_hostname}
 PROCESS_AUDIO_PRODUCTION_HOSTNAME=${production_hostname}
 EOF
 
-rsync -az --delete "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
+rsync -az --delete --exclude '/state/' "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
 
-ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs ${REMOTE_DIR}/state/shared-browser-profile && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production ${REMOTE_DIR}/state/shared-browser-profile"
+ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs ${REMOTE_DIR}/state/shared-browser-profile && chmod 755 ${REMOTE_DIR} ${REMOTE_DIR}/state && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production ${REMOTE_DIR}/state/shared-browser-profile"
 if [[ "$TARGET_ENV" == "all" ]]; then
-  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build"
+  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build --remove-orphans"
 else
-  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build caddy process-audio-${TARGET_ENV}"
+  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build --remove-orphans caddy process-audio-${TARGET_ENV}"
 fi
 
 echo "Deployed process-audio Hetzner stack for ${TARGET_ENV} to ${SSH_TARGET}:${REMOTE_DIR}"

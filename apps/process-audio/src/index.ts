@@ -29,6 +29,7 @@ app.use(express.json());
 const ytdlpPath = 'yt-dlp';
 const configuredYtDlpJsRuntime = process.env.YTDLP_JS_RUNTIME?.trim() || 'deno';
 const localBrowserProfileDir = process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.trim() || '';
+const localBrowserProfileBrowser = process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER?.trim() || 'chromium';
 
 function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string } {
   const primaryRuntime = configuredYtDlpJsRuntime.split(',')[0]?.trim().split(':')[0]?.trim() || 'deno';
@@ -85,6 +86,7 @@ logger.info('Service initializing', {
   browserFallbackEnabled,
   inProcessBrowserFallbackConfigured,
   localBrowserProfileDir: localBrowserProfileDir || null,
+  localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
   finalBrowserFallbackConfigured,
   poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
 });

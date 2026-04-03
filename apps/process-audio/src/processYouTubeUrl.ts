@@ -460,6 +460,12 @@ function getLocalBrowserProfileDir(): string | undefined {
   return value || undefined;
 }
 
+function getLocalBrowserProfileBrowser(): 'chrome' | 'chromium' {
+  return process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER?.trim().toLowerCase() === 'chrome'
+    ? 'chrome'
+    : 'chromium';
+}
+
 function getBrowserFallbackProfileArchiveObject(): string {
   return process.env.BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT?.trim() || PROCESS_AUDIO_BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT;
 }
@@ -1402,7 +1408,10 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
 
     if (resolution.credentialSource === 'chromium_profile') {
       hydratedProfile = await hydrateInProcessBrowserProfile(realtimeDB);
-      fullArgs.push('--cookies-from-browser', `chromium:${hydratedProfile.browserProfileDir}`);
+      fullArgs.push(
+        '--cookies-from-browser',
+        `${getLocalBrowserProfileBrowser()}:${hydratedProfile.browserProfileDir}`
+      );
     }
 
     applyYtDlpRequestPacingArgs(fullArgs);
@@ -1411,6 +1420,7 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
     log.info('Executing in-process browser fallback yt-dlp extraction', {
       youtubeUrl,
       credentialSource: resolution.credentialSource,
+      browserProfileBrowser: resolution.credentialSource === 'chromium_profile' ? getLocalBrowserProfileBrowser() : null,
       browserFallbackStrategy: resolution.strategy,
       browserFallbackServiceRole: resolution.serviceRole,
       browserFallbackInvocationKind: 'in_process',

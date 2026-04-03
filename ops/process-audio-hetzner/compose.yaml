@@ -7,22 +7,6 @@ services:
     expose:
       - "4416"
 
-  browser-auth:
-    image: lscr.io/linuxserver/chromium:latest
-    profiles:
-      - browser-auth
-    shm_size: "1gb"
-    environment:
-      PUID: 1000
-      PGID: 1000
-      TZ: UTC
-      CHROME_CLI: /config/.config/chromium
-    volumes:
-      - ./state/shared-browser-profile:/config
-    ports:
-      - "127.0.0.1:3010:3000"
-    restart: unless-stopped
-
   process-audio-staging:
     build:
       context: ./context

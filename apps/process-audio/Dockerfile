@@ -1,8 +1,7 @@
 # Use Node 22 (required by yt-dlp JS runtime) with Debian-slim (required for glibc DNS in ffmpeg)
 ARG NODE_VERSION=22
 ARG PNPM_VERSION=10.10.0
-ARG PLAYWRIGHT_VERSION=1.58.0
-ARG YT_DLP_VERSION=2026.03.03
+ARG YT_DLP_VERSION=2026.03.17
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
 ARG DENO_VERSION=2.2.7
 ARG DEBIAN_MIRROR=https://mirrors.edge.kernel.org/debian
@@ -60,8 +59,6 @@ RUN pnpm --dir apps/process-audio build
 
 # ---------- Production stage ----------
 FROM node:${NODE_VERSION}-bookworm-slim AS production
-ARG PLAYWRIGHT_VERSION
-ARG YT_DLP_VERSION
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION
 ARG DENO_VERSION
 ARG DEBIAN_MIRROR
@@ -95,14 +92,12 @@ RUN export DENO_INSTALL=/usr/local \
 # Install plugin-capable yt-dlp and the bgutil PO token provider plugin.
 # The plugin talks to an external bgutil provider over HTTP, configured via
 # YTDLP_POT_PROVIDER_BASE_URL at runtime.
+ARG YT_DLP_VERSION
 RUN python3 -m pip install --break-system-packages --no-cache-dir \
        "yt-dlp[default]==${YT_DLP_VERSION}" \
        "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
     && echo "yt-dlp version: $(yt-dlp --version)" \
     && python3 -m pip show bgutil-ytdlp-pot-provider
-
-RUN npm install -g playwright@${PLAYWRIGHT_VERSION} \
-    && PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium
 
 # Install pnpm and copy the prepared workspace from the build stage
 RUN npm install -g pnpm@${PNPM_VERSION}
@@ -114,7 +109,6 @@ COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
 COPY --from=build --chown=node:node /workspace/packages ./packages
 COPY --from=build --chown=node:node /workspace/apps/process-audio ./apps/process-audio
 
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 WORKDIR /workspace/apps/process-audio
 USER node
 
