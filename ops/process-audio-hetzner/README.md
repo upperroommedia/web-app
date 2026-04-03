@@ -61,6 +61,12 @@ The VM hosts:
 - `ytdlp-pot-provider`
 - a host-native Chrome auth stack under the `ytauth` user
 
+The worker images include:
+
+- `yt-dlp`
+- `ffmpeg`
+- `aria2c`
+
 The VM does not host:
 
 - normal file upload processing
@@ -109,6 +115,19 @@ This retry is bounded:
 - one automatic refresh attempt per request
 - one retry after refresh
 - then normal failure alerting/defer logic
+
+## Cookie Source
+
+Hetzner does not use RTDB cookie blobs anymore.
+
+The only supported YouTube cookie source on the VM is the shared host Chrome profile:
+
+- host path:
+  - `/opt/upperroom/process-audio-hetzner/state/shared-browser-profile/.config/google-chrome`
+- container path:
+  - `/workspace/shared-browser-profile/.config/google-chrome`
+
+`yt-dlp` reads that profile with `--cookies-from-browser`.
 
 ## Host Layout
 
@@ -262,6 +281,14 @@ ssh root@<hetzner-ip> "docker logs --tail=200 process-audio-hetzner-process-audi
 ssh root@<hetzner-ip> "docker logs --tail=200 process-audio-hetzner-process-audio-production-1"
 ```
 
+Version checks:
+
+```bash
+ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-staging-1 yt-dlp --version"
+ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-staging-1 ffmpeg -version | head -n 1"
+ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-staging-1 aria2c --version | head -n 1"
+```
+
 Smoke tests:
 
 ```bash
@@ -324,6 +351,30 @@ Useful checks:
 ssh root@<hetzner-ip> "systemctl status process-audio-browser-{xvfb,openbox,x11vnc,novnc,chrome,refresh}.service --no-pager"
 ssh root@<hetzner-ip> "ss -ltnp | egrep '3010|5900'"
 ```
+
+## Monitoring Download Speed
+
+To determine whether a slow request is network-bound or CPU-bound, watch the staging worker logs:
+
+```bash
+ssh root@<hetzner-ip> "docker logs -f process-audio-hetzner-process-audio-staging-1"
+```
+
+The key lines are:
+
+- `Processing progress`
+  - includes `ffmpegSpeed` and `ffmpegBitrate`
+  - best signal for direct URL plus `ffmpeg` fetch/transcode runs
+- `Download progress`
+  - yt-dlp-side progress for file-based download paths
+- `FFmpeg command`
+  - confirms which acquisition path the request took
+
+Interpretation:
+
+- low `ffmpegSpeed` with hot CPU usually means `ffmpeg` filtering/transcoding is the bottleneck
+- low `Download progress` or weak yt-dlp transfer rates suggests the downloader side is the bottleneck
+- `aria2c` is available for yt-dlp-managed file download paths such as section-download fallback, but it does not speed up the direct URL plus `ffmpeg` path by itself
 
 ## Nightly yt-dlp Updates
 

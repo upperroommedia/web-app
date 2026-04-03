@@ -1,6 +1,6 @@
 # Process Audio
 
-Cloud Run service for processing uploaded audio and YouTube-backed sermon audio for Upper Room Media.
+Cloud Run service for processing uploaded audio and the shared `process-audio` runtime used by the Hetzner YouTube workers.
 
 ## YouTube Extraction Model
 
@@ -9,17 +9,16 @@ The YouTube path now follows a strict access order:
 1. `public_provider`
    Uses `yt-dlp` with the bgutil PO-token provider and no cookies.
 2. `cookie_provider`
-   Only used when the public path indicates auth is required and the RTDB cookie session is healthy.
+   Uses `yt-dlp --cookies-from-browser` against the shared host Chrome profile on Hetzner.
 3. `browser_fallback`
-   Final authority when the public path is challenged or the cookie session is stale/challenged.
+   Final authority when the direct extractor path is challenged.
 
 This is intentional. A Cloud Run IP challenge is not fixed by retrying `yt-dlp` more aggressively, and stale cookies are not a durable recovery path.
 
 ## What Changed
 
 - Request-scoped YouTube access decisions are cached so one sermon request does not repeatedly probe YouTube after a known failure.
-- Cookie metadata in RTDB now tracks validation state and a circuit breaker.
-- Cookie stale/challenged failures open the breaker and skip further cookie attempts until rotation.
+- Hetzner no longer relies on RTDB cookie blobs; the shared host Chrome profile is the YouTube session source of truth.
 - Operational alerts now classify YouTube failures into:
   - `public_ip_or_reputation_block`
   - `cookie_session_stale`
@@ -52,7 +51,7 @@ YouTube extraction:
 - `YOUTUBE_BROWSER_FALLBACK_TIMEOUT_MS`
 - `BROWSER_FALLBACK_SHARED_SECRET` optional shared secret for non-Google fallback hosts
 - `BROWSER_FALLBACK_AUTH_MODE=auto|id_token|shared_secret|none`
-- `YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=false`
+- `YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=true` on Hetzner
 - `YTDLP_CONCURRENT_FRAGMENTS=1`
 - `YTDLP_COOKIE_HEALTHCHECK_ENABLED=true`
 - `YOUTUBE_RETRY_DELAY_MS=1500`
@@ -237,52 +236,17 @@ For non-Google fallback hosts such as Cloudflare, `process-audio` can authentica
 
 ## Cookie Rotation Workflow
 
-Production reads YouTube cookies from RTDB key `yt-dlp-cookies` and metadata from `yt-dlp-cookies-meta`.
+Hetzner uses the shared host Chrome profile rather than RTDB cookie blobs.
 
-Cookies are now an emergency compatibility layer, not the primary recovery path for Cloud Run IP challenges.
+Use the operator guide for the current workflow:
 
-Use a dedicated YouTube service account only. Do not use a human browsing profile.
+- [ops/process-audio-hetzner/README.md](/Users/yasaad/Projects/upper-room-media/web-app/ops/process-audio-hetzner/README.md)
 
-Required workflow:
+Current rule:
 
-1. Open a fresh private/incognito window.
-2. Log into YouTube with the dedicated service account only.
-3. In the same tab, navigate to [https://www.youtube.com/robots.txt](https://www.youtube.com/robots.txt).
-4. Export `youtube.com` cookies using a local cookies exporter.
-5. Close the private/incognito window immediately.
-6. Never reopen or browse with that session again.
-7. Base64-encode the exported `cookies.txt`.
-8. Update `yt-dlp-cookies` in RTDB.
-9. Update `yt-dlp-cookies-meta` atomically with the new metadata.
-
-Base64 command on macOS:
-
-```bash
-cat cookies.txt | base64 | pbcopy
-```
-
-Recommended metadata payload:
-
-```json
-{
-  "rotatedAt": "2026-03-13T21:30:00.000Z",
-  "exportedAt": "2026-03-13T21:29:30.000Z",
-  "exportMethod": "Get cookies.txt LOCALLY",
-  "profileType": "incognito",
-  "sourceAccount": "youtube-service-account@upperroommedia.org",
-  "cookieHash": "sha256:<hash>",
-  "lastHealthStatus": "unknown",
-  "consecutiveFailures": 0,
-  "disabledUntil": null
-}
-```
-
-Important rules:
-
-- Manual RTDB pasting is emergency fallback only.
-- Preferred steady state is a controlled cookie-rotation utility that uploads both `yt-dlp-cookies` and `yt-dlp-cookies-meta` together.
-- If RTDB metadata shows `disabledUntil` in the future, the cookie circuit breaker is open and the service will skip cookie-backed attempts.
-- If a cookie healthcheck fails with `The page needs to be reloaded`, rotate the session instead of retrying.
+- keep the shared host Chrome profile signed in
+- let `yt-dlp --cookies-from-browser` read that profile directly
+- do not rotate YouTube cookies through RTDB for the Hetzner workers
 
 ## Verifying the Production Setup
 

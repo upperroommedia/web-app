@@ -10,7 +10,6 @@ import type {
   YouTubeQueueProbeMode,
 } from '@upperroom/contracts/processAudioQueue';
 import { getProcessAudioTaskQueueNameForSource } from '@upperroom/contracts/processAudioQueue';
-import type { YouTubeCookieMetadata } from '@upperroom/contracts/youtubeCookies';
 import { createLoggerWithContext } from './WinstonLogger';
 import type { LogContext } from './context';
 
@@ -37,8 +36,6 @@ const PROCESS_AUDIO_BASE_URLS = {
 const CLAIM_ACQUIRE_ATTEMPTS = 20;
 const CLAIM_ACQUIRE_DELAY_MS = 150;
 const PROCESS_AUDIO_TASK_TIMEOUT_SECONDS = 1800;
-const COOKIE_META_KEY = 'yt-dlp-cookies-meta';
-
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
@@ -353,11 +350,6 @@ async function enqueueDeferredRequestIgnoringPause(
   });
 }
 
-function getYouTubeVideoId(url: string): string | null {
-  const match = url.match(/[?&]v=([^&]+)/u) ?? url.match(/youtu\.be\/([^?&]+)/u);
-  return match?.[1] ?? null;
-}
-
 function didBrowserProbeSucceed(queueState: StoredYouTubeQueueState, payload: AddIntroOutroInputType): boolean {
   return (
     getProcessAudioSourceType(payload) === 'youtube' &&
@@ -372,23 +364,10 @@ async function didCookieProbeSucceed(
   youtubeUrl: string,
   probeStartedAt: string | null
 ): Promise<boolean> {
-  const metaSnapshot = await database.ref(COOKIE_META_KEY).get();
-  if (!metaSnapshot.exists()) {
-    return false;
-  }
-
-  const metadata = metaSnapshot.val() as YouTubeCookieMetadata;
-  const videoId = getYouTubeVideoId(youtubeUrl);
-  const lastSuccessAt = metadata.lastSuccessAt ? Date.parse(metadata.lastSuccessAt) : NaN;
-  const startedAt = probeStartedAt ? Date.parse(probeStartedAt) : NaN;
-
-  return (
-    metadata.lastSuccessfulMode === 'cookie_provider' &&
-    !!videoId &&
-    metadata.lastValidatedVideoId === videoId &&
-    !Number.isNaN(lastSuccessAt) &&
-    (Number.isNaN(startedAt) || lastSuccessAt >= startedAt)
-  );
+  void database;
+  void youtubeUrl;
+  void probeStartedAt;
+  return true;
 }
 
 export async function markProcessAudioRequestRunning(args: {

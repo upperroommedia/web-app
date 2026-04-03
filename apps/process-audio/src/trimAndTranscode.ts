@@ -32,8 +32,8 @@ import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
 
 // Parse ffmpeg stderr for progress and duration
-function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string } {
-  const result: { time?: string; duration?: string } = {};
+function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string; speed?: string; bitrate?: string } {
+  const result: { time?: string; duration?: string; speed?: string; bitrate?: string } = {};
 
   // Parse time: time=00:01:23.45
   const timeMatch = stderrLine.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
@@ -45,6 +45,16 @@ function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: st
   const durationMatch = stderrLine.match(/Duration:\s*(\d{2}:\d{2}:\d{2}\.\d{2})/);
   if (durationMatch) {
     result.duration = durationMatch[1];
+  }
+
+  const speedMatch = stderrLine.match(/speed=\s*([^\s]+)/);
+  if (speedMatch) {
+    result.speed = speedMatch[1];
+  }
+
+  const bitrateMatch = stderrLine.match(/bitrate=\s*([^\s]+)/);
+  if (bitrateMatch) {
+    result.bitrate = bitrateMatch[1];
   }
 
   return result;
@@ -853,6 +863,8 @@ const trimAndTranscode = async (
                 hasTotalTimeMillis: !!totalTimeMillis,
                 transcodeStartPercent: progressRanges.transcodeStartPercent,
                 actualStartPercent: startPercent,
+                ffmpegSpeed: progress.speed ?? null,
+                ffmpegBitrate: progress.bitrate ?? null,
               });
               realtimeDBRef.set(percent).catch((err) => {
                 log.error('Failed to update progress in realtimeDB', {
@@ -874,6 +886,8 @@ const trimAndTranscode = async (
             log.debug('Processing (duration unknown)', {
               timeMillis,
               timeElapsed: progress.time,
+              ffmpegSpeed: progress.speed ?? null,
+              ffmpegBitrate: progress.bitrate ?? null,
             });
           }
         }

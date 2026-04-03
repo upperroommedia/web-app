@@ -32,7 +32,14 @@ const localBrowserProfileDir = process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.tr
 const localBrowserProfileBrowser = process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER?.trim() || 'chromium';
 const runtimeHost = process.env.PROCESS_AUDIO_RUNTIME_HOST?.trim() || 'cloud-run';
 const runtimeEnv = process.env.PROCESS_AUDIO_RUNTIME_ENV?.trim() || process.env.NODE_ENV || 'unknown';
-const ytDlpVersion = process.env.PROCESS_AUDIO_YT_DLP_VERSION?.trim() || 'unknown';
+
+function resolveBinaryVersion(binary: string, args: string[] = ['--version']): string {
+  const result = spawnSync(binary, args, { encoding: 'utf8' });
+  if (result.error || result.status !== 0) {
+    return 'unknown';
+  }
+  return (result.stdout || result.stderr || '').trim().split('\n')[0] || 'unknown';
+}
 
 function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string } {
   const primaryRuntime = configuredYtDlpJsRuntime.split(',')[0]?.trim().split(':')[0]?.trim() || 'deno';
@@ -59,6 +66,13 @@ function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string 
 }
 
 const ytDlpJsRuntimeInfo = validateConfiguredYtDlpJsRuntime();
+const ytDlpVersion = resolveBinaryVersion(ytdlpPath);
+const ffmpegVersion = resolveBinaryVersion(getFFmpegPath(), ['-version'])
+  .replace(/^ffmpeg version\s+/i, '')
+  .trim();
+const aria2Version = resolveBinaryVersion('aria2c', ['--version'])
+  .split('\n')[0]
+  .trim();
 const ytDlpSleepRequestsSeconds = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null;
 const ytDlpSleepIntervalSeconds = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null;
 const ytDlpMaxSleepIntervalSeconds = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim() || null;
@@ -93,6 +107,8 @@ logger.info('Service initializing', {
   runtimeHost,
   runtimeEnv,
   ytDlpVersion,
+  ffmpegVersion,
+  aria2Version,
   finalBrowserFallbackConfigured,
   poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
 });
@@ -166,6 +182,9 @@ app.get('/healthz', (req, res) => {
     ytDlpSleepIntervalSeconds,
     ytDlpMaxSleepIntervalSeconds,
     ytDlpForceIpv4,
+    ytDlpVersion,
+    ffmpegVersion,
+    aria2Version,
   });
 });
 
