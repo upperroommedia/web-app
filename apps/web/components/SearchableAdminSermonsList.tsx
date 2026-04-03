@@ -83,7 +83,12 @@ function MobileFilterDrawer({ show }: { show: boolean }) {
 
 const SearchableAdminSermonList: FunctionComponent<{ hiddenSermonIds?: string[] }> = ({ hiddenSermonIds = [] }) => {
   const { user } = useAuth();
-  const { searchClient, loading: searchClientLoading, error: searchClientError } = useAlgoliaSearch();
+  const {
+    searchClient,
+    loading: searchClientLoading,
+    error: searchClientError,
+    sermonSearchRevision,
+  } = useAlgoliaSearch();
   const theme = useTheme();
   const useMobileFilters = useMediaQuery(theme.breakpoints.down('lg'));
   const [showFilters, setShowFilters] = useState<boolean>(false);
@@ -101,6 +106,7 @@ const SearchableAdminSermonList: FunctionComponent<{ hiddenSermonIds?: string[] 
     <>
       {searchClient ? (
         <InstantSearch
+          key={sermonSearchRevision}
           searchClient={searchClient}
           indexName="sermons"
           stalledSearchDelay={400}

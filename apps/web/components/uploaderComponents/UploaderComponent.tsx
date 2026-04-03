@@ -54,6 +54,7 @@ import DropZone from '../DropZone';
 import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
+import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -102,6 +103,7 @@ const Uploader = (props: UploaderProps) => {
   );
   // ======================== START OF STATE ========================
   const router = useRouter();
+  const { invalidateSermonSearch } = useAlgoliaSearch();
   // Track intentional navigation (after successful save) to bypass unsaved changes warning
   const isIntentionalNavigation = useRef(false);
   const [sermon, setSermon] = useState<Sermon>(() => {
@@ -605,12 +607,13 @@ const Uploader = (props: UploaderProps) => {
 
   // Handle successful upload - store sermon for the success modal
   const handleUploadSuccess = useCallback(
-    (_sermonId: string) => {
+    async (_sermonId: string) => {
+      await invalidateSermonSearch();
       // Store the sermon data for the success modal
       setUploadedSermon({ ...sermon });
       setIsNavigatingToSermon(false);
     },
-    [sermon]
+    [invalidateSermonSearch, sermon]
   );
 
   useEffect(() => {
