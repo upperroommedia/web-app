@@ -10,9 +10,9 @@ import {
   unlinkSafeTempFile,
 } from './utils';
 import { CustomMetadata, AudioSource } from './types';
-import { processYouTubeUrl } from './processYouTubeUrl';
-import { PassThrough, Readable, finished } from 'stream';
-import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
+import { downloadYouTubeAudioToFile } from './processYouTubeUrl';
+import { finished } from 'stream';
+import { spawn } from 'child_process';
 import { sermonStatus, sermonStatusType } from './types';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
@@ -72,8 +72,7 @@ const trimAndTranscode = async (
     metadata: { contentDisposition, metadata: customMetadata },
     timeout: 30 * 60 * 1000, // 30 minutes in milliseconds
   });
-  let inputSource: string | Readable | undefined;
-  let ytdlp: ChildProcessWithoutNullStreams | undefined;
+  let inputSource: string | undefined;
   let proc: ReturnType<typeof spawn> | undefined;
   let transcodingStarted = false;
   let ffmpegStderrBuffer = '';
@@ -179,24 +178,27 @@ const trimAndTranscode = async (
 
   try {
     if (audioSource.type === 'YouTubeUrl') {
-      log.info('Processing YouTube URL with yt-dlp stream piping', {
+      const youtubeSourceFileBase = createTempFile(`youtube-${audioSource.id}`, tempFiles);
+      log.info('Processing YouTube URL with yt-dlp local download', {
         url: audioSource.source,
         startTime,
         duration,
+        outputBase: youtubeSourceFileBase,
       });
-      const passThrough = new PassThrough();
-      ytdlp = await processYouTubeUrl(
+      const downloadedFile = await downloadYouTubeAudioToFile(
         ytdlpPath,
         audioSource.source,
+        youtubeSourceFileBase,
         cancelToken,
-        passThrough,
         updateDownloadProgress,
         realtimeDB,
-        startTime,
-        duration,
         ctx
       );
-      inputSource = passThrough;
+      if (downloadedFile !== youtubeSourceFileBase) {
+        tempFiles.delete(youtubeSourceFileBase);
+        tempFiles.add(downloadedFile);
+      }
+      inputSource = downloadedFile;
     } else {
       // Process the audio source from storage
       const rawSourceFile = createTempFile(`raw-${audioSource.id}`, tempFiles);
@@ -214,28 +216,12 @@ const trimAndTranscode = async (
     const args: string[] = [];
 
     // Input options
-    if (typeof inputSource === 'string') {
-      if (startTime) {
-        args.push('-ss', startTime.toString());
-      }
-      args.push('-i', inputSource);
-      if (duration) {
-        args.push('-t', duration.toString());
-      }
-    } else {
-      // Stream/pipe input - must use stdin
-      args.push('-i', 'pipe:0');
-      if (startTime) {
-        // Use -ss after -i for pipe inputs (output seeking)
-        args.push('-ss', startTime.toString());
-        log.info('Using output seeking for pipe input', {
-          startTime,
-          note: 'Output seeking required for pipes - ffmpeg will decode then discard frames until startTime',
-        });
-      }
-      if (duration) {
-        args.push('-t', duration.toString());
-      }
+    if (startTime !== undefined && startTime !== null) {
+      args.push('-ss', startTime.toString());
+    }
+    args.push('-i', inputSource);
+    if (duration !== undefined && duration !== null) {
+      args.push('-t', duration.toString());
     }
 
     // Audio codec and filters - ALWAYS applied to ensure consistent audio processing
@@ -245,9 +231,9 @@ const trimAndTranscode = async (
     args.push('-acodec', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-af', audioFilters, '-f', 'mp3');
 
     if (audioSource.type === 'YouTubeUrl') {
-      log.info('Transcoding streamed YouTube audio and applying audio filters', {
+      log.info('Transcoding downloaded YouTube audio and applying audio filters', {
         filters: audioFilters,
-        approach: 'ytdlp_pipe_to_ffmpeg',
+        approach: 'ytdlp_download_to_file_then_ffmpeg',
         startTime,
         duration,
       });
@@ -259,52 +245,20 @@ const trimAndTranscode = async (
     const commandLine = `${ffmpegPath} ${args.join(' ')}`;
     log.info('FFmpeg command', {
       command: commandLine,
-      inputType: typeof inputSource === 'string' ? 'file' : 'pipe',
+      inputType: 'file',
       args: args.join(' '),
       trimParameters: {
         startTime,
         requestedDuration: duration,
-        approach: audioSource.type === 'YouTubeUrl' ? 'ytdlp_pipe_to_ffmpeg' : 'standard',
-        seekMode: typeof inputSource === 'string' ? 'input_seek' : 'output_seek',
+        approach: audioSource.type === 'YouTubeUrl' ? 'ytdlp_download_to_file_then_ffmpeg' : 'standard',
+        seekMode: 'input_seek',
         effectiveDuration: duration,
       },
     });
 
     proc = spawn(ffmpegPath, args, {
-      stdio: typeof inputSource === 'string' ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-
-    // Pipe input if it's a stream
-    if (typeof inputSource !== 'string') {
-      if (!proc || !proc.stdin) {
-        throw new Error('FFmpeg process or stdin is null but input is a stream');
-      }
-      inputSource.pipe(proc.stdin, { end: false });
-      const procForErrorHandler = proc; // Capture for error handler
-
-      // Handle EPIPE errors gracefully - they occur when ffmpeg closes stdin early (e.g., during seeking)
-      proc.stdin.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EPIPE') {
-          log.debug('FFmpeg stdin closed (EPIPE) - this is normal when seeking or process completes', {
-            code: err.code,
-          });
-          // Don't kill the process - EPIPE is expected when the reader closes the pipe
-        } else {
-          log.error('FFmpeg stdin error', { error: err, code: err.code });
-          procForErrorHandler.kill('SIGTERM');
-        }
-      });
-
-      inputSource.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EPIPE') {
-          log.debug('Input stream EPIPE - ffmpeg may have closed stdin', { code: err.code });
-          // EPIPE is expected when the destination closes the pipe
-        } else {
-          log.error('Input stream error', { error: err, code: err.code });
-          procForErrorHandler.kill('SIGTERM');
-        }
-      });
-    }
 
     // Pipe output
     if (!proc.stdout) {
@@ -392,20 +346,16 @@ const trimAndTranscode = async (
           log.info('Trim and transcode completed successfully', {
             outputPath: outputFilePath,
             sourceType: audioSource.type,
-            approach: audioSource.type === 'YouTubeUrl' ? 'ytdlp_pipe_to_ffmpeg' : 'standard',
+            approach: audioSource.type === 'YouTubeUrl' ? 'ytdlp_download_to_file_then_ffmpeg' : 'standard',
             trimDecision: {
               startTime,
               requestedDuration: duration,
               note:
                 audioSource.type === 'YouTubeUrl'
-                  ? 'Used streamed yt-dlp input with FFmpeg output seeking for timestamp-accurate trims'
+                  ? 'Used downloaded yt-dlp input file with FFmpeg input seeking for precise trims'
                   : 'Processed local file input',
             },
           });
-          if (ytdlp) {
-            log.debug('Terminating yt-dlp process');
-            ytdlp.kill('SIGTERM');
-          }
           resolve(outputFile);
         } catch (uploadErr) {
           log.error('GCS upload failed after FFmpeg completed', { error: uploadErr });
@@ -465,9 +415,6 @@ const trimAndTranscode = async (
           if (cancelToken.isCancellationRequested) {
             log.warn('Cancellation requested, terminating processes');
             ffmpegProc.kill('SIGTERM');
-            if (ytdlp) {
-              ytdlp.kill('SIGTERM');
-            }
             reject(new Error('Trim and Transcode operation was cancelled'));
             return;
           }
@@ -601,16 +548,7 @@ const trimAndTranscode = async (
         log.warn('Failed to kill FFmpeg process', { error: killError });
       }
     }
-    if (ytdlp) {
-      try {
-        log.debug('Terminating YouTube download process due to error');
-        ytdlp.kill('SIGTERM');
-      } catch (killError) {
-        log.warn('Failed to kill yt-dlp process', { error: killError });
-      }
-    }
-
-    if (inputSource && typeof inputSource === 'string') {
+    if (inputSource) {
       try {
         await unlinkSafeTempFile(inputSource, tempFiles);
       } catch (unlinkError) {

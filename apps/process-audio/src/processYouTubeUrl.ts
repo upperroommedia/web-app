@@ -2444,67 +2444,10 @@ export const processYouTubeUrl = async (
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
 
-  const resolveSelectedFormatId = async (): Promise<{ formatId: string; extractionMode: YouTubeExtractionMode }> => {
-    const baseArgs = [
-      '-J',
-      '-f',
-      'bestaudio/best',
-      '--no-playlist',
-      '--skip-download',
-      '--no-js-runtimes',
-      '--js-runtimes',
-      getPreferredYtDlpJsRuntime(),
-    ];
-    applyPreferredIpFamilyArgs(baseArgs);
-    applyYtDlpRequestPacingArgs(baseArgs);
-
-    const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
-      const args = [...baseArgs];
-      if (extraCookieArgs.length > 0) {
-        args.push(...extraCookieArgs);
-      }
-      applyYouTubeExtractorArgs(args, mode, log);
-      args.push(url);
-      return args;
-    };
-
-    const parseSelectedFormatId = (stdout: string): string => {
-      const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
-      const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
-      if (!selected?.format_id) {
-        throw new Error('yt-dlp did not return a preferred audio format for streaming');
-      }
-      log.info('Selected preferred YouTube audio format for streaming', {
-        formatId: selected.format_id,
-        selectedLanguage: selected.language || null,
-        selectedFormatNote: selected.format_note || null,
-        videoLanguage: parsed.language || null,
-      });
-      return selected.format_id;
-    };
-
-    if (shouldUseCookiesForPublicVideos()) {
-      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
-      const mode: YouTubeExtractionMode = cookieContext.hasCookies ? 'cookie_provider' : 'public_provider';
-      const { stdout } = await runCommandWithCapture(
-        ytdlpPath,
-        buildArgs(mode, cookieContext.args),
-        'yt-dlp stream format selection',
-        mode,
-        ctx
-      );
-      return { formatId: parseSelectedFormatId(stdout), extractionMode: mode };
-    }
-
-    const { stdout } = await runCommandWithCapture(
-      ytdlpPath,
-      buildArgs('public_provider'),
-      'yt-dlp stream format selection',
-      'public_provider',
-      ctx
-    );
-    return { formatId: parseSelectedFormatId(stdout), extractionMode: 'public_provider' };
-  };
+  const resolveSelectedFormatId = async (): Promise<{ formatId: string; extractionMode: YouTubeExtractionMode }> =>
+    resolvePreferredAudioFormatId(ytdlpPath, url, realtimeDB, isDevelopment, log, ctx, 'streaming', (context) => {
+      cookieContext = context;
+    });
 
   const { formatId, extractionMode } = await resolveSelectedFormatId();
 
@@ -2638,6 +2581,240 @@ export const processYouTubeUrl = async (
   ytdlp.stdout.pipe(passThrough, { end: false });
 
   return ytdlp;
+};
+
+async function resolvePreferredAudioFormatId(
+  ytdlpPath: string,
+  url: YouTubeUrl,
+  realtimeDB: Database,
+  isDevelopment: boolean,
+  log: ReturnType<typeof createLoggerWithContext>,
+  ctx: LogContext | undefined,
+  purpose: 'streaming' | 'download',
+  onCookieContext?: (cookieContext: YouTubeCookieContext | undefined) => void
+): Promise<{ formatId: string; extractionMode: YouTubeExtractionMode }> {
+  const baseArgs = [
+    '-J',
+    '-f',
+    'bestaudio/best',
+    '--no-playlist',
+    '--skip-download',
+    '--no-js-runtimes',
+    '--js-runtimes',
+    getPreferredYtDlpJsRuntime(),
+  ];
+  applyPreferredIpFamilyArgs(baseArgs);
+  applyYtDlpRequestPacingArgs(baseArgs);
+
+  const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
+    const args = [...baseArgs];
+    if (extraCookieArgs.length > 0) {
+      args.push(...extraCookieArgs);
+    }
+    applyYouTubeExtractorArgs(args, mode, log);
+    args.push(url);
+    return args;
+  };
+
+  const parseSelectedFormatId = (stdout: string): string => {
+    const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
+    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
+    if (!selected?.format_id) {
+      throw new Error(`yt-dlp did not return a preferred audio format for ${purpose}`);
+    }
+    log.info(`Selected preferred YouTube audio format for ${purpose}`, {
+      formatId: selected.format_id,
+      selectedLanguage: selected.language || null,
+      selectedFormatNote: selected.format_note || null,
+      videoLanguage: parsed.language || null,
+    });
+    return selected.format_id;
+  };
+
+  if (shouldUseCookiesForPublicVideos()) {
+    const cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+    onCookieContext?.(cookieContext);
+    const mode: YouTubeExtractionMode = cookieContext.hasCookies ? 'cookie_provider' : 'public_provider';
+    const { stdout } = await runCommandWithCapture(
+      ytdlpPath,
+      buildArgs(mode, cookieContext.args),
+      `yt-dlp ${purpose} format selection`,
+      mode,
+      ctx
+    );
+    return { formatId: parseSelectedFormatId(stdout), extractionMode: mode };
+  }
+
+  onCookieContext?.(undefined);
+  const { stdout } = await runCommandWithCapture(
+    ytdlpPath,
+    buildArgs('public_provider'),
+    `yt-dlp ${purpose} format selection`,
+    'public_provider',
+    ctx
+  );
+  return { formatId: parseSelectedFormatId(stdout), extractionMode: 'public_provider' };
+}
+
+export const downloadYouTubeAudioToFile = async (
+  ytdlpPath: string,
+  url: YouTubeUrl,
+  outputFilePath: string,
+  cancelToken: CancelToken,
+  updateProgressCallback: (progress: number) => void,
+  realtimeDB: Database,
+  ctx?: LogContext
+): Promise<string> => {
+  const log = createLoggerWithContext(ctx);
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  ensureProductionPoTokenProviderConfigured(isDevelopment);
+
+  log.info('Starting YouTube download to local file', { url, outputFilePath });
+
+  if (cancelToken.isCancellationRequested) {
+    throw new Error('downloadYouTubeAudioToFile operation was cancelled');
+  }
+
+  let previousPercent = -1;
+  let cookieContext: YouTubeCookieContext | undefined;
+  const cleaned = { done: false };
+  const { formatId, extractionMode } = await resolvePreferredAudioFormatId(
+    ytdlpPath,
+    url,
+    realtimeDB,
+    isDevelopment,
+    log,
+    ctx,
+    'download',
+    (context) => {
+      cookieContext = context;
+    }
+  );
+
+  const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
+    const args = ['-f', formatId, '-N', getYtDlpConcurrentFragments(), '--no-playlist', '-o', `${outputFilePath}.%(ext)s`];
+    applyPreferredIpFamilyArgs(args);
+    applyYtDlpRequestPacingArgs(args);
+    if (extraCookieArgs.length > 0) {
+      args.push(...extraCookieArgs);
+    }
+    args.push('--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());
+    applyYouTubeExtractorArgs(args, mode, log);
+    args.push(url);
+    return args;
+  };
+
+  const resolveDownloadedFilePath = (): string => {
+    const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
+    const dir = path.dirname(safeOutputFilePath);
+    const baseName = path.basename(safeOutputFilePath);
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+    const actualFile = files.find((fileName) => {
+      const fileBase = path.basename(fileName, path.extname(fileName));
+      return fileBase === baseName || fileName.startsWith(baseName);
+    });
+
+    if (actualFile) {
+      return ensureSafeTempPath(path.join(dir, actualFile));
+    }
+
+    if (fs.existsSync(safeOutputFilePath)) {
+      return safeOutputFilePath;
+    }
+
+    throw new Error(`yt-dlp did not create an output file for ${baseName}`);
+  };
+
+  const execute = async (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      const args = buildArgs(mode, extraCookieArgs);
+      const command = `${ytdlpPath} ${args.join(' ')}`;
+      log.info('Executing yt-dlp file download command', {
+        command,
+        formatId,
+        extractionMode: mode,
+        outputTemplate: `${outputFilePath}.%(ext)s`,
+      });
+
+      const ytdlp = spawn(ytdlpPath, args);
+      let stderrBuffer = '';
+
+      const rejectWithError = (error: Error): void => {
+        reject(error);
+      };
+
+      ytdlp.on('error', (err) => {
+        rejectWithError(new Error(`yt-dlp file download spawn error: ${err}`));
+      });
+
+      ytdlp.on('close', (code, signal) => {
+        if (code === 0) {
+          try {
+            resolve(resolveDownloadedFilePath());
+          } catch (error) {
+            rejectWithError(error instanceof Error ? error : new Error(String(error)));
+          }
+          return;
+        }
+
+        rejectWithError(
+          buildAnnotatedYouTubeError(
+            `yt-dlp file download exited with code ${code}${signal ? ` (signal: ${signal})` : ''}. stderr: ${stderrBuffer.trim()}`,
+            mode
+          )
+        );
+      });
+
+      ytdlp.stderr?.on('data', (data) => {
+        if (cancelToken.isCancellationRequested) {
+          ytdlp.kill('SIGTERM');
+          rejectWithError(new Error('Download operation was cancelled'));
+          return;
+        }
+
+        const stderrStr = data.toString();
+        if (stderrBuffer.length < 50_000) {
+          stderrBuffer += stderrStr;
+        }
+
+        const percent = extractPercent(stderrStr);
+        if (percent !== null) {
+          const percentInt = Math.floor(percent);
+          if (percentInt !== previousPercent) {
+            previousPercent = percentInt;
+            updateProgressCallback(percent);
+          }
+        }
+      });
+    });
+
+  try {
+    return await execute(extractionMode, cookieContext?.args || []);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!shouldAttemptBrowserCookieRefresh(message, extractionMode, ctx)) {
+      throw error;
+    }
+
+    try {
+      await triggerBrowserYoutubeRefresh(log, ctx as LogContext);
+    } catch (refreshError) {
+      log.error('Shared browser YouTube session refresh failed before local file download retry', {
+        refreshError: refreshError instanceof Error ? refreshError.message : String(refreshError),
+        originalError: message,
+      });
+      throw error;
+    }
+
+    log.warn('Retrying yt-dlp file download after shared browser YouTube session refresh', {
+      extractionMode,
+      formatId,
+    });
+
+    return await execute(extractionMode, cookieContext?.args || []);
+  } finally {
+    cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);
+  }
 };
 
 async function getYouTubeAudioFragments(
