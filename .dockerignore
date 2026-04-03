@@ -1,0 +1,15 @@
+**
+!.dockerignore
+!.npmrc
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!turbo.json
+!apps
+!apps/process-audio
+!apps/process-audio/**
+!packages
+!packages/contracts
+!packages/contracts/**
+!packages/shared
+!packages/shared/**

@@ -69,8 +69,7 @@ ENV PROCESS_AUDIO_YT_DLP_VERSION=${YT_DLP_VERSION}
 WORKDIR /workspace
 
 # Install runtime dependencies:
-# - python3, make, g++: needed for native Node modules (protobufjs, etc.)
-# - python3-pip: installs plugin-capable yt-dlp + PO token plugin
+# - python3 + python3-pip: installs plugin-capable yt-dlp + PO token plugin
 # - ffmpeg: includes ffmpeg + ffprobe (dynamically linked, supports DNS)
 # - tar: extract persisted Chromium profile archives
 # - curl + unzip: install Deno, the preferred yt-dlp JS runtime
@@ -83,7 +82,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
     && printf "deb %s bookworm-security main\n" "$DEBIAN_SECURITY_MIRROR" >> /etc/apt/sources.list \
     && printf "deb %s bookworm-updates main\n" "$DEBIAN_UPDATES_MIRROR" >> /etc/apt/sources.list \
     && apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
-    && apt-get install -y --no-install-recommends python3 python3-pip make g++ ffmpeg curl unzip tar \
+    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg curl unzip tar \
     && rm -rf /var/lib/apt/lists/*
 
 RUN export DENO_INSTALL=/usr/local \
@@ -100,8 +99,7 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \
     && echo "yt-dlp version: $(yt-dlp --version)" \
     && python3 -m pip show bgutil-ytdlp-pot-provider
 
-# Install pnpm and copy the prepared workspace from the build stage
-RUN npm install -g pnpm@${PNPM_VERSION}
+# Copy the prepared workspace from the build stage
 COPY --from=build --chown=node:node /workspace/package.json ./package.json
 COPY --from=build --chown=node:node /workspace/.npmrc ./.npmrc
 COPY --from=build --chown=node:node /workspace/pnpm-lock.yaml ./pnpm-lock.yaml
@@ -110,8 +108,17 @@ COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
 COPY --from=build --chown=node:node /workspace/packages ./packages
 COPY --from=build --chown=node:node /workspace/apps/process-audio ./apps/process-audio
 
+# The final image should not depend on pnpm's workspace symlink layout surviving
+# multi-stage copies. Flatten the two local workspace packages into the app-local
+# node_modules tree so Node can resolve exported subpaths reliably at runtime.
+RUN mkdir -p /workspace/apps/process-audio/node_modules/@upperroom \
+    && rm -rf /workspace/apps/process-audio/node_modules/@upperroom/contracts \
+              /workspace/apps/process-audio/node_modules/@upperroom/shared \
+    && cp -a /workspace/packages/contracts /workspace/apps/process-audio/node_modules/@upperroom/contracts \
+    && cp -a /workspace/packages/shared /workspace/apps/process-audio/node_modules/@upperroom/shared
+
 WORKDIR /workspace/apps/process-audio
 USER node
 
 # Start the app
-CMD ["pnpm", "start"]
+CMD ["node", "./dist/index.js"]
