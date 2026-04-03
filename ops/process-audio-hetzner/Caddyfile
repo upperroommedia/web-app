@@ -1,0 +1,8 @@
+{$PROCESS_AUDIO_HOSTNAME} {
+  encode zstd gzip
+
+  reverse_proxy {$PROCESS_AUDIO_UPSTREAM} {
+    header_up X-Forwarded-Host {host}
+    header_up X-Forwarded-Proto {scheme}
+  }
+}

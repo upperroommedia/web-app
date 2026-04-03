@@ -1,0 +1,64 @@
+name: process-audio-hetzner
+
+services:
+  process-audio-staging:
+    profiles: ["staging"]
+    build:
+      context: ./context
+      dockerfile: apps/process-audio/Dockerfile
+    env_file:
+      - ./env/process-audio-staging.env
+    volumes:
+      - ./state/staging/tmp:/tmp
+      - ./state/staging/logs:/workspace/logs
+    restart: unless-stopped
+    expose:
+      - "8080"
+
+  caddy-staging:
+    profiles: ["staging"]
+    image: caddy:2.10.0
+    depends_on:
+      - process-audio-staging
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./state/caddy/data:/data
+      - ./state/caddy/config:/config
+    environment:
+      PROCESS_AUDIO_UPSTREAM: process-audio-staging:8080
+      PROCESS_AUDIO_HOSTNAME: ${PROCESS_AUDIO_STAGING_HOSTNAME}
+    restart: unless-stopped
+
+  process-audio-production:
+    profiles: ["production"]
+    build:
+      context: ./context
+      dockerfile: apps/process-audio/Dockerfile
+    env_file:
+      - ./env/process-audio-production.env
+    volumes:
+      - ./state/production/tmp:/tmp
+      - ./state/production/logs:/workspace/logs
+    restart: unless-stopped
+    expose:
+      - "8080"
+
+  caddy-production:
+    profiles: ["production"]
+    image: caddy:2.10.0
+    depends_on:
+      - process-audio-production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./state/caddy/data:/data
+      - ./state/caddy/config:/config
+    environment:
+      PROCESS_AUDIO_UPSTREAM: process-audio-production:8080
+      PROCESS_AUDIO_HOSTNAME: ${PROCESS_AUDIO_PRODUCTION_HOSTNAME}
+    restart: unless-stopped
