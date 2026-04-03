@@ -43,12 +43,9 @@ COPY apps/process-audio/package.json apps/process-audio/package.json
 # local tooling that is not needed inside this image build.
 RUN pnpm install --frozen-lockfile --filter @upperroom/process-audio... --ignore-scripts
 
-# Remove workspace-local node_modules symlinks from the shared packages before
-# copying full source trees into the same paths. Keep the app's node_modules so
-# pnpm workspace links remain available during `tsc`.
-RUN rm -rf packages/shared/node_modules packages/contracts/node_modules
-
-# Copy the workspace packages used by process-audio
+# Copy the workspace packages used by process-audio. Preserve the package-local
+# node_modules workspace links created by pnpm install so contracts can still
+# resolve @upperroom/shared when we compile inside the image.
 COPY packages/contracts ./packages/contracts
 COPY packages/shared ./packages/shared
 COPY apps/process-audio ./apps/process-audio
