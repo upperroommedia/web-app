@@ -95,7 +95,7 @@ export const getYouTubeCookieStatus = async (database: Database): Promise<GetYou
     try {
       await beginYouTubeQueueProbe({
         database,
-        targetUri: getProcessAudioTargetUri(),
+        targetUri: getProcessAudioTargetUri('youtube'),
         ownerId: `browser-status:${Date.now()}`,
         probeMode: 'browser_fallback',
       });

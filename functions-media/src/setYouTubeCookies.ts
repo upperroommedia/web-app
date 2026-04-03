@@ -30,7 +30,7 @@ const setyoutubecookies = onCall(
       try {
         await beginYouTubeQueueProbe({
           database,
-          targetUri: getProcessAudioTargetUri(),
+          targetUri: getProcessAudioTargetUri('youtube'),
           ownerId: `cookie-upload:${actor.uid}:${Date.now()}`,
           probeMode: 'cookie_provider',
         });

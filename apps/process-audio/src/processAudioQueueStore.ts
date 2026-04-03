@@ -3,16 +3,17 @@ import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
 import { createHash } from 'node:crypto';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import type {
+  ProcessAudioSourceType,
   StoredDeferredYouTubeRequest,
   StoredProcessAudioRequestState,
   StoredYouTubeQueueState,
   YouTubeQueueProbeMode,
 } from '@upperroom/contracts/processAudioQueue';
+import { getProcessAudioTaskQueueNameForSource } from '@upperroom/contracts/processAudioQueue';
 import type { YouTubeCookieMetadata } from '@upperroom/contracts/youtubeCookies';
 import { createLoggerWithContext } from './WinstonLogger';
 import type { LogContext } from './context';
 
-const PROCESS_AUDIO_TASK_QUEUE_NAME = 'processaudiotask';
 const PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS = 60 * 1000;
 const PROCESS_AUDIO_REQUESTS_PATH = 'processAudioRequests';
 const PROCESS_AUDIO_LOCKS_PATH = 'processAudioLocks';
@@ -22,8 +23,14 @@ const YOUTUBE_QUEUE_STATE_PATH = `${PROCESS_AUDIO_QUEUES_PATH}/youtube/state`;
 const YOUTUBE_QUEUE_DEFERRED_PATH = `${PROCESS_AUDIO_QUEUES_PATH}/youtube/deferred`;
 
 const PROCESS_AUDIO_BASE_URLS = {
-  prod: 'https://process-audio-yshbijirxq-uc.a.run.app',
-  staging: 'https://process-audio-staging-pvaq33fxyq-uc.a.run.app',
+  prod: {
+    storage: 'https://process-audio-yshbijirxq-uc.a.run.app',
+    youtube: 'https://yt-worker.upperroommedia.org',
+  },
+  staging: {
+    storage: 'https://process-audio-staging-pvaq33fxyq-uc.a.run.app',
+    youtube: 'https://yt-worker-staging.upperroommedia.org',
+  },
   local: 'http://127.0.0.1:8080',
 };
 
@@ -40,7 +47,7 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
 
 const getNowIsoString = (): string => new Date().toISOString();
 
-const getProcessAudioSourceType = (payload: AddIntroOutroInputType): 'youtube' | 'storage' => {
+const getProcessAudioSourceType = (payload: AddIntroOutroInputType): ProcessAudioSourceType => {
   return 'youtubeUrl' in payload ? 'youtube' : 'storage';
 };
 
@@ -178,26 +185,34 @@ const buildProcessAudioRequestState = (
 
 const normalizeBaseUrl = (value: string): string => value.replace(/\/process-audio\/?$/u, '').replace(/\/+$/u, '');
 
-function getProcessAudioBaseUrl(): string {
+function getProcessAudioBaseUrl(sourceType: ProcessAudioSourceType = 'storage'): string {
   if (process.env.FUNCTIONS_EMULATOR === 'true') {
     return PROCESS_AUDIO_BASE_URLS.local;
   }
 
   const configuredTarget =
-    process.env.PROCESS_AUDIO_TASK_TARGET_URI ||
-    process.env.PROCESS_AUDIO_SERVICE_URL ||
-    process.env.NEXT_PUBLIC_PROCESS_AUDIO_SERVICE_URL;
+    sourceType === 'youtube'
+      ? process.env.PROCESS_AUDIO_YOUTUBE_TASK_TARGET_URI ||
+        process.env.PROCESS_AUDIO_YOUTUBE_SERVICE_URL ||
+        process.env.NEXT_PUBLIC_PROCESS_AUDIO_YOUTUBE_SERVICE_URL
+      : process.env.PROCESS_AUDIO_FILE_TASK_TARGET_URI ||
+        process.env.PROCESS_AUDIO_FILE_SERVICE_URL ||
+        process.env.NEXT_PUBLIC_PROCESS_AUDIO_FILE_SERVICE_URL ||
+        process.env.PROCESS_AUDIO_TASK_TARGET_URI ||
+        process.env.PROCESS_AUDIO_SERVICE_URL ||
+        process.env.NEXT_PUBLIC_PROCESS_AUDIO_SERVICE_URL;
 
   if (configuredTarget) {
     return normalizeBaseUrl(configuredTarget);
   }
 
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;
-  return projectId === 'urm-app-staging' ? PROCESS_AUDIO_BASE_URLS.staging : PROCESS_AUDIO_BASE_URLS.prod;
+  const targetSet = projectId === 'urm-app-staging' ? PROCESS_AUDIO_BASE_URLS.staging : PROCESS_AUDIO_BASE_URLS.prod;
+  return targetSet[sourceType];
 }
 
-function getProcessAudioTargetUri(): string {
-  return `${getProcessAudioBaseUrl()}/process-audio`;
+function getProcessAudioTargetUri(sourceType: ProcessAudioSourceType = 'storage'): string {
+  return `${getProcessAudioBaseUrl(sourceType)}/process-audio`;
 }
 
 const isTaskMissingError = (error: unknown): boolean => {
@@ -298,7 +313,7 @@ async function enqueueTask(
   await queue.enqueue(sanitizedPayload, {
     id: taskId,
     dispatchDeadlineSeconds: PROCESS_AUDIO_TASK_TIMEOUT_SECONDS,
-    uri: getProcessAudioTargetUri(),
+    uri: getProcessAudioTargetUri(getProcessAudioSourceType(payload)),
   });
 }
 
@@ -307,7 +322,7 @@ async function enqueueDeferredRequestIgnoringPause(
   entry: StoredDeferredYouTubeRequest,
   ownerId: string
 ): Promise<void> {
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
+  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource('youtube'));
 
   await withProcessAudioQueueClaim(database, entry.sermonId, ownerId, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${entry.sermonId}`);
@@ -428,7 +443,9 @@ export async function completeProcessAudioSuccess(args: {
   const { database, payload, requestId, taskId, ctx } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const log = createLoggerWithContext(ctx);
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
+  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(
+    getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(sanitizedPayload))
+  );
 
   await withProcessAudioQueueClaim(database, sanitizedPayload.id, `success:${requestId}`, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
@@ -620,7 +637,9 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
   const { database, payload, requestId, taskId, ctx } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const log = createLoggerWithContext(ctx);
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
+  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(
+    getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(sanitizedPayload))
+  );
 
   return await withProcessAudioQueueClaim(database, sanitizedPayload.id, `cleanup:${requestId}`, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);

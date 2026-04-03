@@ -2,8 +2,9 @@
 
 This stack runs `process-audio` on a single Hetzner Cloud VM with:
 
-- one long-lived Docker container for the app
-- one Caddy reverse proxy for TLS and hostname routing
+- one long-lived Docker container for staging
+- one long-lived Docker container for production
+- one shared Caddy reverse proxy for TLS and hostname routing
 - persistent disk-backed directories for temp files and logs
 - no Cloud Run or serverless hop in the primary YouTube path
 
@@ -59,34 +60,36 @@ From the repo root, create the deployable build context:
 
 ## Deploying Staging
 
-Set the target SSH host and public hostname:
+Set the target SSH host and both public hostnames:
 
 ```bash
 export PROCESS_AUDIO_HETZNER_SSH_TARGET=root@<hetzner-ip-or-host>
 export PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME=yt-worker-staging.upperroommedia.org
+export PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME=yt-worker.upperroommedia.org
 ```
 
 Then run:
 
 ```bash
-./scripts/deploy-process-audio-hetzner.sh staging
+./scripts/deploy-process-audio-hetzner.sh all
 ```
 
 The deploy script will:
 
 1. pull Firebase and runtime secrets from GCP
-2. resolve the existing `ytdlp-pot-provider` URL from the target GCP project
-3. generate `env/process-audio-staging.env`
-3. sync the stack to the VM
-4. build and start the containers with Docker Compose
+2. resolve the existing `ytdlp-pot-provider` URL for both staging and production
+3. generate both env files
+4. sync the stack to the VM
+5. build and start the requested containers with Docker Compose
 
 ## Deploying Production
 
 ```bash
 export PROCESS_AUDIO_HETZNER_SSH_TARGET=root@<hetzner-ip-or-host>
+export PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME=yt-worker-staging.upperroommedia.org
 export PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME=yt-worker.upperroommedia.org
 
-./scripts/deploy-process-audio-hetzner.sh production
+./scripts/deploy-process-audio-hetzner.sh all
 ```
 
 ## Verification
@@ -114,3 +117,10 @@ This VM stack intentionally restores the direct URL + `ffmpeg` model.
 - `YTDLP_POT_PROVIDER_BASE_URL=<resolved from the target GCP project>`
 
 The VM itself is the dedicated runtime. Do not point it at another fallback worker unless you intentionally add a second-tier fallback later.
+
+Staging and production share the same VM, but they do not share runtime env:
+
+- `yt-worker-staging...` routes to the staging container
+- `yt-worker...` routes to the production container
+
+That keeps Firebase buckets/RTDB/projects isolated without trying to switch them inside one request handler.

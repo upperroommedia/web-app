@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <staging|production>" >&2
+  echo "Usage: $0 <staging|production|all>" >&2
   exit 64
 fi
 
@@ -13,7 +13,7 @@ SSH_TARGET="${PROCESS_AUDIO_HETZNER_SSH_TARGET:-}"
 REMOTE_DIR="${PROCESS_AUDIO_HETZNER_REMOTE_DIR:-/opt/upperroom/process-audio-hetzner}"
 
 case "$TARGET_ENV" in
-  staging|production)
+  staging|production|all)
     ;;
   *)
     echo "Unsupported environment: $TARGET_ENV" >&2
@@ -38,24 +38,11 @@ if [[ -z "$SSH_TARGET" ]]; then
   exit 66
 fi
 
-if [[ "$TARGET_ENV" == "staging" ]]; then
-  project_id="urm-app-staging"
-  firebase_project_id="urm-app-staging"
-  bucket="urm-app-staging.firebasestorage.app"
-  database_url="https://urm-app-staging-default-rtdb.firebaseio.com/"
-  hostname="${PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME:-}"
-  env_file_name="process-audio-staging.env"
-else
-  project_id="urm-app"
-  firebase_project_id="urm-app"
-  bucket="urm-app.appspot.com"
-  database_url="https://urm-app-default-rtdb.firebaseio.com/"
-  hostname="${PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME:-}"
-  env_file_name="process-audio-production.env"
-fi
+staging_hostname="${PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME:-}"
+production_hostname="${PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME:-}"
 
-if [[ -z "$hostname" ]]; then
-  echo "Hostname env var is required for ${TARGET_ENV}" >&2
+if [[ -z "$staging_hostname" || -z "$production_hostname" ]]; then
+  echo "Both PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME and PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME are required" >&2
   exit 67
 fi
 
@@ -69,16 +56,37 @@ cp "$ROOT_DIR/ops/process-audio-hetzner/README.md" "$WORK_DIR/README.md"
 
 "$ROOT_DIR/scripts/prepare-process-audio-hetzner-context.sh" "$WORK_DIR/context"
 
-runtime_alert_recipients="$(gcloud secrets versions access latest --secret=RUNTIME_ALERT_RECIPIENTS --project "$project_id")"
-pot_provider_url="$(gcloud run services describe ytdlp-pot-provider --region=us-central1 --project "$project_id" --format='value(status.url)')"
-service_account_json_b64="$(
-  gcloud secrets versions access latest --secret=BROWSER_FALLBACK_FIREBASE_SERVICE_ACCOUNT_JSON --project "$project_id" \
-    | python3 -c 'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())'
-)"
+write_env_file() {
+  local env_name="$1"
+  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients pot_provider_url service_account_json_b64
 
-cat > "$WORK_DIR/env/$env_file_name" <<EOF
+  if [[ "$env_name" == "staging" ]]; then
+    project_id="urm-app-staging"
+    firebase_project_id="urm-app-staging"
+    bucket="urm-app-staging.firebasestorage.app"
+    database_url="https://urm-app-staging-default-rtdb.firebaseio.com/"
+    env_file_name="process-audio-staging.env"
+  else
+    project_id="urm-app"
+    firebase_project_id="urm-app"
+    bucket="urm-app.appspot.com"
+    database_url="https://urm-app-default-rtdb.firebaseio.com/"
+    env_file_name="process-audio-production.env"
+  fi
+
+  runtime_alert_recipients="$(gcloud secrets versions access latest --secret=RUNTIME_ALERT_RECIPIENTS --project "$project_id")"
+  pot_provider_url="$(gcloud run services describe ytdlp-pot-provider --region=us-central1 --project "$project_id" --format='value(status.url)')"
+  service_account_json_b64="$(
+    gcloud secrets versions access latest --secret=BROWSER_FALLBACK_FIREBASE_SERVICE_ACCOUNT_JSON --project "$project_id" \
+    | python3 -c 'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())'
+  )"
+
+  cat > "$WORK_DIR/env/$env_file_name" <<EOF
 NODE_ENV=production
 PORT=8080
+ENABLE_CLOUD_LOGGING=false
+GOOGLE_CLOUD_PROJECT=${firebase_project_id}
+GCLOUD_PROJECT=${firebase_project_id}
 FIREBASE_PROJECT_ID=${firebase_project_id}
 FIREBASE_STORAGE_BUCKET=${bucket}
 FIREBASE_DATABASE_URL=${database_url}
@@ -102,15 +110,23 @@ YOUTUBE_BROWSER_FALLBACK_URL=
 YOUTUBE_FINAL_BROWSER_FALLBACK_URL=
 YOUTUBE_FORCE_IPV4=false
 EOF
+}
+
+write_env_file staging
+write_env_file production
 
 cat > "$WORK_DIR/.env" <<EOF
-PROCESS_AUDIO_STAGING_HOSTNAME=${PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME:-yt-worker-staging.invalid}
-PROCESS_AUDIO_PRODUCTION_HOSTNAME=${PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME:-yt-worker.invalid}
+PROCESS_AUDIO_STAGING_HOSTNAME=${staging_hostname}
+PROCESS_AUDIO_PRODUCTION_HOSTNAME=${production_hostname}
 EOF
 
 rsync -az --delete "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
 
-ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs"
-ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose --profile ${TARGET_ENV} up -d --build"
+ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production"
+if [[ "$TARGET_ENV" == "all" ]]; then
+  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build"
+else
+  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build caddy process-audio-${TARGET_ENV}"
+fi
 
 echo "Deployed process-audio Hetzner stack for ${TARGET_ENV} to ${SSH_TARGET}:${REMOTE_DIR}"

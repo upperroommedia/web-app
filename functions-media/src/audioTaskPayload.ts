@@ -1,7 +1,8 @@
 import type { AddIntroOutroInputType, AudioSource } from '@upperroom/contracts/addIntroOutro/types';
+import { PROCESS_AUDIO_FILE_TASK_QUEUE_NAME } from '@upperroom/contracts/processAudioQueue';
 import { logger } from 'firebase-functions/v2';
 
-export const PROCESS_AUDIO_TASK_QUEUE_NAME = 'processaudiotask';
+export const PROCESS_AUDIO_TASK_QUEUE_NAME = PROCESS_AUDIO_FILE_TASK_QUEUE_NAME;
 export const PROCESS_AUDIO_TASK_TIMEOUT_SECONDS = 1800;
 
 export function validateAddIntroOutroData(data: unknown): data is AddIntroOutroInputType {

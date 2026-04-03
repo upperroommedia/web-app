@@ -2,10 +2,17 @@ name: process-audio-hetzner
 
 services:
   process-audio-staging:
-    profiles: ["staging"]
     build:
       context: ./context
       dockerfile: apps/process-audio/Dockerfile
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        credential_path=/workspace/logs/firebase-service-account.json
+        printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_path"
+        export GOOGLE_APPLICATION_CREDENTIALS="$$credential_path"
+        exec pnpm start
     env_file:
       - ./env/process-audio-staging.env
     volumes:
@@ -15,28 +22,18 @@ services:
     expose:
       - "8080"
 
-  caddy-staging:
-    profiles: ["staging"]
-    image: caddy:2.10.0
-    depends_on:
-      - process-audio-staging
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./state/caddy/data:/data
-      - ./state/caddy/config:/config
-    environment:
-      PROCESS_AUDIO_UPSTREAM: process-audio-staging:8080
-      PROCESS_AUDIO_HOSTNAME: ${PROCESS_AUDIO_STAGING_HOSTNAME}
-    restart: unless-stopped
-
   process-audio-production:
-    profiles: ["production"]
     build:
       context: ./context
       dockerfile: apps/process-audio/Dockerfile
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        credential_path=/workspace/logs/firebase-service-account.json
+        printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_path"
+        export GOOGLE_APPLICATION_CREDENTIALS="$$credential_path"
+        exec pnpm start
     env_file:
       - ./env/process-audio-production.env
     volumes:
@@ -46,11 +43,14 @@ services:
     expose:
       - "8080"
 
-  caddy-production:
-    profiles: ["production"]
+  caddy:
     image: caddy:2.10.0
     depends_on:
+      - process-audio-staging
       - process-audio-production
+    environment:
+      PROCESS_AUDIO_STAGING_HOSTNAME: ${PROCESS_AUDIO_STAGING_HOSTNAME}
+      PROCESS_AUDIO_PRODUCTION_HOSTNAME: ${PROCESS_AUDIO_PRODUCTION_HOSTNAME}
     ports:
       - "80:80"
       - "443:443"
@@ -58,7 +58,4 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./state/caddy/data:/data
       - ./state/caddy/config:/config
-    environment:
-      PROCESS_AUDIO_UPSTREAM: process-audio-production:8080
-      PROCESS_AUDIO_HOSTNAME: ${PROCESS_AUDIO_PRODUCTION_HOSTNAME}
     restart: unless-stopped
