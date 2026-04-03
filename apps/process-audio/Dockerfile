@@ -2,6 +2,7 @@
 ARG NODE_VERSION=22
 ARG PNPM_VERSION=10.10.0
 ARG YT_DLP_VERSION=2026.03.17
+ARG FFMPEG_VERSION=8.1
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
 ARG DENO_VERSION=2.2.7
 ARG DEBIAN_MIRROR=https://mirrors.edge.kernel.org/debian
@@ -57,8 +58,51 @@ COPY apps/process-audio ./apps/process-audio
 # unnecessary and pulls in browser-only transitive deps.
 RUN pnpm --dir apps/process-audio build
 
+# ---------- FFmpeg build stage ----------
+FROM debian:bookworm AS ffmpeg-build
+ARG FFMPEG_VERSION
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
+ARG DEBIAN_UPDATES_MIRROR
+WORKDIR /tmp
+
+RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/apt/sources.list.d/debian.sources \
+    && printf 'Acquire::By-Hash "yes";\n' > /etc/apt/apt.conf.d/99byhash \
+    && printf "deb %s bookworm main\n" "$DEBIAN_MIRROR" > /etc/apt/sources.list \
+    && printf "deb %s bookworm-security main\n" "$DEBIAN_SECURITY_MIRROR" >> /etc/apt/sources.list \
+    && printf "deb %s bookworm-updates main\n" "$DEBIAN_UPDATES_MIRROR" >> /etc/apt/sources.list \
+    && apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
+    && apt-get install -y --no-install-recommends \
+      build-essential \
+      pkg-config \
+      nasm \
+      yasm \
+      libgnutls28-dev \
+      libmp3lame-dev \
+      zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz \
+    && tar -xf ffmpeg.tar.xz \
+    && cd "ffmpeg-${FFMPEG_VERSION}" \
+    && ./configure \
+      --prefix=/opt/ffmpeg \
+      --disable-debug \
+      --disable-doc \
+      --enable-gpl \
+      --enable-gnutls \
+      --enable-libmp3lame \
+    && make -j"$(nproc)" \
+    && make install \
+    && /opt/ffmpeg/bin/ffmpeg -version \
+    && /opt/ffmpeg/bin/ffprobe -version
+
 # ---------- Production stage ----------
 FROM node:${NODE_VERSION}-bookworm-slim AS production
+ARG FFMPEG_VERSION
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION
 ARG DENO_VERSION
 ARG DEBIAN_MIRROR
@@ -66,14 +110,15 @@ ARG DEBIAN_SECURITY_MIRROR
 ARG DEBIAN_UPDATES_MIRROR
 ENV NODE_ENV=production
 ENV PROCESS_AUDIO_YT_DLP_VERSION=${YT_DLP_VERSION}
+ENV PROCESS_AUDIO_FFMPEG_VERSION=${FFMPEG_VERSION}
 WORKDIR /workspace
 
 # Install runtime dependencies:
 # - python3 + python3-pip: installs plugin-capable yt-dlp + PO token plugin
-# - ffmpeg: includes ffmpeg + ffprobe (dynamically linked, supports DNS)
 # - aria2: external downloader for yt-dlp file-based download flows
 # - tar: extract persisted Chromium profile archives
 # - curl + unzip: install Deno, the preferred yt-dlp JS runtime
+# - libgnutls30 + libmp3lame0: runtime dependencies for the pinned ffmpeg build
 RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
@@ -83,7 +128,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
     && printf "deb %s bookworm-security main\n" "$DEBIAN_SECURITY_MIRROR" >> /etc/apt/sources.list \
     && printf "deb %s bookworm-updates main\n" "$DEBIAN_UPDATES_MIRROR" >> /etc/apt/sources.list \
     && apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
-    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg aria2 curl unzip tar \
+    && apt-get install -y --no-install-recommends python3 python3-pip aria2 curl unzip tar libgnutls30 libmp3lame0 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN export DENO_INSTALL=/usr/local \
@@ -99,6 +144,12 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \
        "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
     && echo "yt-dlp version: $(yt-dlp --version)" \
     && python3 -m pip show bgutil-ytdlp-pot-provider
+
+COPY --from=ffmpeg-build /opt/ffmpeg /opt/ffmpeg
+RUN ln -sf /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg \
+    && ln -sf /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
+    && ffmpeg -version | head -n 1 \
+    && ffprobe -version | head -n 1
 
 # Copy the prepared workspace from the build stage
 COPY --from=build --chown=node:node /workspace/package.json ./package.json

@@ -1,4 +1,4 @@
-name: nightly-ytdlp-update
+name: nightly-media-tool-update
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: nightly-ytdlp-update
+  group: nightly-media-tool-update
   cancel-in-progress: true
 
 jobs:
@@ -62,46 +62,60 @@ jobs:
           ssh-keyscan -H "$host_part" >> ~/.ssh/known_hosts
 
       - id: version-check
-        name: Resolve latest stable yt-dlp version
+        name: Resolve latest stable yt-dlp and ffmpeg versions
         run: |
           set -euo pipefail
-          current_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG YT_DLP_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate YT_DLP_VERSION in Dockerfile'; print(match.group(1).strip())")"
+          current_ytdlp_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG YT_DLP_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate YT_DLP_VERSION in Dockerfile'; print(match.group(1).strip())")"
+          current_ffmpeg_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG FFMPEG_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate FFMPEG_VERSION in Dockerfile'; print(match.group(1).strip())")"
 
-          latest_version="$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest yt-dlp release tag found'; print(tag.lstrip('v'))")"
+          latest_ytdlp_version="$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest yt-dlp release tag found'; print(tag.lstrip('v'))")"
+          latest_ffmpeg_version="$(curl -fsSL https://ffmpeg.org/releases/ | python3 -c "import re, sys; html = sys.stdin.read(); versions = sorted(set(re.findall(r'ffmpeg-([0-9]+(?:\\.[0-9]+){1,2})\\.tar\\.xz', html)), key=lambda s: [int(x) for x in s.split('.')]); assert versions, 'No ffmpeg release versions found'; print(versions[-1])")"
 
           should_update=false
-          if [[ "$current_version" != "$latest_version" ]]; then
+          if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" ]]; then
             should_update=true
           fi
 
           {
-            echo "current_version=$current_version"
-            echo "latest_version=$latest_version"
+            echo "current_ytdlp_version=$current_ytdlp_version"
+            echo "latest_ytdlp_version=$latest_ytdlp_version"
+            echo "current_ffmpeg_version=$current_ffmpeg_version"
+            echo "latest_ffmpeg_version=$latest_ffmpeg_version"
             echo "should_update=$should_update"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Exit when yt-dlp is already current
+      - name: Exit when media tools are already current
         if: steps.version-check.outputs.should_update != 'true'
-        run: echo "yt-dlp is already current; no update needed."
+        run: echo "yt-dlp and ffmpeg are already current; no update needed."
 
-      - name: Bump pinned yt-dlp version
+      - name: Bump pinned yt-dlp and ffmpeg versions
         if: steps.version-check.outputs.should_update == 'true'
         env:
-          LATEST_VERSION: ${{ steps.version-check.outputs.latest_version }}
+          LATEST_YTDLP_VERSION: ${{ steps.version-check.outputs.latest_ytdlp_version }}
+          LATEST_FFMPEG_VERSION: ${{ steps.version-check.outputs.latest_ffmpeg_version }}
         run: |
           set -euo pipefail
-          python3 -c "import os, re, pathlib; path = pathlib.Path('apps/process-audio/Dockerfile'); latest = os.environ['LATEST_VERSION']; text = path.read_text(); updated = re.sub(r'(^ARG YT_DLP_VERSION=).+$', rf'\\1{latest}', text, flags=re.MULTILINE); assert updated != text, 'Dockerfile did not change during yt-dlp version bump'; path.write_text(updated)"
+          python3 - <<'PY'
+          import os, pathlib, re
+          path = pathlib.Path('apps/process-audio/Dockerfile')
+          text = path.read_text()
+          updated = re.sub(r'(^ARG YT_DLP_VERSION=).+$', rf"\1{os.environ['LATEST_YTDLP_VERSION']}", text, flags=re.MULTILINE)
+          updated = re.sub(r'(^ARG FFMPEG_VERSION=).+$', rf"\1{os.environ['LATEST_FFMPEG_VERSION']}", updated, flags=re.MULTILINE)
+          assert updated != text, 'Dockerfile did not change during media tool version bump'
+          path.write_text(updated)
+          PY
 
       - name: Commit and push version bump
         if: steps.version-check.outputs.should_update == 'true'
         env:
-          LATEST_VERSION: ${{ steps.version-check.outputs.latest_version }}
+          LATEST_YTDLP_VERSION: ${{ steps.version-check.outputs.latest_ytdlp_version }}
+          LATEST_FFMPEG_VERSION: ${{ steps.version-check.outputs.latest_ffmpeg_version }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/process-audio/Dockerfile
-          git commit -m "Bump yt-dlp to ${LATEST_VERSION}"
+          git commit -m "Bump media tools to yt-dlp ${LATEST_YTDLP_VERSION} and ffmpeg ${LATEST_FFMPEG_VERSION}"
           git push origin HEAD:staging
 
       - name: Deploy staging Hetzner worker

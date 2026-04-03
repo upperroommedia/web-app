@@ -61,7 +61,7 @@ The VM hosts:
 - `ytdlp-pot-provider`
 - a host-native Chrome auth stack under the `ytauth` user
 
-The worker images include:
+The worker images include pinned versions of:
 
 - `yt-dlp`
 - `ffmpeg`
@@ -376,9 +376,9 @@ Interpretation:
 - low `Download progress` or weak yt-dlp transfer rates suggests the downloader side is the bottleneck
 - `aria2c` is available for yt-dlp-managed file download paths such as section-download fallback, but it does not speed up the direct URL plus `ffmpeg` path by itself
 
-## Nightly yt-dlp Updates
+## Nightly Media Tool Updates
 
-GitHub Actions owns the pinned `yt-dlp` version in [apps/process-audio/Dockerfile](/Users/yasaad/Projects/upper-room-media/web-app/apps/process-audio/Dockerfile).
+GitHub Actions owns the pinned `yt-dlp` and `ffmpeg` versions in [apps/process-audio/Dockerfile](/Users/yasaad/Projects/upper-room-media/web-app/apps/process-audio/Dockerfile).
 
 Workflow:
 
@@ -387,12 +387,13 @@ Workflow:
 Behavior:
 
 1. checks the latest stable upstream `yt-dlp`
-2. compares against the pinned Dockerfile version
-3. updates the Dockerfile if newer
-4. commits and pushes the bump to `staging`
-5. deploys staging Hetzner
-6. runs a remote smoke test
-7. deploys production Hetzner only if staging passes
+2. checks the latest stable upstream `ffmpeg`
+3. compares both against the pinned Dockerfile versions
+4. updates the Dockerfile if either is newer
+5. commits and pushes the bump to `staging`
+6. deploys staging Hetzner
+7. runs a remote smoke test
+8. deploys production Hetzner only if staging passes
 
 Required GitHub secrets:
 
