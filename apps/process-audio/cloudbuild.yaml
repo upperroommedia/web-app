@@ -17,8 +17,6 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: [
         'build',
-        '--build-arg',
-        'CACHEBUST=${COMMIT_SHA}', # force latest yt-dlp layer
         '--cache-from',
         '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}',
         '-f',
