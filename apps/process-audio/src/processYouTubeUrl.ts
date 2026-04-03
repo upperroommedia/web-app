@@ -2434,27 +2434,88 @@ export const processYouTubeUrl = async (
   const isDevelopment = process.env.NODE_ENV === 'development';
   ensureProductionPoTokenProviderConfigured(isDevelopment);
 
-  log.info('Starting YouTube download (full stream)', { url, isDevelopment, startTime, duration });
+  log.info('Starting YouTube download (stream to stdout)', { url, isDevelopment, startTime, duration });
 
   if (cancelToken.isCancellationRequested) {
     throw new Error('getYouTubeStream operation was cancelled');
   }
   let totalBytes = 0;
   let previousPercent = -1;
+  let cookieContext: YouTubeCookieContext | undefined;
+  const cleaned = { done: false };
+
+  const resolveSelectedFormatId = async (): Promise<{ formatId: string; extractionMode: YouTubeExtractionMode }> => {
+    const baseArgs = [
+      '-J',
+      '-f',
+      'bestaudio/best',
+      '--no-playlist',
+      '--skip-download',
+      '--no-js-runtimes',
+      '--js-runtimes',
+      getPreferredYtDlpJsRuntime(),
+    ];
+    applyPreferredIpFamilyArgs(baseArgs);
+    applyYtDlpRequestPacingArgs(baseArgs);
+
+    const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
+      const args = [...baseArgs];
+      if (extraCookieArgs.length > 0) {
+        args.push(...extraCookieArgs);
+      }
+      applyYouTubeExtractorArgs(args, mode, log);
+      args.push(url);
+      return args;
+    };
+
+    const parseSelectedFormatId = (stdout: string): string => {
+      const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
+      const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
+      if (!selected?.format_id) {
+        throw new Error('yt-dlp did not return a preferred audio format for streaming');
+      }
+      log.info('Selected preferred YouTube audio format for streaming', {
+        formatId: selected.format_id,
+        selectedLanguage: selected.language || null,
+        selectedFormatNote: selected.format_note || null,
+        videoLanguage: parsed.language || null,
+      });
+      return selected.format_id;
+    };
+
+    if (shouldUseCookiesForPublicVideos()) {
+      cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+      const mode: YouTubeExtractionMode = cookieContext.hasCookies ? 'cookie_provider' : 'public_provider';
+      const { stdout } = await runCommandWithCapture(
+        ytdlpPath,
+        buildArgs(mode, cookieContext.args),
+        'yt-dlp stream format selection',
+        mode,
+        ctx
+      );
+      return { formatId: parseSelectedFormatId(stdout), extractionMode: mode };
+    }
+
+    const { stdout } = await runCommandWithCapture(
+      ytdlpPath,
+      buildArgs('public_provider'),
+      'yt-dlp stream format selection',
+      'public_provider',
+      ctx
+    );
+    return { formatId: parseSelectedFormatId(stdout), extractionMode: 'public_provider' };
+  };
+
+  const { formatId, extractionMode } = await resolveSelectedFormatId();
 
   // Pipes output to stdout - downloads FULL stream, seeking handled by our FFmpeg
-  // NOTE: For precise section downloads with seeking, use getYouTubeAudioUrl + FFmpeg input seeking instead
-  const args = ['-f', 'bestaudio/best', '-N', getYtDlpConcurrentFragments(), '--no-playlist', '-o', '-'];
+  const args = ['-f', formatId, '-N', getYtDlpConcurrentFragments(), '--no-playlist', '-o', '-'];
   applyPreferredIpFamilyArgs(args);
   applyYtDlpRequestPacingArgs(args);
-  let cookieContext: YouTubeCookieContext | undefined;
-  if (shouldUseCookiesForPublicVideos()) {
-    cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+  if (cookieContext?.args.length) {
     args.push(...cookieContext.args);
-    applyYouTubeExtractorArgs(args, cookieContext.hasCookies ? 'cookie_provider' : 'public_provider', log);
-  } else {
-    applyYouTubeExtractorArgs(args, 'public_provider', log);
   }
+  applyYouTubeExtractorArgs(args, extractionMode, log);
 
   // Add JS runtime
   args.push('--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());
@@ -2463,9 +2524,8 @@ export const processYouTubeUrl = async (
   args.push(url);
 
   const command = `${ytdlpPath} ${args.join(' ')}`;
-  log.debug('Executing yt-dlp command', { command });
+  log.debug('Executing yt-dlp streaming command', { command, formatId, extractionMode });
   const ytdlp = spawn(ytdlpPath, args);
-  const cleaned = { done: false };
 
   ytdlp.on('error', (err) => {
     cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);

@@ -4,28 +4,14 @@ import { Database, Reference } from 'firebase-admin/database';
 import {
   convertStringToMilliseconds,
   createTempFile,
-  ensureSafeTempPath,
-  isTrustedYouTubeLiveDvrManifestUrl,
   logMemoryUsage,
   throwErrorOnSpecificStderr,
   getFFmpegPath,
-  getDurationSeconds,
   unlinkSafeTempFile,
 } from './utils';
 import { CustomMetadata, AudioSource } from './types';
-import {
-  processYouTubeUrl,
-  downloadYouTubeSection,
-  getYouTubeAudioUrl,
-  getYouTubeTrimRoutingDecision,
-  YTDLP_HTTP_USER_AGENT,
-  extractMediaUrlBindingDetails,
-  logObservedOutboundNetworkIdentity,
-} from './processYouTubeUrl';
-import { readdir } from 'fs/promises';
+import { processYouTubeUrl } from './processYouTubeUrl';
 import { PassThrough, Readable, finished } from 'stream';
-import os from 'os';
-import path from 'path';
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import { sermonStatus, sermonStatusType } from './types';
 import { createLoggerWithContext } from './WinstonLogger';
@@ -90,22 +76,8 @@ const trimAndTranscode = async (
   let ytdlp: ChildProcessWithoutNullStreams | undefined;
   let proc: ReturnType<typeof spawn> | undefined;
   let transcodingStarted = false;
-  let usedYtdlpSectionDownload = false;
-  let usedDirectUrlWithSeeking = false; // NEW: Track if using direct URL + FFmpeg seeking approach
-  let directUrlHttpHeaders: Record<string, string> | undefined;
-  let directUrlRequestUserAgent: string | null = null;
-  let observedDirectUrlOutboundIdentity:
-    | Awaited<ReturnType<typeof logObservedOutboundNetworkIdentity>>
-    | undefined;
-  let directUrlMediaBindingDetails: ReturnType<typeof extractMediaUrlBindingDetails> | undefined;
   let ffmpegStderrBuffer = '';
   const MAX_FFMPEG_STDERR_BUFFER = 20_000;
-
-  // Duration verification state - used to determine if secondary trim is needed
-  // Secondary trim uses the KNOWN user-specified duration, NOT arbitrary values
-  let secondaryTrimNeeded = false;
-  let secondaryTrimDuration: number | undefined;
-  const DURATION_TOLERANCE_SECONDS = 2; // Allow 2 seconds tolerance for encoding variance
 
   log.info('Starting trim and transcode', {
     sourceType: audioSource.type,
@@ -207,182 +179,24 @@ const trimAndTranscode = async (
 
   try {
     if (audioSource.type === 'YouTubeUrl') {
-      log.info('Processing YouTube URL', { url: audioSource.source });
-
-      if (startTime !== undefined && startTime !== null) {
-        const downloadSectionToInput = async (reason: string): Promise<void> => {
-          const ytdlpOutputFileBase = `ytdlp-${audioSource.id}`;
-          const ytdlpOutputFile = createTempFile(ytdlpOutputFileBase, tempFiles);
-          log.info('Using yt-dlp section download strategy for trimmed YouTube request', {
-            startTime,
-            duration,
-            outputFile: ytdlpOutputFile,
-            reason,
-          });
-
-          let downloadedFile: string;
-          try {
-            downloadedFile = await downloadYouTubeSection(
-              ytdlpPath,
-              audioSource.source,
-              ytdlpOutputFile,
-              cancelToken,
-              updateDownloadProgress,
-              realtimeDB,
-              startTime,
-              duration ?? undefined,
-              ctx
-            );
-
-            if (downloadedFile !== ytdlpOutputFile) {
-              tempFiles.delete(ytdlpOutputFile);
-              tempFiles.add(ensureSafeTempPath(downloadedFile));
-              log.debug('Updated tempFiles tracking for yt-dlp output', {
-                basePath: ytdlpOutputFile,
-                actualPath: downloadedFile,
-              });
-            }
-          } catch (downloadError) {
-            try {
-              const tempDir = os.tmpdir();
-              const files = await readdir(tempDir);
-              const orphanedFiles = files.filter((f) => f.startsWith(ytdlpOutputFileBase));
-              for (const orphanedFile of orphanedFiles) {
-                const orphanedPath = ensureSafeTempPath(path.join(tempDir, orphanedFile));
-                if (!tempFiles.has(orphanedPath)) {
-                  tempFiles.add(orphanedPath);
-                  log.debug('Added orphaned yt-dlp file to cleanup tracking', { file: orphanedPath });
-                }
-              }
-            } catch (cleanupErr) {
-              log.warn('Failed to scan for orphaned yt-dlp files', {
-                error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
-              });
-            }
-            throw downloadError;
-          }
-
-          const actualDuration = await getDurationSeconds(downloadedFile);
-          const expectedDuration = duration ?? Infinity;
-          const durationDifference = actualDuration - expectedDuration;
-          const withinTolerance = duration === undefined || Math.abs(durationDifference) <= DURATION_TOLERANCE_SECONDS;
-
-          log.info('Section-downloaded file duration verification', {
-            actualDuration: actualDuration.toFixed(2),
-            expectedDuration: duration !== undefined ? duration.toFixed(2) : 'not specified',
-            durationDifference: durationDifference.toFixed(2),
-            tolerance: DURATION_TOLERANCE_SECONDS,
-            withinTolerance,
-            requestedStart: startTime,
-            requestedDuration: duration,
-            reason,
-          });
-
-          if (duration !== undefined && actualDuration > expectedDuration + DURATION_TOLERANCE_SECONDS) {
-            secondaryTrimNeeded = true;
-            secondaryTrimDuration = duration;
-            log.warn('Section-downloaded file exceeds expected duration - will apply secondary trim', {
-              actualDuration: actualDuration.toFixed(2),
-              expectedDuration: duration.toFixed(2),
-              excessSeconds: (actualDuration - duration).toFixed(2),
-              action: `Will trim to exact ${duration} seconds as specified by user`,
-            });
-          }
-
-          usedYtdlpSectionDownload = true;
-          inputSource = downloadedFile;
-        };
-
-        let routingDecision:
-          | Awaited<ReturnType<typeof getYouTubeTrimRoutingDecision>>
-          | {
-              strategy: 'direct_url';
-              reason: string;
-              hasFragments: false;
-              likelyDvr: false;
-            };
-        try {
-          routingDecision = await getYouTubeTrimRoutingDecision(ytdlpPath, audioSource.source, realtimeDB, ctx);
-        } catch (routingError) {
-          routingDecision = {
-            strategy: 'direct_url',
-            reason: 'routing_preflight_failed_default_direct',
-            hasFragments: false,
-            likelyDvr: false,
-          };
-          log.warn('YouTube routing preflight failed; defaulting to direct URL extraction', {
-            error: routingError instanceof Error ? routingError.message : String(routingError),
-          });
-        }
-
-        log.info('Deterministic YouTube trim routing decision', {
-          startTime,
-          duration,
-          strategy: routingDecision.strategy,
-          reason: routingDecision.reason,
-          hasFragments: routingDecision.hasFragments,
-          likelyDvr: routingDecision.likelyDvr,
-          formatId: 'formatId' in routingDecision ? routingDecision.formatId : undefined,
-          fragmentCount: 'fragmentCount' in routingDecision ? routingDecision.fragmentCount : undefined,
-          protocol: 'protocol' in routingDecision ? routingDecision.protocol : undefined,
-        });
-
-        if (routingDecision.strategy === 'section_download') {
-          await downloadSectionToInput('deterministic_section_route');
-        } else {
-          log.info('Using direct URL + FFmpeg seeking strategy', {
-            startTime,
-            duration,
-            reason: routingDecision.reason,
-          });
-
-          try {
-            const urlResult = await getYouTubeAudioUrl(ytdlpPath, audioSource.source, realtimeDB, ctx);
-
-            log.info('Successfully extracted direct YouTube audio URL', {
-              format: urlResult.format,
-              videoDuration: urlResult.duration,
-              requestedStart: startTime,
-              requestedDuration: duration,
-              httpHeaderKeys: urlResult.httpHeaders ? Object.keys(urlResult.httpHeaders) : [],
-              userAgentHeader: urlResult.httpHeaders?.['User-Agent'] || null,
-            });
-
-            updateDownloadProgress(100);
-            inputSource = urlResult.url;
-            usedDirectUrlWithSeeking = true;
-            directUrlHttpHeaders = urlResult.httpHeaders;
-
-            log.info('YouTube audio URL ready for FFmpeg processing', {
-              approach: 'direct_url_with_input_seeking',
-              inputType: 'url',
-              seekTo: startTime,
-              duration,
-              headerPropagationEnabled: !!urlResult.httpHeaders,
-            });
-          } catch (urlError) {
-            log.warn('Direct URL extraction failed; falling back to section download strategy', {
-              error: urlError instanceof Error ? urlError.message : String(urlError),
-            });
-            await downloadSectionToInput('direct_url_extraction_failed_fallback');
-          }
-        }
-      } else {
-        // No startTime - use the old streaming approach
-        const passThrough = new PassThrough();
-        ytdlp = await processYouTubeUrl(
-          ytdlpPath,
-          audioSource.source,
-          cancelToken,
-          passThrough,
-          updateDownloadProgress,
-          realtimeDB,
-          undefined,
-          undefined,
-          ctx
-        );
-        inputSource = passThrough;
-      }
+      log.info('Processing YouTube URL with yt-dlp stream piping', {
+        url: audioSource.source,
+        startTime,
+        duration,
+      });
+      const passThrough = new PassThrough();
+      ytdlp = await processYouTubeUrl(
+        ytdlpPath,
+        audioSource.source,
+        cancelToken,
+        passThrough,
+        updateDownloadProgress,
+        realtimeDB,
+        startTime,
+        duration,
+        ctx
+      );
+      inputSource = passThrough;
     } else {
       // Process the audio source from storage
       const rawSourceFile = createTempFile(`raw-${audioSource.id}`, tempFiles);
@@ -400,95 +214,18 @@ const trimAndTranscode = async (
     const args: string[] = [];
 
     // Input options
-    // Three scenarios:
-    // 1. Direct URL with seeking (usedDirectUrlWithSeeking): Use -ss BEFORE -i for input seeking on HTTP URL
-    // 2. yt-dlp section download fallback (usedYtdlpSectionDownload): File already has exact cuts, no seeking
-    // 3. Other sources: Apply -ss/-t as needed
-    const usingYtdlpSectionDownload =
-      audioSource.type === 'YouTubeUrl' && startTime !== undefined && startTime !== null && usedYtdlpSectionDownload;
-
-    if (usedDirectUrlWithSeeking && typeof inputSource === 'string' && inputSource.startsWith('http')) {
-      observedDirectUrlOutboundIdentity = await logObservedOutboundNetworkIdentity(log, 'before_ffmpeg_direct_url_fetch');
-      directUrlMediaBindingDetails = extractMediaUrlBindingDetails(inputSource);
-      const ffmpegRequestUserAgent = directUrlHttpHeaders?.['User-Agent'] || directUrlHttpHeaders?.['user-agent'] || null;
-      directUrlRequestUserAgent = ffmpegRequestUserAgent || YTDLP_HTTP_USER_AGENT;
-      const propagatedHeaders = directUrlHttpHeaders
-        ? Object.entries(directUrlHttpHeaders).filter(
-            ([name]) => name.toLowerCase() !== 'user-agent' && name.toLowerCase() !== 'accept-encoding'
-          )
-        : [];
-      const ffmpegHeaders = propagatedHeaders.length > 0 ? propagatedHeaders.map(([name, value]) => `${name}: ${value}`).join('\r\n') : null;
-
-      // DIRECT URL APPROACH:
-      // Most URLs work best with fast input seeking (-ss before -i).
-      // For YouTube live DVR manifests, prefer output seeking (-ss after -i) for timestamp accuracy.
-      const isYouTubeLiveDvrManifest = isTrustedYouTubeLiveDvrManifestUrl(inputSource);
-
-      args.push('-user_agent', directUrlRequestUserAgent);
-      if (ffmpegHeaders) {
-        args.push('-headers', `${ffmpegHeaders}\r\n`);
-      }
-
+    if (typeof inputSource === 'string') {
       if (startTime) {
-        if (isYouTubeLiveDvrManifest) {
-          args.push('-i', inputSource, '-ss', startTime.toString());
-          log.info('Using output seeking on YouTube DVR manifest for timestamp accuracy', {
-            startTime,
-            seekMode: 'output_seek',
-            dvrManifestDetected: true,
-            note: 'For live DVR manifests, output seeking is slower but more precise than input seeking',
-          });
-        } else {
-          // Treat -ss as an actual timestamp when input start time is non-zero.
-          args.push('-seek_timestamp', '1', '-ss', startTime.toString(), '-i', inputSource);
-          log.info('Using input seeking on HTTP URL', {
-            startTime,
-            seekMode: 'input_seek',
-            dvrManifestDetected: false,
-            note: 'FFmpeg will use HTTP range requests to seek efficiently; -seek_timestamp handles non-zero start times',
-          });
-        }
-      } else {
-        args.push('-i', inputSource);
-      }
-
-      // Always apply duration limit for direct URL approach.
-      if (duration) {
-        args.push('-t', duration.toString());
-        log.info('Applying duration limit to FFmpeg', {
-          duration,
-          seekMode: isYouTubeLiveDvrManifest ? 'output_seek' : 'input_seek',
-          note: 'Duration applied during direct URL transcode',
-        });
-      }
-    } else if (typeof inputSource === 'string') {
-      // File input (including yt-dlp section download fallback)
-      if (!usingYtdlpSectionDownload && startTime) {
-        // For regular files (not yt-dlp precise section), use input seeking for efficiency
         args.push('-ss', startTime.toString());
       }
-      // For yt-dlp section: no seeking needed - file has exact cuts from --force-keyframes-at-cuts
       args.push('-i', inputSource);
-
-      // Duration handling for file inputs:
-      // 1. For non-yt-dlp sources: always use -t with user-specified duration
-      // 2. For yt-dlp section download: only add -t if secondary trim is needed
-      if (duration && !usingYtdlpSectionDownload) {
+      if (duration) {
         args.push('-t', duration.toString());
-      } else if (usingYtdlpSectionDownload && secondaryTrimNeeded && secondaryTrimDuration !== undefined) {
-        // Apply secondary trim using the KNOWN user-specified duration
-        args.push('-t', secondaryTrimDuration.toString());
-        log.info('Applying secondary trim with user-specified duration', {
-          duration: secondaryTrimDuration,
-          reason: 'Downloaded file exceeded expected duration beyond tolerance',
-          note: 'Using KNOWN duration value from user input - not arbitrary trimming',
-        });
       }
     } else {
       // Stream/pipe input - must use stdin
       args.push('-i', 'pipe:0');
-      // Only add -ss if NOT using yt-dlp section download (yt-dlp already handled cutting)
-      if (startTime && !usingYtdlpSectionDownload) {
+      if (startTime) {
         // Use -ss after -i for pipe inputs (output seeking)
         args.push('-ss', startTime.toString());
         log.info('Using output seeking for pipe input', {
@@ -496,8 +233,7 @@ const trimAndTranscode = async (
           note: 'Output seeking required for pipes - ffmpeg will decode then discard frames until startTime',
         });
       }
-      // Duration for pipe inputs
-      if (duration && !usingYtdlpSectionDownload) {
+      if (duration) {
         args.push('-t', duration.toString());
       }
     }
@@ -508,36 +244,12 @@ const trimAndTranscode = async (
       'dynaudnorm=g=21:m=40:c=1:b=0,afftdn,pan=stereo|c0<c0+c1|c1<c0+c1,loudnorm=I=-16:LRA=11:TP=-1.5';
     args.push('-acodec', 'libmp3lame', '-b:a', '128k', '-ac', '2', '-ar', '44100', '-af', audioFilters, '-f', 'mp3');
 
-    if (usedDirectUrlWithSeeking) {
-      const isYouTubeLiveDvrManifest =
-        typeof inputSource === 'string' && isTrustedYouTubeLiveDvrManifestUrl(inputSource);
-      const seekMode = isYouTubeLiveDvrManifest ? 'output_seek' : 'input_seek';
-      log.info('Transcoding from direct URL with seeking', {
+    if (audioSource.type === 'YouTubeUrl') {
+      log.info('Transcoding streamed YouTube audio and applying audio filters', {
         filters: audioFilters,
-        approach: 'direct_url_with_input_seeking',
-        seekMode,
-        dvrManifestDetected: isYouTubeLiveDvrManifest,
+        approach: 'ytdlp_pipe_to_ffmpeg',
         startTime,
         duration,
-        httpHeaderKeys: directUrlHttpHeaders ? Object.keys(directUrlHttpHeaders) : [],
-        userAgentHeader: directUrlRequestUserAgent,
-        observedIpv4: observedDirectUrlOutboundIdentity?.ipv4 || null,
-        observedIpv6: observedDirectUrlOutboundIdentity?.ipv6 || null,
-        mediaHost: directUrlMediaBindingDetails?.host || null,
-        mediaBoundIp: directUrlMediaBindingDetails?.boundIp || null,
-        mediaBoundIpFamily: directUrlMediaBindingDetails?.boundIpFamily || null,
-        note: isYouTubeLiveDvrManifest
-          ? 'Using FFmpeg output seeking (-ss after -i) for YouTube DVR manifest timestamp accuracy'
-          : 'Using FFmpeg input seeking (-ss before -i) for efficient HTTP range-based seeking with yt-dlp-provided request headers',
-      });
-    } else if (usingYtdlpSectionDownload) {
-      log.info('Transcoding yt-dlp section (fallback) and applying audio filters', {
-        filters: audioFilters,
-        secondaryTrimApplied: secondaryTrimNeeded,
-        secondaryTrimDuration: secondaryTrimNeeded ? secondaryTrimDuration : undefined,
-        note: secondaryTrimNeeded
-          ? `Applying secondary trim to ${secondaryTrimDuration}s using KNOWN user-specified duration`
-          : 'File has exact cuts from --force-keyframes-at-cuts, no secondary trim needed',
       });
     }
 
@@ -545,35 +257,16 @@ const trimAndTranscode = async (
     args.push('pipe:1');
 
     const commandLine = `${ffmpegPath} ${args.join(' ')}`;
-    const usesDvrManifestOutputSeek =
-      usedDirectUrlWithSeeking &&
-      typeof inputSource === 'string' &&
-      isTrustedYouTubeLiveDvrManifestUrl(inputSource);
     log.info('FFmpeg command', {
       command: commandLine,
-      inputType: usedDirectUrlWithSeeking ? 'http_url' : typeof inputSource === 'string' ? 'file' : 'pipe',
+      inputType: typeof inputSource === 'string' ? 'file' : 'pipe',
       args: args.join(' '),
       trimParameters: {
         startTime,
         requestedDuration: duration,
-        approach: usedDirectUrlWithSeeking
-          ? 'direct_url_with_input_seeking'
-          : usingYtdlpSectionDownload
-          ? 'yt-dlp_section_fallback'
-          : 'standard',
-        usingDirectUrlWithSeeking: usedDirectUrlWithSeeking,
-        usingYtdlpSectionDownload,
-        seekMode: usedDirectUrlWithSeeking ? (usesDvrManifestOutputSeek ? 'output_seek' : 'input_seek') : 'n/a',
-        dvrManifestDetected: usesDvrManifestOutputSeek,
-        secondaryTrimNeeded,
-        secondaryTrimDuration: secondaryTrimNeeded ? secondaryTrimDuration : undefined,
-        effectiveDuration: usedDirectUrlWithSeeking
-          ? duration
-          : secondaryTrimNeeded
-          ? secondaryTrimDuration
-          : usingYtdlpSectionDownload
-          ? 'handled by yt-dlp'
-          : duration,
+        approach: audioSource.type === 'YouTubeUrl' ? 'ytdlp_pipe_to_ffmpeg' : 'standard',
+        seekMode: typeof inputSource === 'string' ? 'input_seek' : 'output_seek',
+        effectiveDuration: duration,
       },
     });
 
@@ -699,23 +392,14 @@ const trimAndTranscode = async (
           log.info('Trim and transcode completed successfully', {
             outputPath: outputFilePath,
             sourceType: audioSource.type,
-            approach: usedDirectUrlWithSeeking
-              ? 'direct_url_with_input_seeking'
-              : usedYtdlpSectionDownload
-              ? 'yt-dlp_section_fallback'
-              : 'standard',
-            usedDirectUrlWithSeeking,
-            usedYtdlpSectionDownload,
-            secondaryTrimApplied: secondaryTrimNeeded,
+            approach: audioSource.type === 'YouTubeUrl' ? 'ytdlp_pipe_to_ffmpeg' : 'standard',
             trimDecision: {
               startTime,
               requestedDuration: duration,
-              secondaryTrimDuration: secondaryTrimNeeded ? secondaryTrimDuration : undefined,
-              note: usedDirectUrlWithSeeking
-                ? 'Used FFmpeg input seeking on HTTP URL - most reliable approach'
-                : secondaryTrimNeeded
-                ? 'Applied secondary trim using KNOWN user-specified duration'
-                : 'No secondary trim needed',
+              note:
+                audioSource.type === 'YouTubeUrl'
+                  ? 'Used streamed yt-dlp input with FFmpeg output seeking for timestamp-accurate trims'
+                  : 'Processed local file input',
             },
           });
           if (ytdlp) {
@@ -894,14 +578,11 @@ const trimAndTranscode = async (
       });
     });
 
-    // Delete raw audio from temp memory - but NOT if using direct URL (URL is not a local file)
-    if (typeof inputSource === 'string' && !usedDirectUrlWithSeeking) {
+    if (typeof inputSource === 'string') {
       await logMemoryUsage('Before raw audio delete', ctx, tempFiles);
       log.debug('Deleting raw audio temp file', { file: inputSource });
       await unlinkSafeTempFile(inputSource, tempFiles);
       await logMemoryUsage('After raw audio delete', ctx, tempFiles);
-    } else if (usedDirectUrlWithSeeking) {
-      log.debug('Skipping temp file deletion - input was direct URL, not local file');
     }
 
     return promiseResult;
@@ -929,8 +610,7 @@ const trimAndTranscode = async (
       }
     }
 
-    // Cleanup: delete temp files - but NOT if using direct URL (URL is not a local file)
-    if (inputSource && typeof inputSource === 'string' && !usedDirectUrlWithSeeking) {
+    if (inputSource && typeof inputSource === 'string') {
       try {
         await unlinkSafeTempFile(inputSource, tempFiles);
       } catch (unlinkError) {
