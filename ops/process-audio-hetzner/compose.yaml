@@ -7,6 +7,20 @@ services:
     expose:
       - "4416"
 
+  browser-auth:
+    image: lscr.io/linuxserver/chromium:latest
+    shm_size: "1gb"
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: UTC
+      CHROME_CLI: --password-store=basic
+    volumes:
+      - ./state/shared-browser-profile:/config
+    ports:
+      - "127.0.0.1:3010:3000"
+    restart: unless-stopped
+
   process-audio-staging:
     build:
       context: ./context
@@ -26,6 +40,7 @@ services:
     volumes:
       - ./state/staging/tmp:/tmp
       - ./state/staging/logs:/workspace/logs
+      - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
     restart: unless-stopped
     expose:
       - "8080"
@@ -49,6 +64,7 @@ services:
     volumes:
       - ./state/production/tmp:/tmp
       - ./state/production/logs:/workspace/logs
+      - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
     restart: unless-stopped
     expose:
       - "8080"

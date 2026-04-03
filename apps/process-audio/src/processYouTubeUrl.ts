@@ -400,7 +400,7 @@ function applyPreferredIpFamilyArgs(args: string[]): void {
 function isInProcessBrowserFallbackEnabled(): boolean {
   const explicit = process.env.PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED?.trim()?.toLowerCase();
   if (explicit === '0' || explicit === 'false' || explicit === 'no') return false;
-  return !!(process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim());
+  return !!(getLocalBrowserProfileDir() || process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim());
 }
 
 function isBrowserFallbackEnabled(): boolean {
@@ -453,6 +453,11 @@ function getBrowserFallbackSharedSecret(): string | undefined {
 
 function getBrowserFallbackProfileBucketName(): string | undefined {
   return process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim() || undefined;
+}
+
+function getLocalBrowserProfileDir(): string | undefined {
+  const value = process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.trim();
+  return value || undefined;
 }
 
 function getBrowserFallbackProfileArchiveObject(): string {
@@ -1318,11 +1323,29 @@ function buildInProcessBrowserFallbackResolution(
   };
 }
 
-async function hydrateInProcessBrowserProfile(realtimeDB: Database): Promise<{ profileDir: string; browserProfileDir: string }> {
+async function hydrateInProcessBrowserProfile(
+  realtimeDB: Database
+): Promise<{ profileDir: string; browserProfileDir: string; cleanup: boolean }> {
+  const localBrowserProfileDir = getLocalBrowserProfileDir();
+  if (localBrowserProfileDir) {
+    if (!fs.existsSync(localBrowserProfileDir)) {
+      throw buildAnnotatedYouTubeError(
+        `In-process browser fallback local profile directory ${localBrowserProfileDir} does not exist.`,
+        'browser_fallback'
+      );
+    }
+
+    return {
+      profileDir: localBrowserProfileDir,
+      browserProfileDir: localBrowserProfileDir,
+      cleanup: false,
+    };
+  }
+
   const bucketName = getBrowserFallbackProfileBucketName();
   if (!bucketName) {
     throw buildAnnotatedYouTubeError(
-      'In-process browser fallback is not configured because no browser profile bucket is set.',
+      'In-process browser fallback is not configured because no local browser profile directory or browser profile bucket is set.',
       'browser_fallback'
     );
   }
@@ -1350,7 +1373,7 @@ async function hydrateInProcessBrowserProfile(realtimeDB: Database): Promise<{ p
     fs.mkdirSync(browserProfileDir, { recursive: true });
     await runSystemCommand('tar', ['-xzf', archivePath, '-C', browserProfileDir], 'browser profile extract');
 
-    return { profileDir, browserProfileDir };
+    return { profileDir, browserProfileDir, cleanup: true };
   } catch (error) {
     await rm(profileDir, { recursive: true, force: true }).catch(() => {});
     throw error;
@@ -1371,7 +1394,7 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
     resolution.credentialSource === 'none'
       ? ['-J', '--no-playlist', '--skip-download', '--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime()]
       : ['-J', '--no-playlist', '--skip-download'];
-  let hydratedProfile: { profileDir: string; browserProfileDir: string } | null = null;
+  let hydratedProfile: { profileDir: string; browserProfileDir: string; cleanup: boolean } | null = null;
 
   try {
     await logObservedOutboundNetworkIdentity(log, 'before_in_process_browser_fallback_ytdlp');
@@ -1417,7 +1440,7 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
       resolution,
     };
   } finally {
-    if (hydratedProfile) {
+    if (hydratedProfile?.cleanup) {
       await rm(hydratedProfile.profileDir, { recursive: true, force: true }).catch(() => {});
     }
   }

@@ -108,6 +108,9 @@ YOUTUBE_BROWSER_FALLBACK_ENABLED=false
 YOUTUBE_BROWSER_FALLBACK_URL=
 YOUTUBE_FINAL_BROWSER_FALLBACK_URL=
 YOUTUBE_FORCE_IPV4=false
+PROCESS_AUDIO_IN_PROCESS_BROWSER_FALLBACK_ENABLED=true
+PROCESS_AUDIO_BROWSER_PROFILE_DIR=/workspace/shared-browser-profile
+PROCESS_AUDIO_BROWSER_FALLBACK_STRATEGY=session_backed
 EOF
 }
 
@@ -121,7 +124,7 @@ EOF
 
 rsync -az --delete "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
 
-ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production"
+ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs ${REMOTE_DIR}/state/shared-browser-profile && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production ${REMOTE_DIR}/state/shared-browser-profile"
 if [[ "$TARGET_ENV" == "all" ]]; then
   ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build"
 else

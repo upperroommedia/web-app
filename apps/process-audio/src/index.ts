@@ -28,6 +28,7 @@ app.use(express.json());
 // get the path to the yt-dlp binary
 const ytdlpPath = 'yt-dlp';
 const configuredYtDlpJsRuntime = process.env.YTDLP_JS_RUNTIME?.trim() || 'deno';
+const localBrowserProfileDir = process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.trim() || '';
 
 function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string } {
   const primaryRuntime = configuredYtDlpJsRuntime.split(',')[0]?.trim().split(':')[0]?.trim() || 'deno';
@@ -60,6 +61,7 @@ const ytDlpMaxSleepIntervalSeconds = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECOND
 const ytDlpForceIpv4 = process.env.YOUTUBE_FORCE_IPV4?.trim() || 'false';
 const browserFallbackExplicit = process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim().toLowerCase() || '';
 const inProcessBrowserFallbackConfigured = !!(
+  localBrowserProfileDir ||
   process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim()
 );
 const finalBrowserFallbackConfigured = !!process.env.YOUTUBE_FINAL_BROWSER_FALLBACK_URL?.trim();
@@ -82,6 +84,7 @@ logger.info('Service initializing', {
   browserFallbackConfigured,
   browserFallbackEnabled,
   inProcessBrowserFallbackConfigured,
+  localBrowserProfileDir: localBrowserProfileDir || null,
   finalBrowserFallbackConfigured,
   poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
 });
@@ -146,6 +149,7 @@ app.get('/healthz', (req, res) => {
     browserFallbackConfigured,
     browserFallbackEnabled,
     inProcessBrowserFallbackConfigured,
+    localBrowserProfileDir: localBrowserProfileDir || null,
     finalBrowserFallbackConfigured,
     poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
     ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
