@@ -16,6 +16,7 @@ import { spawn } from 'child_process';
 import { sermonStatus, sermonStatusType } from './types';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
+import { ffmpegSemaphore, ytDlpDownloadSemaphore } from './concurrency';
 
 // Parse ffmpeg stderr for progress and duration
 function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string; speed?: string; bitrate?: string } {
@@ -74,6 +75,7 @@ const trimAndTranscode = async (
   });
   let inputSource: string | undefined;
   let proc: ReturnType<typeof spawn> | undefined;
+  let releaseFfmpegSlot: (() => void) | undefined;
   let transcodingStarted = false;
   let ffmpegStderrBuffer = '';
   const MAX_FFMPEG_STDERR_BUFFER = 20_000;
@@ -176,6 +178,43 @@ const trimAndTranscode = async (
     }
   };
 
+  const acquireSemaphoreSlot = async (
+    action: string,
+    semaphore: { name: string; acquire: () => Promise<() => void>; snapshot: () => { active: number; waiting: number; limit: number } }
+  ): Promise<() => void> => {
+    const before = semaphore.snapshot();
+    log.info('Waiting for process-audio concurrency slot', {
+      action,
+      semaphore: semaphore.name,
+      active: before.active,
+      waiting: before.waiting,
+      limit: before.limit,
+    });
+
+    const release = await semaphore.acquire();
+
+    const after = semaphore.snapshot();
+    log.info('Acquired process-audio concurrency slot', {
+      action,
+      semaphore: semaphore.name,
+      active: after.active,
+      waiting: after.waiting,
+      limit: after.limit,
+    });
+
+    return () => {
+      release();
+      const released = semaphore.snapshot();
+      log.info('Released process-audio concurrency slot', {
+        action,
+        semaphore: semaphore.name,
+        active: released.active,
+        waiting: released.waiting,
+        limit: released.limit,
+      });
+    };
+  };
+
   try {
     if (audioSource.type === 'YouTubeUrl') {
       const youtubeSourceFileBase = createTempFile(`youtube-${audioSource.id}`, tempFiles);
@@ -185,15 +224,21 @@ const trimAndTranscode = async (
         duration,
         outputBase: youtubeSourceFileBase,
       });
-      const downloadedFile = await downloadYouTubeAudioToFile(
-        ytdlpPath,
-        audioSource.source,
-        youtubeSourceFileBase,
-        cancelToken,
-        updateDownloadProgress,
-        realtimeDB,
-        ctx
-      );
+      const releaseYtDlpSlot = await acquireSemaphoreSlot('youtube_download', ytDlpDownloadSemaphore);
+      let downloadedFile: string;
+      try {
+        downloadedFile = await downloadYouTubeAudioToFile(
+          ytdlpPath,
+          audioSource.source,
+          youtubeSourceFileBase,
+          cancelToken,
+          updateDownloadProgress,
+          realtimeDB,
+          ctx
+        );
+      } finally {
+        releaseYtDlpSlot();
+      }
       if (downloadedFile !== youtubeSourceFileBase) {
         tempFiles.delete(youtubeSourceFileBase);
         tempFiles.add(downloadedFile);
@@ -210,6 +255,8 @@ const trimAndTranscode = async (
     if (!inputSource) {
       throw new Error('No input source available for ffmpeg processing');
     }
+
+    releaseFfmpegSlot = await acquireSemaphoreSlot('ffmpeg_transcode', ffmpegSemaphore);
 
     // Build ffmpeg command
     const ffmpegPath = getFFmpegPath();
@@ -558,6 +605,9 @@ const trimAndTranscode = async (
 
     throw error; // Bubble up the error
   } finally {
+    if (releaseFfmpegSlot) {
+      releaseFfmpegSlot();
+    }
     await logMemoryUsage('After trim and transcode', ctx, tempFiles);
   }
 };

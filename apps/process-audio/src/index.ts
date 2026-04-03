@@ -20,6 +20,7 @@ import {
   extractCloudTaskId,
 } from './processAudioQueueStore';
 import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
+import { getProcessAudioConcurrencyConfig } from './concurrency';
 
 const YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON = 'browser_fallback_unavailable';
 
@@ -73,6 +74,7 @@ const ffmpegVersion = resolveBinaryVersion(getFFmpegPath(), ['-version'])
 const aria2Version = resolveBinaryVersion('aria2c', ['--version'])
   .split('\n')[0]
   .trim();
+const concurrencyConfig = getProcessAudioConcurrencyConfig();
 const ytDlpSleepRequestsSeconds = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null;
 const ytDlpSleepIntervalSeconds = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null;
 const ytDlpMaxSleepIntervalSeconds = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim() || null;
@@ -111,6 +113,7 @@ logger.info('Service initializing', {
   aria2Version,
   finalBrowserFallbackConfigured,
   poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+  concurrency: concurrencyConfig,
 });
 
 logger.info('Loading storage, realtimeDB and firestore');
@@ -185,6 +188,7 @@ app.get('/healthz', (req, res) => {
     ytDlpVersion,
     ffmpegVersion,
     aria2Version,
+    concurrency: getProcessAudioConcurrencyConfig(),
   });
 });
 
