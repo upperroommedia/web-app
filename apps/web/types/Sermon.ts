@@ -126,6 +126,5 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
     subsplashUploadGeneration: 0,
     createdAtMillis: currentDate.getTime(),
     editedAtMillis: currentDate.getTime(),
-    searchPending: true,
   };
 };

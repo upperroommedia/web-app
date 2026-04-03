@@ -19,12 +19,6 @@ interface ReconcileAdminSermonSearchResultsOutput {
   }>;
 }
 
-interface PendingSermonsReadyForAcknowledgementInput {
-  pendingSermons: Sermon[];
-  hasSettledResults: boolean;
-  confirmedVisibleHitIds: Set<string>;
-}
-
 export const reconcileAdminSermonSearchResults = ({
   algoliaHits,
   pendingSermons,
@@ -36,15 +30,23 @@ export const reconcileAdminSermonSearchResults = ({
   const confirmedAlgoliaHits = algoliaHits
     .filter((sermon) => !resolvedLiveSermonIds.has(sermon.id) || Boolean(liveSermonsById[sermon.id]))
     .map((sermon) => liveSermonsById[sermon.id] ?? sermon);
+  const confirmedAlgoliaHitsById = new Map(confirmedAlgoliaHits.map((sermon) => [sermon.id, sermon]));
 
   const confirmedVisibleHitIds = new Set(confirmedAlgoliaHits.map((sermon) => sermon.id));
-  const visibleHitIdsForPendingDedup = hasSettledResults ? confirmedVisibleHitIds : new Set<string>();
 
   const visiblePendingSermons = showPendingOverlay
-    ? pendingSermons.filter(
-        (sermon) =>
-          sermon.status.audioStatus === sermonStatusType.PROCESSING || !visibleHitIdsForPendingDedup.has(sermon.id)
-      )
+    ? pendingSermons.filter((sermon) => {
+        if (!hasSettledResults) {
+          return true;
+        }
+
+        const confirmedHit = confirmedAlgoliaHitsById.get(sermon.id);
+        if (!confirmedHit) {
+          return true;
+        }
+
+        return (confirmedHit.editedAtMillis ?? 0) < (sermon.editedAtMillis ?? 0);
+      })
     : [];
 
   const visiblePendingIds = new Set(visiblePendingSermons.map((sermon) => sermon.id));
@@ -56,31 +58,14 @@ export const reconcileAdminSermonSearchResults = ({
     displayRows: [
       ...visiblePendingSermons.map((sermon) => ({
         sermon,
-        enableProcessingProgress: true,
+        enableProcessingProgress: sermon.status.audioStatus === sermonStatusType.PROCESSING,
       })),
       ...confirmedAlgoliaHits
         .filter((sermon) => !visiblePendingIds.has(sermon.id))
         .map((sermon) => ({
           sermon,
-          enableProcessingProgress: false,
+          enableProcessingProgress: sermon.status.audioStatus === sermonStatusType.PROCESSING,
         })),
     ],
   };
-};
-
-export const getPendingSermonsReadyForAcknowledgement = ({
-  pendingSermons,
-  hasSettledResults,
-  confirmedVisibleHitIds,
-}: PendingSermonsReadyForAcknowledgementInput): Sermon[] => {
-  if (!hasSettledResults) {
-    return [];
-  }
-
-  return pendingSermons.filter(
-    (sermon) =>
-      sermon.searchPending &&
-      sermon.status.audioStatus !== sermonStatusType.PROCESSING &&
-      confirmedVisibleHitIds.has(sermon.id)
-  );
 };

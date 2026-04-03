@@ -1,7 +1,6 @@
 import { createSermon } from '../types/Sermon';
 import { sermonStatusType } from '../types/SermonTypes';
 import {
-  getPendingSermonsReadyForAcknowledgement,
   reconcileAdminSermonSearchResults,
 } from './sermonSearchResults';
 
@@ -26,7 +25,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     expect(result.displayRows).toEqual([
       {
         sermon: pendingSermon,
-        enableProcessingProgress: true,
+        enableProcessingProgress: false,
       },
     ]);
   });
@@ -80,42 +79,54 @@ describe('reconcileAdminSermonSearchResults', () => {
       [indexedSermon.id, false],
     ]);
   });
-});
 
-describe('getPendingSermonsReadyForAcknowledgement', () => {
-  it('waits for settled Algolia results before clearing searchPending', () => {
-    const sermon = createSermon({
-      id: 'sermon-1',
+  it('keeps a pending Firestore sermon visible until Algolia has the latest version', () => {
+    const pendingSermon = createSermon({
+      id: 'sermon-stale-hit',
       searchPending: true,
+      editedAtMillis: 200,
+    });
+    const staleAlgoliaHit = createSermon({
+      id: 'sermon-stale-hit',
+      editedAtMillis: 100,
     });
 
-    const notReady = getPendingSermonsReadyForAcknowledgement({
-      pendingSermons: [sermon],
-      hasSettledResults: false,
-      confirmedVisibleHitIds: new Set([sermon.id]),
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [staleAlgoliaHit],
+      pendingSermons: [pendingSermon],
+      showPendingOverlay: true,
+      hasSettledResults: true,
+      liveSermonsById: { [pendingSermon.id]: pendingSermon },
+      resolvedLiveSermonIds: new Set([pendingSermon.id]),
     });
 
-    expect(notReady).toHaveLength(0);
+    expect(result.displayRows.map((row) => row.sermon.id)).toEqual([pendingSermon.id]);
+    expect(result.visibleAlgoliaHits.map((sermon) => sermon.id)).toEqual([pendingSermon.id]);
   });
 
-  it('skips processing sermons until they are no longer processing', () => {
-    const baseStatus = createSermon().status;
+  it('does not duplicate a processing sermon once Algolia has the current version', () => {
     const processingSermon = createSermon({
-      id: 'sermon-processing',
+      id: 'sermon-processing-current',
       searchPending: true,
+      editedAtMillis: 200,
       status: {
-        soundCloud: baseStatus.soundCloud,
-        subsplash: baseStatus.subsplash,
+        ...createSermon().status,
         audioStatus: sermonStatusType.PROCESSING,
       },
     });
 
-    const ready = getPendingSermonsReadyForAcknowledgement({
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [processingSermon],
       pendingSermons: [processingSermon],
+      showPendingOverlay: true,
       hasSettledResults: true,
-      confirmedVisibleHitIds: new Set([processingSermon.id]),
+      liveSermonsById: { [processingSermon.id]: processingSermon },
+      resolvedLiveSermonIds: new Set([processingSermon.id]),
     });
 
-    expect(ready).toHaveLength(0);
+    expect(result.displayRows.map((row) => [row.sermon.id, row.enableProcessingProgress])).toEqual([
+      [processingSermon.id, true],
+    ]);
+    expect(result.visiblePendingSermons).toHaveLength(0);
   });
 });

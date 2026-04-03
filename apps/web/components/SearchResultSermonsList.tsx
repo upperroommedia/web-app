@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useHits, useInstantSearch } from 'react-instantsearch';
 import List from '@mui/material/List';
 import Box from '@mui/material/Box';
@@ -12,14 +12,11 @@ import RemainingTimeComponent from './RemainingTimeComponent';
 import TrackProgressComponent from './TrackProgressComponent';
 import firestore, {
   collection,
-  deleteField,
-  doc,
   documentId,
   limit,
   onSnapshot,
   orderBy,
   query,
-  updateDoc,
   where,
 } from '../firebase/firestore';
 import { sermonConverter } from '../types/Sermon';
@@ -27,7 +24,6 @@ import { Sermon } from '../types/SermonTypes';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algolia/searchRecords';
 import {
-  getPendingSermonsReadyForAcknowledgement,
   reconcileAdminSermonSearchResults,
 } from '../utils/sermonSearchResults';
 
@@ -118,28 +114,35 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
   }, [state, sermonIds]);
 };
 
-const SearchResultSermonList = (props: BoxProps) => {
+interface SearchResultSermonListProps extends BoxProps {
+  hiddenSermonIds?: string[];
+}
+
+const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResultSermonListProps) => {
   const { hits } = useHits();
   const { status, results, indexUiState } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
   const playing = useMediaState('playing');
   const hasSettledResults = !results.__isArtificial && status === 'idle';
-  const acknowledgedPendingIdsRef = useRef<Set<string>>(new Set());
   const pendingSermonsQuery = useMemo(
     () =>
       query(
         collection(firestore, 'sermons').withConverter(sermonConverter),
         where('searchPending', '==', true),
-        orderBy('createdAtMillis', 'desc'),
-        limit(8)
+        orderBy('editedAtMillis', 'desc'),
+        limit(20)
       ),
     []
   );
   const [pendingSermons] = useCollectionData(pendingSermonsQuery);
+  const hiddenSermonIdSet = useMemo(() => new Set(hiddenSermonIds), [hiddenSermonIds]);
 
   const normalizedHits = useMemo(
-    () => hits.map((hit) => normalizeAlgoliaSermonHit(hit as AlgoliaSermonHit)),
-    [hits]
+    () =>
+      hits
+        .map((hit) => normalizeAlgoliaSermonHit(hit as AlgoliaSermonHit))
+        .filter((hit) => !hiddenSermonIdSet.has(hit.id)),
+    [hiddenSermonIdSet, hits]
   );
   const visibleHitIds = useMemo(() => normalizedHits.map((hit) => hit.id), [normalizedHits]);
   const refinementList = (indexUiState as { refinementList?: Record<string, string[]> }).refinementList ?? {};
@@ -147,51 +150,30 @@ const SearchResultSermonList = (props: BoxProps) => {
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
   const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds);
-  const { confirmedVisibleHitIds, visiblePendingSermons, visibleAlgoliaHits, displayRows } = useMemo(
+  const { visiblePendingSermons, visibleAlgoliaHits, displayRows } = useMemo(
     () =>
       reconcileAdminSermonSearchResults({
         algoliaHits: normalizedHits,
-        pendingSermons: pendingSermons ?? [],
+        pendingSermons: (pendingSermons ?? []).filter((sermon) => !hiddenSermonIdSet.has(sermon.id)),
         showPendingOverlay,
         hasSettledResults,
         liveSermonsById,
         resolvedLiveSermonIds,
       }),
-    [hasSettledResults, liveSermonsById, normalizedHits, pendingSermons, resolvedLiveSermonIds, showPendingOverlay]
+    [
+      hasSettledResults,
+      hiddenSermonIdSet,
+      liveSermonsById,
+      normalizedHits,
+      pendingSermons,
+      resolvedLiveSermonIds,
+      showPendingOverlay,
+    ]
   );
   const hasVisibleHits = visibleAlgoliaHits.length > 0;
   const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
   const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
-
-  useEffect(() => {
-    const indexedPendingSermons = getPendingSermonsReadyForAcknowledgement({
-      pendingSermons: pendingSermons ?? [],
-      hasSettledResults,
-      confirmedVisibleHitIds,
-    }).filter((sermon) => !acknowledgedPendingIdsRef.current.has(sermon.id));
-
-    if (indexedPendingSermons.length === 0) {
-      return;
-    }
-
-    indexedPendingSermons.forEach((sermon) => acknowledgedPendingIdsRef.current.add(sermon.id));
-
-    void Promise.all(
-      indexedPendingSermons.map(async (sermon) => {
-        try {
-          await updateDoc(doc(firestore, 'sermons', sermon.id), {
-            searchPending: false,
-            searchIndexedAtMillis: Date.now(),
-            searchSyncError: deleteField(),
-          });
-        } catch (error) {
-          console.error('Failed to acknowledge Algolia sync for sermon', sermon.id, error);
-          acknowledgedPendingIdsRef.current.delete(sermon.id);
-        }
-      })
-    );
-  }, [confirmedVisibleHitIds, hasSettledResults, pendingSermons]);
 
   return (
     <Box display="flex" justifyContent="start" flex={3} overflow="hidden" {...props}>

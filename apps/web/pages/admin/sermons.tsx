@@ -48,7 +48,7 @@ const AdminSermons = () => {
   const router = useRouter();
   const { clearCache } = useAlgoliaSearch();
   const processedDeleteIntentRef = useRef<string | null>(null);
-  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [hiddenSermonIds, setHiddenSermonIds] = useState<string[]>([]);
   const [deleteToast, setDeleteToast] = useState<DeleteToastState>({
     open: false,
     severity: 'info',
@@ -131,7 +131,11 @@ const AdminSermons = () => {
       try {
         await deleteSermonWithExternalCleanup(deleteIntentPayload);
         await clearCache();
-        setRefreshNonce((currentNonce) => currentNonce + 1);
+        setHiddenSermonIds((currentIds) =>
+          currentIds.includes(deleteIntentPayload.sermonId)
+            ? currentIds
+            : [...currentIds, deleteIntentPayload.sermonId]
+        );
         setDeleteToast({
           open: true,
           severity: 'success',
@@ -182,7 +186,7 @@ const AdminSermons = () => {
           </Button>
         </Stack>
 
-        <SearchableAdminSermonList refreshNonce={refreshNonce} />
+        <SearchableAdminSermonList hiddenSermonIds={hiddenSermonIds} />
       </Box>
       <Snackbar
         key={deleteToast.id}

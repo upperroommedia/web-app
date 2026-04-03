@@ -229,9 +229,10 @@ const SermonListCard: FunctionComponent<Props> = ({
   const isSubsplashPartial = subsplashUploaded > 0 && subsplashUploaded < subsplashTotal;
   const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
   const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
+  const shouldSubscribeToProcessingProgress = enableProcessingProgress || isProcessing;
   const processingProgressRef = useMemo(
-    () => (enableProcessingProgress && isProcessing ? ref(database, `addIntroOutro/${currentSermon.id}`) : null),
-    [enableProcessingProgress, isProcessing, currentSermon.id]
+    () => (shouldSubscribeToProcessingProgress && isProcessing ? ref(database, `addIntroOutro/${currentSermon.id}`) : null),
+    [shouldSubscribeToProcessingProgress, isProcessing, currentSermon.id]
   );
 
   const [snapshot, _loading, _error] = useObject(processingProgressRef);
