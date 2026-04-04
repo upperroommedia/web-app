@@ -56,6 +56,7 @@ import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bun
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
 import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../utils/sermonEditing';
+import { clearIntentionalNavigation, isIntentionalNavigation, markIntentionalNavigation } from '../../utils/intentionalNavigation';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -105,8 +106,6 @@ const Uploader = (props: UploaderProps) => {
   // ======================== START OF STATE ========================
   const router = useRouter();
   const { invalidateSermonSearch } = useAlgoliaSearch();
-  // Track intentional navigation (after successful save) to bypass unsaved changes warning
-  const isIntentionalNavigation = useRef(false);
   const [sermon, setSermon] = useState<Sermon>(() => {
     if (props.existingSermon) {
       return props.existingSermon;
@@ -278,16 +277,20 @@ const Uploader = (props: UploaderProps) => {
   }, [props.existingList]);
 
   useEffect(() => {
+    clearIntentionalNavigation();
+  }, []);
+
+  useEffect(() => {
     const warningText = 'You have unsaved changes - are you sure you wish to leave this page?';
     const handleWindowClose = (e: BeforeUnloadEvent) => {
       if (!sermonEdited && !isUploading) return;
-      if (isIntentionalNavigation.current) return;
+      if (isIntentionalNavigation()) return;
       e.preventDefault();
       return (e.returnValue = warningText);
     };
     const handleBrowseAway = () => {
       // Skip warning if this is an intentional navigation (after successful save)
-      if (isIntentionalNavigation.current) return;
+      if (isIntentionalNavigation()) return;
       if (!sermonEdited && !isUploading) return;
       if (window.confirm(warningText)) return;
       router.events.emit('routeChangeError');
@@ -638,20 +641,20 @@ const Uploader = (props: UploaderProps) => {
     const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
 
     // Mark navigation as intentional to skip unsaved changes warning
-    isIntentionalNavigation.current = true;
-    setIsNavigatingToSermon(true);
+      markIntentionalNavigation();
+      setIsNavigatingToSermon(true);
 
-    try {
-      const didNavigate = await router.push(targetUrl);
-      if (!didNavigate) {
-        isIntentionalNavigation.current = false;
+      try {
+        const didNavigate = await router.push(targetUrl);
+        if (!didNavigate) {
+          clearIntentionalNavigation();
+          setIsNavigatingToSermon(false);
+        }
+      } catch (error) {
+        console.error('Failed to navigate to sermon details:', error);
+        clearIntentionalNavigation();
         setIsNavigatingToSermon(false);
       }
-    } catch (error) {
-      console.error('Failed to navigate to sermon details:', error);
-      isIntentionalNavigation.current = false;
-      setIsNavigatingToSermon(false);
-    }
   }, [uploadedSermon, isNavigatingToSermon, router]);
 
   // Dismiss the upload modal and stay on page
@@ -1067,7 +1070,7 @@ const Uploader = (props: UploaderProps) => {
 
                       await Promise.all(promises);
                       // Mark as intentional navigation to bypass unsaved changes warning
-                      isIntentionalNavigation.current = true;
+                      markIntentionalNavigation();
                       props.setEditFormOpen?.(false);
                     } finally {
                       setIsEditing(false);

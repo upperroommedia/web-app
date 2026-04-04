@@ -29,6 +29,7 @@ import { UNPROCESSED_SERMONS_BUCKET } from '../../../../constants/storage_consta
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { SermonURL } from '../../../../components/EditSermonForm';
 import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../../../utils/sermonEditing';
+import { markIntentionalNavigation } from '../../../../utils/intentionalNavigation';
 
 const storage = getStorage(firebase);
 
@@ -133,6 +134,7 @@ const EditSermonPage = () => {
 
   // Handle close/cancel - navigate back to details
   const handleClose = () => {
+    markIntentionalNavigation();
     router.push(`/admin/sermons/${sermonId}`);
   };
 
