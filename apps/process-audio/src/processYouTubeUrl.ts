@@ -1334,6 +1334,36 @@ async function probeDownloadActivity(outputFilePath: string): Promise<DownloadAc
   return { partialFiles, latestMtimeMs };
 }
 
+async function probePrimaryOutputPartialFile(outputFilePath: string): Promise<{ path: string; size: number; mtimeMs: number } | null> {
+  const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
+  const dir = path.dirname(safeOutputFilePath);
+  const baseName = path.basename(safeOutputFilePath);
+
+  if (!fs.existsSync(dir)) {
+    return null;
+  }
+
+  const candidates = fs
+    .readdirSync(dir)
+    .filter((fileName) => fileName.startsWith(baseName) && fileName.endsWith('.part') && !fileName.includes('Frag'))
+    .map((fileName) => ensureSafeTempPath(path.join(dir, fileName)));
+
+  let bestCandidate: { path: string; size: number; mtimeMs: number } | null = null;
+
+  for (const candidate of candidates) {
+    try {
+      const stats = await stat(candidate);
+      if (!bestCandidate || stats.size >= bestCandidate.size) {
+        bestCandidate = { path: candidate, size: stats.size, mtimeMs: stats.mtimeMs };
+      }
+    } catch {
+      // Ignore files that disappear during inspection.
+    }
+  }
+
+  return bestCandidate;
+}
+
 async function probeYtDlpState(outputFilePath: string): Promise<YtDlpStateProbe> {
   const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
   const dir = path.dirname(safeOutputFilePath);
@@ -2923,6 +2953,7 @@ async function resolvePreferredAudioFormatId(
   extractionMode: YouTubeExtractionMode;
   protocol: string | null;
   fragmentCount: number;
+  durationSeconds: number | null;
 }> {
   const baseArgs = [
     '-J',
@@ -2947,13 +2978,21 @@ async function resolvePreferredAudioFormatId(
     return args;
   };
 
-  const parseSelectedFormat = (stdout: string): { formatId: string; protocol: string | null; fragmentCount: number } => {
+  const parseSelectedFormat = (
+    stdout: string
+  ): { formatId: string; protocol: string | null; fragmentCount: number; durationSeconds: number | null } => {
     const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
     const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language, parsed);
     if (!selected?.format_id) {
       throw new Error(`yt-dlp did not return a preferred audio format for ${purpose}`);
     }
     const fragmentCount = Array.isArray(selected.fragments) ? selected.fragments.length : 0;
+    const durationSeconds =
+      typeof parsed.duration === 'number' && Number.isFinite(parsed.duration)
+        ? parsed.duration
+        : typeof selected.duration === 'number' && Number.isFinite(selected.duration)
+        ? selected.duration
+        : null;
     log.info(`Selected preferred YouTube audio format for ${purpose}`, {
       formatId: selected.format_id,
       selectedProtocol: selected.protocol || null,
@@ -2964,11 +3003,13 @@ async function resolvePreferredAudioFormatId(
       videoLanguage: parsed.language || null,
       liveStatus: parsed.live_status || null,
       wasLive: parsed.was_live === true,
+      durationSeconds,
     });
     return {
       formatId: selected.format_id,
       protocol: selected.protocol || null,
       fragmentCount,
+      durationSeconds,
     };
   };
 
@@ -3019,7 +3060,7 @@ export const downloadYouTubeAudioToFile = async (
   let previousPercent = -1;
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
-  const { formatId, extractionMode, protocol, fragmentCount } = await resolvePreferredAudioFormatId(
+  const { formatId, extractionMode, protocol, fragmentCount, durationSeconds } = await resolvePreferredAudioFormatId(
     ytdlpPath,
     url,
     realtimeDB,
@@ -3097,6 +3138,8 @@ export const downloadYouTubeAudioToFile = async (
       let lastActivityReason = 'spawned';
       let lastObservedPartialFiles: DownloadActivityProbe['partialFiles'] = [];
       let lastEstimatedPercent = -1;
+      let lastMeasuredOutputSizeBytes = 0;
+      let lastMeasuredOutputPercent = -1;
       let stallPollTimer: NodeJS.Timeout | undefined;
 
       const rejectWithError = (error: Error): void => {
@@ -3120,6 +3163,33 @@ export const downloadYouTubeAudioToFile = async (
       const markActivity = (reason: string): void => {
         lastActivityAt = Date.now();
         lastActivityReason = reason;
+      };
+
+      const applyProgressUpdate = (progress: number, source: 'percent' | 'ffmpeg_time' | 'fragment_estimate' | 'file_growth'): void => {
+        const boundedProgress = Math.max(0, Math.min(99, progress));
+        const percentInt = Math.floor(boundedProgress);
+        if (percentInt <= previousPercent) {
+          return;
+        }
+
+        previousPercent = percentInt;
+        if (source === 'fragment_estimate' || source === 'file_growth') {
+          lastEstimatedPercent = Math.max(lastEstimatedPercent, percentInt);
+        }
+        updateProgressCallback(boundedProgress);
+      };
+
+      const estimatePercentFromOutputSize = (currentSizeBytes: number): number | null => {
+        if (lastMeasuredOutputSizeBytes <= 0 || lastMeasuredOutputPercent <= 0) {
+          return null;
+        }
+
+        const estimatedTotalBytes = lastMeasuredOutputSizeBytes / (lastMeasuredOutputPercent / 100);
+        if (!Number.isFinite(estimatedTotalBytes) || estimatedTotalBytes <= 0) {
+          return null;
+        }
+
+        return Math.min(99, (currentSizeBytes / estimatedTotalBytes) * 100);
       };
 
       ytdlp.on('error', (err) => {
@@ -3163,13 +3233,27 @@ export const downloadYouTubeAudioToFile = async (
           stderrBuffer += stderrStr;
         }
 
-        const percent = extractPercent(stderrStr);
-        if (percent !== null) {
-          const percentInt = Math.floor(percent);
-          if (percentInt !== previousPercent) {
-            previousPercent = percentInt;
-            updateProgressCallback(percent);
-          }
+        let progressPercent: number | null = null;
+        const ffmpegTimeSeconds = extractFfmpegTime(stderrStr);
+        if (ffmpegTimeSeconds !== null && ffmpegTimeSeconds >= 0 && durationSeconds && durationSeconds > 0) {
+          progressPercent = Math.min(99, (ffmpegTimeSeconds / durationSeconds) * 100);
+        } else {
+          progressPercent = extractPercent(stderrStr);
+        }
+
+        if (progressPercent !== null) {
+          applyProgressUpdate(progressPercent, ffmpegTimeSeconds !== null ? 'ffmpeg_time' : 'percent');
+          void probePrimaryOutputPartialFile(outputFilePath)
+            .then((outputPart) => {
+              if (!outputPart || previousPercent <= 0) {
+                return;
+              }
+              lastMeasuredOutputSizeBytes = outputPart.size;
+              lastMeasuredOutputPercent = previousPercent;
+            })
+            .catch(() => {
+              // Ignore missing partial file while calibrating progress from ffmpeg output.
+            });
         }
       });
 
@@ -3184,9 +3268,7 @@ export const downloadYouTubeAudioToFile = async (
           if (estimatedPercent !== null) {
             const percentInt = Math.floor(estimatedPercent);
             if (percentInt > previousPercent && percentInt > lastEstimatedPercent) {
-              lastEstimatedPercent = percentInt;
-              previousPercent = percentInt;
-              updateProgressCallback(estimatedPercent);
+              applyProgressUpdate(estimatedPercent, 'fragment_estimate');
               log.info('Estimated yt-dlp download progress from fragment files', {
                 extractionMode: mode,
                 protocol,
@@ -3195,14 +3277,22 @@ export const downloadYouTubeAudioToFile = async (
               });
             }
           } else if (probe.partialFiles.length > 0 && previousPercent < 1) {
-            previousPercent = 1;
-            lastEstimatedPercent = 1;
-            updateProgressCallback(1);
+            applyProgressUpdate(1, 'file_growth');
             log.info('Marked yt-dlp download as active from partial-file growth', {
               extractionMode: mode,
               protocol,
               fragmentCount,
             });
+          }
+
+          const outputPart = await probePrimaryOutputPartialFile(outputFilePath);
+          if (outputPart && outputPart.size > 0) {
+              const derivedPercent = estimatePercentFromOutputSize(outputPart.size);
+              if (derivedPercent !== null) {
+                applyProgressUpdate(derivedPercent, 'file_growth');
+              } else if (previousPercent < 1) {
+                applyProgressUpdate(1, 'file_growth');
+              }
           }
 
           const latestObservedMtimeMs = probe.latestMtimeMs;
