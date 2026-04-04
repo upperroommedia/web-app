@@ -66,6 +66,7 @@ When working on `apps/web`:
 
 - keep App Hosting secrets and Cloud Functions secrets separate; `apphosting.yaml` secrets do not flow into Cloud Functions
 - keep [apps/web/apphosting.yaml](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/apphosting.yaml) aligned with the current Sentry secret names
+- keep `WEB_APP_SENTRY_AUTH_TOKEN` available to App Hosting builds so Next.js source maps upload during `next build`
 - remember local `firebase.json` points App Hosting deploys at backend `web-staging`; production App Hosting should roll from the `main` branch/backend wiring documented in setup docs rather than a naive `firebase deploy --project urm-app --only apphosting`
 - if source maps are required, provide `SENTRY_AUTH_TOKEN` at build time; event capture does not depend on it
 

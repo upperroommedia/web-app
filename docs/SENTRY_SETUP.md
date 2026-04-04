@@ -48,7 +48,21 @@ The workflows use the official `getsentry/action-release@v3` action with:
 
 For event capture, only `WEB_APP_SENTRY_DSN` is required.
 
-For source map upload during App Hosting builds, also provide `SENTRY_AUTH_TOKEN` to the App Hosting build environment. Without it, Sentry release tracking will still work, but browser stack traces will depend on uploaded artifacts not being available.
+For source map upload during App Hosting builds, also provide `SENTRY_AUTH_TOKEN` to the App Hosting build environment. Without it, browser stack traces will remain minified even if release tracking works.
+
+Current App Hosting setup expects:
+
+- secret: `WEB_APP_SENTRY_AUTH_TOKEN`
+- env var: `SENTRY_AUTH_TOKEN`
+- availability: `BUILD`
+
+This works with the existing [apps/web/next.config.js](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/next.config.js) `withSentryConfig(...)` wrapper, which already passes `authToken: process.env.SENTRY_AUTH_TOKEN`.
+
+Verification target for `web-app`:
+
+- a production `next build` should upload source maps automatically
+- Sentry should show the release and deploy
+- browser frames should resolve by Debug ID instead of showing minified `_next/static/chunks/*.js` output
 
 ## GitHub code mappings
 
@@ -126,6 +140,15 @@ Add one mapping per compiled output root:
 - Source Code Root: `packages/contracts/`
 
 These roots match the TypeScript build outputs under each split codebase `lib/` directory.
+
+Source map notes:
+
+- all split functions codebases now compile with:
+  - `sourceMap: true`
+  - `inlineSources: true`
+  - `sourceRoot: "/"`
+- this improves server-side source context for uploaded `.map` files and GitHub source linking
+- Functions are not currently using a bundler plugin to upload source map artifacts to Sentry; source linking relies on emitted `.map` files plus code mappings
 
 ### `web-app`
 

@@ -43,6 +43,10 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: SENTRY_AUTH_TOKEN
+    secret: WEB_APP_SENTRY_AUTH_TOKEN
+    availability:
+      - BUILD
 
   - variable: FIREBASE_FUNCTIONS_REGION
     value: us-central1
