@@ -94,6 +94,7 @@ function isIOS(): boolean {
 
 interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
+  initialUrl?: string;
   trimStart: number;
   duration: number;
   setTrimStart: (trimStartTime: number) => void;
@@ -104,14 +105,15 @@ interface YouTubeTrimmerProps {
 
 const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   setAudioSource,
-  trimStart: _trimStart,
-  duration: _duration,
+  initialUrl,
+  trimStart: initialTrimStart,
+  duration: initialTrimDuration,
   setTrimStart,
   setDuration,
   audioSourceError,
   setAudioSourceError,
 }) => {
-  const [inputText, setInputText] = useState('');
+  const [inputText, setInputText] = useState(initialUrl ?? '');
   const [hasUserTappedToLoad, setHasUserTappedToLoad] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isIframeVisible, setIsIframeVisible] = useState(false);
@@ -172,18 +174,24 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
       const state = useTrimmerStore.getState();
       if (state.duration === 0 || state.trimEnd === 0) {
+        const clampedTrimStart = Math.max(0, Math.min(initialTrimStart, durationSeconds));
+        const requestedTrimEnd = initialTrimDuration > 0 ? clampedTrimStart + initialTrimDuration : durationSeconds;
         initialize({
           duration: durationSeconds,
-          trimStart: 0,
-          trimEnd: durationSeconds,
+          trimStart: clampedTrimStart,
+          trimEnd: Math.max(clampedTrimStart + 0.1, Math.min(requestedTrimEnd, durationSeconds)),
         });
         return;
       }
 
       setStoreDuration(durationSeconds);
     },
-    [initialize, setStoreDuration]
+    [initialTrimDuration, initialTrimStart, initialize, setStoreDuration]
   );
+
+  useEffect(() => {
+    setInputText(initialUrl ?? '');
+  }, [initialUrl]);
 
   useEffect(() => {
     handleSnapshotRef.current = (snapshot: TrimmerPlayerSnapshot) => {

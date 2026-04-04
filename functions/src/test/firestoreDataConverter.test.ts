@@ -10,6 +10,7 @@ describe('firestoreAdminSermonConverter', () => {
     description: 'Description',
     dateMillis: 1700000000000,
     sourceStartTime: 0,
+    trimDurationSeconds: 900,
     durationSeconds: 1200,
     speakers: [],
     topics: [],
@@ -44,6 +45,7 @@ describe('firestoreAdminSermonConverter', () => {
     expect(converted.title).toBe(baseSermon.title);
     expect(converted.dateMillis).toBe(baseSermon.dateMillis);
     expect(converted.dateString).toBeDefined();
+    expect(converted.trimDurationSeconds).toBe(baseSermon.trimDurationSeconds);
     expect(converted.status.audioStatus).toBe(sermonStatusType.PENDING);
   });
 });

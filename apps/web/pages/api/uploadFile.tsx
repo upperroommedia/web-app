@@ -108,7 +108,7 @@ const uploadFile = async (props: UploadFileProps) => {
   const metadata: UploadMetadata = {
     customMetadata: {
       startTime: props.trimStart.toString(),
-      duration: props.sermon.durationSeconds.toString(),
+      duration: (props.sermon.trimDurationSeconds ?? 0).toString(),
       introUrl: introRef,
       outroUrl: outroRef,
     },
@@ -135,7 +135,7 @@ const uploadFile = async (props: UploadFileProps) => {
         id: props.sermon.id,
         youtubeUrl: audioSource.source,
         startTime: props.trimStart,
-        duration: props.sermon.durationSeconds,
+        duration: props.sermon.trimDurationSeconds ?? 0,
         deleteOriginal: true,
         introUrl: introRef,
         outroUrl: outroRef,
@@ -184,7 +184,7 @@ const uploadFile = async (props: UploadFileProps) => {
               id: props.sermon.id,
               storageFilePath: sermonRef.fullPath,
               startTime: props.trimStart,
-              duration: props.sermon.durationSeconds,
+              duration: props.sermon.trimDurationSeconds ?? 0,
               deleteOriginal: true,
               introUrl: introRef,
               outroUrl: outroRef,

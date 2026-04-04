@@ -389,14 +389,6 @@ export const processAudio = async (
 
     // delete original audio file
     if (cancelToken.isCancellationRequested) return;
-    if (audioSource.type === 'StorageFilePath') {
-      const [originalFileExists] = await bucket.file(audioSource.source).exists();
-      if (originalFileExists && deleteOriginal) {
-        log.info('Deleting original audio file', { source: audioSource.source });
-        await bucket.file(audioSource.source).delete();
-      }
-    }
-
     log.info('Audio processing completed successfully');
   } catch (error) {
     log.error('Audio processing failed', {

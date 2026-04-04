@@ -207,6 +207,33 @@ describe('Uploader Profile', () => {
     await assertFails(setDoc(doc(uploaderDB, 'sermons/uploadedToSoundCloud'), { title: 'Edited Title' }));
     await assertFails(setDoc(doc(uploaderDB, 'sermons/uploadedToSubsplash'), { title: 'Edited Title' }));
   });
+
+  test('Update sermon blocked while audio is pending or processing', async function () {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const securityRulesDisabledDB = context.firestore();
+      await setDoc(doc(securityRulesDisabledDB, 'sermons/pendingSermon'), {
+        uploaderId: 'uploaderId',
+        title: 'test sermon',
+        status: {
+          audioStatus: 'PENDING',
+          soundCloud: 'NOT_UPLOADED',
+          subsplash: 'NOT_UPLOADED',
+        },
+      });
+      await setDoc(doc(securityRulesDisabledDB, 'sermons/processingSermon'), {
+        uploaderId: 'uploaderId',
+        title: 'test sermon',
+        status: {
+          audioStatus: 'PROCESSING',
+          soundCloud: 'NOT_UPLOADED',
+          subsplash: 'NOT_UPLOADED',
+        },
+      });
+    });
+
+    await assertFails(setDoc(doc(uploaderDB, 'sermons/pendingSermon'), { title: 'Edited Title' }));
+    await assertFails(setDoc(doc(uploaderDB, 'sermons/processingSermon'), { title: 'Edited Title' }));
+  });
   test('Delete sermon only if not published to Soundcloud or Subsplash', async function () {
     // add a sermon with uploaderId uploaderId to the database
     await testEnv.withSecurityRulesDisabled(async (context) => {
@@ -270,6 +297,35 @@ describe('User Profile', () => {
 
   test('No write to all sermons', async function () {
     await assertFails(setDoc(doc(userDB, 'sermons/123'), { title: 'test sermon' }));
+  });
+});
+
+describe('Admin Sermon Update Restrictions', () => {
+  test('Admin cannot update sermon while audio is pending or processing', async function () {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const securityRulesDisabledDB = context.firestore();
+      await setDoc(doc(securityRulesDisabledDB, 'sermons/pendingSermon'), {
+        uploaderId: 'uploaderId',
+        title: 'test sermon',
+        status: {
+          audioStatus: 'PENDING',
+          soundCloud: 'NOT_UPLOADED',
+          subsplash: 'NOT_UPLOADED',
+        },
+      });
+      await setDoc(doc(securityRulesDisabledDB, 'sermons/processingSermon'), {
+        uploaderId: 'uploaderId',
+        title: 'test sermon',
+        status: {
+          audioStatus: 'PROCESSING',
+          soundCloud: 'NOT_UPLOADED',
+          subsplash: 'NOT_UPLOADED',
+        },
+      });
+    });
+
+    await assertFails(setDoc(doc(adminDB, 'sermons/pendingSermon'), { title: 'Edited Title' }));
+    await assertFails(setDoc(doc(adminDB, 'sermons/processingSermon'), { title: 'Edited Title' }));
   });
 });
 

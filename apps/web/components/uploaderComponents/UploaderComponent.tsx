@@ -31,13 +31,13 @@ import { Series, seriesConverter } from '../../types/Series';
 import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
+import Alert from '@mui/material/Alert';
 import { createFunctionV2 } from '../../utils/createFunction';
 import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import { getIntroAndOutro } from '../../utils/uploadUtils';
-import { PROCESSED_SERMONS_BUCKET } from '../../constants/storage_constants';
 import { User } from '../../types/User';
 import { VerifiedUserUploaderProps } from './VerifiedUserUploaderComponent';
-import { createFormErrorMessage, getErrorMessage, showAudioTrimmerBoolean, showError } from './utils';
+import { createFormErrorMessage, getErrorMessage, showError } from './utils';
 import UploaderDatePicker from './UploaderDatePicker';
 import { UploaderFieldError, UploadProgress } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
@@ -55,6 +55,7 @@ import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
+import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../utils/sermonEditing';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -466,13 +467,13 @@ const Uploader = (props: UploaderProps) => {
     };
 
     if (audioSource) {
-      if (sermon.durationSeconds <= 0) {
+      if ((sermon.trimDurationSeconds ?? 0) <= 0) {
         nextFormErrors.durationSeconds = {
           error: true,
           message: 'Sermon audio duration must be longer than 0 seconds',
           initialState: false,
         };
-      } else if (sermon.durationSeconds > MAX_DURATION_SECONDS) {
+      } else if ((sermon.trimDurationSeconds ?? 0) > MAX_DURATION_SECONDS) {
         nextFormErrors.durationSeconds = {
           error: true,
           message: `Sermon audio duration must be shorter than ${MAX_DURATION_SECONDS / 3600} hours`,
@@ -490,7 +491,7 @@ const Uploader = (props: UploaderProps) => {
     selectedSeries,
     selectedSundayHomiliesMonth,
     sermon.description,
-    sermon.durationSeconds,
+    sermon.trimDurationSeconds,
     sermon.speakers,
     sermon.subtitle,
     sermon.title,
@@ -522,6 +523,12 @@ const Uploader = (props: UploaderProps) => {
   useEffect(() => {
     updateSermon('seriesId', selectedSeries?.id);
   }, [selectedSeries, updateSermon]);
+
+  useEffect(() => {
+    if (!props.existingSermon) return;
+    if (audioSource?.type !== 'YoutubeUrl') return;
+    updateSermon('youtubeUrl', audioSource.source);
+  }, [audioSource, props.existingSermon, updateSermon]);
 
   useEffect(() => {
     if (!uploadAsSeries) return;
@@ -563,7 +570,7 @@ const Uploader = (props: UploaderProps) => {
 
   const setTrimDuration = useCallback(
     (durationSeconds: number) => {
-      updateSermon('durationSeconds', durationSeconds);
+      updateSermon('trimDurationSeconds', durationSeconds);
       if (durationSeconds <= 0 && audioSource) {
         setFormErrorCallback('durationSeconds', true, 'Sermon audio duration must be longer than 0 seconds');
       } else if (durationSeconds > MAX_DURATION_SECONDS) {
@@ -687,18 +694,47 @@ const Uploader = (props: UploaderProps) => {
     [setSermon]
   );
 
-  const showAudioTrimmer = useMemo(() => {
-    return showAudioTrimmerBoolean(props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash);
-  }, [props.existingSermon?.status.soundCloud, props.existingSermon?.status.subsplash]);
+  const canEditExistingSermon = useMemo(
+    () => (props.existingSermon ? canEditSermonRecord(props.existingSermon) : true),
+    [props.existingSermon]
+  );
+
+  const canEditExistingAudio = useMemo(
+    () => (props.existingSermon ? canEditSermonAudio(props.existingSermon) : false),
+    [props.existingSermon]
+  );
+
+  const isExistingYouTubeSermon = Boolean(props.existingSermon?.youtubeUrl);
+
+  const existingAudioEditMessage = useMemo(() => {
+    if (!props.existingSermon) return null;
+    if (isSermonProcessingLocked(props.existingSermon)) {
+      return 'This sermon cannot be edited while audio is queued or processing.';
+    }
+    if (!canEditExistingSermon) {
+      return 'Cannot edit audio when sermon has been uploaded to SoundCloud or Subsplash.';
+    }
+    if (typeof props.existingSermon.trimDurationSeconds !== 'number' || props.existingSermon.trimDurationSeconds <= 0) {
+      return 'This sermon audio cannot be edited because it does not have saved trim-source settings.';
+    }
+    if (!isExistingYouTubeSermon && props.existingSermonUrl?.status === 'error') {
+      return 'This sermon audio cannot be edited because the source audio file is unavailable.';
+    }
+    if (!isExistingYouTubeSermon && props.existingSermonUrl?.status === 'unavailable') {
+      return 'This sermon audio cannot be edited because the source audio file is unavailable.';
+    }
+    return null;
+  }, [canEditExistingSermon, isExistingYouTubeSermon, props.existingSermon, props.existingSermonUrl?.status]);
 
   const audioSettingsChanged = useMemo(() => {
     if (!props.existingSermon) return false;
 
     return (
       Math.abs(sermon.sourceStartTime - props.existingSermon.sourceStartTime) > 0.05 ||
-      Math.abs(sermon.durationSeconds - props.existingSermon.durationSeconds) > 0.05
+      Math.abs((sermon.trimDurationSeconds ?? 0) - (props.existingSermon.trimDurationSeconds ?? 0)) > 0.05 ||
+      (sermon.youtubeUrl ?? '') !== (props.existingSermon.youtubeUrl ?? '')
     );
-  }, [props.existingSermon, sermon.durationSeconds, sermon.sourceStartTime]);
+  }, [props.existingSermon, sermon.sourceStartTime, sermon.trimDurationSeconds, sermon.youtubeUrl]);
 
   return (
     <>
@@ -922,12 +958,23 @@ const Uploader = (props: UploaderProps) => {
         >
           {props.existingSermon && props.existingList ? (
             <Stack width={1}>
-              {showAudioTrimmer ? (
-                props.existingSermonUrl?.status === 'success' ? (
+              {canEditExistingAudio ? (
+                isExistingYouTubeSermon ? (
+                    <YouTubeTrimmer
+                      initialUrl={props.existingSermon?.youtubeUrl}
+                      trimStart={sermon.sourceStartTime}
+                      duration={sermon.trimDurationSeconds ?? 0}
+                    setDuration={setTrimDuration}
+                    setTrimStart={setTrimStartTime}
+                    setAudioSource={setAudioSource}
+                    audioSourceError={formErrors?.audioSource}
+                    setAudioSourceError={setAudioSourceError}
+                  />
+                ) : props.existingSermonUrl?.status === 'success' ? (
                   <AudioTrimmerComponent
                     url={props.existingSermonUrl.url}
                     trimStart={sermon.sourceStartTime}
-                    trimDuration={sermon.durationSeconds}
+                    trimDuration={sermon.trimDurationSeconds}
                     setTrimStart={setTrimStartTime}
                     setTrimDuration={setTrimDuration}
                     clearAudioTrimmer={clearAudioTrimmer}
@@ -941,14 +988,10 @@ const Uploader = (props: UploaderProps) => {
                     </Typography>
                   </Stack>
                 ) : (
-                  <Typography variant="caption">
-                    Something went wrong loading the audio. Please try again later
-                  </Typography>
+                  <Alert severity="info">{existingAudioEditMessage || 'Something went wrong loading the audio.'}</Alert>
                 )
               ) : (
-                <Typography variant="caption" sx={{ textAlign: 'center' }}>
-                  Cannot edit audio when sermon has been uploaded to SoundCloud or Subsplash
-                </Typography>
+                <Alert severity="info">{existingAudioEditMessage || 'This sermon audio cannot be edited.'}</Alert>
               )}
               <div style={{ display: 'grid', margin: 'auto', paddingTop: '20px' }}>
                 <Button
@@ -974,16 +1017,26 @@ const Uploader = (props: UploaderProps) => {
                         const generateAddIntroOutroTask =
                           createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
                         const { introRef, outroRef } = await getIntroAndOutro(sermon);
-                        const data: AddIntroOutroInputType = {
-                          id: sermon.id,
-                          storageFilePath: `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`,
-                          startTime: sermon.sourceStartTime,
-                          duration: sermon.durationSeconds,
-                          deleteOriginal: false,
-                          skipTranscode: true,
-                          introUrl: introRef,
-                          outroUrl: outroRef,
-                        };
+                        const data: AddIntroOutroInputType = sermon.youtubeUrl
+                          ? {
+                              id: sermon.id,
+                              youtubeUrl: sermon.youtubeUrl,
+                              startTime: sermon.sourceStartTime,
+                              duration: sermon.trimDurationSeconds ?? 0,
+                              deleteOriginal: false,
+                              introUrl: introRef,
+                              outroUrl: outroRef,
+                            }
+                          : {
+                              id: sermon.id,
+                              storageFilePath: `sermons/${sermon.id}`,
+                              startTime: sermon.sourceStartTime,
+                              duration: sermon.trimDurationSeconds ?? 0,
+                              deleteOriginal: false,
+                              skipTranscode: false,
+                              introUrl: introRef,
+                              outroUrl: outroRef,
+                            };
                         promises.push(generateAddIntroOutroTask(data));
                         promises.push(
                           editSermon(pendingSermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId })
@@ -1001,6 +1054,7 @@ const Uploader = (props: UploaderProps) => {
                     }
                   }}
                   disabled={
+                    !canEditExistingSermon ||
                     sermonsEqual(props.existingSermon, sermon) &&
                     listEqual(props.existingList, sermonList) &&
                     !audioSettingsChanged
@@ -1050,7 +1104,7 @@ const Uploader = (props: UploaderProps) => {
                   {useYouTubeUrl ? (
                     <YouTubeTrimmer
                       trimStart={sermon.sourceStartTime}
-                      duration={sermon.durationSeconds}
+                      duration={sermon.trimDurationSeconds ?? 0}
                       setTrimStart={setTrimStartTime}
                       setDuration={setTrimDuration}
                       setAudioSource={setAudioSource}

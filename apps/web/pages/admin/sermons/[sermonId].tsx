@@ -50,7 +50,7 @@ import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import SermonPublishPanel from '../../../components/SermonPublishPanel';
 import firestore, { doc, getDoc, getDocs, collection, updateDoc, setDoc, query, orderBy, where, limit, serverTimestamp } from '../../../firebase/firestore';
-import { sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
+import { sermonStatusType } from '../../../types/SermonTypes';
 import { sermonConverter } from '../../../types/Sermon';
 import { Series, seriesConverter } from '../../../types/Series';
 import useAuth from '../../../context/user/UserContext';
@@ -67,6 +67,7 @@ import { useObject } from 'react-firebase-hooks/database';
 import database, { ref as dbRef } from '../../../firebase/database';
 import LinearProgress from '@mui/material/LinearProgress';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
+import { canEditSermonRecord, isSermonProcessingLocked, isSermonPublishedExternally } from '../../../utils/sermonEditing';
 
 const getErrorField = (error: unknown, field: 'code' | 'details' | 'message'): string | undefined => {
   if (field === 'message' && error instanceof Error && error.message) {
@@ -244,6 +245,10 @@ const SermonDetailsPage = () => {
 
   const retryProcessing = useCallback(async () => {
     if (!sermon || isRetryingProcessing) return;
+    if (typeof sermon.trimDurationSeconds !== 'number' || sermon.trimDurationSeconds <= 0) {
+      alert('This sermon cannot be reprocessed because it does not have saved trim-source settings.');
+      return;
+    }
 
     setIsRetryingProcessing(true);
     try {
@@ -254,7 +259,7 @@ const SermonDetailsPage = () => {
             id: sermon.id,
             youtubeUrl: sermon.youtubeUrl,
             startTime: sermon.sourceStartTime,
-            duration: sermon.durationSeconds,
+            duration: sermon.trimDurationSeconds ?? 0,
             deleteOriginal: true,
             introUrl: introRef,
             outroUrl: outroRef,
@@ -263,7 +268,7 @@ const SermonDetailsPage = () => {
             id: sermon.id,
             storageFilePath: `sermons/${sermon.id}`,
             startTime: sermon.sourceStartTime,
-            duration: sermon.durationSeconds,
+            duration: sermon.trimDurationSeconds ?? 0,
             deleteOriginal: true,
             introUrl: introRef,
             outroUrl: outroRef,
@@ -412,14 +417,13 @@ const SermonDetailsPage = () => {
     || series?.images?.find((img) => img.type === 'square');
 
   // Check if user can edit/delete
-  const canEdit = sermon && (
-    canPublish ||
-    (user?.canUpload() && sermon.status.subsplash !== uploadStatus.UPLOADED && sermon.status.soundCloud !== uploadStatus.UPLOADED)
-  );
+  const canEdit = sermon && (canPublish || user?.canUpload()) && canEditSermonRecord(sermon);
 
   const canDelete = sermon && (
     canPublish ||
-    (user?.canUpload() && sermon.status.subsplash !== uploadStatus.UPLOADED && sermon.status.soundCloud !== uploadStatus.UPLOADED && sermon.status.audioStatus !== sermonStatusType.PENDING)
+    (user?.canUpload() &&
+      !isSermonPublishedExternally(sermon) &&
+      !isSermonProcessingLocked(sermon))
   );
 
   if (sermonLoading) {
@@ -695,6 +699,12 @@ const SermonDetailsPage = () => {
                               />
                             )}
                           </Box>
+                        )}
+
+                        {isSermonProcessingLocked(sermon) && (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
+                            This sermon cannot be edited while audio is queued or processing.
+                          </Typography>
                         )}
 
                       </Stack>

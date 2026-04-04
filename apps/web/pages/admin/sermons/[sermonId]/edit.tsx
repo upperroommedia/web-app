@@ -18,17 +18,17 @@ import Link from 'next/link';
 
 import AppLayout from '../../../../layout/AppLayout';
 import firestore, { doc, getDoc, collection } from '../../../../firebase/firestore';
-import { Sermon, uploadStatus } from '../../../../types/SermonTypes';
+import { Sermon } from '../../../../types/SermonTypes';
 import { sermonConverter } from '../../../../types/Sermon';
 import { listConverter, List } from '../../../../types/List';
 import useAuth from '../../../../context/user/UserContext';
 import VerifiedUserUploaderComponent from '../../../../components/uploaderComponents/VerifiedUserUploaderComponent';
 import { getDownloadURL, getStorage, ref } from '../../../../firebase/storage';
 import firebase from '../../../../firebase/firebase';
-import { PROCESSED_SERMONS_BUCKET } from '../../../../constants/storage_constants';
-import { showAudioTrimmerBoolean } from '../../../../components/uploaderComponents/utils';
+import { UNPROCESSED_SERMONS_BUCKET } from '../../../../constants/storage_constants';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { SermonURL } from '../../../../components/EditSermonForm';
+import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../../../utils/sermonEditing';
 
 const storage = getStorage(firebase);
 
@@ -57,10 +57,7 @@ const EditSermonPage = () => {
   const canPublish = user?.canPublish() ?? false;
 
   // Check if audio trimmer should be shown (only if not published)
-  const showAudioTrimmer = useMemo(() => {
-    if (!sermon) return false;
-    return showAudioTrimmerBoolean(sermon.status.soundCloud, sermon.status.subsplash);
-  }, [sermon]);
+  const showAudioTrimmer = useMemo(() => Boolean(sermon && canEditSermonAudio(sermon) && !sermon.youtubeUrl), [sermon]);
 
   // Fetch sermon data
   const fetchSermonData = useCallback(async () => {
@@ -81,14 +78,14 @@ const EditSermonPage = () => {
       const sermonData = sermonDoc.data();
       
       // Check permissions
-      const canEdit = canPublish || (
-        user.canUpload() && 
-        sermonData.status.subsplash !== uploadStatus.UPLOADED && 
-        sermonData.status.soundCloud !== uploadStatus.UPLOADED
-      );
+      const canEdit = (canPublish || user.canUpload()) && canEditSermonRecord(sermonData);
       
       if (!canEdit) {
-        setError('You do not have permission to edit this sermon');
+        setError(
+          isSermonProcessingLocked(sermonData)
+            ? 'This sermon cannot be edited while audio is queued or processing.'
+            : 'You do not have permission to edit this sermon'
+        );
         setLoading(false);
         return;
       }
@@ -106,7 +103,8 @@ const EditSermonPage = () => {
   useEffect(() => {
     if (!sermon || !showAudioTrimmer) return;
     
-    getDownloadURL(ref(storage, `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`))
+    setSermonUrl({ url: undefined, status: 'loading' });
+    getDownloadURL(ref(storage, `${UNPROCESSED_SERMONS_BUCKET}/${sermon.id}`))
       .then((url) => {
         setSermonUrl({ url, status: 'success' });
       })

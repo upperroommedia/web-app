@@ -44,6 +44,7 @@ export const createEmptySermon = (uploaderId?: string): Sermon => {
     description: '',
     dateMillis: currentDate.getTime(),
     sourceStartTime: 0,
+    trimDurationSeconds: 0,
     durationSeconds: 0,
     speakers: [],
     topics: [],

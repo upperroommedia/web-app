@@ -13,8 +13,8 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
 import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import { getDownloadURL, getStorage, ref } from '../firebase/storage';
-import { PROCESSED_SERMONS_BUCKET } from '../constants/storage_constants';
-import { showAudioTrimmerBoolean } from './uploaderComponents/utils';
+import { UNPROCESSED_SERMONS_BUCKET } from '../constants/storage_constants';
+import { canEditSermonAudio } from '../utils/sermonEditing';
 
 interface EditSermonFormInfo {
   open: boolean;
@@ -29,7 +29,7 @@ export type SermonURL =
     }
   | {
       url: undefined;
-      status: 'loading' | 'error';
+      status: 'loading' | 'error' | 'unavailable';
     };
 const storage = getStorage(firebase);
 const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
@@ -38,13 +38,16 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
   );
   const [sermonUrl, setSermonUrl] = useState<SermonURL>({ url: undefined, status: 'loading' });
 
-  const showAudioTrimmer = useMemo(() => {
-    return showAudioTrimmerBoolean(sermon.status.soundCloud, sermon.status.subsplash);
-  }, [sermon.status.soundCloud, sermon.status.subsplash]);
+  const showAudioTrimmer = useMemo(() => canEditSermonAudio(sermon) && !sermon.youtubeUrl, [sermon]);
 
   useEffect(() => {
-    if (!showAudioTrimmer) return;
-    getDownloadURL(ref(storage, `${PROCESSED_SERMONS_BUCKET}/${sermon.id}`))
+    if (!showAudioTrimmer) {
+      setSermonUrl({ url: undefined, status: 'unavailable' });
+      return;
+    }
+
+    setSermonUrl({ url: undefined, status: 'loading' });
+    getDownloadURL(ref(storage, `${UNPROCESSED_SERMONS_BUCKET}/${sermon.id}`))
       .then((url) => {
         setSermonUrl({ url, status: 'success' });
       })

@@ -29,6 +29,7 @@ export interface Sermon {
   subtitle: string;
   dateMillis: number;
   sourceStartTime: number;
+  trimDurationSeconds?: number;
   durationSeconds: number;
   topics: string[];
   dateString?: string;
