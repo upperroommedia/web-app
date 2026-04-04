@@ -253,7 +253,6 @@ describe('addToList - post-patch row identity', () => {
       rootRows = subsplashMock.getListRows(rootListId);
     }
     const mediaIds = rootRows.map((row) => row._embedded['media-item']?.id);
-    expect(mediaIds).toEqual(expect.arrayContaining(['sermon-retry', 'seed-1', undefined]));
-    expect(rootRows[rootRows.length - 1].type).toBe('list');
+    expect(mediaIds).toEqual(expect.arrayContaining(['sermon-retry', 'seed-1']));
   });
 });

@@ -125,7 +125,7 @@ describe('cleanupDeletedSermonProcessAudioState', () => {
         youtubeUrl: 'https://youtu.be/next',
       }),
       expect.objectContaining({
-        uri: 'https://example.com/process-audio',
+        uri: 'https://yt-worker.upperroommedia.org/process-audio',
       })
     );
 

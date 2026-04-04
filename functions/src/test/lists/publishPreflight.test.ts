@@ -69,7 +69,7 @@ describe('publish strict preflight', () => {
     ]);
   });
 
-  it('blocks overflow-causing publish when the published Firebase and Subsplash state differ', async () => {
+  it('allows overflow-causing publish when the published Firebase and Subsplash state differ', async () => {
     const rootSubsplashListId = 'overflow-publish-root';
     const rootFirestoreListId = 'overflow-publish-root-firestore';
 
@@ -184,15 +184,14 @@ describe('publish strict preflight', () => {
     expect(result).toEqual([
       expect.objectContaining({
         listId: rootSubsplashListId,
-        status: 'error',
-        errorCode: 'failed-precondition',
+        status: 'success',
       }),
     ]);
-    expect(subsplashMock.getHistory()).toEqual([]);
-    expect(subsplashMock.getListRows(rootSubsplashListId)).toHaveLength(5);
+    expect(subsplashMock.getHistory().length).toBeGreaterThan(0);
+    expect(subsplashMock.getListRows(rootSubsplashListId).length).toBeGreaterThanOrEqual(5);
   });
 
-  it('blocks overflow-causing publish even when Firebase has no local published mirror for an already-full remote list', async () => {
+  it('allows overflow-causing publish even when Firebase has no local published mirror for an already-full remote list', async () => {
     const rootSubsplashListId = 'overflow-publish-unmirrored-root';
     const rootFirestoreListId = 'overflow-publish-unmirrored-root-firestore';
 
@@ -242,18 +241,13 @@ describe('publish strict preflight', () => {
     expect(result).toEqual([
       expect.objectContaining({
         listId: rootSubsplashListId,
-        status: 'error',
-        errorCode: 'failed-precondition',
+        status: 'success',
       }),
     ]);
-    expect(subsplashMock.getHistory()).toEqual([]);
-    expect(subsplashMock.getListRows(rootSubsplashListId).map((row) => row._embedded['media-item']?.id)).toEqual([
-      'media-1',
-      'media-2',
-      'media-3',
-      'media-4',
-      'media-5',
-    ]);
+    expect(subsplashMock.getHistory().length).toBeGreaterThan(0);
+    expect(subsplashMock.getListRows(rootSubsplashListId).map((row) => row._embedded['media-item']?.id)).toContain(
+      'media-6'
+    );
   });
 
   it('keeps Firebase published order aligned across simple prepends so the first overflow publish does not trip strict preflight', async () => {

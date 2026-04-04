@@ -87,7 +87,7 @@ const buildRequest = (
 describe('createRoleRequest', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
-    process.env.ROLE_REQUEST_RECIPIENTS = '["ops@example.org","admins@example.org"]';
+    process.env.ADMIN_REQUEST_RECIPIENTS = '["ops@example.org","admins@example.org"]';
     process.env.ADMIN_BASE_URL = 'https://admin.upperroommedia.test/';
 
     await clearCollection(ROLE_REQUESTS_COLLECTION);

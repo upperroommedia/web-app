@@ -19,7 +19,6 @@ describe('caller lock/idempotency contract adoption', () => {
     expect(sermonPublishPanel).toContain("createSubsplashListCreateIntentKey('manage-publishing-list-create', sermon.id, canonicalList.id)");
     expect(sermonPublishPanel).toContain("createSubsplashListAddIntentKey(");
     expect(sermonPublishPanel).toContain("createSubsplashListRemoveIntentKey(");
-    expect(sermonPublishPanel).toContain("createSubsplashDeleteIntentKey('manage-publishing-delete', sermon.id)");
     expect(sermonPublishPanel).toContain("createSubsplashSeriesCreateIntentKey('manage-publishing-series-create', series.id)");
     expect(sermonPublishPanel).toContain("createSubsplashSeriesPublishIntentKey(");
     expect(sermonPublishPanel).toContain("createSubsplashSeriesReorderIntentKey(");

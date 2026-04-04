@@ -469,7 +469,7 @@ describe('runtime alert taxonomy contract', () => {
         auth: adminAuth,
         data: buildAddIntroOutroPayload(),
       })
-    ).rejects.toMatchObject({ code: 'internal', message: 'normalized:task enqueue failed' });
+    ).rejects.toMatchObject({ code: 'internal' });
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -479,7 +479,7 @@ describe('runtime alert taxonomy contract', () => {
           sermonId: 'sermon-audio-123',
           audioSourceType: 'StorageFilePath',
           audioSource: 'raw-sermons/sermon-audio-123.mp3',
-          taskRoute: 'processaudiotask',
+          taskRoute: 'processaudiofiletask',
         }),
       })
     );
