@@ -29,7 +29,10 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   setHasTrimmed,
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const initialTrimEnd = trimDuration && trimDuration > 0 ? trimStart + trimDuration : undefined;
+  const savedTrimStartRef = useRef(trimStart);
+  const savedTrimEndRef = useRef(trimDuration && trimDuration > 0 ? trimStart + trimDuration : undefined);
+  const savedTrimStart = savedTrimStartRef.current;
+  const savedTrimEnd = savedTrimEndRef.current;
 
   // Initialize audio element
   useEffect(() => {
@@ -52,8 +55,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   // Use the sync hook
   const { seek, togglePlayPause } = useAudioTrimmerSync(audioRef, {
     autoPauseAtEnd: true,
-    initialTrimStart: trimStart,
-    initialTrimEnd,
+    initialTrimStart: savedTrimStart,
+    initialTrimEnd: savedTrimEnd,
   });
 
   // Sync store changes to parent props
@@ -73,12 +76,12 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   // Track if user has trimmed
   useEffect(() => {
     if (setHasTrimmed && isReady && duration > 0) {
-      const effectiveInitialTrimEnd = initialTrimEnd ?? duration;
+      const effectiveInitialTrimEnd = savedTrimEnd ?? duration;
       const hasTrimmed =
-        Math.abs(storeTrimStart - trimStart) > 0.05 || Math.abs(storeTrimEnd - effectiveInitialTrimEnd) > 0.05;
+        Math.abs(storeTrimStart - savedTrimStart) > 0.05 || Math.abs(storeTrimEnd - effectiveInitialTrimEnd) > 0.05;
       setHasTrimmed(hasTrimmed);
     }
-  }, [duration, initialTrimEnd, isReady, setHasTrimmed, storeTrimEnd, storeTrimStart, trimStart]);
+  }, [duration, isReady, savedTrimEnd, savedTrimStart, setHasTrimmed, storeTrimEnd, storeTrimStart]);
 
   // Reset store when component unmounts
   useEffect(() => {
@@ -117,8 +120,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
           alignItems="stretch"
           justifyContent="space-between"
         >
-          <EditableTimeInput type="start" label="Trim Start" resetValue={trimStart} />
-          <EditableTimeInput type="end" label="Trim End" resetValue={initialTrimEnd} />
+          <EditableTimeInput type="start" label="Trim Start" resetValue={savedTrimStart} />
+          <EditableTimeInput type="end" label="Trim End" resetValue={savedTrimEnd} />
         </Stack>
         <Stack
           direction="row"
@@ -135,9 +138,9 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
         justifyContent="space-between"
         sx={{ display: { xs: 'none', sm: 'flex' } }}
       >
-        <EditableTimeInput type="start" label="Trim Start" resetValue={trimStart} />
+        <EditableTimeInput type="start" label="Trim Start" resetValue={savedTrimStart} />
         <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} />
-        <EditableTimeInput type="end" label="Trim End" resetValue={initialTrimEnd} />
+        <EditableTimeInput type="end" label="Trim End" resetValue={savedTrimEnd} />
       </Stack>
     </Stack>
   );

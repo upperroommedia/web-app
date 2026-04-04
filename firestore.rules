@@ -16,6 +16,7 @@ service cloud.firestore {
     function sermonIsProcessing() {
       return resource != null &&
         'status' in resource.data &&
+        resource.data.status is map &&
         'audioStatus' in resource.data.status &&
         resource.data.status.audioStatus in ['PENDING', 'PROCESSING'];
     }

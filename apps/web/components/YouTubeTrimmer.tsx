@@ -116,6 +116,10 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   audioSourceError,
   setAudioSourceError,
 }) => {
+  const savedTrimStartRef = useRef(initialTrimStart);
+  const savedTrimEndRef = useRef(initialTrimDuration > 0 ? initialTrimStart + initialTrimDuration : undefined);
+  const savedTrimStart = savedTrimStartRef.current;
+  const savedTrimEnd = savedTrimEndRef.current;
   const [inputText, setInputText] = useState(initialUrl ?? '');
   const [hasUserTappedToLoad, setHasUserTappedToLoad] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -177,8 +181,8 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
       const state = useTrimmerStore.getState();
       if (state.duration === 0 || state.trimEnd === 0) {
-        const clampedTrimStart = Math.max(0, Math.min(initialTrimStart, durationSeconds));
-        const requestedTrimEnd = initialTrimDuration > 0 ? clampedTrimStart + initialTrimDuration : durationSeconds;
+        const clampedTrimStart = Math.max(0, Math.min(savedTrimStart, durationSeconds));
+        const requestedTrimEnd = savedTrimEnd ?? durationSeconds;
         initialize({
           duration: durationSeconds,
           trimStart: clampedTrimStart,
@@ -189,7 +193,7 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
       setStoreDuration(durationSeconds);
     },
-    [initialTrimDuration, initialTrimStart, initialize, setStoreDuration]
+    [initialize, savedTrimEnd, savedTrimStart, setStoreDuration]
   );
 
   useEffect(() => {
@@ -379,10 +383,10 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
     setAudioSource({ source: debouncedInputRef.current, type: 'YoutubeUrl' });
     setAudioSourceError(false, '');
 
-    adapter.load(videoId).catch(() => {
+    adapter.load(videoId, savedTrimStart).catch(() => {
       // Adapter-level errors are surfaced via `onError`.
     });
-  }, [setAudioSource, setAudioSourceError, setStoreIsLoading, setStoreIsReady, shouldLoad, videoId]);
+  }, [savedTrimStart, setAudioSource, setAudioSourceError, setStoreIsLoading, setStoreIsReady, shouldLoad, videoId]);
 
   useEffect(() => {
     if (!shouldLoad || !isReady) {
@@ -687,13 +691,13 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
             type="start"
             label="Start"
             onCommitSeek={(time) => commitSeek(time, true)}
-            resetValue={initialTrimStart}
+            resetValue={savedTrimStart}
           />
           <EditableTimeInput
             type="end"
             label="End"
             onCommitSeek={(time) => commitSeek(time, true)}
-            resetValue={initialTrimDuration > 0 ? initialTrimStart + initialTrimDuration : undefined}
+            resetValue={savedTrimEnd}
           />
         </Stack>
       )}

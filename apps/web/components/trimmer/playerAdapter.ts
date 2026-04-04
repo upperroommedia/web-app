@@ -17,7 +17,7 @@ export type TrimmerPlayerSnapshotListener = (snapshot: TrimmerPlayerSnapshot) =>
 export type TrimmerPlayerErrorListener = (message: string) => void;
 
 export interface TrimmerPlayerAdapter {
-  load(videoId: string): Promise<void>;
+  load(videoId: string, startTimeSeconds?: number): Promise<void>;
   play(): void;
   pause(): void;
   seek(time: number, options?: SeekOptions): void;

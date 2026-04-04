@@ -209,6 +209,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
   private isIframeReady = false;
   private isVideoReady = false;
   private pendingVideoId: string | null = null;
+  private pendingStartSeconds = 0;
   private destroyed = false;
 
   constructor(container: HTMLElement) {
@@ -233,9 +234,10 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
     };
   }
 
-  async load(videoId: string): Promise<void> {
+  async load(videoId: string, startTimeSeconds = 0): Promise<void> {
     this.destroyed = false;
     this.pendingVideoId = videoId;
+    this.pendingStartSeconds = Math.max(0, startTimeSeconds);
     this.isVideoReady = false;
 
     try {
@@ -361,7 +363,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
           this.isIframeReady = true;
           const pending = this.pendingVideoId;
           if (pending) {
-            this.cueVideo(pending);
+            this.cueVideo(pending, this.pendingStartSeconds);
           }
           this.emitSnapshot(true);
           this.startPolling();
@@ -385,14 +387,14 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
     this.startPolling();
   }
 
-  private cueVideo(videoId: string): void {
+  private cueVideo(videoId: string, startSeconds = 0): void {
     if (!this.player) return;
 
     try {
       this.isVideoReady = false;
       this.player.cueVideoById({
         videoId,
-        startSeconds: 0,
+        startSeconds: Math.max(0, startSeconds),
       });
       // Avoid synthetic startup play/pause cycles; they can briefly surface
       // transient YouTube embed error UI before the player is actually used.
