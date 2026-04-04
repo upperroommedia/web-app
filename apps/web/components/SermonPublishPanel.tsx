@@ -161,7 +161,7 @@ const getStatusTone = (
       return {
         sx: {
           bgcolor: alpha(theme.palette.success.main, 0.12),
-          borderColor: alpha(theme.palette.success.main, 0.32),
+          border: `1px solid ${alpha(theme.palette.success.main, theme.palette.mode === 'dark' ? 0.14 : 0.12)}`,
           color: theme.palette.success.dark,
           '& .MuiChip-deleteIcon': { color: theme.palette.success.main },
         },
@@ -170,7 +170,7 @@ const getStatusTone = (
       return {
         sx: {
           bgcolor: alpha(theme.palette.info.main, 0.12),
-          borderColor: alpha(theme.palette.info.main, 0.32),
+          border: `1px solid ${alpha(theme.palette.info.main, theme.palette.mode === 'dark' ? 0.14 : 0.12)}`,
           color: theme.palette.info.dark,
           '& .MuiChip-deleteIcon': { color: theme.palette.info.main },
         },
@@ -178,8 +178,10 @@ const getStatusTone = (
     case 'checking':
       return {
         sx: {
-          bgcolor: alpha(theme.palette.action.selected, 0.5),
-          borderColor: alpha(theme.palette.divider, 1),
+          bgcolor: theme.palette.mode === 'dark'
+            ? alpha(theme.palette.common.white, 0.12)
+            : alpha(theme.palette.common.black, 0.06),
+          border: `1px solid ${alpha(theme.palette.divider, theme.palette.mode === 'dark' ? 0.18 : 0.24)}`,
           color: theme.palette.text.secondary,
           '& .MuiChip-deleteIcon': { color: theme.palette.text.secondary },
         },
@@ -189,7 +191,7 @@ const getStatusTone = (
       return {
         sx: {
           bgcolor: alpha(theme.palette.warning.main, 0.14),
-          borderColor: alpha(theme.palette.warning.main, 0.34),
+          border: `1px solid ${alpha(theme.palette.warning.main, theme.palette.mode === 'dark' ? 0.14 : 0.12)}`,
           color: theme.palette.warning.dark,
           '& .MuiChip-deleteIcon': { color: theme.palette.warning.main },
         },
@@ -198,7 +200,7 @@ const getStatusTone = (
       return {
         sx: {
           bgcolor: alpha(theme.palette.error.main, 0.12),
-          borderColor: alpha(theme.palette.error.main, 0.3),
+          border: `1px solid ${alpha(theme.palette.error.main, theme.palette.mode === 'dark' ? 0.14 : 0.12)}`,
           color: theme.palette.error.dark,
           '& .MuiChip-deleteIcon': { color: theme.palette.error.main },
         },
@@ -206,8 +208,10 @@ const getStatusTone = (
     default:
       return {
         sx: {
-          bgcolor: theme.palette.background.paper,
-          borderColor: alpha(theme.palette.divider, 1),
+          bgcolor: theme.palette.mode === 'dark'
+            ? alpha(theme.palette.common.white, 0.1)
+            : alpha(theme.palette.common.black, 0.045),
+          border: `1px solid ${alpha(theme.palette.divider, theme.palette.mode === 'dark' ? 0.16 : 0.22)}`,
           color: theme.palette.text.secondary,
           '& .MuiChip-deleteIcon': { color: theme.palette.text.secondary },
         },
@@ -229,7 +233,7 @@ const StatusChip: FunctionComponent<{
     <Chip
       avatar={avatar}
       label={label}
-      variant="outlined"
+      variant="filled"
       onDelete={onRetry}
       deleteIcon={
         onRetry ? (retryDisabled ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />) : undefined
