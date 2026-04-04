@@ -121,15 +121,26 @@ PROCESS_AUDIO_BROWSER_FALLBACK_STRATEGY=session_backed
 EOF
 }
 
-write_env_file staging
-write_env_file production
+case "$TARGET_ENV" in
+  staging)
+    write_env_file staging
+    ;;
+  production)
+    write_env_file production
+    ;;
+  all)
+    write_env_file staging
+    write_env_file production
+    ;;
+esac
 
 cat > "$WORK_DIR/.env" <<EOF
 PROCESS_AUDIO_STAGING_HOSTNAME=${staging_hostname}
 PROCESS_AUDIO_PRODUCTION_HOSTNAME=${production_hostname}
 EOF
 
-rsync -az --delete --exclude '/state/' "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
+rsync -az --delete --exclude '/state/' --exclude '/env/' "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
+rsync -az "$WORK_DIR/env/" "${SSH_TARGET}:${REMOTE_DIR}/env/"
 
 ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs ${REMOTE_DIR}/state/shared-browser-profile ${REMOTE_DIR}/state/browser-refresh-control && chmod 755 ${REMOTE_DIR} ${REMOTE_DIR}/state && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production ${REMOTE_DIR}/state/shared-browser-profile ${REMOTE_DIR}/state/browser-refresh-control"
 
