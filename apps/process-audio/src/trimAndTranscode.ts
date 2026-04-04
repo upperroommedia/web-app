@@ -152,7 +152,10 @@ const trimAndTranscode = async (
   const updateDownloadProgress = (progress: number) => {
     if (!transcodingStarted) {
       // Scale yt-dlp progress (0-100%) to 0-downloadEndPercent range
-      const scaledProgress = Math.round(progress * (progressRanges.downloadEndPercent / 100));
+      const scaledProgress =
+        progress > 0
+          ? Math.max(1, Math.round(progress * (progressRanges.downloadEndPercent / 100)))
+          : Math.round(progress * (progressRanges.downloadEndPercent / 100));
 
       // Log progress to console more frequently (every 10% of raw progress)
       const progressDecile = Math.floor(progress / 10);

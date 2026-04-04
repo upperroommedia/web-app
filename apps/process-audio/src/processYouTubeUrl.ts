@@ -209,6 +209,21 @@ function extractPercent(line: string): number | null {
   return percentMatch ? parseFloat(percentMatch[1]) : null;
 }
 
+function normalizeProtocol(protocol: string | undefined | null): string {
+  return (protocol || '').trim().toLowerCase();
+}
+
+function isFragmentedProtocol(protocol: string | undefined | null): boolean {
+  const normalized = normalizeProtocol(protocol);
+  return (
+    normalized.includes('m3u8') ||
+    normalized.includes('dash') ||
+    normalized.includes('http_dash_segments') ||
+    normalized.includes('hls') ||
+    normalized.includes('ism')
+  );
+}
+
 /**
  * Extract time from ffmpeg progress output (e.g., "time=00:00:03.84")
  * Returns time in seconds, or null if not found
@@ -411,6 +426,25 @@ function applyYtDlpExternalDownloaderArgs(args: string[]): void {
   const downloaderArgs = getYtDlpExternalDownloaderArgs();
   if (downloaderArgs) {
     args.push('--downloader-args', `${downloader}:${downloaderArgs}`);
+  }
+}
+
+function maybeApplyYtDlpExternalDownloaderArgs(
+  args: string[],
+  log: ReturnType<typeof createLoggerWithContext>,
+  options?: { protocol?: string | null; fragmentCount?: number | null; context?: string }
+): void {
+  const downloader = getYtDlpExternalDownloader();
+  if (!downloader) return;
+  if (!shouldApplyYtDlpRequestPacing(options)) {
+    applyYtDlpExternalDownloaderArgs(args);
+    log.info('Applying yt-dlp external downloader for fragmented download path', {
+      downloader,
+      downloaderArgs: getYtDlpExternalDownloaderArgs() || null,
+      protocol: options?.protocol || null,
+      fragmentCount: options?.fragmentCount ?? null,
+      context: options?.context || null,
+    });
   }
 }
 
@@ -669,6 +703,30 @@ function applyYtDlpRequestPacingArgs(args: string[]): void {
   if (sleepInterval && maxSleepInterval) {
     args.push('--max-sleep-interval', maxSleepInterval);
   }
+}
+
+function shouldApplyYtDlpRequestPacing(options?: { protocol?: string | null; fragmentCount?: number | null }): boolean {
+  if (!options) return true;
+  if ((options.fragmentCount || 0) > 0) return false;
+  if (isFragmentedProtocol(options.protocol)) return false;
+  return true;
+}
+
+function maybeApplyYtDlpRequestPacingArgs(
+  args: string[],
+  log: ReturnType<typeof createLoggerWithContext>,
+  options?: { protocol?: string | null; fragmentCount?: number | null; context?: string }
+): void {
+  if (!shouldApplyYtDlpRequestPacing(options)) {
+    log.info('Skipping yt-dlp request pacing for fragmented download path', {
+      protocol: options?.protocol || null,
+      fragmentCount: options?.fragmentCount ?? null,
+      context: options?.context || null,
+    });
+    return;
+  }
+
+  applyYtDlpRequestPacingArgs(args);
 }
 
 function buildDecisionCacheKey(ctx: LogContext | undefined, url: string): string | undefined {
@@ -1182,6 +1240,31 @@ type DownloadActivityProbe = {
   partialFiles: Array<{ path: string; size: number; mtimeMs: number }>;
   latestMtimeMs: number | null;
 };
+
+function extractFragmentProgressPercent(
+  partialFiles: DownloadActivityProbe['partialFiles'],
+  totalFragments: number | undefined
+): number | null {
+  if (!totalFragments || totalFragments <= 0) {
+    return null;
+  }
+
+  let highestObservedFragment = 0;
+  for (const file of partialFiles) {
+    const match = path.basename(file.path).match(/Frag(\d+)/i);
+    if (!match) continue;
+    const fragmentNumber = Number.parseInt(match[1], 10);
+    if (Number.isFinite(fragmentNumber)) {
+      highestObservedFragment = Math.max(highestObservedFragment, fragmentNumber);
+    }
+  }
+
+  if (highestObservedFragment <= 0) {
+    return null;
+  }
+
+  return Math.min(99, (highestObservedFragment / totalFragments) * 100);
+}
 
 async function probeDownloadActivity(outputFilePath: string): Promise<DownloadActivityProbe> {
   const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
@@ -2616,17 +2699,26 @@ export const processYouTubeUrl = async (
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
 
-  const resolveSelectedFormatId = async (): Promise<{ formatId: string; extractionMode: YouTubeExtractionMode }> =>
+  const resolveSelectedFormatId = async (): Promise<{
+    formatId: string;
+    extractionMode: YouTubeExtractionMode;
+    protocol: string | null;
+    fragmentCount: number;
+  }> =>
     resolvePreferredAudioFormatId(ytdlpPath, url, realtimeDB, isDevelopment, log, ctx, 'streaming', (context) => {
       cookieContext = context;
     });
 
-  const { formatId, extractionMode } = await resolveSelectedFormatId();
+  const { formatId, extractionMode, protocol, fragmentCount } = await resolveSelectedFormatId();
 
   // Pipes output to stdout - downloads FULL stream, seeking handled by our FFmpeg
   const args = ['-f', formatId, '-N', getYtDlpConcurrentFragments(), '--no-playlist', '-o', '-'];
   applyPreferredIpFamilyArgs(args);
-  applyYtDlpRequestPacingArgs(args);
+  maybeApplyYtDlpRequestPacingArgs(args, log, {
+    protocol,
+    fragmentCount,
+    context: 'streaming_download',
+  });
   if (cookieContext?.args.length) {
     args.push(...cookieContext.args);
   }
@@ -2764,7 +2856,12 @@ async function resolvePreferredAudioFormatId(
   ctx: LogContext | undefined,
   purpose: 'streaming' | 'download',
   onCookieContext?: (cookieContext: YouTubeCookieContext | undefined) => void
-): Promise<{ formatId: string; extractionMode: YouTubeExtractionMode }> {
+): Promise<{
+  formatId: string;
+  extractionMode: YouTubeExtractionMode;
+  protocol: string | null;
+  fragmentCount: number;
+}> {
   const baseArgs = [
     '-J',
     '-f',
@@ -2788,23 +2885,29 @@ async function resolvePreferredAudioFormatId(
     return args;
   };
 
-  const parseSelectedFormatId = (stdout: string): string => {
+  const parseSelectedFormat = (stdout: string): { formatId: string; protocol: string | null; fragmentCount: number } => {
     const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
     const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language, parsed);
     if (!selected?.format_id) {
       throw new Error(`yt-dlp did not return a preferred audio format for ${purpose}`);
     }
+    const fragmentCount = Array.isArray(selected.fragments) ? selected.fragments.length : 0;
     log.info(`Selected preferred YouTube audio format for ${purpose}`, {
       formatId: selected.format_id,
       selectedProtocol: selected.protocol || null,
       selectedLanguage: selected.language || null,
       selectedFormatNote: selected.format_note || null,
       selectedHasVideo: selected.vcodec !== 'none',
+      selectedFragmentCount: fragmentCount,
       videoLanguage: parsed.language || null,
       liveStatus: parsed.live_status || null,
       wasLive: parsed.was_live === true,
     });
-    return selected.format_id;
+    return {
+      formatId: selected.format_id,
+      protocol: selected.protocol || null,
+      fragmentCount,
+    };
   };
 
   if (shouldUseCookiesForPublicVideos()) {
@@ -2818,7 +2921,7 @@ async function resolvePreferredAudioFormatId(
       mode,
       ctx
     );
-    return { formatId: parseSelectedFormatId(stdout), extractionMode: mode };
+    return { ...parseSelectedFormat(stdout), extractionMode: mode };
   }
 
   onCookieContext?.(undefined);
@@ -2829,7 +2932,7 @@ async function resolvePreferredAudioFormatId(
     'public_provider',
     ctx
   );
-  return { formatId: parseSelectedFormatId(stdout), extractionMode: 'public_provider' };
+  return { ...parseSelectedFormat(stdout), extractionMode: 'public_provider' };
 }
 
 export const downloadYouTubeAudioToFile = async (
@@ -2854,7 +2957,7 @@ export const downloadYouTubeAudioToFile = async (
   let previousPercent = -1;
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
-  const { formatId, extractionMode } = await resolvePreferredAudioFormatId(
+  const { formatId, extractionMode, protocol, fragmentCount } = await resolvePreferredAudioFormatId(
     ytdlpPath,
     url,
     realtimeDB,
@@ -2870,10 +2973,19 @@ export const downloadYouTubeAudioToFile = async (
   const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
     const args = ['-f', formatId, '-N', getYtDlpConcurrentFragments(), '--no-playlist', '-o', `${outputFilePath}.%(ext)s`];
     applyPreferredIpFamilyArgs(args);
-    applyYtDlpRequestPacingArgs(args);
+    maybeApplyYtDlpRequestPacingArgs(args, log, {
+      protocol,
+      fragmentCount,
+      context: 'file_download',
+    });
     if (extraCookieArgs.length > 0) {
       args.push(...extraCookieArgs);
     }
+    maybeApplyYtDlpExternalDownloaderArgs(args, log, {
+      protocol,
+      fragmentCount,
+      context: 'file_download',
+    });
     args.push('--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());
     applyYouTubeExtractorArgs(args, mode, log);
     args.push(url);
@@ -2922,6 +3034,7 @@ export const downloadYouTubeAudioToFile = async (
       let lastActivityAt = Date.now();
       let lastActivityReason = 'spawned';
       let lastObservedPartialFiles: DownloadActivityProbe['partialFiles'] = [];
+      let lastEstimatedPercent = -1;
       let stallPollTimer: NodeJS.Timeout | undefined;
 
       const rejectWithError = (error: Error): void => {
@@ -3005,6 +3118,31 @@ export const downloadYouTubeAudioToFile = async (
 
         void (async () => {
           const probe = await probeDownloadActivity(outputFilePath);
+          const estimatedPercent = extractFragmentProgressPercent(probe.partialFiles, fragmentCount);
+          if (estimatedPercent !== null) {
+            const percentInt = Math.floor(estimatedPercent);
+            if (percentInt > previousPercent && percentInt > lastEstimatedPercent) {
+              lastEstimatedPercent = percentInt;
+              previousPercent = percentInt;
+              updateProgressCallback(estimatedPercent);
+              log.info('Estimated yt-dlp download progress from fragment files', {
+                extractionMode: mode,
+                protocol,
+                fragmentCount,
+                estimatedPercent,
+              });
+            }
+          } else if (probe.partialFiles.length > 0 && previousPercent < 1) {
+            previousPercent = 1;
+            lastEstimatedPercent = 1;
+            updateProgressCallback(1);
+            log.info('Marked yt-dlp download as active from partial-file growth', {
+              extractionMode: mode,
+              protocol,
+              fragmentCount,
+            });
+          }
+
           const latestObservedMtimeMs = probe.latestMtimeMs;
           if (latestObservedMtimeMs !== null && latestObservedMtimeMs > lastActivityAt) {
             lastObservedPartialFiles = probe.partialFiles;
@@ -3529,7 +3667,11 @@ export const downloadYouTubeSection = async (
     `${outputFilePath}.%(ext)s`, // Let yt-dlp add extension based on format (webm, m4a, etc.)
   ];
   applyPreferredIpFamilyArgs(baseArgs);
-  applyYtDlpRequestPacingArgs(baseArgs);
+  maybeApplyYtDlpRequestPacingArgs(baseArgs, log, {
+    protocol: 'section_download_fragmented',
+    fragmentCount: 1,
+    context: 'section_download',
+  });
 
   // yt-dlp needs ffmpeg for --download-sections and --force-keyframes-at-cuts
   const ffmpegPath = getFFmpegPath();
@@ -3549,7 +3691,11 @@ export const downloadYouTubeSection = async (
     if (extraCookieArgs.length > 0) {
       args.push(...extraCookieArgs);
     }
-    applyYtDlpExternalDownloaderArgs(args);
+    maybeApplyYtDlpExternalDownloaderArgs(args, log, {
+      protocol: 'section_download_fragmented',
+      fragmentCount: 1,
+      context: 'section_download',
+    });
     applyYouTubeExtractorArgs(args, mode, log);
     args.push(url);
     return args;

@@ -98,7 +98,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
 
 RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
       apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
-      && apt-get install -y --no-install-recommends python3 python3-pip unzip \
+      && apt-get install -y --no-install-recommends python3 python3-pip unzip aria2 \
       && rm -rf /var/lib/apt/lists/* \
       && export DENO_INSTALL=/usr/local \
       && curl -fsSL https://deno.land/install.sh | sh -s -- v${DENO_VERSION} \
@@ -107,6 +107,7 @@ RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
           "yt-dlp[default]==${YT_DLP_VERSION}" \
           "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
       && echo "yt-dlp version: $(yt-dlp --version)" \
+      && echo "aria2 version: $(aria2c --version | head -n 1)" \
       && python3 -m pip show bgutil-ytdlp-pot-provider; \
     else \
       echo "Skipping yt-dlp/browser runtime dependencies for ${PROCESS_AUDIO_RUNTIME_PROFILE} profile"; \
