@@ -47,6 +47,7 @@ import useAuth from '../context/user/UserContext';
 import LinearProgress from '@mui/material/LinearProgress';
 import { sermonConverter } from '../types/Sermon';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
+import { parseProcessingProgress } from '../utils/processAudioProgress';
 
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
@@ -414,7 +415,9 @@ const SermonListCard: FunctionComponent<Props> = ({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
   };
 
-  const processingProgress = snapshot?.val() ? Number(snapshot.val()) : 0;
+  const processingProgressState = parseProcessingProgress(snapshot?.val());
+  const processingProgress = processingProgressState?.percent ?? 0;
+  const processingStageLabel = processingProgressState?.stageLabel ?? 'Processing';
   const imageSize = isDesktop ? 150 : isTablet ? 90 : 70;
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
   const seriesImage = series?.images?.find((img) => img.type === 'wide')
@@ -597,7 +600,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const renderProcessingChip = () => (
     isProcessing ? (
       <Chip
-        label={`Processing...${processingProgress > 0 ? `${processingProgress}%` : ''}`}
+        label={`${processingStageLabel}${processingProgress > 0 ? ` ${processingProgress}%` : ''}`}
         size="small"
         color="warning"
         variant="outlined"
@@ -902,7 +905,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                 </Stack>
               </Box>
 
-              {isProcessing && processingProgress > 0 && (
+              {isProcessing && processingProgressState && (
                 <LinearProgress
                   variant="determinate"
                   value={processingProgress}

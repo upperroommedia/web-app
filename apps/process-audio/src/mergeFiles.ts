@@ -8,6 +8,7 @@ import { spawn } from 'child_process';
 import { finished } from 'stream';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
+import { setProcessAudioProgress } from './processAudioProgress';
 
 // Parse ffmpeg stderr for progress
 function parseFFmpegProgress(stderrLine: string): { time?: string } {
@@ -92,7 +93,7 @@ const mergeFiles = async (
 
   return new Promise((resolve, reject) => {
     // Set initial merge progress to 98% (transcode phase complete)
-    realtimeDBref.set(98).catch((err) => {
+    setProcessAudioProgress(realtimeDBref, 98, 'finalizing', 'Finalizing audio').catch((err) => {
       log.error('Failed to set initial merge progress', {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -123,7 +124,7 @@ const mergeFiles = async (
         await writeStreamDone;
         log.info('Merge completed successfully', { outputPath: outputFilePath });
         // Set to 100% when merge completes
-        realtimeDBref.set(100).catch((err) => {
+        setProcessAudioProgress(realtimeDBref, 100, 'completed', 'Completed').catch((err) => {
           log.error('Failed to set final merge progress', {
             error: err instanceof Error ? err.message : String(err),
           });
@@ -158,7 +159,7 @@ const mergeFiles = async (
         // Only update DB when percent actually changes (less frequent than logs)
         if (scaledPercent > previousScaledPercent) {
           previousScaledPercent = scaledPercent;
-          realtimeDBref.set(scaledPercent).catch((err) => {
+          setProcessAudioProgress(realtimeDBref, scaledPercent, 'finalizing', 'Finalizing audio').catch((err) => {
             log.error('Failed to update progress in realtimeDB', {
               error: err instanceof Error ? err.message : String(err),
               percent: scaledPercent,

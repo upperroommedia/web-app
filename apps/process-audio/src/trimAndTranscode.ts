@@ -17,6 +17,7 @@ import { sermonStatus, sermonStatusType } from './types';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
 import { ffmpegSemaphore, ytDlpDownloadSemaphore } from './concurrency';
+import { setProcessAudioProgress } from './processAudioProgress';
 
 // Parse ffmpeg stderr for progress and duration
 function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string; speed?: string; bitrate?: string } {
@@ -168,7 +169,7 @@ const trimAndTranscode = async (
       // Only update database if progress has increased (prevent backwards jumps)
       if (scaledProgress > maxDownloadProgress) {
         maxDownloadProgress = scaledProgress;
-        realtimeDBRef.set(scaledProgress).catch((err) => {
+        setProcessAudioProgress(realtimeDBRef, scaledProgress, 'downloading', 'Downloading audio').catch((err) => {
           log.error('Failed to update download progress', {
             error: err instanceof Error ? err.message : String(err),
             scaledProgress,
@@ -224,6 +225,11 @@ const trimAndTranscode = async (
         duration,
         outputBase: youtubeSourceFileBase,
       });
+      await setProcessAudioProgress(realtimeDBRef, 0, 'downloading', 'Downloading audio').catch((err) => {
+        log.error('Failed to initialize download progress', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       const releaseYtDlpSlot = await acquireSemaphoreSlot('youtube_download', ytDlpDownloadSemaphore);
       let downloadedFile: string;
       try {
@@ -247,6 +253,11 @@ const trimAndTranscode = async (
     } else {
       // Process the audio source from storage
       const rawSourceFile = createTempFile(`raw-${audioSource.id}`, tempFiles);
+      await setProcessAudioProgress(realtimeDBRef, 0, 'trimming', 'Preparing audio').catch((err) => {
+        log.error('Failed to initialize trimming progress', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       log.debug('Downloading raw audio source', { source: audioSource.source, destination: rawSourceFile });
       await bucket.file(audioSource.source).download({ destination: rawSourceFile });
       inputSource = rawSourceFile;
@@ -481,7 +492,12 @@ const trimAndTranscode = async (
               currentDownloadProgress: maxDownloadProgress,
               initialTranscodePercent,
             });
-            realtimeDBRef.set(initialTranscodePercent).catch((err) => {
+            setProcessAudioProgress(
+              realtimeDBRef,
+              initialTranscodePercent,
+              audioSource.type === 'YouTubeUrl' ? 'transcoding' : 'trimming',
+              audioSource.type === 'YouTubeUrl' ? 'Trimming and transcoding' : 'Trimming audio'
+            ).catch((err) => {
               log.error('Failed to set initial transcode progress', { error: err });
             });
             previousPercent = initialTranscodePercent; // Start transcode progress tracking at current progress
@@ -544,7 +560,12 @@ const trimAndTranscode = async (
                 ffmpegSpeed: progress.speed ?? null,
                 ffmpegBitrate: progress.bitrate ?? null,
               });
-              realtimeDBRef.set(percent).catch((err) => {
+              setProcessAudioProgress(
+                realtimeDBRef,
+                percent,
+                audioSource.type === 'YouTubeUrl' ? 'transcoding' : 'trimming',
+                audioSource.type === 'YouTubeUrl' ? 'Trimming and transcoding' : 'Trimming audio'
+              ).catch((err) => {
                 log.error('Failed to update progress in realtimeDB', {
                   error: err instanceof Error ? err.message : String(err),
                   percent,

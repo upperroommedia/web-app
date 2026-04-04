@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { finished } from 'stream';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
+import { setProcessAudioProgress } from './processAudioProgress';
 
 // Parse ffmpeg stderr for progress and duration
 function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string } {
@@ -181,7 +182,7 @@ const trim = async (
             // Only update DB when percent actually changes (less frequent than logs)
             if (percent > previousPercent) {
               previousPercent = percent;
-              realtimeDBRef.set(percent).catch((err) => {
+              setProcessAudioProgress(realtimeDBRef, percent, 'trimming', 'Trimming audio').catch((err) => {
                 log.error('Failed to update progress in realtimeDB', {
                   error: err instanceof Error ? err.message : String(err),
                   percent,

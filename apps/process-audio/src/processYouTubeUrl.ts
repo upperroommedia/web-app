@@ -977,6 +977,8 @@ function cleanupCookiesFile(cookiesFilePath: string | undefined, cleaned: { done
 const COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,-web_creator';
 const POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,mweb,-web_creator';
 const DEFAULT_YOUTUBE_COOKIE_VALIDATION_URL = 'https://www.youtube.com/watch?v=BaW_jenozKc';
+const DEFAULT_YTDLP_DOWNLOAD_STALL_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_YTDLP_DOWNLOAD_STALL_POLL_INTERVAL_MS = 15 * 1000;
 
 function getPoTokenProviderBaseUrl(): string | undefined {
   const value = process.env.YTDLP_POT_PROVIDER_BASE_URL?.trim();
@@ -986,6 +988,23 @@ function getPoTokenProviderBaseUrl(): string | undefined {
 function getYouTubeCookieValidationUrl(): YouTubeUrl {
   const value = process.env.YTDLP_COOKIE_VALIDATION_URL?.trim();
   return (value || DEFAULT_YOUTUBE_COOKIE_VALIDATION_URL) as YouTubeUrl;
+}
+
+function parsePositiveIntegerEnv(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getYtdlpDownloadStallTimeoutMs(): number {
+  return parsePositiveIntegerEnv(process.env.YTDLP_DOWNLOAD_STALL_TIMEOUT_MS, DEFAULT_YTDLP_DOWNLOAD_STALL_TIMEOUT_MS);
+}
+
+function getYtdlpDownloadStallPollIntervalMs(): number {
+  return parsePositiveIntegerEnv(
+    process.env.YTDLP_DOWNLOAD_STALL_POLL_INTERVAL_MS,
+    DEFAULT_YTDLP_DOWNLOAD_STALL_POLL_INTERVAL_MS
+  );
 }
 
 function shouldDisableInnertubeForPoTokenProvider(): boolean {
@@ -1102,18 +1121,37 @@ function applyYouTubeExtractorArgs(
   mode: YouTubeExtractionMode,
   log: ReturnType<typeof createLoggerWithContext>
 ): void {
-  if (mode === 'cookie_provider') {
-    args.push('--extractor-args', COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS);
+  const providerBaseUrl = getPoTokenProviderBaseUrl();
 
-    log.info('Applying yt-dlp extractor args for cookie-backed extraction', {
+  if (mode === 'cookie_provider') {
+    if (!providerBaseUrl) {
+      args.push('--extractor-args', COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS);
+
+      log.info('Applying yt-dlp extractor args for cookie-backed extraction', {
+        mode,
+        youtubeExtractorArgs: COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS,
+        poTokenProviderConfigured: false,
+      });
+      return;
+    }
+
+    args.push('--extractor-args', POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS);
+
+    const providerArgs = [`base_url=${providerBaseUrl}`];
+    if (shouldDisableInnertubeForPoTokenProvider()) {
+      providerArgs.push('disable_innertube=1');
+    }
+    args.push('--extractor-args', `youtubepot-bgutilhttp:${providerArgs.join(';')}`);
+
+    log.info('Applying yt-dlp extractor args for cookie-backed extraction with PO token provider', {
       mode,
-      youtubeExtractorArgs: COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS,
-      poTokenProviderConfigured: !!getPoTokenProviderBaseUrl(),
+      youtubeExtractorArgs: POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS,
+      poTokenProviderBaseUrl: providerBaseUrl,
+      poTokenProviderDisableInnertube: shouldDisableInnertubeForPoTokenProvider(),
     });
     return;
   }
 
-  const providerBaseUrl = getPoTokenProviderBaseUrl();
   if (!providerBaseUrl) {
     log.debug('Applying yt-dlp extractor args without PO token provider', {
       mode,
@@ -1136,6 +1174,41 @@ function applyYouTubeExtractorArgs(
     poTokenProviderBaseUrl: providerBaseUrl,
     poTokenProviderDisableInnertube: shouldDisableInnertubeForPoTokenProvider(),
   });
+}
+
+type DownloadActivityProbe = {
+  partialFiles: Array<{ path: string; size: number; mtimeMs: number }>;
+  latestMtimeMs: number | null;
+};
+
+async function probeDownloadActivity(outputFilePath: string): Promise<DownloadActivityProbe> {
+  const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
+  const dir = path.dirname(safeOutputFilePath);
+  const baseName = path.basename(safeOutputFilePath);
+
+  if (!fs.existsSync(dir)) {
+    return { partialFiles: [], latestMtimeMs: null };
+  }
+
+  const candidates = fs
+    .readdirSync(dir)
+    .filter((fileName) => fileName.startsWith(baseName) && fileName.includes('.part'))
+    .map((fileName) => ensureSafeTempPath(path.join(dir, fileName)));
+
+  const partialFiles: Array<{ path: string; size: number; mtimeMs: number }> = [];
+  let latestMtimeMs: number | null = null;
+
+  for (const candidate of candidates) {
+    try {
+      const stats = await stat(candidate);
+      partialFiles.push({ path: candidate, size: stats.size, mtimeMs: stats.mtimeMs });
+      latestMtimeMs = latestMtimeMs === null ? stats.mtimeMs : Math.max(latestMtimeMs, stats.mtimeMs);
+    } catch {
+      // Ignore files that disappear during inspection.
+    }
+  }
+
+  return { partialFiles, latestMtimeMs };
 }
 
 async function runCookieHealthcheck(
@@ -1662,25 +1735,23 @@ async function downloadSectionWithInProcessBrowserFallback(
   }
 
   const finalPath = ensureSafeTempPath(`${outputFilePath}.m4a`);
-  await runSystemCommand(
-    getFFmpegPath(),
-    [
-      '-y',
-      '-user_agent',
-      YTDLP_HTTP_USER_AGENT,
-      '-ss',
-      `${startTime}`,
-      '-i',
-      resolved.url,
-      '-t',
-      `${effectiveDuration}`,
-      '-vn',
-      '-acodec',
-      'copy',
-      finalPath,
-    ],
-    'In-process browser fallback ffmpeg trim'
+  const ffmpegArgs = ['-y'];
+  if (/^https?:\/\//i.test(resolved.url)) {
+    ffmpegArgs.push('-user_agent', YTDLP_HTTP_USER_AGENT);
+  }
+  ffmpegArgs.push(
+    '-ss',
+    `${startTime}`,
+    '-i',
+    resolved.url,
+    '-t',
+    `${effectiveDuration}`,
+    '-vn',
+    '-acodec',
+    'copy',
+    finalPath
   );
+  await runSystemCommand(getFFmpegPath(), ffmpegArgs, 'In-process browser fallback ffmpeg trim');
 
   return {
     localFilePath: finalPath,
@@ -1859,6 +1930,26 @@ export const getYouTubeTrimRoutingDecision = async (
             getYouTubeVideoId(url),
             log
           );
+
+          if (isBrowserFallbackEnabled()) {
+            setCachedAccessDecision(ctx, url, {
+              state: 'browser_required',
+              mode: 'browser_fallback',
+              reason: 'routing_preflight_browser_fallback_after_cookie_preferred_failure',
+              cookieFailureClass,
+              cookieFailureMessage: cookieMessage,
+              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
+              disabledUntil: activeCookieContext.disabledUntil,
+              cookieMetadata: activeCookieContext.metadata,
+              decidedAt: getNowIsoString(),
+            });
+            return {
+              strategy: 'direct_url',
+              reason: 'browser_fallback_required_after_cookie_preferred_failure',
+              hasFragments: false,
+              likelyDvr: false,
+            };
+          }
 
           throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
         }
@@ -2231,6 +2322,50 @@ export const getYouTubeAudioUrl = async (
             getYouTubeVideoId(url),
             log
           );
+
+          if (isBrowserFallbackEnabled()) {
+            setCachedAccessDecision(ctx, url, {
+              state: 'browser_required',
+              mode: 'browser_fallback',
+              reason: 'direct_url_browser_fallback_after_cookie_preferred_failure',
+              cookieFailureClass,
+              cookieFailureMessage: cookieMessage,
+              cookieMetadata: activeCookieContext.metadata,
+              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
+              disabledUntil: activeCookieContext.disabledUntil,
+              decidedAt: getNowIsoString(),
+            });
+            const fallback = await invokeBrowserFallbackResolveAudioUrl(
+              ytdlpPath,
+              url,
+              realtimeDB,
+              {
+                action: 'resolve_audio_url',
+                youtubeUrl: url,
+                requestContext: ctx,
+              },
+              log
+            );
+
+            return logAndReturnResolvedAudio(
+              {
+                url: fallback.response.url,
+                format: fallback.response.format || 'unknown',
+                duration: fallback.response.duration,
+              },
+              {
+                selectedMode: 'browser_fallback',
+                endpointKind: fallback.endpointKind,
+                fallbackUrl: fallback.fallbackUrl,
+                browserFallbackInvocationKind: fallback.invocationKind,
+                credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+                browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+                browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+                decisionReason: 'direct_url_browser_fallback_after_cookie_preferred_failure',
+                cookieFailureClass,
+              }
+            );
+          }
 
           throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
         }
@@ -2729,18 +2864,46 @@ export const downloadYouTubeAudioToFile = async (
     new Promise<string>((resolve, reject) => {
       const args = buildArgs(mode, extraCookieArgs);
       const command = `${ytdlpPath} ${args.join(' ')}`;
+      const stallTimeoutMs = getYtdlpDownloadStallTimeoutMs();
+      const stallPollIntervalMs = Math.min(getYtdlpDownloadStallPollIntervalMs(), stallTimeoutMs);
       log.info('Executing yt-dlp file download command', {
         command,
         formatId,
         extractionMode: mode,
         outputTemplate: `${outputFilePath}.%(ext)s`,
+        stallTimeoutMs,
+        stallPollIntervalMs,
       });
 
       const ytdlp = spawn(ytdlpPath, args);
       let stderrBuffer = '';
+      let settled = false;
+      let lastActivityAt = Date.now();
+      let lastActivityReason = 'spawned';
+      let lastObservedPartialFiles: DownloadActivityProbe['partialFiles'] = [];
+      let stallPollTimer: NodeJS.Timeout | undefined;
 
       const rejectWithError = (error: Error): void => {
+        if (settled) return;
+        settled = true;
+        if (stallPollTimer) {
+          clearInterval(stallPollTimer);
+        }
         reject(error);
+      };
+
+      const resolveWithValue = (value: string): void => {
+        if (settled) return;
+        settled = true;
+        if (stallPollTimer) {
+          clearInterval(stallPollTimer);
+        }
+        resolve(value);
+      };
+
+      const markActivity = (reason: string): void => {
+        lastActivityAt = Date.now();
+        lastActivityReason = reason;
       };
 
       ytdlp.on('error', (err) => {
@@ -2748,9 +2911,15 @@ export const downloadYouTubeAudioToFile = async (
       });
 
       ytdlp.on('close', (code, signal) => {
+        if (stallPollTimer) {
+          clearInterval(stallPollTimer);
+        }
+        if (settled) {
+          return;
+        }
         if (code === 0) {
           try {
-            resolve(resolveDownloadedFilePath());
+            resolveWithValue(resolveDownloadedFilePath());
           } catch (error) {
             rejectWithError(error instanceof Error ? error : new Error(String(error)));
           }
@@ -2773,6 +2942,7 @@ export const downloadYouTubeAudioToFile = async (
         }
 
         const stderrStr = data.toString();
+        markActivity('stderr');
         if (stderrBuffer.length < 50_000) {
           stderrBuffer += stderrStr;
         }
@@ -2786,6 +2956,60 @@ export const downloadYouTubeAudioToFile = async (
           }
         }
       });
+
+      stallPollTimer = setInterval(() => {
+        if (settled || cancelToken.isCancellationRequested) {
+          return;
+        }
+
+        void (async () => {
+          const probe = await probeDownloadActivity(outputFilePath);
+          const latestObservedMtimeMs = probe.latestMtimeMs;
+          if (latestObservedMtimeMs !== null && latestObservedMtimeMs > lastActivityAt) {
+            lastObservedPartialFiles = probe.partialFiles;
+            markActivity('partial_file_growth');
+            return;
+          }
+
+          if (probe.partialFiles.length > 0) {
+            lastObservedPartialFiles = probe.partialFiles;
+          }
+
+          const stallDurationMs = Date.now() - lastActivityAt;
+          if (stallDurationMs < stallTimeoutMs) {
+            return;
+          }
+
+          const summarizedFiles = lastObservedPartialFiles.map((file) => ({
+            path: file.path,
+            size: file.size,
+            mtimeMs: file.mtimeMs,
+          }));
+
+          log.error('yt-dlp download stalled; terminating process', {
+            extractionMode: mode,
+            outputTemplate: `${outputFilePath}.%(ext)s`,
+            stallTimeoutMs,
+            stallDurationMs,
+            lastActivityReason,
+            lastObservedPartialFiles: summarizedFiles,
+          });
+          ytdlp.kill('SIGTERM');
+          rejectWithError(
+            buildAnnotatedYouTubeError(
+              `yt-dlp download stalled after ${Math.round(stallDurationMs / 1000)}s without progress. Last activity=${lastActivityReason}. Partial files=${JSON.stringify(
+                summarizedFiles
+              )}. stderr: ${stderrBuffer.trim()}`,
+              mode
+            )
+          );
+        })().catch((pollError) => {
+          log.warn('Failed to inspect yt-dlp partial-file progress during stall detection', {
+            extractionMode: mode,
+            error: pollError instanceof Error ? pollError.message : String(pollError),
+          });
+        });
+      }, stallPollIntervalMs);
     });
 
   try {
@@ -3298,17 +3522,34 @@ export const downloadYouTubeSection = async (
       let previousPercent = -1;
       let stderrBuffer = '';
       let settled = false;
+      let lastActivityAt = Date.now();
+      let lastActivityReason = 'spawned';
+      let lastObservedPartialFiles: DownloadActivityProbe['partialFiles'] = [];
+      let stallPollTimer: NodeJS.Timeout | undefined;
+      const stallTimeoutMs = getYtdlpDownloadStallTimeoutMs();
+      const stallPollIntervalMs = Math.min(getYtdlpDownloadStallPollIntervalMs(), stallTimeoutMs);
 
       const rejectOnce = (error: Error): void => {
         if (settled) return;
         settled = true;
+        if (stallPollTimer) {
+          clearInterval(stallPollTimer);
+        }
         reject(error);
       };
 
       const resolveOnce = (filePath: string): void => {
         if (settled) return;
         settled = true;
+        if (stallPollTimer) {
+          clearInterval(stallPollTimer);
+        }
         resolve(filePath);
+      };
+
+      const markActivity = (reason: string): void => {
+        lastActivityAt = Date.now();
+        lastActivityReason = reason;
       };
 
       const command = `${ytdlpPath} ${attemptArgs.join(' ')}`;
@@ -3318,6 +3559,8 @@ export const downloadYouTubeSection = async (
         outputFilePath,
         attempt: mode,
         usedCookies: mode === 'cookie_provider',
+        stallTimeoutMs,
+        stallPollIntervalMs,
         note: 'Using --force-keyframes-at-cuts for frame-accurate cuts at exact start/end times',
       });
 
@@ -3402,6 +3645,7 @@ export const downloadYouTubeSection = async (
         }
 
         const stderrStr = data.toString();
+        markActivity('stderr');
         if (stderrBuffer.length < 50_000) {
           stderrBuffer += stderrStr;
         }
@@ -3487,6 +3731,61 @@ export const downloadYouTubeSection = async (
           }
         }
       });
+
+      stallPollTimer = setInterval(() => {
+        if (settled || cancelToken.isCancellationRequested) {
+          return;
+        }
+
+        void (async () => {
+          const probe = await probeDownloadActivity(outputFilePath);
+          const latestObservedMtimeMs = probe.latestMtimeMs;
+          if (latestObservedMtimeMs !== null && latestObservedMtimeMs > lastActivityAt) {
+            lastObservedPartialFiles = probe.partialFiles;
+            markActivity('partial_file_growth');
+            return;
+          }
+
+          if (probe.partialFiles.length > 0) {
+            lastObservedPartialFiles = probe.partialFiles;
+          }
+
+          const stallDurationMs = Date.now() - lastActivityAt;
+          if (stallDurationMs < stallTimeoutMs) {
+            return;
+          }
+
+          const summarizedFiles = lastObservedPartialFiles.map((file) => ({
+            path: file.path,
+            size: file.size,
+            mtimeMs: file.mtimeMs,
+          }));
+
+          log.error('yt-dlp section download stalled; terminating process', {
+            attempt: mode,
+            outputTemplate: `${outputFilePath}.%(ext)s`,
+            stallTimeoutMs,
+            stallDurationMs,
+            lastActivityReason,
+            lastObservedPartialFiles: summarizedFiles,
+          });
+
+          ytdlp.kill('SIGTERM');
+          rejectOnce(
+            buildAnnotatedYouTubeError(
+              `yt-dlp section download stalled after ${Math.round(stallDurationMs / 1000)}s without progress. Last activity=${lastActivityReason}. Partial files=${JSON.stringify(
+                summarizedFiles
+              )}. stderr: ${stderrBuffer.trim()}`,
+              mode
+            )
+          );
+        })().catch((pollError) => {
+          log.warn('Failed to inspect yt-dlp section partial-file progress during stall detection', {
+            attempt: mode,
+            error: pollError instanceof Error ? pollError.message : String(pollError),
+          });
+        });
+      }, stallPollIntervalMs);
     });
 
   const cleaned = { done: false };
@@ -3546,6 +3845,50 @@ export const downloadYouTubeSection = async (
             getYouTubeVideoId(url),
             log
           );
+
+          if (isBrowserFallbackEnabled()) {
+            setCachedAccessDecision(ctx, url, {
+              state: 'browser_required',
+              mode: 'browser_fallback',
+              reason: 'section_download_browser_fallback_after_cookie_preferred_failure',
+              cookieFailureClass,
+              cookieFailureMessage: cookieMessage,
+              cookieMetadata: activeCookieContext.metadata,
+              cookieBreakerOpen: activeCookieContext.cookieBreakerOpen,
+              disabledUntil: activeCookieContext.disabledUntil,
+              decidedAt: getNowIsoString(),
+            });
+            const fallback = await invokeBrowserFallbackDownloadSection(
+              ytdlpPath,
+              url,
+              outputFilePath,
+              realtimeDB,
+              startTime,
+              duration,
+              {
+                action: 'download_section',
+                youtubeUrl: url,
+                startTime,
+                duration,
+                requestContext: ctx,
+              },
+              log
+            );
+            logSelectedYouTubeServingPath(log, {
+              youtubeUrl: url,
+              outputType: 'download_section',
+              selectedMode: 'browser_fallback',
+              endpointKind: fallback.endpointKind,
+              fallbackUrl: fallback.fallbackUrl,
+              browserFallbackInvocationKind: fallback.invocationKind,
+              credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+              browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+              browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+              decisionReason: 'section_download_browser_fallback_after_cookie_preferred_failure',
+              cookieFailureClass,
+            });
+            return fallback.localFilePath || (await downloadBrowserFallbackSection(outputFilePath, fallback.response));
+          }
 
           throw buildAnnotatedYouTubeError(cookieMessage, 'cookie_provider');
         }

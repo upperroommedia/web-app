@@ -20,8 +20,38 @@ import trim from './trim';
 import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext, createChildContext, createContext } from './context';
 import { markProcessAudioRequestRunning } from './processAudioQueueStore';
+import { setProcessAudioProgress } from './processAudioProgress';
 
-const PROCESS_AUDIO_LOCK_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_PROCESS_AUDIO_LOCK_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_PROCESS_AUDIO_LOCK_HEARTBEAT_INTERVAL_MS = 30 * 1000;
+
+type ProcessAudioLockState = {
+  requestId?: string;
+  acquiredAt?: number;
+  acquiredAtIso?: string;
+  lastHeartbeatAt?: number;
+  lastHeartbeatAtIso?: string;
+};
+
+function parsePositiveIntegerEnv(name: string): number | null {
+  const raw = process.env[name]?.trim();
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getProcessAudioLockTtlMs(): number {
+  return parsePositiveIntegerEnv('PROCESS_AUDIO_LOCK_TTL_MS') ?? DEFAULT_PROCESS_AUDIO_LOCK_TTL_MS;
+}
+
+function getProcessAudioLockHeartbeatIntervalMs(): number {
+  const configured = parsePositiveIntegerEnv('PROCESS_AUDIO_LOCK_HEARTBEAT_INTERVAL_MS');
+  if (configured) {
+    return configured;
+  }
+
+  return Math.min(DEFAULT_PROCESS_AUDIO_LOCK_HEARTBEAT_INTERVAL_MS, Math.max(1000, getProcessAudioLockTtlMs() / 3));
+}
 
 export class MissingSermonDocumentError extends Error {
   readonly sermonId: string;
@@ -39,20 +69,45 @@ export const isMissingSermonDocumentError = (error: unknown): error is MissingSe
   return error instanceof MissingSermonDocumentError;
 };
 
+export class ProcessAudioAlreadyRunningError extends Error {
+  readonly sermonId: string;
+  readonly activeRequestId: string | null;
+  readonly lockAgeMs: number | null;
+
+  constructor(args: { sermonId: string; activeRequestId: string | null; lockAgeMs: number | null }) {
+    super(`A process-audio request is already running for sermon ${args.sermonId}`);
+    this.name = 'ProcessAudioAlreadyRunningError';
+    this.sermonId = args.sermonId;
+    this.activeRequestId = args.activeRequestId;
+    this.lockAgeMs = args.lockAgeMs;
+  }
+}
+
+export const isProcessAudioAlreadyRunningError = (error: unknown): error is ProcessAudioAlreadyRunningError => {
+  return error instanceof ProcessAudioAlreadyRunningError;
+};
+
 async function acquireProcessAudioLock(
   realtimeDB: Database,
   sermonId: string,
   requestId: string,
   log: ReturnType<typeof createLoggerWithContext>
-): Promise<boolean> {
+): Promise<{ acquired: boolean; currentLock: ProcessAudioLockState | null }> {
   const lockRef = realtimeDB.ref(`processAudioLocks/${sermonId}`);
   const now = Date.now();
+  const lockTtlMs = getProcessAudioLockTtlMs();
 
   const result = await lockRef.transaction((current) => {
     if (current && typeof current === 'object') {
-      const existingRequestId = typeof current.requestId === 'string' ? current.requestId : undefined;
-      const acquiredAt = typeof current.acquiredAt === 'number' ? current.acquiredAt : 0;
-      const expired = !acquiredAt || now - acquiredAt > PROCESS_AUDIO_LOCK_TTL_MS;
+      const lockState = current as ProcessAudioLockState;
+      const existingRequestId = typeof lockState.requestId === 'string' ? lockState.requestId : undefined;
+      const lastHeartbeatAt =
+        typeof lockState.lastHeartbeatAt === 'number'
+          ? lockState.lastHeartbeatAt
+          : typeof lockState.acquiredAt === 'number'
+          ? lockState.acquiredAt
+          : 0;
+      const expired = !lastHeartbeatAt || now - lastHeartbeatAt > lockTtlMs;
       if (existingRequestId && !expired && existingRequestId !== requestId) {
         return;
       }
@@ -62,17 +117,100 @@ async function acquireProcessAudioLock(
       requestId,
       acquiredAt: now,
       acquiredAtIso: new Date(now).toISOString(),
+      lastHeartbeatAt: now,
+      lastHeartbeatAtIso: new Date(now).toISOString(),
     };
   });
 
-  const acquired = !!result.committed && result.snapshot?.val()?.requestId === requestId;
+  const currentLock = (result.snapshot?.val() as ProcessAudioLockState | null) ?? null;
+  const acquired = !!result.committed && currentLock?.requestId === requestId;
   if (!acquired) {
+    const lastHeartbeatAt =
+      typeof currentLock?.lastHeartbeatAt === 'number'
+        ? currentLock.lastHeartbeatAt
+        : typeof currentLock?.acquiredAt === 'number'
+        ? currentLock.acquiredAt
+        : null;
     log.warn('Another process-audio request already holds the sermon lock', {
       sermonId,
       requestId,
+      activeRequestId: currentLock?.requestId ?? null,
+      lockAgeMs: lastHeartbeatAt ? now - lastHeartbeatAt : null,
     });
   }
-  return acquired;
+  return {
+    acquired,
+    currentLock,
+  };
+}
+
+function startProcessAudioLockHeartbeat(
+  realtimeDB: Database,
+  sermonId: string,
+  requestId: string,
+  log: ReturnType<typeof createLoggerWithContext>
+): () => void {
+  const lockRef = realtimeDB.ref(`processAudioLocks/${sermonId}`);
+  const intervalMs = getProcessAudioLockHeartbeatIntervalMs();
+  let stopped = false;
+  let heartbeatInFlight = false;
+
+  const interval = setInterval(() => {
+    if (stopped || heartbeatInFlight) {
+      return;
+    }
+
+    heartbeatInFlight = true;
+    const heartbeatAt = Date.now();
+    lockRef.transaction((current) => {
+      if (!current || typeof current !== 'object') {
+        return current;
+      }
+
+      const lockState = current as ProcessAudioLockState;
+      if (lockState.requestId !== requestId) {
+        return current;
+      }
+
+      return {
+        ...lockState,
+        acquiredAt: typeof lockState.acquiredAt === 'number' ? lockState.acquiredAt : heartbeatAt,
+        acquiredAtIso:
+          typeof lockState.acquiredAtIso === 'string' && lockState.acquiredAtIso
+            ? lockState.acquiredAtIso
+            : new Date(heartbeatAt).toISOString(),
+        lastHeartbeatAt: heartbeatAt,
+        lastHeartbeatAtIso: new Date(heartbeatAt).toISOString(),
+      } satisfies ProcessAudioLockState;
+    })
+      .then((result) => {
+        const currentLock = (result.snapshot?.val() as ProcessAudioLockState | null) ?? null;
+        if (!result.committed || currentLock?.requestId !== requestId) {
+          log.warn('Lost ownership of process-audio sermon lock heartbeat', {
+            sermonId,
+            requestId,
+            activeRequestId: currentLock?.requestId ?? null,
+          });
+        }
+      })
+      .catch((error) => {
+        log.warn('Failed to renew process-audio sermon lock heartbeat', {
+          sermonId,
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        heartbeatInFlight = false;
+      });
+  }, intervalMs);
+
+  interval.unref?.();
+
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+  };
 }
 
 async function releaseProcessAudioLock(
@@ -123,6 +261,7 @@ export const processAudio = async (
   const tempFiles = new Set<string>();
   const lockRequestId = contextWithSermonId.requestId;
   let lockAcquired = false;
+  let stopLockHeartbeat: (() => void) | null = null;
 
   log.info('Starting audio processing', {
     fileName,
@@ -202,10 +341,23 @@ export const processAudio = async (
   }
 
   try {
-    lockAcquired = await acquireProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
+    const lockResult = await acquireProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
+    lockAcquired = lockResult.acquired;
     if (!lockAcquired) {
-      throw new Error(`A process-audio request is already running for sermon ${fileName}`);
+      const currentLock = lockResult.currentLock;
+      const lastHeartbeatAt =
+        typeof currentLock?.lastHeartbeatAt === 'number'
+          ? currentLock.lastHeartbeatAt
+          : typeof currentLock?.acquiredAt === 'number'
+          ? currentLock.acquiredAt
+          : null;
+      throw new ProcessAudioAlreadyRunningError({
+        sermonId: fileName,
+        activeRequestId: currentLock?.requestId ?? null,
+        lockAgeMs: lastHeartbeatAt ? Date.now() - lastHeartbeatAt : null,
+      });
     }
+    stopLockHeartbeat = startProcessAudioLockHeartbeat(realtimeDB, fileName, lockRequestId, log);
 
     await markProcessAudioRequestRunning({
       database: realtimeDB,
@@ -381,7 +533,7 @@ export const processAudio = async (
     });
 
     if (cancelToken.isCancellationRequested) return;
-    await realtimeDB.ref(`addIntroOutro/${fileName}`).set(100).catch((err) => {
+    await setProcessAudioProgress(realtimeDB.ref(`addIntroOutro/${fileName}`), 100, 'completed', 'Completed').catch((err) => {
       log.error('Failed to set final progress to 100%', {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -397,6 +549,7 @@ export const processAudio = async (
     });
     throw error;
   } finally {
+    stopLockHeartbeat?.();
     if (lockAcquired) {
       await releaseProcessAudioLock(realtimeDB, fileName, lockRequestId, log);
     }

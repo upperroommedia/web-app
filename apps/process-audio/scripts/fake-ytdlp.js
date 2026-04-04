@@ -2,10 +2,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const args = process.argv.slice(2);
 const scenario = process.env.FAKE_YTDLP_SCENARIO || 'public_success';
 const hasCookies = args.includes('--cookies') || args.includes('--cookies-from-browser');
+const hasExtractorArgs = args.includes('--extractor-args');
 const isJson = args.includes('-J');
 const isHealthcheck = args.includes('--skip-download');
 const isDirectUrl = args.includes('-g');
@@ -55,7 +57,25 @@ function succeedSectionDownload() {
   process.exit(0);
 }
 
+function stallAfterPartialDownload() {
+  const target = (outputTemplate || '/tmp/fake-output.%(ext)s').replace(/%\((?:ext)\)s/g, 'm4a');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(`${target}.part`, Buffer.alloc(1024 * 1024, 1));
+  fs.writeFileSync(`${target}.part-Frag131.part`, Buffer.alloc(32 * 1024, 2));
+  writeStderr('\r[download]  12.5% of ~  81.35MiB at  822.13KiB/s ETA 01:28 (frag 130/1040)');
+
+  const keepAlive = setInterval(() => {}, 1000);
+  process.on('SIGTERM', () => {
+    clearInterval(keepAlive);
+    process.exit(143);
+  });
+}
+
 function buildAudioJson() {
+  return buildAudioJsonWithUrl('https://example.com/fake-audio.m4a');
+}
+
+function buildAudioJsonWithUrl(url) {
   return {
     duration: 20,
     formats: [
@@ -65,9 +85,45 @@ function buildAudioJson() {
         vcodec: 'none',
         abr: 128,
         protocol: 'https',
+        url,
+        http_headers: {
+          'User-Agent': 'fake-ytdlp-test-agent',
+        },
       },
     ],
   };
+}
+
+function ensureLocalM4aFixture() {
+  const fixturePath = path.join(__dirname, '..', '.tmp', 'youtube-loop', 'browser-fallback-input.m4a');
+  fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
+
+  if (!fs.existsSync(fixturePath)) {
+    const result = spawnSync(
+      'ffmpeg',
+      [
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'anullsrc=r=44100:cl=mono',
+        '-t',
+        '2',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        fixturePath,
+      ],
+      { stdio: 'ignore' }
+    );
+
+    if (result.status !== 0) {
+      fail('ERROR: Unable to generate local browser fallback audio fixture.');
+    }
+  }
+
+  return fixturePath;
 }
 
 switch (scenario) {
@@ -89,6 +145,10 @@ switch (scenario) {
       fail(
         "WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing\nERROR: [youtube] testvideo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication."
       );
+    }
+
+    if (isJson && isHealthcheck && !hasExtractorArgs) {
+      succeedJson(buildAudioJsonWithUrl(`file://${ensureLocalM4aFixture()}`));
     }
 
     if (isHealthcheck || isJson || isDirectUrl || isSectionDownload) {
@@ -116,6 +176,19 @@ switch (scenario) {
 
   case 'provider_unhealthy':
     fail('ERROR: [youtube] [pot] PO Token Providers: none');
+    break;
+
+  case 'download_stall_after_partial':
+    if (isJson) {
+      succeedJson(buildAudioJson());
+    }
+    if (isSectionDownload) {
+      succeedSectionDownload();
+    }
+    if (isDirectUrl) {
+      succeedDirectUrl();
+    }
+    stallAfterPartialDownload();
     break;
 
   default:

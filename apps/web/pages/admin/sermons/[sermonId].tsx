@@ -68,6 +68,7 @@ import database, { ref as dbRef } from '../../../firebase/database';
 import LinearProgress from '@mui/material/LinearProgress';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
 import { canEditSermonRecord, isSermonProcessingLocked, isSermonPublishedExternally } from '../../../utils/sermonEditing';
+import { parseProcessingProgress } from '../../../utils/processAudioProgress';
 
 const getErrorField = (error: unknown, field: 'code' | 'details' | 'message'): string | undefined => {
   if (field === 'message' && error instanceof Error && error.message) {
@@ -119,7 +120,9 @@ const SermonDetailsPage = () => {
   const sermon = sermonSnapshot?.data();
   // Real-time processing progress from Firebase Realtime Database
   const [progressSnapshot] = useObject(sermonId ? dbRef(database, `addIntroOutro/${sermonId}`) : null);
-  const processingProgress = progressSnapshot?.val() ? Number(progressSnapshot.val()) : 0;
+  const processingProgressState = parseProcessingProgress(progressSnapshot?.val());
+  const processingProgress = processingProgressState?.percent ?? 0;
+  const processingStageLabel = processingProgressState?.stageLabel ?? 'Processing';
 
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
@@ -672,31 +675,38 @@ const SermonDetailsPage = () => {
                             ) : (
                               <Chip
                                 icon={statusInfo.icon}
-                                label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0
-                                  ? `${statusInfo.label} (${processingProgress}%)`
-                                  : statusInfo.label}
+                                label={
+                                  sermon.status.audioStatus === sermonStatusType.PROCESSING
+                                    ? processingProgressState
+                                      ? `${processingStageLabel}${processingProgress > 0 ? ` (${processingProgress}%)` : ''}`
+                                      : statusInfo.label
+                                    : statusInfo.label
+                                }
                                 size="small"
                                 color={statusInfo.color}
                                 variant="outlined"
                               />
                             )}
-                            {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0 && (
-                              <LinearProgress
-                                variant="determinate"
-                                value={processingProgress}
-                                sx={{
-                                  mt: 1,
-                                  height: 6,
-                                  borderRadius: 3,
-                                  overflow: 'hidden',
-                                  maxWidth: 220,
-                                  bgcolor: alpha(theme.palette.warning.main, 0.15),
-                                  '& .MuiLinearProgress-bar': {
-                                    bgcolor: 'warning.main',
-                                    borderRadius: 0,
-                                  }
-                                }}
-                              />
+                            {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgressState && (
+                              <Box sx={{ mt: 1, maxWidth: 220 }}>
+                                <LinearProgress
+                                  variant="determinate"
+                                  value={processingProgress}
+                                  sx={{
+                                    height: 6,
+                                    borderRadius: 3,
+                                    overflow: 'hidden',
+                                    bgcolor: alpha(theme.palette.warning.main, 0.15),
+                                    '& .MuiLinearProgress-bar': {
+                                      bgcolor: 'warning.main',
+                                      borderRadius: 0,
+                                    }
+                                  }}
+                                />
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                  {processingStageLabel}{processingProgress > 0 ? ` • ${processingProgress}%` : ''}
+                                </Typography>
+                              </Box>
                             )}
                           </Box>
                         )}

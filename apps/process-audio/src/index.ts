@@ -3,7 +3,11 @@ import { spawnSync } from 'node:child_process';
 import { executeWithTimeout, getAudioSource, getFFmpegPath, logMemoryUsage, validateAddIntroOutroData } from './utils';
 import { ProcessAudioInputType, sermonStatusType, uploadStatus, sermonStatus } from './types';
 import { isAxiosError } from 'axios';
-import { isMissingSermonDocumentError, processAudio } from './processAudio';
+import {
+  isMissingSermonDocumentError,
+  isProcessAudioAlreadyRunningError,
+  processAudio,
+} from './processAudio';
 import { CancelToken } from './CancelToken';
 import { firestoreAdminSermonConverter } from './firestoreAdminDataConverter';
 import { TIMEOUT_SECONDS } from './consts';
@@ -354,6 +358,21 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       }
 
       res.status(200).json({ skipped: true, reason: 'sermon_deleted' });
+      return;
+    }
+
+    if (isProcessAudioAlreadyRunningError(e)) {
+      log.info('Duplicate process-audio request detected while another request is already running', {
+        sermonId: data.id,
+        activeRequestId: e.activeRequestId,
+        lockAgeMs: e.lockAgeMs,
+        taskId,
+      });
+      res.status(202).json({
+        active: true,
+        reason: 'already_running',
+        activeRequestId: e.activeRequestId,
+      });
       return;
     }
 
