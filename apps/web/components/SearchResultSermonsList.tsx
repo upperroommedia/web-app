@@ -217,7 +217,6 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
               audioPlayerSetCurrentSermon={setCurrentSermon}
               subscriptionOwnedByParent
               enableProcessingProgress={enableProcessingProgress}
-              enableSeriesRealtime={false}
             />
           ))}
         {shouldRenderHits && visibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (

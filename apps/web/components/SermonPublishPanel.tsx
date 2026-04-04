@@ -14,6 +14,7 @@ import Typography from '@mui/material/Typography';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { alpha, useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
@@ -203,7 +204,7 @@ const getStatusTone = (
 };
 
 const StatusChip: FunctionComponent<{
-  label: string;
+  label: ReactNode;
   status: PublishDestinationState;
   avatar?: ReactElement;
   tooltip?: ReactNode;
@@ -295,6 +296,32 @@ const SoundCloudChipAvatar = () => {
     </Box>
   );
 };
+
+const ExternalDestinationLink: FunctionComponent<{ href: string; label: string }> = ({ href, label }) => (
+  <Box
+    component="a"
+    href={href}
+    target="_blank"
+    rel="noreferrer"
+    aria-label={label}
+    onClick={(event) => {
+      event.stopPropagation();
+    }}
+    sx={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'inherit',
+      opacity: 0.8,
+      textDecoration: 'none',
+      '&:hover': {
+        opacity: 1,
+      },
+    }}
+  >
+    <OpenInNewIcon sx={{ fontSize: { xs: 12, sm: 14 } }} />
+  </Box>
+);
 
 const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   sermon,
@@ -1530,6 +1557,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const seriesChipTooltip = destinationErrors.series || (seriesPublished ? 'Published successfully.' : seriesStatus.details);
   const canRetrySeries = Boolean(sermon.seriesId && !isBusy && seriesStatus.state === 'error');
   const canRetrySoundCloud = soundCloudStatus.state === 'error' && !isBusy;
+  const soundCloudExternalUrl = isSoundCloudUploaded && sermon.soundCloudTrackUrl ? sermon.soundCloudTrackUrl : null;
   const advancedSelectionSummary = useMemo(() => summarizeAdvancedSelectionChanges({
     publishListCount: selectedListsToPublish.length,
     unpublishListCount: deselectedPublishedLists.length,
@@ -1607,7 +1635,26 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
               return (
                 <StatusChip
                   key={list.id}
-                  label={list.name}
+                  label={
+                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+                      <Box
+                        component="span"
+                        sx={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {list.name}
+                      </Box>
+                      {list.uploadStatus?.status === uploadStatus.UPLOADED && list.subsplashId ? (
+                        <ExternalDestinationLink
+                          href={`https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`}
+                          label={`Open ${list.name} in Subsplash`}
+                        />
+                      ) : null}
+                    </Stack>
+                  }
                   status={chipStatus}
                   tooltip={listChipTooltip(list)}
                   onRetry={
@@ -1644,7 +1691,26 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
               <StatusChip
-                label={series?.name || 'Series'}
+                label={
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+                    <Box
+                      component="span"
+                      sx={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {series?.name || 'Series'}
+                    </Box>
+                    {seriesPublished && series?.subsplashId ? (
+                      <ExternalDestinationLink
+                        href={`https://dashboard.subsplash.com/-d/#/library/media/series/${series.subsplashId}`}
+                        label={`Open ${series.name} in Subsplash`}
+                      />
+                    ) : null}
+                  </Stack>
+                }
                 status={seriesStatus}
                 tooltip={seriesChipTooltip}
                 onRetry={
@@ -1679,7 +1745,16 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             <StatusChip
-              label="SoundCloud"
+              label={
+                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+                  <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
+                    SoundCloud
+                  </Box>
+                  {soundCloudExternalUrl ? (
+                    <ExternalDestinationLink href={soundCloudExternalUrl} label="Open SoundCloud track" />
+                  ) : null}
+                </Stack>
+              }
               status={soundCloudStatus}
               tooltip={destinationErrors.soundcloud || soundCloudStatus.details}
               avatar={<SoundCloudChipAvatar />}
@@ -1881,7 +1956,19 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                     sx={{ m: 0, flex: 1 }}
                   />
                   <StatusChip
-                    label={seriesStatus.label}
+                    label={
+                      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+                        <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
+                          {seriesStatus.label}
+                        </Box>
+                        {seriesPublished && series?.subsplashId ? (
+                          <ExternalDestinationLink
+                            href={`https://dashboard.subsplash.com/-d/#/library/media/series/${series.subsplashId}`}
+                            label={`Open ${series.name} in Subsplash`}
+                          />
+                        ) : null}
+                      </Stack>
+                    }
                     status={seriesStatus}
                     tooltip={seriesChipTooltip}
                     onRetry={
@@ -1934,7 +2021,16 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                   sx={{ m: 0, flex: 1 }}
                 />
                 <StatusChip
-                  label={soundCloudStatus.label}
+                  label={
+                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+                      <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
+                        {soundCloudStatus.label}
+                      </Box>
+                      {soundCloudExternalUrl ? (
+                        <ExternalDestinationLink href={soundCloudExternalUrl} label="Open SoundCloud track" />
+                      ) : null}
+                    </Stack>
+                  }
                   status={soundCloudStatus}
                   tooltip={destinationErrors.soundcloud || soundCloudStatus.details}
                   onRetry={

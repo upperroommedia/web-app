@@ -490,13 +490,13 @@ const SermonListCard: FunctionComponent<Props> = ({
   );
 
   const renderSoundCloudStatus = () => (
-    <Tooltip title={isSoundCloudUploaded ? 'Published to SoundCloud' : 'Not on SoundCloud'}>
+    <Tooltip title={publishTaskRunning && !isSoundCloudUploaded ? 'Publishing to SoundCloud…' : isSoundCloudUploaded ? 'Published to SoundCloud' : 'Not on SoundCloud'}>
       <Chip
-        icon={<CloudIcon sx={{ fontSize: 13 }} />}
-        label="SC"
+        icon={publishTaskRunning && !isSoundCloudUploaded ? <CircularProgress size={13} color="inherit" /> : <CloudIcon sx={{ fontSize: 13 }} />}
+        label={publishTaskRunning && !isSoundCloudUploaded ? 'Publishing…' : 'SC'}
         size="small"
-        variant={isSoundCloudUploaded ? 'filled' : 'outlined'}
-        color={isSoundCloudUploaded ? 'success' : 'default'}
+        variant={isSoundCloudUploaded ? 'filled' : publishTaskRunning ? 'filled' : 'outlined'}
+        color={isSoundCloudUploaded ? 'success' : publishTaskRunning ? 'info' : 'default'}
         onClick={handlePublishClick}
         sx={{
           height: { xs: 16, sm: 22 },
@@ -526,7 +526,21 @@ const SermonListCard: FunctionComponent<Props> = ({
               borderRadius={0}
             />
           }
-          label={series.name}
+          label={
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+              <Box
+                component="span"
+                sx={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {series.name}
+              </Box>
+              {publishTaskRunning && !seriesPublishedToSubsplash ? <CircularProgress size={compact ? 9 : 11} color="inherit" /> : null}
+            </Stack>
+          }
           size="small"
           variant="filled"
           sx={{
@@ -534,10 +548,14 @@ const SermonListCard: FunctionComponent<Props> = ({
             cursor: 'pointer',
             overflow: 'hidden',
             maxWidth: compact ? 120 : 'none',
-            bgcolor: seriesPublishedToSubsplash
+            bgcolor: publishTaskRunning && !seriesPublishedToSubsplash
+              ? alpha(theme.palette.info.main, 0.14)
+              : seriesPublishedToSubsplash
               ? alpha(theme.palette.success.main, 0.12)
               : alpha(theme.palette.warning.main, 0.16),
-            border: `1px solid ${seriesPublishedToSubsplash
+            border: `1px solid ${publishTaskRunning && !seriesPublishedToSubsplash
+              ? alpha(theme.palette.info.main, 0.34)
+              : seriesPublishedToSubsplash
               ? alpha(theme.palette.success.main, 0.35)
               : alpha(theme.palette.warning.main, 0.4)}`,
             '& .MuiChip-label': {
@@ -545,7 +563,11 @@ const SermonListCard: FunctionComponent<Props> = ({
               pl: compact ? 0.2 : { sm: 0.35, md: 0.45 },
               pr: compact ? 0.45 : { sm: 0.75, md: 1 },
               fontWeight: 500,
-              color: seriesPublishedToSubsplash ? theme.palette.success.dark : theme.palette.warning.dark,
+              color: publishTaskRunning && !seriesPublishedToSubsplash
+                ? theme.palette.info.dark
+                : seriesPublishedToSubsplash
+                  ? theme.palette.success.dark
+                  : theme.palette.warning.dark,
             },
             '& .MuiChip-avatar': {
               ml: 0,
@@ -555,10 +577,16 @@ const SermonListCard: FunctionComponent<Props> = ({
               borderRadius: 0,
             },
             '&:hover': {
-              bgcolor: seriesPublishedToSubsplash
+              bgcolor: publishTaskRunning && !seriesPublishedToSubsplash
+                ? alpha(theme.palette.info.main, 0.2)
+                : seriesPublishedToSubsplash
                 ? alpha(theme.palette.success.main, 0.18)
                 : alpha(theme.palette.warning.main, 0.24),
-              borderColor: seriesPublishedToSubsplash ? theme.palette.success.main : theme.palette.warning.main,
+              borderColor: publishTaskRunning && !seriesPublishedToSubsplash
+                ? theme.palette.info.main
+                : seriesPublishedToSubsplash
+                  ? theme.palette.success.main
+                  : theme.palette.warning.main,
             }
           }}
         />
