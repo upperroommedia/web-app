@@ -46,6 +46,7 @@ firebase apphosting:secrets:set ADMIN_BASE_URL --project urm-app-staging
 firebase apphosting:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
 firebase apphosting:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
 firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
+firebase apphosting:secrets:set WEB_APP_SENTRY_DSN --project urm-app-staging
 ```
 
 If access is not auto-granted:
@@ -66,6 +67,7 @@ firebase functions:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
 firebase functions:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_ID --project urm-app-staging
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app-staging
+firebase functions:secrets:set FUNCTIONS_SENTRY_DSN --project urm-app-staging
 ```
 
 Notes:
@@ -74,7 +76,10 @@ Notes:
 - `SUBSPLASH_EMAIL` and `SUBSPLASH_PASSWORD` are consumed by Subsplash publish/sync functions and related triggers.
 - `ALGOLIA_SEARCH_API_KEY` is consumed by `generateSecuredApiKey`.
 - `SOUNDCLOUD_CLIENT_ID` and `SOUNDCLOUD_CLIENT_SECRET` are consumed by the SoundCloud OAuth bootstrap and automatic token refresh flow.
+- `WEB_APP_SENTRY_DSN` is consumed by App Hosting via [apps/web/apphosting.yaml](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/apphosting.yaml).
+- `FUNCTIONS_SENTRY_DSN` is consumed by [functions/src/sentry.ts](/Users/yasaad/Projects/upper-room-media/web-app/functions/src/sentry.ts) and must be present before deploying any split codebase with Sentry enabled.
 - App Hosting secrets in `apphosting.yaml` do not automatically flow into Cloud Functions.
+- GitHub Actions release automation also needs repository secret `SENTRY_AUTH_TOKEN`; see [docs/SENTRY_SETUP.md](/Users/yasaad/Projects/upper-room-media/web-app/docs/SENTRY_SETUP.md).
 
 ## 3c. Enable Google Sign-In in staging Auth (one-time)
 

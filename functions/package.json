@@ -22,6 +22,7 @@
   "main": "lib/functions/src/index.js",
   "dependencies": {
     "@upperroom/shared": "workspace:*",
+    "@sentry/node": "^10.47.0",
     "@google-cloud/functions-framework": "catalog:",
     "@google-cloud/storage": "catalog:",
     "algoliasearch": "catalog:",

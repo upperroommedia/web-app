@@ -263,8 +263,16 @@ Sentry env injected by deploy:
 
 - `SENTRY_DSN`
 - `SENTRY_ENVIRONMENT=staging|production`
-- `SENTRY_RELEASE=<git sha>`
+- `SENTRY_RELEASE=process-audio-hetzner@<staging|production>-<git sha>`
 - `SENTRY_TRACES_SAMPLE_RATE=0.1`
+- `SENTRY_ENABLE_LOGS=true`
+- `SENTRY_LOG_LEVELS=warn,error`
+
+Operational observability defaults:
+
+- request traces stay enabled at `SENTRY_TRACES_SAMPLE_RATE=0.1`
+- manual spans cover the end-to-end sermon run, media download/transcode, and intro/outro merge stages
+- Winston forwards `warn` and `error` logs into Sentry Logs by default to avoid high-volume noise from the normal `info/debug` stream
 
 ## Deploying Cloud Run process-audio
 
@@ -294,8 +302,8 @@ curl -fsS https://yt-worker.upperroommedia.org/healthz
 Sentry checks:
 
 ```bash
-curl -fsS https://yt-worker-staging.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
-curl -fsS https://yt-worker.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
+curl -fsS https://yt-worker-staging.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease, .sentryLogsEnabled, .sentryLogLevels, .sentryTracesSampleRate'
+curl -fsS https://yt-worker.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease, .sentryLogsEnabled, .sentryLogLevels, .sentryTracesSampleRate'
 ```
 
 Container checks on the VM:

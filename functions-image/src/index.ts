@@ -1,7 +1,10 @@
+import '../../functions/src/sentry';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { runtimeAlertRecipientsSecret } from '../../functions/src/notifications/notificationSecrets';
+import { functionsSentryDsnSecret, initFunctionsSentry } from '../../functions/src/sentry';
+initFunctionsSentry();
 setGlobalOptions({
-  secrets: [runtimeAlertRecipientsSecret],
+  secrets: [runtimeAlertRecipientsSecret, functionsSentryDsnSecret],
 });
 
 import uploadimage from '../../functions/src/handleImageUpload';

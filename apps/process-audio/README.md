@@ -51,6 +51,8 @@ Core runtime:
 - `SENTRY_ENVIRONMENT`
 - `SENTRY_RELEASE`
 - `SENTRY_TRACES_SAMPLE_RATE`
+- `SENTRY_ENABLE_LOGS`
+- `SENTRY_LOG_LEVELS`
 
 YouTube extraction, Hetzner profile only:
 
@@ -155,10 +157,20 @@ Current behavior:
 
 - Sentry is initialized before Express boot
 - handled request failures are captured explicitly before sermon error state is written
+- long-running work is traced with explicit spans for:
+  - `process-audio.run`
+  - `Downloading YouTube Audio` / trim / transcode stage
+  - `process-audio.merge-intro-outro`
+- Winston forwards high-signal application logs into Sentry Logs
+  - deploy default: `SENTRY_ENABLE_LOGS=true`
+  - deploy default levels: `SENTRY_LOG_LEVELS=warn,error`
 - `GET /healthz` reports:
   - `sentryEnabled`
   - `sentryEnvironment`
   - `sentryRelease`
+  - `sentryLogsEnabled`
+  - `sentryLogLevels`
+  - `sentryTracesSampleRate`
 
 Hetzner deploys inject Sentry from GCP Secret Manager:
 
@@ -169,8 +181,8 @@ Hetzner deploys inject Sentry from GCP Secret Manager:
 Quick verification after deploy:
 
 ```bash
-curl https://yt-worker-staging.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
-curl https://yt-worker.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
+curl https://yt-worker-staging.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease, .sentryLogsEnabled, .sentryLogLevels, .sentryTracesSampleRate'
+curl https://yt-worker.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease, .sentryLogsEnabled, .sentryLogLevels, .sentryTracesSampleRate'
 ```
 
 Container-level verification:

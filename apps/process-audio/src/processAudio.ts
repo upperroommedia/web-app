@@ -21,6 +21,7 @@ import { createLoggerWithContext } from './WinstonLogger';
 import { LogContext, createChildContext, createContext } from './context';
 import { markProcessAudioRequestRunning } from './processAudioQueueStore';
 import { setProcessAudioProgress } from './processAudioProgress';
+import { Sentry } from './instrument';
 
 const DEFAULT_PROCESS_AUDIO_LOCK_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_PROCESS_AUDIO_LOCK_HEARTBEAT_INTERVAL_MS = 30 * 1000;
@@ -263,6 +264,20 @@ export const processAudio = async (
   let lockAcquired = false;
   let stopLockHeartbeat: (() => void) | null = null;
 
+  return Sentry.startSpan(
+    {
+      name: 'process-audio.run',
+      op: 'process_audio.run',
+      attributes: {
+        'process_audio.sermon_id': fileName,
+        'process_audio.audio_source_type': audioSource.type,
+        'process_audio.skip_transcode': Boolean(skipTranscode),
+        'process_audio.has_intro': Boolean(introUrl),
+        'process_audio.has_outro': Boolean(outroUrl),
+        'process_audio.task_id': taskId ?? 'none',
+      },
+    },
+    async () => {
   log.info('Starting audio processing', {
     fileName,
     startTime,
@@ -428,41 +443,54 @@ export const processAudio = async (
     // Ensure sermonId is preserved in child context
     const trimCtx = createChildContext(contextWithSermonId, 'trim');
 
-    if (skipTranscode) {
-      if (audioSource.type !== 'StorageFilePath') {
-        log.error('Invalid audio source for skipTranscode', { sourceType: audioSource.type });
-        throw new Error('Audio source must be a file from processed-sermons in order to trim without transcoding');
+    await Sentry.startSpan(
+      {
+        name: trimMessage,
+        op: skipTranscode ? 'media.trim' : audioSource.type === 'StorageFilePath' ? 'media.transcode' : 'media.download',
+        attributes: {
+          'process_audio.sermon_id': fileName,
+          'process_audio.audio_source_type': audioSource.type,
+        },
+      },
+      async () => {
+        if (skipTranscode) {
+          if (audioSource.type !== 'StorageFilePath') {
+            log.error('Invalid audio source for skipTranscode', { sourceType: audioSource.type });
+            throw new Error('Audio source must be a file from processed-sermons in order to trim without transcoding');
+          }
+          await trim(
+            cancelToken,
+            bucket,
+            audioSource.source,
+            processedStoragePath,
+            tempFiles,
+            realtimeDB.ref(`addIntroOutro/${fileName}`),
+            customMetadata,
+            startTime,
+            duration,
+            trimCtx
+          );
+          return;
+        }
+
+        await trimAndTranscode(
+          ytdlpPath,
+          cancelToken,
+          bucket,
+          audioSource,
+          processedStoragePath,
+          tempFiles,
+          realtimeDB.ref(`addIntroOutro/${fileName}`),
+          realtimeDB,
+          docRef,
+          sermonStatus,
+          customMetadata,
+          startTime,
+          duration,
+          trimCtx
+        );
       }
-      await trim(
-        cancelToken,
-        bucket,
-        audioSource.source,
-        processedStoragePath,
-        tempFiles,
-        realtimeDB.ref(`addIntroOutro/${fileName}`),
-        customMetadata,
-        startTime,
-        duration,
-        trimCtx
-      );
-    } else {
-      await trimAndTranscode(
-        ytdlpPath,
-        cancelToken,
-        bucket,
-        audioSource,
-        processedStoragePath,
-        tempFiles,
-        realtimeDB.ref(`addIntroOutro/${fileName}`),
-        realtimeDB,
-        docRef,
-        sermonStatus,
-        customMetadata,
-        startTime,
-        duration,
-        trimCtx
-      );
-    }
+    );
 
     log.info('Audio processing step completed', { step: trimMessage });
 
@@ -504,16 +532,27 @@ export const processAudio = async (
 
       // Ensure sermonId is preserved in child context
       const mergeCtx = createChildContext(contextWithSermonId, 'merge');
-      const mergedOutputFile = await mergeFiles(
-        cancelToken,
-        bucket,
-        filePathsArray,
-        outputFilePath,
-        durationSeconds,
-        tempFiles,
-        realtimeDB.ref(`addIntroOutro/${fileName}`),
-        customMetadata,
-        mergeCtx
+      const mergedOutputFile = await Sentry.startSpan(
+        {
+          name: 'process-audio.merge-intro-outro',
+          op: 'media.merge',
+          attributes: {
+            'process_audio.sermon_id': fileName,
+            'process_audio.merge_file_count': filePathsArray.length,
+          },
+        },
+        () =>
+          mergeFiles(
+            cancelToken,
+            bucket,
+            filePathsArray,
+            outputFilePath,
+            durationSeconds,
+            tempFiles,
+            realtimeDB.ref(`addIntroOutro/${fileName}`),
+            customMetadata,
+            mergeCtx
+          )
       );
       log.info('Files merged successfully', { outputPath: mergedOutputFile.name });
       await logMemoryUsage('Memory Usage after merge', contextWithSermonId, tempFiles);
@@ -573,4 +612,6 @@ export const processAudio = async (
       log.error('Error during cleanup', { error: err });
     }
   }
+    }
+  );
 };

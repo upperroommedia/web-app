@@ -1,3 +1,4 @@
+import './sentry';
 // Deprecated compatibility entrypoint.
 //
 // Production deploys use the split Firebase codebases defined in firebase.json:

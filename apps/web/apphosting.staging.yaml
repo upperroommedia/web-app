@@ -44,6 +44,16 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: NEXT_PUBLIC_SENTRY_ENVIRONMENT
+    value: staging
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: SENTRY_ENVIRONMENT
+    value: staging
+    availability:
+      - BUILD
+      - RUNTIME
   - variable: FIREBASE_PROJECT_ID
     value: urm-app-staging
     availability:

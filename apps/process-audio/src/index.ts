@@ -1,4 +1,4 @@
-import './instrument';
+import { sentryEnabled, sentryEnvironment, sentryLogsEnabled, sentryRelease, sentryTracesSampleRate } from './instrument';
 import express, { Request } from 'express';
 import { spawnSync } from 'node:child_process';
 import * as Sentry from '@sentry/node';
@@ -14,7 +14,7 @@ import { CancelToken } from './CancelToken';
 import { firestoreAdminSermonConverter } from './firestoreAdminDataConverter';
 import { TIMEOUT_SECONDS } from './consts';
 import firebaseAdmin from './firebaseAdmin';
-import logger, { createLoggerWithContext } from './WinstonLogger';
+import logger, { createLoggerWithContext, sentryLogLevels } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
 import { analyzeYouTubeFailure } from './youtubeExtractionPolicy';
@@ -37,9 +37,6 @@ const localBrowserProfileBrowser = process.env.PROCESS_AUDIO_BROWSER_PROFILE_BRO
 const runtimeProfile = process.env.PROCESS_AUDIO_RUNTIME_PROFILE?.trim().toLowerCase() || 'hetzner';
 const runtimeHost = process.env.PROCESS_AUDIO_RUNTIME_HOST?.trim() || 'cloud-run';
 const runtimeEnv = process.env.PROCESS_AUDIO_RUNTIME_ENV?.trim() || process.env.NODE_ENV || 'unknown';
-const sentryEnabled = !!process.env.SENTRY_DSN?.trim();
-const sentryEnvironment = process.env.SENTRY_ENVIRONMENT?.trim() || runtimeEnv;
-const sentryRelease = process.env.SENTRY_RELEASE?.trim() || process.env.K_REVISION?.trim() || null;
 const youtubeProcessingEnabled = runtimeProfile !== 'cloudrun';
 const ytdlpPath = youtubeProcessingEnabled ? 'yt-dlp' : null;
 const configuredYtDlpJsRuntime = youtubeProcessingEnabled ? process.env.YTDLP_JS_RUNTIME?.trim() || 'deno' : null;
@@ -202,7 +199,10 @@ app.get('/healthz', (req, res) => {
     youtubeProcessingEnabled,
     sentryEnabled,
     sentryEnvironment,
-    sentryRelease,
+    sentryRelease: sentryRelease ?? null,
+    sentryLogsEnabled,
+    sentryLogLevels,
+    sentryTracesSampleRate,
     browserFallbackConfigured,
     browserFallbackEnabled,
     inProcessBrowserFallbackConfigured,

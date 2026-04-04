@@ -47,6 +47,7 @@ firebase apphosting:secrets:set ADMIN_BASE_URL --project urm-app
 firebase apphosting:secrets:set SUBSPLASH_EMAIL --project urm-app
 firebase apphosting:secrets:set SUBSPLASH_PASSWORD --project urm-app
 firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app
+firebase apphosting:secrets:set WEB_APP_SENTRY_DSN --project urm-app
 ```
 
 Grant those same secret names to backend `web-prod`:
@@ -58,6 +59,7 @@ firebase apphosting:secrets:grantaccess ADMIN_BASE_URL --project urm-app --backe
 firebase apphosting:secrets:grantaccess SUBSPLASH_EMAIL --project urm-app --backend web-prod
 firebase apphosting:secrets:grantaccess SUBSPLASH_PASSWORD --project urm-app --backend web-prod
 firebase apphosting:secrets:grantaccess ALGOLIA_SEARCH_API_KEY --project urm-app --backend web-prod
+firebase apphosting:secrets:grantaccess WEB_APP_SENTRY_DSN --project urm-app --backend web-prod
 ```
 
 ## 3b. Configure Cloud Functions secrets/env (production)
@@ -71,13 +73,17 @@ firebase functions:secrets:set SUBSPLASH_PASSWORD --project urm-app
 firebase functions:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_ID --project urm-app
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app
+firebase functions:secrets:set FUNCTIONS_SENTRY_DSN --project urm-app
 ```
 
 Notes:
 
 - App Hosting resolves the same secret names independently in each Firebase project.
+- `WEB_APP_SENTRY_DSN` is resolved by App Hosting from [apps/web/apphosting.yaml](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/apphosting.yaml).
+- `FUNCTIONS_SENTRY_DSN` is required by [functions/src/sentry.ts](/Users/yasaad/Projects/upper-room-media/web-app/functions/src/sentry.ts) for every split codebase that initializes Sentry.
 - `apps/web/apphosting.prod.yaml` overrides only the project-specific values; shared secret names remain in `apps/web/apphosting.yaml`.
 - App Hosting secrets do not automatically flow into Cloud Functions.
+- GitHub Actions release automation also needs repository secret `SENTRY_AUTH_TOKEN`; see [docs/SENTRY_SETUP.md](/Users/yasaad/Projects/upper-room-media/web-app/docs/SENTRY_SETUP.md).
 
 ## 4. Configure GitHub OIDC for production backend deploys
 
@@ -96,9 +102,10 @@ Before merging `staging` into `main`, confirm:
 2. `web-prod` live branch is `main`.
 3. `web-prod` environment name is `prod`.
 4. The six App Hosting secret names exist in `urm-app`.
-5. Each App Hosting secret is granted to `web-prod`.
-6. The required Functions secrets exist in `urm-app`.
-7. Automatic App Hosting rollouts are enabled for `web-prod`.
+5. `WEB_APP_SENTRY_DSN` also exists in `urm-app`.
+6. Each App Hosting secret is granted to `web-prod`.
+7. The required Functions secrets, including `FUNCTIONS_SENTRY_DSN`, exist in `urm-app`.
+8. Automatic App Hosting rollouts are enabled for `web-prod`.
 
 ## 6. Validate the pipeline
 

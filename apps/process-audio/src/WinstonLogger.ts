@@ -1,9 +1,20 @@
 import winston from 'winston';
+import Transport from 'winston-transport';
 import { LoggingWinston } from '@google-cloud/logging-winston';
 import { LogContext } from './context';
+import { Sentry, sentryLogsEnabled } from './instrument';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
 const cloudLoggingEnabled = process.env.ENABLE_CLOUD_LOGGING === 'true' || Boolean(process.env.K_SERVICE);
+const defaultSentryLogLevels = ['warn', 'error'];
+const sentryLogLevels = Array.from(
+  new Set(
+    (process.env.SENTRY_LOG_LEVELS?.trim() || defaultSentryLogLevels.join(','))
+      .split(',')
+      .map((level) => level.trim().toLowerCase())
+      .filter(Boolean)
+  )
+);
 
 // Configure transports - only use Cloud Logging in production
 const transports: winston.transport[] = [new winston.transports.Console()];
@@ -29,6 +40,17 @@ if (!isDevelopment && cloudLoggingEnabled) {
   } catch (error) {
     // If Cloud Logging fails to initialize, just use console
     console.warn('Failed to initialize Cloud Logging, using console only:', error);
+  }
+}
+
+if (sentryLogsEnabled) {
+  try {
+    const SentryWinstonTransport = Sentry.createSentryWinstonTransport(Transport, {
+      levels: sentryLogLevels as Array<'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'>,
+    });
+    transports.push(new SentryWinstonTransport());
+  } catch (error) {
+    console.warn('Failed to initialize Sentry Winston transport, using existing transports only:', error);
   }
 }
 
@@ -123,4 +145,4 @@ const logger = createLoggerWithContext();
 
 // Export both default logger and factory function
 export default logger;
-export { createLoggerWithContext };
+export { createLoggerWithContext, sentryLogLevels };

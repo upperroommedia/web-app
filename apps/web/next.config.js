@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const { withSentryConfig } = require('@sentry/nextjs');
 
 /** @type {import('next').NextConfig} */
 
@@ -66,10 +68,75 @@ const loadRootEnv = () => {
 
 loadRootEnv();
 
+const readFirstDefinedEnv = (...keys) => {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+};
+
+const resolveGitSha = () => {
+  const envGitSha = readFirstDefinedEnv(
+    'SENTRY_GIT_SHA',
+    'GITHUB_SHA',
+    'COMMIT_SHA',
+    'SOURCE_VERSION',
+    'GOOGLE_CLOUD_BUILD_SOURCE_VERSION',
+    'FIREBASE_GIT_COMMIT_SHA'
+  );
+
+  if (envGitSha) {
+    return envGitSha;
+  }
+
+  try {
+    return execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+};
+
+const resolveSentryEnvironment = () =>
+  readFirstDefinedEnv('NEXT_PUBLIC_SENTRY_ENVIRONMENT', 'SENTRY_ENVIRONMENT') || process.env.NODE_ENV || '';
+
+const resolveSentryRelease = () => {
+  const explicitRelease = readFirstDefinedEnv('NEXT_PUBLIC_SENTRY_RELEASE', 'SENTRY_RELEASE');
+  if (explicitRelease) {
+    return explicitRelease;
+  }
+
+  const gitSha = resolveGitSha();
+  const sentryEnvironment = resolveSentryEnvironment();
+  if (!gitSha || !sentryEnvironment) {
+    return '';
+  }
+
+  return `web-app@${sentryEnvironment}-${gitSha}`;
+};
+
+const sentryRelease = resolveSentryRelease();
+
+if (sentryRelease) {
+  process.env.NEXT_PUBLIC_SENTRY_RELEASE = process.env.NEXT_PUBLIC_SENTRY_RELEASE || sentryRelease;
+  process.env.SENTRY_RELEASE = process.env.SENTRY_RELEASE || sentryRelease;
+}
+
 const nextConfig = {
   output: 'standalone',
   outputFileTracingRoot: repoRoot,
   reactStrictMode: true,
+  env: {
+    ...(sentryRelease
+      ? {
+          NEXT_PUBLIC_SENTRY_RELEASE: sentryRelease,
+          SENTRY_RELEASE: sentryRelease,
+        }
+      : {}),
+  },
   images: {
     dangerouslyAllowLocalIP: process.env.NODE_ENV === 'development',
     remotePatterns: [
@@ -118,4 +185,18 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+module.exports = withSentryConfig(nextConfig, {
+  org: 'upper-room-media',
+  project: 'web-app',
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  release: sentryRelease || undefined,
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  webpack: {
+    autoInstrumentServerFunctions: true,
+    autoInstrumentMiddleware: true,
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
+});

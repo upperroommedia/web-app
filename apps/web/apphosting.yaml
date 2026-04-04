@@ -33,6 +33,17 @@ env:
       - BUILD
       - RUNTIME
 
+  - variable: NEXT_PUBLIC_SENTRY_DSN
+    secret: WEB_APP_SENTRY_DSN
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: SENTRY_DSN
+    secret: WEB_APP_SENTRY_DSN
+    availability:
+      - BUILD
+      - RUNTIME
+
   - variable: FIREBASE_FUNCTIONS_REGION
     value: us-central1
     availability:

@@ -29,6 +29,7 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
+      deploy_web_app: ${{ steps.detect.outputs.deploy_web_app }}
       deploy_firestore: ${{ steps.detect.outputs.deploy_firestore }}
       deploy_database: ${{ steps.detect.outputs.deploy_database }}
       deploy_storage: ${{ steps.detect.outputs.deploy_storage }}
@@ -161,6 +162,7 @@ jobs:
           deploy_firestore=false
           deploy_database=false
           deploy_storage=false
+          deploy_web_app=false
           deploy_functions_core=false
           deploy_functions_media=false
           deploy_functions_image=false
@@ -169,6 +171,7 @@ jobs:
             deploy_firestore=true
             deploy_database=true
             deploy_storage=true
+            deploy_web_app=true
             deploy_functions_core=true
             deploy_functions_media=true
             deploy_functions_image=true
@@ -184,6 +187,10 @@ jobs:
 
             if contains_path '^storage\.rules$|^config/storage-cors/staging\.json$'; then
               deploy_storage=true
+            fi
+
+            if contains_path '^(apps/web/|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc)'; then
+              deploy_web_app=true
             fi
 
             if contains_path '^functions-core/'; then
@@ -227,6 +234,7 @@ jobs:
             echo "deploy_firestore=$deploy_firestore"
             echo "deploy_database=$deploy_database"
             echo "deploy_storage=$deploy_storage"
+            echo "deploy_web_app=$deploy_web_app"
             echo "deploy_functions_core=$deploy_functions_core"
             echo "deploy_functions_media=$deploy_functions_media"
             echo "deploy_functions_image=$deploy_functions_image"
@@ -251,6 +259,7 @@ jobs:
           DEPLOY_FIRESTORE: ${{ needs.detect-changes.outputs.deploy_firestore }}
           DEPLOY_DATABASE: ${{ needs.detect-changes.outputs.deploy_database }}
           DEPLOY_STORAGE: ${{ needs.detect-changes.outputs.deploy_storage }}
+          DEPLOY_WEB_APP: ${{ needs.detect-changes.outputs.deploy_web_app }}
           DEPLOY_FUNCTIONS_CORE: ${{ needs.detect-changes.outputs.deploy_functions_core }}
           DEPLOY_FUNCTIONS_MEDIA: ${{ needs.detect-changes.outputs.deploy_functions_media }}
           DEPLOY_FUNCTIONS_IMAGE: ${{ needs.detect-changes.outputs.deploy_functions_image }}
@@ -271,6 +280,7 @@ jobs:
             echo "- Firestore rules/indexes: \`$DEPLOY_FIRESTORE\`"
             echo "- Realtime Database rules: \`$DEPLOY_DATABASE\`"
             echo "- Storage rules: \`$DEPLOY_STORAGE\`"
+            echo "- Web app release tracking: \`$DEPLOY_WEB_APP\`"
             echo "- Functions core: \`$DEPLOY_FUNCTIONS_CORE\`"
             echo "- Functions media: \`$DEPLOY_FUNCTIONS_MEDIA\`"
             echo "- Functions image: \`$DEPLOY_FUNCTIONS_IMAGE\`"
@@ -291,6 +301,30 @@ jobs:
       - name: No-op for non-deployable changes
         if: needs.detect-changes.outputs.anything_to_run != 'true'
         run: echo "No deployable changes detected for staging."
+
+  track-web-release:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.deploy_web_app == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Create staging Sentry release for web-app
+        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        uses: getsentry/action-release@v3
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: upper-room-media
+        with:
+          projects: web-app
+          environment: staging
+          release: web-app@staging-${{ github.sha }}
+          set_commits: auto
+          ignore_missing: true
+          ignore_empty: true
+          working_directory: .
 
   deploy-firestore:
     runs-on: ubuntu-latest
@@ -384,3 +418,29 @@ jobs:
       - name: Deploy functions:integrations
         if: needs.detect-changes.outputs.deploy_functions_integrations == 'true'
         run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:integrations --non-interactive
+
+  track-functions-release:
+    runs-on: ubuntu-latest
+    needs:
+      - detect-changes
+      - deploy-functions
+    if: (needs.detect-changes.outputs.deploy_functions_core == 'true' || needs.detect-changes.outputs.deploy_functions_media == 'true' || needs.detect-changes.outputs.deploy_functions_image == 'true' || needs.detect-changes.outputs.deploy_functions_integrations == 'true') && needs.deploy-functions.result == 'success'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Create staging Sentry release for firebase-functions
+        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        uses: getsentry/action-release@v3
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: upper-room-media
+        with:
+          projects: firebase-functions
+          environment: staging
+          release: firebase-functions@staging-${{ github.sha }}
+          set_commits: auto
+          ignore_missing: true
+          ignore_empty: true
+          working_directory: .
