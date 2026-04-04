@@ -13,7 +13,6 @@ import {
 
 interface AudioTrimmerProps {
   url: string;
-  waveformUrl?: string;
   trimStart: number;
   trimDuration?: number;
   setTrimStart: (trimStartTime: number) => void;
@@ -23,7 +22,6 @@ interface AudioTrimmerProps {
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   url,
-  waveformUrl,
   trimStart,
   trimDuration,
   setTrimStart,
@@ -98,8 +96,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   );
 
   const waveformElement = useMemo(
-    () => <AudioWaveform url={waveformUrl ?? url} height={80} />,
-    [url, waveformUrl]
+    () => <AudioWaveform url={url} height={80} />,
+    [url]
   );
 
   return (

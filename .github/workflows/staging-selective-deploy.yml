@@ -23,6 +23,7 @@ concurrency:
 
 env:
   FIREBASE_PROJECT: urm-app-staging
+  STORAGE_BUCKET: urm-app-staging.firebasestorage.app
 
 jobs:
   detect-changes:
@@ -181,7 +182,7 @@ jobs:
               deploy_database=true
             fi
 
-            if contains_path '^storage\.rules$'; then
+            if contains_path '^storage\.rules$|^config/storage-cors/staging\.json$'; then
               deploy_storage=true
             fi
 
@@ -341,6 +342,9 @@ jobs:
 
       - name: Deploy Storage rules
         run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage --non-interactive
+
+      - name: Apply Storage bucket CORS
+        run: gcloud storage buckets update "gs://$STORAGE_BUCKET" --cors-file=config/storage-cors/staging.json
 
   deploy-functions:
     runs-on: ubuntu-latest

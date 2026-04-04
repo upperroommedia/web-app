@@ -11,7 +11,6 @@ const DynamicAudioTrimmer = dynamic(() => import('./AudioTrimmer'), { ssr: false
 
 type AudioTrimmerComponentProps = {
   url: string;
-  waveformUrl?: string;
   trimStart: number;
   trimDuration?: number;
   setTrimStart: (trimStartTime: number) => void;
@@ -23,7 +22,6 @@ type AudioTrimmerComponentProps = {
 
 const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
   url,
-  waveformUrl,
   trimStart,
   trimDuration,
   setTrimStart,
@@ -57,7 +55,6 @@ const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
       ) : null}
       <DynamicAudioTrimmer
         url={url}
-        waveformUrl={waveformUrl}
         trimStart={trimStart}
         trimDuration={trimDuration}
         setTrimStart={setTrimStart}

@@ -754,11 +754,6 @@ const Uploader = (props: UploaderProps) => {
     sermonsEqual,
   ]);
 
-  const existingWaveformUrl = useMemo(() => {
-    if (!props.existingSermonUrl?.url) return undefined;
-    return `/api/audio-waveform?sourceUrl=${encodeURIComponent(props.existingSermonUrl.url)}`;
-  }, [props.existingSermonUrl?.url]);
-
   return (
     <>
       <Head>
@@ -997,7 +992,6 @@ const Uploader = (props: UploaderProps) => {
                 ) : props.existingSermonUrl?.status === 'success' ? (
                   <AudioTrimmerComponent
                     url={props.existingSermonUrl.url}
-                    waveformUrl={existingWaveformUrl}
                     trimStart={sermon.sourceStartTime}
                     trimDuration={sermon.trimDurationSeconds}
                     setTrimStart={setTrimStartTime}
