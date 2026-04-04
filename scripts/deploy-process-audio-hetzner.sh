@@ -164,12 +164,34 @@ trap cleanup EXIT
 
 cd "$remote_dir"
 
+prune_build_artifacts() {
+  docker builder prune -af >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+}
+
+remove_service_for_rebuild() {
+  local service_name="$1"
+  local image_id=""
+
+  image_id="$(docker compose images -q "$service_name" 2>/dev/null | head -n 1 || true)"
+  docker compose rm -sf "$service_name" >/dev/null 2>&1 || true
+
+  if [[ -n "$image_id" ]]; then
+    docker image rm -f "$image_id" >/dev/null 2>&1 || true
+  fi
+}
+
 if [[ "$target_env" == "all" ]]; then
+  remove_service_for_rebuild process-audio-staging
+  remove_service_for_rebuild process-audio-production
+  prune_build_artifacts
   docker compose up -d --build --remove-orphans
   exit 0
 fi
 
 docker compose up -d ytdlp-pot-provider
+remove_service_for_rebuild "process-audio-${target_env}"
+prune_build_artifacts
 docker compose up -d --build --no-deps "process-audio-${target_env}"
 docker compose up -d --no-deps caddy
 EOF
