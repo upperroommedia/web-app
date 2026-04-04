@@ -44,10 +44,11 @@ json_output="$(
     '${SMOKE_URL}'"
 )"
 
-printf '%s' "$json_output" | python3 - <<'PY'
+JSON_OUTPUT="$json_output" python3 - <<'PY'
 import json, sys
+import os
 
-data = json.load(sys.stdin)
+data = json.loads(os.environ["JSON_OUTPUT"])
 formats = data.get("formats") or []
 has_audio = any(
     isinstance(fmt, dict)
