@@ -10,8 +10,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: nightly-media-tool-update
-  cancel-in-progress: true
+  group: process-audio-hetzner-host
+  cancel-in-progress: false
 
 jobs:
   update-and-deploy:

@@ -132,10 +132,35 @@ EOF
 rsync -az --delete --exclude '/state/' "$WORK_DIR/" "${SSH_TARGET}:${REMOTE_DIR}/"
 
 ssh "$SSH_TARGET" "mkdir -p ${REMOTE_DIR}/state/staging/tmp ${REMOTE_DIR}/state/staging/logs ${REMOTE_DIR}/state/production/tmp ${REMOTE_DIR}/state/production/logs ${REMOTE_DIR}/state/shared-browser-profile ${REMOTE_DIR}/state/browser-refresh-control && chmod 755 ${REMOTE_DIR} ${REMOTE_DIR}/state && chown -R 1000:1000 ${REMOTE_DIR}/state/staging ${REMOTE_DIR}/state/production ${REMOTE_DIR}/state/shared-browser-profile ${REMOTE_DIR}/state/browser-refresh-control"
-if [[ "$TARGET_ENV" == "all" ]]; then
-  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build --remove-orphans"
-else
-  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker compose up -d --build --remove-orphans caddy process-audio-${TARGET_ENV}"
+
+ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${TARGET_ENV}'" <<'EOF'
+set -euo pipefail
+
+remote_dir="$1"
+target_env="$2"
+lock_dir="${remote_dir}/.deploy-lock"
+
+cleanup() {
+  rmdir "$lock_dir"
+}
+
+while ! mkdir "$lock_dir" 2>/dev/null; do
+  echo "Another Hetzner deploy is in progress; waiting for lock..."
+  sleep 2
+done
+
+trap cleanup EXIT
+
+cd "$remote_dir"
+
+if [[ "$target_env" == "all" ]]; then
+  docker compose up -d --build --remove-orphans
+  exit 0
 fi
+
+docker compose up -d ytdlp-pot-provider
+docker compose up -d --build --no-deps "process-audio-${target_env}"
+docker compose up -d --no-deps caddy
+EOF
 
 echo "Deployed process-audio Hetzner stack for ${TARGET_ENV} to ${SSH_TARGET}:${REMOTE_DIR}"
