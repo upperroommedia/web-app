@@ -159,7 +159,13 @@ const mergeFiles = async (
         // Only update DB when percent actually changes (less frequent than logs)
         if (scaledPercent > previousScaledPercent) {
           previousScaledPercent = scaledPercent;
-          setProcessAudioProgress(realtimeDBref, scaledPercent, 'finalizing', 'Finalizing audio').catch((err) => {
+          setProcessAudioProgress(
+            realtimeDBref,
+            scaledPercent,
+            'finalizing',
+            'Finalizing audio',
+            percent > 0 ? Math.max(1, Math.round(percent)) : 0
+          ).catch((err) => {
             log.error('Failed to update progress in realtimeDB', {
               error: err instanceof Error ? err.message : String(err),
               percent: scaledPercent,

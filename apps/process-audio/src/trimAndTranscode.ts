@@ -185,12 +185,16 @@ const trimAndTranscode = async (
       // Only update database if progress has increased (prevent backwards jumps)
       if (scaledProgress > maxDownloadProgress) {
         maxDownloadProgress = scaledProgress;
-        setProcessAudioProgress(realtimeDBRef, scaledProgress, 'downloading', 'Downloading audio').catch((err) => {
-          log.error('Failed to update download progress', {
-            error: err instanceof Error ? err.message : String(err),
-            scaledProgress,
-          });
-        });
+        const stagePercent = progress > 0 ? Math.max(1, Math.round(progress)) : 0;
+        setProcessAudioProgress(realtimeDBRef, scaledProgress, 'downloading', 'Downloading audio', stagePercent).catch(
+          (err) => {
+            log.error('Failed to update download progress', {
+              error: err instanceof Error ? err.message : String(err),
+              scaledProgress,
+              stagePercent,
+            });
+          }
+        );
       }
     }
   };
@@ -535,7 +539,8 @@ const trimAndTranscode = async (
               realtimeDBRef,
               initialTranscodePercent,
               audioSource.type === 'YouTubeUrl' ? 'transcoding' : 'trimming',
-              audioSource.type === 'YouTubeUrl' ? 'Trimming and transcoding' : 'Trimming audio'
+              audioSource.type === 'YouTubeUrl' ? 'Trimming and transcoding' : 'Trimming audio',
+              0
             ).catch((err) => {
               log.error('Failed to set initial transcode progress', { error: err });
             });
@@ -603,7 +608,8 @@ const trimAndTranscode = async (
                 realtimeDBRef,
                 percent,
                 audioSource.type === 'YouTubeUrl' ? 'transcoding' : 'trimming',
-                audioSource.type === 'YouTubeUrl' ? 'Trimming and transcoding' : 'Trimming audio'
+                audioSource.type === 'YouTubeUrl' ? 'Trimming and transcoding' : 'Trimming audio',
+                rawPercent > 0 ? Math.max(1, Math.round(rawPercent)) : 0
               ).catch((err) => {
                 log.error('Failed to update progress in realtimeDB', {
                   error: err instanceof Error ? err.message : String(err),

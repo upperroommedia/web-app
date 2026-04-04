@@ -182,7 +182,13 @@ const trim = async (
             // Only update DB when percent actually changes (less frequent than logs)
             if (percent > previousPercent) {
               previousPercent = percent;
-              setProcessAudioProgress(realtimeDBRef, percent, 'trimming', 'Trimming audio').catch((err) => {
+              setProcessAudioProgress(
+                realtimeDBRef,
+                percent,
+                'trimming',
+                'Trimming audio',
+                rawPercent > 0 ? Math.max(1, Math.round(rawPercent)) : 0
+              ).catch((err) => {
                 log.error('Failed to update progress in realtimeDB', {
                   error: err instanceof Error ? err.message : String(err),
                   percent,

@@ -10,6 +10,8 @@ export type ProcessAudioProgressStage =
 
 export interface ProcessAudioProgressState {
   percent: number;
+  stagePercent?: number;
+  overallPercent?: number;
   stage: ProcessAudioProgressStage;
   stageLabel: string;
   updatedAt: string;
@@ -20,12 +22,18 @@ function clampPercent(percent: number): number {
 }
 
 export function buildProcessAudioProgressState(
-  percent: number,
+  overallPercent: number,
   stage: ProcessAudioProgressStage,
-  stageLabel: string
+  stageLabel: string,
+  stagePercent?: number
 ): ProcessAudioProgressState {
+  const normalizedOverallPercent = clampPercent(overallPercent);
+  const normalizedStagePercent = stagePercent === undefined ? normalizedOverallPercent : clampPercent(stagePercent);
+
   return {
-    percent: clampPercent(percent),
+    percent: normalizedStagePercent,
+    stagePercent: normalizedStagePercent,
+    overallPercent: normalizedOverallPercent,
     stage,
     stageLabel,
     updatedAt: new Date().toISOString(),
@@ -34,9 +42,10 @@ export function buildProcessAudioProgressState(
 
 export async function setProcessAudioProgress(
   ref: Reference,
-  percent: number,
+  overallPercent: number,
   stage: ProcessAudioProgressStage,
-  stageLabel: string
+  stageLabel: string,
+  stagePercent?: number
 ): Promise<void> {
-  await ref.set(buildProcessAudioProgressState(percent, stage, stageLabel));
+  await ref.set(buildProcessAudioProgressState(overallPercent, stage, stageLabel, stagePercent));
 }
