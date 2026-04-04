@@ -22,6 +22,7 @@ This is intentional. Cloud Run is no longer part of the YouTube extraction path.
 
 - Request-scoped YouTube access decisions are cached so one sermon request does not repeatedly probe YouTube after a known failure.
 - Hetzner no longer relies on RTDB cookie blobs; the shared host Chrome profile is the YouTube session source of truth.
+- Hetzner now reports runtime failures to Sentry project `process-audio-hetzner`.
 - Operational alerts now classify YouTube failures into:
   - `public_ip_or_reputation_block`
   - `cookie_session_stale`
@@ -46,6 +47,10 @@ Core runtime:
 - `PROCESS_AUDIO_BUCKET`
 - `RUNTIME_ALERT_RECIPIENTS` or the Secret Manager binding used by deploy
 - `PROCESS_AUDIO_RUNTIME_PROFILE=cloudrun|hetzner`
+- `SENTRY_DSN`
+- `SENTRY_ENVIRONMENT`
+- `SENTRY_RELEASE`
+- `SENTRY_TRACES_SAMPLE_RATE`
 
 YouTube extraction, Hetzner profile only:
 
@@ -136,6 +141,46 @@ Artifacts are written to `.tmp/youtube-loop/`.
 Deployment rule:
 
 - Do not deploy YouTube extraction changes until the local loop passes.
+
+## Sentry
+
+Hetzner `process-audio` sends runtime exceptions to Sentry project `process-audio-hetzner` in org `upper-room-media`.
+
+Implementation references:
+
+- [src/instrument.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/process-audio/src/instrument.ts)
+- [src/index.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/process-audio/src/index.ts)
+
+Current behavior:
+
+- Sentry is initialized before Express boot
+- handled request failures are captured explicitly before sermon error state is written
+- `GET /healthz` reports:
+  - `sentryEnabled`
+  - `sentryEnvironment`
+  - `sentryRelease`
+
+Hetzner deploys inject Sentry from GCP Secret Manager:
+
+- secret name: `PROCESS_AUDIO_SENTRY_DSN`
+- staging project: `urm-app-staging`
+- production project: `urm-app`
+
+Quick verification after deploy:
+
+```bash
+curl https://yt-worker-staging.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
+curl https://yt-worker.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
+```
+
+Container-level verification:
+
+```bash
+ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-staging-1 /bin/sh -lc 'env | grep -E \"^SENTRY_|^PROCESS_AUDIO_RUNTIME_(ENV|HOST|PROFILE)=\" | sort'"
+ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-production-1 /bin/sh -lc 'env | grep -E \"^SENTRY_|^PROCESS_AUDIO_RUNTIME_(ENV|HOST|PROFILE)=\" | sort'"
+```
+
+If you send a synthetic smoke event from a live container, ignore the resulting issue in Sentry immediately so it does not create operational noise.
 
 ## Local Test Topology
 

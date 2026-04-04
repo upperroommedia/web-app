@@ -60,6 +60,7 @@ The VM hosts:
 - `caddy`
 - `ytdlp-pot-provider`
 - a host-native Chrome auth stack under the `ytauth` user
+- Sentry-enabled `process-audio` containers for both environments
 
 The worker images include pinned versions of:
 
@@ -248,6 +249,23 @@ Primary scripts:
 - [scripts/deploy-process-audio-hetzner.sh](/Users/yasaad/Projects/upper-room-media/web-app/scripts/deploy-process-audio-hetzner.sh)
 - [scripts/setup-process-audio-hetzner-host-browser-auth.sh](/Users/yasaad/Projects/upper-room-media/web-app/scripts/setup-process-audio-hetzner-host-browser-auth.sh)
 
+### Sentry Configuration
+
+Hetzner `process-audio` reports to Sentry project `process-audio-hetzner` in org `upper-room-media`.
+
+Secrets read during deploy:
+
+- `PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON`
+- `RUNTIME_ALERT_RECIPIENTS`
+- `PROCESS_AUDIO_SENTRY_DSN`
+
+Sentry env injected by deploy:
+
+- `SENTRY_DSN`
+- `SENTRY_ENVIRONMENT=staging|production`
+- `SENTRY_RELEASE=<git sha>`
+- `SENTRY_TRACES_SAMPLE_RATE=0.1`
+
 ## Deploying Cloud Run process-audio
 
 Cloud Run still exists and is still deployed for the non-YouTube path.
@@ -273,12 +291,21 @@ curl -fsS https://yt-worker-staging.upperroommedia.org/healthz
 curl -fsS https://yt-worker.upperroommedia.org/healthz
 ```
 
+Sentry checks:
+
+```bash
+curl -fsS https://yt-worker-staging.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
+curl -fsS https://yt-worker.upperroommedia.org/healthz | jq '.sentryEnabled, .sentryEnvironment, .sentryRelease'
+```
+
 Container checks on the VM:
 
 ```bash
 ssh root@<hetzner-ip> "cd /opt/upperroom/process-audio-hetzner && docker compose ps"
 ssh root@<hetzner-ip> "docker logs --tail=200 process-audio-hetzner-process-audio-staging-1"
 ssh root@<hetzner-ip> "docker logs --tail=200 process-audio-hetzner-process-audio-production-1"
+ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-staging-1 /bin/sh -lc 'env | grep -E \"^SENTRY_|^PROCESS_AUDIO_RUNTIME_(ENV|HOST|PROFILE)=\" | sort'"
+ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-production-1 /bin/sh -lc 'env | grep -E \"^SENTRY_|^PROCESS_AUDIO_RUNTIME_(ENV|HOST|PROFILE)=\" | sort'"
 ```
 
 Version checks:
@@ -295,6 +322,18 @@ Smoke tests:
 bash scripts/verify-hetzner-ytdlp-smoke.sh staging
 bash scripts/verify-hetzner-ytdlp-smoke.sh production
 ```
+
+Optional Sentry smoke from a live container:
+
+```bash
+ssh root@<hetzner-ip> "docker exec -i process-audio-hetzner-process-audio-staging-1 /bin/sh -lc 'cd /workspace/apps/process-audio && node'" <<'NODE'
+const { Sentry } = require('./dist/instrument.js');
+Sentry.captureMessage('staging process-audio sentry smoke', 'info');
+Sentry.close(2000).then((ok) => process.exit(ok ? 0 : 1));
+NODE
+```
+
+Ignore the resulting synthetic issue in Sentry after verification.
 
 ## Native Browser Auth
 
