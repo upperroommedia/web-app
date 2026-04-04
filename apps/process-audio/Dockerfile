@@ -5,19 +5,22 @@ ARG PNPM_VERSION=10.10.0
 ARG PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
 ARG YT_DLP_VERSION=2026.03.17
 ARG FFMPEG_VERSION=8.1
-ARG FFMPEG_BUILD_ARCHIVE=ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz
 ARG FFMPEG_BUILD_BASE_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
 ARG DENO_VERSION=2.2.7
 ARG DEBIAN_MIRROR=https://mirrors.edge.kernel.org/debian
 ARG DEBIAN_SECURITY_MIRROR=https://security.debian.org/debian-security
 ARG DEBIAN_UPDATES_MIRROR=https://mirrors.edge.kernel.org/debian
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 # ---------- Build stage ----------
 FROM node:${NODE_VERSION}-bookworm AS build
 ARG DEBIAN_MIRROR
 ARG DEBIAN_SECURITY_MIRROR
 ARG DEBIAN_UPDATES_MIRROR
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /workspace
 
 # Install build dependencies (needed for native modules during npm install)
@@ -66,13 +69,14 @@ FROM node:${NODE_VERSION}-bookworm-slim AS production
 ARG PROCESS_AUDIO_RUNTIME_PROFILE
 ARG YT_DLP_VERSION
 ARG FFMPEG_VERSION
-ARG FFMPEG_BUILD_ARCHIVE
 ARG FFMPEG_BUILD_BASE_URL
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION
 ARG DENO_VERSION
 ARG DEBIAN_MIRROR
 ARG DEBIAN_SECURITY_MIRROR
 ARG DEBIAN_UPDATES_MIRROR
+ARG TARGETOS
+ARG TARGETARCH
 ENV NODE_ENV=production
 ENV PROCESS_AUDIO_RUNTIME_PROFILE=${PROCESS_AUDIO_RUNTIME_PROFILE}
 ENV PROCESS_AUDIO_YT_DLP_VERSION=${YT_DLP_VERSION}
@@ -94,7 +98,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
 
 RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
       apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
-      && apt-get install -y --no-install-recommends python3 python3-pip aria2 unzip \
+      && apt-get install -y --no-install-recommends python3 python3-pip unzip \
       && rm -rf /var/lib/apt/lists/* \
       && export DENO_INSTALL=/usr/local \
       && curl -fsSL https://deno.land/install.sh | sh -s -- v${DENO_VERSION} \
@@ -108,7 +112,15 @@ RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
       echo "Skipping yt-dlp/browser runtime dependencies for ${PROCESS_AUDIO_RUNTIME_PROFILE} profile"; \
     fi
 
-RUN curl -fsSL "${FFMPEG_BUILD_BASE_URL}/${FFMPEG_BUILD_ARCHIVE}" -o /tmp/ffmpeg.tar.xz \
+RUN detected_arch="$(dpkg --print-architecture)" \
+    && resolved_os="${TARGETOS:-linux}" \
+    && case "${resolved_os}/${detected_arch}" in \
+      linux/amd64) ffmpeg_archive="ffmpeg-n${FFMPEG_VERSION}-latest-linux64-gpl-${FFMPEG_VERSION}.tar.xz" ;; \
+      linux/arm64) ffmpeg_archive="ffmpeg-n${FFMPEG_VERSION}-latest-linuxarm64-gpl-${FFMPEG_VERSION}.tar.xz" ;; \
+      *) echo "Unsupported FFmpeg target platform: ${resolved_os}/${detected_arch}" >&2; exit 1 ;; \
+    esac \
+    && echo "Installing FFmpeg archive: ${ffmpeg_archive} for ${resolved_os}/${detected_arch}" \
+    && curl -fsSL "${FFMPEG_BUILD_BASE_URL}/${ffmpeg_archive}" -o /tmp/ffmpeg.tar.xz \
     && mkdir -p /opt/ffmpeg \
     && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp \
     && ffmpeg_dir="$(find /tmp -maxdepth 1 -type d -name 'ffmpeg-*' | head -n 1)" \

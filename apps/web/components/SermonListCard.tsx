@@ -32,6 +32,7 @@ import CollectionsIcon from '@mui/icons-material/Collections';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
+import PendingIcon from '@mui/icons-material/Pending';
 
 import { useObject } from 'react-firebase-hooks/database';
 import { useDocument } from 'react-firebase-hooks/firestore';
@@ -221,6 +222,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const audioStatus = currentSermon.status.audioStatus;
   const canPublish = user?.canPublish() ?? false;
   const isProcessed = audioStatus === sermonStatusType.PROCESSED;
+  const isPending = audioStatus === sermonStatusType.PENDING;
   const isProcessing = audioStatus === sermonStatusType.PROCESSING;
   const isError = audioStatus === sermonStatusType.ERROR;
   const isSoundCloudUploaded = currentSermon.status.soundCloud === uploadStatus.UPLOADED;
@@ -588,6 +590,34 @@ const SermonListCard: FunctionComponent<Props> = ({
     ) : null
   );
 
+  const renderPendingChip = () => (
+    isPending ? (
+      <Chip
+        icon={<PendingIcon />}
+        label="PENDING"
+        size="small"
+        color="default"
+        variant="outlined"
+        sx={{
+          height: { xs: 16, sm: 20 },
+          width: 'fit-content',
+          maxWidth: 'none',
+          flexShrink: 0,
+          '& .MuiChip-label': {
+            fontSize: { xs: '0.5rem', sm: '0.6rem' },
+            px: 0.5,
+            whiteSpace: 'nowrap',
+          },
+          '& .MuiChip-icon': {
+            ml: 0.5,
+            mr: -0.25,
+            fontSize: { xs: '0.7rem', sm: '0.85rem' },
+          },
+        }}
+      />
+    ) : null
+  );
+
   const renderErrorIndicator = () => (
     isError ? (
       <Tooltip title={currentSermon.status.message || 'Error'}>
@@ -833,6 +863,7 @@ const SermonListCard: FunctionComponent<Props> = ({
                     )}
                     {isProcessed && renderSeriesTag(false)}
                     <Stack direction="row" spacing={{ xs: 0.35, sm: 0.5 }} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap', minWidth: 0 }}>
+                      {renderPendingChip()}
                       {renderProcessingChip()}
                       {renderErrorIndicator()}
                     </Stack>
@@ -850,9 +881,13 @@ const SermonListCard: FunctionComponent<Props> = ({
                   sx={{
                     height: 2,
                     borderRadius: 1,
+                    overflow: 'hidden',
                     mt: 0.5,
                     bgcolor: alpha(theme.palette.warning.main, 0.15),
-                    '& .MuiLinearProgress-bar': { bgcolor: 'warning.main' }
+                    '& .MuiLinearProgress-bar': {
+                      bgcolor: 'warning.main',
+                      borderRadius: 0,
+                    }
                   }}
                 />
               )}

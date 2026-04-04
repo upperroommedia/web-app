@@ -23,4 +23,17 @@ rsync -a --delete "$ROOT_DIR/apps/process-audio/" "$OUTPUT_DIR/apps/process-audi
 rsync -a --delete "$ROOT_DIR/packages/contracts/" "$OUTPUT_DIR/packages/contracts/"
 rsync -a --delete "$ROOT_DIR/packages/shared/" "$OUTPUT_DIR/packages/shared/"
 
+cat > "$OUTPUT_DIR/.dockerignore" <<'EOF'
+**/.git
+**/.github
+**/.next
+**/.turbo
+**/.cache
+**/node_modules
+**/dist
+**/coverage
+**/*.log
+**/.DS_Store
+EOF
+
 echo "Prepared process-audio Hetzner context in $OUTPUT_DIR"

@@ -1,0 +1,53 @@
+services:
+  process-audio-cloudrun:
+    build:
+      context: ../..
+      dockerfile: apps/process-audio/Dockerfile
+      args:
+        PROCESS_AUDIO_RUNTIME_PROFILE: cloudrun
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: info
+      PROCESS_AUDIO_RUNTIME_PROFILE: cloudrun
+      PROCESS_AUDIO_RUNTIME_HOST: docker-dev
+      PROCESS_AUDIO_RUNTIME_ENV: local
+      FIREBASE_EMULATOR_HOST: host.docker.internal
+      FIRESTORE_EMULATOR_PORT: "8081"
+      FIREBASE_AUTH_EMULATOR_PORT: "9099"
+      FIREBASE_STORAGE_EMULATOR_PORT: "9199"
+      FIREBASE_DATABASE_EMULATOR_PORT: "9000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PROCESS_AUDIO_FILE_HOST_PORT:-8080}:8080"
+
+  ytdlp-pot-provider:
+    image: docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    expose:
+      - "4416"
+
+  process-audio-hetzner:
+    build:
+      context: ../..
+      dockerfile: apps/process-audio/Dockerfile
+      args:
+        PROCESS_AUDIO_RUNTIME_PROFILE: hetzner
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      PROCESS_AUDIO_RUNTIME_PROFILE: hetzner
+      PROCESS_AUDIO_RUNTIME_HOST: docker-dev
+      PROCESS_AUDIO_RUNTIME_ENV: local
+      FIREBASE_EMULATOR_HOST: host.docker.internal
+      FIRESTORE_EMULATOR_PORT: "8081"
+      FIREBASE_AUTH_EMULATOR_PORT: "9099"
+      FIREBASE_STORAGE_EMULATOR_PORT: "9199"
+      FIREBASE_DATABASE_EMULATOR_PORT: "9000"
+      YTDLP_POT_PROVIDER_BASE_URL: http://ytdlp-pot-provider:4416
+      YOUTUBE_BROWSER_FALLBACK_ENABLED: "false"
+    depends_on:
+      - ytdlp-pot-provider
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PROCESS_AUDIO_YOUTUBE_HOST_PORT:-8082}:8080"

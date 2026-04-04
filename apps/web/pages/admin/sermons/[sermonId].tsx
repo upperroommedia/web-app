@@ -1247,11 +1247,12 @@ const SermonDetailsPage = () => {
                           mt: 1,
                           height: 6,
                           borderRadius: 3,
+                          overflow: 'hidden',
                           maxWidth: 200,
                           bgcolor: alpha(theme.palette.warning.main, 0.15),
                           '& .MuiLinearProgress-bar': {
                             bgcolor: 'warning.main',
-                            borderRadius: 3,
+                            borderRadius: 0,
                           }
                         }}
                       />

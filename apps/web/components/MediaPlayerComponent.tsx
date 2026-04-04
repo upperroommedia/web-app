@@ -12,6 +12,7 @@ const storage = getStorage();
 function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   const { currentSermon } = useAudioPlayer();
   const [src, setSrc] = useState('');
+  const [resolvedSrcSermonId, setResolvedSrcSermonId] = useState<string | undefined>(undefined);
   const router = useRouter();
   const sermonId = currentSermon?.id;
   const sermonUrl = currentSermon?.url;
@@ -19,21 +20,32 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    if (!sermonId || sermonUrl) {
-      return () => {
-        cancelled = true;
-      };
-    }
     if (!sermonId) {
+      setSrc('');
+      setResolvedSrcSermonId(undefined);
       return () => {
         cancelled = true;
       };
     }
 
+    if (sermonUrl) {
+      setSrc('');
+      setResolvedSrcSermonId(undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Clear the previously resolved URL immediately so a newly selected sermon
+    // can't momentarily reuse stale audio while its storage URL is loading.
+    setSrc('');
+    setResolvedSrcSermonId(undefined);
+
     getDownloadURL(ref(storage, `intro-outro-sermons/${sermonId}`))
       .then((url) => {
         if (!cancelled) {
           setSrc((prevSrc) => (prevSrc === url ? prevSrc : url));
+          setResolvedSrcSermonId(sermonId);
         }
       })
       .catch((error) => {
@@ -46,7 +58,7 @@ function MediaPlayerComponent({ children }: { children: React.ReactNode }) {
     };
   }, [sermonId, sermonUrl]);
 
-  const resolvedSrc = sermonUrl || (sermonId ? src : '');
+  const resolvedSrc = sermonUrl || (resolvedSrcSermonId === sermonId ? src : '');
 
   return (
     <MediaPlayer

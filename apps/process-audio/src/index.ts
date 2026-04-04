@@ -75,7 +75,8 @@ const ytDlpVersion = ytdlpPath ? resolveBinaryVersion(ytdlpPath) : null;
 const ffmpegVersion = resolveBinaryVersion(getFFmpegPath(), ['-version'])
   .replace(/^ffmpeg version\s+/i, '')
   .trim();
-const aria2Version = youtubeProcessingEnabled ? resolveBinaryVersion('aria2c', ['--version']).split('\n')[0].trim() : null;
+const configuredExternalDownloader = youtubeProcessingEnabled ? process.env.YTDLP_EXTERNAL_DOWNLOADER?.trim() || null : null;
+const externalDownloaderVersion = configuredExternalDownloader ? resolveBinaryVersion(configuredExternalDownloader, ['--version']).split('\n')[0].trim() : null;
 const concurrencyConfig = getProcessAudioConcurrencyConfig();
 const ytDlpSleepRequestsSeconds = youtubeProcessingEnabled ? process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null : null;
 const ytDlpSleepIntervalSeconds = youtubeProcessingEnabled ? process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null : null;
@@ -121,7 +122,8 @@ logger.info('Service initializing', {
   runtimeEnv,
   ytDlpVersion,
   ffmpegVersion,
-  aria2Version,
+  externalDownloader: configuredExternalDownloader,
+  externalDownloaderVersion,
   finalBrowserFallbackConfigured,
   poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
   concurrency: concurrencyConfig,
@@ -202,7 +204,8 @@ app.get('/healthz', (req, res) => {
     ytDlpForceIpv4,
     ytDlpVersion,
     ffmpegVersion,
-    aria2Version,
+    externalDownloader: configuredExternalDownloader,
+    externalDownloaderVersion,
     concurrency: getProcessAudioConcurrencyConfig(),
   });
 });
