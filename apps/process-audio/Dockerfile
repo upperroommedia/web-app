@@ -98,7 +98,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
 
 RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
       apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
-      && apt-get install -y --no-install-recommends python3 python3-pip aria2 unzip \
+      && apt-get install -y --no-install-recommends python3 python3-pip unzip \
       && rm -rf /var/lib/apt/lists/* \
       && export DENO_INSTALL=/usr/local \
       && curl -fsSL https://deno.land/install.sh | sh -s -- v${DENO_VERSION} \

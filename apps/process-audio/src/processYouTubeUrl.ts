@@ -394,12 +394,12 @@ function shouldUseCookiesForPublicVideos(): boolean {
 
 function getYtDlpExternalDownloader(): string | undefined {
   const value = process.env.YTDLP_EXTERNAL_DOWNLOADER?.trim();
-  return value || 'aria2c';
+  return value || undefined;
 }
 
 function getYtDlpExternalDownloaderArgs(): string | undefined {
   const value = process.env.YTDLP_EXTERNAL_DOWNLOADER_ARGS?.trim();
-  return value || '-x 16 -s 16 -j 1 -k 1M';
+  return value || undefined;
 }
 
 function applyYtDlpExternalDownloaderArgs(args: string[]): void {
