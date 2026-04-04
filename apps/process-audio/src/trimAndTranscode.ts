@@ -19,6 +19,19 @@ import { LogContext } from './context';
 import { ffmpegSemaphore, ytDlpDownloadSemaphore } from './concurrency';
 import { setProcessAudioProgress } from './processAudioProgress';
 
+function buildQueuedStageLabel(args: { action: string; active: number; waiting: number; limit: number }): string {
+  const queuedBehind = args.waiting + (args.active >= args.limit ? args.active : 0);
+  if (args.action === 'youtube_download') {
+    return queuedBehind > 0
+      ? `Queued behind ${queuedBehind} other sermon download${queuedBehind === 1 ? '' : 's'}`
+      : 'Queued for download';
+  }
+
+  return queuedBehind > 0
+    ? `Queued behind ${queuedBehind} other processing task${queuedBehind === 1 ? '' : 's'}`
+    : 'Queued for processing';
+}
+
 // Parse ffmpeg stderr for progress and duration
 function parseFFmpegProgress(stderrLine: string): { time?: string; duration?: string; speed?: string; bitrate?: string } {
   const result: { time?: string; duration?: string; speed?: string; bitrate?: string } = {};
@@ -184,7 +197,8 @@ const trimAndTranscode = async (
 
   const acquireSemaphoreSlot = async (
     action: string,
-    semaphore: { name: string; acquire: () => Promise<() => void>; snapshot: () => { active: number; waiting: number; limit: number } }
+    semaphore: { name: string; acquire: () => Promise<() => void>; snapshot: () => { active: number; waiting: number; limit: number } },
+    onQueued?: (snapshot: { active: number; waiting: number; limit: number }) => Promise<void>
   ): Promise<() => void> => {
     const before = semaphore.snapshot();
     log.info('Waiting for process-audio concurrency slot', {
@@ -194,6 +208,10 @@ const trimAndTranscode = async (
       waiting: before.waiting,
       limit: before.limit,
     });
+
+    if ((before.active >= before.limit || before.waiting > 0) && onQueued) {
+      await onQueued(before);
+    }
 
     const release = await semaphore.acquire();
 
@@ -233,7 +251,25 @@ const trimAndTranscode = async (
           error: err instanceof Error ? err.message : String(err),
         });
       });
-      const releaseYtDlpSlot = await acquireSemaphoreSlot('youtube_download', ytDlpDownloadSemaphore);
+      const releaseYtDlpSlot = await acquireSemaphoreSlot(
+        'youtube_download',
+        ytDlpDownloadSemaphore,
+        async (snapshot) => {
+          await setProcessAudioProgress(realtimeDBRef, 0, 'queued', buildQueuedStageLabel({
+            action: 'youtube_download',
+            active: snapshot.active,
+            waiting: snapshot.waiting,
+            limit: snapshot.limit,
+          })).catch((err) => {
+            log.error('Failed to set queued download progress state', {
+              error: err instanceof Error ? err.message : String(err),
+              active: snapshot.active,
+              waiting: snapshot.waiting,
+              limit: snapshot.limit,
+            });
+          });
+        }
+      );
       let downloadedFile: string;
       try {
         downloadedFile = await downloadYouTubeAudioToFile(

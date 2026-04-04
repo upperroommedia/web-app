@@ -1,4 +1,5 @@
 export type ProcessingProgressStage =
+  | 'queued'
   | 'downloading'
   | 'transcoding'
   | 'trimming'

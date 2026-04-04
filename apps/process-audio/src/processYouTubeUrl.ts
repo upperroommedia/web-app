@@ -1260,6 +1260,11 @@ type DownloadActivityProbe = {
   latestMtimeMs: number | null;
 };
 
+type YtDlpStateProbe = {
+  currentFragmentIndex: number | null;
+  rawState: string | null;
+};
+
 function extractFragmentProgressPercent(
   partialFiles: DownloadActivityProbe['partialFiles'],
   totalFragments: number | undefined
@@ -1313,6 +1318,30 @@ async function probeDownloadActivity(outputFilePath: string): Promise<DownloadAc
   }
 
   return { partialFiles, latestMtimeMs };
+}
+
+async function probeYtDlpState(outputFilePath: string): Promise<YtDlpStateProbe> {
+  const safeOutputFilePath = ensureSafeTempPath(outputFilePath);
+  const dir = path.dirname(safeOutputFilePath);
+  const baseName = path.basename(safeOutputFilePath);
+  const statePath = ensureSafeTempPath(path.join(dir, `${baseName}.ytdl`));
+
+  try {
+    const rawState = await readFile(statePath, 'utf8');
+    const parsed = JSON.parse(rawState) as {
+      downloader?: { current_fragment?: { index?: unknown } };
+    };
+    const index = parsed?.downloader?.current_fragment?.index;
+    return {
+      currentFragmentIndex: typeof index === 'number' && Number.isFinite(index) ? index : null,
+      rawState: rawState.trim() || null,
+    };
+  } catch {
+    return {
+      currentFragmentIndex: null,
+      rawState: null,
+    };
+  }
 }
 
 async function runCookieHealthcheck(
@@ -3183,6 +3212,7 @@ export const downloadYouTubeAudioToFile = async (
             size: file.size,
             mtimeMs: file.mtimeMs,
           }));
+          const ytdlpState = await probeYtDlpState(outputFilePath);
 
           log.error('yt-dlp download stalled; terminating process', {
             extractionMode: mode,
@@ -3191,13 +3221,15 @@ export const downloadYouTubeAudioToFile = async (
             stallDurationMs,
             lastActivityReason,
             lastObservedPartialFiles: summarizedFiles,
+            ytdlpCurrentFragmentIndex: ytdlpState.currentFragmentIndex,
+            ytdlpRawState: ytdlpState.rawState,
           });
           ytdlp.kill('SIGTERM');
           rejectWithError(
             buildAnnotatedYouTubeError(
               `yt-dlp download stalled after ${Math.round(stallDurationMs / 1000)}s without progress. Last activity=${lastActivityReason}. Partial files=${JSON.stringify(
                 summarizedFiles
-              )}. stderr: ${stderrBuffer.trim()}`,
+              )}. ytdlState=${JSON.stringify(ytdlpState)}. stderr: ${stderrBuffer.trim()}`,
               mode
             )
           );
@@ -3966,6 +3998,7 @@ export const downloadYouTubeSection = async (
             size: file.size,
             mtimeMs: file.mtimeMs,
           }));
+          const ytdlpState = await probeYtDlpState(outputFilePath);
 
           log.error('yt-dlp section download stalled; terminating process', {
             attempt: mode,
@@ -3974,6 +4007,8 @@ export const downloadYouTubeSection = async (
             stallDurationMs,
             lastActivityReason,
             lastObservedPartialFiles: summarizedFiles,
+            ytdlpCurrentFragmentIndex: ytdlpState.currentFragmentIndex,
+            ytdlpRawState: ytdlpState.rawState,
           });
 
           ytdlp.kill('SIGTERM');
@@ -3981,7 +4016,7 @@ export const downloadYouTubeSection = async (
             buildAnnotatedYouTubeError(
               `yt-dlp section download stalled after ${Math.round(stallDurationMs / 1000)}s without progress. Last activity=${lastActivityReason}. Partial files=${JSON.stringify(
                 summarizedFiles
-              )}. stderr: ${stderrBuffer.trim()}`,
+              )}. ytdlState=${JSON.stringify(ytdlpState)}. stderr: ${stderrBuffer.trim()}`,
               mode
             )
           );

@@ -418,6 +418,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const processingProgressState = parseProcessingProgress(snapshot?.val());
   const processingProgress = processingProgressState?.percent ?? 0;
   const processingStageLabel = processingProgressState?.stageLabel ?? 'Processing';
+  const isQueuedForProcessing = processingProgressState?.stage === 'queued';
   const imageSize = isDesktop ? 150 : isTablet ? 90 : 70;
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
   const seriesImage = series?.images?.find((img) => img.type === 'wide')
@@ -907,8 +908,8 @@ const SermonListCard: FunctionComponent<Props> = ({
 
               {isProcessing && processingProgressState && (
                 <LinearProgress
-                  variant="determinate"
-                  value={processingProgress}
+                  variant={isQueuedForProcessing ? 'indeterminate' : 'determinate'}
+                  value={isQueuedForProcessing ? undefined : processingProgress}
                   sx={{
                     height: 2,
                     borderRadius: 1,

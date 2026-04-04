@@ -123,6 +123,7 @@ const SermonDetailsPage = () => {
   const processingProgressState = parseProcessingProgress(progressSnapshot?.val());
   const processingProgress = processingProgressState?.percent ?? 0;
   const processingStageLabel = processingProgressState?.stageLabel ?? 'Processing';
+  const isQueuedForProcessing = processingProgressState?.stage === 'queued';
 
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
@@ -678,7 +679,7 @@ const SermonDetailsPage = () => {
                                 label={
                                   sermon.status.audioStatus === sermonStatusType.PROCESSING
                                     ? processingProgressState
-                                      ? `${processingStageLabel}${processingProgress > 0 ? ` (${processingProgress}%)` : ''}`
+                                      ? `${processingStageLabel}${processingProgress > 0 && !isQueuedForProcessing ? ` (${processingProgress}%)` : ''}`
                                       : statusInfo.label
                                     : statusInfo.label
                                 }
@@ -690,8 +691,8 @@ const SermonDetailsPage = () => {
                             {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgressState && (
                               <Box sx={{ mt: 1, maxWidth: 220 }}>
                                 <LinearProgress
-                                  variant="determinate"
-                                  value={processingProgress}
+                                  variant={isQueuedForProcessing ? 'indeterminate' : 'determinate'}
+                                  value={isQueuedForProcessing ? undefined : processingProgress}
                                   sx={{
                                     height: 6,
                                     borderRadius: 3,
