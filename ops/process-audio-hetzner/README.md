@@ -266,13 +266,13 @@ Sentry env injected by deploy:
 - `SENTRY_RELEASE=process-audio-hetzner@<staging|production>-<git sha>`
 - `SENTRY_TRACES_SAMPLE_RATE=0.1`
 - `SENTRY_ENABLE_LOGS=true`
-- `SENTRY_LOG_LEVELS=warn,error`
+- `SENTRY_LOG_LEVELS=info,warn,error`
 
 Operational observability defaults:
 
 - request traces stay enabled at `SENTRY_TRACES_SAMPLE_RATE=0.1`
 - manual spans cover the end-to-end sermon run, media download/transcode, and intro/outro merge stages
-- Winston forwards `warn` and `error` logs into Sentry Logs by default to avoid high-volume noise from the normal `info/debug` stream
+- Winston forwards structured `info`, `warn`, and `error` logs into Sentry Logs by default so request lifecycle, format selection, and yt-dlp stall diagnostics are visible without SSH
 
 ## Deploying Cloud Run process-audio
 

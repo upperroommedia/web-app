@@ -128,7 +128,7 @@ const trimAndTranscode = async (
     // Example: 100 min audio, transcode 40-60: (40/60)/5 * 98 = 13.3%
     const downloadEndPercent =
       totalProcessingTime > 0
-        ? Math.min(98, Math.round((downloadTime / totalProcessingTime / DOWNLOAD_SPEED_MULTIPLIER) * 98))
+        ? Math.max(2, Math.min(98, Math.round((downloadTime / totalProcessingTime / DOWNLOAD_SPEED_MULTIPLIER) * 98)))
         : 0;
 
     // Transcode starts where download ends

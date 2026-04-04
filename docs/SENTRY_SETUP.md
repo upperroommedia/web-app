@@ -90,7 +90,7 @@ Runtime observability notes:
 - The Hetzner deploy sets:
   - `SENTRY_TRACES_SAMPLE_RATE=0.1`
   - `SENTRY_ENABLE_LOGS=true`
-  - `SENTRY_LOG_LEVELS=warn,error`
+  - `SENTRY_LOG_LEVELS=info,warn,error`
 - `GET /healthz` should report:
   - `sentryEnabled`
   - `sentryEnvironment`

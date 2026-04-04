@@ -74,6 +74,8 @@ interface YouTubeFragmentFormat {
 interface YouTubeJsonInfo {
   duration?: number;
   language?: string;
+  live_status?: string;
+  was_live?: boolean;
   formats?: YouTubeFragmentFormat[];
 }
 
@@ -1511,17 +1513,32 @@ async function downloadBrowserFallbackSection(
   return finalPath;
 }
 
+function isCompletedYouTubeLivestream(info: Pick<YouTubeJsonInfo, 'live_status' | 'was_live'> | undefined): boolean {
+  if (!info) {
+    return false;
+  }
+
+  return info.was_live === true || info.live_status === 'post_live';
+}
+
 function selectPreferredAudioFormat(
   formats: YouTubeFragmentFormat[],
-  originalLanguage?: string
+  originalLanguage?: string,
+  info?: Pick<YouTubeJsonInfo, 'live_status' | 'was_live'>
 ): YouTubeFragmentFormat | undefined {
-  const candidates = formats.filter((f) => f && f.vcodec === 'none');
+  const completedLivestream = isCompletedYouTubeLivestream(info);
+  const audioOnlyCandidates = formats.filter((f) => f && f.vcodec === 'none');
+  const livestreamMuxedCandidates = completedLivestream
+    ? formats.filter((f) => f && f.vcodec !== 'none' && (f.protocol || '').toLowerCase().includes('m3u8'))
+    : [];
+  const candidates = livestreamMuxedCandidates.length > 0 ? livestreamMuxedCandidates : audioOnlyCandidates;
   if (candidates.length === 0) return undefined;
 
   const normalize = (value: string | undefined): string => value?.trim().toLowerCase() || '';
   const targetLanguage = normalize(originalLanguage);
   const getCombinedDescriptor = (fmt: YouTubeFragmentFormat): string =>
     `${fmt.format_note || ''} ${fmt.format || ''}`.trim().toLowerCase();
+  const getProtocol = (fmt: YouTubeFragmentFormat): string => normalize(fmt.protocol);
   const isOriginalAudioTrack = (fmt: YouTubeFragmentFormat): boolean => {
     const descriptor = getCombinedDescriptor(fmt);
     if (descriptor.includes('original')) return true;
@@ -1529,7 +1546,7 @@ function selectPreferredAudioFormat(
     return false;
   };
 
-  const originalCandidates = candidates.filter(isOriginalAudioTrack);
+  const originalCandidates = livestreamMuxedCandidates.length > 0 ? [] : candidates.filter(isOriginalAudioTrack);
   const effectiveCandidates = originalCandidates.length > 0 ? originalCandidates : candidates;
 
   candidates.sort((a, b) => {
@@ -1537,17 +1554,25 @@ function selectPreferredAudioFormat(
       let s = 0;
       const descriptor = getCombinedDescriptor(fmt);
       const language = normalize(fmt.language);
+      const protocol = getProtocol(fmt);
+      const isAudioOnly = fmt.vcodec === 'none';
       if (descriptor.includes('original')) s += 1000;
       if (descriptor.includes('default')) s += 300;
       if (targetLanguage && language === targetLanguage) s += 200;
-      if (fmt.ext === 'm4a') s += 100;
-      if (fmt.format_id === '140') s += 50;
+      if (!completedLivestream && isAudioOnly) s += 400;
+      if (completedLivestream && protocol.includes('m3u8')) s += 1500;
+      if (completedLivestream && protocol.includes('dash')) s -= 1000;
+      if (completedLivestream && protocol.includes('http_dash_segments')) s -= 4000;
+      if (protocol === 'https') s += 120;
+      if (protocol.includes('m3u8')) s += 100;
+      if (fmt.ext === 'm4a') s += completedLivestream ? 20 : 100;
+      if (!completedLivestream && fmt.format_id === '140') s += 50;
       if (descriptor.includes('drc')) s -= 25;
       if (typeof fmt.language_preference === 'number') s += fmt.language_preference * 10;
       if (typeof fmt.source_preference === 'number') s += fmt.source_preference;
       if (typeof fmt.preference === 'number') s += fmt.preference;
       if (typeof fmt.abr === 'number') s += Math.min(fmt.abr, 320);
-      if (Array.isArray(fmt.fragments) && fmt.fragments.length > 0) s += 10;
+      if (!completedLivestream && Array.isArray(fmt.fragments) && fmt.fragments.length > 0) s += 10;
       return s;
     };
     return score(b) - score(a);
@@ -1558,17 +1583,25 @@ function selectPreferredAudioFormat(
       let s = 0;
       const descriptor = getCombinedDescriptor(fmt);
       const language = normalize(fmt.language);
+      const protocol = getProtocol(fmt);
+      const isAudioOnly = fmt.vcodec === 'none';
       if (descriptor.includes('original')) s += 1000;
       if (descriptor.includes('default')) s += 300;
       if (targetLanguage && language === targetLanguage) s += 200;
-      if (fmt.ext === 'm4a') s += 100;
-      if (fmt.format_id === '140') s += 50;
+      if (!completedLivestream && isAudioOnly) s += 400;
+      if (completedLivestream && protocol.includes('m3u8')) s += 1500;
+      if (completedLivestream && protocol.includes('dash')) s -= 1000;
+      if (completedLivestream && protocol.includes('http_dash_segments')) s -= 4000;
+      if (protocol === 'https') s += 120;
+      if (protocol.includes('m3u8')) s += 100;
+      if (fmt.ext === 'm4a') s += completedLivestream ? 20 : 100;
+      if (!completedLivestream && fmt.format_id === '140') s += 50;
       if (descriptor.includes('drc')) s -= 25;
       if (typeof fmt.language_preference === 'number') s += fmt.language_preference * 10;
       if (typeof fmt.source_preference === 'number') s += fmt.source_preference;
       if (typeof fmt.preference === 'number') s += fmt.preference;
       if (typeof fmt.abr === 'number') s += Math.min(fmt.abr, 320);
-      if (Array.isArray(fmt.fragments) && fmt.fragments.length > 0) s += 10;
+      if (!completedLivestream && Array.isArray(fmt.fragments) && fmt.fragments.length > 0) s += 10;
       return s;
     };
     return score(b) - score(a);
@@ -1693,7 +1726,7 @@ async function resolveAudioUrlWithInProcessBrowserFallback(
       'browser_fallback'
     );
     const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
-    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
+    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language, parsed);
 
     if (!selected?.url) {
       throw buildAnnotatedYouTubeError('yt-dlp did not return an audio-only format URL.', 'browser_fallback');
@@ -1807,7 +1840,7 @@ export const getYouTubeTrimRoutingDecision = async (
     }
 
     const formats = Array.isArray(parsed.formats) ? parsed.formats : [];
-    const selected = selectPreferredAudioFormat(formats, parsed.language);
+    const selected = selectPreferredAudioFormat(formats, parsed.language, parsed);
     if (!selected) {
       return {
         strategy: 'direct_url',
@@ -2138,7 +2171,7 @@ export const getYouTubeAudioUrl = async (
       throw new Error(`Failed to parse yt-dlp JSON output: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
+    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language, parsed);
     const streamUrl = selected?.url;
 
     if (streamUrl && streamUrl.startsWith('http')) {
@@ -2147,9 +2180,13 @@ export const getYouTubeAudioUrl = async (
       log.info('Successfully extracted YouTube audio URL', {
         format: selected?.ext || selected?.format_id || 'unknown',
         selectedFormatId: selected?.format_id || null,
+        selectedProtocol: selected?.protocol || null,
         selectedLanguage: selected?.language || null,
         selectedFormatNote: selected?.format_note || null,
+        selectedHasVideo: selected ? selected.vcodec !== 'none' : null,
         videoLanguage: parsed.language || null,
+        liveStatus: parsed.live_status || null,
+        wasLive: parsed.was_live === true,
         duration: parsed.duration ?? selected?.duration,
         urlLength: streamUrl.length,
         urlPreview: streamUrl.substring(0, 100) + '...',
@@ -2753,15 +2790,19 @@ async function resolvePreferredAudioFormatId(
 
   const parseSelectedFormatId = (stdout: string): string => {
     const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
-    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language);
+    const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language, parsed);
     if (!selected?.format_id) {
       throw new Error(`yt-dlp did not return a preferred audio format for ${purpose}`);
     }
     log.info(`Selected preferred YouTube audio format for ${purpose}`, {
       formatId: selected.format_id,
+      selectedProtocol: selected.protocol || null,
       selectedLanguage: selected.language || null,
       selectedFormatNote: selected.format_note || null,
+      selectedHasVideo: selected.vcodec !== 'none',
       videoLanguage: parsed.language || null,
+      liveStatus: parsed.live_status || null,
+      wasLive: parsed.was_live === true,
     });
     return selected.format_id;
   };
@@ -3075,7 +3116,7 @@ async function getYouTubeAudioFragments(
     }
 
     const formats = Array.isArray(parsed.formats) ? parsed.formats : [];
-    const selected = selectPreferredAudioFormat(formats, parsed.language);
+    const selected = selectPreferredAudioFormat(formats, parsed.language, parsed);
     if (!selected) {
       throw new Error('No audio format was returned by yt-dlp');
     }
