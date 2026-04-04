@@ -259,23 +259,23 @@ const SermonDetailsPage = () => {
       const { introRef, outroRef } = await getIntroAndOutro(sermon);
       const payload: AddIntroOutroInputType = sermon.youtubeUrl
         ? {
-            id: sermon.id,
-            youtubeUrl: sermon.youtubeUrl,
-            startTime: sermon.sourceStartTime,
-            duration: sermon.trimDurationSeconds ?? 0,
-            deleteOriginal: true,
-            introUrl: introRef,
-            outroUrl: outroRef,
-          }
+          id: sermon.id,
+          youtubeUrl: sermon.youtubeUrl,
+          startTime: sermon.sourceStartTime,
+          duration: sermon.trimDurationSeconds ?? 0,
+          deleteOriginal: true,
+          introUrl: introRef,
+          outroUrl: outroRef,
+        }
         : {
-            id: sermon.id,
-            storageFilePath: `sermons/${sermon.id}`,
-            startTime: sermon.sourceStartTime,
-            duration: sermon.trimDurationSeconds ?? 0,
-            deleteOriginal: true,
-            introUrl: introRef,
-            outroUrl: outroRef,
-          };
+          id: sermon.id,
+          storageFilePath: `sermons/${sermon.id}`,
+          startTime: sermon.sourceStartTime,
+          duration: sermon.trimDurationSeconds ?? 0,
+          deleteOriginal: true,
+          introUrl: introRef,
+          outroUrl: outroRef,
+        };
 
       await generateAddIntroOutroTask(payload, {
         metadata: { operationKey: createOperationKey('sermon-details-retry-processing', sermon.id) },
@@ -703,20 +703,10 @@ const SermonDetailsPage = () => {
                                     }
                                   }}
                                 />
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                                  {processingStageLabel}{processingProgress > 0 ? ` • ${processingProgress}%` : ''}
-                                </Typography>
                               </Box>
                             )}
                           </Box>
                         )}
-
-                        {isSermonProcessingLocked(sermon) && (
-                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
-                            This sermon cannot be edited while audio is queued or processing.
-                          </Typography>
-                        )}
-
                       </Stack>
                     </Stack>
                   </Stack>
