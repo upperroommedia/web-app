@@ -60,13 +60,10 @@ steps:
           --min-instances "${_MIN_INSTANCES}"
           --max-instances "${_MAX_INSTANCES}"
           --timeout "${_TIMEOUT}"
+          --clear-network
           --set-secrets "$${set_secrets}"
           --set-env-vars "NODE_ENV=production,FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID},FIREBASE_STORAGE_BUCKET=${_FIREBASE_STORAGE_BUCKET},FIREBASE_DATABASE_URL=${_FIREBASE_DATABASE_URL},PROCESS_AUDIO_RUNTIME_PROFILE=cloudrun,PROCESS_AUDIO_RUNTIME_HOST=cloud-run,PROCESS_AUDIO_RUNTIME_ENV=${_RUNTIME_ENV}"
         )
-
-        if [[ -n "${_NETWORK}" && -n "${_SUBNET}" ]]; then
-          DEPLOY_ARGS+=(--network "${_NETWORK}" --subnet "${_SUBNET}" --vpc-egress all-traffic)
-        fi
 
         gcloud run "${DEPLOY_ARGS[@]}"
 
@@ -92,5 +89,3 @@ substitutions:
   _MIN_INSTANCES: '0'
   _MAX_INSTANCES: '10'
   _TIMEOUT: '3600'
-  _NETWORK: ''
-  _SUBNET: ''
