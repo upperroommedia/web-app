@@ -47,6 +47,7 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
     liveSermonsById: {},
     resolvedIds: new Set<string>(),
   });
+  const sermonIdsKey = useMemo(() => sermonIds.join('\u0000'), [sermonIds]);
 
   useEffect(() => {
     if (sermonIds.length === 0) {
@@ -56,11 +57,6 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
       });
       return;
     }
-
-    setState({
-      liveSermonsById: {},
-      resolvedIds: new Set<string>(),
-    });
 
     const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon>; resolved: boolean }>();
     const updateState = () => {
@@ -79,6 +75,16 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
         resolvedIds: nextResolvedIds,
       });
     };
+
+    setState((currentState) => {
+      const visibleIdSet = new Set(sermonIds);
+      return {
+        liveSermonsById: Object.fromEntries(
+          Object.entries(currentState.liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
+        ),
+        resolvedIds: new Set([...currentState.resolvedIds].filter((sermonId) => visibleIdSet.has(sermonId))),
+      };
+    });
 
     const unsubscribeCallbacks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
       const sermonsQuery = query(
@@ -110,7 +116,7 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
     return () => {
       unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
     };
-  }, [sermonIds]);
+  }, [sermonIdsKey]);
 
   return useMemo(() => {
     if (sermonIds.length === 0) {
