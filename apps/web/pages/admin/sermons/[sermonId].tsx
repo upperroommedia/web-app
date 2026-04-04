@@ -123,10 +123,26 @@ const SermonDetailsPage = () => {
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
   const isCurrentlyPlaying = currentSermon?.id === sermonId && playing;
+  const buildSeriesPreview = useCallback((seriesId: string): Series => ({
+    id: seriesId,
+    name: sermon?.seriesName || 'Series',
+    subtitle: '',
+    summary: '',
+    images: sermon?.seriesImage ? [sermon.seriesImage] : [],
+    itemCount: 0,
+    publishedItemCount: 0,
+    status: 'draft',
+    subsplashId: '',
+    ownerId: '',
+    createdAt: null,
+    updatedAt: null,
+  }), [sermon?.seriesImage, sermon?.seriesName]);
   const refreshSeriesState = useCallback(async (seriesId: string) => {
     const latestSeriesSnapshot = await getDoc(doc(firestore, 'series', seriesId).withConverter(seriesConverter));
     if (latestSeriesSnapshot.exists()) {
       setSeries(latestSeriesSnapshot.data());
+    } else {
+      setSeries(null);
     }
   }, []);
 
@@ -141,6 +157,7 @@ const SermonDetailsPage = () => {
     setError(null);
 
     if (sermon.seriesId) {
+      setSeries(buildSeriesPreview(sermon.seriesId));
       getDoc(doc(firestore, 'series', sermon.seriesId).withConverter(seriesConverter))
         .then((seriesDoc) => {
           if (seriesDoc.exists()) {
@@ -174,7 +191,7 @@ const SermonDetailsPage = () => {
     }
     // Intentionally depend on ids only to avoid refetch on every sermon snapshot (e.g. metadata-only updates)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sermon read for permission/seriesId/uploaderId; ids are sufficient
-  }, [sermon?.id, sermon?.seriesId, sermon?.uploaderId, isAdmin, canPublish, user?.uid]);
+  }, [buildSeriesPreview, sermon?.id, sermon?.seriesId, sermon?.uploaderId, isAdmin, canPublish, user?.uid]);
 
   // Handle errors from real-time listener
   useEffect(() => {
@@ -390,6 +407,9 @@ const SermonDetailsPage = () => {
     ? (`${uploader.firstName ?? ''} ${uploader.lastName ?? ''}`.trim() || uploader.displayName || uploader.email)
     : 'Unknown';
   const derivedSeriesSubtitle = series ? `${series.publishedItemCount || 0} part series` : null;
+  const seriesCardImage = series?.images?.find((img) => img.type === 'wide')
+    || series?.images?.find((img) => img.type === 'banner')
+    || series?.images?.find((img) => img.type === 'square');
 
   // Check if user can edit/delete
   const canEdit = sermon && (
@@ -780,11 +800,11 @@ const SermonDetailsPage = () => {
                       }}
                     >
                       <AvatarWithDefaultImage
-                        width={50}
-                        height={50}
+                        width={104}
+                        height={58}
                         altName={series.name}
                         borderRadius={6}
-                        image={series.images?.find((img) => img.type === 'square')}
+                        image={seriesCardImage}
                       />
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="subtitle1" fontWeight={600} sx={{ fontSize: { xs: '0.85rem', sm: '1rem' } }}>

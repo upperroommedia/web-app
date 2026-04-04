@@ -5,6 +5,7 @@ export type PublishUiState =
   | 'published'
   | 'partial'
   | 'not_published'
+  | 'checking'
   | 'publishing'
   | 'error'
   | 'blocked'

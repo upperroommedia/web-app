@@ -8,6 +8,7 @@ import Collapse from '@mui/material/Collapse';
 import Divider from '@mui/material/Divider';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
@@ -108,6 +109,8 @@ type ActionPlan = {
   icon: ReactNode;
 };
 
+type ActiveRunMode = 'idle' | 'publish' | 'unpublish' | 'advanced';
+
 const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
   const busyDetails = parseLockBusyDetails(error);
   if (!busyDetails) {
@@ -170,6 +173,15 @@ const getStatusTone = (
           borderColor: alpha(theme.palette.info.main, 0.32),
           color: theme.palette.info.dark,
           '& .MuiChip-deleteIcon': { color: theme.palette.info.main },
+        },
+      };
+    case 'checking':
+      return {
+        sx: {
+          bgcolor: alpha(theme.palette.action.selected, 0.5),
+          borderColor: alpha(theme.palette.divider, 1),
+          color: theme.palette.text.secondary,
+          '& .MuiChip-deleteIcon': { color: theme.palette.text.secondary },
         },
       };
     case 'partial':
@@ -297,6 +309,11 @@ const SoundCloudChipAvatar = () => {
   );
 };
 
+const getSeriesAvatarImage = (series: Series | null): Series['images'][number] | undefined =>
+  series?.images?.find((image) => image.type === 'wide')
+  || series?.images?.find((image) => image.type === 'banner')
+  || series?.images?.find((image) => image.type === 'square');
+
 const ExternalDestinationLink: FunctionComponent<{ href: string; label: string }> = ({ href, label }) => (
   <Box
     component="a"
@@ -332,11 +349,25 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
 }) => {
   const { user } = useAuth();
   const theme = useTheme();
+  const buildSeriesPreview = useCallback((seriesId: string): Series => ({
+    id: seriesId,
+    name: sermon.seriesName || 'Series',
+    subtitle: '',
+    summary: '',
+    images: sermon.seriesImage ? [sermon.seriesImage] : [],
+    itemCount: 0,
+    publishedItemCount: 0,
+    status: 'draft',
+    subsplashId: '',
+    ownerId: '',
+    createdAt: null,
+    updatedAt: null,
+  }), [sermon.seriesImage, sermon.seriesName]);
   const [advancedOpen, setAdvancedOpen] = useState(initialAdvancedOpen);
   const [notice, setNotice] = useState<NoticeState>(null);
-  const [series, setSeries] = useState<Series | null>(null);
+  const [series, setSeries] = useState<Series | null>(() => (sermon.seriesId ? buildSeriesPreview(sermon.seriesId) : null));
   const [seriesLoading, setSeriesLoading] = useState(false);
-  const [seriesPublished, setSeriesPublished] = useState(false);
+  const [seriesPublished, setSeriesPublished] = useState<boolean | null>(sermon.seriesId ? null : false);
   const [soundCloudError, setSoundCloudError] = useState<ReactNode | null>(null);
   const [destinationErrors, setDestinationErrors] = useState<{
     lists?: string;
@@ -347,6 +378,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const [isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
   const [isPublishingToSeries, setIsPublishingToSeries] = useState(false);
   const [isPublishingEverywhere, setIsPublishingEverywhere] = useState(false);
+  const [activeRunMode, setActiveRunMode] = useState<ActiveRunMode>('idle');
   const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
   const [selectedSeriesEnabled, setSelectedSeriesEnabled] = useState(false);
   const [selectedSoundCloudEnabled, setSelectedSoundCloudEnabled] = useState(false);
@@ -432,16 +464,20 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         return;
       }
 
-      setSeriesLoading(true);
+      setSeries(buildSeriesPreview(sermon.seriesId));
+      setSeriesPublished(null);
+      setSeriesLoading(!sermon.seriesName);
       try {
         const seriesDoc = await getDoc(doc(firestore, 'series', sermon.seriesId).withConverter(seriesConverter));
         if (!cancelled) {
-          setSeries(seriesDoc.exists() ? seriesDoc.data() : null);
+          setSeries(seriesDoc.exists() ? seriesDoc.data() : buildSeriesPreview(sermon.seriesId));
         }
 
         const seriesItemDoc = await getDoc(doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id));
         if (!cancelled) {
-          setSeriesPublished(seriesItemDoc.exists() && seriesItemDoc.data()?.publishedToSubsplash === true);
+          setSeriesPublished(
+            seriesItemDoc.exists() && seriesItemDoc.data()?.publishedToSubsplash === true
+          );
         }
       } catch (error) {
         if (!cancelled) {
@@ -463,22 +499,37 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [sermon.id, sermon.seriesId]);
+  }, [buildSeriesPreview, sermon.id, sermon.seriesId, sermon.seriesName]);
 
   const isSoundCloudUploaded = sermon.status.soundCloud === uploadStatus.UPLOADED;
   const canPublishToSeries = canPublishSermonToSeries(sermon);
+  const selectedSeriesToPublish = Boolean(selectedSeriesEnabled && sermon.seriesId && !seriesPublished && canPublishToSeries);
+  const selectedSeriesToUnpublish = Boolean(selectedSeriesEnabled === false && sermon.seriesId && seriesPublished);
+  const selectedSoundCloudToPublish = selectedSoundCloudEnabled && !isDevelopment && !isSoundCloudUploaded;
+  const selectedSoundCloudToUnpublish = selectedSoundCloudEnabled === false && isSoundCloudUploaded;
+  const isRunningPublishEverywhere = isPublishingEverywhere && activeRunMode === 'publish';
+  const isRunningUnpublishEverywhere = isPublishingEverywhere && activeRunMode === 'unpublish';
+  const isApplyingAdvancedChanges = isPublishingEverywhere && activeRunMode === 'advanced';
   const hasPublishedDestinations =
     selectedPublishedLists.length > 0 ||
     deselectedPublishedLists.length > 0 ||
-    seriesPublished ||
+    seriesPublished === true ||
     isSoundCloudUploaded;
 
   const soundCloudStatus: PublishDestinationState = useMemo(() => {
-    if (isUploadingToSoundCloud || (isPublishingEverywhere && !isSoundCloudUploaded)) {
+    if (
+      isUploadingToSoundCloud
+      || (isRunningPublishEverywhere && !isSoundCloudUploaded)
+      || (isRunningUnpublishEverywhere && isSoundCloudUploaded)
+      || (isApplyingAdvancedChanges && (selectedSoundCloudToPublish || selectedSoundCloudToUnpublish))
+    ) {
       return {
         state: 'publishing',
-        label: 'Publishing',
-        details: 'Sending sermon to SoundCloud.',
+        label: selectedSoundCloudToUnpublish || isRunningUnpublishEverywhere ? 'Unpublishing' : 'Publishing',
+        details:
+          selectedSoundCloudToUnpublish || isRunningUnpublishEverywhere
+            ? 'Removing sermon from SoundCloud.'
+            : 'Sending sermon to SoundCloud.',
       };
     }
 
@@ -514,14 +565,29 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       label: 'Not published',
       details: 'Will be included in Publish Everywhere.',
     };
-  }, [isPublishingEverywhere, isSoundCloudUploaded, isUploadingToSoundCloud, sermon.soundCloudTrackUrl, soundCloudError]);
+  }, [
+    isApplyingAdvancedChanges,
+    isRunningPublishEverywhere,
+    isRunningUnpublishEverywhere,
+    isSoundCloudUploaded,
+    isUploadingToSoundCloud,
+    selectedSoundCloudToPublish,
+    selectedSoundCloudToUnpublish,
+    sermon.soundCloudTrackUrl,
+    soundCloudError,
+  ]);
 
   const listsStatus = useMemo<PublishDestinationState>(() => {
-    if (isUploadingToSubsplash || isPublishingEverywhere) {
+    if (isUploadingToSubsplash || isRunningPublishEverywhere || isRunningUnpublishEverywhere || isApplyingAdvancedChanges) {
+      const unpublishCount = isRunningUnpublishEverywhere
+        ? selectedPublishedLists.length + deselectedPublishedLists.length
+        : deselectedPublishedLists.length;
+      const publishCount = isRunningPublishEverywhere ? selectedListsToPublish.length : selectedListsToPublish.length;
+      const isUnpublishingOnly = unpublishCount > 0 && publishCount === 0;
       return {
         state: 'publishing',
-        label: 'Publishing',
-        details: 'Syncing sermon to Subsplash lists.',
+        label: isUnpublishingOnly ? 'Unpublishing' : 'Publishing',
+        details: isUnpublishingOnly ? 'Removing sermon from Subsplash lists.' : 'Syncing sermon to Subsplash lists.',
       };
     }
 
@@ -539,10 +605,31 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     }
 
     return baseState;
-  }, [destinationErrors.lists, isPublishingEverywhere, isUploadingToSubsplash, listArrayFirestore, listError?.message, loading]);
+  }, [
+    deselectedPublishedLists.length,
+    destinationErrors.lists,
+    isApplyingAdvancedChanges,
+    isRunningPublishEverywhere,
+    isRunningUnpublishEverywhere,
+    isUploadingToSubsplash,
+    listArrayFirestore,
+    listError?.message,
+    loading,
+    selectedListsToPublish.length,
+    selectedPublishedLists.length,
+  ]);
+
+  const isListDataLoading = loading && !listError && listArray.length === 0;
+  const listSkeletonCount = useMemo(() => {
+    const expectedCount = sermon.numberOfLists ?? 0;
+    if (expectedCount > 0) {
+      return Math.min(expectedCount, 4);
+    }
+    return 3;
+  }, [sermon.numberOfLists]);
 
   const seriesStatus = useMemo<PublishDestinationState>(() => {
-    if (seriesLoading) {
+    if (seriesLoading && !series) {
       return {
         state: 'publishing',
         label: 'Loading',
@@ -558,11 +645,16 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       };
     }
 
-    if (isPublishingToSeries || isPublishingEverywhere) {
+    if (isPublishingToSeries || isRunningPublishEverywhere || isRunningUnpublishEverywhere || isApplyingAdvancedChanges) {
+      const isUnpublishingSeries = selectedSeriesToUnpublish || isRunningUnpublishEverywhere;
       return {
         state: 'publishing',
-        label: 'Publishing',
-        details: seriesPublished ? 'Updating series membership.' : 'Syncing sermon into its series.',
+        label: isUnpublishingSeries ? 'Unpublishing' : 'Publishing',
+        details: isUnpublishingSeries
+          ? 'Removing sermon from its series.'
+          : seriesPublished === true
+            ? 'Updating series membership.'
+            : 'Syncing sermon into its series.',
       };
     }
 
@@ -572,6 +664,14 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         label: 'Needs attention',
         details: series?.name || 'Series publish failed.',
         error: destinationErrors.series,
+      };
+    }
+
+    if (seriesPublished === null) {
+      return {
+        state: 'checking',
+        label: 'Checking',
+        details: 'Checking series publish state.',
       };
     }
 
@@ -599,11 +699,14 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   }, [
     canPublishToSeries,
     destinationErrors.series,
-    isPublishingEverywhere,
+    isApplyingAdvancedChanges,
+    isRunningPublishEverywhere,
+    isRunningUnpublishEverywhere,
     isPublishingToSeries,
     series,
     seriesLoading,
     seriesPublished,
+    selectedSeriesToUnpublish,
     sermon.seriesId,
   ]);
 
@@ -1211,6 +1314,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     }
 
     setIsPublishingEverywhere(true);
+    setActiveRunMode('publish');
     setNotice(null);
     setDestinationErrors({});
     setSoundCloudError(null);
@@ -1305,6 +1409,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       setNoticeFromRun(nextStatuses);
     } finally {
       setIsPublishingEverywhere(false);
+      setActiveRunMode('idle');
     }
   }, [
     canPublishToSeries,
@@ -1332,6 +1437,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     }
 
     setIsPublishingEverywhere(true);
+    setActiveRunMode('unpublish');
     setNotice(null);
     setDestinationErrors({});
     setSoundCloudError(null);
@@ -1371,6 +1477,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       });
     } finally {
       setIsPublishingEverywhere(false);
+      setActiveRunMode('idle');
     }
   }, [
     deleteFromSoundCloud,
@@ -1383,17 +1490,13 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     unpublishFromSeries,
   ]);
 
-  const selectedSeriesToPublish = selectedSeriesEnabled && sermon.seriesId && !seriesPublished && canPublishToSeries;
-  const selectedSeriesToUnpublish = Boolean(selectedSeriesEnabled === false && sermon.seriesId && seriesPublished);
-  const selectedSoundCloudToPublish = selectedSoundCloudEnabled && !isDevelopment && !isSoundCloudUploaded;
-  const selectedSoundCloudToUnpublish = selectedSoundCloudEnabled === false && isSoundCloudUploaded;
-
   const applyAdvancedListChanges = useCallback(async () => {
     if (isPublishingEverywhere) {
       return;
     }
 
     setIsPublishingEverywhere(true);
+    setActiveRunMode('advanced');
     setNotice(null);
     setDestinationErrors((previous) => ({ ...previous, lists: undefined, series: undefined, soundcloud: undefined }));
 
@@ -1471,6 +1574,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
     } finally {
       setIsPublishingEverywhere(false);
+      setActiveRunMode('idle');
     }
   }, [
     deleteFromSoundCloud,
@@ -1531,10 +1635,25 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
 
   const getListChipStatus = useCallback(
     (list: SermonList): PublishDestinationState => {
-      if (isPublishingEverywhere && selectedListsToPublish.some((selectedList) => selectedList.id === list.id)) {
+      const isPublishingSelectedList = (
+        isRunningPublishEverywhere
+        || (isApplyingAdvancedChanges && selectedListsToPublish.some((selectedList) => selectedList.id === list.id))
+      );
+      const isUnpublishingSelectedList = (
+        (isRunningUnpublishEverywhere && list.uploadStatus?.status === uploadStatus.UPLOADED)
+        || (isApplyingAdvancedChanges && deselectedPublishedLists.some((selectedList) => selectedList.id === list.id))
+      );
+
+      if (isPublishingSelectedList) {
         return {
           state: 'publishing',
           label: 'Publishing',
+        };
+      }
+      if (isUnpublishingSelectedList) {
+        return {
+          state: 'publishing',
+          label: 'Unpublishing',
         };
       }
       if (list.uploadStatus?.status === uploadStatus.UPLOADED) {
@@ -1551,10 +1670,18 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
       return { state: 'not_published', label: 'Ready' };
     },
-    [isPublishingEverywhere, selectedListIds, selectedListsToPublish]
+    [
+      deselectedPublishedLists,
+      isApplyingAdvancedChanges,
+      isRunningPublishEverywhere,
+      isRunningUnpublishEverywhere,
+      selectedListIds,
+      selectedListsToPublish,
+    ]
   );
 
-  const seriesChipTooltip = destinationErrors.series || (seriesPublished ? 'Published successfully.' : seriesStatus.details);
+  const seriesChipTooltip =
+    destinationErrors.series || (seriesPublished === true ? 'Published successfully.' : seriesStatus.details);
   const canRetrySeries = Boolean(sermon.seriesId && !isBusy && seriesStatus.state === 'error');
   const canRetrySoundCloud = soundCloudStatus.state === 'error' && !isBusy;
   const soundCloudExternalUrl = isSoundCloudUploaded && sermon.soundCloudTrackUrl ? sermon.soundCloudTrackUrl : null;
@@ -1629,54 +1756,64 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
             Lists
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {listArray.map((list) => {
-              const chipStatus = getListChipStatus(list);
-              const canRetryList = chipStatus.state === 'error' && !isBusy;
-              return (
-                <StatusChip
-                  key={list.id}
-                  label={
-                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
-                      <Box
-                        component="span"
-                        sx={{
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {list.name}
-                      </Box>
-                      {list.uploadStatus?.status === uploadStatus.UPLOADED && list.subsplashId ? (
-                        <ExternalDestinationLink
-                          href={`https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`}
-                          label={`Open ${list.name} in Subsplash`}
+            {isListDataLoading
+              ? Array.from({ length: listSkeletonCount }).map((_, index) => (
+                  <Skeleton
+                    key={`list-skeleton-${index}`}
+                    variant="rounded"
+                    width={index === 0 ? 132 : index === 1 ? 112 : 124}
+                    height={32}
+                    sx={{ borderRadius: 999 }}
+                  />
+                ))
+              : listArray.map((list) => {
+                  const chipStatus = getListChipStatus(list);
+                  const canRetryList = chipStatus.state === 'error' && !isBusy;
+                  return (
+                    <StatusChip
+                      key={list.id}
+                      label={
+                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+                          <Box
+                            component="span"
+                            sx={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {list.name}
+                          </Box>
+                          {list.uploadStatus?.status === uploadStatus.UPLOADED && list.subsplashId ? (
+                            <ExternalDestinationLink
+                              href={`https://dashboard.subsplash.com/-d/#/library/lists/standard/${list.subsplashId}`}
+                              label={`Open ${list.name} in Subsplash`}
+                            />
+                          ) : null}
+                        </Stack>
+                      }
+                      status={chipStatus}
+                      tooltip={listChipTooltip(list)}
+                      onRetry={
+                        canRetryList
+                          ? () => {
+                              void retrySingleList(list);
+                            }
+                          : undefined
+                      }
+                      retryDisabled={isUploadingToSubsplash}
+                      avatar={
+                        <AvatarWithDefaultImage
+                          image={list.images?.find((image) => image.type === 'square')}
+                          altName={list.name}
+                          width={26}
+                          height={26}
+                          borderRadius={999}
                         />
-                      ) : null}
-                    </Stack>
-                  }
-                  status={chipStatus}
-                  tooltip={listChipTooltip(list)}
-                  onRetry={
-                    canRetryList
-                      ? () => {
-                          void retrySingleList(list);
-                        }
-                      : undefined
-                  }
-                  retryDisabled={isUploadingToSubsplash}
-                  avatar={
-                    <AvatarWithDefaultImage
-                      image={list.images?.find((image) => image.type === 'square')}
-                      altName={list.name}
-                      width={26}
-                      height={26}
-                      borderRadius={999}
+                      }
                     />
-                  }
-                />
-              );
-            })}
+                  );
+                })}
           </Box>
         </Box>
 
@@ -1703,7 +1840,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                     >
                       {series?.name || 'Series'}
                     </Box>
-                    {seriesPublished && series?.subsplashId ? (
+                    {seriesPublished === true && series?.subsplashId ? (
                       <ExternalDestinationLink
                         href={`https://dashboard.subsplash.com/-d/#/library/media/series/${series.subsplashId}`}
                         label={`Open ${series.name} in Subsplash`}
@@ -1723,7 +1860,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                 retryDisabled={isPublishingToSeries}
                 avatar={
                   <AvatarWithDefaultImage
-                    image={series?.images?.find((image) => image.type === 'square')}
+                    image={getSeriesAvatarImage(series)}
                     altName={series?.name || 'Series'}
                     width={26}
                     height={26}
@@ -1836,6 +1973,29 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
               </Typography>
               {listError ? (
                 <Alert severity="error">{listError.message}</Alert>
+              ) : isListDataLoading ? (
+                <Stack spacing={1}>
+                  {Array.from({ length: listSkeletonCount }).map((_, index) => (
+                    <Box
+                      key={`advanced-list-skeleton-${index}`}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 1.5,
+                        p: 1,
+                        borderRadius: 2,
+                        border: `1px solid ${theme.palette.divider}`,
+                      }}
+                    >
+                      <Stack direction="row" spacing={1.25} alignItems="center" sx={{ flex: 1 }}>
+                        <Skeleton variant="circular" width={34} height={34} />
+                        <Skeleton variant="text" width={index === 0 ? '34%' : index === 1 ? '26%' : '30%'} height={24} />
+                      </Stack>
+                      <Skeleton variant="rounded" width={92} height={28} sx={{ borderRadius: 999 }} />
+                    </Box>
+                  ))}
+                </Stack>
               ) : loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
                   <CircularProgress />
@@ -1944,7 +2104,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                     label={
                       <Stack direction="row" spacing={1.25} alignItems="center">
                         <AvatarWithDefaultImage
-                          image={series?.images?.find((image) => image.type === 'square')}
+                          image={getSeriesAvatarImage(series)}
                           altName={series?.name || 'Series'}
                           width={34}
                           height={34}
@@ -1961,7 +2121,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                         <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
                           {seriesStatus.label}
                         </Box>
-                        {seriesPublished && series?.subsplashId ? (
+                        {seriesPublished === true && series?.subsplashId ? (
                           <ExternalDestinationLink
                             href={`https://dashboard.subsplash.com/-d/#/library/media/series/${series.subsplashId}`}
                             label={`Open ${series.name} in Subsplash`}
