@@ -27,12 +27,16 @@ export const reconcileAdminSermonSearchResults = ({
   liveSermonsById,
   resolvedLiveSermonIds,
 }: ReconcileAdminSermonSearchResultsInput): ReconcileAdminSermonSearchResultsOutput => {
-  const confirmedAlgoliaHits = algoliaHits
-    .filter((sermon) => !resolvedLiveSermonIds.has(sermon.id) || Boolean(liveSermonsById[sermon.id]))
-    .map((sermon) => liveSermonsById[sermon.id] ?? sermon);
-  const confirmedAlgoliaHitsById = new Map(confirmedAlgoliaHits.map((sermon) => [sermon.id, sermon]));
+  const hydratedAlgoliaHits = algoliaHits
+    .map((sermon) => liveSermonsById[sermon.id])
+    .filter((sermon): sermon is Sermon => Boolean(sermon));
+  const hydratedAlgoliaHitsById = new Map(hydratedAlgoliaHits.map((sermon) => [sermon.id, sermon]));
 
-  const confirmedVisibleHitIds = new Set(confirmedAlgoliaHits.map((sermon) => sermon.id));
+  const confirmedVisibleHitIds = new Set(
+    algoliaHits
+      .filter((sermon) => resolvedLiveSermonIds.has(sermon.id) && Boolean(liveSermonsById[sermon.id]))
+      .map((sermon) => sermon.id)
+  );
 
   const visiblePendingSermons = showPendingOverlay
     ? pendingSermons.filter((sermon) => {
@@ -40,12 +44,12 @@ export const reconcileAdminSermonSearchResults = ({
           return true;
         }
 
-        const confirmedHit = confirmedAlgoliaHitsById.get(sermon.id);
-        if (!confirmedHit) {
+        const hydratedHit = hydratedAlgoliaHitsById.get(sermon.id);
+        if (!hydratedHit) {
           return true;
         }
 
-        return (confirmedHit.editedAtMillis ?? 0) < (sermon.editedAtMillis ?? 0);
+        return (hydratedHit.editedAtMillis ?? 0) < (sermon.editedAtMillis ?? 0);
       })
     : [];
 
@@ -54,13 +58,13 @@ export const reconcileAdminSermonSearchResults = ({
   return {
     confirmedVisibleHitIds,
     visiblePendingSermons,
-    visibleAlgoliaHits: confirmedAlgoliaHits.filter((sermon) => !visiblePendingIds.has(sermon.id)),
+    visibleAlgoliaHits: hydratedAlgoliaHits.filter((sermon) => !visiblePendingIds.has(sermon.id)),
     displayRows: [
       ...visiblePendingSermons.map((sermon) => ({
         sermon,
         enableProcessingProgress: sermon.status.audioStatus === sermonStatusType.PROCESSING,
       })),
-      ...confirmedAlgoliaHits
+      ...hydratedAlgoliaHits
         .filter((sermon) => !visiblePendingIds.has(sermon.id))
         .map((sermon) => ({
           sermon,

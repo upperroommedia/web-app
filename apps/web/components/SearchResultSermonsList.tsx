@@ -28,6 +28,7 @@ import {
 } from '../utils/sermonSearchResults';
 
 const FIRESTORE_IN_QUERY_LIMIT = 10;
+const HYDRATION_SKELETON_DELAY_MS = 1000;
 
 const chunkIds = (ids: string[], chunkSize: number): string[][] => {
   const chunks: string[][] = [];
@@ -39,6 +40,27 @@ const chunkIds = (ids: string[], chunkSize: number): string[][] => {
   return chunks;
 };
 
+const useDelayedTrue = (value: boolean, delayMs: number): boolean => {
+  const [delayedValue, setDelayedValue] = useState(false);
+
+  useEffect(() => {
+    if (!value) {
+      setDelayedValue(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDelayedValue(true);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [delayMs, value]);
+
+  return delayedValue;
+};
+
 const useLiveVisibleSermons = (sermonIds: string[]) => {
   const [state, setState] = useState<{
     liveSermonsById: Record<string, Sermon>;
@@ -47,19 +69,26 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
     liveSermonsById: {},
     resolvedIds: new Set<string>(),
   });
+  const sermonIdsKey = useMemo(() => sermonIds.join('\u0000'), [sermonIds]);
 
   useEffect(() => {
     if (sermonIds.length === 0) {
+      setState({
+        liveSermonsById: {},
+        resolvedIds: new Set<string>(),
+      });
       return;
     }
 
-    const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon> }>();
+    const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon>; resolved: boolean }>();
     const updateState = () => {
       const nextLiveSermonsById: Record<string, Sermon> = {};
       const nextResolvedIds = new Set<string>();
 
-      chunkSnapshots.forEach(({ ids, records }) => {
-        ids.forEach((id) => nextResolvedIds.add(id));
+      chunkSnapshots.forEach(({ ids, records, resolved }) => {
+        if (resolved) {
+          ids.forEach((id) => nextResolvedIds.add(id));
+        }
         Object.assign(nextLiveSermonsById, records);
       });
 
@@ -69,6 +98,16 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
       });
     };
 
+    setState((currentState) => {
+      const visibleIdSet = new Set(sermonIds);
+      return {
+        liveSermonsById: Object.fromEntries(
+          Object.entries(currentState.liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
+        ),
+        resolvedIds: new Set([...currentState.resolvedIds].filter((sermonId) => visibleIdSet.has(sermonId))),
+      };
+    });
+
     const unsubscribeCallbacks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
       const sermonsQuery = query(
         collection(firestore, 'sermons').withConverter(sermonConverter),
@@ -77,12 +116,17 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
 
       return onSnapshot(
         sermonsQuery,
+        { includeMetadataChanges: true },
         (snapshot) => {
           const nextChunkRecords: Record<string, Sermon> = {};
           snapshot.docs.forEach((docSnapshot) => {
             nextChunkRecords[docSnapshot.id] = docSnapshot.data();
           });
-          chunkSnapshots.set(chunkIndex, { ids: idChunk, records: nextChunkRecords });
+          chunkSnapshots.set(chunkIndex, {
+            ids: idChunk,
+            records: nextChunkRecords,
+            resolved: !snapshot.metadata.fromCache,
+          });
           updateState();
         },
         (error) => {
@@ -94,7 +138,7 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
     return () => {
       unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
     };
-  }, [sermonIds]);
+  }, [sermonIdsKey]);
 
   return useMemo(() => {
     if (sermonIds.length === 0) {
@@ -150,6 +194,16 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
   const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds);
+  const unresolvedVisibleHitIds = useMemo(
+    () =>
+      visibleHitIds.filter((sermonId) => !liveSermonsById[sermonId] && !resolvedLiveSermonIds.has(sermonId)),
+    [liveSermonsById, resolvedLiveSermonIds, visibleHitIds]
+  );
+  const unresolvedVisibleHitCount = unresolvedVisibleHitIds.length;
+  const hasUnresolvedVisibleHits = useMemo(
+    () => visibleHitIds.some((sermonId) => !resolvedLiveSermonIds.has(sermonId)),
+    [resolvedLiveSermonIds, visibleHitIds]
+  );
   const { visiblePendingSermons, visibleAlgoliaHits, displayRows } = useMemo(
     () =>
       reconcileAdminSermonSearchResults({
@@ -172,8 +226,18 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   );
   const hasVisibleHits = visibleAlgoliaHits.length > 0;
   const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
-  const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending;
+  const isHydratingVisibleHits = hasSettledResults && visibleHitIds.length > 0 && hasUnresolvedVisibleHits;
+  const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending && unresolvedVisibleHitCount === 0;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
+  const shouldShowHydrationSkeletons = useDelayedTrue(
+    shouldRenderHits && unresolvedVisibleHitCount > 0,
+    HYDRATION_SKELETON_DELAY_MS
+  );
+  const shouldShowEmptyState =
+    shouldRenderHits &&
+    !isHydratingVisibleHits &&
+    visibleAlgoliaHits.length === 0 &&
+    (!showPendingOverlay || visiblePendingSermons.length === 0);
 
   return (
     <Box display="flex" justifyContent="start" flex={3} overflow="hidden" {...props}>
@@ -217,10 +281,11 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
               audioPlayerSetCurrentSermon={setCurrentSermon}
               subscriptionOwnedByParent
               enableProcessingProgress={enableProcessingProgress}
-              enableSeriesRealtime={false}
             />
           ))}
-        {shouldRenderHits && visibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
+        {shouldShowHydrationSkeletons &&
+          unresolvedVisibleHitIds.map((sermonId) => <SermonListCardSkeloten key={`hydrating-sermon-${sermonId}`} />)}
+        {shouldShowEmptyState && (
           <Typography sx={{ px: { xs: 0.5, sm: 1 } }} color="text.secondary">
             No sermons found. Upload a sermon to get started.
           </Typography>
