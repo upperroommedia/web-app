@@ -161,6 +161,7 @@ const BottomAudioBar: FunctionComponent = () => {
   const remote = useMediaRemote();
   const rootRef = useRef<HTMLDivElement>(null);
   const artworkBorderRadius = downLG ? 2 : '50%';
+  const artworkImageBorderRadius = downLG ? 8 : 9999;
 
   useEffect(() => {
     const docEl = document.documentElement;
@@ -260,7 +261,7 @@ const BottomAudioBar: FunctionComponent = () => {
                 height={isMobile ? 48 : downLG ? 56 : 72}
                 altName={currentSermon?.title || 'Sermon'}
                 image={sermonImage}
-                borderRadius={downLG ? 8 : '50%'}
+                borderRadius={artworkImageBorderRadius}
               />
               {/* Subtle glow effect on album art */}
               <Box
