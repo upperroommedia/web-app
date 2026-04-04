@@ -429,6 +429,16 @@ function applyYtDlpExternalDownloaderArgs(args: string[]): void {
   }
 }
 
+function shouldApplyYtDlpExternalDownloader(options?: {
+  protocol?: string | null;
+  fragmentCount?: number | null;
+}): boolean {
+  if (!options) return true;
+  if ((options.fragmentCount || 0) > 0) return false;
+  if (isFragmentedProtocol(options.protocol)) return false;
+  return true;
+}
+
 function maybeApplyYtDlpExternalDownloaderArgs(
   args: string[],
   log: ReturnType<typeof createLoggerWithContext>,
@@ -436,16 +446,25 @@ function maybeApplyYtDlpExternalDownloaderArgs(
 ): void {
   const downloader = getYtDlpExternalDownloader();
   if (!downloader) return;
-  if (!shouldApplyYtDlpRequestPacing(options)) {
-    applyYtDlpExternalDownloaderArgs(args);
-    log.info('Applying yt-dlp external downloader for fragmented download path', {
+  if (!shouldApplyYtDlpExternalDownloader(options)) {
+    log.info('Skipping yt-dlp external downloader for fragmented download path', {
       downloader,
       downloaderArgs: getYtDlpExternalDownloaderArgs() || null,
       protocol: options?.protocol || null,
       fragmentCount: options?.fragmentCount ?? null,
       context: options?.context || null,
     });
+    return;
   }
+
+  applyYtDlpExternalDownloaderArgs(args);
+  log.info('Applying yt-dlp external downloader for direct download path', {
+    downloader,
+    downloaderArgs: getYtDlpExternalDownloaderArgs() || null,
+    protocol: options?.protocol || null,
+    fragmentCount: options?.fragmentCount ?? null,
+    context: options?.context || null,
+  });
 }
 
 export function shouldForceIpv4ForYouTube(): boolean {
