@@ -30,13 +30,17 @@ const toFirebaseSermonData = (sermon: Sermon): FirebaseSermon => ({
 const fromFirebaseSermonData = (id: string, firestoreSermon: FirebaseSermon): Sermon => {
   const { date, ...data } = firestoreSermon;
   const currentTime = Timestamp.now();
-  return {
+  const convertedSermon: Sermon = {
     ...createEmptySermon(),
     ...data,
     dateMillis: date?.toMillis() || currentTime.toMillis(),
     dateString: getDateString(date?.toDate() || currentTime.toDate()),
     id,
   };
+  if (!Object.prototype.hasOwnProperty.call(data, 'trimDurationSeconds')) {
+    delete convertedSermon.trimDurationSeconds;
+  }
+  return convertedSermon;
 };
 
 export const firestoreAdminSermonConverter: FirestoreDataConverter<Sermon> = {

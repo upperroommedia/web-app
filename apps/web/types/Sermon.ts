@@ -91,7 +91,7 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data();
     const currentTime = Timestamp.now();
-    return {
+    const convertedSermon: Sermon = {
       ...createEmptySermon(),
       ...data,
       ...(snapshot.data().date && {
@@ -100,6 +100,10 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
       }),
       id: snapshot.id,
     };
+    if (!Object.prototype.hasOwnProperty.call(data, 'trimDurationSeconds')) {
+      delete convertedSermon.trimDurationSeconds;
+    }
+    return convertedSermon;
   },
 };
 

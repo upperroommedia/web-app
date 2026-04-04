@@ -48,4 +48,20 @@ describe('firestoreAdminSermonConverter', () => {
     expect(converted.trimDurationSeconds).toBe(baseSermon.trimDurationSeconds);
     expect(converted.status.audioStatus).toBe(sermonStatusType.PENDING);
   });
+
+  it('fromFirestore preserves missing trimDurationSeconds for legacy sermons', () => {
+    const { trimDurationSeconds: _trimDurationSeconds, ...legacySermon } = baseSermon;
+    const snapshot = {
+      id: 'sermon-legacy',
+      data: () =>
+        ({
+          ...legacySermon,
+          date: Timestamp.fromMillis(baseSermon.dateMillis),
+        }) as unknown as ReturnType<typeof firestoreAdminSermonConverter.toFirestore>,
+    } as unknown as Parameters<typeof firestoreAdminSermonConverter.fromFirestore>[0];
+
+    const converted = firestoreAdminSermonConverter.fromFirestore(snapshot);
+    expect(converted.id).toBe('sermon-legacy');
+    expect(converted.trimDurationSeconds).toBeUndefined();
+  });
 });

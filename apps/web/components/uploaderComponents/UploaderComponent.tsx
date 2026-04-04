@@ -706,6 +706,19 @@ const Uploader = (props: UploaderProps) => {
     () => (props.existingSermon ? canEditSermonAudio(props.existingSermon) : false),
     [props.existingSermon]
   );
+  const existingSermonHasSavedTrimSettings = useMemo(
+    () =>
+      Boolean(
+        props.existingSermon &&
+        typeof props.existingSermon.trimDurationSeconds === 'number' &&
+        props.existingSermon.trimDurationSeconds > 0
+      ),
+    [props.existingSermon]
+  );
+  const canReprocessExistingAudio = useMemo(
+    () => canEditExistingAudio && existingSermonHasSavedTrimSettings,
+    [canEditExistingAudio, existingSermonHasSavedTrimSettings]
+  );
 
   const isExistingYouTubeSermon = Boolean(props.existingSermon?.youtubeUrl);
 
@@ -717,7 +730,7 @@ const Uploader = (props: UploaderProps) => {
     if (!canEditExistingSermon) {
       return 'Cannot edit audio when sermon has been uploaded to SoundCloud or Subsplash.';
     }
-    if (typeof props.existingSermon.trimDurationSeconds !== 'number' || props.existingSermon.trimDurationSeconds <= 0) {
+    if (!existingSermonHasSavedTrimSettings) {
       return 'This sermon audio cannot be edited because it does not have saved trim-source settings.';
     }
     if (!isExistingYouTubeSermon && props.existingSermonUrl?.status === 'error') {
@@ -727,17 +740,29 @@ const Uploader = (props: UploaderProps) => {
       return 'This sermon audio cannot be edited because the source audio file is unavailable.';
     }
     return null;
-  }, [canEditExistingSermon, isExistingYouTubeSermon, props.existingSermon, props.existingSermonUrl?.status]);
+  }, [
+    canEditExistingSermon,
+    existingSermonHasSavedTrimSettings,
+    isExistingYouTubeSermon,
+    props.existingSermon,
+    props.existingSermonUrl?.status,
+  ]);
 
   const audioSettingsChanged = useMemo(() => {
-    if (!props.existingSermon) return false;
+    if (!props.existingSermon || !canReprocessExistingAudio) return false;
 
     return (
       Math.abs(sermon.sourceStartTime - props.existingSermon.sourceStartTime) > 0.05 ||
       Math.abs((sermon.trimDurationSeconds ?? 0) - (props.existingSermon.trimDurationSeconds ?? 0)) > 0.05 ||
       (sermon.youtubeUrl ?? '') !== (props.existingSermon.youtubeUrl ?? '')
     );
-  }, [props.existingSermon, sermon.sourceStartTime, sermon.trimDurationSeconds, sermon.youtubeUrl]);
+  }, [
+    canReprocessExistingAudio,
+    props.existingSermon,
+    sermon.sourceStartTime,
+    sermon.trimDurationSeconds,
+    sermon.youtubeUrl,
+  ]);
 
   const existingSermonHasChanges = useMemo(() => {
     if (!props.existingSermon) return true;
@@ -1026,35 +1051,44 @@ const Uploader = (props: UploaderProps) => {
                     setInvalidFormMessage(undefined);
                     setIsEditing(true);
                     try {
+                      const sermonToPersist =
+                        props.existingSermon && !canReprocessExistingAudio
+                          ? {
+                              ...sermon,
+                              sourceStartTime: props.existingSermon.sourceStartTime,
+                              trimDurationSeconds: props.existingSermon.trimDurationSeconds,
+                              youtubeUrl: props.existingSermon.youtubeUrl,
+                            }
+                          : sermon;
                       const promises = [];
 
                       if (audioSettingsChanged) {
                         const pendingSermon = {
-                          ...sermon,
+                          ...sermonToPersist,
                           status: {
-                            ...sermon.status,
+                            ...sermonToPersist.status,
                             audioStatus: sermonStatusType.PENDING,
                             message: '',
                           },
                         };
                         const generateAddIntroOutroTask =
                           createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-                        const { introRef, outroRef } = await getIntroAndOutro(sermon);
-                        const data: AddIntroOutroInputType = sermon.youtubeUrl
+                        const { introRef, outroRef } = await getIntroAndOutro(sermonToPersist);
+                        const data: AddIntroOutroInputType = sermonToPersist.youtubeUrl
                           ? {
-                              id: sermon.id,
-                              youtubeUrl: sermon.youtubeUrl,
-                              startTime: sermon.sourceStartTime,
-                              duration: sermon.trimDurationSeconds ?? 0,
+                              id: sermonToPersist.id,
+                              youtubeUrl: sermonToPersist.youtubeUrl,
+                              startTime: sermonToPersist.sourceStartTime,
+                              duration: sermonToPersist.trimDurationSeconds ?? 0,
                               deleteOriginal: false,
                               introUrl: introRef,
                               outroUrl: outroRef,
                             }
                           : {
-                              id: sermon.id,
-                              storageFilePath: `sermons/${sermon.id}`,
-                              startTime: sermon.sourceStartTime,
-                              duration: sermon.trimDurationSeconds ?? 0,
+                              id: sermonToPersist.id,
+                              storageFilePath: `sermons/${sermonToPersist.id}`,
+                              startTime: sermonToPersist.sourceStartTime,
+                              duration: sermonToPersist.trimDurationSeconds ?? 0,
                               deleteOriginal: false,
                               skipTranscode: false,
                               introUrl: introRef,
@@ -1065,7 +1099,9 @@ const Uploader = (props: UploaderProps) => {
                           editSermon(pendingSermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId })
                         );
                       } else {
-                        promises.push(editSermon(sermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId }));
+                        promises.push(
+                          editSermon(sermonToPersist, sermonList, { originalSeriesId: props.existingSermon?.seriesId })
+                        );
                       }
 
                       await Promise.all(promises);
