@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
 import { Dispatch, FunctionComponent, memo, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
 import YouTubeTrimmerControls from './YouTubeTrimmerControls';
@@ -95,6 +96,7 @@ function isIOS(): boolean {
 interface YouTubeTrimmerProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
   initialUrl?: string;
+  allowUrlEdit?: boolean;
   trimStart: number;
   duration: number;
   setTrimStart: (trimStartTime: number) => void;
@@ -106,6 +108,7 @@ interface YouTubeTrimmerProps {
 const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   setAudioSource,
   initialUrl,
+  allowUrlEdit = true,
   trimStart: initialTrimStart,
   duration: initialTrimDuration,
   setTrimStart,
@@ -310,15 +313,17 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
   // Sync store changes to parent props
   useEffect(() => {
+    if (!isReady) return;
     setTrimStart(storeTrimStart);
-  }, [storeTrimStart, setTrimStart]);
+  }, [isReady, storeTrimStart, setTrimStart]);
 
   useEffect(() => {
+    if (!isReady) return;
     const trimDuration = storeTrimEnd - storeTrimStart;
     if (trimDuration > 0) {
       setDuration(trimDuration);
     }
-  }, [storeTrimStart, storeTrimEnd, setDuration]);
+  }, [isReady, storeTrimStart, storeTrimEnd, setDuration]);
 
   // Reset state when URL is cleared or invalid.
   useEffect(() => {
@@ -541,24 +546,35 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
 
   return (
     <Box display="flex" width={1} flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
-      <Box display="flex" width={1} justifyContent="center" alignItems="center" gap={1}>
-        <TextField
-          sx={{
-            display: 'block',
-            width: 1,
-          }}
-          fullWidth
-          id="youtube-url-input"
-          label="Youtube Link"
-          name="Youtube Link"
-          variant="outlined"
-          required
-          error={showError(audioSourceError)}
-          helperText={getErrorMessage(audioSourceError)}
-          value={inputText}
-          onChange={handleTextFieldChange}
-        />
-      </Box>
+      {allowUrlEdit ? (
+        <Box display="flex" width={1} justifyContent="center" alignItems="center" gap={1}>
+          <TextField
+            sx={{
+              display: 'block',
+              width: 1,
+            }}
+            fullWidth
+            id="youtube-url-input"
+            label="Youtube Link"
+            name="Youtube Link"
+            variant="outlined"
+            required
+            error={showError(audioSourceError)}
+            helperText={getErrorMessage(audioSourceError)}
+            value={inputText}
+            onChange={handleTextFieldChange}
+          />
+        </Box>
+      ) : (
+        <Box display="flex" width={1} flexDirection="column" gap={0.5}>
+          <Typography variant="caption" color="text.secondary">
+            Source video
+          </Typography>
+          <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+            {initialUrl}
+          </Typography>
+        </Box>
+      )}
       {!showError(audioSourceError) && !videoId && inputText.trim() && <CircularProgress />}
 
       <Box sx={{ position: 'relative', width: '100%', display: showPlayer ? 'block' : 'none' }}>
@@ -667,8 +683,18 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
           justifyContent="space-between"
           sx={{ mt: 2, width: '100%' }}
         >
-          <EditableTimeInput type="start" label="Start" onCommitSeek={(time) => commitSeek(time, true)} />
-          <EditableTimeInput type="end" label="End" onCommitSeek={(time) => commitSeek(time, true)} />
+          <EditableTimeInput
+            type="start"
+            label="Start"
+            onCommitSeek={(time) => commitSeek(time, true)}
+            resetValue={initialTrimStart}
+          />
+          <EditableTimeInput
+            type="end"
+            label="End"
+            onCommitSeek={(time) => commitSeek(time, true)}
+            resetValue={initialTrimDuration > 0 ? initialTrimStart + initialTrimDuration : undefined}
+          />
         </Stack>
       )}
     </Box>

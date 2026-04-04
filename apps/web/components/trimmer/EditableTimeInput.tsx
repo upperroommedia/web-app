@@ -18,6 +18,8 @@ interface EditableTimeInputProps {
   disabled?: boolean;
   /** Optional callback to commit a media seek on reset/blur using a single external seek path. */
   onCommitSeek?: (time: number) => void;
+  /** Optional reset target. Defaults to timeline start/end when omitted. */
+  resetValue?: number;
 }
 
 // Fixed format: HH:MM:SS.m (always 10 characters)
@@ -100,7 +102,7 @@ function prevDigitPosition(pos: number): number {
  * - Delete/Backspace replace digits with 0 instead of removing
  * - Typing overwrites the digit at cursor position
  */
-function EditableTimeInput({ type, label, sx, disabled, onCommitSeek }: EditableTimeInputProps) {
+function EditableTimeInput({ type, label, sx, disabled, onCommitSeek, resetValue }: EditableTimeInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Subscribe only to this input's value and duration so the other bound doesn't trigger re-renders.
@@ -137,7 +139,7 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek }: Editable
   );
 
   // Original value: 0 for start, duration for end
-  const originalValue = type === 'start' ? 0 : duration;
+  const originalValue = resetValue ?? (type === 'start' ? 0 : duration);
 
   // Keep reset affordance visible while actively editing even if store commit is pending.
   const hasChanged = isFocused
@@ -483,7 +485,7 @@ function EditableTimeInput({ type, label, sx, disabled, onCommitSeek }: Editable
         }}
       />
       {/* Reset button - absolutely positioned, fades in/out */}
-      <Tooltip title={`Reset to ${type === 'start' ? 'beginning' : 'end'}`}>
+      <Tooltip title={`Reset to ${resetValue === undefined ? (type === 'start' ? 'beginning' : 'end') : `saved ${type}`}`}>
         <IconButton
           size="small"
           onClick={handleReset}

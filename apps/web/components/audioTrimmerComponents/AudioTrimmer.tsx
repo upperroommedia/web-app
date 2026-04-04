@@ -13,6 +13,7 @@ import {
 
 interface AudioTrimmerProps {
   url: string;
+  waveformUrl?: string;
   trimStart: number;
   trimDuration?: number;
   setTrimStart: (trimStartTime: number) => void;
@@ -22,6 +23,7 @@ interface AudioTrimmerProps {
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   url,
+  waveformUrl,
   trimStart,
   trimDuration,
   setTrimStart,
@@ -46,6 +48,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   const storeTrimStart = useTrimmerStore((state) => state.trimStart);
   const storeTrimEnd = useTrimmerStore((state) => state.trimEnd);
   const duration = useTrimmerStore((state) => state.duration);
+  const isReady = useTrimmerStore((state) => state.isReady);
   const reset = useTrimmerStore((state) => state.reset);
 
   // Use the sync hook
@@ -57,25 +60,27 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
 
   // Sync store changes to parent props
   useEffect(() => {
+    if (!isReady) return;
     setTrimStart(storeTrimStart);
-  }, [storeTrimStart, setTrimStart]);
+  }, [isReady, storeTrimStart, setTrimStart]);
 
   useEffect(() => {
+    if (!isReady) return;
     const trimDuration = storeTrimEnd - storeTrimStart;
     if (trimDuration > 0) {
       setTrimDuration(trimDuration);
     }
-  }, [storeTrimStart, storeTrimEnd, setTrimDuration]);
+  }, [isReady, storeTrimStart, storeTrimEnd, setTrimDuration]);
 
   // Track if user has trimmed
   useEffect(() => {
-    if (setHasTrimmed && duration > 0) {
+    if (setHasTrimmed && isReady && duration > 0) {
       const effectiveInitialTrimEnd = initialTrimEnd ?? duration;
       const hasTrimmed =
         Math.abs(storeTrimStart - trimStart) > 0.05 || Math.abs(storeTrimEnd - effectiveInitialTrimEnd) > 0.05;
       setHasTrimmed(hasTrimmed);
     }
-  }, [duration, initialTrimEnd, setHasTrimmed, storeTrimEnd, storeTrimStart, trimStart]);
+  }, [duration, initialTrimEnd, isReady, setHasTrimmed, storeTrimEnd, storeTrimStart, trimStart]);
 
   // Reset store when component unmounts
   useEffect(() => {
@@ -93,8 +98,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   );
 
   const waveformElement = useMemo(
-    () => <AudioWaveform url={url} height={80} />,
-    [url]
+    () => <AudioWaveform url={waveformUrl ?? url} height={80} />,
+    [url, waveformUrl]
   );
 
   return (
@@ -114,8 +119,8 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
           alignItems="stretch"
           justifyContent="space-between"
         >
-          <EditableTimeInput type="start" label="Trim Start" />
-          <EditableTimeInput type="end" label="Trim End" />
+          <EditableTimeInput type="start" label="Trim Start" resetValue={trimStart} />
+          <EditableTimeInput type="end" label="Trim End" resetValue={initialTrimEnd} />
         </Stack>
         <Stack
           direction="row"
@@ -132,9 +137,9 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
         justifyContent="space-between"
         sx={{ display: { xs: 'none', sm: 'flex' } }}
       >
-        <EditableTimeInput type="start" label="Trim Start" />
+        <EditableTimeInput type="start" label="Trim Start" resetValue={trimStart} />
         <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} />
-        <EditableTimeInput type="end" label="Trim End" />
+        <EditableTimeInput type="end" label="Trim End" resetValue={initialTrimEnd} />
       </Stack>
     </Stack>
   );

@@ -11,47 +11,53 @@ const DynamicAudioTrimmer = dynamic(() => import('./AudioTrimmer'), { ssr: false
 
 type AudioTrimmerComponentProps = {
   url: string;
+  waveformUrl?: string;
   trimStart: number;
   trimDuration?: number;
   setTrimStart: (trimStartTime: number) => void;
   setTrimDuration: (duration: number) => void;
   clearAudioTrimmer: () => void;
   setHasTrimmed?: Dispatch<SetStateAction<boolean>>;
+  showClearButton?: boolean;
 };
 
 const AudioTrimmerComponent: FunctionComponent<AudioTrimmerComponentProps> = ({
   url,
+  waveformUrl,
   trimStart,
   trimDuration,
   setTrimStart,
   setTrimDuration,
   clearAudioTrimmer,
   setHasTrimmed,
+  showClearButton = true,
 }) => {
   return (
     <Box sx={{ width: '100%', position: 'relative' }}>
-      {/* Close button - positioned in top right */}
-      <Tooltip title="Remove audio" placement="left">
-        <IconButton
-          size="small"
-          onClick={clearAudioTrimmer}
-          sx={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            zIndex: 10,
-            color: 'text.secondary',
-            '&:hover': {
-              color: 'error.main',
-              bgcolor: 'rgba(239, 68, 68, 0.1)',
-            },
-          }}
-        >
-          <CloseIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
+      {showClearButton ? (
+        <Tooltip title="Remove audio" placement="left">
+          <IconButton
+            size="small"
+            onClick={clearAudioTrimmer}
+            sx={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              zIndex: 10,
+              color: 'text.secondary',
+              '&:hover': {
+                color: 'error.main',
+                bgcolor: 'rgba(239, 68, 68, 0.1)',
+              },
+            }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ) : null}
       <DynamicAudioTrimmer
         url={url}
+        waveformUrl={waveformUrl}
         trimStart={trimStart}
         trimDuration={trimDuration}
         setTrimStart={setTrimStart}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, memo, useCallback, useMemo } from 'react';
 import Box from '@mui/material/Box';
-import { alpha } from '@mui/material/styles';
+import { alpha, useTheme } from '@mui/material/styles';
 import { colors } from '../../styles/theme';
 import { keyframes } from '@mui/system';
 
@@ -18,6 +18,7 @@ interface AudioWaveformProps {
  * Decodes audio and renders a visual waveform representation.
  */
 function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
+  const theme = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [peaks, setPeaks] = useState<number[]>([]);
@@ -27,7 +28,10 @@ function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
   const [barCount, setBarCount] = useState(0);
 
   // Use theme accent color if not provided
-  const waveformColor = color || colors.accent.primary;
+  const waveformColor = useMemo(
+    () => color || (theme.palette.mode === 'dark' ? colors.accent.light : colors.accent.primary),
+    [color, theme.palette.mode]
+  );
 
   // Compute peaks from audio data
   const computePeaks = useCallback(

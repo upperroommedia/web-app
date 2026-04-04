@@ -736,6 +736,29 @@ const Uploader = (props: UploaderProps) => {
     );
   }, [props.existingSermon, sermon.sourceStartTime, sermon.trimDurationSeconds, sermon.youtubeUrl]);
 
+  const existingSermonHasChanges = useMemo(() => {
+    if (!props.existingSermon) return true;
+
+    return (
+      !sermonsEqual(sermon, props.existingSermon) ||
+      !listEqual(sermonList, props.existingList || emptyListWithLatest) ||
+      audioSettingsChanged
+    );
+  }, [
+    audioSettingsChanged,
+    emptyListWithLatest,
+    props.existingList,
+    props.existingSermon,
+    sermon,
+    sermonList,
+    sermonsEqual,
+  ]);
+
+  const existingWaveformUrl = useMemo(() => {
+    if (!props.existingSermonUrl?.url) return undefined;
+    return `/api/audio-waveform?sourceUrl=${encodeURIComponent(props.existingSermonUrl.url)}`;
+  }, [props.existingSermonUrl?.url]);
+
   return (
     <>
       <Head>
@@ -962,6 +985,7 @@ const Uploader = (props: UploaderProps) => {
                 isExistingYouTubeSermon ? (
                     <YouTubeTrimmer
                       initialUrl={props.existingSermon?.youtubeUrl}
+                      allowUrlEdit={false}
                       trimStart={sermon.sourceStartTime}
                       duration={sermon.trimDurationSeconds ?? 0}
                     setDuration={setTrimDuration}
@@ -973,12 +997,14 @@ const Uploader = (props: UploaderProps) => {
                 ) : props.existingSermonUrl?.status === 'success' ? (
                   <AudioTrimmerComponent
                     url={props.existingSermonUrl.url}
+                    waveformUrl={existingWaveformUrl}
                     trimStart={sermon.sourceStartTime}
                     trimDuration={sermon.trimDurationSeconds}
                     setTrimStart={setTrimStartTime}
                     setTrimDuration={setTrimDuration}
                     clearAudioTrimmer={clearAudioTrimmer}
                     setHasTrimmed={setHasTrimmed}
+                    showClearButton={false}
                   />
                 ) : props.existingSermonUrl?.status === 'loading' ? (
                   <Stack alignItems="center" flexDirection="row" gap="1rem">
@@ -1055,9 +1081,7 @@ const Uploader = (props: UploaderProps) => {
                   }}
                   disabled={
                     !canEditExistingSermon ||
-                    sermonsEqual(props.existingSermon, sermon) &&
-                    listEqual(props.existingList, sermonList) &&
-                    !audioSettingsChanged
+                    !existingSermonHasChanges
                   }
                   variant="contained"
                 >
