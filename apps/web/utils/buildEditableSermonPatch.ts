@@ -14,7 +14,7 @@ export const buildEditableSermonPatch = (sermon: Sermon) => ({
   date: Timestamp.fromMillis(sermon.dateMillis),
   dateString: sermon.dateString ?? getDateString(new Date(sermon.dateMillis)),
   sourceStartTime: sermon.sourceStartTime,
-  trimDurationSeconds: sermon.trimDurationSeconds,
+  ...(sermon.trimDurationSeconds === undefined ? {} : { trimDurationSeconds: sermon.trimDurationSeconds }),
   durationSeconds: sermon.durationSeconds,
   speakers: sermon.speakers,
   topics: sermon.topics,
