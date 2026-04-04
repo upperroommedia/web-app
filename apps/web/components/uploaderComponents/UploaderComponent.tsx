@@ -906,6 +906,7 @@ const Uploader = (props: UploaderProps) => {
             speaker={sermon.speakers[0]}
             newImageCallback={handleNewImage}
             vertical={true}
+            showOptionalityChip={false}
           />
         </Box>
         <Box

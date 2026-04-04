@@ -32,6 +32,7 @@ interface BundleListSelectorProps {
 const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: BundleListSelectorProps) => {
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
+  const [visibleListArray, setVisibleListArray] = useState<ListWithHighlight[]>([]);
   const [localTopicSearch, setLocalTopicSearch] = useState<LocalSearch<Topic> | null>(null);
   const [isLoadingBundles, setIsLoadingBundles] = useState<boolean>(false);
   const [isSearching, setIsSearching] = useState<boolean>(false);
@@ -129,6 +130,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
             return [topicToListWithHighlight(topic, resolvedList)];
           });
           setAllListArray(resolvedTopicLists);
+          setVisibleListArray(resolvedTopicLists);
           // Initialize local search
           const searchInstance = new LocalSearch(topics, 'title', 'topics');
           setLocalTopicSearch(searchInstance);
@@ -149,7 +151,6 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
   const searchTopicsLocally = async (query: string): Promise<ListWithHighlight[]> => {
     try {
       if (!localTopicSearch || !query.trim()) {
-        // Return more initial topics if no query
         return allListArray;
       }
       const searchResults = localTopicSearch.search(query);
@@ -214,7 +215,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
             }
           }}
           id="bundle-list-selector-input"
-          options={getListUnion(value, allListArray)}
+          options={getListUnion(value, visibleListArray)}
           renderTags={(list, getTagProps) => {
             return list.map((list, index) => {
               const { key: _tagKey, ...tagProps } = getTagProps({ index });
@@ -251,7 +252,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
           onInputChange={async (_, newInputValue) => {
             const hasQuery = newInputValue.trim().length > 0;
             setIsSearching(hasQuery);
-            setAllListArray(await searchTopicsLocally(newInputValue));
+            setVisibleListArray(await searchTopicsLocally(newInputValue));
           }}
           renderOption={(props, option: ListWithHighlight) => {
             const { key: _key, ...optionProps } = props;
@@ -266,8 +267,8 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
                 borderRadius={5}
                 sx={{ marginRight: '15px' }}
               />
-              {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
-                                  <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
+              {option._highlightResult ? (
+                <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
               ) : (
                 <div>{option.name}</div>
               )}
@@ -308,7 +309,7 @@ const BundleListSelector: FunctionComponent<BundleListSelectorProps> = (props: B
         newListPopup={newListPopup}
         setNewListPopup={setNewListPopup}
         listArray={allListArray}
-        setListArray={setAllListArray}
+        setListArray={setVisibleListArray}
         setSermonList={props.setSermonList}
         listType={props.listType}
       />
