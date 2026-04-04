@@ -173,7 +173,7 @@ function logFFMPEGVersion(ffmpegStaticPath: string) {
 export function getFFmpegPath(): string {
   // Check common ffmpeg locations in priority order
   const ffmpegPaths = [
-    '/usr/local/bin/ffmpeg', // Linux/Docker (pinned source build)
+    '/usr/local/bin/ffmpeg', // Linux/Docker (pinned bundled build)
     '/usr/bin/ffmpeg', // Linux/Docker (apt install)
     '/opt/homebrew/bin/ffmpeg', // macOS ARM (Homebrew)
   ];
@@ -192,7 +192,7 @@ export function getFFmpegPath(): string {
 export function getFFprobePath(): string {
   // Check common ffprobe locations in priority order
   const ffprobePaths = [
-    '/usr/local/bin/ffprobe', // Linux/Docker (pinned source build)
+    '/usr/local/bin/ffprobe', // Linux/Docker (pinned bundled build)
     '/usr/bin/ffprobe', // Linux/Docker (apt install)
     '/opt/homebrew/bin/ffprobe', // macOS ARM (Homebrew)
   ];
