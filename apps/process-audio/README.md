@@ -1,6 +1,9 @@
 # Process Audio
 
-Cloud Run service for processing uploaded audio and the shared `process-audio` runtime used by the Hetzner YouTube workers.
+Shared `process-audio` runtime with two deployment profiles:
+
+- Cloud Run: storage-backed trim/transcode only
+- Hetzner: YouTube-capable worker with `yt-dlp`, browser session access, and browser fallback support
 
 ## YouTube Extraction Model
 
@@ -13,7 +16,7 @@ The YouTube path now follows a strict access order:
 3. `browser_fallback`
    Final authority when the direct extractor path is challenged.
 
-This is intentional. A Cloud Run IP challenge is not fixed by retrying `yt-dlp` more aggressively, and stale cookies are not a durable recovery path.
+This is intentional. Cloud Run is no longer part of the YouTube extraction path. File-backed audio stays on Cloud Run, while YouTube extraction stays on Hetzner.
 
 ## What Changed
 
@@ -42,8 +45,9 @@ Core runtime:
 - `GOOGLE_APPLICATION_CREDENTIALS`
 - `PROCESS_AUDIO_BUCKET`
 - `RUNTIME_ALERT_RECIPIENTS` or the Secret Manager binding used by deploy
+- `PROCESS_AUDIO_RUNTIME_PROFILE=cloudrun|hetzner`
 
-YouTube extraction:
+YouTube extraction, Hetzner profile only:
 
 - `YTDLP_POT_PROVIDER_BASE_URL`
 - `YOUTUBE_BROWSER_FALLBACK_URL`
@@ -68,7 +72,7 @@ YouTube extraction:
 From the monorepo root, build the image:
 
 ```bash
-docker build --file apps/process-audio/Dockerfile --tag process-audio .
+docker build --build-arg PROCESS_AUDIO_RUNTIME_PROFILE=hetzner --file apps/process-audio/Dockerfile --tag process-audio .
 ```
 
 Run the container against real Firebase:
@@ -160,59 +164,14 @@ Keep at least one live smoke test in staging, but use the deterministic local lo
 
 Runtime failure alert recipients are injected from the Secret Manager secret `RUNTIME_ALERT_RECIPIENTS` during Cloud Run deploys. The app also supports `PROCESS_AUDIO_ALERT_RECIPIENTS`, `RUNTIME_ALERT_RECIPIENTS`, or `RUNTIME_ALERT_EMAILS`, but deploy should bind `RUNTIME_ALERT_RECIPIENTS`.
 
-The production YouTube stack assumes:
+The current production split is:
 
-- `process-audio` runs as the orchestrator on Cloud Run
-- a separate bgutil PO-token provider service is deployed
-- an optional but recommended browser fallback worker is deployed on a stateful host with:
+- Cloud Run `process-audio`: storage-backed processing only
+- Hetzner `yt-worker`: YouTube extraction and transcode orchestration
+- optional but recommended browser fallback worker on a stateful host with:
   - persistent Chromium profile storage
   - a dedicated YouTube service account
   - stable outbound IP
-
-Example PO-token provider deployment:
-
-```bash
-gcloud run deploy ytdlp-pot-provider \
-  --image docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1 \
-  --region us-central1 \
-  --allow-unauthenticated
-```
-
-Verify the provider with its documented health endpoint before wiring it into `process-audio`:
-
-```bash
-curl -fsS https://ytdlp-pot-provider-<hash>-uc.a.run.app/ping
-```
-
-Deploy `process-audio` with the provider URL:
-
-```bash
-gcloud run deploy process-audio \
-  --image gcr.io/urm-app/process-audio \
-  --region us-central1 \
-  --min-instances 0 \
-  --cpu-throttling \
-  --set-env-vars YTDLP_POT_PROVIDER_BASE_URL=https://ytdlp-pot-provider-<hash>-uc.a.run.app
-```
-
-Recommended production defaults:
-
-- keep `YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=false`
-- keep `YTDLP_CONCURRENT_FRAGMENTS=1`
-- keep `YOUTUBE_PUBLIC_PROVIDER_MAX_ATTEMPTS=1`
-- keep `YOUTUBE_COOKIE_PROVIDER_MAX_ATTEMPTS=1`
-- set `YTDLP_SLEEP_REQUESTS_SECONDS=2`
-- set `YTDLP_SLEEP_INTERVAL_SECONDS=1`
-- set `YTDLP_MAX_SLEEP_INTERVAL_SECONDS=3`
-- keep `YTDLP_JS_RUNTIME=deno`
-- configure `YOUTUBE_BROWSER_FALLBACK_URL`
-- keep `BROWSER_FALLBACK_AUTH_MODE=auto` unless a custom auth path requires override
-- pin the provider image digest before promoting to production
-- prefer deterministic egress for Cloud Run so outbound IP reputation is measurable
-
-Optional:
-
-- Set `YTDLP_POT_DISABLE_INNERTUBE=true` if the provider is healthy but token usage still fails for a subset of videos.
 
 ## Browser Fallback Contract
 

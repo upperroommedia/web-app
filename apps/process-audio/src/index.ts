@@ -26,13 +26,14 @@ const YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON = 'browser_fallback_unavailable';
 
 const app = express();
 app.use(express.json());
-// get the path to the yt-dlp binary
-const ytdlpPath = 'yt-dlp';
-const configuredYtDlpJsRuntime = process.env.YTDLP_JS_RUNTIME?.trim() || 'deno';
 const localBrowserProfileDir = process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.trim() || '';
 const localBrowserProfileBrowser = process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER?.trim() || 'chromium';
+const runtimeProfile = process.env.PROCESS_AUDIO_RUNTIME_PROFILE?.trim().toLowerCase() || 'hetzner';
 const runtimeHost = process.env.PROCESS_AUDIO_RUNTIME_HOST?.trim() || 'cloud-run';
 const runtimeEnv = process.env.PROCESS_AUDIO_RUNTIME_ENV?.trim() || process.env.NODE_ENV || 'unknown';
+const youtubeProcessingEnabled = runtimeProfile !== 'cloudrun';
+const ytdlpPath = youtubeProcessingEnabled ? 'yt-dlp' : null;
+const configuredYtDlpJsRuntime = youtubeProcessingEnabled ? process.env.YTDLP_JS_RUNTIME?.trim() || 'deno' : null;
 
 function resolveBinaryVersion(binary: string, args: string[] = ['--version']): string {
   const result = spawnSync(binary, args, { encoding: 'utf8' });
@@ -43,6 +44,9 @@ function resolveBinaryVersion(binary: string, args: string[] = ['--version']): s
 }
 
 function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string } {
+  if (!configuredYtDlpJsRuntime) {
+    throw new Error('yt-dlp JavaScript runtime validation is only available when YouTube processing is enabled.');
+  }
   const primaryRuntime = configuredYtDlpJsRuntime.split(',')[0]?.trim().split(':')[0]?.trim() || 'deno';
   const result = spawnSync(primaryRuntime, ['--version'], { encoding: 'utf8' });
 
@@ -66,37 +70,44 @@ function validateConfiguredYtDlpJsRuntime(): { runtime: string; version: string 
   };
 }
 
-const ytDlpJsRuntimeInfo = validateConfiguredYtDlpJsRuntime();
-const ytDlpVersion = resolveBinaryVersion(ytdlpPath);
+const ytDlpJsRuntimeInfo = youtubeProcessingEnabled ? validateConfiguredYtDlpJsRuntime() : null;
+const ytDlpVersion = ytdlpPath ? resolveBinaryVersion(ytdlpPath) : null;
 const ffmpegVersion = resolveBinaryVersion(getFFmpegPath(), ['-version'])
   .replace(/^ffmpeg version\s+/i, '')
   .trim();
-const aria2Version = resolveBinaryVersion('aria2c', ['--version'])
-  .split('\n')[0]
-  .trim();
+const aria2Version = youtubeProcessingEnabled ? resolveBinaryVersion('aria2c', ['--version']).split('\n')[0].trim() : null;
 const concurrencyConfig = getProcessAudioConcurrencyConfig();
-const ytDlpSleepRequestsSeconds = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null;
-const ytDlpSleepIntervalSeconds = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null;
-const ytDlpMaxSleepIntervalSeconds = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim() || null;
-const ytDlpForceIpv4 = process.env.YOUTUBE_FORCE_IPV4?.trim() || 'false';
-const browserFallbackExplicit = process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim().toLowerCase() || '';
+const ytDlpSleepRequestsSeconds = youtubeProcessingEnabled ? process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim() || null : null;
+const ytDlpSleepIntervalSeconds = youtubeProcessingEnabled ? process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim() || null : null;
+const ytDlpMaxSleepIntervalSeconds = youtubeProcessingEnabled ? process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim() || null : null;
+const ytDlpForceIpv4 = youtubeProcessingEnabled ? process.env.YOUTUBE_FORCE_IPV4?.trim() || 'false' : null;
+const browserFallbackExplicit = youtubeProcessingEnabled
+  ? process.env.YOUTUBE_BROWSER_FALLBACK_ENABLED?.trim().toLowerCase() || ''
+  : '';
 const inProcessBrowserFallbackConfigured = !!(
-  localBrowserProfileDir ||
+  youtubeProcessingEnabled &&
+  (localBrowserProfileDir ||
   process.env.BROWSER_FALLBACK_PROFILE_BUCKET?.trim() || process.env.FIREBASE_STORAGE_BUCKET?.trim()
+  )
 );
-const finalBrowserFallbackConfigured = !!process.env.YOUTUBE_FINAL_BROWSER_FALLBACK_URL?.trim();
+const finalBrowserFallbackConfigured = youtubeProcessingEnabled && !!process.env.YOUTUBE_FINAL_BROWSER_FALLBACK_URL?.trim();
 const browserFallbackEnabled =
+  youtubeProcessingEnabled &&
   !['0', 'false', 'no'].includes(browserFallbackExplicit) &&
   (inProcessBrowserFallbackConfigured || finalBrowserFallbackConfigured || !!process.env.YOUTUBE_BROWSER_FALLBACK_URL?.trim());
 const browserFallbackConfigured = browserFallbackEnabled || finalBrowserFallbackConfigured;
 
 logger.info('Service initializing', {
+  runtimeProfile,
+  youtubeProcessingEnabled,
   ytdlpPath,
   configuredYtDlpJsRuntime,
-  ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
-  ytDlpJsRuntimeVersion: ytDlpJsRuntimeInfo.version,
-  ytDlpUseCookiesForPublicVideos: process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false',
-  ytDlpConcurrentFragments: process.env.YTDLP_CONCURRENT_FRAGMENTS || '1',
+  ytDlpJsRuntime: ytDlpJsRuntimeInfo?.runtime ?? null,
+  ytDlpJsRuntimeVersion: ytDlpJsRuntimeInfo?.version ?? null,
+  ytDlpUseCookiesForPublicVideos: youtubeProcessingEnabled
+    ? process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false'
+    : null,
+  ytDlpConcurrentFragments: youtubeProcessingEnabled ? process.env.YTDLP_CONCURRENT_FRAGMENTS || '1' : null,
   ytDlpSleepRequestsSeconds,
   ytDlpSleepIntervalSeconds,
   ytDlpMaxSleepIntervalSeconds,
@@ -112,7 +123,7 @@ logger.info('Service initializing', {
   ffmpegVersion,
   aria2Version,
   finalBrowserFallbackConfigured,
-  poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+  poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
   concurrency: concurrencyConfig,
 });
 
@@ -171,16 +182,20 @@ app.get('/', (req, res) => {
 app.get('/healthz', (req, res) => {
   res.status(200).json({
     ok: true,
-    service: 'process-audio-cloud-run',
+    service: 'process-audio',
     revision: process.env.K_REVISION || 'local',
+    runtimeProfile,
+    youtubeProcessingEnabled,
     browserFallbackConfigured,
     browserFallbackEnabled,
     inProcessBrowserFallbackConfigured,
     localBrowserProfileDir: localBrowserProfileDir || null,
     finalBrowserFallbackConfigured,
-    poTokenProviderConfigured: !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
-    ytDlpJsRuntime: ytDlpJsRuntimeInfo.runtime,
-    ytDlpUseCookiesForPublicVideos: process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false',
+    poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+    ytDlpJsRuntime: ytDlpJsRuntimeInfo?.runtime ?? null,
+    ytDlpUseCookiesForPublicVideos: youtubeProcessingEnabled
+      ? process.env.YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS || 'false'
+      : null,
     ytDlpSleepRequestsSeconds,
     ytDlpSleepIntervalSeconds,
     ytDlpMaxSleepIntervalSeconds,
@@ -229,12 +244,50 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
     audioStatus: sermonStatusType.PROCESSING,
   };
 
+  if (audioSource.type === 'YouTubeUrl' && !youtubeProcessingEnabled) {
+    const message = 'This process-audio runtime only supports storage-backed audio processing.';
+    log.error('Rejected unsupported YouTube request for storage-only runtime', {
+      runtimeProfile,
+      runtimeHost,
+      runtimeEnv,
+      taskId,
+    });
+
+    try {
+      await completeProcessAudioFailure({
+        database: realtimeDB,
+        payload: data,
+        requestId: ctx.requestId,
+        taskId,
+      });
+    } catch (queueStateError) {
+      log.error('Failed to update process-audio queue state after unsupported request rejection', {
+        error: queueStateError instanceof Error ? queueStateError.message : String(queueStateError),
+      });
+    }
+
+    try {
+      await docRef.update({
+        status: {
+          ...sermonStatus,
+          audioStatus: sermonStatusType.ERROR,
+          message,
+        },
+      });
+    } catch (updateError) {
+      log.error('Failed to update document status after unsupported request rejection', { error: updateError });
+    }
+
+    res.status(409).json({ error: message });
+    return;
+  }
+
   try {
     const cancelToken = new CancelToken();
     await executeWithTimeout(
       () =>
         processAudio(
-          ytdlpPath,
+          ytdlpPath ?? 'yt-dlp',
           cancelToken,
           bucket,
           realtimeDB,

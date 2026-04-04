@@ -1,6 +1,8 @@
-# Use Node 22 (required by yt-dlp JS runtime) with Debian-slim (required for glibc DNS in ffmpeg)
+# Use Node 22 across both runtime profiles. Hetzner still needs the yt-dlp JS runtime,
+# while Cloud Run only uses the storage-backed trim/transcode path.
 ARG NODE_VERSION=22
 ARG PNPM_VERSION=10.10.0
+ARG PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
 ARG YT_DLP_VERSION=2026.03.17
 ARG FFMPEG_VERSION=8.1
 ARG FFMPEG_BUILD_ARCHIVE=ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz
@@ -61,6 +63,8 @@ RUN pnpm --dir packages/shared build \
 
 # ---------- Production stage ----------
 FROM node:${NODE_VERSION}-bookworm-slim AS production
+ARG PROCESS_AUDIO_RUNTIME_PROFILE
+ARG YT_DLP_VERSION
 ARG FFMPEG_VERSION
 ARG FFMPEG_BUILD_ARCHIVE
 ARG FFMPEG_BUILD_BASE_URL
@@ -70,15 +74,12 @@ ARG DEBIAN_MIRROR
 ARG DEBIAN_SECURITY_MIRROR
 ARG DEBIAN_UPDATES_MIRROR
 ENV NODE_ENV=production
+ENV PROCESS_AUDIO_RUNTIME_PROFILE=${PROCESS_AUDIO_RUNTIME_PROFILE}
 ENV PROCESS_AUDIO_YT_DLP_VERSION=${YT_DLP_VERSION}
 ENV PROCESS_AUDIO_FFMPEG_VERSION=${FFMPEG_VERSION}
 WORKDIR /workspace
 
-# Install runtime dependencies:
-# - python3 + python3-pip: installs plugin-capable yt-dlp + PO token plugin
-# - aria2: external downloader for yt-dlp file-based download flows
-# - tar: extract persisted Chromium profile archives
-# - curl + unzip + xz-utils: install Deno and extract the pinned prebuilt ffmpeg archive
+# Install common runtime dependencies for all profiles.
 RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
@@ -88,22 +89,24 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
     && printf "deb %s bookworm-security main\n" "$DEBIAN_SECURITY_MIRROR" >> /etc/apt/sources.list \
     && printf "deb %s bookworm-updates main\n" "$DEBIAN_UPDATES_MIRROR" >> /etc/apt/sources.list \
     && apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
-    && apt-get install -y --no-install-recommends python3 python3-pip aria2 curl unzip tar xz-utils \
+    && apt-get install -y --no-install-recommends curl tar xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN export DENO_INSTALL=/usr/local \
-    && curl -fsSL https://deno.land/install.sh | sh -s -- v${DENO_VERSION} \
-    && deno --version
-
-# Install plugin-capable yt-dlp and the bgutil PO token provider plugin.
-# The plugin talks to an external bgutil provider over HTTP, configured via
-# YTDLP_POT_PROVIDER_BASE_URL at runtime.
-ARG YT_DLP_VERSION
-RUN python3 -m pip install --break-system-packages --no-cache-dir \
-       "yt-dlp[default]==${YT_DLP_VERSION}" \
-       "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
-    && echo "yt-dlp version: $(yt-dlp --version)" \
-    && python3 -m pip show bgutil-ytdlp-pot-provider
+RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
+      apt-get update -o Acquire::Retries=3 -o Acquire::https::No-Cache=true -o Acquire::http::Pipeline-Depth=0 \
+      && apt-get install -y --no-install-recommends python3 python3-pip aria2 unzip \
+      && rm -rf /var/lib/apt/lists/* \
+      && export DENO_INSTALL=/usr/local \
+      && curl -fsSL https://deno.land/install.sh | sh -s -- v${DENO_VERSION} \
+      && deno --version \
+      && python3 -m pip install --break-system-packages --no-cache-dir \
+          "yt-dlp[default]==${YT_DLP_VERSION}" \
+          "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
+      && echo "yt-dlp version: $(yt-dlp --version)" \
+      && python3 -m pip show bgutil-ytdlp-pot-provider; \
+    else \
+      echo "Skipping yt-dlp/browser runtime dependencies for ${PROCESS_AUDIO_RUNTIME_PROFILE} profile"; \
+    fi
 
 RUN curl -fsSL "${FFMPEG_BUILD_BASE_URL}/${FFMPEG_BUILD_ARCHIVE}" -o /tmp/ffmpeg.tar.xz \
     && mkdir -p /opt/ffmpeg \

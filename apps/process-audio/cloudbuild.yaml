@@ -19,6 +19,8 @@ steps:
         'build',
         '--cache-from',
         '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}',
+        '--build-arg',
+        'PROCESS_AUDIO_RUNTIME_PROFILE=cloudrun',
         '-f',
         'apps/process-audio/Dockerfile',
         '-t',
@@ -36,64 +38,13 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}']
 
-  # Step 4: Deploy the dedicated PO-token provider service when needed and persist its URL.
+  # Step 4: Deploy the storage-only Cloud Run service.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: bash
     args:
       - -ceu
       - |
-        if [[ "${_DEPLOY_POT_PROVIDER}" == "true" ]]; then
-          gcloud run deploy "${_POT_PROVIDER_SERVICE_NAME}" \
-            --project "${_PROJECT_ID}" \
-            --image "${_POT_PROVIDER_IMAGE}" \
-            --region "${_REGION}" \
-            --platform managed \
-            --port "${_POT_PROVIDER_PORT}" \
-            --min-instances "${_POT_PROVIDER_MIN_INSTANCES}" \
-            --max-instances "${_POT_PROVIDER_MAX_INSTANCES}" \
-            --cpu "${_POT_PROVIDER_CPU}" \
-            --memory "${_POT_PROVIDER_MEMORY}" \
-            --concurrency "${_POT_PROVIDER_CONCURRENCY}" \
-            --timeout "${_POT_PROVIDER_TIMEOUT}"
-
-          gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
-            --project "${_PROJECT_ID}" \
-            --region "${_REGION}" \
-            --format='value(status.url)' > /workspace/pot_provider_url.txt
-        else
-          printf '%s' "${_POT_PROVIDER_URL}" > /workspace/pot_provider_url.txt
-        fi
-
-        POT_PROVIDER_URL="$$(cat /workspace/pot_provider_url.txt)"
-        export POT_PROVIDER_URL
-
-        if [[ "${_DEPLOY_POT_PROVIDER}" == "true" ]]; then
-          READY_STATUS="$$(gcloud run services describe "${_POT_PROVIDER_SERVICE_NAME}" \
-            --project "${_PROJECT_ID}" \
-            --region "${_REGION}" \
-            --format=json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((condition.get("status","") for condition in data.get("status", {}).get("conditions", []) if condition.get("type") == "Ready"), ""))')"
-
-          if [[ "$$READY_STATUS" != "True" ]]; then
-            echo "POT provider is not Ready after deploy: status=$$READY_STATUS" >&2
-            exit 1
-          fi
-
-          echo "Validated POT provider readiness at $$POT_PROVIDER_URL"
-        else
-          echo "Skipping POT provider deploy for this process-audio deployment."
-        fi
-
-  # Step 5: Deploy to Cloud Run (private service)
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: bash
-    args:
-      - -ceu
-      - |
-        POT_PROVIDER_URL="$$(cat /workspace/pot_provider_url.txt)"
         update_secrets="RUNTIME_ALERT_RECIPIENTS=${_RUNTIME_ALERT_RECIPIENTS_SECRET}:latest"
-        if [[ -n "${_BROWSER_FALLBACK_SHARED_SECRET_SECRET}" ]]; then
-          update_secrets="$${update_secrets},BROWSER_FALLBACK_SHARED_SECRET=${_BROWSER_FALLBACK_SHARED_SECRET_SECRET}:latest"
-        fi
 
         DEPLOY_ARGS=(
           deploy "${_SERVICE_NAME}"
@@ -110,7 +61,7 @@ steps:
           --max-instances "${_MAX_INSTANCES}"
           --timeout "${_TIMEOUT}"
           --update-secrets "$${update_secrets}"
-          --update-env-vars "NODE_ENV=production,FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID},FIREBASE_STORAGE_BUCKET=${_FIREBASE_STORAGE_BUCKET},FIREBASE_DATABASE_URL=${_FIREBASE_DATABASE_URL},YTDLP_POT_PROVIDER_BASE_URL=$$POT_PROVIDER_URL,YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=${_YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS},YTDLP_CONCURRENT_FRAGMENTS=${_YTDLP_CONCURRENT_FRAGMENTS},YOUTUBE_RETRY_DELAY_MS=${_YOUTUBE_RETRY_DELAY_MS},YTDLP_COOKIE_HEALTHCHECK_ENABLED=${_YTDLP_COOKIE_HEALTHCHECK_ENABLED},YTDLP_POT_DISABLE_INNERTUBE=${_YTDLP_POT_DISABLE_INNERTUBE},YTDLP_JS_RUNTIME=${_YTDLP_JS_RUNTIME},YOUTUBE_PUBLIC_PROVIDER_MAX_ATTEMPTS=${_YOUTUBE_PUBLIC_PROVIDER_MAX_ATTEMPTS},YOUTUBE_COOKIE_PROVIDER_MAX_ATTEMPTS=${_YOUTUBE_COOKIE_PROVIDER_MAX_ATTEMPTS},YOUTUBE_COOKIE_CIRCUIT_BREAKER_MINUTES=${_YOUTUBE_COOKIE_CIRCUIT_BREAKER_MINUTES},YTDLP_SLEEP_REQUESTS_SECONDS=${_YTDLP_SLEEP_REQUESTS_SECONDS},YTDLP_SLEEP_INTERVAL_SECONDS=${_YTDLP_SLEEP_INTERVAL_SECONDS},YTDLP_MAX_SLEEP_INTERVAL_SECONDS=${_YTDLP_MAX_SLEEP_INTERVAL_SECONDS},YOUTUBE_BROWSER_FALLBACK_ENABLED=${_YOUTUBE_BROWSER_FALLBACK_ENABLED},YOUTUBE_BROWSER_FALLBACK_URL=${_YOUTUBE_BROWSER_FALLBACK_URL},YOUTUBE_FINAL_BROWSER_FALLBACK_URL=${_YOUTUBE_FINAL_BROWSER_FALLBACK_URL},YOUTUBE_FORCE_IPV4=${_YOUTUBE_FORCE_IPV4}"
+          --update-env-vars "NODE_ENV=production,FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID},FIREBASE_STORAGE_BUCKET=${_FIREBASE_STORAGE_BUCKET},FIREBASE_DATABASE_URL=${_FIREBASE_DATABASE_URL},PROCESS_AUDIO_RUNTIME_PROFILE=cloudrun,PROCESS_AUDIO_RUNTIME_HOST=cloud-run,PROCESS_AUDIO_RUNTIME_ENV=${_RUNTIME_ENV}"
         )
 
         if [[ -n "${_NETWORK}" && -n "${_SUBNET}" ]]; then
@@ -130,43 +81,16 @@ substitutions:
   _IMAGE_NAME: 'process-audio'
   _CACHE_TAG: 'buildcache'
   _SERVICE_NAME: 'process-audio'
-  _POT_PROVIDER_SERVICE_NAME: 'ytdlp-pot-provider'
-  _POT_PROVIDER_IMAGE: 'docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1'
-  _POT_PROVIDER_CPU: '1'
-  _POT_PROVIDER_MEMORY: '512Mi'
-  _POT_PROVIDER_CONCURRENCY: '1'
-  _POT_PROVIDER_PORT: '4416'
-  _POT_PROVIDER_MIN_INSTANCES: '0'
-  _POT_PROVIDER_MAX_INSTANCES: '3'
-  _POT_PROVIDER_TIMEOUT: '300'
-  _DEPLOY_POT_PROVIDER: 'false'
-  _POT_PROVIDER_URL: ''
+  _RUNTIME_ENV: 'production'
   _FIREBASE_PROJECT_ID: 'urm-app'
   _FIREBASE_STORAGE_BUCKET: 'urm-app.appspot.com'
   _FIREBASE_DATABASE_URL: 'https://urm-app-default-rtdb.firebaseio.com/'
   _RUNTIME_ALERT_RECIPIENTS_SECRET: 'RUNTIME_ALERT_RECIPIENTS'
-  _BROWSER_FALLBACK_SHARED_SECRET_SECRET: ''
   _CPU: '2'
   _MEMORY: '4Gi'
   _CONCURRENCY: '1'
   _MIN_INSTANCES: '0'
   _MAX_INSTANCES: '10'
   _TIMEOUT: '3600'
-  _YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS: 'false'
-  _YTDLP_CONCURRENT_FRAGMENTS: '1'
-  _YOUTUBE_RETRY_DELAY_MS: '1500'
-  _YTDLP_COOKIE_HEALTHCHECK_ENABLED: 'true'
-  _YTDLP_POT_DISABLE_INNERTUBE: 'false'
-  _YTDLP_JS_RUNTIME: 'deno'
-  _YOUTUBE_PUBLIC_PROVIDER_MAX_ATTEMPTS: '1'
-  _YOUTUBE_COOKIE_PROVIDER_MAX_ATTEMPTS: '1'
-  _YOUTUBE_COOKIE_CIRCUIT_BREAKER_MINUTES: '30'
-  _YTDLP_SLEEP_REQUESTS_SECONDS: '2'
-  _YTDLP_SLEEP_INTERVAL_SECONDS: '1'
-  _YTDLP_MAX_SLEEP_INTERVAL_SECONDS: '3'
   _NETWORK: ''
   _SUBNET: ''
-  _YOUTUBE_BROWSER_FALLBACK_ENABLED: 'false'
-  _YOUTUBE_BROWSER_FALLBACK_URL: ''
-  _YOUTUBE_FINAL_BROWSER_FALLBACK_URL: ''
-  _YOUTUBE_FORCE_IPV4: 'false'

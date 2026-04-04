@@ -24,7 +24,7 @@ default:
 # Build the Docker image
 build:
     @echo "Building Docker image..."
-    docker build --file apps/process-audio/Dockerfile --tag process-audio ../..
+    docker build --build-arg PROCESS_AUDIO_RUNTIME_PROFILE=hetzner --file apps/process-audio/Dockerfile --tag process-audio ../..
 
 # Start the service (builds and runs the Docker container)
 # Usage: just start-service
