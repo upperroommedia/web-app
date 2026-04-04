@@ -68,6 +68,22 @@ The worker images include pinned versions of:
 - `ffmpeg`
 - `aria2c`
 
+## Known-Good Livestream Fix
+
+Known-good production release for completed YouTube livestream downloads:
+
+- `process-audio-hetzner@production-c6d37e55b15de384c6ada0fbd6c58bd9b5a6f0b6`
+
+Why this matters:
+
+- on Hetzner, yt-dlp's native `m3u8` downloader could intermittently fail mid-stream with fragment temp-file errors like:
+  - `Unable to rename file ... part-FragNNN.part`
+  - `FileNotFoundError ... part-FragNNN`
+- this affected completed livestream URLs routed through `formatId=91` / `selectedProtocol=m3u8_native`
+- the known-good fix forces `--downloader m3u8:ffmpeg` for YouTube `m3u8` paths while leaving direct `https` downloads on the existing path
+
+If livestream downloads regress in the future, compare behavior against commit `c6d37e55` first before changing format selection again.
+
 The VM does not host:
 
 - normal file upload processing
