@@ -52,7 +52,6 @@ import {
   createSubsplashSeriesUnpublishIntentKey,
   createSubsplashUploadIntentKey,
   didAllListPublishesSucceed,
-  getSermonSubsplashStatusAfterListMutation,
   summarizeListPublishErrors,
 } from '../utils/subsplashPublishFlow';
 import { runSubsplashSeriesPublishSaga } from '../utils/subsplashSeriesPublishSaga';
@@ -913,7 +912,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
 
       const listsPublishedSuccessfully = didAllListPublishesSucceed(targetListIds, addToListReturn);
       batch.update(sermonRef, {
-        'status.subsplash': getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
         approverId: user?.uid,
       });
       await batch.commit();

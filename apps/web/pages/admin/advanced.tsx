@@ -29,6 +29,11 @@ import type {
 } from '@upperroom/contracts/updateAllSpeakerTags';
 import type { UpdateAllSpeakerTagsResultType } from '@upperroom/contracts/updateAllSpeakerTags';
 import type {
+  BackfillSermonSubsplashStatusInputType,
+  BackfillSermonSubsplashStatusOutputType,
+  BackfillSermonSubsplashStatusResultType,
+} from '@upperroom/contracts/backfillSermonSubsplashStatus';
+import type {
   GetYouTubeCookieStatusInput,
   GetYouTubeCookieStatusOutputType,
 } from '@upperroom/contracts/getYouTubeCookieStatus';
@@ -148,6 +153,9 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
   const [isUploadingYouTubeCookies, setIsUploadingYouTubeCookies] = useState(false);
   const [isRunningSpeakerTagUpdate, setIsRunningSpeakerTagUpdate] = useState(false);
   const [speakerTagUpdateResult, setSpeakerTagUpdateResult] = useState<UpdateAllSpeakerTagsResultType | null>(null);
+  const [isRunningSubsplashStatusBackfill, setIsRunningSubsplashStatusBackfill] = useState(false);
+  const [subsplashStatusBackfillResult, setSubsplashStatusBackfillResult] =
+    useState<BackfillSermonSubsplashStatusResultType | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
 
   const isAdmin = user?.isAdmin() ?? false;
@@ -306,6 +314,40 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       setNotice({ severity: 'error', text: message });
     } finally {
       setIsRunningSpeakerTagUpdate(false);
+    }
+  }, [canRunScripts]);
+
+  const runBackfillSermonSubsplashStatus = useCallback(async () => {
+    if (!canRunScripts) {
+      setNotice({ severity: 'error', text: 'You are not allowed to run admin scripts.' });
+      return;
+    }
+
+    setIsRunningSubsplashStatusBackfill(true);
+    setSubsplashStatusBackfillResult(null);
+    setNotice({ severity: 'info', text: 'Recomputing sermon Subsplash status from list counters…' });
+
+    try {
+      const backfillSermonSubsplashStatus = createFunctionV2<
+        BackfillSermonSubsplashStatusInputType,
+        BackfillSermonSubsplashStatusOutputType
+      >('backfillsermonsubsplashstatus');
+      const result = await backfillSermonSubsplashStatus({});
+      if (result.status !== 'success') {
+        setNotice({ severity: 'error', text: result.error });
+        return;
+      }
+
+      setSubsplashStatusBackfillResult(result.data);
+      setNotice({
+        severity: 'success',
+        text: `Checked ${result.data.totalSermons} sermons. Updated ${result.data.updatedCount} and left ${result.data.alreadyCorrectCount} unchanged.`,
+      });
+    } catch (error) {
+      const message = formatCallableError(error, 'Failed to backfill sermon Subsplash status.');
+      setNotice({ severity: 'error', text: message });
+    } finally {
+      setIsRunningSubsplashStatusBackfill(false);
     }
   }, [canRunScripts]);
 
@@ -810,6 +852,60 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                         ) : (
                           <Alert severity="success">No speaker tag updates failed in the last run.</Alert>
                         )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ) : null}
+
+                <Divider />
+
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  spacing={1.5}
+                >
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={700}>
+                      Backfill Sermon Subsplash Status
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Recompute <code>status.subsplash</code> as uploaded only when uploaded-list count equals total-list count and total-list count is greater than zero.
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    onClick={runBackfillSermonSubsplashStatus}
+                    disabled={isRunningSubsplashStatusBackfill}
+                  >
+                    {isRunningSubsplashStatusBackfill ? 'Backfilling…' : 'Backfill Subsplash Status'}
+                  </Button>
+                </Stack>
+
+                {subsplashStatusBackfillResult ? (
+                  <Card variant="outlined" sx={{ bgcolor: 'background.default' }}>
+                    <CardContent>
+                      <Stack spacing={2}>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight={700}>
+                            Last Backfill Summary
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            Summary for the most recent sermon Subsplash status reconciliation run.
+                          </Typography>
+                        </Box>
+
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
+                          <Chip color="success" label={`${subsplashStatusBackfillResult.updatedCount} updated`} />
+                          <Chip label={`${subsplashStatusBackfillResult.alreadyCorrectCount} already correct`} />
+                          <Chip label={`${subsplashStatusBackfillResult.totalSermons} total sermons`} />
+                        </Stack>
+
+                        <Typography variant="body2" color="text.secondary">
+                          Sample updated sermon IDs: {subsplashStatusBackfillResult.processedSermonIds.length > 0
+                            ? subsplashStatusBackfillResult.processedSermonIds.join(', ')
+                            : 'None'}
+                        </Typography>
                       </Stack>
                     </CardContent>
                   </Card>
