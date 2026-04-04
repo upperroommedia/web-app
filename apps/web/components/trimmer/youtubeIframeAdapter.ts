@@ -97,18 +97,39 @@ function loadYouTubeIframeApi(): Promise<YouTubeIframeApi> {
   youtubeApiPromise = new Promise<YouTubeIframeApi>((resolve, reject) => {
     const existingScript = document.getElementById(YOUTUBE_IFRAME_API_SCRIPT_ID) as HTMLScriptElement | null;
     let timeoutId = -1;
+    let readyPollId = -1;
+    let settled = false;
+    let scriptForCleanup: HTMLScriptElement | null = null;
 
     const cleanup = () => {
       if (timeoutId !== -1) {
         window.clearTimeout(timeoutId);
       }
+      if (readyPollId !== -1) {
+        window.clearInterval(readyPollId);
+      }
+      if (scriptForCleanup) {
+        scriptForCleanup.removeEventListener('error', onScriptError);
+      }
     };
 
     const resolveWhenReady = () => {
-      if (window.YT?.Player) {
-        cleanup();
-        resolve(window.YT);
+      if (settled || !window.YT?.Player) {
+        return;
       }
+      settled = true;
+      cleanup();
+      resolve(window.YT);
+    };
+
+    const rejectWith = (error: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      youtubeApiPromise = null;
+      reject(error);
     };
 
     const previousReady = window.onYouTubeIframeAPIReady;
@@ -118,23 +139,33 @@ function loadYouTubeIframeApi(): Promise<YouTubeIframeApi> {
     };
 
     const onScriptError = () => {
-      cleanup();
-      reject(new Error('Failed to load YouTube iframe API script'));
+      rejectWith(new Error('Failed to load YouTube iframe API script'));
     };
+
+    if (window.YT?.Player) {
+      resolveWhenReady();
+      return;
+    }
 
     if (!existingScript) {
       const script = document.createElement('script');
       script.id = YOUTUBE_IFRAME_API_SCRIPT_ID;
       script.src = YOUTUBE_IFRAME_API_SRC;
       script.async = true;
-      script.onerror = onScriptError;
+      script.addEventListener('error', onScriptError, { once: true });
+      scriptForCleanup = script;
       document.head.appendChild(script);
     } else {
       existingScript.addEventListener('error', onScriptError, { once: true });
+      scriptForCleanup = existingScript;
     }
 
+    readyPollId = window.setInterval(() => {
+      resolveWhenReady();
+    }, 100);
+
     timeoutId = window.setTimeout(() => {
-      reject(new Error('Timed out while waiting for YouTube iframe API'));
+      rejectWith(new Error('Timed out while waiting for YouTube iframe API'));
     }, YOUTUBE_IFRAME_API_TIMEOUT_MS);
   });
 
@@ -176,6 +207,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
   private restoreMuteAfterPrime = false;
   private lastSnapshot: TrimmerPlayerSnapshot | null = null;
   private isIframeReady = false;
+  private isVideoReady = false;
   private pendingVideoId: string | null = null;
   private destroyed = false;
 
@@ -204,6 +236,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
   async load(videoId: string): Promise<void> {
     this.destroyed = false;
     this.pendingVideoId = videoId;
+    this.isVideoReady = false;
 
     try {
       await this.ensurePlayer();
@@ -211,6 +244,8 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
 
       if (this.isIframeReady) {
         this.cueVideo(videoId);
+      } else {
+        this.emitSnapshot(true);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -277,6 +312,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
     this.player = null;
     this.api = null;
     this.isIframeReady = false;
+    this.isVideoReady = false;
     this.lastSnapshot = null;
     this.container.replaceChildren();
 
@@ -302,6 +338,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
 
     this.api = api;
     this.isIframeReady = false;
+    this.isVideoReady = false;
 
     const mountNode = document.createElement('div');
     this.container.replaceChildren(mountNode);
@@ -330,6 +367,10 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
           this.startPolling();
         },
         onStateChange: (event) => {
+          const unstartedState = this.api?.PlayerState.UNSTARTED ?? -1;
+          if (event.data !== unstartedState && this.pendingVideoId) {
+            this.isVideoReady = true;
+          }
           logTrimmerDebug('youtube-iframe.state-change', {
             state: event.data,
           });
@@ -348,6 +389,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
     if (!this.player) return;
 
     try {
+      this.isVideoReady = false;
       this.player.cueVideoById({
         videoId,
         startSeconds: 0,
@@ -437,6 +479,8 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
     const playingState: number = api?.PlayerState.PLAYING ?? 1;
     const endedState: number = api?.PlayerState.ENDED ?? 0;
     const bufferingState: number = api?.PlayerState.BUFFERING ?? 3;
+    const cuedState: number = api?.PlayerState.CUED ?? 5;
+    const unstartedState: number = api?.PlayerState.UNSTARTED ?? -1;
 
     let currentTime = 0;
     let duration = 0;
@@ -454,6 +498,10 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
       return;
     }
 
+    const hasLoadedVideoState =
+      this.pendingVideoId !== null &&
+      (this.isVideoReady || duration > 0 || playerState === cuedState || playerState > unstartedState);
+
     const snapshot: TrimmerPlayerSnapshot = {
       currentTime,
       duration,
@@ -461,7 +509,7 @@ export class YouTubeIframeAdapter implements TrimmerPlayerAdapter {
       paused: playerState !== playingState,
       buffering: playerState === bufferingState,
       muted,
-      ready: this.isIframeReady && !!this.pendingVideoId,
+      ready: this.isIframeReady && hasLoadedVideoState,
       ended: playerState === endedState,
     };
 
