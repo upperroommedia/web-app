@@ -419,6 +419,10 @@ function getYtDlpExternalDownloaderArgs(): string | undefined {
   return value || undefined;
 }
 
+function shouldForceFfmpegForM3u8(protocol: string | undefined | null): boolean {
+  return normalizeProtocol(protocol).includes('m3u8');
+}
+
 function applyYtDlpExternalDownloaderArgs(args: string[]): void {
   const downloader = getYtDlpExternalDownloader();
   if (!downloader) return;
@@ -444,6 +448,16 @@ function maybeApplyYtDlpExternalDownloaderArgs(
   log: ReturnType<typeof createLoggerWithContext>,
   options?: { protocol?: string | null; fragmentCount?: number | null; context?: string }
 ): void {
+  if (shouldForceFfmpegForM3u8(options?.protocol)) {
+    args.push('--downloader', 'm3u8:ffmpeg');
+    log.info('Forcing ffmpeg downloader for YouTube m3u8 download path', {
+      protocol: options?.protocol || null,
+      fragmentCount: options?.fragmentCount ?? null,
+      context: options?.context || null,
+    });
+    return;
+  }
+
   const downloader = getYtDlpExternalDownloader();
   if (!downloader) return;
   if (!shouldApplyYtDlpExternalDownloader(options)) {
