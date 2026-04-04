@@ -27,6 +27,7 @@ import {
 } from './processAudioQueueStore';
 import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
 import { getProcessAudioConcurrencyConfig } from './concurrency';
+import type { StoredProcessAudioRequestState } from '@upperroom/contracts/processAudioQueue';
 
 const YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON = 'browser_fallback_unavailable';
 
@@ -143,6 +144,139 @@ const bucket = firebaseAdmin.storage().bucket();
 const realtimeDB = firebaseAdmin.database();
 const db = firebaseAdmin.firestore();
 
+function shouldRecoverOrphanedHetznerStateOnStartup(): boolean {
+  if (runtimeProfile !== 'hetzner') {
+    return false;
+  }
+
+  const explicit = process.env.PROCESS_AUDIO_RECOVER_ORPHANED_STATE_ON_STARTUP?.trim().toLowerCase();
+  return !['0', 'false', 'no'].includes(explicit || '');
+}
+
+async function recoverOrphanedHetznerProcessAudioStateOnStartup(): Promise<void> {
+  if (!shouldRecoverOrphanedHetznerStateOnStartup()) {
+    return;
+  }
+
+  const startupLogger = createLoggerWithContext(createContext(undefined, 'startup-recovery'));
+  startupLogger.info('Scanning for orphaned process-audio state after worker startup');
+
+  const [locksSnapshot, requestsSnapshot, progressSnapshot] = await Promise.all([
+    realtimeDB.ref('processAudioLocks').get(),
+    realtimeDB.ref('processAudioRequests').get(),
+    realtimeDB.ref('addIntroOutro').get(),
+  ]);
+
+  const lockEntries = (locksSnapshot.val() as Record<string, unknown> | null) ?? {};
+  const requestEntries = (requestsSnapshot.val() as Record<string, StoredProcessAudioRequestState> | null) ?? {};
+  const progressEntries = (progressSnapshot.val() as Record<string, unknown> | null) ?? {};
+  const sermonIds = new Set<string>([
+    ...Object.keys(lockEntries),
+    ...Object.keys(requestEntries),
+    ...Object.keys(progressEntries),
+  ]);
+
+  if (sermonIds.size === 0) {
+    startupLogger.info('No orphaned process-audio state found on startup');
+    return;
+  }
+
+  let recoveredCount = 0;
+
+  for (const sermonId of sermonIds) {
+    const requestState = requestEntries[sermonId];
+    const hasRunningRequest = !!requestState?.runningRequestId;
+    const hasLock = sermonId in lockEntries;
+    const hasProgress = sermonId in progressEntries;
+
+    if (!hasRunningRequest && !hasLock && !hasProgress) {
+      continue;
+    }
+
+    recoveredCount += 1;
+    startupLogger.warn('Recovering orphaned process-audio state after restart', {
+      sermonId,
+      runningRequestId: requestState?.runningRequestId ?? null,
+      runningTaskId: requestState?.runningTaskId ?? null,
+      runningAt: requestState?.runningAt ?? null,
+      hasLock,
+      hasProgress,
+    });
+
+    const updates: Array<Promise<unknown>> = [
+      realtimeDB.ref(`processAudioLocks/${sermonId}`).remove().catch((error) => {
+        startupLogger.error('Failed to remove orphaned process-audio lock', {
+          sermonId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }),
+      realtimeDB.ref(`addIntroOutro/${sermonId}`).remove().catch((error) => {
+        startupLogger.error('Failed to remove orphaned process progress node', {
+          sermonId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }),
+    ];
+
+    if (requestState) {
+      updates.push(
+        realtimeDB
+          .ref(`processAudioRequests/${sermonId}`)
+          .set({
+            ...requestState,
+            runningRequestId: null,
+            runningTaskId: null,
+            runningRequestVersion: null,
+            runningAt: null,
+            updatedAt: new Date().toISOString(),
+          } satisfies StoredProcessAudioRequestState)
+          .catch((error) => {
+            startupLogger.error('Failed to clear orphaned process-audio request state', {
+              sermonId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          })
+      );
+    }
+
+    updates.push(
+      db
+        .collection('sermons')
+        .withConverter(firestoreAdminSermonConverter)
+        .doc(sermonId)
+        .get()
+        .then(async (snapshot) => {
+          if (!snapshot.exists) {
+            return;
+          }
+          const sermon = snapshot.data();
+          if (sermon?.status?.audioStatus !== sermonStatusType.PROCESSING) {
+            return;
+          }
+          await snapshot.ref.update({
+            status: {
+              ...sermon.status,
+              audioStatus: sermonStatusType.ERROR,
+              message: 'Audio processing was interrupted during worker restart. Retry required.',
+            },
+          });
+        })
+        .catch((error) => {
+          startupLogger.error('Failed to mark sermon as interrupted after startup recovery', {
+            sermonId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        })
+    );
+
+    await Promise.all(updates);
+  }
+
+  startupLogger.info('Completed orphaned process-audio startup recovery', {
+    recoveredCount,
+  });
+}
+
 // Log Firestore connection details after initialization
 const isDevelopment = process.env.NODE_ENV === 'development';
 if (isDevelopment) {
@@ -172,7 +306,17 @@ if (isDevelopment) {
 
 logger.info('Initializing ffmpeg');
 getFFmpegPath(); // Initialize and verify ffmpeg is available
-logger.info('Service ready');
+
+void recoverOrphanedHetznerProcessAudioStateOnStartup()
+  .then(() => {
+    logger.info('Service ready');
+  })
+  .catch((error) => {
+    logger.error('Failed to recover orphaned process-audio state on startup', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    logger.info('Service ready');
+  });
 
 app.get('/', (req, res) => {
   const VERSION = '1.1.0';
