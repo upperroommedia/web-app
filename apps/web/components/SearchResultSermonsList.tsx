@@ -50,16 +50,27 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
 
   useEffect(() => {
     if (sermonIds.length === 0) {
+      setState({
+        liveSermonsById: {},
+        resolvedIds: new Set<string>(),
+      });
       return;
     }
 
-    const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon> }>();
+    setState({
+      liveSermonsById: {},
+      resolvedIds: new Set<string>(),
+    });
+
+    const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon>; resolved: boolean }>();
     const updateState = () => {
       const nextLiveSermonsById: Record<string, Sermon> = {};
       const nextResolvedIds = new Set<string>();
 
-      chunkSnapshots.forEach(({ ids, records }) => {
-        ids.forEach((id) => nextResolvedIds.add(id));
+      chunkSnapshots.forEach(({ ids, records, resolved }) => {
+        if (resolved) {
+          ids.forEach((id) => nextResolvedIds.add(id));
+        }
         Object.assign(nextLiveSermonsById, records);
       });
 
@@ -77,12 +88,17 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
 
       return onSnapshot(
         sermonsQuery,
+        { includeMetadataChanges: true },
         (snapshot) => {
           const nextChunkRecords: Record<string, Sermon> = {};
           snapshot.docs.forEach((docSnapshot) => {
             nextChunkRecords[docSnapshot.id] = docSnapshot.data();
           });
-          chunkSnapshots.set(chunkIndex, { ids: idChunk, records: nextChunkRecords });
+          chunkSnapshots.set(chunkIndex, {
+            ids: idChunk,
+            records: nextChunkRecords,
+            resolved: !snapshot.metadata.fromCache,
+          });
           updateState();
         },
         (error) => {
@@ -150,6 +166,16 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
   const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds);
+  const unresolvedVisibleHitIds = useMemo(
+    () =>
+      visibleHitIds.filter((sermonId) => !liveSermonsById[sermonId] && !resolvedLiveSermonIds.has(sermonId)),
+    [liveSermonsById, resolvedLiveSermonIds, visibleHitIds]
+  );
+  const unresolvedVisibleHitCount = unresolvedVisibleHitIds.length;
+  const hasUnresolvedVisibleHits = useMemo(
+    () => visibleHitIds.some((sermonId) => !resolvedLiveSermonIds.has(sermonId)),
+    [resolvedLiveSermonIds, visibleHitIds]
+  );
   const { visiblePendingSermons, visibleAlgoliaHits, displayRows } = useMemo(
     () =>
       reconcileAdminSermonSearchResults({
@@ -172,8 +198,14 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   );
   const hasVisibleHits = visibleAlgoliaHits.length > 0;
   const hasVisiblePending = showPendingOverlay && visiblePendingSermons.length > 0;
-  const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending;
+  const isHydratingVisibleHits = hasSettledResults && visibleHitIds.length > 0 && hasUnresolvedVisibleHits;
+  const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending && unresolvedVisibleHitCount === 0;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
+  const shouldShowEmptyState =
+    shouldRenderHits &&
+    !isHydratingVisibleHits &&
+    visibleAlgoliaHits.length === 0 &&
+    (!showPendingOverlay || visiblePendingSermons.length === 0);
 
   return (
     <Box display="flex" justifyContent="start" flex={3} overflow="hidden" {...props}>
@@ -219,7 +251,9 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
               enableProcessingProgress={enableProcessingProgress}
             />
           ))}
-        {shouldRenderHits && visibleAlgoliaHits.length === 0 && (!showPendingOverlay || visiblePendingSermons.length === 0) && (
+        {shouldRenderHits &&
+          unresolvedVisibleHitIds.map((sermonId) => <SermonListCardSkeloten key={`hydrating-sermon-${sermonId}`} />)}
+        {shouldShowEmptyState && (
           <Typography sx={{ px: { xs: 0.5, sm: 1 } }} color="text.secondary">
             No sermons found. Upload a sermon to get started.
           </Typography>

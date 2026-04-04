@@ -49,6 +49,44 @@ describe('reconcileAdminSermonSearchResults', () => {
     expect(result.displayRows).toEqual([]);
   });
 
+  it('hides Algolia hits until Firestore has confirmed the visible ids from the server', () => {
+    const unresolvedSermonHit = createSermon({
+      id: 'unresolved-sermon',
+    });
+
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [unresolvedSermonHit],
+      pendingSermons: [],
+      showPendingOverlay: true,
+      hasSettledResults: true,
+      liveSermonsById: {},
+      resolvedLiveSermonIds: new Set(),
+    });
+
+    expect(result.visibleAlgoliaHits).toHaveLength(0);
+    expect(result.confirmedVisibleHitIds.size).toBe(0);
+    expect(result.displayRows).toEqual([]);
+  });
+
+  it('renders Firestore-backed rows immediately even before server confirmation arrives', () => {
+    const cachedSermon = createSermon({
+      id: 'cached-sermon',
+    });
+
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [cachedSermon],
+      pendingSermons: [],
+      showPendingOverlay: true,
+      hasSettledResults: true,
+      liveSermonsById: { [cachedSermon.id]: cachedSermon },
+      resolvedLiveSermonIds: new Set(),
+    });
+
+    expect(result.visibleAlgoliaHits.map((sermon) => sermon.id)).toEqual([cachedSermon.id]);
+    expect(result.confirmedVisibleHitIds.size).toBe(0);
+    expect(result.displayRows.map((row) => row.sermon.id)).toEqual([cachedSermon.id]);
+  });
+
   it('builds a single stable row list with pending sermons first and indexed sermons after', () => {
     const pendingSermon = createSermon({
       id: 'pending-sermon',
