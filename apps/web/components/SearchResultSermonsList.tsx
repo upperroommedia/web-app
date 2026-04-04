@@ -28,6 +28,7 @@ import {
 } from '../utils/sermonSearchResults';
 
 const FIRESTORE_IN_QUERY_LIMIT = 10;
+const HYDRATION_SKELETON_DELAY_MS = 1000;
 
 const chunkIds = (ids: string[], chunkSize: number): string[][] => {
   const chunks: string[][] = [];
@@ -37,6 +38,27 @@ const chunkIds = (ids: string[], chunkSize: number): string[][] => {
   }
 
   return chunks;
+};
+
+const useDelayedTrue = (value: boolean, delayMs: number): boolean => {
+  const [delayedValue, setDelayedValue] = useState(false);
+
+  useEffect(() => {
+    if (!value) {
+      setDelayedValue(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDelayedValue(true);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [delayMs, value]);
+
+  return delayedValue;
 };
 
 const useLiveVisibleSermons = (sermonIds: string[]) => {
@@ -207,6 +229,10 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const isHydratingVisibleHits = hasSettledResults && visibleHitIds.length > 0 && hasUnresolvedVisibleHits;
   const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending && unresolvedVisibleHitCount === 0;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
+  const shouldShowHydrationSkeletons = useDelayedTrue(
+    shouldRenderHits && unresolvedVisibleHitCount > 0,
+    HYDRATION_SKELETON_DELAY_MS
+  );
   const shouldShowEmptyState =
     shouldRenderHits &&
     !isHydratingVisibleHits &&
@@ -257,7 +283,7 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
               enableProcessingProgress={enableProcessingProgress}
             />
           ))}
-        {shouldRenderHits &&
+        {shouldShowHydrationSkeletons &&
           unresolvedVisibleHitIds.map((sermonId) => <SermonListCardSkeloten key={`hydrating-sermon-${sermonId}`} />)}
         {shouldShowEmptyState && (
           <Typography sx={{ px: { xs: 0.5, sm: 1 } }} color="text.secondary">
