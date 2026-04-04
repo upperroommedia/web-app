@@ -152,9 +152,19 @@ jobs:
             changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
           fi
 
+          changed_files_for_functions="$(echo "$changed_files" | grep -Ev '^functions/src/sentryBuildInfo\.ts$' || true)"
+
           contains_path() {
             local pattern="$1"
             if echo "$changed_files" | grep -Eq "$pattern"; then
+              return 0
+            fi
+            return 1
+          }
+
+          contains_function_path() {
+            local pattern="$1"
+            if echo "$changed_files_for_functions" | grep -Eq "$pattern"; then
               return 0
             fi
             return 1
@@ -210,7 +220,7 @@ jobs:
               deploy_functions_integrations=true
             fi
 
-            if contains_path '^(functions/src/|apps/web/firebase/|apps/web/shared/|apps/web/types/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
+            if contains_function_path '^(functions/src/|apps/web/firebase/|apps/web/shared/|apps/web/types/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
               deploy_functions_core=true
               deploy_functions_media=true
               deploy_functions_image=true
