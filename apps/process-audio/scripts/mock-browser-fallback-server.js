@@ -6,6 +6,9 @@ const app = express();
 const port = Number.parseInt(process.env.BROWSER_FALLBACK_PORT || '8090', 10);
 const sessionState = process.env.BROWSER_FALLBACK_SESSION_STATE || 'authenticated';
 const fallbackBaseUrl = process.env.BROWSER_FALLBACK_BASE_URL || `http://browser-fallback:${port}`;
+const strategy = process.env.BROWSER_FALLBACK_STRATEGY || 'session_backed';
+const serviceRole = process.env.BROWSER_FALLBACK_SERVICE_ROLE || 'mock-browser-fallback';
+const credentialSource = process.env.BROWSER_FALLBACK_CREDENTIAL_SOURCE || 'chromium_profile';
 
 app.use(express.json());
 
@@ -22,6 +25,9 @@ app.get('/session-status', (req, res) => {
     profileUpdatedAt: null,
     profileGeneration: null,
     fakeMode: true,
+    strategy,
+    serviceRole,
+    credentialSource,
     healthcheckConfigured: false,
     lastCheckedAt: null,
     lastErrorCode: null,
@@ -41,6 +47,11 @@ app.post('/fallback', (req, res) => {
       url: 'https://example.com/browser-fallback-audio.m4a',
       format: 'm4a',
       duration: 20,
+      resolution: {
+        strategy,
+        serviceRole,
+        credentialSource,
+      },
     });
   }
 
@@ -48,6 +59,11 @@ app.post('/fallback', (req, res) => {
     return res.json({
       downloadUrl: `${fallbackBaseUrl}/downloads/mock-section.m4a`,
       ext: 'm4a',
+      resolution: {
+        strategy,
+        serviceRole,
+        credentialSource,
+      },
     });
   }
 

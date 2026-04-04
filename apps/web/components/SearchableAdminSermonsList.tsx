@@ -81,9 +81,14 @@ function MobileFilterDrawer({ show }: { show: boolean }) {
   );
 }
 
-const SearchableAdminSermonList: FunctionComponent<{ refreshNonce?: number }> = ({ refreshNonce = 0 }) => {
+const SearchableAdminSermonList: FunctionComponent<{ hiddenSermonIds?: string[] }> = ({ hiddenSermonIds = [] }) => {
   const { user } = useAuth();
-  const { searchClient, loading: searchClientLoading, error: searchClientError } = useAlgoliaSearch();
+  const {
+    searchClient,
+    loading: searchClientLoading,
+    error: searchClientError,
+    sermonSearchRevision,
+  } = useAlgoliaSearch();
   const theme = useTheme();
   const useMobileFilters = useMediaQuery(theme.breakpoints.down('lg'));
   const [showFilters, setShowFilters] = useState<boolean>(false);
@@ -101,7 +106,7 @@ const SearchableAdminSermonList: FunctionComponent<{ refreshNonce?: number }> = 
     <>
       {searchClient ? (
         <InstantSearch
-          key={refreshNonce}
+          key={sermonSearchRevision}
           searchClient={searchClient}
           indexName="sermons"
           stalledSearchDelay={400}
@@ -119,7 +124,7 @@ const SearchableAdminSermonList: FunctionComponent<{ refreshNonce?: number }> = 
                 minWidth={0}
                 columnGap={{ lg: 1 }}
               >
-                <SearchResultSermonList gridArea="results" />
+                <SearchResultSermonList gridArea="results" hiddenSermonIds={hiddenSermonIds} />
                 {useMobileFilters ? <MobileFilterDrawer show={showFilters} /> : <AdminSermonFilters />}
               </Box>
               <CustomPagination />

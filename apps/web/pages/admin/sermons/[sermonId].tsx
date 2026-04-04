@@ -315,7 +315,7 @@ const SermonDetailsPage = () => {
       await updateDoc(sermonRef, {
         soundCloudTrackId: result.soundCloudTrackId,
         soundCloudTrackUrl: result.soundCloudTrackUrl ?? deleteField(),
-        status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
+        'status.soundCloud': uploadStatus.UPLOADED,
       });
     } catch (error: unknown) {
       console.error('Error uploading to SoundCloud:', error);
@@ -340,7 +340,7 @@ const SermonDetailsPage = () => {
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
         soundCloudTrackUrl: deleteField(),
-        status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+        'status.soundCloud': uploadStatus.NOT_UPLOADED,
       });
       setIsUploadingToSoundCloud(false);
       return;
@@ -353,14 +353,14 @@ const SermonDetailsPage = () => {
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
         soundCloudTrackUrl: deleteField(),
-        status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+        'status.soundCloud': uploadStatus.NOT_UPLOADED,
       });
     } catch (error: unknown) {
       if (getErrorField(error, 'details')?.includes('Invalid track id')) {
         await updateDoc(sermonRef, {
           soundCloudTrackId: deleteField(),
           soundCloudTrackUrl: deleteField(),
-          status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+          'status.soundCloud': uploadStatus.NOT_UPLOADED,
         });
       } else {
         console.error('Error deleting from SoundCloud:', error);
@@ -525,10 +525,7 @@ const SermonDetailsPage = () => {
         }
       });
       batch.update(sermonRef, {
-        status: {
-          ...sermon.status,
-          subsplash: getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
-        },
+        'status.subsplash': getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
         approverId: user?.uid,
       });
       await batch.commit();
@@ -607,7 +604,7 @@ const SermonDetailsPage = () => {
       batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
         subsplashId: deleteField(),
         subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
-        status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
+        'status.subsplash': uploadStatus.NOT_UPLOADED,
       });
       await batch.commit();
     } catch (error: unknown) {
@@ -634,7 +631,7 @@ const SermonDetailsPage = () => {
         batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
           subsplashId: deleteField(),
           subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
-          status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
+          'status.subsplash': uploadStatus.NOT_UPLOADED,
         });
         await batch.commit();
       } else {

@@ -2,6 +2,13 @@
   "name": "@upperroom/contracts",
   "private": true,
   "version": "0.1.0",
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./*.d.ts",
+      "default": "./*.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:ci": "pnpm run build"

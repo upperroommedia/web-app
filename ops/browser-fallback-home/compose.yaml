@@ -1,0 +1,48 @@
+name: browser-fallback-home
+
+services:
+  browser-fallback-staging:
+    profiles: ["staging"]
+    build:
+      context: ./context
+      dockerfile: apps/browser-fallback/Dockerfile
+    env_file:
+      - ./env/browser-fallback-staging.env
+    ports:
+      - "127.0.0.1:8090:8090"
+    restart: unless-stopped
+
+  cloudflared-staging:
+    profiles: ["staging"]
+    image: cloudflare/cloudflared:2026.3.0
+    command: ["tunnel", "--config", "/etc/cloudflared/browser-fallback-staging.yml", "run"]
+    depends_on:
+      - browser-fallback-staging
+    user: "0:0"
+    volumes:
+      - ./tunnels/browser-fallback-staging.yml:/etc/cloudflared/browser-fallback-staging.yml:ro
+      - ./tunnels/e2e168f5-5dbc-4048-834e-a38084a8b85b.json:/etc/cloudflared/e2e168f5-5dbc-4048-834e-a38084a8b85b.json:ro
+    restart: unless-stopped
+
+  browser-fallback-production:
+    profiles: ["production"]
+    build:
+      context: ./context
+      dockerfile: apps/browser-fallback/Dockerfile
+    env_file:
+      - ./env/browser-fallback-production.env
+    ports:
+      - "127.0.0.1:8091:8091"
+    restart: unless-stopped
+
+  cloudflared-production:
+    profiles: ["production"]
+    image: cloudflare/cloudflared:2026.3.0
+    command: ["tunnel", "--config", "/etc/cloudflared/browser-fallback-production.yml", "run"]
+    depends_on:
+      - browser-fallback-production
+    user: "0:0"
+    volumes:
+      - ./tunnels/browser-fallback-production.yml:/etc/cloudflared/browser-fallback-production.yml:ro
+      - ./tunnels/49665e85-59a9-4323-b92c-4e1db0e4c33e.json:/etc/cloudflared/49665e85-59a9-4323-b92c-4e1db0e4c33e.json:ro
+    restart: unless-stopped

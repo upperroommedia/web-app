@@ -1,0 +1,17 @@
+{$PROCESS_AUDIO_STAGING_HOSTNAME} {
+  encode zstd gzip
+
+  reverse_proxy process-audio-staging:8080 {
+    header_up X-Forwarded-Host {host}
+    header_up X-Forwarded-Proto {scheme}
+  }
+}
+
+{$PROCESS_AUDIO_PRODUCTION_HOSTNAME} {
+  encode zstd gzip
+
+  reverse_proxy process-audio-production:8080 {
+    header_up X-Forwarded-Host {host}
+    header_up X-Forwarded-Proto {scheme}
+  }
+}

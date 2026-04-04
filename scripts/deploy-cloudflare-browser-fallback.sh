@@ -26,6 +26,11 @@ if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
   exit 64
 fi
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required for Cloudflare browser-fallback deploys." >&2
+  exit 64
+fi
+
 verify_cloudflare_containers_auth() {
   local url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/me"
   local response_file
@@ -70,13 +75,35 @@ EOF
 
 verify_cloudflare_containers_auth
 
+process_audio_service="process-audio"
+if [[ "$DEPLOY_ENV" == "staging" ]]; then
+  process_audio_service="process-audio-staging"
+fi
+
 firebase_service_account_json="$(gcloud secrets versions access latest --secret="$SECRET_NAME" --project "$GCP_PROJECT")"
 browser_fallback_shared_secret="$(gcloud secrets versions access latest --secret=BROWSER_FALLBACK_SHARED_SECRET --project "$GCP_PROJECT")"
+pot_provider_base_url="$(gcloud run services describe ytdlp-pot-provider --project "$GCP_PROJECT" --region us-central1 --format='value(status.url)' 2>/dev/null || true)"
+
+if [[ -z "$pot_provider_base_url" ]]; then
+  pot_provider_base_url="$(
+    gcloud run services describe "$process_audio_service" --project "$GCP_PROJECT" --region us-central1 --format=json \
+      | jq -r '.spec.template.spec.containers[0].env[]? | select(.name == "YTDLP_POT_PROVIDER_BASE_URL") | .value // empty' \
+      | head -n 1
+  )"
+fi
 
 printf '%s' "$firebase_service_account_json" | \
   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON --config wrangler.browser-fallback.jsonc --env "$DEPLOY_ENV"
 
 printf '%s' "$browser_fallback_shared_secret" | \
   npx wrangler secret put BROWSER_FALLBACK_SHARED_SECRET --config wrangler.browser-fallback.jsonc --env "$DEPLOY_ENV"
+
+if [[ -n "$pot_provider_base_url" ]]; then
+  printf '%s' "$pot_provider_base_url" | \
+    npx wrangler secret put YTDLP_POT_PROVIDER_BASE_URL --config wrangler.browser-fallback.jsonc --env "$DEPLOY_ENV"
+  echo "Configured YTDLP_POT_PROVIDER_BASE_URL for ${DEPLOY_ENV}: ${pot_provider_base_url}"
+else
+  echo "::warning::No YTDLP_POT_PROVIDER_BASE_URL could be resolved for ${DEPLOY_ENV}; cookie PO-token experiment will be skipped."
+fi
 
 npx wrangler deploy --config wrangler.browser-fallback.jsonc --env "$DEPLOY_ENV"

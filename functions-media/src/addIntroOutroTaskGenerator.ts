@@ -7,11 +7,11 @@ import handleError from '../../functions/src/handleError';
 import { emitOperationalAlert } from '../../functions/src/notifications/emitOperationalAlert';
 import {
   getAudioSource,
-  PROCESS_AUDIO_TASK_QUEUE_NAME,
   validateAddIntroOutroData,
 } from './audioTaskPayload';
 import { getProcessAudioTargetUri } from './processAudioService';
 import { queueOrReplaceProcessAudioRequest } from './processAudioQueueStore';
+import { getProcessAudioTaskQueueNameForSource } from '@upperroom/contracts/processAudioQueue';
 
 const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
   const data = request.data;
@@ -30,10 +30,12 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
   }
 
   const audioSource = getAudioSource(data);
+  const sourceType = audioSource.type === 'YouTubeUrl' ? 'youtube' : 'storage';
+  const taskQueueName = getProcessAudioTaskQueueNameForSource(sourceType);
   const bucket = firebaseAdmin.storage().bucket();
   const db = firebaseAdmin.firestore();
   const docRef = db.collection('sermons').doc(data.id);
-  const targetUri = getProcessAudioTargetUri();
+  const targetUri = getProcessAudioTargetUri(sourceType);
 
   try {
     if (audioSource.type === 'StorageFilePath') {
@@ -59,6 +61,7 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
       requestVersion: queueResult.requestVersion,
       taskId: 'taskId' in queueResult ? queueResult.taskId : null,
       sourceType: queueResult.sourceType,
+      taskQueueName,
       targetUri,
       projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID,
     });
@@ -77,7 +80,7 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
           sermonId: data.id,
           audioSourceType: audioSource.type,
           audioSource: audioSource.source,
-          taskRoute: PROCESS_AUDIO_TASK_QUEUE_NAME,
+          taskRoute: taskQueueName,
           targetUri,
         },
       });
@@ -97,7 +100,7 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
         sermonId: data.id,
         audioSourceType: audioSource.type,
         audioSource: audioSource.source,
-        taskRoute: PROCESS_AUDIO_TASK_QUEUE_NAME,
+        taskRoute: taskQueueName,
         targetUri,
       },
     });

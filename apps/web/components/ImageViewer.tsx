@@ -20,6 +20,7 @@ interface propsType {
   speaker?: ISpeaker;
   vertical?: boolean;
   requiredTypes?: ImageSizeType[];
+  showOptionalityChip?: boolean;
   renderHeaderForType?: (type: ImageSizeType, image?: ImageType) => React.ReactNode;
 }
 
@@ -53,6 +54,7 @@ const ImageViewer = (props: propsType) => {
   }, []);
 
   const requiredTypes = props.requiredTypes ?? [];
+  const showOptionalityChip = props.showOptionalityChip ?? true;
   const isRequiredType = (type: ImageSizeType): boolean => requiredTypes.includes(type);
 
   return (
@@ -184,25 +186,27 @@ const ImageViewer = (props: propsType) => {
                   })
                 }
                 >
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 12,
-                    transform: 'translateY(-50%)',
-                    padding: '2px 8px',
-                    borderRadius: '999px',
-                    backgroundColor: isRequiredType(type)
-                      ? 'rgba(245, 158, 11, 0.92)'
-                      : 'rgba(15, 23, 42, 0.72)',
-                    color: isRequiredType(type) ? '#111827' : '#e2e8f0',
-                    fontSize: '0.7rem',
-                    fontWeight: 700,
-                    letterSpacing: '0.01em',
+                {showOptionalityChip && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 12,
+                      transform: 'translateY(-50%)',
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      backgroundColor: isRequiredType(type)
+                        ? 'rgba(245, 158, 11, 0.92)'
+                        : 'rgba(15, 23, 42, 0.72)',
+                      color: isRequiredType(type) ? '#111827' : '#e2e8f0',
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.01em',
                     }}
                   >
-                  {isRequiredType(type) ? 'Required' : 'Optional'}
-                </div>
+                    {isRequiredType(type) ? 'Required' : 'Optional'}
+                  </div>
+                )}
                 <div
                   style={{
                     position: 'absolute',

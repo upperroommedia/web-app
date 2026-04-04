@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { AddIntroOutroInputType } from './addIntroOutro/types';
 
-export const PROCESS_AUDIO_TASK_QUEUE_NAME = 'processaudiotask';
+export const PROCESS_AUDIO_FILE_TASK_QUEUE_NAME = 'processaudiofiletask';
+export const PROCESS_AUDIO_YOUTUBE_TASK_QUEUE_NAME = 'processaudioyoutubetask';
 export const PROCESS_AUDIO_LOCK_TTL_MS = 30 * 60 * 1000;
 export const PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS = 60 * 1000;
 export const PROCESS_AUDIO_REQUESTS_PATH = 'processAudioRequests';
@@ -15,6 +16,9 @@ export const YOUTUBE_BROWSER_FALLBACK_LEASE_PATH = `${YOUTUBE_BROWSER_FALLBACK_S
 export const YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON = 'browser_fallback_unavailable';
 
 export type ProcessAudioSourceType = 'youtube' | 'storage';
+export type ProcessAudioTaskQueueName =
+  | typeof PROCESS_AUDIO_FILE_TASK_QUEUE_NAME
+  | typeof PROCESS_AUDIO_YOUTUBE_TASK_QUEUE_NAME;
 export type YouTubeQueueProbeMode = 'cookie_provider' | 'browser_fallback';
 
 export type YouTubeQueueProbeStatus =
@@ -86,6 +90,14 @@ export interface StoredYouTubeQueueState {
 
 export const getProcessAudioSourceType = (payload: AddIntroOutroInputType): ProcessAudioSourceType => {
   return 'youtubeUrl' in payload ? 'youtube' : 'storage';
+};
+
+export const getProcessAudioTaskQueueNameForSource = (sourceType: ProcessAudioSourceType): ProcessAudioTaskQueueName => {
+  return sourceType === 'youtube' ? PROCESS_AUDIO_YOUTUBE_TASK_QUEUE_NAME : PROCESS_AUDIO_FILE_TASK_QUEUE_NAME;
+};
+
+export const getProcessAudioTaskQueueName = (payload: AddIntroOutroInputType): ProcessAudioTaskQueueName => {
+  return getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(payload));
 };
 
 export const normalizeProcessAudioRequest = (payload: AddIntroOutroInputType): NormalizedProcessAudioRequest => {

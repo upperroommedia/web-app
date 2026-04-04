@@ -1,0 +1,7 @@
+tunnel: 49665e85-59a9-4323-b92c-4e1db0e4c33e
+credentials-file: /etc/cloudflared/49665e85-59a9-4323-b92c-4e1db0e4c33e.json
+
+ingress:
+  - hostname: browser-fallback.upperroommedia.org
+    service: http://browser-fallback-production:8091
+  - service: http_status:404

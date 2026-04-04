@@ -4,12 +4,12 @@ import type { AddIntroOutroInputType } from '../../packages/contracts/addIntroOu
 import {
   buildInitialYouTubeQueueState,
   computeProcessAudioTaskId,
+  getProcessAudioTaskQueueNameForSource,
   getProcessAudioSourceType,
   PROCESS_AUDIO_LOCKS_PATH,
   PROCESS_AUDIO_QUEUE_CLAIMS_PATH,
   PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS,
   PROCESS_AUDIO_REQUESTS_PATH,
-  PROCESS_AUDIO_TASK_QUEUE_NAME,
   sanitizeProcessAudioPayload,
   type StoredDeferredYouTubeRequest,
   type StoredProcessAudioRequestState,
@@ -20,8 +20,14 @@ import {
 } from '../../packages/contracts/processAudioQueue';
 
 const PROCESS_AUDIO_BASE_URLS = {
-  prod: 'https://process-audio-yshbijirxq-uc.a.run.app',
-  staging: 'https://process-audio-staging-pvaq33fxyq-uc.a.run.app',
+  prod: {
+    storage: 'https://process-audio-yshbijirxq-uc.a.run.app',
+    youtube: 'https://yt-worker.upperroommedia.org',
+  },
+  staging: {
+    storage: 'https://process-audio-staging-pvaq33fxyq-uc.a.run.app',
+    youtube: 'https://yt-worker-staging.upperroommedia.org',
+  },
   local: 'http://127.0.0.1:8080',
 };
 
@@ -45,22 +51,30 @@ const getNowIsoString = (): string => new Date().toISOString();
 
 const normalizeBaseUrl = (value: string): string => value.replace(/\/process-audio\/?$/u, '').replace(/\/+$/u, '');
 
-export const getProcessAudioTargetUriForQueueCleanup = (): string => {
+export const getProcessAudioTargetUriForQueueCleanup = (sourceType: 'youtube' | 'storage' = 'storage'): string => {
   if (process.env.FUNCTIONS_EMULATOR === 'true') {
     return `${PROCESS_AUDIO_BASE_URLS.local}/process-audio`;
   }
 
   const configuredTarget =
-    process.env.PROCESS_AUDIO_TASK_TARGET_URI ||
-    process.env.PROCESS_AUDIO_SERVICE_URL ||
-    process.env.NEXT_PUBLIC_PROCESS_AUDIO_SERVICE_URL;
+    sourceType === 'youtube'
+      ? process.env.PROCESS_AUDIO_YOUTUBE_TASK_TARGET_URI ||
+        process.env.PROCESS_AUDIO_YOUTUBE_SERVICE_URL ||
+        process.env.NEXT_PUBLIC_PROCESS_AUDIO_YOUTUBE_SERVICE_URL
+      : process.env.PROCESS_AUDIO_FILE_TASK_TARGET_URI ||
+        process.env.PROCESS_AUDIO_FILE_SERVICE_URL ||
+        process.env.NEXT_PUBLIC_PROCESS_AUDIO_FILE_SERVICE_URL ||
+        process.env.PROCESS_AUDIO_TASK_TARGET_URI ||
+        process.env.PROCESS_AUDIO_SERVICE_URL ||
+        process.env.NEXT_PUBLIC_PROCESS_AUDIO_SERVICE_URL;
 
   if (configuredTarget) {
     return `${normalizeBaseUrl(configuredTarget)}/process-audio`;
   }
 
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;
-  const baseUrl = projectId === 'urm-app-staging' ? PROCESS_AUDIO_BASE_URLS.staging : PROCESS_AUDIO_BASE_URLS.prod;
+  const baseUrlSet = projectId === 'urm-app-staging' ? PROCESS_AUDIO_BASE_URLS.staging : PROCESS_AUDIO_BASE_URLS.prod;
+  const baseUrl = baseUrlSet[sourceType];
   return `${baseUrl}/process-audio`;
 };
 
@@ -195,8 +209,7 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
   ownerId: string;
   targetUri?: string;
 }): Promise<QueueCleanupResult> {
-  const { database, sermonId, ownerId, targetUri = getProcessAudioTargetUriForQueueCleanup() } = args;
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
+  const { database, sermonId, ownerId } = args;
 
   return await withProcessAudioQueueClaim(database, sermonId, ownerId, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sermonId}`);
@@ -216,6 +229,8 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
     );
     const remainingDeferredEntries = sortDeferredEntries(deferredEntries.filter((entry) => entry.sermonId !== sermonId));
     const deletedTaskId = requestState?.queuedTaskId ?? null;
+    const requestSourceType = requestState?.sourceType ?? 'storage';
+    const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(requestSourceType));
 
     await deleteExistingTask(queue, deletedTaskId);
     await Promise.all([requestRef.remove(), deferredRef.remove(), lockRef.remove()]);
@@ -253,13 +268,19 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
     const nextRequestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${nextProbe.sermonId}`);
     const nextRequestSnapshot = await nextRequestRef.get();
     const now = getNowIsoString();
+    const nextTargetUri = getProcessAudioTargetUriForQueueCleanup('youtube');
     const nextRequestState = nextRequestSnapshot.exists()
       ? (nextRequestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(nextProbe.payload, nextProbe.requestVersion, now);
     const nextTaskId = computeProcessAudioTaskId(nextProbe.sermonId, nextProbe.requestVersion, `${ownerId}:${now}`);
 
     await deleteExistingTask(queue, nextRequestState.queuedTaskId);
-    await enqueueTask(queue, nextProbe.payload, nextTaskId, targetUri);
+    await enqueueTask(
+      getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource('youtube')),
+      nextProbe.payload,
+      nextTaskId,
+      nextTargetUri
+    );
 
     await Promise.all([
       nextRequestRef.set({

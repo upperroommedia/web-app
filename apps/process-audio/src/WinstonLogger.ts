@@ -3,12 +3,13 @@ import { LoggingWinston } from '@google-cloud/logging-winston';
 import { LogContext } from './context';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
+const cloudLoggingEnabled = process.env.ENABLE_CLOUD_LOGGING === 'true' || Boolean(process.env.K_SERVICE);
 
 // Configure transports - only use Cloud Logging in production
 const transports: winston.transport[] = [new winston.transports.Console()];
 
-// Only add Google Cloud Logging in production
-if (!isDevelopment) {
+// Only add Google Cloud Logging when explicitly enabled or running on Cloud Run.
+if (!isDevelopment && cloudLoggingEnabled) {
   try {
     // Configure LoggingWinston with proper labels for GCP structured logging
     const loggingWinston = new LoggingWinston({

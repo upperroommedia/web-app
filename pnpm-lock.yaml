@@ -619,6 +619,9 @@ importers:
       '@google-cloud/storage':
         specifier: 7.19.0
         version: 7.19.0(encoding@0.1.13)
+      algoliasearch:
+        specifier: 5.27.0
+        version: 5.27.0
       axios:
         specifier: ^1.13.6
         version: 1.13.6

@@ -18,7 +18,7 @@ interface UploadButtonProps {
   setUploadProgress: Dispatch<SetStateAction<UploadProgress>>;
   setInvalidFormMessage: Dispatch<SetStateAction<string | undefined>>;
   setIsUploading: Dispatch<SetStateAction<boolean>>;
-  onUploadSuccess?: (sermonId: string) => void;
+  onUploadSuccess?: (sermonId: string) => void | Promise<void>;
 }
 
 export default function UploadButton({
@@ -51,7 +51,7 @@ export default function UploadButton({
               sermonList,
             });
             // Call success callback with sermon ID
-            onUploadSuccess?.(sermon.id);
+            await onUploadSuccess?.(sermon.id);
           } catch (error) {
             setUploadProgress({ error: true, message: `Error uploading file: ${error}`, percent: 0 });
             setIsUploading(false);

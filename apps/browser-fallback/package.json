@@ -9,7 +9,8 @@
     "start": "node ./dist/index.js",
     "build": "tsc -p tsconfig.json",
     "build:ci": "pnpm run build",
-    "bootstrap:profile": "node ./scripts/bootstrap-browser-profile.js"
+    "bootstrap:profile": "node ./scripts/bootstrap-browser-profile.js",
+    "export:ytcookies": "node ./scripts/export-ytdlp-cookies.js"
   },
   "engines": {
     "node": "22"

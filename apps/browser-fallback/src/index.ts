@@ -8,12 +8,15 @@ import { randomUUID } from 'node:crypto';
 import type { Bucket } from '@google-cloud/storage';
 import type { Database } from 'firebase-admin/database';
 import type {
+  BrowserFallbackCredentialSource,
   BrowserFallbackDownloadSectionResponse,
   BrowserFallbackErrorCode,
   BrowserFallbackErrorResponse,
   BrowserFallbackRequest,
+  BrowserFallbackResolutionMetadata,
   BrowserFallbackResolveAudioUrlResponse,
   BrowserFallbackSessionState,
+  BrowserFallbackStrategy,
 } from '@upperroom/contracts/browserFallback';
 import firebaseAdmin from './firebaseAdmin';
 import {
@@ -33,12 +36,18 @@ const artifactPrefix = process.env.BROWSER_FALLBACK_ARTIFACT_PREFIX || 'browser-
 const signedUrlTtlMs = Number.parseInt(process.env.BROWSER_FALLBACK_SIGNED_URL_TTL_SECONDS || '900', 10) * 1000;
 const healthcheckYoutubeUrl = process.env.BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL?.trim() || '';
 const sharedSecret = process.env.BROWSER_FALLBACK_SHARED_SECRET?.trim() || '';
+const browserFallbackStrategy: BrowserFallbackStrategy =
+  process.env.BROWSER_FALLBACK_STRATEGY?.trim().toLowerCase() === 'public_only' ? 'public_only' : 'session_backed';
+const browserFallbackServiceRole = process.env.BROWSER_FALLBACK_SERVICE_ROLE?.trim() || null;
+const cookieSafeYouTubeExtractorArgs = 'youtube:player_client=default,-web_creator';
+const poTokenEnabledYouTubeExtractorArgs = 'youtube:player_client=default,mweb,-web_creator';
 const userAgent =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 
 type WorkerState = {
   browser: Browser;
   context: BrowserContext;
+  browserProfileDir: string | null;
   metadata: {
     sessionState: BrowserFallbackSessionState;
     profileUpdatedAt: string | null;
@@ -49,6 +58,14 @@ type WorkerState = {
 let workerStatePromise: Promise<WorkerState> | null = null;
 let bucketInstance: Bucket | null = null;
 let databaseInstance: Database | null = null;
+
+function buildResolutionMetadata(credentialSource: BrowserFallbackCredentialSource): BrowserFallbackResolutionMetadata {
+  return {
+    serviceRole: browserFallbackServiceRole,
+    strategy: browserFallbackStrategy,
+    credentialSource,
+  };
+}
 
 function buildErrorResponse(
   code: BrowserFallbackErrorCode,
@@ -103,6 +120,86 @@ function classifyWorkerFailure(message: string): { code: BrowserFallbackErrorCod
   return { code: 'temporary_upstream_failure', sessionState: 'authenticated', retryable: true };
 }
 
+function getPoTokenProviderBaseUrl(): string | undefined {
+  const value = process.env.YTDLP_POT_PROVIDER_BASE_URL?.trim();
+  return value ? value.replace(/\/+$/, '') : undefined;
+}
+
+function shouldDisableInnertubeForPoTokenProvider(): boolean {
+  const value = process.env.YTDLP_POT_DISABLE_INNERTUBE?.trim()?.toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+function shouldUsePoTokenProviderWithCookies(): boolean {
+  const value = process.env.YTDLP_USE_POT_PROVIDER_WITH_COOKIES?.trim()?.toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+function getYtDlpSleepRequestsSeconds(): string | undefined {
+  const value = process.env.YTDLP_SLEEP_REQUESTS_SECONDS?.trim();
+  return value || undefined;
+}
+
+function getYtDlpSleepIntervalSeconds(): string | undefined {
+  const value = process.env.YTDLP_SLEEP_INTERVAL_SECONDS?.trim();
+  return value || undefined;
+}
+
+function getYtDlpMaxSleepIntervalSeconds(): string | undefined {
+  const value = process.env.YTDLP_MAX_SLEEP_INTERVAL_SECONDS?.trim();
+  return value || undefined;
+}
+
+function applyYtDlpRequestPacingArgs(args: string[]): void {
+  const sleepRequests = getYtDlpSleepRequestsSeconds();
+  const sleepInterval = getYtDlpSleepIntervalSeconds();
+  const maxSleepInterval = getYtDlpMaxSleepIntervalSeconds();
+
+  if (sleepRequests) {
+    args.push('--sleep-requests', sleepRequests);
+  }
+  if (sleepInterval) {
+    args.push('--sleep-interval', sleepInterval);
+  }
+  if (sleepInterval && maxSleepInterval) {
+    args.push('--max-sleep-interval', maxSleepInterval);
+  }
+}
+
+function applyCookieExtractorArgs(args: string[]): {
+  usePoTokenProvider: boolean;
+  poTokenProviderBaseUrl: string | null;
+  poTokenProviderDisableInnertube: boolean;
+  youtubeExtractorArgs: string;
+} {
+  const poTokenProviderBaseUrl = getPoTokenProviderBaseUrl();
+  const poTokenProviderDisableInnertube = shouldDisableInnertubeForPoTokenProvider();
+  const usePoTokenProvider = shouldUsePoTokenProviderWithCookies() && !!poTokenProviderBaseUrl;
+
+  if (!usePoTokenProvider) {
+    args.push('--extractor-args', cookieSafeYouTubeExtractorArgs);
+    return {
+      usePoTokenProvider: false,
+      poTokenProviderBaseUrl: poTokenProviderBaseUrl || null,
+      poTokenProviderDisableInnertube,
+      youtubeExtractorArgs: cookieSafeYouTubeExtractorArgs,
+    };
+  }
+
+  args.push('--extractor-args', poTokenEnabledYouTubeExtractorArgs);
+  const providerArgs = [`base_url=${poTokenProviderBaseUrl}`];
+  if (poTokenProviderDisableInnertube) {
+    providerArgs.push('disable_innertube=1');
+  }
+  args.push('--extractor-args', `youtubepot-bgutilhttp:${providerArgs.join(';')}`);
+  return {
+    usePoTokenProvider: true,
+    poTokenProviderBaseUrl,
+    poTokenProviderDisableInnertube,
+    youtubeExtractorArgs: poTokenEnabledYouTubeExtractorArgs,
+  };
+}
+
 async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return await new Promise((resolve, reject) => {
     const proc = spawn(command, args);
@@ -139,12 +236,12 @@ function toNetscapeCookies(cookies: Awaited<ReturnType<BrowserContext['cookies']
 }
 
 async function ensureBrowserState(): Promise<WorkerState> {
-  if (fakeMode) {
+  if (fakeMode || browserFallbackStrategy === 'public_only') {
     return null;
   }
   if (!workerStatePromise) {
     workerStatePromise = (async () => {
-      const { metadata, storageStatePath } = await hydrateBrowserProfile({
+      const { metadata, storageStatePath, browserProfileDir } = await hydrateBrowserProfile({
         bucket: getBucket(),
         database: getDatabase(),
       });
@@ -156,7 +253,7 @@ async function ensureBrowserState(): Promise<WorkerState> {
         userAgent,
         storageState: storageStatePath || undefined,
       });
-      return { browser, context, metadata };
+      return { browser, context, browserProfileDir, metadata };
     })().catch(async (error) => {
       workerStatePromise = null;
       throw error;
@@ -185,21 +282,27 @@ function selectPreferredAudioFormat(formats: AudioFormat[]): AudioFormat | undef
   return candidates.sort((left, right) => (right.abr || 0) - (left.abr || 0))[0];
 }
 
-async function resolveAudioUrlWithCookies(youtubeUrl: string, cookiesFilePath: string): Promise<BrowserFallbackResolveAudioUrlResponse> {
-  const args = [
-    '-J',
-    '--no-playlist',
-    '--skip-download',
-    '--no-js-runtimes',
-    '--js-runtimes',
-    ytDlpJsRuntime,
-    '--cookies',
-    cookiesFilePath,
-    '--extractor-args',
-    'youtube:player_client=default,-web_creator',
-    youtubeUrl,
-  ];
-  const { stdout } = await runCommand(ytdlpPath, args);
+async function resolveAudioUrlWithYtDlpArgs(
+  youtubeUrl: string,
+  args: string[],
+  logFields: Record<string, unknown>
+): Promise<BrowserFallbackResolveAudioUrlResponse> {
+  applyYtDlpRequestPacingArgs(args);
+  const fullArgs = ['-J', '--no-playlist', '--skip-download', ...args, youtubeUrl];
+
+  console.log(
+    JSON.stringify({
+      event: 'browser_fallback_ytdlp_extract',
+      youtubeUrl,
+      jsRuntime: ytDlpJsRuntime,
+      sleepRequestsSeconds: getYtDlpSleepRequestsSeconds() || null,
+      sleepIntervalSeconds: getYtDlpSleepIntervalSeconds() || null,
+      maxSleepIntervalSeconds: getYtDlpMaxSleepIntervalSeconds() || null,
+      ...logFields,
+    })
+  );
+
+  const { stdout } = await runCommand(ytdlpPath, fullArgs);
   const parsed = JSON.parse(stdout) as YtDlpJson;
   const selected = selectPreferredAudioFormat(parsed.formats || []);
   if (!selected?.url) {
@@ -209,6 +312,62 @@ async function resolveAudioUrlWithCookies(youtubeUrl: string, cookiesFilePath: s
     url: selected.url,
     format: selected.ext || selected.format_id || 'unknown',
     duration: parsed.duration ?? selected.duration,
+  };
+}
+
+async function resolveAudioUrlWithCookies(youtubeUrl: string, cookiesFilePath: string): Promise<BrowserFallbackResolveAudioUrlResponse> {
+  const args = ['--no-js-runtimes', '--js-runtimes', ytDlpJsRuntime, '--cookies', cookiesFilePath];
+  const extractorConfig = applyCookieExtractorArgs(args);
+  const response = await resolveAudioUrlWithYtDlpArgs(youtubeUrl, args, {
+    serviceRole: browserFallbackServiceRole,
+    strategy: browserFallbackStrategy,
+    sessionSource: 'legacy_cookies_file',
+    credentialSource: 'legacy_cookies_file',
+    usePoTokenProvider: extractorConfig.usePoTokenProvider,
+    poTokenProviderBaseUrl: extractorConfig.poTokenProviderBaseUrl,
+    poTokenProviderDisableInnertube: extractorConfig.poTokenProviderDisableInnertube,
+    youtubeExtractorArgs: extractorConfig.youtubeExtractorArgs,
+  });
+  return {
+    ...response,
+    resolution: buildResolutionMetadata('legacy_cookies_file'),
+  };
+}
+
+async function resolveAudioUrlWithBrowserProfile(
+  youtubeUrl: string,
+  browserProfileDir: string
+): Promise<BrowserFallbackResolveAudioUrlResponse> {
+  const response = await resolveAudioUrlWithYtDlpArgs(
+    youtubeUrl,
+    ['--cookies-from-browser', `chromium:${browserProfileDir}`],
+    {
+      serviceRole: browserFallbackServiceRole,
+      strategy: browserFallbackStrategy,
+      sessionSource: 'chromium_profile',
+      credentialSource: 'chromium_profile',
+    }
+  );
+  return {
+    ...response,
+    resolution: buildResolutionMetadata('chromium_profile'),
+  };
+}
+
+async function resolveAudioUrlWithPublicProvider(youtubeUrl: string): Promise<BrowserFallbackResolveAudioUrlResponse> {
+  const response = await resolveAudioUrlWithYtDlpArgs(
+    youtubeUrl,
+    ['--no-js-runtimes', '--js-runtimes', ytDlpJsRuntime],
+    {
+      serviceRole: browserFallbackServiceRole,
+      strategy: browserFallbackStrategy,
+      sessionSource: 'public_no_cookies',
+      credentialSource: 'none',
+    }
+  );
+  return {
+    ...response,
+    resolution: buildResolutionMetadata('none'),
   };
 }
 
@@ -261,19 +420,37 @@ async function checkpointContext(state: WorkerState, sessionState: BrowserFallba
   });
 }
 
-async function withCookies<T>(run: (cookiesFilePath: string, sessionState: BrowserFallbackSessionState) => Promise<T>): Promise<T> {
+async function getContextSessionState(context: BrowserContext): Promise<BrowserFallbackSessionState> {
+  const cookies = await context.cookies(['https://www.youtube.com', 'https://accounts.google.com']);
+  return cookies.some((cookie) => isAuthCookie(cookie.name)) ? 'authenticated' : 'auth_required';
+}
+
+async function withSessionSource<T>(
+  run: (source: { browserProfileDir: string | null; cookiesFilePath: string | null; sessionState: BrowserFallbackSessionState }) => Promise<T>
+): Promise<T> {
   const state = await ensureBrowserState();
   if (!state) {
-    return await run('', 'fake_mode');
+    const sessionState: BrowserFallbackSessionState =
+      browserFallbackStrategy === 'public_only' ? 'public_only' : 'fake_mode';
+    return await run({ browserProfileDir: null, cookiesFilePath: '', sessionState });
   }
-  const { cookiesFilePath, sessionState } = await exportCookiesFile(state.context);
+
+  const sessionState = await getContextSessionState(state.context);
+  if (state.browserProfileDir) {
+    const result = await run({ browserProfileDir: state.browserProfileDir, cookiesFilePath: null, sessionState });
+    await checkpointContext(state, sessionState);
+    return result;
+  }
+
+  const { cookiesFilePath } = await exportCookiesFile(state.context);
   if (!cookiesFilePath) {
     throw Object.assign(new Error('Browser profile is not authenticated.'), {
       browserFailure: buildErrorResponse('auth_required', 'Browser profile is not authenticated.', sessionState, false),
     });
   }
+
   try {
-    const result = await run(cookiesFilePath, sessionState);
+    const result = await run({ browserProfileDir: null, cookiesFilePath, sessionState });
     await checkpointContext(state, sessionState);
     return result;
   } finally {
@@ -284,6 +461,9 @@ async function withCookies<T>(run: (cookiesFilePath: string, sessionState: Brows
 async function getLiveSessionStatus(): Promise<{
   ok: boolean;
   sessionState: BrowserFallbackSessionState;
+  strategy: BrowserFallbackStrategy;
+  serviceRole: string | null;
+  credentialSource: BrowserFallbackCredentialSource | null;
   profileUpdatedAt: string | null;
   profileGeneration: string | null;
   healthcheckConfigured: boolean;
@@ -293,9 +473,49 @@ async function getLiveSessionStatus(): Promise<{
 }> {
   const state = await ensureBrowserState();
   if (!state) {
+    if (browserFallbackStrategy === 'public_only') {
+      try {
+        if (healthcheckYoutubeUrl) {
+          await resolveAudioUrlWithPublicProvider(healthcheckYoutubeUrl);
+        }
+        return {
+          ok: true,
+          sessionState: 'public_only',
+          strategy: browserFallbackStrategy,
+          serviceRole: browserFallbackServiceRole,
+          credentialSource: 'none',
+          profileUpdatedAt: null,
+          profileGeneration: null,
+          healthcheckConfigured: !!healthcheckYoutubeUrl,
+          lastCheckedAt: healthcheckYoutubeUrl ? new Date().toISOString() : null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const classified = classifyWorkerFailure(message);
+        return {
+          ok: false,
+          sessionState: 'public_only',
+          strategy: browserFallbackStrategy,
+          serviceRole: browserFallbackServiceRole,
+          credentialSource: 'none',
+          profileUpdatedAt: null,
+          profileGeneration: null,
+          healthcheckConfigured: !!healthcheckYoutubeUrl,
+          lastCheckedAt: new Date().toISOString(),
+          lastErrorCode: classified.code,
+          lastErrorMessage: message,
+        };
+      }
+    }
+
     return {
       ok: true,
       sessionState: 'fake_mode',
+      strategy: browserFallbackStrategy,
+      serviceRole: browserFallbackServiceRole,
+      credentialSource: 'none',
       profileUpdatedAt: new Date().toISOString(),
       profileGeneration: 'fake-mode',
       healthcheckConfigured: false,
@@ -305,7 +525,7 @@ async function getLiveSessionStatus(): Promise<{
     };
   }
 
-  const { cookiesFilePath, sessionState } = await exportCookiesFile(state.context);
+  const sessionState = await getContextSessionState(state.context);
   if (sessionState !== state.metadata.sessionState) {
     state.metadata = await checkpointBrowserProfile({
       bucket: getBucket(),
@@ -315,10 +535,13 @@ async function getLiveSessionStatus(): Promise<{
     });
   }
 
-  if (!cookiesFilePath) {
+  if (!state.browserProfileDir && sessionState !== 'authenticated') {
     return {
       ok: false,
       sessionState,
+      strategy: browserFallbackStrategy,
+      serviceRole: browserFallbackServiceRole,
+      credentialSource: state.browserProfileDir ? 'chromium_profile' : 'legacy_cookies_file',
       profileUpdatedAt: state.metadata.profileUpdatedAt,
       profileGeneration: state.metadata.profileGeneration,
       healthcheckConfigured: !!healthcheckYoutubeUrl,
@@ -333,6 +556,9 @@ async function getLiveSessionStatus(): Promise<{
       return {
         ok: sessionState === 'authenticated',
         sessionState,
+        strategy: browserFallbackStrategy,
+        serviceRole: browserFallbackServiceRole,
+        credentialSource: state.browserProfileDir ? 'chromium_profile' : 'legacy_cookies_file',
         profileUpdatedAt: state.metadata.profileUpdatedAt,
         profileGeneration: state.metadata.profileGeneration,
         healthcheckConfigured: false,
@@ -343,11 +569,26 @@ async function getLiveSessionStatus(): Promise<{
     }
 
     const checkedAt = new Date().toISOString();
-    await resolveAudioUrlWithCookies(healthcheckYoutubeUrl, cookiesFilePath);
+    if (state.browserProfileDir) {
+      await resolveAudioUrlWithBrowserProfile(healthcheckYoutubeUrl, state.browserProfileDir);
+    } else {
+      const { cookiesFilePath } = await exportCookiesFile(state.context);
+      if (!cookiesFilePath) {
+        throw new Error('Browser profile is not authenticated.');
+      }
+      try {
+        await resolveAudioUrlWithCookies(healthcheckYoutubeUrl, cookiesFilePath);
+      } finally {
+        await rm(path.dirname(cookiesFilePath), { recursive: true, force: true });
+      }
+    }
     await checkpointContext(state, sessionState);
     return {
       ok: true,
       sessionState,
+      strategy: browserFallbackStrategy,
+      serviceRole: browserFallbackServiceRole,
+      credentialSource: state.browserProfileDir ? 'chromium_profile' : 'legacy_cookies_file',
       profileUpdatedAt: state.metadata.profileUpdatedAt,
       profileGeneration: state.metadata.profileGeneration,
       healthcheckConfigured: true,
@@ -362,6 +603,9 @@ async function getLiveSessionStatus(): Promise<{
     return {
       ok: false,
       sessionState: classified.sessionState === 'auth_required' ? 'auth_required' : sessionState,
+      strategy: browserFallbackStrategy,
+      serviceRole: browserFallbackServiceRole,
+      credentialSource: state.browserProfileDir ? 'chromium_profile' : 'legacy_cookies_file',
       profileUpdatedAt: state.metadata.profileUpdatedAt,
       profileGeneration: state.metadata.profileGeneration,
       healthcheckConfigured: !!healthcheckYoutubeUrl,
@@ -369,8 +613,6 @@ async function getLiveSessionStatus(): Promise<{
       lastErrorCode: classified.code,
       lastErrorMessage: message,
     };
-  } finally {
-    await rm(path.dirname(cookiesFilePath), { recursive: true, force: true });
   }
 }
 
@@ -392,6 +634,9 @@ app.get('/session-status', async (_req, res) => {
       ...baseStatus,
       ok: liveStatus.ok,
       sessionState: liveStatus.sessionState,
+      strategy: liveStatus.strategy,
+      serviceRole: liveStatus.serviceRole,
+      credentialSource: liveStatus.credentialSource,
       profileUpdatedAt: liveStatus.profileUpdatedAt,
       profileGeneration: liveStatus.profileGeneration,
       healthcheckConfigured: liveStatus.healthcheckConfigured,
@@ -406,6 +651,9 @@ app.get('/session-status', async (_req, res) => {
       ...baseStatus,
       sessionState: classified.sessionState,
       ok: false,
+      strategy: browserFallbackStrategy,
+      serviceRole: browserFallbackServiceRole,
+      credentialSource: browserFallbackStrategy === 'public_only' ? 'none' : null,
       lastCheckedAt: new Date().toISOString(),
       lastErrorCode: classified.code,
       lastErrorMessage: message,
@@ -433,12 +681,27 @@ app.post('/fallback', async (req, res) => {
           url: 'https://example.com/browser-fallback-audio.m4a',
           format: 'm4a',
           duration: 20,
+          resolution: buildResolutionMetadata('none'),
         };
         res.status(200).json(response);
         return;
       }
 
-      const response = await withCookies(async (cookiesFilePath) => await resolveAudioUrlWithCookies(payload.youtubeUrl, cookiesFilePath));
+      if (browserFallbackStrategy === 'public_only') {
+        const response = await resolveAudioUrlWithPublicProvider(payload.youtubeUrl);
+        res.status(200).json(response);
+        return;
+      }
+
+      const response = await withSessionSource(async ({ browserProfileDir, cookiesFilePath }) => {
+        if (browserProfileDir) {
+          return await resolveAudioUrlWithBrowserProfile(payload.youtubeUrl, browserProfileDir);
+        }
+        if (!cookiesFilePath) {
+          throw new Error('Browser profile is not authenticated.');
+        }
+        return await resolveAudioUrlWithCookies(payload.youtubeUrl, cookiesFilePath);
+      });
       res.status(200).json(response);
       return;
     }
@@ -449,13 +712,47 @@ app.post('/fallback', async (req, res) => {
         const response: BrowserFallbackDownloadSectionResponse = {
           downloadUrl: `${baseUrl}/artifacts/mock-section.m4a`,
           ext: 'm4a',
+          resolution: buildResolutionMetadata('none'),
         };
         res.status(200).json(response);
         return;
       }
 
-      const response = await withCookies(async (cookiesFilePath) => {
-        const resolved = await resolveAudioUrlWithCookies(payload.youtubeUrl, cookiesFilePath);
+      if (browserFallbackStrategy === 'public_only') {
+        const resolved = await resolveAudioUrlWithPublicProvider(payload.youtubeUrl);
+        const effectiveDuration = payload.duration ?? resolved.duration;
+        if (!effectiveDuration || effectiveDuration <= 0) {
+          throw new Error('Browser fallback could not determine a valid download duration.');
+        }
+        const outputDir = await mkdtemp(path.join(os.tmpdir(), 'browser-fallback-artifact-'));
+        const outputFilePath = path.join(outputDir, `${randomUUID()}.m4a`);
+        try {
+          await trimSectionToFile({
+            audioUrl: resolved.url,
+            startTime: payload.startTime,
+            duration: effectiveDuration,
+            outputFilePath,
+          });
+          const downloadUrl = await uploadArtifactAndSign(outputFilePath);
+          const response: BrowserFallbackDownloadSectionResponse = {
+            downloadUrl,
+            ext: 'm4a',
+            resolution: resolved.resolution,
+          };
+          res.status(200).json(response);
+          return;
+        } finally {
+          await rm(outputDir, { recursive: true, force: true });
+        }
+      }
+
+      const response = await withSessionSource(async ({ browserProfileDir, cookiesFilePath }) => {
+        if (!browserProfileDir && !cookiesFilePath) {
+          throw new Error('Browser profile is not authenticated.');
+        }
+        const resolved = browserProfileDir
+          ? await resolveAudioUrlWithBrowserProfile(payload.youtubeUrl, browserProfileDir)
+          : await resolveAudioUrlWithCookies(payload.youtubeUrl, cookiesFilePath as string);
         const effectiveDuration = payload.duration ?? resolved.duration;
         if (!effectiveDuration || effectiveDuration <= 0) {
           throw new Error('Browser fallback could not determine a valid download duration.');
@@ -473,6 +770,7 @@ app.post('/fallback', async (req, res) => {
           return {
             downloadUrl,
             ext: 'm4a',
+            resolution: resolved.resolution,
           } satisfies BrowserFallbackDownloadSectionResponse;
         } finally {
           await rm(outputDir, { recursive: true, force: true });

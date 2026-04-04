@@ -16,6 +16,8 @@ type AlgoliaSearchContextValue = {
   loading: boolean;
   error: string | null;
   clearCache: () => Promise<void>;
+  sermonSearchRevision: number;
+  invalidateSermonSearch: () => Promise<void>;
 };
 
 const AlgoliaSearchContext = createContext<AlgoliaSearchContextValue | null>(null);
@@ -43,6 +45,7 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [sermonSearchRevision, setSermonSearchRevision] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,6 +126,11 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
     await searchClient.clearCache();
   }, [searchClient]);
 
+  const invalidateSermonSearch = useCallback(async () => {
+    await clearCache();
+    setSermonSearchRevision((currentRevision) => currentRevision + 1);
+  }, [clearCache]);
+
   const value = useMemo<AlgoliaSearchContextValue>(
     () => ({
       appId,
@@ -130,8 +138,10 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
       loading,
       error,
       clearCache,
+      sermonSearchRevision,
+      invalidateSermonSearch,
     }),
-    [appId, clearCache, error, loading, searchClient]
+    [appId, clearCache, error, invalidateSermonSearch, loading, searchClient, sermonSearchRevision]
   );
 
   return <AlgoliaSearchContext.Provider value={value}>{children}</AlgoliaSearchContext.Provider>;

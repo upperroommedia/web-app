@@ -2,7 +2,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { BrowserFallbackSessionState, BrowserFallbackSessionStatusResponse } from '@upperroom/contracts/browserFallback';
+import { spawn } from 'node:child_process';
+import type {
+  BrowserFallbackCredentialSource,
+  BrowserFallbackSessionState,
+  BrowserFallbackSessionStatusResponse,
+  BrowserFallbackStrategy,
+} from '@upperroom/contracts/browserFallback';
 import type { Database } from 'firebase-admin/database';
 import type { Bucket } from '@google-cloud/storage';
 
@@ -17,10 +23,20 @@ type BrowserFallbackProfileMetadata = {
 
 const getProfileStateObject = (): string =>
   process.env.BROWSER_FALLBACK_PROFILE_OBJECT || 'browser-fallback/profile/storage-state.json';
+const getProfileArchiveObject = (): string =>
+  process.env.BROWSER_FALLBACK_PROFILE_ARCHIVE_OBJECT || 'browser-fallback/profile/chromium-profile.tar.gz';
 const getProfileMetaObject = (): string => process.env.BROWSER_FALLBACK_PROFILE_META_OBJECT || 'browser-fallback/profile/latest.json';
 
 function getNowIsoString(): string {
   return new Date().toISOString();
+}
+
+function getBrowserFallbackStrategy(): BrowserFallbackStrategy {
+  return process.env.BROWSER_FALLBACK_STRATEGY?.trim().toLowerCase() === 'public_only' ? 'public_only' : 'session_backed';
+}
+
+function getBrowserFallbackServiceRole(): string | null {
+  return process.env.BROWSER_FALLBACK_SERVICE_ROLE?.trim() || null;
 }
 
 function getProfileLeaseTtlMs(): number {
@@ -30,6 +46,29 @@ function getProfileLeaseTtlMs(): number {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+async function runCommand(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(command, args);
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`));
+    });
+  });
 }
 
 async function withProfileLease<T>(database: Database, ownerId: string, run: () => Promise<T>): Promise<T> {
@@ -94,25 +133,47 @@ export async function readBrowserFallbackProfileMetadata(bucket: Bucket): Promis
 export async function hydrateBrowserProfile(args: {
   bucket: Bucket;
   database: Database;
-}): Promise<{ profileDir: string; metadata: BrowserFallbackProfileMetadata; storageStatePath: string | null }> {
+}): Promise<{
+  profileDir: string;
+  metadata: BrowserFallbackProfileMetadata;
+  storageStatePath: string | null;
+  browserProfileDir: string | null;
+}> {
   const { bucket, database } = args;
   const profileDir = await mkdtemp(path.join(os.tmpdir(), 'browser-profile-'));
   const metadata = await readBrowserFallbackProfileMetadata(bucket);
   const stateFile = bucket.file(getProfileStateObject());
+  const archiveFile = bucket.file(getProfileArchiveObject());
   const [exists] = await stateFile.exists();
-  if (!exists) {
-    await mkdir(profileDir, { recursive: true });
-    return { profileDir, metadata, storageStatePath: null };
+  const storageStatePath = path.join(profileDir, 'storage-state.json');
+  const browserProfileDir = path.join(profileDir, 'chromium-profile');
+  const profileArchivePath = path.join(profileDir, 'chromium-profile.tar.gz');
+
+  await mkdir(profileDir, { recursive: true });
+
+  const [archiveExists] = await archiveFile.exists();
+  if (archiveExists) {
+    await withProfileLease(database, `hydrate:${randomUUID()}`, async () => {
+      await archiveFile.download({ destination: profileArchivePath });
+    });
+    await mkdir(browserProfileDir, { recursive: true });
+    await runCommand('tar', ['-xzf', profileArchivePath, '-C', browserProfileDir]);
   }
 
-  const storageStatePath = path.join(profileDir, 'storage-state.json');
+  if (!exists) {
+    return { profileDir, metadata, storageStatePath: null, browserProfileDir: archiveExists ? browserProfileDir : null };
+  }
 
   await withProfileLease(database, `hydrate:${randomUUID()}`, async () => {
-    await mkdir(profileDir, { recursive: true });
     await stateFile.download({ destination: storageStatePath });
   });
 
-  return { profileDir, metadata, storageStatePath };
+  return {
+    profileDir,
+    metadata,
+    storageStatePath,
+    browserProfileDir: archiveExists ? browserProfileDir : null,
+  };
 }
 
 export async function checkpointBrowserProfile(args: {
@@ -152,6 +213,27 @@ export async function buildBrowserFallbackSessionStatus(
   bucket: Bucket | null,
   fakeMode: boolean
 ): Promise<BrowserFallbackSessionStatusResponse> {
+  const strategy = getBrowserFallbackStrategy();
+  const serviceRole = getBrowserFallbackServiceRole();
+  if (strategy === 'public_only' && !fakeMode) {
+    return {
+      ok: true,
+      service: 'browser-fallback',
+      configured: true,
+      sessionState: 'public_only',
+      profileUpdatedAt: null,
+      profileGeneration: null,
+      fakeMode,
+      strategy,
+      serviceRole,
+      credentialSource: 'none',
+      healthcheckConfigured: false,
+      lastCheckedAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
+  }
+
   const metadata = fakeMode
     ? {
         sessionState: 'fake_mode' as const,
@@ -167,13 +249,16 @@ export async function buildBrowserFallbackSessionStatus(
         };
 
   return {
-    ok: fakeMode || metadata.sessionState === 'authenticated',
+    ok: fakeMode || strategy === 'public_only' || metadata.sessionState === 'authenticated',
     service: 'browser-fallback',
-    configured: fakeMode || !!process.env.BROWSER_FALLBACK_PROFILE_BUCKET,
+    configured: fakeMode || strategy === 'public_only' || !!process.env.BROWSER_FALLBACK_PROFILE_BUCKET,
     sessionState: metadata.sessionState,
     profileUpdatedAt: metadata.profileUpdatedAt,
     profileGeneration: metadata.profileGeneration,
     fakeMode,
+    strategy,
+    serviceRole,
+    credentialSource: fakeMode ? ('none' as BrowserFallbackCredentialSource) : null,
     healthcheckConfigured: false,
     lastCheckedAt: null,
     lastErrorCode: null,

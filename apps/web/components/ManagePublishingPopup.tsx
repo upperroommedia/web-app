@@ -223,7 +223,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       await updateDoc(sermonRef, {
         soundCloudTrackId: result.soundCloudTrackId,
         soundCloudTrackUrl: result.soundCloudTrackUrl ?? deleteField(),
-        status: { ...sermon.status, soundCloud: uploadStatus.UPLOADED },
+        'status.soundCloud': uploadStatus.UPLOADED,
       });
       onUpdate?.();
     } catch (error: unknown) {
@@ -248,7 +248,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
         soundCloudTrackUrl: deleteField(),
-        status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+        'status.soundCloud': uploadStatus.NOT_UPLOADED,
       });
       setIsUploadingToSoundCloud(false);
       onUpdate?.();
@@ -262,7 +262,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       await updateDoc(sermonRef, {
         soundCloudTrackId: deleteField(),
         soundCloudTrackUrl: deleteField(),
-        status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+        'status.soundCloud': uploadStatus.NOT_UPLOADED,
       });
       onUpdate?.();
     } catch (error: unknown) {
@@ -270,7 +270,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         await updateDoc(sermonRef, {
           soundCloudTrackId: deleteField(),
           soundCloudTrackUrl: deleteField(),
-          status: { ...sermon.status, soundCloud: uploadStatus.NOT_UPLOADED },
+          'status.soundCloud': uploadStatus.NOT_UPLOADED,
         });
         onUpdate?.();
       } else {
@@ -321,7 +321,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
       batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
         subsplashId: deleteField(),
         subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
-        status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
+        'status.subsplash': uploadStatus.NOT_UPLOADED,
       });
       await batch.commit();
       setSeriesPublished(false);
@@ -351,7 +351,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
         batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
           subsplashId: deleteField(),
           subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
-          status: { ...sermon.status, subsplash: uploadStatus.NOT_UPLOADED },
+          'status.subsplash': uploadStatus.NOT_UPLOADED,
         });
         await batch.commit();
         setSeriesPublished(false);
@@ -521,10 +521,7 @@ const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({
 
       const listsPublishedSuccessfully = didAllListPublishesSucceed(targetListIds, addToListReturn);
       batch.update(sermonRef, {
-        status: {
-          ...sermon.status,
-          subsplash: getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
-        },
+        'status.subsplash': getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
         approverId: user?.uid,
       });
 

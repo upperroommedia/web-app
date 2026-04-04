@@ -28,6 +28,30 @@ const getQueryString = (value: string | string[] | undefined): string | undefine
   return value;
 };
 
+const getDeleteIntentPayloadFromRoute = (
+  query: Record<string, string | string[] | undefined>,
+  asPath: string
+): {
+  sermonId: string;
+  subsplashId?: string;
+  soundCloudTrackId?: string;
+} | null => {
+  const routeParams = new URLSearchParams(asPath.split('?')[1] ?? '');
+  const deleteIntent = getQueryString(query.deleteIntent) ?? routeParams.get('deleteIntent') ?? undefined;
+  const deleteSermonId = getQueryString(query.deleteSermonId) ?? routeParams.get('deleteSermonId') ?? undefined;
+
+  if (deleteIntent !== 'sermon' || !deleteSermonId) {
+    return null;
+  }
+
+  return {
+    sermonId: deleteSermonId,
+    subsplashId: getQueryString(query.deleteSubsplashId) ?? routeParams.get('deleteSubsplashId') ?? undefined,
+    soundCloudTrackId:
+      getQueryString(query.deleteSoundCloudTrackId) ?? routeParams.get('deleteSoundCloudTrackId') ?? undefined,
+  };
+};
+
 const getDeleteFailureMessage = (error: unknown): string => {
   const busyDetails = parseLockBusyDetails(error);
   if (busyDetails) {
@@ -48,7 +72,7 @@ const AdminSermons = () => {
   const router = useRouter();
   const { clearCache } = useAlgoliaSearch();
   const processedDeleteIntentRef = useRef<string | null>(null);
-  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [hiddenSermonIds, setHiddenSermonIds] = useState<string[]>([]);
   const [deleteToast, setDeleteToast] = useState<DeleteToastState>({
     open: false,
     severity: 'info',
@@ -80,29 +104,23 @@ const AdminSermons = () => {
   }, [router]);
 
   const deleteIntentPayload = useMemo(() => {
-    if (!router.isReady) {
-      return null;
-    }
-
-    const deleteIntent = getQueryString(router.query.deleteIntent);
-    const deleteSermonId = getQueryString(router.query.deleteSermonId);
-
-    if (deleteIntent !== 'sermon' || !deleteSermonId) {
-      return null;
-    }
-
-    return {
-      sermonId: deleteSermonId,
-      subsplashId: getQueryString(router.query.deleteSubsplashId),
-      soundCloudTrackId: getQueryString(router.query.deleteSoundCloudTrackId),
-    };
+    return getDeleteIntentPayloadFromRoute(router.query, router.asPath);
   }, [
-    router.isReady,
+    router.asPath,
     router.query.deleteIntent,
     router.query.deleteSermonId,
     router.query.deleteSubsplashId,
     router.query.deleteSoundCloudTrackId,
   ]);
+  const effectiveHiddenSermonIds = useMemo(() => {
+    if (!deleteIntentPayload) {
+      return hiddenSermonIds;
+    }
+
+    return hiddenSermonIds.includes(deleteIntentPayload.sermonId)
+      ? hiddenSermonIds
+      : [deleteIntentPayload.sermonId, ...hiddenSermonIds];
+  }, [deleteIntentPayload, hiddenSermonIds]);
 
   useEffect(() => {
     if (!deleteIntentPayload) {
@@ -131,7 +149,11 @@ const AdminSermons = () => {
       try {
         await deleteSermonWithExternalCleanup(deleteIntentPayload);
         await clearCache();
-        setRefreshNonce((currentNonce) => currentNonce + 1);
+        setHiddenSermonIds((currentIds) =>
+          currentIds.includes(deleteIntentPayload.sermonId)
+            ? currentIds
+            : [...currentIds, deleteIntentPayload.sermonId]
+        );
         setDeleteToast({
           open: true,
           severity: 'success',
@@ -182,7 +204,7 @@ const AdminSermons = () => {
           </Button>
         </Stack>
 
-        <SearchableAdminSermonList refreshNonce={refreshNonce} />
+        <SearchableAdminSermonList hiddenSermonIds={effectiveHiddenSermonIds} />
       </Box>
       <Snackbar
         key={deleteToast.id}

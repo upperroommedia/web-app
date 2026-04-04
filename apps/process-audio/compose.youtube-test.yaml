@@ -3,6 +3,8 @@ services:
     build:
       context: ../..
       dockerfile: apps/process-audio/Dockerfile
+      args:
+        PROCESS_AUDIO_RUNTIME_PROFILE: hetzner
     environment:
       NODE_ENV: development
       LOG_LEVEL: debug

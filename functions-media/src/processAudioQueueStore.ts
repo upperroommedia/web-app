@@ -7,12 +7,12 @@ import {
   buildInitialYouTubeQueueState,
   computeProcessAudioRequestVersion,
   computeProcessAudioTaskId,
+  getProcessAudioTaskQueueNameForSource,
   getProcessAudioSourceType,
   isProcessAudioLockActive,
   PROCESS_AUDIO_LOCKS_PATH,
   PROCESS_AUDIO_QUEUE_CLAIMS_PATH,
   PROCESS_AUDIO_REQUESTS_PATH,
-  PROCESS_AUDIO_TASK_QUEUE_NAME,
   PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS,
   sanitizeProcessAudioPayload,
   type ProcessAudioSourceType,
@@ -339,7 +339,8 @@ export async function queueOrReplaceProcessAudioRequest(args: {
   const { database, payload, targetUri, ownerId } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
+  const sourceType = getProcessAudioSourceType(sanitizedPayload);
+  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource(sourceType));
 
   return await withProcessAudioQueueClaim(database, sanitizedPayload.id, ownerId, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
@@ -347,7 +348,6 @@ export async function queueOrReplaceProcessAudioRequest(args: {
     const [requestSnapshot, lockSnapshot] = await Promise.all([requestRef.get(), lockRef.get()]);
     const now = getNowIsoString();
     const taskId = computeProcessAudioTaskId(sanitizedPayload.id, requestVersion, `${ownerId}:${now}`);
-    const sourceType = getProcessAudioSourceType(sanitizedPayload);
     const currentState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(sanitizedPayload, requestVersion, now);
@@ -437,7 +437,7 @@ export async function beginYouTubeQueueProbe(args: {
   probeMode: YouTubeQueueProbeMode;
 }): Promise<void> {
   const { database, targetUri, ownerId, probeMode } = args;
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(PROCESS_AUDIO_TASK_QUEUE_NAME);
+  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource('youtube'));
   const deferredSnapshot = await database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get();
   const deferredEntries = Object.values((deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {});
   const probeCandidate = deferredEntries

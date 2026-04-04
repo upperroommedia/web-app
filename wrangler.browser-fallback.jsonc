@@ -3,6 +3,10 @@
   "main": "./apps/browser-fallback-cloudflare/src/index.ts",
   "compatibility_date": "2026-03-31",
   "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
   "vars": {
     "NODE_ENV": "production",
     "PORT": "8080",
@@ -57,6 +61,11 @@
         "BROWSER_FALLBACK_PROFILE_META_OBJECT": "browser-fallback/profile/latest.json",
         "BROWSER_FALLBACK_ARTIFACT_PREFIX": "browser-fallback/artifacts",
         "BROWSER_FALLBACK_HEALTHCHECK_YOUTUBE_URL": "https://youtu.be/dKaZ89SkVYY",
+        "YTDLP_USE_POT_PROVIDER_WITH_COOKIES": "true",
+        "YTDLP_POT_DISABLE_INNERTUBE": "false",
+        "YTDLP_SLEEP_REQUESTS_SECONDS": "2",
+        "YTDLP_SLEEP_INTERVAL_SECONDS": "1",
+        "YTDLP_MAX_SLEEP_INTERVAL_SECONDS": "3",
         "YTDLP_JS_RUNTIME": "deno"
       }
     },

@@ -1,0 +1,7 @@
+tunnel: e2e168f5-5dbc-4048-834e-a38084a8b85b
+credentials-file: /etc/cloudflared/e2e168f5-5dbc-4048-834e-a38084a8b85b.json
+
+ingress:
+  - hostname: browser-fallback-staging.upperroommedia.org
+    service: http://browser-fallback-staging:8090
+  - service: http_status:404
