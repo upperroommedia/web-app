@@ -30,8 +30,10 @@ if [[ -z "$SSH_TARGET" ]]; then
   exit 65
 fi
 
-json_output="$(
-  ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker exec ${CONTAINER_NAME} yt-dlp -J \
+json_output_file="$(mktemp)"
+trap 'rm -f "$json_output_file"' EXIT
+
+ssh "$SSH_TARGET" "cd ${REMOTE_DIR} && docker exec ${CONTAINER_NAME} yt-dlp -J \
     --cookies-from-browser chrome:/workspace/shared-browser-profile/.config/google-chrome \
     --no-playlist \
     --skip-download \
@@ -41,14 +43,13 @@ json_output="$(
     --max-sleep-interval 3 \
     --extractor-args 'youtube:player_client=default,mweb,-web_creator' \
     --extractor-args 'youtubepot-bgutilhttp:base_url=http://ytdlp-pot-provider:4416' \
-    '${SMOKE_URL}'"
-)"
+    '${SMOKE_URL}'" > "$json_output_file"
 
-JSON_OUTPUT="$json_output" python3 - <<'PY'
+python3 - "$json_output_file" <<'PY'
 import json, sys
-import os
 
-data = json.loads(os.environ["JSON_OUTPUT"])
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
 formats = data.get("formats") or []
 has_audio = any(
     isinstance(fmt, dict)
