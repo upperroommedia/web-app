@@ -1726,10 +1726,19 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                 onClick={() => {
                   void currentActionPlan.run();
                 }}
-              disabled={currentActionPlan.disabled}
-            >
-              {isPublishingEverywhere ? currentActionPlan.pendingLabel : currentActionPlan.label}
-            </Button>
+                disabled={currentActionPlan.disabled}
+                sx={{
+                  minHeight: { xs: 34, sm: 40, md: 44 },
+                  px: { xs: 1.25, sm: 1.75 },
+                  py: { xs: 0.45, sm: 0.9 },
+                  fontSize: { xs: '0.76rem', sm: '0.9rem', md: '0.96rem' },
+                  '& .MuiButton-startIcon svg': {
+                    fontSize: { xs: '0.95rem', sm: '1.1rem', md: '1.2rem' },
+                  },
+                }}
+              >
+                {isPublishingEverywhere ? currentActionPlan.pendingLabel : currentActionPlan.label}
+              </Button>
           </Stack>
         ) : null}
       </Stack>
@@ -1961,6 +1970,15 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                 void currentActionPlan.run();
               }}
               disabled={currentActionPlan.disabled}
+              sx={{
+                minHeight: { xs: 34, sm: 40, md: 44 },
+                px: { xs: 1.25, sm: 1.75 },
+                py: { xs: 0.45, sm: 0.9 },
+                fontSize: { xs: '0.76rem', sm: '0.9rem', md: '0.96rem' },
+                '& .MuiButton-startIcon svg': {
+                  fontSize: { xs: '0.95rem', sm: '1.1rem', md: '1.2rem' },
+                },
+              }}
             >
               {isPublishingEverywhere ? currentActionPlan.pendingLabel : currentActionPlan.label}
             </Button>

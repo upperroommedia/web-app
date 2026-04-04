@@ -447,227 +447,261 @@ const SermonDetailsPage = () => {
         {/* Main Card */}
         <Card sx={{ overflow: 'visible' }}>
           <CardContent sx={{ p: { xs: 1.5, sm: 2, md: 3 } }}>
-            {/* Header with Image and Info - Image always on right */}
+            {/* Header with Image, Info, and Actions */}
             <Box
               sx={{
                 display: 'flex',
                 flexDirection: 'row',
                 gap: { xs: 1.5, sm: 2, md: 3 },
                 mb: { xs: 2, sm: 3 },
+                alignItems: 'flex-start',
               }}
             >
-              {/* Info Section - First so it's on the left */}
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography
-                  variant="h4"
-                  fontWeight={700}
-                  gutterBottom
-                  sx={{
-                    fontSize: { xs: '1.25rem', sm: '1.5rem', md: '2rem' },
-                  }}
-                >
-                  {sermon.title}
-                </Typography>
-
-                {sermon.subtitle && (
-                  <Typography variant="h6" color="text.secondary" gutterBottom sx={{ fontSize: { xs: '0.9rem', sm: '1rem', md: '1.25rem' } }}>
-                    {sermon.subtitle}
-                  </Typography>
-                )}
-
-                {/* Speakers */}
-                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: { xs: 1, sm: 2 } }}>
-                  {sermon.speakers.map((speaker) => (
-                    <Chip
-                      key={speaker.id}
-                      component={Link}
-                      href={`/admin/speakers/${speaker.id}`}
-                      clickable
-                      avatar={
-                        <AvatarWithDefaultImage
-                          altName={speaker.name}
-                          image={speaker.images?.find((image) => image.type === 'square')}
-                          width={20}
-                          height={20}
-                          borderRadius={999}
-                        />
-                      }
-                      label={speaker.name}
-                      size="small"
-                      variant="outlined"
+              {/* Cover Image - On the left */}
+              <Box sx={{ flexShrink: 0 }}>
+                <Stack spacing={1.25} sx={{ width: { xs: 80, sm: 120, md: 160 } }}>
+                  <Box
+                    sx={{
+                      width: { xs: 80, sm: 120, md: 160 },
+                      height: { xs: 80, sm: 120, md: 160 },
+                      borderRadius: { xs: 1, sm: 2 },
+                      overflow: 'hidden',
+                      boxShadow: 2,
+                      bgcolor: sermon.images?.find((img) => img.type === 'square')?.averageColorHex || 'action.hover',
+                      backgroundImage: sermon.images?.find((img) => img.type === 'square')?.downloadLink
+                        ? `url(${sermon.images.find((img) => img.type === 'square')?.downloadLink})`
+                        : 'url(/URM_icon.png)',
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }}
+                  />
+                  {sermon.status.audioStatus === sermonStatusType.PROCESSED && (
+                    <Button
+                      variant="contained"
+                      size="medium"
+                      startIcon={isCurrentlyPlaying ? <PauseCircleIcon /> : <PlayCircleIcon />}
+                      onClick={handlePlayPause}
+                      fullWidth
                       sx={{
-                        height: { xs: 22, sm: 26 },
-                        cursor: 'pointer',
-                        borderRadius: 999,
-                        pl: { xs: '1px', sm: '2px' },
-                        bgcolor: alpha(theme.palette.primary.main, 0.08),
-                        textDecoration: 'none',
-                        transition: theme.transitions.create(['background-color', 'border-color', 'box-shadow']),
-                        '& .MuiChip-label': {
-                          fontSize: { xs: '0.62rem', sm: '0.7rem' },
-                          fontWeight: 700,
-                          px: { xs: '6px', sm: '8px' },
-                        },
-                        '& .MuiChip-avatar': {
-                          ml: 0,
-                          mr: { xs: '3px', sm: '4px' },
-                          width: { xs: 18, sm: 20 },
-                          height: { xs: 18, sm: 20 },
-                        },
-                        '&:hover': {
-                          backgroundColor: alpha(theme.palette.primary.main, 0.14),
-                          borderColor: 'primary.main',
-                        },
-                        '&:focus-visible': {
-                          boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.3)}`,
+                        minHeight: { xs: 28, sm: 34, md: 38 },
+                        px: { xs: 0.75, sm: 1.25 },
+                        py: { xs: 0.35, sm: 0.75 },
+                        fontSize: { xs: '0.68rem', sm: '0.82rem', md: '0.88rem' },
+                        '& .MuiButton-startIcon svg': {
+                          fontSize: { xs: '0.88rem', sm: '1.05rem', md: '1.15rem' },
                         },
                       }}
-                    />
-                  ))}
-                </Stack>
-
-                {/* Meta Info - Dates */}
-                <Stack spacing={0.5} sx={{ mb: { xs: 1, sm: 2 } }}>
-                  <Stack direction="row" spacing={0.5} alignItems="center">
-                    <CalendarTodayIcon sx={{ fontSize: { xs: 14, sm: 18 }, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
-                      <strong>Date:</strong> {new Date(sermon.dateMillis).toLocaleDateString('en-US', { dateStyle: 'medium' })}
-                    </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={0.5} alignItems="center">
-                    <UploadIcon sx={{ fontSize: { xs: 14, sm: 18 }, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
-                      <strong>Uploaded:</strong> {new Date(sermon.createdAtMillis).toLocaleDateString('en-US', { dateStyle: 'medium' })}
-                    </Typography>
-                  </Stack>
-                  {sermon.durationSeconds > 0 && (
-                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
-                      <strong>Duration:</strong> {formatDuration(sermon.durationSeconds)}
-                    </Typography>
+                    >
+                      {isCurrentlyPlaying ? 'Pause' : 'Play'}
+                    </Button>
                   )}
-                </Stack>
-
-                {/* Status chip */}
-                {statusInfo && sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
-                  <Box sx={{ mb: 2 }}>
-                    {sermon.status.audioStatus === sermonStatusType.ERROR ? (
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <Tooltip
-                          open={showStatusTooltip}
-                          onOpen={() => setShowStatusTooltip(true)}
-                          onClose={() => setShowStatusTooltip(false)}
-                          placement="top"
-                          title={sermon.status.message || 'Error'}
-                        >
-                          <Box
-                            onClick={() => setShowStatusTooltip((previousOpen) => !previousOpen)}
-                            sx={{ display: 'inline-flex', cursor: 'pointer' }}
-                          >
-                            <Chip
-                              icon={statusInfo.icon}
-                              label={statusInfo.label}
-                              size="small"
-                              color={statusInfo.color}
-                              variant="outlined"
-                            />
-                          </Box>
-                        </Tooltip>
-                        <Tooltip title="Retry processing">
-                          <span>
-                            <Button
-                              size="small"
-                              color="error"
-                              variant="text"
-                              startIcon={isRetryingProcessing ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />}
-                              onClick={retryProcessing}
-                              disabled={isRetryingProcessing}
-                              sx={{ minWidth: 'auto', px: 1, py: 0.25 }}
-                            >
-                              Retry
-                            </Button>
-                          </span>
-                        </Tooltip>
-                      </Stack>
-                    ) : (
-                      <Chip
-                        icon={statusInfo.icon}
-                        label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0
-                          ? `${statusInfo.label} (${processingProgress}%)`
-                          : statusInfo.label}
-                        size="small"
-                        color={statusInfo.color}
-                        variant="outlined"
-                      />
-                    )}
-                    {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0 && (
-                      <LinearProgress
-                        variant="determinate"
-                        value={processingProgress}
-                        sx={{
-                          mt: 1,
-                          height: 6,
-                          borderRadius: 3,
-                          overflow: 'hidden',
-                          maxWidth: 200,
-                          bgcolor: alpha(theme.palette.warning.main, 0.15),
-                          '& .MuiLinearProgress-bar': {
-                            bgcolor: 'warning.main',
-                            borderRadius: 0,
-                          }
-                        }}
-                      />
-                    )}
-                  </Box>
-                )}
-
-                {/* Play Button */}
-                {sermon.status.audioStatus === sermonStatusType.PROCESSED && (
-                  <Button
-                    variant="contained"
-                    size="large"
-                    startIcon={isCurrentlyPlaying ? <PauseCircleIcon /> : <PlayCircleIcon />}
-                    onClick={handlePlayPause}
-                    sx={{ mb: 2 }}
-                  >
-                    {isCurrentlyPlaying ? 'Pause' : 'Play'}
-                  </Button>
-                )}
-
-                {/* Uploader Info */}
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 40 }, height: { xs: 20, sm: 40 } }} />
-                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
-                    Uploaded by {uploaderName}
-                  </Typography>
                 </Stack>
               </Box>
 
-              {/* Cover Image - On the right */}
-              <Box sx={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <Box
-                  sx={{
-                    width: { xs: 80, sm: 120, md: 160 },
-                    height: { xs: 80, sm: 120, md: 160 },
-                    borderRadius: { xs: 1, sm: 2 },
-                    overflow: 'hidden',
-                    boxShadow: 2,
-                    bgcolor: sermon.images?.find((img) => img.type === 'square')?.averageColorHex || 'action.hover',
-                    backgroundImage: sermon.images?.find((img) => img.type === 'square')?.downloadLink
-                      ? `url(${sermon.images.find((img) => img.type === 'square')?.downloadLink})`
-                      : 'url(/URM_icon.png)',
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                  }}
-                />
-                {/* Action Buttons below image */}
-                <Stack spacing={0.5} sx={{ width: '100%' }}>
+              {/* Info Section - Center */}
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Stack spacing={{ xs: 1.25, sm: 1.75, md: 2 }}>
+                  <Box>
+                    <Typography
+                      variant="h4"
+                      fontWeight={700}
+                      gutterBottom
+                      sx={{
+                        fontSize: { xs: '1.25rem', sm: '1.5rem', md: '2rem' },
+                      }}
+                    >
+                      {sermon.title}
+                    </Typography>
+
+                    {sermon.subtitle && (
+                      <Typography variant="h6" color="text.secondary" gutterBottom sx={{ fontSize: { xs: '0.9rem', sm: '1rem', md: '1.25rem' } }}>
+                        {sermon.subtitle}
+                      </Typography>
+                    )}
+
+                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
+                      {sermon.speakers.map((speaker) => (
+                        <Chip
+                          key={speaker.id}
+                          component={Link}
+                          href={`/admin/speakers/${speaker.id}`}
+                          clickable
+                          avatar={
+                            <AvatarWithDefaultImage
+                              altName={speaker.name}
+                              image={speaker.images?.find((image) => image.type === 'square')}
+                              width={20}
+                              height={20}
+                              borderRadius={999}
+                            />
+                          }
+                          label={speaker.name}
+                          size="small"
+                          variant="outlined"
+                          sx={{
+                            height: { xs: 24, sm: 30 },
+                            cursor: 'pointer',
+                            borderRadius: 999,
+                            pl: { xs: '2px', sm: '3px' },
+                            bgcolor: alpha(theme.palette.primary.main, 0.08),
+                            textDecoration: 'none',
+                            transition: theme.transitions.create(['background-color', 'border-color', 'box-shadow']),
+                            '& .MuiChip-label': {
+                              fontSize: { xs: '0.68rem', sm: '0.78rem' },
+                              fontWeight: 700,
+                              px: { xs: '7px', sm: '9px' },
+                            },
+                            '& .MuiChip-avatar': {
+                              ml: 0,
+                              mr: { xs: '4px', sm: '5px' },
+                              width: { xs: 20, sm: 22 },
+                              height: { xs: 20, sm: 22 },
+                            },
+                            '&:hover': {
+                              backgroundColor: alpha(theme.palette.primary.main, 0.14),
+                              borderColor: 'primary.main',
+                            },
+                            '&:focus-visible': {
+                              boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.3)}`,
+                            },
+                          }}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
+
+                  <Stack
+                    direction={{ xs: 'column', md: 'row' }}
+                    spacing={{ xs: 1.25, md: 2.5 }}
+                    alignItems={{ xs: 'stretch', md: 'flex-end' }}
+                    justifyContent="space-between"
+                  >
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      spacing={{ xs: 1.25, sm: 2, md: 2.5 }}
+                      alignItems={{ xs: 'flex-start', sm: 'center' }}
+                      flexWrap="wrap"
+                      useFlexGap
+                      sx={{ flex: 1, minWidth: 0 }}
+                    >
+                      <Stack spacing={0.5}>
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <CalendarTodayIcon sx={{ fontSize: { xs: 14, sm: 18 }, color: 'text.secondary' }} />
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
+                            <strong>Date:</strong> {new Date(sermon.dateMillis).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                          </Typography>
+                        </Stack>
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <UploadIcon sx={{ fontSize: { xs: 14, sm: 18 }, color: 'text.secondary' }} />
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
+                            <strong>Uploaded:</strong> {new Date(sermon.createdAtMillis).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                          </Typography>
+                        </Stack>
+                        {sermon.durationSeconds > 0 && (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.85rem' } }}>
+                            <strong>Duration:</strong> {formatDuration(sermon.durationSeconds)}
+                          </Typography>
+                        )}
+                      </Stack>
+
+                      <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                        {statusInfo && sermon.status.audioStatus !== sermonStatusType.PROCESSED && (
+                          <Box>
+                            {sermon.status.audioStatus === sermonStatusType.ERROR ? (
+                              <Stack direction="row" spacing={0.5} alignItems="center">
+                                <Tooltip
+                                  open={showStatusTooltip}
+                                  onOpen={() => setShowStatusTooltip(true)}
+                                  onClose={() => setShowStatusTooltip(false)}
+                                  placement="top"
+                                  title={sermon.status.message || 'Error'}
+                                >
+                                  <Box
+                                    onClick={() => setShowStatusTooltip((previousOpen) => !previousOpen)}
+                                    sx={{ display: 'inline-flex', cursor: 'pointer' }}
+                                  >
+                                    <Chip
+                                      icon={statusInfo.icon}
+                                      label={statusInfo.label}
+                                      size="small"
+                                      color={statusInfo.color}
+                                      variant="outlined"
+                                    />
+                                  </Box>
+                                </Tooltip>
+                                <Tooltip title="Retry processing">
+                                  <span>
+                                    <Button
+                                      size="small"
+                                      color="error"
+                                      variant="text"
+                                      startIcon={isRetryingProcessing ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon fontSize="small" />}
+                                      onClick={retryProcessing}
+                                      disabled={isRetryingProcessing}
+                                      sx={{ minWidth: 'auto', px: 1, py: 0.25 }}
+                                    >
+                                      Retry
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              </Stack>
+                            ) : (
+                              <Chip
+                                icon={statusInfo.icon}
+                                label={sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0
+                                  ? `${statusInfo.label} (${processingProgress}%)`
+                                  : statusInfo.label}
+                                size="small"
+                                color={statusInfo.color}
+                                variant="outlined"
+                              />
+                            )}
+                            {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgress > 0 && (
+                              <LinearProgress
+                                variant="determinate"
+                                value={processingProgress}
+                                sx={{
+                                  mt: 1,
+                                  height: 6,
+                                  borderRadius: 3,
+                                  overflow: 'hidden',
+                                  maxWidth: 220,
+                                  bgcolor: alpha(theme.palette.warning.main, 0.15),
+                                  '& .MuiLinearProgress-bar': {
+                                    bgcolor: 'warning.main',
+                                    borderRadius: 0,
+                                  }
+                                }}
+                              />
+                            )}
+                          </Box>
+                        )}
+
+                      </Stack>
+                    </Stack>
+                  </Stack>
+                </Stack>
+              </Box>
+
+              {/* Action Buttons - On the right */}
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  minWidth: { xs: 92, sm: 120, md: 160 },
+                  minHeight: { xs: 120, sm: 160, md: 205 },
+                }}
+              >
+                <Stack spacing={0.75} sx={{ width: '100%' }}>
                   {canEdit && (
                     <Button
                       variant="outlined"
                       size="small"
                       startIcon={<EditIcon />}
                       onClick={() => router.push(`/admin/sermons/${sermonId}/edit`)}
-                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' } }}
+                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, minHeight: { sm: 40 } }}
                     >
                       Edit
                     </Button>
@@ -679,11 +713,21 @@ const SermonDetailsPage = () => {
                       size="small"
                       startIcon={<DeleteIcon />}
                       onClick={() => setDeletePopup(true)}
-                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' } }}
+                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, minHeight: { sm: 40 } }}
                     >
                       Delete
                     </Button>
                   )}
+                </Stack>
+                <Stack direction="row" spacing={1} alignItems="center" justifyContent="flex-end" sx={{ mt: 1.5 }}>
+                  <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 28 }, height: { xs: 20, sm: 28 } }} />
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, textAlign: 'right' }}
+                  >
+                    Uploaded by {uploaderName}
+                  </Typography>
                 </Stack>
               </Box>
             </Box>
