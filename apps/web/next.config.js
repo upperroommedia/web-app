@@ -112,6 +112,7 @@ const nextConfig = {
   },
   compress: true,
   poweredByHeader: false,
+  devIndicators: false,
   turbopack: {
     root: repoRoot,
   },

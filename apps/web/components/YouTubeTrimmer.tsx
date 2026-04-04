@@ -3,7 +3,9 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import Button from '@mui/material/Button';
+import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { Dispatch, FunctionComponent, memo, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
 import YouTubeTrimmerControls from './YouTubeTrimmerControls';
@@ -570,13 +572,23 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
           />
         </Box>
       ) : (
-        <Box display="flex" width={1} flexDirection="column" gap={0.5}>
-          <Typography variant="caption" color="text.secondary">
-            Source video
-          </Typography>
-          <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
-            {initialUrl}
-          </Typography>
+        <Box display="flex" width={1}>
+          {initialUrl ? (
+            <Link
+              href={initialUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              underline="hover"
+              color="inherit"
+              sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, width: 'fit-content' }}
+              aria-label="Open source video"
+            >
+              <Typography variant="body2" component="span">
+                Source video
+              </Typography>
+              <OpenInNewIcon sx={{ fontSize: 16 }} />
+            </Link>
+          ) : null}
         </Box>
       )}
       {!showError(audioSourceError) && !videoId && inputText.trim() && <CircularProgress />}

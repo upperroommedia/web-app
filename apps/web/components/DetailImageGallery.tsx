@@ -152,7 +152,7 @@ const DetailImageGallery = ({ images = [], altName }: DetailImageGalleryProps) =
               alt={`${altName} ${selectedImage.type}`}
               width={selectedImage.width || 1600}
               height={selectedImage.height || Math.round((selectedImage.width || 1600) / AspectRatio[selectedImage.type])}
-              sizes="100vw"
+              sizes={fullScreen ? '100vw' : '92vw'}
               style={{
                 width: 'auto',
                 height: 'auto',

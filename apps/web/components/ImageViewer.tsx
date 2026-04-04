@@ -72,6 +72,7 @@ const ImageViewer = (props: propsType) => {
         {ImageSizes.map((type, i) => {
           const image: ImageType | undefined = props.images.find((image) => image.type === type);
           const header = props.renderHeaderForType?.(type, image);
+          const shouldPrioritizeImage = props.vertical && i === 0;
           return image ? (
             <div key={`${image.id}-image`} style={{ width: '100%' }}>
               {header && <div style={{ marginBottom: '8px' }}>{header}</div>}
@@ -111,7 +112,13 @@ const ImageViewer = (props: propsType) => {
                     <Image
                       src={image.downloadLink}
                       alt={image.name}
-                      sizes={props.vertical ? '100vw' : '(max-width: 600px) 100vw, (max-width: 900px) 50vw, 33vw'}
+                      loading={shouldPrioritizeImage ? 'eager' : 'lazy'}
+                      fetchPriority={shouldPrioritizeImage ? 'high' : undefined}
+                      sizes={
+                        props.vertical
+                          ? '(max-width: 600px) min(300px, calc(100vw - 32px)), 300px'
+                          : '(max-width: 600px) 100vw, (max-width: 900px) 50vw, 33vw'
+                      }
                       style={{
                         objectFit: 'contain',
                       }}
