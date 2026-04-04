@@ -24,6 +24,7 @@ concurrency:
 env:
   FIREBASE_PROJECT: urm-app-staging
   STORAGE_BUCKET: urm-app-staging.firebasestorage.app
+  SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
 jobs:
   detect-changes:
@@ -312,10 +313,9 @@ jobs:
           fetch-depth: 0
 
       - name: Create staging Sentry release for web-app
-        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         uses: getsentry/action-release@v3
         env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: upper-room-media
         with:
           projects: web-app
@@ -431,10 +431,9 @@ jobs:
           fetch-depth: 0
 
       - name: Create staging Sentry release for firebase-functions
-        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         uses: getsentry/action-release@v3
         env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: upper-room-media
         with:
           projects: firebase-functions

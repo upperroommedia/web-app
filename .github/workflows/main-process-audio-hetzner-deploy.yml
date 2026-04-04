@@ -38,6 +38,7 @@ jobs:
       GCP_PROJECT: urm-app
       PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME: yt-worker-staging.upperroommedia.org
       PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME: yt-worker.upperroommedia.org
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -92,10 +93,9 @@ jobs:
         run: bash scripts/verify-hetzner-ytdlp-smoke.sh production
 
       - name: Create production Sentry release for process-audio-hetzner
-        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         uses: getsentry/action-release@v3
         env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: upper-room-media
         with:
           projects: process-audio-hetzner
