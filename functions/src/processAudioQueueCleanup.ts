@@ -52,10 +52,6 @@ const getNowIsoString = (): string => new Date().toISOString();
 const normalizeBaseUrl = (value: string): string => value.replace(/\/process-audio\/?$/u, '').replace(/\/+$/u, '');
 
 export const getProcessAudioTargetUriForQueueCleanup = (sourceType: 'youtube' | 'storage' = 'storage'): string => {
-  if (process.env.FUNCTIONS_EMULATOR === 'true') {
-    return `${PROCESS_AUDIO_BASE_URLS.local}/process-audio`;
-  }
-
   const configuredTarget =
     sourceType === 'youtube'
       ? process.env.PROCESS_AUDIO_YOUTUBE_TASK_TARGET_URI ||
@@ -70,6 +66,10 @@ export const getProcessAudioTargetUriForQueueCleanup = (sourceType: 'youtube' | 
 
   if (configuredTarget) {
     return `${normalizeBaseUrl(configuredTarget)}/process-audio`;
+  }
+
+  if (process.env.FUNCTIONS_EMULATOR === 'true') {
+    return `${PROCESS_AUDIO_BASE_URLS.local}/process-audio`;
   }
 
   const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;

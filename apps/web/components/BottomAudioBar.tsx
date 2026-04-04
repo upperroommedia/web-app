@@ -13,6 +13,7 @@ import {
   PlayButton,
   SeekButton,
   Tooltip,
+  useMediaRemote,
   useMediaState,
   type TooltipPlacement,
 } from '@vidstack/react';
@@ -28,6 +29,7 @@ import {
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
+import CircularProgress from '@mui/material/CircularProgress';
 import CloseIcon from '@mui/icons-material/Close';
 import { useTheme, alpha } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -107,15 +109,19 @@ function Mute({ tooltipPlacement }: MediaButtonProps) {
 // Play/Pause Button Component
 function Play({ tooltipPlacement }: MediaButtonProps) {
   const isPaused = useMediaState('paused');
+  const waiting = useMediaState('waiting');
+  const canPlay = useMediaState('canPlay');
+  const isLoadingPlayback = waiting || !canPlay;
+
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <PlayButton className="vds-button floating-player-play-btn">
-          {isPaused ? <PlayIcon /> : <PauseIcon />}
+        <PlayButton className="vds-button floating-player-play-btn" disabled={isLoadingPlayback}>
+          {isLoadingPlayback ? <CircularProgress color="inherit" size={20} thickness={5} /> : isPaused ? <PlayIcon /> : <PauseIcon />}
         </PlayButton>
       </Tooltip.Trigger>
       <Tooltip.Content className="vds-tooltip-content" placement={tooltipPlacement}>
-        {isPaused ? 'Play' : 'Pause'}
+        {isLoadingPlayback ? 'Loading audio' : isPaused ? 'Play' : 'Pause'}
       </Tooltip.Content>
     </Tooltip.Root>
   );
@@ -152,7 +158,9 @@ const BottomAudioBar: FunctionComponent = () => {
   const downLG = useMediaQuery(theme.breakpoints.down('lg'));
   const sidebarHidden = useMediaQuery(theme.breakpoints.down('lg'));
   const { currentSermon, setCurrentSermon } = useAudioPlayer();
+  const remote = useMediaRemote();
   const rootRef = useRef<HTMLDivElement>(null);
+  const artworkBorderRadius = downLG ? 2 : '50%';
 
   useEffect(() => {
     const docEl = document.documentElement;
@@ -232,7 +240,8 @@ const BottomAudioBar: FunctionComponent = () => {
               alignItems: 'center',
               width: '100%',
               gap: { xs: 1.5, sm: 2 },
-              p: { xs: 1.5, sm: 2 },
+              px: { xs: 1.5, sm: 2 },
+              py: { xs: 1.5, sm: 1.25 },
               position: 'relative',
             }}
           >
@@ -241,17 +250,17 @@ const BottomAudioBar: FunctionComponent = () => {
               sx={{
                 position: 'relative',
                 flexShrink: 0,
-                borderRadius: 2,
+                borderRadius: artworkBorderRadius,
                 overflow: 'hidden',
                 boxShadow: `0 4px 12px ${alpha(theme.palette.common.black, 0.3)}`,
               }}
             >
               <AvatarWithDefaultImage
-                width={isMobile ? 48 : 56}
-                height={isMobile ? 48 : 56}
+                width={isMobile ? 48 : downLG ? 56 : 72}
+                height={isMobile ? 48 : downLG ? 56 : 72}
                 altName={currentSermon?.title || 'Sermon'}
                 image={sermonImage}
-                borderRadius={8}
+                borderRadius={downLG ? 8 : '50%'}
               />
               {/* Subtle glow effect on album art */}
               <Box
@@ -417,6 +426,9 @@ const BottomAudioBar: FunctionComponent = () => {
                 '& .floating-player-btn': {
                   width: { xs: 36, sm: 40 },
                   height: { xs: 36, sm: 40 },
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   color: theme.palette.mode === 'dark'
                     ? alpha(theme.palette.common.white, 0.9)
                     : theme.palette.grey[700],
@@ -427,7 +439,7 @@ const BottomAudioBar: FunctionComponent = () => {
                       : theme.palette.grey[900],
                     transform: 'scale(1.1)',
                   },
-                  '& svg': {
+                  '& > svg': {
                     width: { xs: 20, sm: 24 },
                     height: { xs: 20, sm: 24 },
                   },
@@ -435,6 +447,9 @@ const BottomAudioBar: FunctionComponent = () => {
                 '& .floating-player-play-btn': {
                   width: { xs: 44, sm: 48 },
                   height: { xs: 44, sm: 48 },
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   backgroundColor: theme.palette.mode === 'dark'
                     ? theme.palette.common.white
                     : theme.palette.grey[900],
@@ -448,9 +463,16 @@ const BottomAudioBar: FunctionComponent = () => {
                     transform: 'scale(1.08)',
                     boxShadow: `0 6px 16px ${alpha(theme.palette.common.black, 0.4)}`,
                   },
-                  '& svg': {
+                  '& > svg': {
                     width: { xs: 24, sm: 28 },
                     height: { xs: 24, sm: 28 },
+                  },
+                  '& .MuiCircularProgress-root': {
+                    display: 'block',
+                    flexShrink: 0,
+                  },
+                  '& .MuiCircularProgress-svg': {
+                    display: 'block',
                   },
                 },
               }}
@@ -509,7 +531,11 @@ const BottomAudioBar: FunctionComponent = () => {
 
             {/* Close Button */}
             <IconButton
-              onClick={() => setCurrentSermon(undefined)}
+              onClick={() => {
+                remote.pause();
+                remote.seek(0);
+                setCurrentSermon(undefined);
+              }}
               size="small"
               sx={{
                 color: theme.palette.mode === 'dark'
