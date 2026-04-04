@@ -32,6 +32,7 @@ require_command gcloud
 require_command rsync
 require_command ssh
 require_command python3
+require_command git
 
 if [[ -z "$SSH_TARGET" ]]; then
   echo "PROCESS_AUDIO_HETZNER_SSH_TARGET is required" >&2
@@ -48,6 +49,7 @@ fi
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
+RELEASE_SHA="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 
 mkdir -p "$WORK_DIR/env" "$WORK_DIR/state/caddy/data" "$WORK_DIR/state/caddy/config"
 cp "$ROOT_DIR/ops/process-audio-hetzner/compose.yaml" "$WORK_DIR/compose.yaml"
@@ -58,7 +60,7 @@ cp "$ROOT_DIR/ops/process-audio-hetzner/README.md" "$WORK_DIR/README.md"
 
 write_env_file() {
   local env_name="$1"
-  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64
+  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64 sentry_dsn
 
   if [[ "$env_name" == "staging" ]]; then
     project_id="urm-app-staging"
@@ -75,6 +77,7 @@ write_env_file() {
   fi
 
   runtime_alert_recipients="$(gcloud secrets versions access latest --secret=RUNTIME_ALERT_RECIPIENTS --project "$project_id")"
+  sentry_dsn="$(gcloud secrets versions access latest --secret=PROCESS_AUDIO_SENTRY_DSN --project "$project_id")"
   service_account_json_b64="$(
     gcloud secrets versions access latest --secret=PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON --project "$project_id" \
     | python3 -c 'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())'
@@ -91,6 +94,10 @@ FIREBASE_STORAGE_BUCKET=${bucket}
 FIREBASE_DATABASE_URL=${database_url}
 FIREBASE_SERVICE_ACCOUNT_JSON=${service_account_json_b64}
 RUNTIME_ALERT_RECIPIENTS=${runtime_alert_recipients}
+SENTRY_DSN=${sentry_dsn}
+SENTRY_ENVIRONMENT=${env_name}
+SENTRY_RELEASE=${RELEASE_SHA}
+SENTRY_TRACES_SAMPLE_RATE=0.1
 PROCESS_AUDIO_RUNTIME_HOST=hetzner
 PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
 PROCESS_AUDIO_RUNTIME_ENV=${env_name}
@@ -170,9 +177,11 @@ prune_build_artifacts() {
 remove_service_for_rebuild() {
   local service_name="$1"
   local image_id=""
+  local container_name="process-audio-hetzner-${service_name}-1"
 
   image_id="$(docker compose images -q "$service_name" 2>/dev/null | head -n 1 || true)"
   docker compose rm -sf "$service_name" >/dev/null 2>&1 || true
+  docker rm -f "$container_name" >/dev/null 2>&1 || true
 
   if [[ -n "$image_id" ]]; then
     docker image rm -f "$image_id" >/dev/null 2>&1 || true

@@ -1,5 +1,7 @@
+import './instrument';
 import express, { Request } from 'express';
 import { spawnSync } from 'node:child_process';
+import * as Sentry from '@sentry/node';
 import { executeWithTimeout, getAudioSource, getFFmpegPath, logMemoryUsage, validateAddIntroOutroData } from './utils';
 import { ProcessAudioInputType, sermonStatusType, uploadStatus, sermonStatus } from './types';
 import { isAxiosError } from 'axios';
@@ -35,6 +37,9 @@ const localBrowserProfileBrowser = process.env.PROCESS_AUDIO_BROWSER_PROFILE_BRO
 const runtimeProfile = process.env.PROCESS_AUDIO_RUNTIME_PROFILE?.trim().toLowerCase() || 'hetzner';
 const runtimeHost = process.env.PROCESS_AUDIO_RUNTIME_HOST?.trim() || 'cloud-run';
 const runtimeEnv = process.env.PROCESS_AUDIO_RUNTIME_ENV?.trim() || process.env.NODE_ENV || 'unknown';
+const sentryEnabled = !!process.env.SENTRY_DSN?.trim();
+const sentryEnvironment = process.env.SENTRY_ENVIRONMENT?.trim() || runtimeEnv;
+const sentryRelease = process.env.SENTRY_RELEASE?.trim() || process.env.K_REVISION?.trim() || null;
 const youtubeProcessingEnabled = runtimeProfile !== 'cloudrun';
 const ytdlpPath = youtubeProcessingEnabled ? 'yt-dlp' : null;
 const configuredYtDlpJsRuntime = youtubeProcessingEnabled ? process.env.YTDLP_JS_RUNTIME?.trim() || 'deno' : null;
@@ -124,6 +129,9 @@ logger.info('Service initializing', {
   localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
   runtimeHost,
   runtimeEnv,
+  sentryEnabled,
+  sentryEnvironment,
+  sentryRelease,
   ytDlpVersion,
   ffmpegVersion,
   externalDownloader: configuredExternalDownloader,
@@ -192,6 +200,9 @@ app.get('/healthz', (req, res) => {
     revision: process.env.K_REVISION || 'local',
     runtimeProfile,
     youtubeProcessingEnabled,
+    sentryEnabled,
+    sentryEnvironment,
+    sentryRelease,
     browserFallbackConfigured,
     browserFallbackEnabled,
     inProcessBrowserFallbackConfigured,
@@ -375,6 +386,34 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       });
       return;
     }
+
+    Sentry.withScope((scope) => {
+      scope.setTag('route', 'process-audio');
+      scope.setTag('runtimeHost', runtimeHost);
+      scope.setTag('runtimeEnv', runtimeEnv);
+      scope.setTag('audioSourceType', audioSource.type);
+      scope.setContext('processAudio', {
+        sermonId: data.id,
+        requestId: ctx.requestId,
+        taskId: taskId ?? null,
+        audioSource: audioSource.source,
+        youtubeProcessingEnabled,
+        browserFallbackConfigured,
+        browserFallbackEnabled,
+        ytDlpVersion: ytDlpVersion ?? null,
+        poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+      });
+
+      if (request.auth?.email) {
+        scope.setUser({
+          email: request.auth.email,
+          id: request.auth.sub,
+          username: request.auth.name,
+        });
+      }
+
+      Sentry.captureException(e);
+    });
 
     const youtubeFailureAnalysis =
       audioSource.type === 'YouTubeUrl' ? analyzeYouTubeFailure(message, 'public_provider') : undefined;
@@ -610,6 +649,8 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
     await logMemoryUsage('Final Memory Usage', ctx);
   }
 });
+
+Sentry.setupExpressErrorHandler(app);
 
 const port = parseInt(process.env.PORT ?? '') || 8080;
 app.listen(port, () => {
