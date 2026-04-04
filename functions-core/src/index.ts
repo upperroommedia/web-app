@@ -48,6 +48,7 @@ import listspeakerrequests from '../../functions/src/speakerRequests/listSpeaker
 import acceptspeakerrequest from '../../functions/src/speakerRequests/acceptSpeakerRequest';
 import denyspeakerrequest from '../../functions/src/speakerRequests/denySpeakerRequest';
 import updateallspeakertags from '../../functions/src/updateAllSpeakerTags';
+import backfillsermonsubsplashstatus from '../../functions/src/backfillSermonSubsplashStatus';
 import getlistoverflowchain from '../../functions/src/getListOverflowChain';
 import getlistpublisheddrift from '../../functions/src/getListPublishedDrift';
 import marklistoverflowlink from '../../functions/src/markListOverflowLink';
@@ -107,6 +108,7 @@ exports.listspeakerrequests = listspeakerrequests;
 exports.acceptspeakerrequest = acceptspeakerrequest;
 exports.denyspeakerrequest = denyspeakerrequest;
 exports.updateallspeakertags = updateallspeakertags;
+exports.backfillsermonsubsplashstatus = backfillsermonsubsplashstatus;
 exports.getlistoverflowchain = getlistoverflowchain;
 exports.getlistpublisheddrift = getlistpublisheddrift;
 exports.marklistoverflowlink = marklistoverflowlink;

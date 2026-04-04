@@ -7,6 +7,7 @@ import { firestoreAdminSermonConverter } from '../../firestoreDataConverter';
 import handleError from '../../handleError';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
 import { syncRootProjectionStatusFromCanonical } from '../../helpers/syncRootProjectionStatusFromCanonical';
+import { deriveSubsplashStatus } from '../../utils/deriveSubsplashStatus';
 
 const sermonListOnUpdate = firestore.onDocumentUpdated(
   'sermons/{sermonId}/sermonLists/{sermonListId}',
@@ -30,6 +31,7 @@ const sermonListOnUpdate = firestore.onDocumentUpdated(
       await firestoreDb.runTransaction(async (transaction) => {
         const sermonDoc = await transaction.get(sermonRef);
         if (sermonDoc.exists) {
+          const sermon = sermonDoc.data();
           let incrementValue = 0;
           if (previousUploadStatus !== uploadStatus.UPLOADED && updatedUploadStatus === uploadStatus.UPLOADED) {
             logger.log('Sermon was uploaded - incrementing numberOfListsUploadedTo');
@@ -40,9 +42,12 @@ const sermonListOnUpdate = firestore.onDocumentUpdated(
           }
 
           if (incrementValue !== 0) {
+            const nextNumberOfLists = sermon?.numberOfLists ?? 0;
+            const nextNumberOfListsUploadedTo = (sermon?.numberOfListsUploadedTo ?? 0) + incrementValue;
             logger.log(`Updating numberOfListsUploadedTo for sermon ${sermonId} by ${incrementValue}`);
             transaction.update(sermonRef, {
               numberOfListsUploadedTo: FieldValue.increment(incrementValue),
+              'status.subsplash': deriveSubsplashStatus(nextNumberOfLists, nextNumberOfListsUploadedTo),
             });
             didMutate = true;
           } else {

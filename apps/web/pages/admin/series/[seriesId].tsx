@@ -1162,7 +1162,6 @@ const SeriesDetailsPage = () => {
     const mediaItemId = uploadResultData.id;
     await updateDoc(doc(firestore, 'sermons', sermon.id), {
       subsplashId: mediaItemId,
-      'status.subsplash': uploadStatus.UPLOADED,
       approverId: user?.uid ?? null,
     });
 

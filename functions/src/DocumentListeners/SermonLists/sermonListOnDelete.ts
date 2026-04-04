@@ -8,6 +8,7 @@ import { SermonList } from '@upperroom/shared/types/SermonList';
 import { removeFromList } from '../../removeFromList';
 import { ensureSermonCountInvariant } from '../../utils/sermonCountInvariantGuard';
 import { syncRootProjectionStatusFromCanonical } from '../../helpers/syncRootProjectionStatusFromCanonical';
+import { deriveSubsplashStatus } from '../../utils/deriveSubsplashStatus';
 
 const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{sermonListId}', async (event) => {
   const snapshot = event.data;
@@ -62,9 +63,17 @@ const sermonListOnDelete = onDocumentDeleted('sermons/{sermonId}/sermonLists/{se
     await firestoreDb.runTransaction(async (transaction) => {
       const sermonDoc = await transaction.get(sermonRef);
       if (sermonDoc.exists) {
+        const sermon = sermonDoc.data();
+        const nextNumberOfLists = Math.max(0, (sermon?.numberOfLists ?? 0) - 1);
+        const nextNumberOfListsUploadedTo = Math.max(
+          0,
+          (sermon?.numberOfListsUploadedTo ?? 0) + decrementListUploadedToValue
+        );
+
         transaction.update(sermonRef, {
           numberOfLists: FieldValue.increment(-1),
           numberOfListsUploadedTo: FieldValue.increment(decrementListUploadedToValue),
+          'status.subsplash': deriveSubsplashStatus(nextNumberOfLists, nextNumberOfListsUploadedTo),
         });
         didMutate = true;
         logger.info(`Successfully decremented numberOfLists for sermon ${sermonId}`, {

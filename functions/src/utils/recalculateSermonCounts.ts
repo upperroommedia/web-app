@@ -2,6 +2,7 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminSermonConverter } from '../firestoreDataConverter';
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SermonList } from '@upperroom/shared/types/SermonList';
+import { deriveSubsplashStatus } from './deriveSubsplashStatus';
 
 /**
  * Recalculates and updates the numberOfLists and numberOfListsUploadedTo counts for a sermon
@@ -40,6 +41,7 @@ export async function recalculateSermonCounts(
       await sermonRef.update({
         numberOfLists,
         numberOfListsUploadedTo,
+        'status.subsplash': deriveSubsplashStatus(numberOfLists, numberOfListsUploadedTo),
       });
 
       console.log(`Recalculated counts for sermon ${sermonId}: ${numberOfListsUploadedTo}/${numberOfLists}`);
