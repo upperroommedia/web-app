@@ -117,6 +117,11 @@ interface SeriesDisplayItem extends SeriesItemWithSermon {
   canRemoveLocally: boolean;
 }
 
+type InlineNotice = {
+  severity: 'success' | 'info' | 'warning' | 'error';
+  message: string;
+} | null;
+
 const cloneSeriesDisplayItems = (source: SeriesDisplayItem[]): SeriesDisplayItem[] =>
   source.map((item) => ({
     ...item,
@@ -892,6 +897,8 @@ const SeriesDetailsPage = () => {
   const [unpublishTarget, setUnpublishTarget] = useState<SeriesDisplayItem | null>(null);
   const [isRemovingItem, setIsRemovingItem] = useState(false);
   const [selectedSeriesItemIds, setSelectedSeriesItemIds] = useState<Set<string>>(new Set());
+  const [pageNotice, setPageNotice] = useState<InlineNotice>(null);
+  const [addItemNotice, setAddItemNotice] = useState<InlineNotice>(null);
 
   const isAdmin = user?.isAdmin() ?? false;
 
@@ -1031,6 +1038,7 @@ const SeriesDetailsPage = () => {
     }
     setSermonSearchQuery('');
     setSelectedSermonIds(new Set());
+    setAddItemNotice(null);
     setAddItemPopup(false);
   }, [isAddingSelectedSermons]);
 
@@ -1220,14 +1228,20 @@ const SeriesDetailsPage = () => {
   ): Promise<boolean> => {
     if (!seriesItem.sermon || !seriesItem.sermonId) {
       if (!options?.suppressAlert) {
-        alert('Sermon details are missing for this item. Refresh and retry.');
+        setPageNotice({
+          severity: 'error',
+          message: 'Sermon details are missing for this item. Refresh and retry.',
+        });
       }
       return false;
     }
 
     if (!canPublishSermonToSeries(seriesItem.sermon)) {
       if (!options?.suppressAlert) {
-        alert(SERIES_PUBLISH_BLOCKED_MESSAGE);
+        setPageNotice({
+          severity: 'warning',
+          message: SERIES_PUBLISH_BLOCKED_MESSAGE,
+        });
       }
       return false;
     }
@@ -1268,12 +1282,21 @@ const SeriesDetailsPage = () => {
         sermonSubsplashId: mediaItemId,
       });
       await fetchSeriesData();
+      if (!options?.suppressAlert) {
+        setPageNotice({
+          severity: 'success',
+          message: `${seriesItem.sermon.title} was published to the series.`,
+        });
+      }
 
       return true;
     } catch (err: unknown) {
       console.error('Error publishing series item:', err);
       if (!options?.suppressAlert) {
-        alert(`Error publishing item to series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
+        setPageNotice({
+          severity: 'error',
+          message: `Error publishing item to series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`,
+        });
       }
       return false;
     } finally {
@@ -1310,9 +1333,16 @@ const SeriesDetailsPage = () => {
       }
 
       await fetchSeriesData();
+      setPageNotice({
+        severity: 'info',
+        message: `${seriesItem.sermon?.title || seriesItem.remoteTitle || 'The item'} was unpublished from the series.`,
+      });
     } catch (err: unknown) {
       console.error('Error unpublishing series item:', err);
-      alert(`Error unpublishing item from series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
+      setPageNotice({
+        severity: 'error',
+        message: `Error unpublishing item from series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`,
+      });
     } finally {
       setUnpublishingItemId(null);
       setUnpublishTarget(null);
@@ -1837,18 +1867,14 @@ const SeriesDetailsPage = () => {
 
           setSelectedSermonIds(new Set(idsToRemoveLocally));
 
-          const keptPublishedMessage = titlesKeptPublished.length > 0
-            ? `\n\nThese sermons were added in Subsplash and were kept published locally:\n${titlesKeptPublished.join('\n')}`
-            : '';
-          const retryMessage = titlesToRetry.length > 0
-            ? `\n\nThese sermons were not safely published and were removed locally:\n${titlesToRetry.join('\n')}`
-            : '';
-          const rollbackFailureMessage = bulkResult.rollbackFailures.length > 0
-            ? `\n\nRollback failures:\n${bulkResult.rollbackFailures.map((failure) => `${failure.mediaItemId}: ${failure.error}`).join('\n')}`
-            : '';
-          alert(
-            `Automatic Subsplash series publish did not fully complete.\n${bulkResult.message}${retryMessage}${keptPublishedMessage}${rollbackFailureMessage}`
-          );
+          setAddItemNotice({
+            severity: 'warning',
+            message:
+              `Automatic Subsplash series publish did not fully complete. ${bulkResult.message}` +
+              `${titlesToRetry.length > 0 ? ` Items removed locally: ${titlesToRetry.join(', ')}.` : ''}` +
+              `${titlesKeptPublished.length > 0 ? ` Items kept published: ${titlesKeptPublished.join(', ')}.` : ''}` +
+              `${bulkResult.rollbackFailures.length > 0 ? ` Rollback failures: ${bulkResult.rollbackFailures.map((failure) => `${failure.mediaItemId}: ${failure.error}`).join(' | ')}.` : ''}`,
+          });
           return;
         }
 
@@ -1874,12 +1900,24 @@ const SeriesDetailsPage = () => {
       if (orderedNewItems.length > 0) {
         setSermonSearchQuery('');
         setSelectedSermonIds(new Set());
+        setAddItemNotice(publishedCandidates.length > 0
+          ? {
+              severity: 'success',
+              message: 'Items were added to the series and published memberships were synced where possible.',
+            }
+          : {
+              severity: 'success',
+              message: 'Items were added to the series.',
+            });
         setAddItemPopup(false);
       }
       await fetchSeriesData();
     } catch (err: unknown) {
       console.error('Error adding selected sermons:', err);
-      alert(`Error adding selected sermons: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
+      setAddItemNotice({
+        severity: 'error',
+        message: `Error adding selected sermons: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`,
+      });
     } finally {
       setActiveAddingSermonId(null);
       setIsAddingSelectedSermons(false);
@@ -2323,6 +2361,7 @@ const SeriesDetailsPage = () => {
                 fetchAvailableSermons();
                 setSermonSearchQuery('');
                 setSelectedSermonIds(new Set());
+                setAddItemNotice(null);
                 setAddItemPopup(true);
               }}
             >
@@ -2330,6 +2369,12 @@ const SeriesDetailsPage = () => {
             </Button>
           </Stack>
         </Box>
+
+        {pageNotice ? (
+          <Alert severity={pageNotice.severity} sx={{ mb: 3 }}>
+            {pageNotice.message}
+          </Alert>
+        ) : null}
 
         {/* Items List */}
         {items.length === 0 ? (
@@ -2357,6 +2402,7 @@ const SeriesDetailsPage = () => {
                 fetchAvailableSermons();
                 setSermonSearchQuery('');
                 setSelectedSermonIds(new Set());
+                setAddItemNotice(null);
                 setAddItemPopup(true);
               }}
             >
@@ -2504,6 +2550,11 @@ const SeriesDetailsPage = () => {
           Add Item to Series
         </DialogTitle>
         <DialogContent>
+          {addItemNotice ? (
+            <Alert severity={addItemNotice.severity} sx={{ mt: 1, mb: 2 }}>
+              {addItemNotice.message}
+            </Alert>
+          ) : null}
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1, mb: 1 }}>
             <FormControlLabel
               label="Select all visible"

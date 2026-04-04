@@ -6,7 +6,7 @@
  * - Inline publishing status (no popup)
  * - Edit and Delete actions
  */
-import { ReactNode, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Box from '@mui/material/Box';
@@ -34,16 +34,11 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
-import CloudIcon from '@mui/icons-material/Cloud';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import PendingIcon from '@mui/icons-material/Pending';
-import CollectionsIcon from '@mui/icons-material/Collections';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import CloudOffIcon from '@mui/icons-material/CloudOff';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import UploadIcon from '@mui/icons-material/Upload';
 import AddIcon from '@mui/icons-material/Add';
@@ -53,69 +48,25 @@ import { alpha, useTheme } from '@mui/material/styles';
 import AppLayout from '../../../layout/AppLayout';
 import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
-import firestore, { doc, getDoc, getDocs, deleteDoc, collection, writeBatch, deleteField, updateDoc, setDoc, query, orderBy, where, limit, serverTimestamp } from '../../../firebase/firestore';
-import storage, { getDownloadURL, ref } from '../../../firebase/storage';
+import SermonPublishPanel from '../../../components/SermonPublishPanel';
+import firestore, { doc, getDoc, getDocs, collection, updateDoc, setDoc, query, orderBy, where, limit, serverTimestamp } from '../../../firebase/firestore';
 import { sermonStatusType, uploadStatus } from '../../../types/SermonTypes';
 import { sermonConverter } from '../../../types/Sermon';
 import { Series, seriesConverter } from '../../../types/Series';
-import { SermonList, sermonListConverter } from '../../../types/SermonList';
 import useAuth from '../../../context/user/UserContext';
 import useAudioPlayer from '../../../context/audio/audioPlayerContext';
 import { useMediaState, useMediaRemote } from '@vidstack/react';
 import { createFunctionV2 } from '../../../utils/createFunction';
-import { createOperationKey, parseLockBusyDetails } from '../../../utils/callableConcurrency';
-import {
-  createSubsplashDeleteIntentKey,
-  createSubsplashListAddIntentKey,
-  createSubsplashListCreateIntentKey,
-  createSubsplashListRemoveIntentKey,
-  createSubsplashSeriesCreateIntentKey,
-  createSubsplashSeriesPublishIntentKey,
-  createSubsplashSeriesReorderIntentKey,
-  createSubsplashSeriesRollbackIntentKey,
-  createSubsplashSeriesUnpublishIntentKey,
-  createSubsplashUploadIntentKey,
-  didAllListPublishesSucceed,
-  getNextPublishGeneration,
-  getSermonSubsplashStatusAfterListMutation,
-  summarizeListPublishErrors,
-} from '../../../utils/subsplashPublishFlow';
-import { runSubsplashSeriesPublishSaga } from '../../../utils/subsplashSeriesPublishSaga';
-import { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '@upperroom/contracts/uploadToSoundCloud';
-import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
-import { AddtoListInputType, AddToListOutputType } from '@upperroom/contracts/addToList';
-import { RemoveFromListInputType, RemoveFromListOutputType } from '@upperroom/contracts/removeFromList';
+import { createOperationKey } from '../../../utils/callableConcurrency';
 import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
-import { CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType } from '@upperroom/contracts/createNewSubsplashList';
-import { AddToSeriesInputType, AddToSeriesOutputType } from '@upperroom/contracts/addToSeries';
-import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '@upperroom/contracts/removeFromSeries';
-import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
-import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '@upperroom/contracts/reorderSeriesItems';
 import UserAvatar from '../../../components/UserAvatar';
 import { User } from '../../../types/User';
 import { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '@upperroom/contracts/getUsersByIds';
-import { getSquareImageDownloadLink } from '../../../utils/utils';
-import { isDevelopment } from '../../../firebase/firebase';
-import { useCollectionData, useDocument } from 'react-firebase-hooks/firestore';
+import { useDocument } from 'react-firebase-hooks/firestore';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref as dbRef } from '../../../firebase/database';
-import UploadStatusList from '../../../components/UploadStatusList';
 import LinearProgress from '@mui/material/LinearProgress';
-import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
-import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../../../utils/soundcloudAuthRecovery';
-import { resolveCanonicalFirestoreList } from '../../../utils/resolveCanonicalFirestoreList';
-
-const getLockBusyMessage = (error: unknown, fallbackMessage: string): string => {
-  const busyDetails = parseLockBusyDetails(error);
-  if (!busyDetails) {
-    return fallbackMessage;
-  }
-
-  const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
-  const lockedKeys = busyDetails.locked_keys.length > 0 ? ` Locked keys: ${busyDetails.locked_keys.join(', ')}.` : '';
-  return `${fallbackMessage} Another publishing action is in progress.${lockedKeys} Retry in about ${retryInSeconds}s.`;
-};
 
 const getErrorField = (error: unknown, field: 'code' | 'details' | 'message'): string | undefined => {
   if (field === 'message' && error instanceof Error && error.message) {
@@ -149,12 +100,7 @@ const SermonDetailsPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRetryingProcessing, setIsRetryingProcessing] = useState(false);
 
-  // Publishing state
-  const [isUploadingToSoundCloud, setIsUploadingToSoundCloud] = useState(false);
-  const [soundCloudError, setSoundCloudError] = useState<ReactNode | null>(null);
-  const [_isUploadingToSubsplash, setIsUploadingToSubsplash] = useState(false);
-  const [seriesPublishAction, setSeriesPublishAction] = useState<'publish' | 'unpublish' | null>(null);
-  const [confirmSeriesUnpublishOpen, setConfirmSeriesUnpublishOpen] = useState(false);
+  // Publishing-related series assignment state
   const [addToSeriesDialogOpen, setAddToSeriesDialogOpen] = useState(false);
   const [ownedSeriesOptions, setOwnedSeriesOptions] = useState<Series[]>([]);
   const [loadingOwnedSeries, setLoadingOwnedSeries] = useState(false);
@@ -170,15 +116,6 @@ const SermonDetailsPage = () => {
     }
   );
   const sermon = sermonSnapshot?.data();
-  const [seriesItemSnapshot] = useDocument(
-    sermon?.seriesId ? doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id) : null
-  );
-
-  // Sermon lists
-  const [sermonLists, listsLoading, _listsError] = useCollectionData(
-    sermonId ? collection(firestore, `sermons/${sermonId}/sermonLists`).withConverter(sermonListConverter) : null
-  );
-
   // Real-time processing progress from Firebase Realtime Database
   const [progressSnapshot] = useObject(sermonId ? dbRef(database, `addIntroOutro/${sermonId}`) : null);
   const processingProgress = progressSnapshot?.val() ? Number(progressSnapshot.val()) : 0;
@@ -186,11 +123,6 @@ const SermonDetailsPage = () => {
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
   const isCurrentlyPlaying = currentSermon?.id === sermonId && playing;
-  const isSoundCloudUploaded = sermon?.status.soundCloud === uploadStatus.UPLOADED;
-
-  const listItemsUploaded = sermonLists?.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED) || [];
-  const listItemsNotUploaded = sermonLists?.filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED) || [];
-  const seriesPublishedToSubsplash = seriesItemSnapshot?.exists() && seriesItemSnapshot.data()?.publishedToSubsplash === true;
   const refreshSeriesState = useCallback(async (seriesId: string) => {
     const latestSeriesSnapshot = await getDoc(doc(firestore, 'series', seriesId).withConverter(seriesConverter));
     if (latestSeriesSnapshot.exists()) {
@@ -293,356 +225,6 @@ const SermonDetailsPage = () => {
     }
   }, [sermon, currentSermon, isDeleting, setCurrentSermon, router]);
 
-  // SoundCloud upload/delete
-  const uploadToSoundCloud = useCallback(async () => {
-    if (!sermon) return;
-    setIsUploadingToSoundCloud(true);
-    setSoundCloudError(null);
-
-    const uploadToSoundCloudFn = createFunctionV2<UploadToSoundCloudInputType, UploadToSoundCloudReturnType>('uploadtosoundcloud');
-    const data: UploadToSoundCloudInputType = {
-      title: sermon.title,
-      description: sermon.description,
-      tags: [sermon.subtitle, ...sermon.topics],
-      speakers: sermon.speakers.map((speaker) => speaker.name),
-      audioStoragePath: `intro-outro-sermons/${sermon.id}`,
-      imageSource: getSquareImageDownloadLink(sermon),
-    };
-
-    try {
-      const result = await uploadToSoundCloudFn(data);
-      const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-      await updateDoc(sermonRef, {
-        soundCloudTrackId: result.soundCloudTrackId,
-        soundCloudTrackUrl: result.soundCloudTrackUrl ?? deleteField(),
-        'status.soundCloud': uploadStatus.UPLOADED,
-      });
-    } catch (error: unknown) {
-      console.error('Error uploading to SoundCloud:', error);
-      setSoundCloudError(
-        isSoundCloudReconnectRequiredClientError(error)
-          ? getSoundCloudRecoveryMessage(user?.isAdmin() ?? false)
-          : getErrorMessage(error, 'Failed to upload to SoundCloud')
-      );
-    } finally {
-      setIsUploadingToSoundCloud(false);
-    }
-  }, [sermon, user]);
-
-  const deleteFromSoundCloud = useCallback(async () => {
-    if (!sermon) return;
-    setIsUploadingToSoundCloud(true);
-    setSoundCloudError(null);
-
-    const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-
-    if (!sermon.soundCloudTrackId) {
-      await updateDoc(sermonRef, {
-        soundCloudTrackId: deleteField(),
-        soundCloudTrackUrl: deleteField(),
-        'status.soundCloud': uploadStatus.NOT_UPLOADED,
-      });
-      setIsUploadingToSoundCloud(false);
-      return;
-    }
-
-    const deleteFromSoundCloudFn = createFunctionV2<{ soundCloudTrackId: string }, void>('deletefromsoundcloud');
-
-    try {
-      await deleteFromSoundCloudFn({ soundCloudTrackId: sermon.soundCloudTrackId });
-      await updateDoc(sermonRef, {
-        soundCloudTrackId: deleteField(),
-        soundCloudTrackUrl: deleteField(),
-        'status.soundCloud': uploadStatus.NOT_UPLOADED,
-      });
-    } catch (error: unknown) {
-      if (getErrorField(error, 'details')?.includes('Invalid track id')) {
-        await updateDoc(sermonRef, {
-          soundCloudTrackId: deleteField(),
-          soundCloudTrackUrl: deleteField(),
-          'status.soundCloud': uploadStatus.NOT_UPLOADED,
-        });
-      } else {
-        console.error('Error deleting from SoundCloud:', error);
-        setSoundCloudError(
-          isSoundCloudReconnectRequiredClientError(error)
-            ? getSoundCloudRecoveryMessage(user?.isAdmin() ?? false)
-            : getErrorMessage(error, 'Failed to remove from SoundCloud')
-        );
-      }
-    } finally {
-      setIsUploadingToSoundCloud(false);
-    }
-  }, [sermon, user]);
-
-  // Subsplash functions
-  const uploadToSubsplash = useCallback(async (listsToUploadTo: SermonList[]): Promise<string | undefined> => {
-    if (!sermon) return undefined;
-    try {
-      const subsplashIdToListIdMap = new Map<string, string>();
-      const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
-      const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
-      const uploadOperationKey = createSubsplashUploadIntentKey(
-        'sermon-admin-upload',
-        sermon.id,
-        sermon.subsplashUploadGeneration
-      );
-      const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
-
-      const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
-        title: sermon.title,
-        subtitle: sermon.subtitle,
-        speakers: sermon.speakers,
-        autoPublish: !isDevelopment,
-        audioTitle: sermon.title,
-        audioUrl: url,
-        topics: sermon.topics,
-        description: sermon.description,
-        images: sermon.images,
-        date: new Date(sermon.dateMillis),
-      };
-
-      setIsUploadingToSubsplash(true);
-
-      let id = sermon.subsplashId;
-      const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-      if (!id) {
-        const response = (await uploadToSubsplashCallable({
-          ...data,
-          operationKey: uploadOperationKey,
-          lockKey: sermon.id,
-        })) as unknown as { id: string };
-        id = response.id;
-        await updateDoc(sermonRef, { subsplashId: id });
-      }
-
-      const listsMetadata = await Promise.all(
-        listsToUploadTo.map(async (list) => {
-          const canonicalList = await resolveCanonicalFirestoreList(list);
-          if (!canonicalList) {
-            throw new Error(
-              `List "${list.name}" could not be resolved to a Firestore list document. Refusing to create or update a Subsplash list from a non-canonical list id.`
-            );
-          }
-
-          if (canonicalList.subsplashId) {
-            subsplashIdToListIdMap.set(canonicalList.subsplashId, canonicalList.id);
-            return {
-              listId: canonicalList.subsplashId,
-              overflowBehavior: canonicalList.overflowBehavior,
-              type: canonicalList.type,
-            };
-          }
-          const createNewSubsplashList = createFunctionV2<CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType>('createnewsubsplashlist');
-          const { listId } = await createNewSubsplashList({
-            title: canonicalList.name,
-            subtitle: '',
-            images: canonicalList.images,
-            operationKey: createSubsplashListCreateIntentKey('sermon-admin-list-create', sermon.id, canonicalList.id),
-          });
-          await updateDoc(doc(firestore, `lists/${canonicalList.id}`), { subsplashId: listId });
-          subsplashIdToListIdMap.set(listId, canonicalList.id);
-          return { listId, overflowBehavior: canonicalList.overflowBehavior, type: canonicalList.type };
-        })
-      );
-
-      const addToListReturn = listsMetadata.length === 0
-        ? []
-        : await addToList({
-          destinationListIds: listsMetadata.map((m) => m.listId),
-          mediaItem: { id, type: 'media-item' },
-          operationKey: createSubsplashListAddIntentKey(
-            'sermon-admin-list-add',
-            sermon.id,
-            listsToUploadTo.map((list) => ({
-              id: list.id,
-              publishGeneration: list.publishGeneration,
-            }))
-          ),
-        });
-      const targetListIds = listsMetadata.map((m) => m.listId);
-
-      const batch = writeBatch(firestore);
-      const listsById = new Map(listsToUploadTo.map((list) => [list.id, list]));
-      addToListReturn.forEach((r) => {
-        const listId = subsplashIdToListIdMap.get(r.listId);
-        if (!listId) return;
-        const docRef = doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`).withConverter(sermonListConverter);
-        const list = listsById.get(listId);
-        if (!list) {
-          throw new Error(`List metadata for firestore list ${listId} not found`);
-        }
-        if (r.status === 'success') {
-          const actualPlacement =
-            r.actualPlacement ??
-            {
-              firestoreListId: listId,
-              subsplashListId: r.listId,
-              overflowDepth: 0,
-              position: 1,
-              listItemId: r.listItemId,
-            };
-          const resolvedListItemId = actualPlacement.listItemId ?? r.listItemId;
-          if (!resolvedListItemId) {
-            throw new Error(`Successful list publish for ${listId} did not return a resolved listItemId.`);
-          }
-          batch.set(
-            docRef,
-            {
-              ...list,
-              publishGeneration: list.publishGeneration ?? 0,
-              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: resolvedListItemId },
-            },
-            { merge: true }
-          );
-          batch.set(
-            doc(firestore, 'lists', listId, 'listItems', sermon.id),
-            {
-              subsplashId: id,
-              uploadStatus: { status: uploadStatus.UPLOADED, listItemId: resolvedListItemId },
-              physicalPlacement: actualPlacement,
-            },
-            { merge: true }
-          );
-        } else {
-          batch.set(
-            docRef,
-            {
-              ...list,
-              publishGeneration: list.publishGeneration ?? 0,
-              uploadStatus: { status: uploadStatus.ERROR, reason: r.error },
-            },
-            { merge: true }
-          );
-          batch.set(
-            doc(firestore, 'lists', listId, 'listItems', sermon.id),
-            {
-              subsplashId: id,
-              uploadStatus: { status: uploadStatus.ERROR, reason: r.error },
-            },
-            { merge: true }
-          );
-        }
-      });
-      batch.update(sermonRef, {
-        'status.subsplash': getSermonSubsplashStatusAfterListMutation(targetListIds, addToListReturn),
-        approverId: user?.uid,
-      });
-      await batch.commit();
-      if (!didAllListPublishesSucceed(targetListIds, addToListReturn)) {
-        alert(summarizeListPublishErrors(targetListIds, addToListReturn) || 'One or more list publishes failed.');
-        return undefined;
-      }
-      return id;
-    } catch (error) {
-      console.error('Error uploading to Subsplash:', error);
-      alert(getLockBusyMessage(error, 'Failed to upload sermon to Subsplash.'));
-      return undefined;
-    } finally {
-      setIsUploadingToSubsplash(false);
-    }
-  }, [sermon, user?.uid]);
-
-  const removeFromList = async (listsToRemoveFrom: SermonList[]) => {
-    if (!sermon) return;
-    try {
-      const removeFromListCallable = createFunctionV2<RemoveFromListInputType, RemoveFromListOutputType>('removefromlist');
-      const listsToRemoveFiltered = listsToRemoveFrom.filter(
-        (list) => list.uploadStatus?.status === uploadStatus.UPLOADED && list.uploadStatus.listItemId
-      );
-
-      await removeFromListCallable({
-        listIds: listsToRemoveFiltered.map((list) => list.subsplashId) as string[],
-        listItemIds: listsToRemoveFiltered.map((list) => list.uploadStatus?.status === uploadStatus.UPLOADED ? list.uploadStatus.listItemId : '') as string[],
-        itemIds: listsToRemoveFiltered.map(() => sermon.subsplashId || sermon.id) as string[],
-        itemTypes: listsToRemoveFiltered.map(() => 'media-item') as string[],
-        sermonIds: listsToRemoveFiltered.map(() => sermon.id),
-        operationKey: createSubsplashListRemoveIntentKey(
-          'sermon-admin-list-remove',
-          sermon.id,
-          listsToRemoveFiltered.map((list) => list.subsplashId).filter((listId): listId is string => Boolean(listId))
-        ),
-      });
-    } catch (error) {
-      console.error('Error removing from list:', error);
-      alert(getLockBusyMessage(error, 'Failed to remove sermon from one or more Subsplash lists.'));
-    }
-  };
-
-  const deleteFromSubsplash = useCallback(async () => {
-    if (!sermon) return;
-    const deleteFromSubsplashCall = createFunctionV2<{ subsplashId: string }, void>('deletefromsubsplash');
-    const deleteOperationKey = createSubsplashDeleteIntentKey('sermon-admin-delete', sermon.id);
-    try {
-      setIsUploadingToSubsplash(true);
-      if (sermon.subsplashId) {
-        await deleteFromSubsplashCall(
-          { subsplashId: sermon.subsplashId },
-          { metadata: { operationKey: deleteOperationKey } }
-        );
-      }
-
-      const batch = writeBatch(firestore);
-      const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
-      const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
-      sermonSeriesListSnapshot.forEach((docSnap) => {
-        batch.update(docSnap.ref, {
-          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
-          publishGeneration: getNextPublishGeneration(docSnap.data().publishGeneration),
-        });
-      });
-      if (sermon.seriesId) {
-        const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
-        const seriesItemSnapshot = await getDoc(seriesItemRef);
-        if (seriesItemSnapshot.exists()) {
-          batch.update(seriesItemRef, {
-            publishedToSubsplash: false,
-            sermonSubsplashId: deleteField(),
-          });
-        }
-      }
-      batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
-        subsplashId: deleteField(),
-        subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
-        'status.subsplash': uploadStatus.NOT_UPLOADED,
-      });
-      await batch.commit();
-    } catch (error: unknown) {
-      if (getErrorField(error, 'code') === 'functions/not-found') {
-        const batch = writeBatch(firestore);
-        const sermonSeriesList = collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter);
-        const sermonSeriesListSnapshot = await getDocs(sermonSeriesList);
-        sermonSeriesListSnapshot.forEach((docSnap) => {
-          batch.update(docSnap.ref, {
-            uploadStatus: { status: uploadStatus.NOT_UPLOADED },
-            publishGeneration: getNextPublishGeneration(docSnap.data().publishGeneration),
-          });
-        });
-        if (sermon.seriesId) {
-          const seriesItemRef = doc(firestore, `series/${sermon.seriesId}/seriesItems`, sermon.id);
-          const seriesItemSnapshot = await getDoc(seriesItemRef);
-          if (seriesItemSnapshot.exists()) {
-            batch.update(seriesItemRef, {
-              publishedToSubsplash: false,
-              sermonSubsplashId: deleteField(),
-            });
-          }
-        }
-        batch.update(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter), {
-          subsplashId: deleteField(),
-          subsplashUploadGeneration: getNextPublishGeneration(sermon.subsplashUploadGeneration),
-          'status.subsplash': uploadStatus.NOT_UPLOADED,
-        });
-        await batch.commit();
-      } else {
-        console.error('Error deleting from Subsplash:', error);
-        alert(getLockBusyMessage(error, getErrorMessage(error, 'Failed to delete from Subsplash')));
-      }
-    } finally {
-      setIsUploadingToSubsplash(false);
-    }
-  }, [sermon]);
-
   const retryProcessing = useCallback(async () => {
     if (!sermon || isRetryingProcessing) return;
 
@@ -680,172 +262,6 @@ const SermonDetailsPage = () => {
       setIsRetryingProcessing(false);
     }
   }, [isRetryingProcessing, sermon]);
-
-  const publishToSeriesForSeries = useCallback(async (targetSeries: Series) => {
-    if (!sermon) {
-      throw new Error('Sermon not found.');
-    }
-    if (!canPublishSermonToSeries(sermon)) {
-      throw new Error(SERIES_PUBLISH_BLOCKED_MESSAGE);
-    }
-
-    let mediaItemId = sermon.subsplashId;
-    if (!mediaItemId) {
-      mediaItemId = await uploadToSubsplash([]);
-    }
-
-    if (!mediaItemId) {
-      throw new Error('Sermon must be uploaded to Subsplash before publishing to series.');
-    }
-
-    let resolvedSeries = targetSeries;
-    let seriesSubsplashId = targetSeries.subsplashId;
-    if (!seriesSubsplashId) {
-      const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
-      const createResult = await createSeriesFunction({
-        title: targetSeries.name,
-        summary: targetSeries.summary,
-        ownerId: targetSeries.ownerId,
-        firestoreId: targetSeries.id,
-        skipSubsplash: false,
-        images: targetSeries.images,
-        operationKey: createSubsplashSeriesCreateIntentKey('sermon-admin-series-create', targetSeries.id),
-      });
-
-      if (createResult.status !== 'success' || !createResult.subsplashId) {
-        throw new Error(createResult.error || 'Failed to create series in Subsplash.');
-      }
-
-      seriesSubsplashId = createResult.subsplashId;
-      await updateDoc(doc(firestore, 'series', targetSeries.id), {
-        subsplashId: seriesSubsplashId,
-        status: 'published',
-      });
-      resolvedSeries = { ...targetSeries, subsplashId: seriesSubsplashId, status: 'published' };
-      setSeries((previousSeries) => (
-        previousSeries && previousSeries.id === targetSeries.id ? resolvedSeries : previousSeries
-      ));
-    }
-
-    const seriesItemRef = doc(firestore, `series/${resolvedSeries.id}/seriesItems`, sermon.id);
-    const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
-    const reorderSeriesFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
-    const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-
-    const sagaResult = await runSubsplashSeriesPublishSaga({
-      ensureSeriesSubsplashId: async () => seriesSubsplashId as string,
-      addToSeries: async (resolvedSeriesSubsplashId) =>
-        addToSeriesFunction({
-          seriesSubsplashId: resolvedSeriesSubsplashId,
-          mediaItemId,
-          operationKey: createSubsplashSeriesPublishIntentKey(
-            'sermon-admin-series-publish',
-            sermon.id,
-            resolvedSeries.id
-          ),
-        }),
-      reorderSeries: async (resolvedMediaItemId) => {
-        const orderedItemsSnapshot = await getDocs(
-          query(collection(firestore, `series/${resolvedSeries.id}/seriesItems`), orderBy('position', 'desc'))
-        );
-        const targetExistsInOrder = orderedItemsSnapshot.docs.some((seriesItemDoc) => seriesItemDoc.id === sermon.id);
-        if (!targetExistsInOrder) {
-          throw new Error('Sermon is missing from Firestore series order. Refresh and retry.');
-        }
-
-        const publishedItems = orderedItemsSnapshot.docs
-          .map((seriesItemDoc) => {
-            const data = seriesItemDoc.data() as { publishedToSubsplash?: boolean; sermonSubsplashId?: string };
-            const isPublished = seriesItemDoc.id === sermon.id ? true : data.publishedToSubsplash === true;
-            const itemMediaItemId = seriesItemDoc.id === sermon.id
-              ? resolvedMediaItemId
-              : data.sermonSubsplashId;
-            return {
-              sermonId: seriesItemDoc.id,
-              isPublished,
-              mediaItemId: itemMediaItemId,
-            };
-          })
-          .filter((item) => item.isPublished);
-
-        const missingMediaId = publishedItems.find((item) => !item.mediaItemId);
-        if (missingMediaId) {
-          throw new Error(`Published series item ${missingMediaId.sermonId} is missing a Subsplash media ID.`);
-        }
-
-        const reorderResult = await reorderSeriesFunction({
-          firestoreSeriesId: resolvedSeries.id,
-          itemOrder: publishedItems.map((item, index) => ({
-            mediaItemId: item.mediaItemId as string,
-            position: publishedItems.length - index,
-          })),
-          operationKey: createSubsplashSeriesReorderIntentKey(
-            'sermon-admin-series-reorder',
-            resolvedSeries.id,
-            publishedItems.map((item) => item.mediaItemId as string)
-          ),
-        });
-        if (reorderResult.status !== 'success') {
-          throw new Error(reorderResult.message || 'Subsplash reorder failed.');
-        }
-      },
-      rollbackSeriesMembership: async (resolvedMediaItemId) => {
-        const rollbackResult = await removeFromSeriesFunction({
-          mediaItemId: resolvedMediaItemId,
-          operationKey: createSubsplashSeriesRollbackIntentKey(
-            'sermon-admin-series-rollback',
-            sermon.id,
-            resolvedSeries.id
-          ),
-        });
-        if (rollbackResult.status !== 'success') {
-          throw new Error(rollbackResult.message || 'Failed to rollback series membership.');
-        }
-      },
-      persistLocalPublished: async (resolvedMediaItemId) => {
-        await setDoc(
-          seriesItemRef,
-          {
-            publishedToSubsplash: true,
-            sermonSubsplashId: resolvedMediaItemId,
-          },
-          { merge: true }
-        );
-      },
-      persistLocalUnpublished: async () => {
-        await setDoc(
-          seriesItemRef,
-          {
-            publishedToSubsplash: false,
-            sermonSubsplashId: deleteField(),
-          },
-          { merge: true }
-        );
-      },
-    });
-
-    if (sagaResult.status !== 'success') {
-      throw new Error(sagaResult.error || 'Failed to publish sermon to series.');
-    }
-
-    await refreshSeriesState(resolvedSeries.id);
-  }, [refreshSeriesState, sermon, uploadToSubsplash]);
-
-  const publishToSeries = useCallback(async () => {
-    if (!series) {
-      return;
-    }
-
-    setSeriesPublishAction('publish');
-    try {
-      await publishToSeriesForSeries(series);
-    } catch (err: unknown) {
-      console.error('Error publishing sermon to series:', err);
-      alert(getLockBusyMessage(err, getErrorMessage(err, 'Failed to publish sermon to series')));
-    } finally {
-      setSeriesPublishAction(null);
-    }
-  }, [publishToSeriesForSeries, series]);
 
   const openAddToSeriesDialog = useCallback(async () => {
     if (!user?.uid) {
@@ -923,21 +339,6 @@ const SermonDetailsPage = () => {
       );
       await updateDoc(doc(firestore, 'sermons', sermon.id), { seriesId: selectedSeries.id });
 
-      if (sermon.subsplashId || sermon.status.subsplash === uploadStatus.UPLOADED) {
-        setSeriesPublishAction('publish');
-        try {
-          await publishToSeriesForSeries(selectedSeries);
-        } catch (publishErr: unknown) {
-          await deleteDoc(doc(firestore, `series/${selectedSeries.id}/seriesItems`, sermon.id));
-          await updateDoc(doc(firestore, 'sermons', sermon.id), { seriesId: null });
-          throw new Error(
-            getErrorMessage(publishErr, 'Automatic series publish failed. Sermon was not added to series.')
-          );
-        } finally {
-          setSeriesPublishAction(null);
-        }
-      }
-
       await refreshSeriesState(selectedSeries.id);
       setAddToSeriesDialogOpen(false);
       setSelectedOwnedSeriesId('');
@@ -948,47 +349,7 @@ const SermonDetailsPage = () => {
     } finally {
       setIsAddingToSeries(false);
     }
-  }, [isAddingToSeries, publishToSeriesForSeries, refreshSeriesState, selectedOwnedSeriesId, sermon, user?.uid]);
-
-  const unpublishFromSeries = useCallback(async () => {
-    if (!sermon || !series) {
-      return;
-    }
-
-    setSeriesPublishAction('unpublish');
-    try {
-      const seriesItemData = seriesItemSnapshot?.data() as { sermonSubsplashId?: string } | undefined;
-      const mediaItemId = seriesItemData?.sermonSubsplashId || sermon.subsplashId;
-
-      if (mediaItemId) {
-        const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
-        await removeFromSeriesFunction({
-          mediaItemId,
-          operationKey: createSubsplashSeriesUnpublishIntentKey(
-            'sermon-admin-series-unpublish',
-            sermon.id,
-            series.id
-          ),
-        });
-      }
-
-      await setDoc(
-        doc(firestore, `series/${series.id}/seriesItems`, sermon.id),
-        {
-          publishedToSubsplash: false,
-          sermonSubsplashId: deleteField(),
-        },
-        { merge: true }
-      );
-      await refreshSeriesState(series.id);
-      setConfirmSeriesUnpublishOpen(false);
-    } catch (err: unknown) {
-      console.error('Error unpublishing sermon from series:', err);
-      alert(getLockBusyMessage(err, getErrorMessage(err, 'Failed to unpublish sermon from series')));
-    } finally {
-      setSeriesPublishAction(null);
-    }
-  }, [refreshSeriesState, series, seriesItemSnapshot, sermon]);
+  }, [isAddingToSeries, refreshSeriesState, selectedOwnedSeriesId, sermon, user?.uid]);
 
   // Play/pause toggle
   const handlePlayPause = () => {
@@ -1024,7 +385,6 @@ const SermonDetailsPage = () => {
   };
 
   const statusInfo = getStatusInfo();
-  const canPublishToSeries = canPublishSermonToSeries(sermon);
   const selectedOwnedSeries = ownedSeriesOptions.find((candidate) => candidate.id === selectedOwnedSeriesId) || null;
   const uploaderName = uploader
     ? (`${uploader.firstName ?? ''} ${uploader.lastName ?? ''}`.trim() || uploader.displayName || uploader.email)
@@ -1405,178 +765,23 @@ const SermonDetailsPage = () => {
                 <Divider sx={{ my: { xs: 2, sm: 3 } }} />
                 <Box>
                   <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                    Publishing Status
+                    Publish Sermon
                   </Typography>
-
-                  {/* SoundCloud */}
-                  <Card variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Stack direction="row" spacing={2} alignItems="center">
-                        <CloudIcon sx={{ fontSize: 28, color: isSoundCloudUploaded ? 'success.main' : 'text.disabled' }} />
-                        <Box>
-                          <Typography variant="subtitle2">SoundCloud</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {isSoundCloudUploaded ? 'Published' : 'Not Published'}
-                          </Typography>
-                          {sermon.soundCloudTrackUrl && (
-                            <Button
-                              component="a"
-                              href={sermon.soundCloudTrackUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              size="small"
-                              color="inherit"
-                              endIcon={<OpenInNewIcon fontSize="inherit" />}
-                              sx={{ mt: 0.5, px: 0, minWidth: 0 }}
-                            >
-                              Open SoundCloud
-                            </Button>
-                          )}
-                        </Box>
-                      </Stack>
-                      {isUploadingToSoundCloud ? (
-                        <CircularProgress size={24} />
-                      ) : isSoundCloudUploaded ? (
-                        <Button variant="outlined" color="error" size="small" startIcon={<CloudOffIcon />} onClick={deleteFromSoundCloud}>
-                          Remove
-                        </Button>
-                      ) : (
-                        <Button variant="contained" size="small" startIcon={<CloudUploadIcon />} onClick={uploadToSoundCloud} disabled={isDevelopment}>
-                          {isDevelopment ? 'Dev Mode' : 'Upload'}
-                        </Button>
-                      )}
-                    </Stack>
-                    {soundCloudError ? <Alert severity="error" sx={{ mt: 2 }}>{soundCloudError}</Alert> : null}
-                  </Card>
-
-                  {/* Subsplash Lists */}
-                  <Card variant="outlined" sx={{ p: 2 }}>
-                    <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-                      <CollectionsIcon sx={{ fontSize: 28, color: listItemsUploaded.length > 0 ? 'success.main' : 'text.disabled' }} />
-                      <Box>
-                        <Typography variant="subtitle2">Subsplash Lists</Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {listItemsUploaded.length} / {sermonLists?.length || 0} lists published
-                        </Typography>
-                      </Box>
-                    </Stack>
-
-                    {listsLoading ? (
-                      <CircularProgress size={20} />
-                    ) : (
-                      <Stack spacing={2}>
-                        <UploadStatusList
-                          key={listItemsUploaded.map((list) => list.id).join('') + 'Uploaded'}
-                          sectionTitle="Published"
-                          sermonListItems={listItemsUploaded}
-                          buttonAction={removeFromList}
-                          allSelectedButtonAction={deleteFromSubsplash}
-                          buttonLabel="Remove From Lists"
-                          buttonColorVariant="error"
-                        />
-                        <UploadStatusList
-                          key={listItemsNotUploaded.map((list) => list.id).join('') + 'NotUploaded'}
-                          sectionTitle="Not Published"
-                          sermonListItems={listItemsNotUploaded}
-                          buttonAction={async (lists) => { await uploadToSubsplash(lists); }}
-                          buttonLabel="Publish to Subsplash"
-                        />
-                      </Stack>
-                    )}
-                  </Card>
-
-                  {/* Subsplash Series */}
-                  <Card variant="outlined" sx={{ p: 2, mt: 2 }}>
-                    <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
-                      <Stack direction="row" spacing={2} alignItems="center">
-                        <CollectionsIcon sx={{ fontSize: 28, color: seriesPublishedToSubsplash ? 'success.main' : 'text.disabled' }} />
-                        <Box>
-                          <Typography variant="subtitle2">Subsplash Series</Typography>
-                          {series ? (
-                            <Typography variant="body2" color="text.secondary">
-                              {series.name} • {seriesPublishedToSubsplash ? 'Published' : 'Not Published'}
-                            </Typography>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              No series assigned
-                            </Typography>
-                          )}
-                        </Box>
-                      </Stack>
-
-                      {!series ? (
-                        <Button
-                          variant="contained"
-                          size="small"
-                          startIcon={<AddIcon />}
-                          onClick={openAddToSeriesDialog}
-                          disabled={loadingOwnedSeries || isAddingToSeries}
-                        >
-                          Add To Series
-                        </Button>
-                      ) : seriesPublishAction ? (
-                        <CircularProgress size={22} />
-                      ) : seriesPublishedToSubsplash ? (
-                        <Button
-                          variant="outlined"
-                          color="warning"
-                          size="small"
-                          startIcon={<CloudOffIcon />}
-                          onClick={() => setConfirmSeriesUnpublishOpen(true)}
-                        >
-                          Unpublish
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="contained"
-                          size="small"
-                          startIcon={<CloudUploadIcon />}
-                          onClick={publishToSeries}
-                          disabled={!canPublishToSeries}
-                          title={!canPublishToSeries ? SERIES_PUBLISH_BLOCKED_MESSAGE : undefined}
-                        >
-                          Publish
-                        </Button>
-                      )}
-                    </Stack>
-                  </Card>
+                  <SermonPublishPanel
+                    sermon={sermon}
+                    onUpdate={() => {
+                      if (sermon.seriesId) {
+                        void refreshSeriesState(sermon.seriesId);
+                      }
+                    }}
+                    onRequestAddToSeries={openAddToSeriesDialog}
+                  />
                 </Box>
               </>
             )}
           </CardContent>
         </Card>
       </Box>
-
-      <Dialog
-        open={confirmSeriesUnpublishOpen}
-        onClose={() => !seriesPublishAction && setConfirmSeriesUnpublishOpen(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Unpublish From Series?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            This will remove this sermon from the Subsplash series, but keep it assigned to the series in this app.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setConfirmSeriesUnpublishOpen(false)}
-            disabled={Boolean(seriesPublishAction)}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="warning"
-            onClick={unpublishFromSeries}
-            disabled={Boolean(seriesPublishAction)}
-            startIcon={seriesPublishAction === 'unpublish' ? <CircularProgress size={16} color="inherit" /> : <CloudOffIcon fontSize="small" />}
-          >
-            Unpublish
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Dialog
         open={addToSeriesDialogOpen}
