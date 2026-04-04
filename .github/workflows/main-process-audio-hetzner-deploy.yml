@@ -18,6 +18,7 @@ on:
       - 'scripts/deploy-process-audio-hetzner.sh'
       - 'scripts/prepare-process-audio-hetzner-context.sh'
       - 'scripts/verify-hetzner-ytdlp-smoke.sh'
+      - 'scripts/wait-for-process-audio-health.sh'
       - '.github/workflows/main-process-audio-hetzner-deploy.yml'
   workflow_dispatch:
 
@@ -83,7 +84,7 @@ jobs:
         run: ./scripts/deploy-process-audio-hetzner.sh production
 
       - name: Verify production health
-        run: curl -fsS https://yt-worker.upperroommedia.org/healthz
+        run: bash scripts/wait-for-process-audio-health.sh https://yt-worker.upperroommedia.org/healthz
 
       - name: Run production yt-dlp smoke test
         env:
