@@ -117,6 +117,10 @@ describe('syncListItemMirrorByFirestoreListId', () => {
       status: uploadStatus.UPLOADED,
       listItemId: 'new-row-id',
     });
-    expect(staleSnapshot.exists).toBe(false);
+    expect(staleSnapshot.exists).toBe(true);
+    expect(staleSnapshot.data()?.uploadStatus).toEqual({
+      status: uploadStatus.UPLOADED,
+      listItemId: 'stale-row-id',
+    });
   });
 });

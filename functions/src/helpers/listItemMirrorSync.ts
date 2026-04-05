@@ -66,20 +66,8 @@ export const syncListItemMirrorByFirestoreListId = async (
   });
 
   const listItemsRef = firestore.collection('lists').doc(firestoreListId).collection('listItems');
-  const existingSnapshot = await listItemsRef.get();
   const batch = firestore.batch();
   let writes = 0;
-
-  existingSnapshot.docs.forEach((doc) => {
-    const existingUploadStatus = doc.data()?.uploadStatus?.status;
-    const shouldDeleteMissingUploadedMirror =
-      existingUploadStatus === uploadStatus.UPLOADED && !desiredBySermonId.has(doc.id);
-
-    if (shouldDeleteMissingUploadedMirror) {
-      batch.delete(doc.ref);
-      writes += 1;
-    }
-  });
 
   desiredBySermonId.forEach(({ sermon, row }, sermonId) => {
     batch.set(

@@ -25,6 +25,7 @@ import { getConfiguredMaxListSize, getPageContentCapacity } from './helpers/list
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SubsplashListRow } from './types/Subsplash';
 import { canReconstructRemoteRow, getRemoteRowResourceId } from './helpers/remoteChainItems';
+import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 
 export interface RemoveFromListInputType {
   listIds: string[];
@@ -125,6 +126,19 @@ const findItemPlacementInOverflowChain = async (
   }
 
   return null;
+};
+
+const resolveRootFirestoreListIdBySubsplashListId = async (subsplashListId: string): Promise<string | null> => {
+  const firestoreDB = firebaseAdmin.firestore();
+  const listQuery = await firestoreDB.collection('lists').where('subsplashId', '==', subsplashListId).limit(1).get();
+  if (listQuery.empty) {
+    return null;
+  }
+
+  const listDoc = listQuery.docs[0];
+  const listData = listDoc.data() as Record<string, unknown>;
+  const explicitRootListId = normalizeString(listData.rootListId);
+  return explicitRootListId ?? listDoc.id;
 };
 
 type OverflowChainNode = {
@@ -525,6 +539,25 @@ export const removeFromList = async (
       itemIds,
       itemTypes,
     });
+
+    const uniqueListIds = [...new Set(listIds)];
+    for (const listId of uniqueListIds) {
+      const rootFirestoreListId = await resolveRootFirestoreListIdBySubsplashListId(listId);
+      if (!rootFirestoreListId) {
+        continue;
+      }
+
+      listDebugLog('removeFromList.runRemoval.strictPreflight.start', {
+        listId,
+        rootFirestoreListId,
+      });
+      await ensureCanPerformStrictPublishedMutation(rootFirestoreListId, token, 'remove');
+      listDebugLog('removeFromList.runRemoval.strictPreflight.success', {
+        listId,
+        rootFirestoreListId,
+      });
+    }
+
     const result = await Promise.allSettled(
       listItemIds.map(async (listItemId, index) => {
       const listId = listIds[index];

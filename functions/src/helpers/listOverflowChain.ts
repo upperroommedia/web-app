@@ -187,6 +187,27 @@ const getStoredSermonsBySubsplashIds = async (subsplashIds: string[]): Promise<M
   return sermonsBySubsplashId;
 };
 
+const getStoredRootProjectionItemsBySubsplashId = (
+  rootListItemsSnapshot: FirebaseFirestore.QuerySnapshot
+): Map<string, StoredSermonRecord> => {
+  const itemsBySubsplashId = new Map<string, StoredSermonRecord>();
+
+  rootListItemsSnapshot.docs.forEach((doc) => {
+    const itemData = doc.data() as Record<string, unknown> & { subsplashId?: string };
+    const subsplashId = normalizeString(itemData.subsplashId);
+    if (!subsplashId || itemsBySubsplashId.has(subsplashId)) {
+      return;
+    }
+
+    itemsBySubsplashId.set(subsplashId, {
+      id: doc.id,
+      data: itemData,
+    });
+  });
+
+  return itemsBySubsplashId;
+};
+
 type BatchWriteOperation =
   | {
       type: 'set';
@@ -251,6 +272,7 @@ export const syncRootMembershipPlacements = async (
   const rootListId = rootNode.record.id;
   const rootListItemsRef = firestore.collection('lists').doc(rootListId).collection('listItems');
   const rootListItemsSnapshot = await rootListItemsRef.get();
+  const rootProjectionItemsBySubsplashId = getStoredRootProjectionItemsBySubsplashId(rootListItemsSnapshot);
   const rootListData = rootNode.record.data;
   const rootListMembershipData = { ...rootListData };
   delete rootListMembershipData.count;
@@ -313,7 +335,8 @@ export const syncRootMembershipPlacements = async (
       return;
     }
 
-    const sermonRecord = sermonsBySubsplashId.get(placement.mediaItemId);
+    const sermonRecord =
+      sermonsBySubsplashId.get(placement.mediaItemId) ?? rootProjectionItemsBySubsplashId.get(placement.mediaItemId);
     if (!sermonRecord) {
       logicalPosition += 1;
       return;
@@ -494,10 +517,21 @@ const collapseEmptyTailOverflowPages = async (
     );
 
     await patchListRows(parentSubsplashId, updatedParentRows, token);
-    await firestore.collection('lists').doc(parentNode.record.id).update({
+    const now = Date.now();
+    const batch = firestore.batch();
+    batch.update(firestore.collection('lists').doc(parentNode.record.id), {
       moreSermonsRef: FieldValue.delete(),
-      updatedAtMillis: Date.now(),
+      updatedAtMillis: now,
     });
+    batch.set(
+      firestore.collection('lists').doc(tailNode.record.id),
+      {
+        count: 0,
+        updatedAtMillis: now,
+      },
+      { merge: true }
+    );
+    await batch.commit();
     listDebugLog('listOverflowChain.collapseEmptyTailOverflowPages.collapsedTail', {
       rootListId: rootRecord.id,
       parentFirestoreListId: parentNode.record.id,

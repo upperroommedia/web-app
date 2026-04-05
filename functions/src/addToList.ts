@@ -730,6 +730,20 @@ async function processListStep(
     existingPlacementInChain,
   });
 
+  if (shouldEnforceStrictPreflight) {
+    listDebugLog('addToList.processListStep.strictPreflight.start', {
+      listId,
+      rootListId: explicitRootListId ?? listDoc.id,
+      action: 'publish',
+    });
+    await ensureCanPerformStrictPublishedMutation(explicitRootListId ?? listDoc.id, token, 'publish');
+    listDebugLog('addToList.processListStep.strictPreflight.success', {
+      listId,
+      rootListId: explicitRootListId ?? listDoc.id,
+      action: 'publish',
+    });
+  }
+
   let {
     rows: currentRows,
     enforcedRowCount,
@@ -871,18 +885,6 @@ async function processListStep(
         physicalMaxRowCount,
         maxListSize,
       });
-      if (shouldEnforceStrictPreflight) {
-        listDebugLog('addToList.processListStep.strictPreflight.start', {
-          listId,
-          rootListId: explicitRootListId ?? listDoc.id,
-          action: 'overflow-publish',
-        });
-        await ensureCanPerformStrictPublishedMutation(explicitRootListId ?? listDoc.id, token, 'overflow-publish');
-        listDebugLog('addToList.processListStep.strictPreflight.success', {
-          listId,
-          rootListId: explicitRootListId ?? listDoc.id,
-        });
-      }
       if (listData.overflowBehavior === OverflowBehavior.CREATENEWLIST) {
         let nextListId =
           typeof listData.moreSermonsRef === 'string' && listData.moreSermonsRef.trim()

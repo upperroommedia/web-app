@@ -163,14 +163,16 @@ const OVERFLOW_PUBLISH_BLOCKING_ISSUE_CODES = new Set<PublishedListDriftIssue['c
   ...REORDER_BLOCKING_ISSUE_CODES,
 ]);
 
+type StrictPublishedMutationAction = 'reorder' | 'overflow-publish' | 'publish' | 'remove';
+
 const canProceedWithPublishedMutation = (
   issues: PublishedListDriftIssue[],
-  action: 'reorder' | 'overflow-publish'
+  action: StrictPublishedMutationAction
 ): boolean => {
   const blockingCodes =
     action === 'reorder' ? REORDER_BLOCKING_ISSUE_CODES : OVERFLOW_PUBLISH_BLOCKING_ISSUE_CODES;
 
-  return !issues.some((issue) => blockingCodes.has(issue.code));
+  return !issues.some((issue) => issue.severity === 'blocking' && blockingCodes.has(issue.code));
 };
 
 const loadRootProjectionItems = async (rootListId: string): Promise<RootProjectionItem[]> => {
@@ -574,7 +576,7 @@ export const auditPublishedListDrift = async (
 export const ensureCanPerformStrictPublishedMutation = async (
   rootListId: string,
   token: string,
-  action: 'reorder' | 'overflow-publish'
+  action: StrictPublishedMutationAction
 ): Promise<PublishedListDriftState> => {
   listDebugLog('publishedListDrift.ensureStrict.start', {
     rootListId,
@@ -605,7 +607,15 @@ export const ensureCanPerformStrictPublishedMutation = async (
   });
   throw new HttpsError(
     'failed-precondition',
-    `Cannot ${action === 'reorder' ? 'reorder this list' : 'publish into overflow'} because the published Firebase and Subsplash state differ.`,
+    `Cannot ${
+      action === 'reorder'
+        ? 'reorder this list'
+        : action === 'overflow-publish'
+        ? 'publish into overflow'
+        : action === 'remove'
+        ? 'remove from this list'
+        : 'publish into this list'
+    } because the published Firebase and Subsplash state differ.`,
     {
       rootListId: driftState.rootListId,
       action,

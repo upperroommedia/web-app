@@ -250,6 +250,105 @@ describe('publish strict preflight', () => {
     );
   });
 
+  it('blocks publish when the current Subsplash chain has malformed continuation rows', async () => {
+    const rootSubsplashListId = 'publish-blocked-invalid-continuation-root';
+    const overflowSubsplashListId = 'publish-blocked-invalid-continuation-overflow';
+    const straySubsplashListId = 'publish-blocked-invalid-continuation-stray';
+    const rootFirestoreListId = 'publish-blocked-invalid-continuation-root-firestore';
+    const overflowFirestoreListId = 'publish-blocked-invalid-continuation-overflow-firestore';
+
+    subsplashMock.createList(rootSubsplashListId, 'Root List', 3, 5);
+    subsplashMock.createList(overflowSubsplashListId, 'Overflow List', 0, 5);
+    subsplashMock.createList(straySubsplashListId, 'Stray List', 0, 5);
+    subsplashMock.listRows.set(rootSubsplashListId, [
+      {
+        id: 'row-1',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: rootSubsplashListId },
+          'media-item': { id: 'media-1' },
+        },
+      },
+      {
+        id: 'row-link-expected',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: rootSubsplashListId },
+          list: { id: overflowSubsplashListId },
+        },
+      },
+      {
+        id: 'row-link-stray',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 3,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: rootSubsplashListId },
+          list: { id: straySubsplashListId },
+        },
+      },
+    ]);
+    subsplashMock.listRows.set(overflowSubsplashListId, []);
+
+    await createListDocument({
+      id: rootFirestoreListId,
+      subsplashId: rootSubsplashListId,
+      title: 'Root List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 1,
+      logicalCount: 1,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: rootFirestoreListId,
+      overflowDepth: 0,
+      moreSermonsRef: overflowSubsplashListId,
+    });
+    await createListDocument({
+      id: overflowFirestoreListId,
+      subsplashId: overflowSubsplashListId,
+      title: 'Overflow List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 0,
+      isRootList: false,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreListId,
+      overflowDepth: 1,
+    });
+
+    subsplashMock.clearHistory();
+
+    const result = await addToListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootSubsplashListId],
+        mediaItem: { id: 'media-2', type: 'media-item' },
+        maxListSize: 5,
+        operationKey: 'publish-blocked-invalid-continuation',
+      },
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        listId: rootSubsplashListId,
+        status: 'error',
+        errorCode: 'failed-precondition',
+      }),
+    ]);
+    expect(subsplashMock.getHistory()).toEqual([]);
+    expect(subsplashMock.getListRows(rootSubsplashListId).map((row) => row.id)).toEqual([
+      'row-1',
+      'row-link-expected',
+      'row-link-stray',
+    ]);
+  });
+
   it('keeps Firebase published order aligned across simple prepends so the first overflow publish does not trip strict preflight', async () => {
     const rootSubsplashListId = 'overflow-preflight-sequence-root';
     const rootFirestoreListId = 'overflow-preflight-sequence-root-firestore';

@@ -482,9 +482,16 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     
     // Create Firestore documents
     const rootFirestoreId = await createListDocument({
+      id: 'remove-test-root-list-firestore',
       subsplashId: rootListId,
       title: 'Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 199,
+      logicalCount: 201,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: 'remove-test-root-list-firestore',
+      overflowDepth: 0,
       moreSermonsRef: overflowListId,
     });
     
@@ -493,6 +500,9 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       title: 'More Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+      count: 2,
     });
 
     // Try to remove using the original listItemId (which won't exist in root list)
@@ -564,10 +574,17 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     subsplashMock.listRows.set(overflowListId, []);
     
     // Create Firestore documents
-    await createListDocument({
+    const rootFirestoreId = await createListDocument({
+      id: 'remove-test-root-list-2-firestore',
       subsplashId: rootListId,
       title: 'Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 0,
+      logicalCount: 0,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: 'remove-test-root-list-2-firestore',
+      overflowDepth: 0,
       moreSermonsRef: overflowListId,
     });
     
@@ -576,6 +593,9 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       title: 'More Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+      count: 0,
     });
 
     // Try to remove an item that doesn't exist anywhere
@@ -723,9 +743,16 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     
     // Create Firestore documents
     const rootFirestoreId = await createListDocument({
+      id: 'remove-test-multi-overflow-root-firestore',
       subsplashId: rootListId,
       title: 'Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 0,
+      logicalCount: 1,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: 'remove-test-multi-overflow-root-firestore',
+      overflowDepth: 0,
       moreSermonsRef: overflowList1Id,
     });
     
@@ -734,6 +761,9 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       title: 'More Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+      count: 0,
       moreSermonsRef: overflowList2Id,
     });
     
@@ -742,6 +772,9 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       title: 'More More Root List',
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 2,
+      count: 1,
     });
 
     const request: RemoveFromListTestRequest = {
