@@ -87,6 +87,13 @@ interface YouTubeAudioFragmentsResult {
   fragmentDurationSeconds: number;
 }
 
+export interface YouTubeResolvedDownloadPolicy {
+  dashFragmentedDownload: boolean;
+  dashConcurrency: string;
+  abortOnUnavailableFragments: boolean;
+  useExternalDownloader: boolean;
+}
+
 interface YouTubeCookieMetadata {
   rotatedAt?: string;
   exportedAt?: string;
@@ -209,6 +216,25 @@ function extractPercent(line: string): number | null {
   return percentMatch ? parseFloat(percentMatch[1]) : null;
 }
 
+function extractFragmentProgressFromLine(line: string): { current: number; total: number; percent: number } | null {
+  const fragmentMatch = line.match(/\(frag\s+(\d+)\/(\d+)\)/i);
+  if (!fragmentMatch) {
+    return null;
+  }
+
+  const current = Number.parseInt(fragmentMatch[1], 10);
+  const total = Number.parseInt(fragmentMatch[2], 10);
+  if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) {
+    return null;
+  }
+
+  return {
+    current,
+    total,
+    percent: Math.min(99, Math.max(0, (current / total) * 100)),
+  };
+}
+
 function normalizeProtocol(protocol: string | undefined | null): string {
   return (protocol || '').trim().toLowerCase();
 }
@@ -273,6 +299,10 @@ function getYouTubeVideoId(url: string): string | undefined {
 
 function getYtDlpConcurrentFragments(): string {
   return process.env.YTDLP_CONCURRENT_FRAGMENTS?.trim() || '1';
+}
+
+function getYtDlpDashConcurrentFragments(): string {
+  return process.env.YTDLP_DASH_CONCURRENT_FRAGMENTS?.trim() || '4';
 }
 
 function getPreferredYtDlpJsRuntime(): string {
@@ -419,6 +449,12 @@ function getYtDlpExternalDownloaderArgs(): string | undefined {
   return value || undefined;
 }
 
+function shouldAbortOnUnavailableFragmentsForDash(): boolean {
+  const value = process.env.YTDLP_DASH_ABORT_ON_UNAVAILABLE_FRAGMENTS?.trim()?.toLowerCase();
+  if (!value) return true;
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
 function getPreferredDirectAudioFormatSelector(): string {
   const configured = process.env.YTDLP_DIRECT_AUDIO_SELECTOR?.trim();
   return configured || 'ba[ext=m4a]/ba[ext=webm]/ba';
@@ -505,6 +541,24 @@ function maybeApplyYtDlpExternalDownloaderArgs(
 export function shouldForceIpv4ForYouTube(): boolean {
   const value = process.env.YOUTUBE_FORCE_IPV4?.trim()?.toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
+}
+
+function isDashProtocol(protocol: string | undefined | null): boolean {
+  const normalized = normalizeProtocol(protocol);
+  return normalized.includes('dash');
+}
+
+export function resolveYouTubeDownloadPolicy(
+  protocol: string | undefined | null,
+  fragmentCount: number
+): YouTubeResolvedDownloadPolicy {
+  const dashFragmentedDownload = isDashProtocol(protocol) && fragmentCount > 0;
+  return {
+    dashFragmentedDownload,
+    dashConcurrency: dashFragmentedDownload ? getYtDlpDashConcurrentFragments() : getYtDlpConcurrentFragments(),
+    abortOnUnavailableFragments: dashFragmentedDownload ? shouldAbortOnUnavailableFragmentsForDash() : false,
+    useExternalDownloader: !dashFragmentedDownload,
+  };
 }
 
 function applyPreferredIpFamilyArgs(args: string[]): void {
@@ -3101,6 +3155,8 @@ export const downloadYouTubeAudioToFile = async (
     protocol: string | null;
     fragmentCount: number;
     durationSeconds: number | null;
+    dashConcurrency: string | null;
+    abortOnUnavailableFragments: boolean;
     useConcurrentFragments: boolean;
     useRequestPacing: boolean;
     useExternalDownloader: boolean;
@@ -3117,7 +3173,10 @@ export const downloadYouTubeAudioToFile = async (
   ): string[] => {
     const args = ['-f', config.formatSpec, '--no-playlist', '-o', `${outputFilePath}.%(ext)s`];
     if (config.useConcurrentFragments) {
-      args.push('-N', getYtDlpConcurrentFragments());
+      args.push('-N', config.dashConcurrency || getYtDlpConcurrentFragments());
+    }
+    if (config.abortOnUnavailableFragments) {
+      args.push('--abort-on-unavailable-fragments');
     }
     if (config.noPart) {
       args.push('--no-part');
@@ -3188,6 +3247,10 @@ export const downloadYouTubeAudioToFile = async (
         formatId: config.logFormatId,
         extractionMode: mode,
         attemptStrategy: config.attemptStrategy,
+        protocol: config.protocol,
+        fragmentCount: config.fragmentCount,
+        dashConcurrency: config.dashConcurrency,
+        abortOnUnavailableFragments: config.abortOnUnavailableFragments,
         outputTemplate: `${outputFilePath}.%(ext)s`,
         stallTimeoutMs,
         stallPollIntervalMs,
@@ -3295,10 +3358,16 @@ export const downloadYouTubeAudioToFile = async (
         }
 
         let progressPercent: number | null = null;
+        let progressSource: 'percent' | 'ffmpeg_time' | 'fragment_estimate' = 'percent';
+        const fragmentProgress = config.fragmentCount > 0 ? extractFragmentProgressFromLine(chunk) : null;
         const ffmpegTimeSeconds = extractFfmpegTime(chunk);
-        if (ffmpegTimeSeconds !== null && ffmpegTimeSeconds >= 0 && config.durationSeconds && config.durationSeconds > 0) {
+        if (fragmentProgress && fragmentProgress.total > 0) {
+          progressPercent = fragmentProgress.percent;
+          progressSource = 'fragment_estimate';
+        } else if (ffmpegTimeSeconds !== null && ffmpegTimeSeconds >= 0 && config.durationSeconds && config.durationSeconds > 0) {
           progressPercent = Math.min(99, (ffmpegTimeSeconds / config.durationSeconds) * 100);
-        } else {
+          progressSource = 'ffmpeg_time';
+        } else if (config.fragmentCount <= 0) {
           progressPercent = extractPercent(chunk);
         }
 
@@ -3306,7 +3375,7 @@ export const downloadYouTubeAudioToFile = async (
           return;
         }
 
-        applyProgressUpdate(progressPercent, ffmpegTimeSeconds !== null ? 'ffmpeg_time' : 'percent');
+        applyProgressUpdate(progressPercent, progressSource);
         void probePrimaryOutputPartialFile(outputFilePath)
           .then((outputPart) => {
             if (!outputPart || previousPercent <= 0) {
@@ -3454,6 +3523,8 @@ export const downloadYouTubeAudioToFile = async (
     protocol: 'https',
     fragmentCount: 0,
     durationSeconds: null,
+    dashConcurrency: null,
+    abortOnUnavailableFragments: false,
     useConcurrentFragments: false,
     useRequestPacing: false,
     useExternalDownloader: false,
@@ -3522,15 +3593,18 @@ export const downloadYouTubeAudioToFile = async (
         }
       );
 
+      const downloadPolicy = resolveYouTubeDownloadPolicy(protocol, fragmentCount);
       const resolvedFallbackAttempt: DownloadAttemptConfig = {
         formatSpec: formatId,
         logFormatId: formatId,
         protocol,
         fragmentCount,
         durationSeconds,
+        dashConcurrency: downloadPolicy.dashConcurrency,
+        abortOnUnavailableFragments: downloadPolicy.abortOnUnavailableFragments,
         useConcurrentFragments: true,
         useRequestPacing: true,
-        useExternalDownloader: true,
+        useExternalDownloader: downloadPolicy.useExternalDownloader,
         noPart: false,
         noContinue: false,
         extractAudio: false,
