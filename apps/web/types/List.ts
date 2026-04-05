@@ -17,6 +17,23 @@ export enum ListType {
 export enum ListTag {
   BIBLE_CHAPTER = 'bible-chapter',
   SUNDAY_HOMILY_MONTH = 'sunday-homily-month',
+  HOLY_WEEK = 'holy-week',
+}
+
+export enum HolyWeekKind {
+  YEAR = 'year',
+  DAY = 'day',
+}
+
+export enum HolyWeekDay {
+  PALM_SUNDAY = 'palm-sunday',
+  HOLY_MONDAY = 'holy-monday',
+  HOLY_TUESDAY = 'holy-tuesday',
+  HOLY_WEDNESDAY = 'holy-wednesday',
+  COVENANT_THURSDAY = 'covenant-thursday',
+  GOOD_FRIDAY = 'good-friday',
+  JOYOUS_SATURDAY = 'joyous-saturday',
+  RESURRECTION = 'resurrection',
 }
 
 export type ListTagAndPostionType =
@@ -28,6 +45,18 @@ export type ListTagAndPostionType =
       listTag: ListTag.SUNDAY_HOMILY_MONTH;
       position: number;
       year: number;
+    }
+  | {
+      listTag: ListTag.HOLY_WEEK;
+      holyWeekKind: HolyWeekKind.YEAR;
+      position: number;
+      year: number;
+    }
+  | {
+      listTag: ListTag.HOLY_WEEK;
+      holyWeekKind: HolyWeekKind.DAY;
+      position: number;
+      day: HolyWeekDay;
     };
 
 export interface List {
@@ -58,6 +87,20 @@ export interface SundayHomiliesMonthList extends List {
 
 export interface BibleStudyList extends List {
   listTagAndPosition: Extract<ListTagAndPostionType, { listTag: ListTag.BIBLE_CHAPTER }>;
+}
+
+export interface HolyWeekYearList extends List {
+  listTagAndPosition: Extract<
+    ListTagAndPostionType,
+    { listTag: ListTag.HOLY_WEEK; holyWeekKind: HolyWeekKind.YEAR }
+  >;
+}
+
+export interface HolyWeekDayList extends List {
+  listTagAndPosition: Extract<
+    ListTagAndPostionType,
+    { listTag: ListTag.HOLY_WEEK; holyWeekKind: HolyWeekKind.DAY }
+  >;
 }
 
 export interface ListWithHighlight extends List {

@@ -100,6 +100,28 @@ export const SUNDAY_HOMILY_BUNDLE_CONFIG: BundleConfig<List> = {
   whereConditions: [{ field: 'listTagAndPosition.listTag', operator: '==', value: ListTag.SUNDAY_HOMILY_MONTH }],
 };
 
+export const HOLY_WEEK_BUNDLE_CONFIG: BundleConfig<List> = {
+  bundleType: 'holy-week',
+  functionName: 'createholyweekbundle',
+  namedQuery: 'latest-holy-week-query',
+  cacheKeyPrefix: 'holy-week',
+  displayName: 'holy week',
+  metadataDocPath: 'bundle-metadata/holy-week-bundle',
+  bundlePath: 'bundles/holy-week-bundle.bin',
+  collectionName: 'lists',
+  collectionPath: 'lists/{listId}',
+  converter: listConverter,
+  shouldTrigger: (beforeData: List | undefined, afterData: List | undefined): boolean => {
+    return (
+      !isEqual(omit(beforeData, fieldsToOmit), omit(afterData, fieldsToOmit)) &&
+      (beforeData?.listTagAndPosition?.listTag === ListTag.HOLY_WEEK ||
+        afterData?.listTagAndPosition?.listTag === ListTag.HOLY_WEEK)
+    );
+  },
+  orderByField: 'listTagAndPosition.position',
+  whereConditions: [{ field: 'listTagAndPosition.listTag', operator: '==', value: ListTag.HOLY_WEEK }],
+};
+
 export const LATEST_LIST_BUNDLE_CONFIG: BundleConfig<List> = {
   bundleType: 'latest-list',
   functionName: 'createlatestlistbundle',
@@ -129,6 +151,7 @@ type BundleType =
   | typeof SUBTITLE_BUNDLE_CONFIG.bundleType
   | typeof BIBLE_CHAPTER_BUNDLE_CONFIG.bundleType
   | typeof SUNDAY_HOMILY_BUNDLE_CONFIG.bundleType
+  | typeof HOLY_WEEK_BUNDLE_CONFIG.bundleType
   | typeof LATEST_LIST_BUNDLE_CONFIG.bundleType;
 
 // Create count property type

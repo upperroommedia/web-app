@@ -5,11 +5,12 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { FunctionComponent, Dispatch, SetStateAction, memo, useMemo, useState } from 'react';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
-import { List, ListType, ListWithHighlight } from '../types/List';
+import { List, ListWithHighlight } from '../types/List';
 import { Sermon } from '../types/SermonTypes';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
 import { LocalSearch } from '../utils/localSearch';
+import { removeCategoryScopedLists } from '../utils/categoryScopedLists';
 
 interface SubtitleSelectorProps {
   sermonList: List[];
@@ -60,36 +61,13 @@ const SubtitleSelector: FunctionComponent<SubtitleSelectorProps> = (props: Subti
           }
         }}
         onChange={async (_, newValue) => {
-          if (
-            newValue === null &&
-            props.sermonList.find((list) => list.type === ListType.CATEGORY_LIST) !== undefined
-          ) {
-            // user cleared the selection - remove sermon from list
+          if (newValue === null) {
             props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: '' }));
-            props.setSermonList((oldSermonList) =>
-              oldSermonList.filter((list) => list.type !== ListType.CATEGORY_LIST)
-            );
-          } else if (!newValue) {
-            // cleared selector with no existing sermon list
-            props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: '' }));
+            props.setSermonList((oldSermonList) => removeCategoryScopedLists(oldSermonList));
           } else if (newValue) {
-            // a new value has been selected
             props.setSubtitleError(false, '');
             props.setSermon((oldSermon) => ({ ...oldSermon, subtitle: newValue.name }));
-            const listWithSameName = props.sermonList.find((list) => list.name === newValue.name);
-            if (
-              props.sermonList.find((list) => list.type === ListType.SERIES && !list.listTagAndPosition) === undefined
-            ) {
-              props.setSermonList((oldSermonList) => [
-                ...oldSermonList.filter((list) => list.type !== ListType.CATEGORY_LIST),
-                newValue,
-              ]);
-            } else if (listWithSameName !== undefined) {
-              props.setSermonList((oldSermonList) => [
-                ...oldSermonList.filter((list) => list.name !== newValue.name),
-                newValue,
-              ]);
-            }
+            props.setSermonList((oldSermonList) => [...removeCategoryScopedLists(oldSermonList), newValue]);
           }
         }}
         id="subtitle-selector-input"

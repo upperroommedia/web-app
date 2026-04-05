@@ -25,6 +25,7 @@ import repopulatelistfromspeakeritems from '../../functions/src/Scrapers/repopul
 import tagitemsinlist from '../../functions/src/Scrapers/tagItemsInList';
 import { fixPhantomListItems } from '../../functions/src/Scrapers/fixPhantomListItems';
 import { updateSubsplashTag } from '../../functions/src/Scrapers/updateSubsplashTag';
+import backfillholyweeklists from '../../functions/src/backfillHolyWeekLists';
 
 exports.generatesecuredapikey = generatesecuredapikey;
 exports.uploadToSubsplash = uploadToSubsplash;
@@ -44,3 +45,4 @@ exports.repopulatelistfromspeakeritems = repopulatelistfromspeakeritems;
 exports.tagitemsinlist = tagitemsinlist;
 exports.fixphantomlistitems = fixPhantomListItems;
 exports.updatesubsplashtag = updateSubsplashTag;
+exports.backfillholyweeklists = backfillholyweeklists;

@@ -16,8 +16,12 @@ describe('functions-core index exports', () => {
       "import backfillsermonsubsplashstatus from '../../functions/src/backfillSermonSubsplashStatus';"
     );
     expect(entrypointSource).toContain(
+      "import { createHolyWeekBundle } from '../../functions/src/createHolyWeekBundle';"
+    );
+    expect(entrypointSource).toContain(
       "import marklistoverflowlink from '../../functions/src/markListOverflowLink';"
     );
+    expect(entrypointSource).toContain('holyWeekListOnWrite');
     expect(entrypointSource).toContain(
       "import reorderlistitems from '../../functions/src/reorderListItems';"
     );
@@ -27,6 +31,8 @@ describe('functions-core index exports', () => {
     expect(entrypointSource).toContain('exports.getlistoverflowchain = getlistoverflowchain;');
     expect(entrypointSource).toContain('exports.getlistpublisheddrift = getlistpublisheddrift;');
     expect(entrypointSource).toContain('exports.backfillsermonsubsplashstatus = backfillsermonsubsplashstatus;');
+    expect(entrypointSource).toContain('exports.createholyweekbundle = createHolyWeekBundle;');
+    expect(entrypointSource).toContain('exports.holyweeklistonwrite = holyWeekListOnWrite;');
     expect(entrypointSource).toContain('exports.marklistoverflowlink = marklistoverflowlink;');
     expect(entrypointSource).toContain('exports.reorderlistitems = reorderlistitems;');
     expect(entrypointSource).toContain('exports.resolvelistpublisheddrift = resolvelistpublisheddrift;');

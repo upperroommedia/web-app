@@ -34,6 +34,11 @@ import type {
   BackfillSermonSubsplashStatusResultType,
 } from '@upperroom/contracts/backfillSermonSubsplashStatus';
 import type {
+  BackfillHolyWeekListsInputType,
+  BackfillHolyWeekListsOutputType,
+  BackfillHolyWeekListsResultType,
+} from '@upperroom/contracts/backfillHolyWeekLists';
+import type {
   GetYouTubeCookieStatusInput,
   GetYouTubeCookieStatusOutputType,
 } from '@upperroom/contracts/getYouTubeCookieStatus';
@@ -156,6 +161,8 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
   const [isRunningSubsplashStatusBackfill, setIsRunningSubsplashStatusBackfill] = useState(false);
   const [subsplashStatusBackfillResult, setSubsplashStatusBackfillResult] =
     useState<BackfillSermonSubsplashStatusResultType | null>(null);
+  const [isRunningHolyWeekBackfill, setIsRunningHolyWeekBackfill] = useState(false);
+  const [holyWeekBackfillResult, setHolyWeekBackfillResult] = useState<BackfillHolyWeekListsResultType | null>(null);
   const [notice, setNotice] = useState<NoticeState>(null);
 
   const isAdmin = user?.isAdmin() ?? false;
@@ -348,6 +355,41 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
       setNotice({ severity: 'error', text: message });
     } finally {
       setIsRunningSubsplashStatusBackfill(false);
+    }
+  }, [canRunScripts]);
+
+  const runBackfillHolyWeekLists = useCallback(async () => {
+    if (!canRunScripts) {
+      setNotice({ severity: 'error', text: 'You are not allowed to run admin scripts.' });
+      return;
+    }
+
+    setIsRunningHolyWeekBackfill(true);
+    setHolyWeekBackfillResult(null);
+    setNotice({ severity: 'info', text: 'Syncing Holy Week year/day lists from Subsplash…' });
+
+    try {
+      const backfillHolyWeekLists = createFunctionV2<
+        BackfillHolyWeekListsInputType,
+        BackfillHolyWeekListsOutputType
+      >('backfillholyweeklists');
+      const result = await backfillHolyWeekLists({});
+      if (result.status !== 'success') {
+        setNotice({ severity: 'error', text: result.error });
+        return;
+      }
+
+      setHolyWeekBackfillResult(result.data);
+      const hasWarnings = result.data.duplicateYears.length > 0 || result.data.invalidTitles.length > 0;
+      setNotice({
+        severity: hasWarnings ? 'warning' : 'success',
+        text: `Processed ${result.data.processedYearLists.length} Pascha year lists and tagged ${result.data.taggedDayLists} Holy Week day lists.${hasWarnings ? ' Review duplicates/invalid titles below.' : ''}`,
+      });
+    } catch (error) {
+      const message = formatCallableError(error, 'Failed to backfill Holy Week lists.');
+      setNotice({ severity: 'error', text: message });
+    } finally {
+      setIsRunningHolyWeekBackfill(false);
     }
   }, [canRunScripts]);
 
@@ -773,6 +815,98 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                     Temporary one-off maintenance actions. These are restricted to a single designated admin account.
                   </Typography>
                 </Box>
+
+                <Divider />
+
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  spacing={1.5}
+                >
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={700}>
+                      Backfill Holy Week Lists
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Tag the Pascha year lists under the configured Subsplash parent and tag the fixed Holy Week day lists so the uploader can target them directly.
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    onClick={runBackfillHolyWeekLists}
+                    disabled={isRunningHolyWeekBackfill}
+                  >
+                    {isRunningHolyWeekBackfill ? 'Backfilling…' : 'Backfill Holy Week Lists'}
+                  </Button>
+                </Stack>
+
+                {holyWeekBackfillResult ? (
+                  <Card variant="outlined" sx={{ bgcolor: 'background.default' }}>
+                    <CardContent>
+                      <Stack spacing={2}>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight={700}>
+                            Last Holy Week Backfill
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            Summary for the most recent Holy Week list sync run.
+                          </Typography>
+                        </Box>
+
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
+                          <Chip label={`${holyWeekBackfillResult.totalYearRows} source year rows`} />
+                          <Chip color="success" label={`${holyWeekBackfillResult.createdYearLists} created`} />
+                          <Chip color="success" label={`${holyWeekBackfillResult.updatedYearLists} updated`} />
+                          <Chip label={`${holyWeekBackfillResult.skippedYearLists} unchanged`} />
+                          <Chip label={`${holyWeekBackfillResult.taggedDayLists} day lists tagged`} />
+                          <Chip
+                            color={holyWeekBackfillResult.duplicateYears.length > 0 ? 'warning' : 'default'}
+                            label={`${holyWeekBackfillResult.duplicateYears.length} duplicate years`}
+                          />
+                          <Chip
+                            color={holyWeekBackfillResult.invalidTitles.length > 0 ? 'warning' : 'default'}
+                            label={`${holyWeekBackfillResult.invalidTitles.length} invalid titles`}
+                          />
+                        </Stack>
+
+                        {holyWeekBackfillResult.duplicateYears.length > 0 ? (
+                          <Alert severity="warning">
+                            <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                              Duplicate Pascha years detected
+                            </Typography>
+                            <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                              {holyWeekBackfillResult.duplicateYears.map((entry) => (
+                                <Box component="li" key={entry.year}>
+                                  <Typography variant="body2">
+                                    {entry.year}: {entry.listIds.join(', ')}
+                                  </Typography>
+                                </Box>
+                              ))}
+                            </Box>
+                          </Alert>
+                        ) : null}
+
+                        {holyWeekBackfillResult.invalidTitles.length > 0 ? (
+                          <Alert severity="warning">
+                            <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                              Invalid Pascha titles skipped
+                            </Typography>
+                            <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                              {holyWeekBackfillResult.invalidTitles.map((entry) => (
+                                <Box component="li" key={entry.listId}>
+                                  <Typography variant="body2">
+                                    {entry.title || '(empty title)'} ({entry.listId})
+                                  </Typography>
+                                </Box>
+                              ))}
+                            </Box>
+                          </Alert>
+                        ) : null}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ) : null}
 
                 <Divider />
 

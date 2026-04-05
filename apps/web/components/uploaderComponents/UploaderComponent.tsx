@@ -26,7 +26,15 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import YouTubeTrimmer from '../YouTubeTrimmer';
 import Typography from '@mui/material/Typography';
 import Head from 'next/head';
-import { List, listConverter, ListTag, ListType, SundayHomiliesMonthList } from '../../types/List';
+import {
+  type HolyWeekDayList,
+  type HolyWeekYearList,
+  List,
+  listConverter,
+  ListTag,
+  ListType,
+  SundayHomiliesMonthList,
+} from '../../types/List';
 import { Series, seriesConverter } from '../../types/Series';
 import SubtitleSelector from '../SubtitleSelector';
 import Stack from '@mui/material/Stack';
@@ -43,8 +51,9 @@ import { UploaderFieldError, UploadProgress } from '../../context/types';
 import SpeakerSelector from './SpeakerSelector';
 import SpeakerRequestPopup from './SpeakerRequestPopup';
 import SundayHomilyMonthSelector from './SundayHomilyMonthSelector';
-import { BIBLE_STUDIES_STRING, MAX_DURATION_SECONDS, SUNDAY_HOMILIES_STRING } from './consts';
+import { BIBLE_STUDIES_STRING, MAX_DURATION_SECONDS, PASCHA_WEEK_STRING, SUNDAY_HOMILIES_STRING } from './consts';
 import BibleChapterSelector from './BibleChapterSelector';
+import HolyWeekSelector from './HolyWeekSelector';
 import UploadButton from './UploadButton';
 import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
@@ -57,6 +66,7 @@ import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
 import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../utils/sermonEditing';
 import { clearIntentionalNavigation, isIntentionalNavigation, markIntentionalNavigation } from '../../utils/intentionalNavigation';
+import { removeCategoryScopedLists } from '../../utils/categoryScopedLists';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
 
@@ -73,6 +83,8 @@ const _fieldsToValidate = [
   'speakers',
   'bibleChapter',
   'sundayHomiliesMonth',
+  'holyWeekYear',
+  'holyWeekDay',
   'durationSeconds',
   'topics',
 ] as const;
@@ -150,6 +162,22 @@ const Uploader = (props: UploaderProps) => {
       return new Date().getFullYear();
     }
   });
+  const [selectedHolyWeekYear, setSelectedHolyWeekYear] = useState<HolyWeekYearList | null>(
+    props.existingList?.find(
+      (list) =>
+        list.listTagAndPosition?.listTag === ListTag.HOLY_WEEK &&
+        'holyWeekKind' in list.listTagAndPosition &&
+        list.listTagAndPosition.holyWeekKind === 'year'
+    ) as HolyWeekYearList | null
+  );
+  const [selectedHolyWeekDay, setSelectedHolyWeekDay] = useState<HolyWeekDayList | null>(
+    props.existingList?.find(
+      (list) =>
+        list.listTagAndPosition?.listTag === ListTag.HOLY_WEEK &&
+        'holyWeekKind' in list.listTagAndPosition &&
+        list.listTagAndPosition.holyWeekKind === 'day'
+    ) as HolyWeekDayList | null
+  );
   const [_hasTrimmed, setHasTrimmed] = useState(false);
 
   // Series selection (sermon can only be in one series)
@@ -363,6 +391,18 @@ const Uploader = (props: UploaderProps) => {
     },
     [setFormErrorCallback]
   );
+  const setHolyWeekYearError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('holyWeekYear', error, message, initialState);
+    },
+    [setFormErrorCallback]
+  );
+  const setHolyWeekDayError = useCallback(
+    (error: boolean, message: string, initialState: boolean = false) => {
+      setFormErrorCallback('holyWeekDay', error, message, initialState);
+    },
+    [setFormErrorCallback]
+  );
   const setSpeakerError = useCallback(
     (error: boolean, message: string) => {
       setFormErrorCallback('speakers', error, message);
@@ -414,6 +454,8 @@ const Uploader = (props: UploaderProps) => {
     const topicLists = sermonList.filter((list) => list.type === ListType.TOPIC_LIST);
     const shouldRequireBibleChapter = !uploadAsSeries && sermon.subtitle === BIBLE_STUDIES_STRING;
     const shouldRequireSundayMonth = !uploadAsSeries && sermon.subtitle === SUNDAY_HOMILIES_STRING;
+    const shouldRequireHolyWeekYear = !uploadAsSeries && sermon.subtitle === PASCHA_WEEK_STRING;
+    const shouldRequireHolyWeekDay = !uploadAsSeries && sermon.subtitle === PASCHA_WEEK_STRING;
     const shouldRequireAudioSource = !isEditingExistingSermon;
 
     const nextFormErrors: FormErrors = {
@@ -462,6 +504,16 @@ const Uploader = (props: UploaderProps) => {
         message: 'You must select a sunday homily month',
         initialState: false,
       },
+      holyWeekYear: {
+        error: shouldRequireHolyWeekYear && !selectedHolyWeekYear,
+        message: 'You must select a Pascha week year',
+        initialState: false,
+      },
+      holyWeekDay: {
+        error: shouldRequireHolyWeekDay && !selectedHolyWeekDay,
+        message: 'You must select a Holy Week day',
+        initialState: false,
+      },
       durationSeconds: {
         error: false,
         message: '',
@@ -491,6 +543,8 @@ const Uploader = (props: UploaderProps) => {
     audioSource,
     props.existingSermon,
     selectedChapter,
+    selectedHolyWeekDay,
+    selectedHolyWeekYear,
     selectedSeries,
     selectedSundayHomiliesMonth,
     sermon.description,
@@ -534,6 +588,19 @@ const Uploader = (props: UploaderProps) => {
   }, [audioSource, props.existingSermon, updateSermon]);
 
   useEffect(() => {
+    if (sermon.subtitle !== BIBLE_STUDIES_STRING) {
+      setSelectedChapter(null);
+    }
+    if (sermon.subtitle !== SUNDAY_HOMILIES_STRING) {
+      setSelectedSundayHomiliesMonth(null);
+    }
+    if (sermon.subtitle !== PASCHA_WEEK_STRING) {
+      setSelectedHolyWeekYear(null);
+      setSelectedHolyWeekDay(null);
+    }
+  }, [sermon.subtitle]);
+
+  useEffect(() => {
     if (!uploadAsSeries) return;
     if (selectedSeries) {
       setSeriesError(false, '');
@@ -547,13 +614,7 @@ const Uploader = (props: UploaderProps) => {
         updateSermon('subtitle', '');
         setSubtitleError(false, '');
         setSeriesError(false, '');
-        setSermonList((oldSermonList) =>
-          oldSermonList.filter(
-            (list) =>
-              list.type !== ListType.CATEGORY_LIST ||
-              Boolean(list.listTagAndPosition)
-          )
-        );
+        setSermonList((oldSermonList) => removeCategoryScopedLists(oldSermonList));
       } else {
         setSelectedSeries(null);
         setSeriesError(false, '');
@@ -913,27 +974,47 @@ const Uploader = (props: UploaderProps) => {
             </div>
           )}
           {!uploadAsSeries &&
-            (sermon.subtitle === BIBLE_STUDIES_STRING || sermon.subtitle === SUNDAY_HOMILIES_STRING) && (
+            (sermon.subtitle === BIBLE_STUDIES_STRING ||
+              sermon.subtitle === SUNDAY_HOMILIES_STRING ||
+              sermon.subtitle === PASCHA_WEEK_STRING) && (
             <Box sx={{ display: 'flex', gap: '1ch', width: 1, flexDirection: { xs: 'column', xl: 'row' } }}>
-              <BibleChapterSelector
-                sermonSubtitle={sermon.subtitle}
-                setSermonList={setSermonList}
-                selectedChapter={selectedChapter}
-                setSelectedChapter={setSelectedChapter}
-                bibleChapterError={formErrors?.bibleChapter}
-                setBibleChapterError={setBibleChapterError}
-              />
-              <SundayHomilyMonthSelector
-                sermonSubtitle={sermon.subtitle}
-                date={date}
-                setSermonList={setSermonList}
-                selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
-                setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
-                sundayHomiliesYear={sundayHomiliesYear}
-                setSundayHomiliesYear={setSundayHomiliesYear}
-                sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
-                setSundayHomiliesMonthError={setSundayHomiliesMonthError}
-              />
+              {(sermon.subtitle === BIBLE_STUDIES_STRING || sermon.subtitle === SUNDAY_HOMILIES_STRING) && (
+                <>
+                  <BibleChapterSelector
+                    sermonSubtitle={sermon.subtitle}
+                    setSermonList={setSermonList}
+                    selectedChapter={selectedChapter}
+                    setSelectedChapter={setSelectedChapter}
+                    bibleChapterError={formErrors?.bibleChapter}
+                    setBibleChapterError={setBibleChapterError}
+                  />
+                  <SundayHomilyMonthSelector
+                    sermonSubtitle={sermon.subtitle}
+                    date={date}
+                    setSermonList={setSermonList}
+                    selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
+                    setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
+                    sundayHomiliesYear={sundayHomiliesYear}
+                    setSundayHomiliesYear={setSundayHomiliesYear}
+                    sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
+                    setSundayHomiliesMonthError={setSundayHomiliesMonthError}
+                  />
+                </>
+              )}
+              {sermon.subtitle === PASCHA_WEEK_STRING && (
+                <HolyWeekSelector
+                  sermonSubtitle={sermon.subtitle}
+                  setSermonList={setSermonList}
+                  selectedHolyWeekYear={selectedHolyWeekYear}
+                  setSelectedHolyWeekYear={setSelectedHolyWeekYear}
+                  selectedHolyWeekDay={selectedHolyWeekDay}
+                  setSelectedHolyWeekDay={setSelectedHolyWeekDay}
+                  holyWeekYearError={formErrors?.holyWeekYear}
+                  setHolyWeekYearError={setHolyWeekYearError}
+                  holyWeekDayError={formErrors?.holyWeekDay}
+                  setHolyWeekDayError={setHolyWeekDayError}
+                />
+              )}
             </Box>
           )}
           <SpeakerSelector

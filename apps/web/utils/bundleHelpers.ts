@@ -3,6 +3,7 @@ import {
   TOPIC_BUNDLE_CONFIG,
   SUBTITLE_BUNDLE_CONFIG,
   BIBLE_CHAPTER_BUNDLE_CONFIG,
+  HOLY_WEEK_BUNDLE_CONFIG,
   SUNDAY_HOMILY_BUNDLE_CONFIG,
   LATEST_LIST_BUNDLE_CONFIG,
 } from '../shared/bundleConfigs';
@@ -24,6 +25,10 @@ export const getBibleChapterBundleManager = (): BundleManager<List> => {
 
 export const getSundayHomilyBundleManager = (): BundleManager<List> => {
   return BundleManager.getInstance<List>(SUNDAY_HOMILY_BUNDLE_CONFIG);
+};
+
+export const getHolyWeekBundleManager = (): BundleManager<List> => {
+  return BundleManager.getInstance<List>(HOLY_WEEK_BUNDLE_CONFIG);
 };
 
 export const getLatestListBundleManager = (): BundleManager<List> => {
@@ -48,6 +53,11 @@ export const getBibleChaptersFromBundle = async (): Promise<List[]> => {
 
 export const getSundayHomiliesFromBundle = async (): Promise<List[]> => {
   const manager = getSundayHomilyBundleManager();
+  return manager.getData();
+};
+
+export const getHolyWeekListsFromBundle = async (): Promise<List[]> => {
+  const manager = getHolyWeekBundleManager();
   return manager.getData();
 };
 
@@ -77,6 +87,11 @@ export const clearSundayHomilyBundleCache = (): void => {
   manager.clearCache();
 };
 
+export const clearHolyWeekBundleCache = (): void => {
+  const manager = getHolyWeekBundleManager();
+  manager.clearCache();
+};
+
 export const clearLatestListBundleCache = (): void => {
   const manager = getLatestListBundleManager();
   manager.clearCache();
@@ -87,6 +102,7 @@ export const clearAllBundleCaches = (): void => {
   clearSubtitleBundleCache();
   clearBibleChapterBundleCache();
   clearSundayHomilyBundleCache();
+  clearHolyWeekBundleCache();
   clearLatestListBundleCache();
 };
 
@@ -108,6 +124,11 @@ export const checkBibleChapterBundleUpdates = async (): Promise<boolean> => {
 
 export const checkSundayHomilyBundleUpdates = async (): Promise<boolean> => {
   const manager = getSundayHomilyBundleManager();
+  return manager.checkForUpdates();
+};
+
+export const checkHolyWeekBundleUpdates = async (): Promise<boolean> => {
+  const manager = getHolyWeekBundleManager();
   return manager.checkForUpdates();
 };
 
@@ -137,6 +158,11 @@ export const preloadSundayHomilyBundleIfNeeded = async (): Promise<void> => {
   return manager.preloadIfNeeded();
 };
 
+export const preloadHolyWeekBundleIfNeeded = async (): Promise<void> => {
+  const manager = getHolyWeekBundleManager();
+  return manager.preloadIfNeeded();
+};
+
 export const preloadLatestListIfNeeded = async (): Promise<void> => {
   const manager = getLatestListBundleManager();
   return manager.preloadIfNeeded();
@@ -148,6 +174,7 @@ export const preloadAllBundlesIfNeeded = async (): Promise<void> => {
     preloadSubtitleBundleIfNeeded(),
     preloadBibleChapterBundleIfNeeded(),
     preloadSundayHomilyBundleIfNeeded(),
+    preloadHolyWeekBundleIfNeeded(),
     preloadLatestListIfNeeded(),
   ]);
 };
@@ -159,6 +186,7 @@ export const getAllBundleCacheStatus = () => {
     subtitles: getSubtitleBundleManager().getCacheStatus(),
     bibleChapters: getBibleChapterBundleManager().getCacheStatus(),
     sundayHomilies: getSundayHomilyBundleManager().getCacheStatus(),
+    holyWeek: getHolyWeekBundleManager().getCacheStatus(),
     latestList: getLatestListBundleManager().getCacheStatus(),
   };
 };

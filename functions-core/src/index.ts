@@ -30,9 +30,14 @@ import topicOnWrite from '../../functions/src/DocumentListeners/Topics/topicOnWr
 import { createSubtitleBundle } from '../../functions/src/createSubtitleBundle';
 import subtitleListOnWrite from '../../functions/src/DocumentListeners/Lists/subtitleListOnWrite';
 import { createBibleChapterBundle } from '../../functions/src/createBibleChapterBundle';
+import { createHolyWeekBundle } from '../../functions/src/createHolyWeekBundle';
 import { createSundayHomilyBundle } from '../../functions/src/createSundayHomilyBundle';
 import { createLatestListBundle } from '../../functions/src/createLatestListBundle';
-import { bibleChapterListOnWrite, sundayHomilyListOnWrite } from '../../functions/src/DocumentListeners/Lists/taggedListOnWrite';
+import {
+  bibleChapterListOnWrite,
+  holyWeekListOnWrite,
+  sundayHomilyListOnWrite,
+} from '../../functions/src/DocumentListeners/Lists/taggedListOnWrite';
 import seriesItemOnWrite from '../../functions/src/DocumentListeners/Series/seriesItemOnWrite';
 import createrolerequest from '../../functions/src/roleRequests/createRoleRequest';
 import listrolerequests from '../../functions/src/roleRequests/listRoleRequests';
@@ -89,9 +94,11 @@ exports.topiconwrite = topicOnWrite;
 exports.createsubtitlebundle = createSubtitleBundle;
 exports.subtitlelistonwrite = subtitleListOnWrite;
 exports.createbiblechapterbundle = createBibleChapterBundle;
+exports.createholyweekbundle = createHolyWeekBundle;
 exports.createsundayhomilybundle = createSundayHomilyBundle;
 exports.createlatestlistbundle = createLatestListBundle;
 exports.biblechapterlistonwrite = bibleChapterListOnWrite;
+exports.holyweeklistonwrite = holyWeekListOnWrite;
 exports.sundayhomilylistonwrite = sundayHomilyListOnWrite;
 exports.seriesitemonwrite = seriesItemOnWrite;
 exports.createrolerequest = createrolerequest;
