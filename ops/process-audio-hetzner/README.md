@@ -81,6 +81,9 @@ Why this matters:
   - `FileNotFoundError ... part-FragNNN`
 - this affected completed livestream URLs routed through `formatId=91` / `selectedProtocol=m3u8_native`
 - the known-good fix forces `--downloader m3u8:ffmpeg` for YouTube `m3u8` paths while leaving direct `https` downloads on the existing path
+- benchmarked follow-up tuning on the deployed production image showed the best stable throughput with:
+  - `YTDLP_M3U8_FFMPEG_DOWNLOADER_ARGS=-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx -reconnect_delay_max 5 -http_persistent 1 -http_multiple 1`
+- on the exact `KP3zAP3GE0g` livestream URL, that tuned `ffmpeg` path outperformed the plain `m3u8:ffmpeg` baseline during 45-second live-container probes on Hetzner
 
 If livestream downloads regress in the future, compare behavior against commit `c6d37e55` first before changing format selection again.
 

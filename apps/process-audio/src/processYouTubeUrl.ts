@@ -419,6 +419,20 @@ function getYtDlpExternalDownloaderArgs(): string | undefined {
   return value || undefined;
 }
 
+function getYtDlpM3u8FfmpegDownloaderArgs(): string {
+  const configured = process.env.YTDLP_M3U8_FFMPEG_DOWNLOADER_ARGS?.trim();
+  if (configured) return configured;
+  return [
+    '-reconnect 1',
+    '-reconnect_streamed 1',
+    '-reconnect_on_network_error 1',
+    '-reconnect_on_http_error 4xx,5xx',
+    '-reconnect_delay_max 5',
+    '-http_persistent 1',
+    '-http_multiple 1',
+  ].join(' ');
+}
+
 function shouldForceFfmpegForM3u8(protocol: string | undefined | null): boolean {
   return normalizeProtocol(protocol).includes('m3u8');
 }
@@ -450,10 +464,12 @@ function maybeApplyYtDlpExternalDownloaderArgs(
 ): void {
   if (shouldForceFfmpegForM3u8(options?.protocol)) {
     args.push('--downloader', 'm3u8:ffmpeg');
+    args.push('--downloader-args', `ffmpeg_i:${getYtDlpM3u8FfmpegDownloaderArgs()}`);
     log.info('Forcing ffmpeg downloader for YouTube m3u8 download path', {
       protocol: options?.protocol || null,
       fragmentCount: options?.fragmentCount ?? null,
       context: options?.context || null,
+      downloaderArgs: getYtDlpM3u8FfmpegDownloaderArgs(),
     });
     return;
   }

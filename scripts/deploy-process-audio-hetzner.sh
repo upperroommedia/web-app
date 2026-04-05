@@ -108,6 +108,7 @@ YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=true
 YTDLP_CONCURRENT_FRAGMENTS=1
 YTDLP_EXTERNAL_DOWNLOADER=aria2c
 YTDLP_EXTERNAL_DOWNLOADER_ARGS=-x 16 -s 16 -k 1M
+YTDLP_M3U8_FFMPEG_DOWNLOADER_ARGS=-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx -reconnect_delay_max 5 -http_persistent 1 -http_multiple 1
 YOUTUBE_RETRY_DELAY_MS=1500
 YTDLP_COOKIE_HEALTHCHECK_ENABLED=true
 YTDLP_POT_DISABLE_INNERTUBE=false
