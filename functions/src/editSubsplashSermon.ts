@@ -4,6 +4,7 @@ import axios from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from './uploadToSubsplash';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
+import { ImageType } from '@upperroom/shared/types/Image';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
@@ -70,15 +71,19 @@ const editSubsplashSermon = onCall(
               ...(data.date && { date: data.date }),
               ...(data.images && {
                 _embedded: {
-                  images: data.images.map((image) => {
-                    if (image.subsplashId) {
+                  images: data.images
+                    .map((image) => {
+                      const remoteImageId = image.subsplashId || image.id;
+                      if (!remoteImageId) {
+                        return undefined;
+                      }
+
                       return {
-                        id: image.subsplashId,
+                        id: remoteImageId,
                         type: image.type,
                       };
-                    }
-                    return;
-                  }),
+                    })
+                    .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined),
                   // audio: { id: data.audioId },
                 },
               }),

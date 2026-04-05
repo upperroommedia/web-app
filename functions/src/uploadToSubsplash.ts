@@ -109,15 +109,19 @@ const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts },
             date: data.date,
             auto_publish: data.autoPublish ?? false,
             _embedded: {
-              images: data.images.map((image) => {
-                if (image.subsplashId) {
+              images: data.images
+                .map((image) => {
+                  const remoteImageId = image.subsplashId || image.id;
+                  if (!remoteImageId) {
+                    return undefined;
+                  }
+
                   return {
-                    id: image.subsplashId,
+                    id: remoteImageId,
                     type: image.type,
                   };
-                }
-                return;
-              }),
+                })
+                .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined),
               audio: { id: audioId },
             },
           });
