@@ -3195,6 +3195,7 @@ export const downloadYouTubeAudioToFile = async (
 
       const ytdlp = spawn(ytdlpPath, args);
       let stderrBuffer = '';
+      let stdoutBuffer = '';
       let settled = false;
       let lastActivityAt = Date.now();
       let lastActivityReason = 'spawned';
@@ -3276,11 +3277,48 @@ export const downloadYouTubeAudioToFile = async (
 
         rejectWithError(
           buildAnnotatedYouTubeError(
-            `yt-dlp file download exited with code ${code}${signal ? ` (signal: ${signal})` : ''}. stderr: ${stderrBuffer.trim()}`,
+            `yt-dlp file download exited with code ${code}${signal ? ` (signal: ${signal})` : ''}. stderr: ${stderrBuffer.trim()} stdout: ${stdoutBuffer.trim()}`,
             mode
           )
         );
       });
+
+      const handleProgressChunk = (chunk: string, source: 'stderr' | 'stdout'): void => {
+        markActivity(source);
+
+        if (source === 'stderr') {
+          if (stderrBuffer.length < 50_000) {
+            stderrBuffer += chunk;
+          }
+        } else if (stdoutBuffer.length < 50_000) {
+          stdoutBuffer += chunk;
+        }
+
+        let progressPercent: number | null = null;
+        const ffmpegTimeSeconds = extractFfmpegTime(chunk);
+        if (ffmpegTimeSeconds !== null && ffmpegTimeSeconds >= 0 && config.durationSeconds && config.durationSeconds > 0) {
+          progressPercent = Math.min(99, (ffmpegTimeSeconds / config.durationSeconds) * 100);
+        } else {
+          progressPercent = extractPercent(chunk);
+        }
+
+        if (progressPercent === null) {
+          return;
+        }
+
+        applyProgressUpdate(progressPercent, ffmpegTimeSeconds !== null ? 'ffmpeg_time' : 'percent');
+        void probePrimaryOutputPartialFile(outputFilePath)
+          .then((outputPart) => {
+            if (!outputPart || previousPercent <= 0) {
+              return;
+            }
+            lastMeasuredOutputSizeBytes = outputPart.size;
+            lastMeasuredOutputPercent = previousPercent;
+          })
+          .catch(() => {
+            // Ignore missing partial file while calibrating progress from downloader output.
+          });
+      };
 
       ytdlp.stderr?.on('data', (data) => {
         if (cancelToken.isCancellationRequested) {
@@ -3289,34 +3327,17 @@ export const downloadYouTubeAudioToFile = async (
           return;
         }
 
-        const stderrStr = data.toString();
-        markActivity('stderr');
-        if (stderrBuffer.length < 50_000) {
-          stderrBuffer += stderrStr;
+        handleProgressChunk(data.toString(), 'stderr');
+      });
+
+      ytdlp.stdout?.on('data', (data) => {
+        if (cancelToken.isCancellationRequested) {
+          ytdlp.kill('SIGTERM');
+          rejectWithError(new Error('Download operation was cancelled'));
+          return;
         }
 
-        let progressPercent: number | null = null;
-        const ffmpegTimeSeconds = extractFfmpegTime(stderrStr);
-        if (ffmpegTimeSeconds !== null && ffmpegTimeSeconds >= 0 && config.durationSeconds && config.durationSeconds > 0) {
-          progressPercent = Math.min(99, (ffmpegTimeSeconds / config.durationSeconds) * 100);
-        } else {
-          progressPercent = extractPercent(stderrStr);
-        }
-
-        if (progressPercent !== null) {
-          applyProgressUpdate(progressPercent, ffmpegTimeSeconds !== null ? 'ffmpeg_time' : 'percent');
-          void probePrimaryOutputPartialFile(outputFilePath)
-            .then((outputPart) => {
-              if (!outputPart || previousPercent <= 0) {
-                return;
-              }
-              lastMeasuredOutputSizeBytes = outputPart.size;
-              lastMeasuredOutputPercent = previousPercent;
-            })
-            .catch(() => {
-              // Ignore missing partial file while calibrating progress from ffmpeg output.
-            });
-        }
+        handleProgressChunk(data.toString(), 'stdout');
       });
 
       stallPollTimer = setInterval(() => {
@@ -3401,7 +3422,7 @@ export const downloadYouTubeAudioToFile = async (
             buildAnnotatedYouTubeError(
               `yt-dlp download stalled after ${Math.round(stallDurationMs / 1000)}s without progress. Last activity=${lastActivityReason}. Partial files=${JSON.stringify(
                 summarizedFiles
-              )}. ytdlState=${JSON.stringify(ytdlpState)}. stderr: ${stderrBuffer.trim()}`,
+              )}. ytdlState=${JSON.stringify(ytdlpState)}. stderr: ${stderrBuffer.trim()} stdout: ${stdoutBuffer.trim()}`,
               mode
             )
           );
