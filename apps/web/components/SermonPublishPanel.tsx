@@ -66,6 +66,8 @@ import { getSquareImageDownloadLink } from '../utils/utils';
 import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../utils/soundcloudAuthRecovery';
 import { PublishDestinationState, getListsDestinationState, summarizePublishRun } from '../utils/sermonPublishingUi';
 import { runPublishEverywhereFlow } from '../utils/publishEverywhereFlow';
+import { deleteSubsplashMediaAndLocalState } from '../utils/deleteSubsplashMediaAndLocalState';
+import { getSubsplashUnpublishStrategy } from '../utils/getSubsplashUnpublishStrategy';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import type { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '@upperroom/contracts/uploadToSoundCloud';
 import type { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
@@ -428,9 +430,47 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     };
   }, [listArray, selectedListIds]);
 
+  const syncDestinationActivity = useCallback((nextActivity: DestinationActivityState) => {
+    setDestinationActivity(nextActivity);
+  }, []);
+
   useEffect(() => {
     onBusyStateChange?.(destinationActivity);
   }, [destinationActivity, onBusyStateChange]);
+
+  useEffect(() => {
+    const persistedActivity = sermon.publishActivity ?? createIdleDestinationActivityState();
+    if (
+      persistedActivity.listOperation === destinationActivity.listOperation
+      && persistedActivity.seriesOperation === destinationActivity.seriesOperation
+      && persistedActivity.soundCloudOperation === destinationActivity.soundCloudOperation
+      && persistedActivity.listIds.length === destinationActivity.listIds.length
+      && persistedActivity.listIds.every((listId, index) => listId === destinationActivity.listIds[index])
+    ) {
+      return;
+    }
+
+    const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
+    void updateDoc(sermonRef, {
+      publishActivity:
+        destinationActivity.listOperation === 'idle'
+        && destinationActivity.seriesOperation === 'idle'
+        && destinationActivity.soundCloudOperation === 'idle'
+          ? deleteField()
+          : {
+              listOperation: destinationActivity.listOperation,
+              listIds: destinationActivity.listIds,
+              seriesOperation: destinationActivity.seriesOperation,
+              soundCloudOperation: destinationActivity.soundCloudOperation,
+              updatedAtMillis: Date.now(),
+            },
+    }).catch((error) => {
+      console.error('Failed to persist sermon publish activity', {
+        sermonId: sermon.id,
+        error,
+      });
+    });
+  }, [destinationActivity, sermon.id, sermon.publishActivity]);
 
   useEffect(() => {
     if (listArray.length === 0) {
@@ -712,13 +752,13 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     nextActivity: DestinationActivityState,
     action: () => Promise<T>
   ): Promise<T> => {
-    setDestinationActivity(nextActivity);
+    syncDestinationActivity(nextActivity);
     try {
       return await action();
     } finally {
-      setDestinationActivity(createIdleDestinationActivityState());
+      syncDestinationActivity(createIdleDestinationActivityState());
     }
-  }, []);
+  }, [syncDestinationActivity]);
 
   const uploadToSoundCloud = useCallback(async (): Promise<SeriesPublishResult> => {
     setIsUploadingToSoundCloud(true);
@@ -1317,6 +1357,14 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     }
   }, [onUpdate, sermon.id, sermon.soundCloudTrackId, user]);
 
+  const deleteSubsplashMedia = useCallback(async (): Promise<boolean> => {
+    return deleteSubsplashMediaAndLocalState({
+      sermonId: sermon.id,
+      subsplashId: sermon.subsplashId,
+      seriesId: sermon.seriesId,
+    });
+  }, [sermon.id, sermon.seriesId, sermon.subsplashId]);
+
   const publishEverywhere = useCallback(async () => {
     if (isPublishingEverywhere) {
       return;
@@ -1341,7 +1389,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         soundCloudOperation: shouldPublishSoundCloud ? 'publish' : 'idle',
       };
 
-      setDestinationActivity(sharedActivity);
+      syncDestinationActivity(sharedActivity);
       const { listResult, seriesResult, soundCloudResult } = await runPublishEverywhereFlow<
         ListPublishResult,
         SeriesPublishResult,
@@ -1429,7 +1477,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     } finally {
       setIsPublishingEverywhere(false);
       setActiveRunMode('idle');
-      setDestinationActivity(createIdleDestinationActivityState());
+      syncDestinationActivity(createIdleDestinationActivityState());
     }
   }, [
     basicActionPlan.publishListIds,
@@ -1446,6 +1494,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     sermon.subsplashId,
     setNoticeFromRun,
     soundCloudStatus,
+    syncDestinationActivity,
     ensureSubsplashMediaItem,
     uploadToSoundCloud,
     uploadToSubsplash,
@@ -1468,9 +1517,31 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       const hadPublishedLists = publishedLists.length > 0;
       const hadSeries = basicActionPlan.unpublishSeries;
       const hadSoundCloud = basicActionPlan.unpublishSoundCloud;
+      const subsplashUnpublishStrategy = getSubsplashUnpublishStrategy({
+        hasSubsplashId: Boolean(sermon.subsplashId),
+        publishedListCount: publishedLists.length,
+        listCountToUnpublish: publishedLists.length,
+        seriesPublished: seriesPublished === true,
+        unpublishSeries: hadSeries,
+        publishListCount: 0,
+        publishSeries: false,
+      });
       let hadError = false;
 
-      if (hadPublishedLists) {
+      if (subsplashUnpublishStrategy === 'delete_media') {
+        try {
+          await deleteSubsplashMedia();
+          onUpdate?.();
+        } catch (error: unknown) {
+          hadError = true;
+          const message = getLockBusyMessage(error, getErrorMessage(error, 'Failed to delete sermon from Subsplash.'));
+          setDestinationErrors((previous) => ({
+            ...previous,
+            lists: previous.lists ?? message,
+            series: previous.series ?? message,
+          }));
+        }
+      } else if (hadPublishedLists) {
         const listResult = await runWithDestinationActivity({
           listOperation: 'unpublish',
           listIds: publishedLists.map((list) => list.id),
@@ -1482,7 +1553,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         }
       }
 
-      if (hadSeries) {
+      if (hadSeries && subsplashUnpublishStrategy !== 'delete_media') {
         const seriesResult = await runWithDestinationActivity({
           listOperation: 'idle',
           listIds: [],
@@ -1515,17 +1586,22 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     } finally {
       setIsPublishingEverywhere(false);
       setActiveRunMode('idle');
-      setDestinationActivity(createIdleDestinationActivityState());
+      syncDestinationActivity(createIdleDestinationActivityState());
     }
   }, [
     basicActionPlan.unpublishListIds,
     basicActionPlan.unpublishSeries,
     basicActionPlan.unpublishSoundCloud,
     deleteFromSoundCloud,
+    deleteSubsplashMedia,
     isPublishingEverywhere,
     listArray,
+    onUpdate,
     removeFromLists,
     runWithDestinationActivity,
+    sermon.subsplashId,
+    seriesPublished,
+    syncDestinationActivity,
     unpublishFromSeries,
   ]);
 
@@ -1542,6 +1618,16 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     try {
       const actionMessages: string[] = [];
       let hadError = false;
+      const currentlyPublishedLists = listArray.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED);
+      const subsplashUnpublishStrategy = getSubsplashUnpublishStrategy({
+        hasSubsplashId: Boolean(sermon.subsplashId),
+        publishedListCount: currentlyPublishedLists.length,
+        listCountToUnpublish: deselectedPublishedLists.length,
+        seriesPublished: seriesPublished === true,
+        unpublishSeries: selectedSeriesToUnpublish,
+        publishListCount: selectedListsToPublish.length,
+        publishSeries: selectedSeriesToPublish,
+      });
 
       if (selectedListsToPublish.length > 0) {
         const publishResult = await runWithDestinationActivity({
@@ -1557,7 +1643,21 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         }
       }
 
-      if (deselectedPublishedLists.length > 0) {
+      if (subsplashUnpublishStrategy === 'delete_media') {
+        try {
+          await deleteSubsplashMedia();
+          onUpdate?.();
+          actionMessages.push('deleted from Subsplash');
+        } catch (error: unknown) {
+          hadError = true;
+          const message = getLockBusyMessage(error, getErrorMessage(error, 'Failed to delete sermon from Subsplash.'));
+          setDestinationErrors((previous) => ({
+            ...previous,
+            lists: previous.lists ?? message,
+            series: previous.series ?? message,
+          }));
+        }
+      } else if (deselectedPublishedLists.length > 0) {
         const unpublishResult = await runWithDestinationActivity({
           listOperation: 'unpublish',
           listIds: deselectedPublishedLists.map((list) => list.id),
@@ -1585,7 +1685,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         }
       }
 
-      if (selectedSeriesToUnpublish) {
+      if (selectedSeriesToUnpublish && subsplashUnpublishStrategy !== 'delete_media') {
         const seriesResult = await runWithDestinationActivity({
           listOperation: 'idle',
           listIds: [],
@@ -1644,20 +1744,26 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     } finally {
       setIsPublishingEverywhere(false);
       setActiveRunMode('idle');
-      setDestinationActivity(createIdleDestinationActivityState());
+      syncDestinationActivity(createIdleDestinationActivityState());
     }
   }, [
     deleteFromSoundCloud,
     deselectedPublishedLists,
+    deleteSubsplashMedia,
     isPublishingEverywhere,
+    listArray,
+    onUpdate,
     publishToSeries,
     removeFromLists,
     runWithDestinationActivity,
+    sermon.subsplashId,
     selectedListsToPublish,
     selectedSeriesToPublish,
     selectedSeriesToUnpublish,
     selectedSoundCloudToPublish,
     selectedSoundCloudToUnpublish,
+    seriesPublished,
+    syncDestinationActivity,
     unpublishFromSeries,
     uploadToSoundCloud,
     uploadToSubsplash,

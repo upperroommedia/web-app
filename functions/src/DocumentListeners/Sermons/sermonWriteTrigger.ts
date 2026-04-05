@@ -13,6 +13,7 @@ interface SearchSyncFields {
   searchPending?: boolean;
   searchIndexedAtMillis?: number;
   searchSyncError?: string;
+  publishActivity?: unknown;
 }
 
 type SermonWithSearchSync = Sermon & SearchSyncFields;
@@ -25,6 +26,7 @@ const stripNonPropagatedFields = (sermon: SermonWithSearchSync) => {
     searchPending: _searchPending,
     searchIndexedAtMillis: _searchIndexedAtMillis,
     searchSyncError: _searchSyncError,
+    publishActivity: _publishActivity,
     /* eslint-enable @typescript-eslint/no-unused-vars */
     ...rest
   } = sermon;

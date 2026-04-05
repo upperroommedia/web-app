@@ -261,14 +261,23 @@ const SermonListCard: FunctionComponent<Props> = ({
   const seriesPublishedToSubsplash = enableSeriesRealtime
     ? seriesItemSnapshot?.exists() && seriesItemSnapshot.data()?.publishedToSubsplash === true
     : currentSermon.seriesPublishedToSubsplash === true;
-  const publishTaskRunning = (
+  const persistedPublishTaskActivity = currentSermon.publishActivity ?? createIdleDestinationActivityState();
+
+  const effectivePublishTaskActivity = (
     publishTaskActivity.listOperation !== 'idle'
     || publishTaskActivity.seriesOperation !== 'idle'
     || publishTaskActivity.soundCloudOperation !== 'idle'
+  ) ? publishTaskActivity : persistedPublishTaskActivity;
+  const publishTaskRunning = (
+    effectivePublishTaskActivity.listOperation !== 'idle'
+    || effectivePublishTaskActivity.seriesOperation !== 'idle'
+    || effectivePublishTaskActivity.soundCloudOperation !== 'idle'
   );
-  const subsplashListsPublishing = publishTaskActivity.listOperation !== 'idle';
-  const soundCloudPublishing = publishTaskActivity.soundCloudOperation !== 'idle';
-  const seriesPublishing = publishTaskActivity.seriesOperation !== 'idle';
+  const subsplashListsPublishing = effectivePublishTaskActivity.listOperation !== 'idle';
+  const soundCloudPublishing = effectivePublishTaskActivity.soundCloudOperation !== 'idle';
+  const seriesPublishing = effectivePublishTaskActivity.seriesOperation !== 'idle';
+  const listsUnpublishing = effectivePublishTaskActivity.listOperation === 'unpublish';
+  const soundCloudUnpublishing = effectivePublishTaskActivity.soundCloudOperation === 'unpublish';
 
   const uploaderName =
     currentSermon.uploaderDisplayName ||
@@ -480,17 +489,25 @@ const SermonListCard: FunctionComponent<Props> = ({
   );
 
   const renderSubsplashStatus = () => (
-    <Tooltip title={`Published to ${subsplashUploaded} of ${subsplashTotal} lists`}>
+    <Tooltip
+      title={
+        subsplashListsPublishing
+          ? listsUnpublishing
+            ? 'Unpublishing from Subsplash lists…'
+            : 'Publishing to Subsplash lists…'
+          : `Published to ${subsplashUploaded} of ${subsplashTotal} lists`
+      }
+    >
       <Chip
         icon={
           subsplashListsPublishing
             ? <CircularProgress size={13} color="inherit" />
             : <CollectionsIcon sx={{ fontSize: 13 }} />
         }
-        label={subsplashListsPublishing ? 'Publishing…' : `${subsplashUploaded}/${subsplashTotal}`}
+        label={subsplashListsPublishing ? (listsUnpublishing ? 'Unpublishing…' : 'Publishing…') : `${subsplashUploaded}/${subsplashTotal}`}
         size="small"
-        variant={isSubsplashComplete ? 'filled' : 'outlined'}
-        color={isSubsplashComplete ? 'success' : isSubsplashPartial ? 'warning' : 'default'}
+        variant={subsplashListsPublishing || isSubsplashComplete ? 'filled' : 'outlined'}
+        color={subsplashListsPublishing ? 'info' : isSubsplashComplete ? 'success' : isSubsplashPartial ? 'warning' : 'default'}
         onClick={handlePublishClick}
         sx={{
           height: { xs: 16, sm: 22 },
@@ -504,12 +521,22 @@ const SermonListCard: FunctionComponent<Props> = ({
   );
 
   const renderSoundCloudStatus = () => (
-    <Tooltip title={soundCloudPublishing && !isSoundCloudUploaded ? 'Publishing to SoundCloud…' : isSoundCloudUploaded ? 'Published to SoundCloud' : 'Not on SoundCloud'}>
+    <Tooltip
+      title={
+        soundCloudPublishing
+          ? soundCloudUnpublishing
+            ? 'Unpublishing from SoundCloud…'
+            : 'Publishing to SoundCloud…'
+          : isSoundCloudUploaded
+            ? 'Published to SoundCloud'
+            : 'Not on SoundCloud'
+      }
+    >
       <Chip
-        icon={soundCloudPublishing && !isSoundCloudUploaded ? <CircularProgress size={13} color="inherit" /> : <CloudIcon sx={{ fontSize: 13 }} />}
-        label={soundCloudPublishing && !isSoundCloudUploaded ? 'Publishing…' : 'SC'}
+        icon={soundCloudPublishing ? <CircularProgress size={13} color="inherit" /> : <CloudIcon sx={{ fontSize: 13 }} />}
+        label={soundCloudPublishing ? (soundCloudUnpublishing ? 'Unpublishing…' : 'Publishing…') : 'SC'}
         size="small"
-        variant={isSoundCloudUploaded ? 'filled' : soundCloudPublishing ? 'filled' : 'outlined'}
+        variant={isSoundCloudUploaded || soundCloudPublishing ? 'filled' : 'outlined'}
         color={isSoundCloudUploaded ? 'success' : soundCloudPublishing ? 'info' : 'default'}
         onClick={handlePublishClick}
         sx={{
@@ -552,7 +579,7 @@ const SermonListCard: FunctionComponent<Props> = ({
               >
                 {series.name}
               </Box>
-              {seriesPublishing && !seriesPublishedToSubsplash ? <CircularProgress size={compact ? 9 : 11} color="inherit" /> : null}
+              {seriesPublishing ? <CircularProgress size={compact ? 9 : 11} color="inherit" /> : null}
             </Stack>
           }
           size="small"
@@ -562,12 +589,12 @@ const SermonListCard: FunctionComponent<Props> = ({
             cursor: 'pointer',
             overflow: 'hidden',
             maxWidth: compact ? 120 : 'none',
-            bgcolor: seriesPublishing && !seriesPublishedToSubsplash
+            bgcolor: seriesPublishing
               ? alpha(theme.palette.info.main, 0.14)
               : seriesPublishedToSubsplash
               ? alpha(theme.palette.success.main, 0.12)
               : alpha(theme.palette.warning.main, 0.16),
-            border: `1px solid ${seriesPublishing && !seriesPublishedToSubsplash
+            border: `1px solid ${seriesPublishing
               ? alpha(theme.palette.info.main, 0.34)
               : seriesPublishedToSubsplash
               ? alpha(theme.palette.success.main, 0.35)
@@ -577,7 +604,7 @@ const SermonListCard: FunctionComponent<Props> = ({
               pl: compact ? 0.2 : { sm: 0.35, md: 0.45 },
               pr: compact ? 0.45 : { sm: 0.75, md: 1 },
               fontWeight: 500,
-              color: seriesPublishing && !seriesPublishedToSubsplash
+              color: seriesPublishing
                 ? theme.palette.info.dark
                 : seriesPublishedToSubsplash
                   ? theme.palette.success.dark
@@ -591,12 +618,12 @@ const SermonListCard: FunctionComponent<Props> = ({
               borderRadius: 0,
             },
             '&:hover': {
-              bgcolor: seriesPublishing && !seriesPublishedToSubsplash
+              bgcolor: seriesPublishing
                 ? alpha(theme.palette.info.main, 0.2)
                 : seriesPublishedToSubsplash
                 ? alpha(theme.palette.success.main, 0.18)
                 : alpha(theme.palette.warning.main, 0.24),
-              borderColor: seriesPublishing && !seriesPublishedToSubsplash
+              borderColor: seriesPublishing
                 ? theme.palette.info.main
                 : seriesPublishedToSubsplash
                   ? theme.palette.success.main

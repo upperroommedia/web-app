@@ -14,6 +14,16 @@ export enum uploadStatus {
   UPLOADED = 'UPLOADED',
 }
 
+export type publishActivityOperation = 'idle' | 'publish' | 'unpublish';
+
+export interface sermonPublishActivity {
+  listOperation: publishActivityOperation;
+  listIds: string[];
+  seriesOperation: publishActivityOperation;
+  soundCloudOperation: publishActivityOperation;
+  updatedAtMillis?: number;
+}
+
 export interface sermonStatus {
   subsplash: uploadStatus;
   soundCloud: uploadStatus;
@@ -57,4 +67,5 @@ export interface Sermon {
   seriesName?: string;
   seriesImage?: ImageType;
   seriesPublishedToSubsplash?: boolean;
+  publishActivity?: sermonPublishActivity;
 }

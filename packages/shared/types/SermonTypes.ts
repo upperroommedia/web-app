@@ -14,6 +14,16 @@ export enum uploadStatus {
   UPLOADED = 'UPLOADED',
 }
 
+export type publishActivityOperation = 'idle' | 'publish' | 'unpublish';
+
+export interface sermonPublishActivity {
+  listOperation: publishActivityOperation;
+  listIds: string[];
+  seriesOperation: publishActivityOperation;
+  soundCloudOperation: publishActivityOperation;
+  updatedAtMillis?: number;
+}
+
 export interface sermonStatus {
   subsplash: uploadStatus;
   soundCloud: uploadStatus;
@@ -48,4 +58,5 @@ export interface Sermon {
   editedAtMillis: number;
   youtubeUrl?: string;
   seriesId?: string;  // Firestore series ID (not subsplashId) - sermon can only be in one series
+  publishActivity?: sermonPublishActivity;
 }

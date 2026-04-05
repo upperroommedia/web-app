@@ -91,6 +91,7 @@ export const normalizeAlgoliaSermonHit = (hit: AlgoliaSermonHit): Sermon => {
     seriesName: hit.seriesName,
     seriesImage: hit.seriesImage,
     seriesPublishedToSubsplash: hit.seriesPublishedToSubsplash,
+    publishActivity: hit.publishActivity,
   };
 };
 
