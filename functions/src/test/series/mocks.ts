@@ -88,6 +88,7 @@ export class SubsplashSeriesMock {
       media_items_count: 0,
       published_media_items_count: 0,
       display_type: 'thumbnails',
+      published_at: null,
       status: 'draft',
       short_code: Math.random().toString(36).substring(2, 9),
       is_default: false,
@@ -108,6 +109,43 @@ export class SubsplashSeriesMock {
    */
   getSeries(id: string): SubsplashSeries | undefined {
     return this.series.get(id);
+  }
+
+  patchSeriesMetadata(seriesId: string, payload: PatchSeriesPayload): SubsplashSeries {
+    const series = this.series.get(seriesId);
+    if (!series) {
+      throw new Error(`Series ${seriesId} not found`);
+    }
+
+    if (payload.title !== undefined) {
+      series.title = payload.title;
+    }
+    if (payload.subtitle !== undefined) {
+      series.subtitle = payload.subtitle;
+    }
+    if (payload.summary !== undefined) {
+      series.summary = payload.summary;
+    }
+    if (payload.published_at !== undefined) {
+      series.published_at = payload.published_at;
+      series.status = payload.published_at ? 'published' : 'draft';
+    }
+    if (payload._embedded?.images) {
+      series._embedded = {
+        ...series._embedded,
+        images: payload._embedded.images.map((image) => ({
+          id: image.id,
+          type: image.type as 'square' | 'wide' | 'banner',
+        })),
+      };
+    }
+    if (payload._embedded?.['media-items']) {
+      this.patchSeriesItemPositions(seriesId, payload._embedded['media-items']);
+    }
+
+    series.updated_at = new Date().toISOString();
+    this.series.set(seriesId, series);
+    return series;
   }
 
   /**
@@ -331,7 +369,7 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
       return Promise.reject({ response: { status: 404, data: { error: 'Series not found' } } });
     }
 
-    // PATCH /media/v1/media-series/{id} - Update series (reorder items)
+    // PATCH /media/v1/media-series/{id} - Update series metadata / publish state / reorder items
     const patchSeriesMatch = url.match(/media\/v1\/media-series\/([a-zA-Z0-9-]+)$/);
     if (method === 'PATCH' && patchSeriesMatch) {
       const seriesId = patchSeriesMatch[1];
@@ -344,10 +382,7 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
         return Promise.reject({ response: { status: 404, data: { error: 'Series not found' } } });
       }
       const payload = config.data as PatchSeriesPayload;
-      if (payload._embedded?.['media-items']) {
-        subsplashSeriesMock.patchSeriesItemPositions(seriesId, payload._embedded['media-items']);
-      }
-      return Promise.resolve({ data: subsplashSeriesMock.getSeries(seriesId), status: 200 });
+      return Promise.resolve({ data: subsplashSeriesMock.patchSeriesMetadata(seriesId, payload), status: 200 });
     }
 
     // GET /media/v1/media-items?filter[media_series]=... - Get series items

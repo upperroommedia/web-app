@@ -100,7 +100,7 @@ describe('createSeries - Basic Functionality', () => {
     expect(firestoreSeries?.subtitle).toBe('0 part series');
   });
 
-  it('should set status to draft by default', async () => {
+  it('should publish the remote series immediately after creation', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
       auth: { token: { role: 'admin' } },
       data: {
@@ -114,7 +114,7 @@ describe('createSeries - Basic Functionality', () => {
     expect(result.status).toBe('success');
 
     const firestoreSeries = await getSeriesBySubsplashId(result.subsplashId!);
-    expect(firestoreSeries?.status).toBe('draft');
+    expect(firestoreSeries?.status).toBe('published');
   });
 
   it('should persist provided images when syncing to Subsplash', async () => {
@@ -138,6 +138,49 @@ describe('createSeries - Basic Functionality', () => {
     expect(firestoreSeries?.images).toHaveLength(2);
     expect(firestoreSeries?.images[0].id).toBe('img-square');
     expect(firestoreSeries?.images[1].id).toBe('img-wide');
+  });
+
+  it('should patch Subsplash series images using subsplashId when local image ids differ', async () => {
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Series With Remote Image Refs',
+        ownerId: TEST_USER_ID,
+        images: [
+          {
+            id: 'firestore-square',
+            subsplashId: 'subsplash-square',
+            type: 'square',
+            downloadLink: 'https://example.com/square.jpg',
+            name: 'Square',
+          },
+          {
+            id: 'firestore-wide',
+            subsplashId: 'subsplash-wide',
+            type: 'wide',
+            downloadLink: 'https://example.com/wide.jpg',
+            name: 'Wide',
+          },
+          {
+            id: 'firestore-banner',
+            subsplashId: 'subsplash-banner',
+            type: 'banner',
+            downloadLink: 'https://example.com/banner.jpg',
+            name: 'Banner',
+          },
+        ],
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+    expect(result.status).toBe('success');
+
+    const remoteSeries = subsplashSeriesMock.getSeries(result.subsplashId!);
+    expect(remoteSeries?._embedded?.images).toEqual([
+      { id: 'subsplash-square', type: 'square' },
+      { id: 'subsplash-wide', type: 'wide' },
+      { id: 'subsplash-banner', type: 'banner' },
+    ]);
   });
 
   it('should update existing firestore series when firestoreId is provided', async () => {

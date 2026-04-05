@@ -386,15 +386,26 @@ export async function deleteSubsplashSeries(seriesId: string, token: string): Pr
  */
 export async function patchSeriesMetadata(
   seriesId: string,
-  updates: { title?: string; subtitle?: string; summary?: string; images?: Array<{ id: string; type: string }> },
+  updates: {
+    title?: string;
+    subtitle?: string;
+    summary?: string;
+    publishedAt?: string | null;
+    images?: Array<{ id: string; type: string }>;
+  },
   token: string
 ): Promise<SubsplashSeries> {
+  const embeddedPayload: PatchSeriesPayload['_embedded'] = {
+    ...(updates.images ? { images: updates.images } : {}),
+  };
+
   const payload: PatchSeriesPayload = {
     id: seriesId,
     ...(updates.title && { title: updates.title }),
     ...(updates.subtitle && { subtitle: updates.subtitle }),
     ...(updates.summary && { summary: updates.summary }),
-    ...(updates.images && { _embedded: { images: updates.images } }),
+    ...(updates.publishedAt !== undefined && { published_at: updates.publishedAt }),
+    ...(Object.keys(embeddedPayload).length > 0 && { _embedded: embeddedPayload }),
   };
 
   const config = createAxiosConfig(

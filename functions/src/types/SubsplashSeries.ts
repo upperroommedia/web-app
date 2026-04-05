@@ -33,6 +33,7 @@ export interface SubsplashSeries {
   subtitle?: string;
   slug: string;
   summary?: string;
+  published_at?: string | null;
   media_items_count: number;
   published_media_items_count: number;
   display_type: string;
@@ -64,6 +65,7 @@ export interface PatchSeriesPayload {
   title?: string;
   subtitle?: string;
   summary?: string;
+  published_at?: string | null;
   _embedded?: {
     images?: Array<{ id: string; type: string }>;
     'media-items'?: Array<{ id: string; position: number | null }>;

@@ -21,6 +21,23 @@ import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 
 const firestoreDB = firebaseAdmin.firestore();
 
+const toSubsplashSeriesImageRefs = (
+  images: NonNullable<CreateSeriesInputType['images']>
+): Array<{ id: string; type: string }> =>
+  images
+    .map((image) => {
+      const remoteImageId = image.subsplashId || image.id;
+      if (!remoteImageId) {
+        return undefined;
+      }
+
+      return {
+        id: remoteImageId,
+        type: image.type,
+      };
+    })
+    .filter((image): image is { id: string; type: string } => image !== undefined);
+
 export interface CreateSeriesInputType {
   title: string;
   summary?: string;
@@ -33,6 +50,7 @@ export interface CreateSeriesInputType {
     type: string;
     downloadLink: string;
     name?: string;
+    subsplashId?: string;
   }>;
 }
 
@@ -132,37 +150,41 @@ const createSeries = onCall(
             const token = await authenticateSubsplash();
 
             // Create series in Subsplash
-            const subsplashSeries = await createSubsplashSeries(title.trim(), token, {
+            let syncedSubsplashSeries = await createSubsplashSeries(title.trim(), token, {
               subtitle: initialSubtitle,
               summary: summary?.trim(),
             });
             if (imagesToPersist.length > 0) {
-              await patchSeriesMetadata(
-                subsplashSeries.id,
+              syncedSubsplashSeries = await patchSeriesMetadata(
+                syncedSubsplashSeries.id,
                 {
-                  images: imagesToPersist.map((image) => ({
-                    id: image.id,
-                    type: image.type,
-                  })),
+                  images: toSubsplashSeriesImageRefs(imagesToPersist),
                 },
                 token
               );
             }
+            syncedSubsplashSeries = await patchSeriesMetadata(
+              syncedSubsplashSeries.id,
+              {
+                publishedAt: new Date().toISOString(),
+              },
+              token
+            );
 
             // Create Firestore document with Subsplash data
             const firestoreData: Record<string, unknown> = {
               id: seriesRef.id,
-              name: subsplashSeries.title,
-              subtitle: subsplashSeries.subtitle || initialSubtitle,
+              name: syncedSubsplashSeries.title,
+              subtitle: syncedSubsplashSeries.subtitle || initialSubtitle,
               images: imagesToPersist,
-              itemCount: subsplashSeries.media_items_count,
-              publishedItemCount: subsplashSeries.published_media_items_count,
-              status: subsplashSeries.status,
-              subsplashId: subsplashSeries.id,
+              itemCount: syncedSubsplashSeries.media_items_count,
+              publishedItemCount: syncedSubsplashSeries.published_media_items_count,
+              status: syncedSubsplashSeries.status,
+              subsplashId: syncedSubsplashSeries.id,
               ownerId: ownerId.trim(),
-              slug: subsplashSeries.slug,
-              shortCode: subsplashSeries.short_code,
-              position: subsplashSeries.position,
+              slug: syncedSubsplashSeries.slug,
+              shortCode: syncedSubsplashSeries.short_code,
+              position: syncedSubsplashSeries.position,
               updatedAt: FieldValue.serverTimestamp(),
             };
             if (!existingSeriesDoc.exists) {
@@ -170,19 +192,19 @@ const createSeries = onCall(
             }
 
             // Only add optional fields if they have values (Firestore doesn't allow undefined)
-            if (subsplashSeries.summary) {
-              firestoreData.summary = subsplashSeries.summary;
+            if (syncedSubsplashSeries.summary) {
+              firestoreData.summary = syncedSubsplashSeries.summary;
             }
 
             await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
 
-            logger.log(`Created series: Firestore ID=${seriesRef.id}, Subsplash ID=${subsplashSeries.id}`);
+            logger.log(`Created series: Firestore ID=${seriesRef.id}, Subsplash ID=${syncedSubsplashSeries.id}`);
 
             return {
               status: 'success',
               firestoreId: seriesRef.id,
-              subsplashId: subsplashSeries.id,
-              slug: subsplashSeries.slug,
+              subsplashId: syncedSubsplashSeries.id,
+              slug: syncedSubsplashSeries.slug,
             };
           },
           {

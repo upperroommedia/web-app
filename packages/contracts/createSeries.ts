@@ -3,6 +3,7 @@ export interface CreateSeriesImageInput {
   type: string;
   downloadLink: string;
   name?: string;
+  subsplashId?: string;
 }
 
 export interface CreateSeriesInputType {
