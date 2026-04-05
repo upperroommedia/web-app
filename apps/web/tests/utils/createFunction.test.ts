@@ -1,3 +1,5 @@
+export {};
+
 const httpsCallableMock = jest.fn();
 const httpsCallableFromURLMock = jest.fn();
 const captureExceptionMock = jest.fn();

@@ -94,6 +94,7 @@ import {
   ListOverflowChainViewItem,
   sortListOverflowChainSourceItems,
 } from '../../../utils/lists/listOverflowChainView';
+import { reportHandledError } from '../../../utils/reportHandledError';
 
 type ListDetailItem = Sermon & {
   rowId?: string;
@@ -846,6 +847,13 @@ const ListDetailsPage = () => {
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load list details', error);
+          reportHandledError(error, {
+            area: 'admin-list-details',
+            action: 'load-list-details',
+            extras: {
+              listId,
+            },
+          });
           alert(getErrorMessage(error, 'Failed to load list details.'));
           setList(null);
           setChainView(null);
@@ -941,6 +949,14 @@ const ListDetailsPage = () => {
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load published drift diagnostics', error);
+          reportHandledError(error, {
+            area: 'admin-list-details',
+            action: 'load-published-drift',
+            extras: {
+              listId,
+              rootListId: chainView.rootListId,
+            },
+          });
           alert(getErrorMessage(error, 'Failed to load published drift diagnostics.'));
         }
       } finally {
@@ -955,7 +971,7 @@ const ListDetailsPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [chainView?.rootListId, isAdvancedDebugOpen, isPublishedDriftLoading, list?.subsplashId, publishedDrift]);
+  }, [chainView?.rootListId, isAdvancedDebugOpen, isPublishedDriftLoading, list?.subsplashId, listId, publishedDrift]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1063,6 +1079,14 @@ const ListDetailsPage = () => {
     } catch (error) {
       console.error('Failed to save list order', error);
       setItems(previousItems);
+      reportHandledError(error, {
+        area: 'admin-list-details',
+        action: 'save-order',
+        extras: {
+          listId,
+          rootListId: chainView?.rootListId ?? listId,
+        },
+      });
       alert(getErrorMessage(error, 'Failed to save list order. The view was reset to the last synced order.'));
     } finally {
       setIsSaving(false);
@@ -1084,11 +1108,21 @@ const ListDetailsPage = () => {
       setReloadNonce((value) => value + 1);
     } catch (error) {
       console.error('Failed to mark overflow list row', error);
+      reportHandledError(error, {
+        area: 'admin-list-details',
+        action: 'mark-overflow-link',
+        extras: {
+          listId,
+          rootListId: chainView.rootListId,
+          rowId: item.rowId,
+          sourceListId: item.sourceListId,
+        },
+      });
       alert(getErrorMessage(error, 'Failed to mark this list row as the overflow page.'));
     } finally {
       setMarkingOverflowRowId(null);
     }
-  }, [chainView]);
+  }, [chainView, listId]);
 
   const handleOpenSermon = useCallback(
     (sermonId: string) => {

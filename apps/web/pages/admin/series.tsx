@@ -47,6 +47,7 @@ import {
   formatLockBusyRetryMessage,
   parseLockBusyDetails,
 } from '../../utils/callableConcurrency';
+import { reportHandledError } from '../../utils/reportHandledError';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -499,6 +500,13 @@ const AdminSeriesPage = () => {
     } catch (err: unknown) {
       console.error('Error deleting series:', err);
       const fallbackMessage = `Error deleting series: ${getErrorMessage(err, 'Unknown error')}`;
+      reportHandledError(err, {
+        area: 'admin-series-list',
+        action: 'delete-series',
+        extras: {
+          seriesId: selectedSeries.id,
+        },
+      });
       alert(getLockBusyMessage(err, fallbackMessage));
     } finally {
       setIsDeleting(false);

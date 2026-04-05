@@ -14,6 +14,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Button, { ButtonPropsColorOverrides } from '@mui/material/Button';
 import { OverridableStringUnion } from '@mui/types';
 import CircularProgress from '@mui/material/CircularProgress';
+import { reportHandledError } from '../utils/reportHandledError';
 
 interface UploadStatusListProps {
   sectionTitle: string;
@@ -95,6 +96,14 @@ const UploadStatusList = ({
         await secondaryButtonAction(selectedItems);
       }
     } catch (error) {
+      reportHandledError(error, {
+        area: 'upload-status-list',
+        action,
+        extras: {
+          sectionTitle,
+          selectedItemIds: selectedItems.map((item) => item.id),
+        },
+      });
       alert(error);
     } finally {
       setLoadingAction(null);

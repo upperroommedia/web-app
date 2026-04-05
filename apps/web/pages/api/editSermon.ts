@@ -29,6 +29,7 @@ import { uploadStatus } from '../../types/SermonTypes';
 import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
 import { createOperationKey, parseLockBusyDetails } from '../../utils/callableConcurrency';
 import { resolveCanonicalSermonLists } from '../../utils/resolveCanonicalSermonLists';
+import { reportHandledError } from '../../utils/reportHandledError';
 
 interface EditSermonOptions {
   originalSeriesId?: string;
@@ -91,9 +92,26 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       if (busyDetails) {
         const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
         const lockedKeys = busyDetails.locked_keys.length > 0 ? ` Locked keys: ${busyDetails.locked_keys.join(', ')}.` : '';
+        reportHandledError(result.reason, {
+          area: 'edit-sermon',
+          action: 'mutation-busy',
+          level: 'warning',
+          extras: {
+            sermonId: sermon.id,
+            retryInSeconds,
+            lockedKeys: busyDetails.locked_keys,
+          },
+        });
         alert(`Subsplash is busy processing another mutation.${lockedKeys} Retry in about ${retryInSeconds}s.`);
       } else {
         const reason = result.reason;
+        reportHandledError(reason, {
+          area: 'edit-sermon',
+          action: 'mutation-failed',
+          extras: {
+            sermonId: sermon.id,
+          },
+        });
         alert(reason instanceof Error ? reason.message : String(reason));
       }
     }
@@ -202,6 +220,15 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       });
     } catch (err) {
       console.error('Error updating series membership:', err);
+      reportHandledError(err, {
+        area: 'edit-sermon',
+        action: 'update-series-membership',
+        extras: {
+          sermonId: sermon.id,
+          originalSeriesId,
+          newSeriesId,
+        },
+      });
       throw err; // Re-throw to let caller handle the error
     }
   }

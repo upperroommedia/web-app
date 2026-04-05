@@ -69,6 +69,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
 import { canEditSermonRecord, isSermonProcessingLocked, isSermonPublishedExternally } from '../../../utils/sermonEditing';
 import { parseProcessingProgress } from '../../../utils/processAudioProgress';
+import { reportHandledError, reportHandledMessage } from '../../../utils/reportHandledError';
 
 const getErrorField = (error: unknown, field: 'code' | 'details' | 'message'): string | undefined => {
   if (field === 'message' && error instanceof Error && error.message) {
@@ -242,14 +243,29 @@ const SermonDetailsPage = () => {
     } catch (err) {
       console.error('Error deleting sermon:', err);
       const message = err instanceof Error ? err.message : 'Failed to start delete';
+      reportHandledError(err, {
+        area: 'sermon-details',
+        action: 'delete-sermon',
+        extras: {
+          sermonId,
+        },
+      });
       alert(message);
       setIsDeleting(false);
     }
-  }, [sermon, currentSermon, isDeleting, setCurrentSermon, router]);
+  }, [sermon, currentSermon, isDeleting, setCurrentSermon, router, sermonId]);
 
   const retryProcessing = useCallback(async () => {
     if (!sermon || isRetryingProcessing) return;
     if (typeof sermon.trimDurationSeconds !== 'number' || sermon.trimDurationSeconds <= 0) {
+      reportHandledMessage('This sermon cannot be reprocessed because it does not have saved trim-source settings.', {
+        area: 'sermon-details',
+        action: 'retry-processing-missing-trim-settings',
+        level: 'warning',
+        extras: {
+          sermonId: sermon.id,
+        },
+      });
       alert('This sermon cannot be reprocessed because it does not have saved trim-source settings.');
       return;
     }
@@ -283,6 +299,13 @@ const SermonDetailsPage = () => {
       });
     } catch (retryError) {
       console.error('Error retrying sermon processing:', retryError);
+      reportHandledError(retryError, {
+        area: 'sermon-details',
+        action: 'retry-processing',
+        extras: {
+          sermonId: sermon.id,
+        },
+      });
       alert(getErrorMessage(retryError, 'Failed to retry sermon processing'));
     } finally {
       setIsRetryingProcessing(false);
@@ -316,11 +339,19 @@ const SermonDetailsPage = () => {
       }
     } catch (err: unknown) {
       console.error('Error loading owned series:', err);
+      reportHandledError(err, {
+        area: 'sermon-details',
+        action: 'load-owned-series',
+        extras: {
+          sermonId,
+          userId: user?.uid,
+        },
+      });
       alert(getErrorMessage(err, 'Failed to load your series'));
     } finally {
       setLoadingOwnedSeries(false);
     }
-  }, [user?.uid]);
+  }, [user?.uid, sermonId]);
 
   const addSermonToSelectedSeries = useCallback(async () => {
     if (!sermon || !user?.uid || !selectedOwnedSeriesId || isAddingToSeries) {
@@ -371,6 +402,14 @@ const SermonDetailsPage = () => {
       setOwnedSeriesSearchQuery('');
     } catch (err: unknown) {
       console.error('Error adding sermon to selected series:', err);
+      reportHandledError(err, {
+        area: 'sermon-details',
+        action: 'add-sermon-to-series',
+        extras: {
+          sermonId: sermon.id,
+          selectedOwnedSeriesId,
+        },
+      });
       alert(getErrorMessage(err, 'Failed to add sermon to series'));
     } finally {
       setIsAddingToSeries(false);

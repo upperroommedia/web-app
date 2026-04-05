@@ -6,12 +6,13 @@ import CssBaseline from '@mui/material/CssBaseline';
 import Head from 'next/head';
 import '@vidstack/react/player/styles/default/theme.css';
 import Box from '@mui/material/Box';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
 import dynamic from 'next/dynamic';
 import { ThemeProvider as NextThemesProvider, useTheme } from 'next-themes';
 import { darkTheme, lightTheme } from '../styles/theme';
 import { AlgoliaSearchProvider } from '../context/search/AlgoliaSearchContext';
+import { installConsoleErrorCapture } from '../utils/reportHandledError';
 
 // Dynamic import for MediaPlayerComponent to reduce initial bundle size
 const MediaPlayerComponent = dynamic(() => import('../components/MediaPlayerComponent'), {
@@ -64,6 +65,10 @@ function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'rou
 
 function MyApp({ Component, pageProps }: ComponentWithPageLayout) {
   const algoliaAppId = process.env.NEXT_PUBLIC_ALGOLIA_APP_ID;
+
+  useEffect(() => {
+    installConsoleErrorCapture();
+  }, []);
 
   return (
     <>

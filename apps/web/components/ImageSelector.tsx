@@ -28,6 +28,7 @@ import { algoliasearch, SearchResponse } from 'algoliasearch';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import InputAdornment from '@mui/material/InputAdornment';
+import { reportHandledError, reportHandledMessage } from '../utils/reportHandledError';
 const IMAGE_SAVE_TIMEOUT_MS = 30000;
 
 const client =
@@ -137,6 +138,15 @@ const ImageSelector = (props: {
         const timeoutId = window.setTimeout(() => {
           unsubscribe();
           setImageUploading(false);
+          reportHandledMessage('Image upload finished, but image processing did not complete in time.', {
+            area: 'image-selector',
+            action: 'save-image-timeout',
+            level: 'warning',
+            extras: {
+              name,
+              selectedImageType: props.selectedImageFromSpeakerDetails.type,
+            },
+          });
           alert('Image upload finished, but image processing did not complete in time. Please try again in a moment.');
         }, IMAGE_SAVE_TIMEOUT_MS);
 
@@ -154,10 +164,27 @@ const ImageSelector = (props: {
           });
         });
       } else {
+        reportHandledMessage('An image with this name already exists.', {
+          area: 'image-selector',
+          action: 'save-image-duplicate-name',
+          level: 'warning',
+          extras: {
+            name,
+            selectedImageType: props.selectedImageFromSpeakerDetails.type,
+          },
+        });
         alert('An image with this name already exists, please use a different name');
         setImageUploading(false);
       }
     } catch (e) {
+      reportHandledError(e, {
+        area: 'image-selector',
+        action: 'save-image',
+        extras: {
+          name,
+          selectedImageType: props.selectedImageFromSpeakerDetails.type,
+        },
+      });
       alert(e);
       setImageUploading(false);
     }

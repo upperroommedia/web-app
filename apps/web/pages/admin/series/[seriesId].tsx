@@ -85,6 +85,7 @@ import {
   parseLockBusyDetails,
 } from '../../../utils/callableConcurrency';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
+import { reportHandledError, reportHandledMessage } from '../../../utils/reportHandledError';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '@upperroom/contracts/reorderSeriesItems';
 import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '@upperroom/contracts/removeFromSeries';
@@ -1463,6 +1464,13 @@ const SeriesDetailsPage = () => {
     } catch (err: unknown) {
       console.error('Error saving order:', err);
       setItems(previousItems);
+      reportHandledError(err, {
+        area: 'admin-series-details',
+        action: 'save-order',
+        extras: {
+          seriesId,
+        },
+      });
       alert(`Error saving order. Reverted to last synced state.\n${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     } finally {
       setIsSaving(false);
@@ -1515,6 +1523,15 @@ const SeriesDetailsPage = () => {
       setRemoveTarget(null);
     } catch (err: unknown) {
       console.error('Error removing item:', err);
+      reportHandledError(err, {
+        area: 'admin-series-details',
+        action: 'remove-item',
+        extras: {
+          seriesId,
+          targetDisplayId: removeTarget.displayId,
+          targetSermonId: removeTarget.sermonId,
+        },
+      });
       alert(`Error removing item: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     } finally {
       setIsRemovingItem(false);
@@ -1566,6 +1583,14 @@ const SeriesDetailsPage = () => {
       setRemoveTarget(null);
     } catch (err: unknown) {
       console.error('Error removing item:', err);
+      reportHandledError(err, {
+        area: 'admin-series-details',
+        action: 'bulk-remove-items',
+        extras: {
+          seriesId,
+          targetDisplayIds: targets.map((target) => target.displayId),
+        },
+      });
       alert(`Error removing item: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     } finally {
       setIsRemovingItem(false);
@@ -1606,6 +1631,15 @@ const SeriesDetailsPage = () => {
 
       const sermonDoc = await getDoc(doc(firestore, 'sermons', sermon.id));
       if (!sermonDoc.exists()) {
+        reportHandledMessage('This sermon no longer exists. It may have been deleted.', {
+          area: 'admin-series-details',
+          action: 'add-item-missing-sermon',
+          level: 'warning',
+          extras: {
+            seriesId,
+            sermonId: sermon.id,
+          },
+        });
         alert('This sermon no longer exists. It may have been deleted.');
         setAvailableSermons((previousSermons) => previousSermons.filter((candidate) => candidate.id !== sermon.id));
         return false;
@@ -1616,6 +1650,15 @@ const SeriesDetailsPage = () => {
 
       const seriesDoc = await getDoc(doc(firestore, 'series', seriesId));
       if (!seriesDoc.exists()) {
+        reportHandledMessage('This series no longer exists. Redirecting to series list.', {
+          area: 'admin-series-details',
+          action: 'add-item-missing-series',
+          level: 'warning',
+          extras: {
+            seriesId,
+            sermonId: sermon.id,
+          },
+        });
         alert('This series no longer exists. Redirecting to series list.');
         router.push('/admin/series');
         return false;
@@ -1666,6 +1709,14 @@ const SeriesDetailsPage = () => {
       return true;
     } catch (err: unknown) {
       console.error('Error adding item:', err);
+      reportHandledError(err, {
+        area: 'admin-series-details',
+        action: 'add-item',
+        extras: {
+          seriesId,
+          sermonId: sermon.id,
+        },
+      });
       alert(`Error adding item: ${getErrorMessage(err, 'Unknown error')}`);
       return false;
     }
@@ -1699,6 +1750,15 @@ const SeriesDetailsPage = () => {
 
       const seriesDoc = await getDoc(doc(firestore, 'series', seriesId));
       if (!seriesDoc.exists()) {
+        reportHandledMessage('This series no longer exists. Redirecting to series list.', {
+          area: 'admin-series-details',
+          action: 'bulk-add-missing-series',
+          level: 'warning',
+          extras: {
+            seriesId,
+            sermonIds: sermonsToAdd.map((sermon) => sermon.id),
+          },
+        });
         alert('This series no longer exists. Redirecting to series list.');
         router.push('/admin/series');
         return;
@@ -1952,6 +2012,13 @@ const SeriesDetailsPage = () => {
       router.push('/admin/series');
     } catch (err: unknown) {
       console.error('Error deleting series:', err);
+      reportHandledError(err, {
+        area: 'admin-series-details',
+        action: 'delete-series',
+        extras: {
+          seriesId,
+        },
+      });
       alert(`Error deleting series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`);
     }
     setIsDeleting(false);
