@@ -419,6 +419,11 @@ function getYtDlpExternalDownloaderArgs(): string | undefined {
   return value || undefined;
 }
 
+function getPreferredDirectAudioFormatSelector(): string {
+  const configured = process.env.YTDLP_DIRECT_AUDIO_SELECTOR?.trim();
+  return configured || 'ba[ext=m4a]/ba[ext=webm]/ba';
+}
+
 function getYtDlpM3u8FfmpegDownloaderArgs(): string {
   const configured = process.env.YTDLP_M3U8_FFMPEG_DOWNLOADER_ARGS?.trim();
   if (configured) return configured;
@@ -1361,7 +1366,13 @@ async function probePrimaryOutputPartialFile(outputFilePath: string): Promise<{ 
 
   const candidates = fs
     .readdirSync(dir)
-    .filter((fileName) => fileName.startsWith(baseName) && fileName.endsWith('.part') && !fileName.includes('Frag'))
+    .filter((fileName) => {
+      if (!fileName.startsWith(baseName)) return false;
+      if (fileName.includes('Frag')) return false;
+      if (fileName.endsWith('.log')) return false;
+      if (fileName.endsWith('.ytdl')) return false;
+      return fileName.endsWith('.part') || path.basename(fileName, path.extname(fileName)) === baseName;
+    })
     .map((fileName) => ensureSafeTempPath(path.join(dir, fileName)));
 
   let bestCandidate: { path: string; size: number; mtimeMs: number } | null = null;
@@ -1722,7 +1733,9 @@ function selectPreferredAudioFormat(
   const livestreamMuxedCandidates = completedLivestream
     ? formats.filter((f) => f && f.vcodec !== 'none' && (f.protocol || '').toLowerCase().includes('m3u8'))
     : [];
-  const candidates = livestreamMuxedCandidates.length > 0 ? livestreamMuxedCandidates : audioOnlyCandidates;
+  const candidates = completedLivestream
+    ? [...audioOnlyCandidates, ...livestreamMuxedCandidates]
+    : audioOnlyCandidates;
   if (candidates.length === 0) return undefined;
 
   const normalize = (value: string | undefined): string => value?.trim().toLowerCase() || '';
@@ -1737,7 +1750,7 @@ function selectPreferredAudioFormat(
     return false;
   };
 
-  const originalCandidates = livestreamMuxedCandidates.length > 0 ? [] : candidates.filter(isOriginalAudioTrack);
+  const originalCandidates = candidates.filter(isOriginalAudioTrack);
   const effectiveCandidates = originalCandidates.length > 0 ? originalCandidates : candidates;
 
   candidates.sort((a, b) => {
@@ -1751,13 +1764,15 @@ function selectPreferredAudioFormat(
       if (descriptor.includes('default')) s += 300;
       if (targetLanguage && language === targetLanguage) s += 200;
       if (!completedLivestream && isAudioOnly) s += 400;
-      if (completedLivestream && protocol.includes('m3u8')) s += 1500;
+      if (completedLivestream && isAudioOnly) s += 2200;
+      if (completedLivestream && isAudioOnly && protocol === 'https') s += 700;
+      if (completedLivestream && !isAudioOnly && protocol.includes('m3u8')) s += 1200;
       if (completedLivestream && protocol.includes('dash')) s -= 1000;
       if (completedLivestream && protocol.includes('http_dash_segments')) s -= 4000;
       if (protocol === 'https') s += 120;
       if (protocol.includes('m3u8')) s += 100;
       if (fmt.ext === 'm4a') s += completedLivestream ? 20 : 100;
-      if (!completedLivestream && fmt.format_id === '140') s += 50;
+      if (fmt.format_id === '140') s += completedLivestream ? 250 : 50;
       if (descriptor.includes('drc')) s -= 25;
       if (typeof fmt.language_preference === 'number') s += fmt.language_preference * 10;
       if (typeof fmt.source_preference === 'number') s += fmt.source_preference;
@@ -1780,13 +1795,15 @@ function selectPreferredAudioFormat(
       if (descriptor.includes('default')) s += 300;
       if (targetLanguage && language === targetLanguage) s += 200;
       if (!completedLivestream && isAudioOnly) s += 400;
-      if (completedLivestream && protocol.includes('m3u8')) s += 1500;
+      if (completedLivestream && isAudioOnly) s += 2200;
+      if (completedLivestream && isAudioOnly && protocol === 'https') s += 700;
+      if (completedLivestream && !isAudioOnly && protocol.includes('m3u8')) s += 1200;
       if (completedLivestream && protocol.includes('dash')) s -= 1000;
       if (completedLivestream && protocol.includes('http_dash_segments')) s -= 4000;
       if (protocol === 'https') s += 120;
       if (protocol.includes('m3u8')) s += 100;
       if (fmt.ext === 'm4a') s += completedLivestream ? 20 : 100;
-      if (!completedLivestream && fmt.format_id === '140') s += 50;
+      if (fmt.format_id === '140') s += completedLivestream ? 250 : 50;
       if (descriptor.includes('drc')) s -= 25;
       if (typeof fmt.language_preference === 'number') s += fmt.language_preference * 10;
       if (typeof fmt.source_preference === 'number') s += fmt.source_preference;
@@ -3076,35 +3093,59 @@ export const downloadYouTubeAudioToFile = async (
   let previousPercent = -1;
   let cookieContext: YouTubeCookieContext | undefined;
   const cleaned = { done: false };
-  const { formatId, extractionMode, protocol, fragmentCount, durationSeconds } = await resolvePreferredAudioFormatId(
-    ytdlpPath,
-    url,
-    realtimeDB,
-    isDevelopment,
-    log,
-    ctx,
-    'download',
-    (context) => {
-      cookieContext = context;
-    }
-  );
+  const directAudioFormatSelector = getPreferredDirectAudioFormatSelector();
 
-  const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
-    const args = ['-f', formatId, '-N', getYtDlpConcurrentFragments(), '--no-playlist', '-o', `${outputFilePath}.%(ext)s`];
+  type DownloadAttemptConfig = {
+    formatSpec: string;
+    logFormatId: string;
+    protocol: string | null;
+    fragmentCount: number;
+    durationSeconds: number | null;
+    useConcurrentFragments: boolean;
+    useRequestPacing: boolean;
+    useExternalDownloader: boolean;
+    noPart: boolean;
+    noContinue: boolean;
+    extractAudio: boolean;
+    attemptStrategy: 'direct_audio' | 'resolved_fallback';
+  };
+
+  const buildArgs = (
+    mode: YouTubeExtractionMode,
+    config: DownloadAttemptConfig,
+    extraCookieArgs: string[] = []
+  ): string[] => {
+    const args = ['-f', config.formatSpec, '--no-playlist', '-o', `${outputFilePath}.%(ext)s`];
+    if (config.useConcurrentFragments) {
+      args.push('-N', getYtDlpConcurrentFragments());
+    }
+    if (config.noPart) {
+      args.push('--no-part');
+    }
+    if (config.noContinue) {
+      args.push('--no-continue');
+    }
+    if (config.extractAudio) {
+      args.push('-x');
+    }
     applyPreferredIpFamilyArgs(args);
-    maybeApplyYtDlpRequestPacingArgs(args, log, {
-      protocol,
-      fragmentCount,
-      context: 'file_download',
-    });
+    if (config.useRequestPacing) {
+      maybeApplyYtDlpRequestPacingArgs(args, log, {
+        protocol: config.protocol,
+        fragmentCount: config.fragmentCount,
+        context: 'file_download',
+      });
+    }
     if (extraCookieArgs.length > 0) {
       args.push(...extraCookieArgs);
     }
-    maybeApplyYtDlpExternalDownloaderArgs(args, log, {
-      protocol,
-      fragmentCount,
-      context: 'file_download',
-    });
+    if (config.useExternalDownloader) {
+      maybeApplyYtDlpExternalDownloaderArgs(args, log, {
+        protocol: config.protocol,
+        fragmentCount: config.fragmentCount,
+        context: 'file_download',
+      });
+    }
     args.push('--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());
     applyYouTubeExtractorArgs(args, mode, log);
     args.push(url);
@@ -3132,16 +3173,21 @@ export const downloadYouTubeAudioToFile = async (
     throw new Error(`yt-dlp did not create an output file for ${baseName}`);
   };
 
-  const execute = async (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): Promise<string> =>
+  const execute = async (
+    mode: YouTubeExtractionMode,
+    config: DownloadAttemptConfig,
+    extraCookieArgs: string[] = []
+  ): Promise<string> =>
     new Promise<string>((resolve, reject) => {
-      const args = buildArgs(mode, extraCookieArgs);
+      const args = buildArgs(mode, config, extraCookieArgs);
       const command = `${ytdlpPath} ${args.join(' ')}`;
       const stallTimeoutMs = getYtdlpDownloadStallTimeoutMs();
       const stallPollIntervalMs = Math.min(getYtdlpDownloadStallPollIntervalMs(), stallTimeoutMs);
       log.info('Executing yt-dlp file download command', {
         command,
-        formatId,
+        formatId: config.logFormatId,
         extractionMode: mode,
+        attemptStrategy: config.attemptStrategy,
         outputTemplate: `${outputFilePath}.%(ext)s`,
         stallTimeoutMs,
         stallPollIntervalMs,
@@ -3251,8 +3297,8 @@ export const downloadYouTubeAudioToFile = async (
 
         let progressPercent: number | null = null;
         const ffmpegTimeSeconds = extractFfmpegTime(stderrStr);
-        if (ffmpegTimeSeconds !== null && ffmpegTimeSeconds >= 0 && durationSeconds && durationSeconds > 0) {
-          progressPercent = Math.min(99, (ffmpegTimeSeconds / durationSeconds) * 100);
+        if (ffmpegTimeSeconds !== null && ffmpegTimeSeconds >= 0 && config.durationSeconds && config.durationSeconds > 0) {
+          progressPercent = Math.min(99, (ffmpegTimeSeconds / config.durationSeconds) * 100);
         } else {
           progressPercent = extractPercent(stderrStr);
         }
@@ -3280,15 +3326,16 @@ export const downloadYouTubeAudioToFile = async (
 
         void (async () => {
           const probe = await probeDownloadActivity(outputFilePath);
-          const estimatedPercent = extractFragmentProgressPercent(probe.partialFiles, fragmentCount);
+          const estimatedPercent = extractFragmentProgressPercent(probe.partialFiles, config.fragmentCount);
           if (estimatedPercent !== null) {
             const percentInt = Math.floor(estimatedPercent);
             if (percentInt > previousPercent && percentInt > lastEstimatedPercent) {
               applyProgressUpdate(estimatedPercent, 'fragment_estimate');
               log.info('Estimated yt-dlp download progress from fragment files', {
                 extractionMode: mode,
-                protocol,
-                fragmentCount,
+                protocol: config.protocol,
+                fragmentCount: config.fragmentCount,
+                attemptStrategy: config.attemptStrategy,
                 estimatedPercent,
               });
             }
@@ -3296,19 +3343,23 @@ export const downloadYouTubeAudioToFile = async (
             applyProgressUpdate(1, 'file_growth');
             log.info('Marked yt-dlp download as active from partial-file growth', {
               extractionMode: mode,
-              protocol,
-              fragmentCount,
+              protocol: config.protocol,
+              fragmentCount: config.fragmentCount,
+              attemptStrategy: config.attemptStrategy,
             });
           }
 
           const outputPart = await probePrimaryOutputPartialFile(outputFilePath);
           if (outputPart && outputPart.size > 0) {
-              const derivedPercent = estimatePercentFromOutputSize(outputPart.size);
-              if (derivedPercent !== null) {
-                applyProgressUpdate(derivedPercent, 'file_growth');
-              } else if (previousPercent < 1) {
-                applyProgressUpdate(1, 'file_growth');
-              }
+            const derivedPercent = estimatePercentFromOutputSize(outputPart.size);
+            if (derivedPercent !== null) {
+              applyProgressUpdate(derivedPercent, 'file_growth');
+            } else if (previousPercent < 1) {
+              applyProgressUpdate(1, 'file_growth');
+            }
+            if (outputPart.mtimeMs > lastActivityAt) {
+              markActivity('output_file_growth');
+            }
           }
 
           const latestObservedMtimeMs = probe.latestMtimeMs;
@@ -3336,6 +3387,7 @@ export const downloadYouTubeAudioToFile = async (
 
           log.error('yt-dlp download stalled; terminating process', {
             extractionMode: mode,
+            attemptStrategy: config.attemptStrategy,
             outputTemplate: `${outputFilePath}.%(ext)s`,
             stallTimeoutMs,
             stallDurationMs,
@@ -3362,30 +3414,114 @@ export const downloadYouTubeAudioToFile = async (
       }, stallPollIntervalMs);
     });
 
-  try {
-    return await execute(extractionMode, cookieContext?.args || []);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!shouldAttemptBrowserCookieRefresh(message, extractionMode, ctx)) {
-      throw error;
+  const getInitialDownloadAttempt = async (): Promise<{ mode: YouTubeExtractionMode; extraCookieArgs: string[] }> => {
+    if (!shouldUseCookiesForPublicVideos()) {
+      return { mode: 'public_provider', extraCookieArgs: [] };
     }
 
+    cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+    if (shouldPreferCookieProvider(cookieContext) && !cookieContext.cookieBreakerOpen) {
+      return { mode: 'cookie_provider', extraCookieArgs: cookieContext.args };
+    }
+
+    return { mode: 'public_provider', extraCookieArgs: [] };
+  };
+
+  const directAudioAttempt: DownloadAttemptConfig = {
+    formatSpec: directAudioFormatSelector,
+    logFormatId: directAudioFormatSelector,
+    protocol: 'https',
+    fragmentCount: 0,
+    durationSeconds: null,
+    useConcurrentFragments: false,
+    useRequestPacing: false,
+    useExternalDownloader: false,
+    noPart: true,
+    noContinue: true,
+    extractAudio: true,
+    attemptStrategy: 'direct_audio',
+  };
+
+  const runAttemptWithOptionalBrowserRefresh = async (
+    mode: YouTubeExtractionMode,
+    config: DownloadAttemptConfig,
+    extraCookieArgs: string[]
+  ): Promise<string> => {
     try {
-      await triggerBrowserYoutubeRefresh(log, ctx as LogContext);
-    } catch (refreshError) {
-      log.error('Shared browser YouTube session refresh failed before local file download retry', {
-        refreshError: refreshError instanceof Error ? refreshError.message : String(refreshError),
-        originalError: message,
+      return await execute(mode, config, extraCookieArgs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!shouldAttemptBrowserCookieRefresh(message, mode, ctx)) {
+        throw error;
+      }
+
+      try {
+        await triggerBrowserYoutubeRefresh(log, ctx as LogContext);
+      } catch (refreshError) {
+        log.error('Shared browser YouTube session refresh failed before local file download retry', {
+          refreshError: refreshError instanceof Error ? refreshError.message : String(refreshError),
+          originalError: message,
+          attemptStrategy: config.attemptStrategy,
+        });
+        throw error;
+      }
+
+      log.warn('Retrying yt-dlp file download after shared browser YouTube session refresh', {
+        extractionMode: mode,
+        formatId: config.logFormatId,
+        attemptStrategy: config.attemptStrategy,
       });
-      throw error;
+
+      return await execute(mode, config, extraCookieArgs);
     }
+  };
 
-    log.warn('Retrying yt-dlp file download after shared browser YouTube session refresh', {
-      extractionMode,
-      formatId,
-    });
+  try {
+    try {
+      const initialAttempt = await getInitialDownloadAttempt();
+      return await runAttemptWithOptionalBrowserRefresh(initialAttempt.mode, directAudioAttempt, initialAttempt.extraCookieArgs);
+    } catch (directAudioError) {
+      const directAudioMessage = directAudioError instanceof Error ? directAudioError.message : String(directAudioError);
+      log.warn('Primary direct-audio YouTube download failed; falling back to resolved format selection', {
+        url,
+        directAudioFormatSelector,
+        error: directAudioMessage,
+      });
 
-    return await execute(extractionMode, cookieContext?.args || []);
+      const { formatId, extractionMode, protocol, fragmentCount, durationSeconds } = await resolvePreferredAudioFormatId(
+        ytdlpPath,
+        url,
+        realtimeDB,
+        isDevelopment,
+        log,
+        ctx,
+        'download',
+        (context) => {
+          cookieContext = context;
+        }
+      );
+
+      const resolvedFallbackAttempt: DownloadAttemptConfig = {
+        formatSpec: formatId,
+        logFormatId: formatId,
+        protocol,
+        fragmentCount,
+        durationSeconds,
+        useConcurrentFragments: true,
+        useRequestPacing: true,
+        useExternalDownloader: true,
+        noPart: false,
+        noContinue: false,
+        extractAudio: false,
+        attemptStrategy: 'resolved_fallback',
+      };
+
+      return await runAttemptWithOptionalBrowserRefresh(
+        extractionMode,
+        resolvedFallbackAttempt,
+        cookieContext?.args || []
+      );
+    }
   } finally {
     cleanupCookiesFile(cookieContext?.cookiesFilePath, cleaned);
   }
