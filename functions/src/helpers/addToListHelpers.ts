@@ -131,6 +131,50 @@ export async function getFullListRowsWithTotal(listId: string, token: string): P
   };
 }
 
+export type ReconciledSubsplashListState = {
+  listDetails: SubsplashList;
+  rows: SubsplashListRow[];
+  materializedRowCount: number;
+  listRowsCount: number;
+  enforcedRowCount: number;
+  phantomRowCount: number;
+  maxItemCount: number;
+};
+
+export async function getReconciledListState(listId: string, token: string): Promise<ReconciledSubsplashListState> {
+  const [listDetails, { rows }] = await Promise.all([
+    getListDetails(listId, token),
+    getFullListRowsWithTotal(listId, token),
+  ]);
+
+  const materializedRowCount = rows.length;
+  const listRowsCount = Math.max(0, listDetails.list_rows_count ?? 0);
+  const enforcedRowCount = Math.max(listRowsCount, materializedRowCount);
+  const maxItemCount = listDetails.max_item_count ?? enforcedRowCount;
+  const phantomRowCount = Math.max(0, enforcedRowCount - materializedRowCount);
+
+  if (phantomRowCount > 0) {
+    logger.warn('Subsplash list count mismatch detected', {
+      listId,
+      listRowsCount,
+      materializedRowCount,
+      enforcedRowCount,
+      phantomRowCount,
+      maxItemCount,
+    });
+  }
+
+  return {
+    listDetails,
+    rows,
+    materializedRowCount,
+    listRowsCount,
+    enforcedRowCount,
+    phantomRowCount,
+    maxItemCount,
+  };
+}
+
 export async function getListDetails(listId: string, token: string): Promise<SubsplashList> {
   const config = createAxiosConfig(
     `https://core.subsplash.com/builder/v1/lists/${listId}`,

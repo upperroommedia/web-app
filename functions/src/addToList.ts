@@ -4,7 +4,7 @@ import { SubsplashListRow, SubsplashMediaItem } from './types/Subsplash';
 import {
   createListRow,
   getFullListRows,
-  getFullListRowsWithTotal,
+  getReconciledListState,
   patchListRows,
   createNewList,
   getListDetails,
@@ -356,20 +356,20 @@ const ensureListIsPatchableBeforeDestructiveMutation = async (
 
 const ensureExistingRowCountDoesNotExceedConfiguredMax = ({
   listId,
-  totalRowCount,
+  enforcedRowCount,
   maxListSize,
 }: {
   listId: string;
-  totalRowCount: number;
+  enforcedRowCount: number;
   maxListSize: number;
 }): void => {
-  if (totalRowCount <= maxListSize) {
+  if (enforcedRowCount <= maxListSize) {
     return;
   }
 
   throw new HttpsError(
     'failed-precondition',
-    `List ${listId} currently has ${totalRowCount} rows in Subsplash, which exceeds the configured maxListSize of ${maxListSize}. No changes were made.`
+    `List ${listId} currently has ${enforcedRowCount} enforced rows in Subsplash, which exceeds the configured maxListSize of ${maxListSize}. No changes were made.`
   );
 };
 
@@ -407,17 +407,17 @@ const computeOverflowContentKeepLimit = ({
 };
 
 const shouldOverflowAfterInsert = ({
-  totalRowCount,
+  enforcedRowCount,
   maxListSize,
   physicalMaxRowCount,
   currentRows,
 }: {
-  totalRowCount: number;
+  enforcedRowCount: number;
   maxListSize: number;
   physicalMaxRowCount: number;
   currentRows: SubsplashListRow[];
 }): boolean => {
-  if (totalRowCount >= maxListSize) {
+  if (enforcedRowCount >= maxListSize) {
     return true;
   }
 
@@ -426,7 +426,7 @@ const shouldOverflowAfterInsert = ({
     return false;
   }
 
-  return totalRowCount + 1 >= physicalMaxRowCount;
+  return enforcedRowCount + 1 >= physicalMaxRowCount;
 };
 
 const applyRemoveOldestMutation = async ({
@@ -675,18 +675,25 @@ async function processListStep(
     existingPlacementInChain,
   });
 
-  let { rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token);
+  let {
+    rows: currentRows,
+    enforcedRowCount,
+    phantomRowCount,
+    maxItemCount: physicalMaxRowCount,
+  } = await getReconciledListState(listId, token);
   let exists = currentRows.some((row) => getRemoteRowResourceId(row) === itemToAdd.id);
   listDebugLog('addToList.processListStep.remoteState', {
     listId,
-    totalRowCount,
+    enforcedRowCount,
+    phantomRowCount,
+    physicalMaxRowCount,
     exists,
     currentRows: summarizeSubsplashRows(currentRows),
   });
 
   ensureExistingRowCountDoesNotExceedConfiguredMax({
     listId,
-    totalRowCount,
+    enforcedRowCount,
     maxListSize,
   });
 
@@ -718,7 +725,12 @@ async function processListStep(
         token,
         maxListSize,
       });
-      ({ rows: currentRows, total: totalRowCount } = await getFullListRowsWithTotal(listId, token));
+      ({
+        rows: currentRows,
+        enforcedRowCount,
+        phantomRowCount,
+        maxItemCount: physicalMaxRowCount,
+      } = await getReconciledListState(listId, token));
       exists = currentRows.some((row) => getRemoteRowResourceId(row) === itemToAdd.id);
       existingPlacementInChain = exists
         ? {
@@ -762,7 +774,7 @@ async function processListStep(
       listData,
       currentRows,
       token,
-      totalRowCount,
+      totalRowCount: enforcedRowCount,
       maxListSize,
     });
 
@@ -778,10 +790,8 @@ async function processListStep(
   } else {
     const newRow = createListRow(itemToAdd, listId, 1);
     const updatedRows = [newRow, ...currentRows];
-    const listDetails = await getListDetails(listId, token);
-    const physicalMaxRowCount = listDetails.max_item_count ?? maxListSize;
     const willOverflow = shouldOverflowAfterInsert({
-      totalRowCount,
+      enforcedRowCount,
       maxListSize,
       physicalMaxRowCount,
       currentRows,
@@ -983,7 +993,7 @@ async function processListStep(
                     })
                   : buildRootListMetadata({
                       rootListId: listDoc.id,
-                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
                       hasOverflowPages: true,
                   })),
               },
@@ -1020,7 +1030,7 @@ async function processListStep(
                     })
                   : buildRootListMetadata({
                       rootListId: listDoc.id,
-                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : totalRowCount,
+                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
                       hasOverflowPages: true,
                     })),
               },
@@ -1122,7 +1132,8 @@ async function processListStep(
           });
         }
       } else if (listData.overflowBehavior === OverflowBehavior.REMOVEOLDEST) {
-        const finalRows = updatedRows.slice(0, maxListSize);
+        const effectiveVisibleCapacity = Math.max(0, maxListSize - phantomRowCount);
+        const finalRows = updatedRows.slice(0, effectiveVisibleCapacity);
         finalRowsSnapshot = await applyRemoveOldestMutation({
           listId,
           itemId: itemToAdd.id,

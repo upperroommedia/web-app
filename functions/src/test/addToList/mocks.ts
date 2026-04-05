@@ -212,7 +212,11 @@ export class SubsplashMock {
     if (
       this.fullCapacityPatchCreateFailures.has(id) &&
       containsNewRows &&
-      (existingRows.length >= maxAllowed || (existingRowsIncludeContinuationLink && existingRows.length >= maxAllowed - 1)) &&
+      (
+        existingRows.length >= maxAllowed ||
+        list.list_rows_count >= maxAllowed ||
+        (existingRowsIncludeContinuationLink && existingRows.length >= maxAllowed - 1)
+      ) &&
       rowCount >= maxAllowed
     ) {
       const error = new Error(`Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`);
