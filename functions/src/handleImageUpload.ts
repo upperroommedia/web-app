@@ -34,15 +34,20 @@ import handleError from './handleError';
 //   },
 // };
 
-const uploadImageToSubsplash = async (name: string, originalFile: string): Promise<string> => {
+const uploadImageToSubsplash = async (
+  name: string,
+  originalFile: string,
+  imageType: ImageSizeType,
+  contentType: string
+): Promise<string> => {
   //add resized image references to firestore image data
   logger.log('Getting subsplash info for new image upload');
   const bearerToken = await authenticateSubsplash();
   const requestData = {
     app_key: '9XTSHD',
-    content_type: 'image/jpeg',
+    content_type: contentType,
     title: name,
-    type: 'square',
+    type: imageType,
   };
   const config = createAxiosConfig('https://core.subsplash.com/files/v1/images', bearerToken, 'POST', requestData);
   logger.log('config', config);
@@ -66,7 +71,7 @@ const uploadImageToSubsplash = async (name: string, originalFile: string): Promi
     method: 'PUT',
     data: file,
     headers: {
-      'Content-Type': 'image/jpeg',
+      'Content-Type': contentType,
       Origin: 'https://dashboard.subsplash.com',
       'x-amz-acl': 'public-read',
     },
@@ -141,8 +146,9 @@ const handleImageUpload = onObjectFinalized(
 
       const downloadUrl = await ensureFirebaseDownloadUrl(remoteFile);
       logger.log('uploading to subsplash');
+      const imageType = metadata.type as ImageSizeType;
       const [subsplashImageId, computedImageMetadata] = await Promise.all([
-        uploadImageToSubsplash(imageName, originalFile),
+        uploadImageToSubsplash(imageName, originalFile, imageType, object.contentType),
         computeMetadataForImage(originalFile),
       ]);
 
@@ -152,7 +158,7 @@ const handleImageUpload = onObjectFinalized(
         id: subsplashImageId,
         subsplashId: subsplashImageId,
         size: 'original',
-        type: metadata.type as ImageSizeType,
+        type: imageType,
         downloadLink: downloadUrl,
         name: imageName,
         dateAddedMillis: new Date().getTime(),
