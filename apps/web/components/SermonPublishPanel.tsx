@@ -83,7 +83,7 @@ import useAuth from '../context/user/UserContext';
 interface SermonPublishPanelProps {
   sermon: Sermon;
   onUpdate?: () => void;
-  onBusyStateChange?: (busy: boolean) => void;
+  onBusyStateChange?: (activity: DestinationActivityState) => void;
   onRequestAddToSeries?: () => void;
   initialAdvancedOpen?: boolean;
 }
@@ -385,6 +385,11 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
   const [selectedSeriesEnabled, setSelectedSeriesEnabled] = useState(false);
   const [selectedSoundCloudEnabled, setSelectedSoundCloudEnabled] = useState(false);
+  const isBusy =
+    isUploadingToSoundCloud ||
+    isUploadingToSubsplash ||
+    isPublishingToSeries ||
+    isPublishingEverywhere;
 
   const [listArrayFirestore, loading, listError] = useCollectionData(
     collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter)
@@ -418,15 +423,9 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     };
   }, [listArray, selectedListIds]);
 
-  const isBusy =
-    isUploadingToSoundCloud ||
-    isUploadingToSubsplash ||
-    isPublishingToSeries ||
-    isPublishingEverywhere;
-
   useEffect(() => {
-    onBusyStateChange?.(isBusy);
-  }, [isBusy, onBusyStateChange]);
+    onBusyStateChange?.(destinationActivity);
+  }, [destinationActivity, onBusyStateChange]);
 
   useEffect(() => {
     if (listArray.length === 0) {

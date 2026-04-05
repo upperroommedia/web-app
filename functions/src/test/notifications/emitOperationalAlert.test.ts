@@ -2,6 +2,7 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { emitOperationalAlert } from '../../notifications/emitOperationalAlert';
 import * as queueEmailModule from '../../notifications/queueEmail';
+import * as sentryModule from '../../sentry';
 import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 jest.setTimeout(45_000);
@@ -24,6 +25,7 @@ const clearCollection = async (collectionName: string): Promise<void> => {
 describe('emitOperationalAlert', () => {
   beforeEach(async () => {
     jest.restoreAllMocks();
+    jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
     await clearCollection('mail');
   });
 
@@ -42,6 +44,15 @@ describe('emitOperationalAlert', () => {
       },
     });
 
+    expect(sentryModule.captureFunctionsExceptionAndFlush).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        tags: expect.objectContaining({
+          alertCode: 'AUDIO_PIPELINE_FAILURE',
+          functionName: 'processaudiotask',
+        }),
+      })
+    );
     expect(loggerSpy).toHaveBeenCalledTimes(1);
     expect(loggerSpy.mock.calls[0]).toMatchObject([
       'operational alert emitted',

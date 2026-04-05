@@ -1,1 +1,1 @@
-export const sentryBuildGitSha = 'a51adbb0f9546cb4a2a8a60f68e2ef0d83aca8a0' as const;
+export const sentryBuildGitSha = 'feefe4c595794844e3f6ba8a1b8beef24603a321' as const;

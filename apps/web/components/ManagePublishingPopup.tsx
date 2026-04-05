@@ -10,13 +10,14 @@ import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import { Sermon } from '../types/SermonTypes';
+import type { DestinationActivityState } from '../utils/sermonPublishActions';
 
 interface ManagePublishingPopupProps {
   sermon: Sermon;
   open: boolean;
   onClose: () => void;
   onUpdate?: () => void;
-  onBusyStateChange?: (busy: boolean) => void;
+  onBusyStateChange?: (activity: DestinationActivityState) => void;
 }
 
 const ManagePublishingPopup: FunctionComponent<ManagePublishingPopupProps> = ({

@@ -7,6 +7,7 @@ import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { isAxiosError } from 'axios';
 import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
+import { startFunctionsSpan } from './sentry';
 
 export interface DeleteFromSoundCloudInputType {
   soundCloudTrackId: string;
@@ -17,14 +18,23 @@ export type DeleteFromSoundCloudReturnType = void;
 const deleteFromSoundCloud = onCall(
   { secrets: soundcloudSecretsWithRuntimeAlerts },
   async (request: CallableRequest<DeleteFromSoundCloudInputType>): Promise<DeleteFromSoundCloudReturnType> => {
-    logger.log('deleteFromSoundCloud', request);
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
+    logger.log('deleteFromSoundCloud.start', {
+      soundCloudTrackId: request.data.soundCloudTrackId,
+    });
     try {
-      logger.log('Attempting to delete from SoundCloud', request.data);
-      await runWithSoundCloudAccessToken((token) => deleteTrack(token, request.data.soundCloudTrackId));
-      logger.log('Track deleted from SoundCloud');
+      await startFunctionsSpan(
+        {
+          name: 'deleteFromSoundCloud',
+          op: 'soundcloud.delete',
+        },
+        () => runWithSoundCloudAccessToken((token) => deleteTrack(token, request.data.soundCloudTrackId))
+      );
+      logger.log('deleteFromSoundCloud.success', {
+        soundCloudTrackId: request.data.soundCloudTrackId,
+      });
     } catch (error) {
       if (error instanceof HttpsError) {
         await emitSoundCloudReconnectAlertIfNeeded({
@@ -40,7 +50,9 @@ const deleteFromSoundCloud = onCall(
       }
 
       if (isAxiosError(error) && error.response?.status === 404) {
-        logger.warn(`SoundCloud track not found (already deleted): ${request.data.soundCloudTrackId}`);
+        logger.warn('deleteFromSoundCloud.notFound', {
+          soundCloudTrackId: request.data.soundCloudTrackId,
+        });
         return;
       }
 

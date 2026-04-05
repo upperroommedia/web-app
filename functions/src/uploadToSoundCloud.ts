@@ -7,6 +7,7 @@ import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { emitSoundCloudReconnectAlertIfNeeded } from './soundcloudAuthAlerting';
+import { startFunctionsSpan } from './sentry';
 
 export interface UploadToSoundCloudInputType {
   audioStoragePath: string;
@@ -26,25 +27,46 @@ export type UploadToSoundCloudReturnType = {
 const uploadToSoundCloudCall = onCall(
   { secrets: soundcloudSecretsWithRuntimeAlerts },
   async (request: CallableRequest<UploadToSoundCloudInputType>): Promise<UploadToSoundCloudReturnType> => {
-    logger.log('uploadToSoundCloud', request);
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
     const data = request.data;
     const bucket = firebaseAdmin.storage().bucket();
+    logger.log('uploadToSoundCloud.start', {
+      audioStoragePath: data.audioStoragePath,
+      hasImageSource: Boolean(data.imageSource ?? data.imageStoragePath),
+      speakerCount: data.speakers.length,
+      tagCount: data.tags.length,
+      titleLength: data.title.length,
+    });
     try {
-      const uploadResult = await runWithSoundCloudAccessToken((token) =>
-        uploadTrack(token, {
-          bucket,
-          audioStoragePath: data.audioStoragePath,
-          imageSource: data.imageSource ?? data.imageStoragePath,
-          title: data.title,
-          tags: data.tags,
-          description: data.description,
-        })
+      const uploadResult = await startFunctionsSpan(
+        {
+          name: 'uploadToSoundCloud',
+          op: 'soundcloud.upload',
+          attributes: {
+            hasImageSource: Boolean(data.imageSource ?? data.imageStoragePath),
+            speakerCount: data.speakers.length,
+            tagCount: data.tags.length,
+          },
+        },
+        () =>
+          runWithSoundCloudAccessToken((token) =>
+            uploadTrack(token, {
+              bucket,
+              audioStoragePath: data.audioStoragePath,
+              imageSource: data.imageSource ?? data.imageStoragePath,
+              title: data.title,
+              tags: data.tags,
+              description: data.description,
+            })
+          )
       );
       const soundCloudTrackId = uploadResult.trackIdentifier;
-      logger.log('SoundCloud upload response track id', soundCloudTrackId);
+      logger.log('uploadToSoundCloud.success', {
+        audioStoragePath: data.audioStoragePath,
+        soundCloudTrackId,
+      });
       return {
         soundCloudTrackId,
         ...(uploadResult.permalinkUrl ? { soundCloudTrackUrl: uploadResult.permalinkUrl } : {}),

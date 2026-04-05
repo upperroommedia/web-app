@@ -7,6 +7,7 @@ import { getAdminBaseUrl, getRuntimeAlertRecipients } from './notificationParams
 import { OperationalAlertPayload } from './notificationTypes';
 import { queueEmail } from './queueEmail';
 import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
+import { captureFunctionsExceptionAndFlush } from '../sentry';
 
 const OPERATIONAL_ALERT_EMITTED = Symbol.for('urm.operationalAlertEmitted');
 
@@ -121,6 +122,26 @@ export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Pr
   const payload = buildAlertPayload(input, Date.now());
   markOperationalAlertEmitted(input.error);
   try {
+    try {
+      await captureFunctionsExceptionAndFlush(input.error, {
+        tags: {
+          alertCode: payload.alertCode,
+          ...(typeof payload.context?.functionName === 'string' ? { functionName: payload.context.functionName } : {}),
+        },
+        extra: {
+          summary: payload.summary,
+          occurredAtMs: payload.occurredAtMs,
+          ...(payload.context ? { context: payload.context } : {}),
+        },
+      });
+    } catch (sentryError) {
+      logger.error('failed to send operational alert to sentry', {
+        alertCode: payload.alertCode,
+        summary: payload.summary,
+        sentryErrorMessage: sentryError instanceof Error ? sentryError.message : String(sentryError),
+      });
+    }
+
     const recipients = getRuntimeAlertRecipients();
 
     logger.error('operational alert emitted', {

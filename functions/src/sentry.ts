@@ -81,6 +81,12 @@ type FunctionsSentryContext = {
   extra?: Record<string, unknown>;
 };
 
+type FunctionsSpanOptions = {
+  name: string;
+  op: string;
+  attributes?: Record<string, string | number | boolean | undefined>;
+};
+
 const captureWithContext = (error: unknown, context?: FunctionsSentryContext): string | undefined => {
   return Sentry.withScope((scope) => {
     if (context?.tags) {
@@ -124,4 +130,30 @@ export const captureFunctionsExceptionAndFlush = async (
 
   await Sentry.flush(flushTimeoutMs);
   return eventId;
+};
+
+export const startFunctionsSpan = async <T>(
+  options: FunctionsSpanOptions,
+  callback: () => Promise<T>
+): Promise<T> => {
+  if (!initialized) {
+    initFunctionsSentry();
+  }
+
+  if (!Sentry.isEnabled()) {
+    return callback();
+  }
+
+  const attributes = Object.fromEntries(
+    Object.entries(options.attributes ?? {}).filter(([, value]) => typeof value !== 'undefined')
+  );
+
+  return Sentry.startSpan(
+    {
+      name: options.name,
+      op: options.op,
+      attributes,
+    },
+    callback
+  );
 };

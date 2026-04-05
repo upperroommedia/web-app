@@ -1,17 +1,28 @@
 import axios from 'axios';
 import type { Bucket } from '@google-cloud/storage';
 import { deleteTrack, updateTrack, uploadTrack } from '../../soundcloudClient';
+import { Readable } from 'node:stream';
 
 jest.mock('axios');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
-const createBucket = (): Bucket =>
-  ({
-    file: () => ({
-      download: jest.fn(async () => [Buffer.from('file-data')]),
-    }),
-  }) as unknown as Bucket;
+type MockFile = {
+  getMetadata: jest.Mock;
+  createReadStream: jest.Mock;
+};
+
+const createBucket = (): Bucket & { __file: MockFile } => {
+  const file = {
+    getMetadata: jest.fn(async () => [{ size: '9', contentType: 'audio/mpeg' }]),
+    createReadStream: jest.fn(() => Readable.from(['file-data'])),
+  };
+
+  return {
+    file: jest.fn(() => file),
+    __file: file,
+  } as unknown as Bucket & { __file: MockFile };
+};
 
 describe('soundcloudClient', () => {
   beforeEach(() => {
@@ -19,6 +30,7 @@ describe('soundcloudClient', () => {
   });
 
   it('prefers the documented urn identifier in upload responses', async () => {
+    const bucket = createBucket();
     mockedAxios.post.mockResolvedValue({
       data: {
         urn: 'soundcloud:tracks:12345',
@@ -27,7 +39,7 @@ describe('soundcloudClient', () => {
     });
 
     const trackResult = await uploadTrack('access-token', {
-      bucket: createBucket(),
+      bucket,
       audioStoragePath: 'audio/file.mp3',
       title: 'Test track',
       tags: ['sermon'],
@@ -37,6 +49,8 @@ describe('soundcloudClient', () => {
     expect(trackResult).toEqual({
       trackIdentifier: 'soundcloud:tracks:12345',
     });
+    expect(bucket.__file.getMetadata).toHaveBeenCalled();
+    expect(bucket.__file.createReadStream).toHaveBeenCalled();
   });
 
   it('URL-encodes track identifiers for metadata updates', async () => {
@@ -71,5 +85,52 @@ describe('soundcloudClient', () => {
       'https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A12345',
       expect.any(Object)
     );
+  });
+
+  it('streams remote artwork instead of buffering it before upload', async () => {
+    const bucket = createBucket();
+    mockedAxios.get.mockResolvedValue({
+      data: Readable.from(['image-data']),
+      headers: {
+        'content-type': 'image/png',
+        'content-length': '10',
+      },
+    } as never);
+    mockedAxios.post.mockResolvedValue({
+      data: {
+        urn: 'soundcloud:tracks:999',
+      },
+    });
+
+    await uploadTrack('access-token', {
+      bucket,
+      audioStoragePath: 'audio/file.mp3',
+      imageSource: 'https://storage.googleapis.com/example/image.png',
+      title: 'Test track',
+      tags: ['sermon'],
+      description: 'Description',
+    });
+
+    expect(mockedAxios.get).toHaveBeenCalledWith('https://storage.googleapis.com/example/image.png', {
+      responseType: 'stream',
+    });
+  });
+
+  it('streams artwork updates from storage instead of downloading buffers', async () => {
+    const bucket = createBucket();
+    bucket.__file.getMetadata.mockResolvedValueOnce([{ size: '10', contentType: 'image/jpeg' }]);
+    mockedAxios.put.mockResolvedValue({
+      data: {
+        permalink_url: 'https://soundcloud.com/upper-room-media/test-track',
+      },
+    });
+
+    await updateTrack('access-token', 'soundcloud:tracks:12345', {
+      imageSource: 'images/artwork.jpg',
+      bucket,
+    });
+
+    expect(bucket.__file.getMetadata).toHaveBeenCalled();
+    expect(bucket.__file.createReadStream).toHaveBeenCalled();
   });
 });

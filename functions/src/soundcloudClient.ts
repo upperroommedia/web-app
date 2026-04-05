@@ -10,6 +10,8 @@ import axios, { AxiosError, isAxiosError } from 'axios';
 import FormData from 'form-data';
 import { Bucket } from '@google-cloud/storage';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
+import { basename, extname } from 'node:path';
+import { Readable } from 'node:stream';
 
 const SOUNDCLOUD_API_BASE = 'https://api.soundcloud.com';
 
@@ -86,14 +88,94 @@ function formatTagList(tags: string[]): string {
   return tags.map((t) => (t.includes(' ') ? `"${t}"` : t)).join(' ');
 }
 
-async function downloadImageSource(bucket: Bucket, source: string): Promise<Buffer> {
-  if (/^https?:\/\//i.test(source)) {
-    const response = await axios.get(source, { responseType: 'arraybuffer' });
-    return Buffer.from(response.data);
+type MultipartStreamSource = {
+  stream: Readable;
+  filename: string;
+  contentType: string;
+  knownLength?: number;
+};
+
+const parseKnownLength = (rawValue: unknown): number | undefined => {
+  if (typeof rawValue === 'number' && Number.isFinite(rawValue) && rawValue >= 0) {
+    return rawValue;
   }
 
-  const [imageBuffer] = await bucket.file(source).download();
-  return imageBuffer;
+  if (typeof rawValue !== 'string') {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(rawValue.trim(), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+};
+
+const inferFilenameFromPath = (value: string, fallback: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const candidate = basename(trimmed);
+  return candidate.length > 0 ? candidate : fallback;
+};
+
+const inferFilenameFromUrl = (source: string, fallback: string): string => {
+  try {
+    const url = new URL(source);
+    const candidate = basename(decodeURIComponent(url.pathname));
+    return candidate.length > 0 ? candidate : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const inferImageContentTypeFromFilename = (filename: string): string => {
+  const extension = extname(filename).toLowerCase();
+  switch (extension) {
+    case '.png':
+      return 'image/png';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    case '.jpeg':
+    case '.jpg':
+    default:
+      return 'image/jpeg';
+  }
+};
+
+async function createBucketStreamSource(
+  bucket: Bucket,
+  storagePath: string,
+  fallbackFilename: string,
+  fallbackContentType: string
+): Promise<MultipartStreamSource> {
+  const file = bucket.file(storagePath);
+  const [metadata] = await file.getMetadata();
+  const filename = inferFilenameFromPath(storagePath, fallbackFilename);
+  return {
+    stream: file.createReadStream(),
+    filename,
+    contentType: metadata.contentType || fallbackContentType,
+    knownLength: parseKnownLength(metadata.size),
+  };
+}
+
+async function createImageSourceStream(bucket: Bucket, source: string): Promise<MultipartStreamSource> {
+  if (/^https?:\/\//i.test(source)) {
+    const response = await axios.get<Readable>(source, { responseType: 'stream' });
+    const filename = inferFilenameFromUrl(source, 'artwork.jpg');
+    return {
+      stream: response.data,
+      filename,
+      contentType:
+        (typeof response.headers['content-type'] === 'string' && response.headers['content-type']) ||
+        inferImageContentTypeFromFilename(filename),
+      knownLength: parseKnownLength(response.headers['content-length']),
+    };
+  }
+
+  return createBucketStreamSource(bucket, source, 'artwork.jpg', inferImageContentTypeFromFilename(source));
 }
 
 /**
@@ -101,21 +183,28 @@ async function downloadImageSource(bucket: Bucket, source: string): Promise<Buff
  * Firebase Storage, then POSTs multipart/form-data to SoundCloud.
  */
 export async function uploadTrack(accessToken: string, params: UploadTrackParams): Promise<SoundCloudTrackResult> {
-  const [audioBuf] = await params.bucket.file(params.audioStoragePath).download();
+  const audioSource = await createBucketStreamSource(
+    params.bucket,
+    params.audioStoragePath,
+    'audio.mp3',
+    'audio/mpeg'
+  );
   const form = new FormData();
   form.append('track[title]', params.title);
-  form.append('track[asset_data]', audioBuf, {
-    filename: 'audio.mp3',
-    contentType: 'audio/mpeg',
+  form.append('track[asset_data]', audioSource.stream, {
+    filename: audioSource.filename,
+    contentType: audioSource.contentType,
+    knownLength: audioSource.knownLength,
   });
   form.append('track[tag_list]', formatTagList(params.tags));
   form.append('track[description]', params.description);
 
   if (params.imageSource) {
-    const imgBuf = await downloadImageSource(params.bucket, params.imageSource);
-    form.append('track[artwork_data]', imgBuf, {
-      filename: 'artwork.jpg',
-      contentType: 'image/jpeg',
+    const imageSource = await createImageSourceStream(params.bucket, params.imageSource);
+    form.append('track[artwork_data]', imageSource.stream, {
+      filename: imageSource.filename,
+      contentType: imageSource.contentType,
+      knownLength: imageSource.knownLength,
     });
   }
 
@@ -164,10 +253,11 @@ export async function updateTrack(
     if (params.title != null) form.append('track[title]', params.title);
     if (params.description != null) form.append('track[description]', params.description);
     if (params.tags != null) form.append('track[tag_list]', formatTagList(params.tags));
-    const imgBuf = await downloadImageSource(params.bucket!, params.imageSource!);
-    form.append('track[artwork_data]', imgBuf, {
-      filename: 'artwork.jpg',
-      contentType: 'image/jpeg',
+    const imageSource = await createImageSourceStream(params.bucket!, params.imageSource!);
+    form.append('track[artwork_data]', imageSource.stream, {
+      filename: imageSource.filename,
+      contentType: imageSource.contentType,
+      knownLength: imageSource.knownLength,
     });
     const response = await axios.put(`${SOUNDCLOUD_API_BASE}/tracks/${encodeTrackIdentifier(trackId)}`, form, {
       headers: {
