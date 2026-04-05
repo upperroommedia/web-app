@@ -14,6 +14,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { runtimeAlertRecipientsSecret } from './notifications/notificationSecrets';
+import { functionsSentryDsnSecret } from './sentry';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
 
 const SOUND_CLOUD_TOKEN_URL = 'https://secure.soundcloud.com/oauth/token';
@@ -623,6 +624,7 @@ export const soundcloudSecretsWithRuntimeAlerts = [
   soundcloudClientIdSecret,
   soundcloudClientSecretSecret,
   runtimeAlertRecipientsSecret,
+  functionsSentryDsnSecret,
 ];
 
 export const soundcloudOAuthSecrets = [soundcloudClientIdSecret, soundcloudClientSecretSecret];
