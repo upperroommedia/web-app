@@ -65,6 +65,7 @@ import {
 import { getSquareImageDownloadLink } from '../utils/utils';
 import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../utils/soundcloudAuthRecovery';
 import { PublishDestinationState, getListsDestinationState, summarizePublishRun } from '../utils/sermonPublishingUi';
+import { runPublishEverywhereFlow } from '../utils/publishEverywhereFlow';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import type { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '@upperroom/contracts/uploadToSoundCloud';
 import type { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
@@ -102,6 +103,10 @@ type ListPublishResult = {
 type SeriesPublishResult = {
   status: 'success' | 'error';
   error?: string;
+};
+
+type SubsplashMediaItemResult = {
+  mediaItemId: string;
 };
 
 type ActionPlan = {
@@ -753,47 +758,55 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     }
   }, [onUpdate, sermon, user]);
 
+  const ensureSubsplashMediaItem = useCallback(async (): Promise<SubsplashMediaItemResult> => {
+    if (sermon.subsplashId) {
+      return { mediaItemId: sermon.subsplashId };
+    }
+
+    const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
+    const uploadOperationKey = createSubsplashUploadIntentKey(
+      'manage-publishing-upload',
+      sermon.id,
+      sermon.subsplashUploadGeneration
+    );
+    const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
+    const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
+      title: sermon.title,
+      subtitle: sermon.subtitle,
+      speakers: sermon.speakers,
+      autoPublish: !isDevelopment,
+      audioTitle: sermon.title,
+      audioUrl: url,
+      topics: sermon.topics,
+      description: sermon.description,
+      images: sermon.images,
+      date: new Date(sermon.dateMillis),
+    };
+    const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
+    const response = (await uploadToSubsplashCallable({
+      ...data,
+      operationKey: uploadOperationKey,
+      lockKey: sermon.id,
+    })) as unknown as { id: string };
+    await updateDoc(sermonRef, {
+      subsplashId: response.id,
+      approverId: user?.uid,
+    });
+    return { mediaItemId: response.id };
+  }, [sermon, user?.uid]);
+
   const uploadToSubsplash = useCallback(async (
     listsToUploadTo: SermonList[],
-    options?: { suppressNotice?: boolean }
+    options?: { suppressNotice?: boolean; existingMediaItemId?: string }
   ): Promise<ListPublishResult> => {
     setIsUploadingToSubsplash(true);
     setDestinationErrors((previous) => ({ ...previous, lists: undefined }));
 
     try {
       const subsplashIdToListIdMap = new Map<string, string>();
-      const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
-      const uploadOperationKey = createSubsplashUploadIntentKey(
-        'manage-publishing-upload',
-        sermon.id,
-        sermon.subsplashUploadGeneration
-      );
-      const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
-      const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
-        title: sermon.title,
-        subtitle: sermon.subtitle,
-        speakers: sermon.speakers,
-        autoPublish: !isDevelopment,
-        audioTitle: sermon.title,
-        audioUrl: url,
-        topics: sermon.topics,
-        description: sermon.description,
-        images: sermon.images,
-        date: new Date(sermon.dateMillis),
-      };
-
-      let id = sermon.subsplashId;
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-      if (!id) {
-        const response = (await uploadToSubsplashCallable({
-          ...data,
-          operationKey: uploadOperationKey,
-          lockKey: sermon.id,
-        })) as unknown as { id: string };
-        id = response.id;
-        await updateDoc(sermonRef, { subsplashId: id });
-      }
+      const id = options?.existingMediaItemId || (await ensureSubsplashMediaItem()).mediaItemId;
 
       const listsMetadata = await Promise.all(
         listsToUploadTo.map(async (list) => {
@@ -949,7 +962,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     } finally {
       setIsUploadingToSubsplash(false);
     }
-  }, [onUpdate, sermon, user?.uid]);
+  }, [ensureSubsplashMediaItem, onUpdate, sermon, user?.uid]);
 
   const removeFromLists = useCallback(async (
     listsToRemoveFrom: SermonList[],
@@ -1317,18 +1330,49 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
 
     const nextStatuses: PublishDestinationState[] = [];
     try {
-      let mediaItemId = sermon.subsplashId;
       const listsToPublish = listArray.filter((list) => basicActionPlan.publishListIds.includes(list.id));
+      const shouldPublishLists = listsToPublish.length > 0;
+      const shouldPublishSeries = Boolean(sermon.seriesId && basicActionPlan.publishSeries);
+      const shouldPublishSoundCloud = basicActionPlan.publishSoundCloud;
+      const sharedActivity: DestinationActivityState = {
+        listOperation: shouldPublishLists ? 'publish' : 'idle',
+        listIds: shouldPublishLists ? listsToPublish.map((list) => list.id) : [],
+        seriesOperation: shouldPublishSeries ? 'publish' : 'idle',
+        soundCloudOperation: shouldPublishSoundCloud ? 'publish' : 'idle',
+      };
 
-      if (listsToPublish.length > 0) {
-        const listResult = await runWithDestinationActivity({
-          listOperation: 'publish',
-          listIds: listsToPublish.map((list) => list.id),
-          seriesOperation: 'idle',
-          soundCloudOperation: 'idle',
-        }, async () => uploadToSubsplash(listsToPublish, { suppressNotice: true }));
+      setDestinationActivity(sharedActivity);
+      const { listResult, seriesResult, soundCloudResult } = await runPublishEverywhereFlow<
+        ListPublishResult,
+        SeriesPublishResult,
+        SeriesPublishResult
+      >({
+        shouldPublishLists,
+        shouldPublishSeries,
+        shouldPublishSoundCloud,
+        initialMediaItemId: sermon.subsplashId,
+        ensureMediaItem: async () => {
+          try {
+            return await ensureSubsplashMediaItem();
+          } catch (error: unknown) {
+            const message = getLockBusyMessage(error, getErrorMessage(error, 'Failed to publish to Subsplash.'));
+            setDestinationErrors((previous) => ({
+              ...previous,
+              lists: shouldPublishLists ? message : previous.lists,
+              series: shouldPublishSeries ? message : previous.series,
+            }));
+            throw new Error(message);
+          }
+        },
+        publishLists: async (mediaItemId) =>
+          uploadToSubsplash(listsToPublish, { suppressNotice: true, existingMediaItemId: mediaItemId }),
+        publishSeries: async (mediaItemId) => publishToSeries({ mediaItemId, suppressNotice: true }),
+        publishSoundCloud: async () => uploadToSoundCloud(),
+        createPrepErrorResult: (error) => ({ status: 'error', error }),
+      });
+
+      if (listResult) {
         if (listResult.status === 'success') {
-          mediaItemId = listResult.mediaItemId || mediaItemId;
           nextStatuses.push({
             state: 'published',
             label: 'Published',
@@ -1345,57 +1389,25 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         nextStatuses.push(listsStatus);
       }
 
-      if (sermon.seriesId && basicActionPlan.publishSeries) {
-        if (!mediaItemId) {
-          const prepResult = await runWithDestinationActivity({
-            listOperation: 'idle',
-            listIds: [],
-            seriesOperation: 'publish',
-            soundCloudOperation: 'idle',
-          }, async () => uploadToSubsplash([], { suppressNotice: true }));
-          if (prepResult.status === 'success') {
-            mediaItemId = prepResult.mediaItemId || mediaItemId;
-          } else {
-            nextStatuses.push({
-              state: 'error',
-              label: 'Series publish failed',
-              error: prepResult.error,
-            });
-          }
-        }
-
-        if (mediaItemId) {
-          const seriesResult = await runWithDestinationActivity({
-            listOperation: 'idle',
-            listIds: [],
-            seriesOperation: 'publish',
-            soundCloudOperation: 'idle',
-          }, async () => publishToSeries({ mediaItemId, suppressNotice: true }));
-          if (seriesResult.status === 'success') {
-            nextStatuses.push({
-              state: 'published',
-              label: 'Published',
-              details: series ? `${series.name} was published.` : 'Series membership was published.',
-            });
-          } else {
-            nextStatuses.push({
-              state: canPublishToSeries ? 'error' : 'blocked',
-              label: canPublishToSeries ? 'Series publish failed' : 'Series publish blocked',
-              error: seriesResult.error,
-            });
-          }
+      if (seriesResult) {
+        if (seriesResult.status === 'success') {
+          nextStatuses.push({
+            state: 'published',
+            label: 'Published',
+            details: series ? `${series.name} was published.` : 'Series membership was published.',
+          });
+        } else {
+          nextStatuses.push({
+            state: canPublishToSeries ? 'error' : 'blocked',
+            label: canPublishToSeries ? 'Series publish failed' : 'Series publish blocked',
+            error: seriesResult.error,
+          });
         }
       } else {
         nextStatuses.push(seriesStatus);
       }
 
-      if (basicActionPlan.publishSoundCloud) {
-        const soundCloudResult = await runWithDestinationActivity({
-          listOperation: 'idle',
-          listIds: [],
-          seriesOperation: 'idle',
-          soundCloudOperation: 'publish',
-        }, async () => uploadToSoundCloud());
+      if (soundCloudResult) {
         nextStatuses.push(
           soundCloudResult.status === 'success'
             ? {
@@ -1428,13 +1440,13 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     listArray,
     listsStatus,
     publishToSeries,
-    runWithDestinationActivity,
     series,
     seriesStatus,
     sermon.seriesId,
     sermon.subsplashId,
     setNoticeFromRun,
     soundCloudStatus,
+    ensureSubsplashMediaItem,
     uploadToSoundCloud,
     uploadToSubsplash,
   ]);
