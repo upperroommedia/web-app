@@ -1,3 +1,6 @@
+import { SermonList } from '../types/SermonList';
+import { uploadStatus } from '../types/SermonTypes';
+
 export interface AdvancedSelectionSummaryInput {
   publishListCount: number;
   unpublishListCount: number;
@@ -14,6 +17,38 @@ export interface AdvancedSelectionSummary {
   hasUnpublishChanges: boolean;
   isMixedDirection: boolean;
   isPureUnpublish: boolean;
+}
+
+export interface BasicPublishActionPlanInput {
+  lists: SermonList[];
+  hasSeriesId: boolean;
+  seriesPublished: boolean | null;
+  canPublishToSeries: boolean;
+  isSoundCloudUploaded: boolean;
+  isDevelopment: boolean;
+}
+
+export interface BasicPublishActionPlan {
+  publishListIds: string[];
+  unpublishListIds: string[];
+  publishSeries: boolean;
+  unpublishSeries: boolean;
+  publishSoundCloud: boolean;
+  unpublishSoundCloud: boolean;
+  publishLabel: string;
+  hasPublishTargets: boolean;
+  hasUnpublishTargets: boolean;
+  showPublishButton: boolean;
+  showUnpublishButton: boolean;
+}
+
+export type DestinationOperation = 'idle' | 'publish' | 'unpublish';
+
+export interface DestinationActivityState {
+  listOperation: DestinationOperation;
+  listIds: string[];
+  seriesOperation: DestinationOperation;
+  soundCloudOperation: DestinationOperation;
 }
 
 const formatParts = (parts: string[]): string => parts.join(', ');
@@ -92,3 +127,52 @@ export const summarizeAdvancedSelectionChanges = (
     isPureUnpublish: false,
   };
 };
+
+export const buildBasicPublishActionPlan = (
+  input: BasicPublishActionPlanInput
+): BasicPublishActionPlan => {
+  const publishListIds = input.lists
+    .filter((list) => list.uploadStatus?.status !== uploadStatus.UPLOADED)
+    .map((list) => list.id);
+  const unpublishListIds = input.lists
+    .filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED)
+    .map((list) => list.id);
+  const publishSeries = Boolean(
+    input.hasSeriesId
+    && input.seriesPublished === false
+    && input.canPublishToSeries
+  );
+  const unpublishSeries = Boolean(input.hasSeriesId && input.seriesPublished === true);
+  const publishSoundCloud = !input.isDevelopment && !input.isSoundCloudUploaded;
+  const unpublishSoundCloud = input.isSoundCloudUploaded;
+
+  const publishSummary = summarizeAdvancedSelectionChanges({
+    publishListCount: publishListIds.length,
+    unpublishListCount: 0,
+    publishSeries,
+    unpublishSeries: false,
+    publishSoundCloud,
+    unpublishSoundCloud: false,
+  });
+
+  return {
+    publishListIds,
+    unpublishListIds,
+    publishSeries,
+    unpublishSeries,
+    publishSoundCloud,
+    unpublishSoundCloud,
+    publishLabel: publishSummary.hasPublishChanges ? publishSummary.label : 'Nothing to publish',
+    hasPublishTargets: publishSummary.hasPublishChanges,
+    hasUnpublishTargets: unpublishListIds.length > 0 || unpublishSeries || unpublishSoundCloud,
+    showPublishButton: publishSummary.hasPublishChanges,
+    showUnpublishButton: unpublishListIds.length > 0 || unpublishSeries || unpublishSoundCloud,
+  };
+};
+
+export const createIdleDestinationActivityState = (): DestinationActivityState => ({
+  listOperation: 'idle',
+  listIds: [],
+  seriesOperation: 'idle',
+  soundCloudOperation: 'idle',
+});

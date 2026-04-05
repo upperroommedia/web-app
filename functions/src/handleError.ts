@@ -1,6 +1,7 @@
 import { AxiosError, isAxiosError } from 'axios';
 import { CallableRequest, HttpsError } from 'firebase-functions/v2/https';
 import { emitOperationalAlert, hasOperationalAlertBeenEmitted } from './notifications/emitOperationalAlert';
+import { captureFunctionsExceptionAndFlush } from './sentry';
 
 type TriggeringUserContext = {
   uid: string;
@@ -128,6 +129,12 @@ const handleError = (error: unknown, options: HandleErrorOptions = {}): HttpsErr
   };
 
   if (!hasOperationalAlertBeenEmitted(error)) {
+    void captureFunctionsExceptionAndFlush(error, {
+      tags: {
+        normalizedErrorCode: httpsError.code,
+      },
+      extra: context,
+    });
     void emitOperationalAlert({
       alertCode: options.alertCode ?? 'UNHANDLED_RUNTIME_ERROR',
       summary: options.summary ?? 'A Firebase function failed and was normalized by handleError.',

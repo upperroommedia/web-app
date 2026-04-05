@@ -2,6 +2,7 @@ import { AxiosError } from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 import handleError from '../handleError';
 import * as emitOperationalAlertModule from '../notifications/emitOperationalAlert';
+import * as sentryModule from '../sentry';
 
 describe('handleError', () => {
   beforeEach(() => {
@@ -10,6 +11,7 @@ describe('handleError', () => {
 
   it('emits a fallback operational alert when normalizing an unhandled error', () => {
     const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
 
     const error = new Error('boom');
     const normalized = handleError(error, {
@@ -30,6 +32,21 @@ describe('handleError', () => {
 
     expect(normalized).toBeInstanceOf(HttpsError);
     expect(normalized.code).toBe('internal');
+    expect(sentrySpy).toHaveBeenCalledWith(error, {
+      tags: {
+        normalizedErrorCode: 'internal',
+      },
+      extra: {
+        functionName: 'testHandler',
+        normalizedErrorCode: 'internal',
+        triggeringUser: {
+          uid: 'user-123',
+          email: 'tester@example.org',
+          displayName: 'Test User',
+          role: 'admin',
+        },
+      },
+    });
     expect(emitSpy).toHaveBeenCalledWith({
       alertCode: 'TEST_UNHANDLED_RUNTIME_ERROR',
       summary: 'Test summary',
@@ -49,6 +66,7 @@ describe('handleError', () => {
 
   it('does not emit a duplicate operational alert for errors already reported', async () => {
     const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
 
     const error = new Error('already reported');
     emitOperationalAlertModule.markOperationalAlertEmitted(error);
@@ -58,10 +76,12 @@ describe('handleError', () => {
 
     expect(normalized).toBeInstanceOf(HttpsError);
     expect(emitSpy).not.toHaveBeenCalled();
+    expect(sentrySpy).not.toHaveBeenCalled();
   });
 
   it('maps upstream 429 responses to resource-exhausted with retry metadata', () => {
     const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
     const error = new AxiosError(
       'Request failed with status code 429',
       'ERR_BAD_REQUEST',
@@ -84,6 +104,14 @@ describe('handleError', () => {
 
     expect(normalized).toBeInstanceOf(HttpsError);
     expect(normalized.code).toBe('resource-exhausted');
+    expect(sentrySpy).toHaveBeenCalledWith(error, {
+      tags: {
+        normalizedErrorCode: 'resource-exhausted',
+      },
+      extra: {
+        normalizedErrorCode: 'resource-exhausted',
+      },
+    });
     expect(normalized.details).toMatchObject({
       code: 'UPSTREAM_RATE_LIMITED',
       upstream_status: 429,

@@ -70,9 +70,11 @@ jest.mock('firebase-functions/v2/https', () => ({
   }),
   HttpsError: class extends Error {
     code: string;
-    constructor(code: string, message: string) {
+    details?: unknown;
+    constructor(code: string, message: string, details?: unknown) {
       super(message);
       this.code = code;
+      this.details = details;
     }
   },
   CallableRequest: {} // Type only, not needed at runtime
@@ -91,6 +93,7 @@ export class SubsplashMock {
   private staleListRowsSnapshots: Map<string, SubsplashListRow[]> = new Map();
   private history: MockSubsplashHistoryEntry[] = [];
   private fullCapacityPatchCreateFailures: Set<string> = new Set();
+  private hiddenFullCapacityPatchCreateFailures: Set<string> = new Set();
 
   constructor() {
     this.reset();
@@ -107,6 +110,7 @@ export class SubsplashMock {
     this.staleListRowsSnapshots.clear();
     this.history = [];
     this.fullCapacityPatchCreateFailures.clear();
+    this.hiddenFullCapacityPatchCreateFailures.clear();
   }
 
   createList(id: string, title: string, count: number = 0, maxItemCount?: number, subtitle?: string): SubsplashList {
@@ -161,6 +165,10 @@ export class SubsplashMock {
 
   failPatchWhenAtCapacityWithNewRows(listId: string) {
     this.fullCapacityPatchCreateFailures.add(listId);
+  }
+
+  failPatchWhenHiddenCapacityIsFull(listId: string) {
+    this.hiddenFullCapacityPatchCreateFailures.add(listId);
   }
 
   setPatchRetainsOmittedRows(value: boolean) {
@@ -225,6 +233,27 @@ export class SubsplashMock {
         errors: [{ code: 'bad_request', detail: `max number of list rows exceeded: ${maxAllowed}` }],
       };
       throw error;
+    }
+
+    if (
+      this.hiddenFullCapacityPatchCreateFailures.has(id) &&
+      containsNewRows &&
+      rowCount >= maxAllowed - 1
+    ) {
+      const error = new Error(`Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`);
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamStatus = 400;
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamData = {
+        errors: [{ code: 'bad_request', detail: `max number of list rows exceeded: ${maxAllowed}` }],
+      };
+      throw error;
+    }
+
+    if (
+      this.hiddenFullCapacityPatchCreateFailures.has(id) &&
+      !containsNewRows &&
+      rowCount <= maxAllowed - 2
+    ) {
+      this.hiddenFullCapacityPatchCreateFailures.delete(id);
     }
     
     list.list_rows_count = rowCount;

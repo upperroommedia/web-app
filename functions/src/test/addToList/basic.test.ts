@@ -1794,5 +1794,56 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
         .filter((entry) => entry.event === 'patch' && entry.listId === listId);
       expect(patchEvents.at(-1)?.rows).toHaveLength(199);
     });
+
+    it('retries latest-list remove-oldest with one fewer visible row when Subsplash still rejects a 200-row patch', async () => {
+      const listId = 'removeoldest-hidden-full-199-visible';
+      subsplashMock.createList(listId, 'Latest List Hidden Full', 199, 200);
+      subsplashMock.failPatchWhenHiddenCapacityIsFull(listId);
+
+      const initialRows: SubsplashListRow[] = Array.from({ length: 199 }, (_, index) => ({
+        id: `row-hidden-${index + 1}`,
+        app_key: '9XTSHD',
+        method: 'static',
+        position: index + 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: `hidden-item-${index + 1}` },
+        },
+      }));
+      subsplashMock.listRows.set(listId, initialRows);
+
+      await createListDocument({
+        subsplashId: listId,
+        title: 'Latest List Hidden Full',
+        overflowBehavior: OverflowBehavior.REMOVEOLDEST,
+        count: 199,
+      });
+      await createSermonDocument(buildSermon('sermon-hidden-new', 'hidden-new-item'));
+
+      const result = await addToListHandler({
+        auth: { token: { role: 'admin' } },
+        data: {
+          destinationListIds: [listId],
+          mediaItem: { id: 'hidden-new-item', type: 'media-item' as const },
+          maxListSize: 200,
+        },
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].status).toBe('success');
+
+      const rows = subsplashMock.getListRows(listId);
+      expect(rows).toHaveLength(199);
+      expect(rows[0]._embedded['media-item']?.id).toBe('hidden-new-item');
+      expect(rows[198]._embedded['media-item']?.id).toBe('hidden-item-198');
+      expect(rows.some((row) => row._embedded['media-item']?.id === 'hidden-item-199')).toBe(false);
+      expect(subsplashMock.getList(listId)?.list_rows_count).toBe(199);
+
+      const patchEvents = subsplashMock
+        .getHistory()
+        .filter((entry) => entry.event === 'patch' && entry.listId === listId);
+      expect(patchEvents.at(-1)?.rows).toHaveLength(199);
+    });
   });
 });

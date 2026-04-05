@@ -31,6 +31,7 @@ import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } f
 import { getConfiguredMaxListSize } from './helpers/listCapacity';
 import { canReconstructRemoteRow, getRemoteRowResourceId, getRemoteRowTitle } from './helpers/remoteChainItems';
 import { rebalanceOverflowChainAfterRemoval } from './removeFromList';
+import { captureFunctionsExceptionAndFlush } from './sentry';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -429,6 +430,28 @@ const shouldOverflowAfterInsert = ({
   return enforcedRowCount + 1 >= physicalMaxRowCount;
 };
 
+const isSubsplashMaxRowExceededError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as {
+    message?: unknown;
+    details?: {
+      upstream?: {
+        errors?: Array<{ detail?: unknown }>;
+      };
+    };
+  };
+
+  const upstreamDetails = maybeError.details?.upstream?.errors;
+  if (Array.isArray(upstreamDetails)) {
+    return upstreamDetails.some((entry) => typeof entry?.detail === 'string' && entry.detail.includes('max number of list rows exceeded'));
+  }
+
+  return typeof maybeError.message === 'string' && maybeError.message.includes('max number of list rows exceeded');
+};
+
 const applyRemoveOldestMutation = async ({
   listId,
   itemId,
@@ -448,12 +471,14 @@ const applyRemoveOldestMutation = async ({
       .filter((rowId): rowId is string => typeof rowId === 'string' && rowId.trim().length > 0)
   );
   const rowsToDelete = currentRows.filter((row) => row.id && !finalRowIds.has(row.id));
+  const visibleRowsAfterDelete = finalRows.filter((row) => row.id);
 
   listDebugLog('addToList.processListStep.removeOldest.start', {
     listId,
     itemId,
     currentRows: summarizeSubsplashRows(currentRows),
     finalRows: summarizeSubsplashRows(finalRows),
+    visibleRowsAfterDelete: summarizeSubsplashRows(visibleRowsAfterDelete),
     rowsToDelete: summarizeSubsplashRows(rowsToDelete),
   });
 
@@ -461,7 +486,37 @@ const applyRemoveOldestMutation = async ({
 
   try {
     await deleteExistingRowsMissingFromTarget(listId, currentRows, finalRows, token);
-    const finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+    let finalRowsSnapshot: SubsplashListRow[];
+    try {
+      finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+    } catch (error) {
+      if (!isSubsplashMaxRowExceededError(error) || visibleRowsAfterDelete.length >= finalRows.length) {
+        throw error;
+      }
+
+      listDebugWarn('addToList.processListStep.removeOldest.hiddenCapacityRetry.start', {
+        listId,
+        itemId,
+        error,
+        visibleRowsAfterDelete: summarizeSubsplashRows(visibleRowsAfterDelete),
+        finalRows: summarizeSubsplashRows(finalRows),
+      });
+
+      const healedRowsSnapshot = await patchListRows(listId, visibleRowsAfterDelete, token);
+      listDebugLog('addToList.processListStep.removeOldest.hiddenCapacityRetry.healedVisibleRows', {
+        listId,
+        itemId,
+        healedRowsSnapshot: summarizeSubsplashRows(healedRowsSnapshot),
+      });
+
+      finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+      listDebugLog('addToList.processListStep.removeOldest.hiddenCapacityRetry.complete', {
+        listId,
+        itemId,
+        finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
+      });
+    }
+
     listDebugLog('addToList.processListStep.removeOldest.complete', {
       listId,
       itemId,
@@ -806,6 +861,16 @@ async function processListStep(
     });
 
     if (willOverflow) {
+      listDebugLog('addToList.processListStep.branchDecision', {
+        listId,
+        itemId: itemToAdd.id,
+        branch: 'overflow',
+        overflowBehavior: listData.overflowBehavior,
+        enforcedRowCount,
+        phantomRowCount,
+        physicalMaxRowCount,
+        maxListSize,
+      });
       if (shouldEnforceStrictPreflight) {
         listDebugLog('addToList.processListStep.strictPreflight.start', {
           listId,
@@ -1134,6 +1199,15 @@ async function processListStep(
       } else if (listData.overflowBehavior === OverflowBehavior.REMOVEOLDEST) {
         const effectiveVisibleCapacity = Math.max(0, maxListSize - phantomRowCount);
         const finalRows = updatedRows.slice(0, effectiveVisibleCapacity);
+        listDebugLog('addToList.processListStep.removeOldest.plan', {
+          listId,
+          itemId: itemToAdd.id,
+          enforcedRowCount,
+          phantomRowCount,
+          effectiveVisibleCapacity,
+          updatedRows: summarizeSubsplashRows(updatedRows),
+          finalRows: summarizeSubsplashRows(finalRows),
+        });
         finalRowsSnapshot = await applyRemoveOldestMutation({
           listId,
           itemId: itemToAdd.id,
@@ -1145,7 +1219,42 @@ async function processListStep(
         throw new HttpsError('failed-precondition', 'List overflowed and no valid behavior set');
       }
     } else {
-      finalRowsSnapshot = await patchListRows(listId, updatedRows, token);
+      listDebugLog('addToList.processListStep.branchDecision', {
+        listId,
+        itemId: itemToAdd.id,
+        branch: 'simplePatch',
+        overflowBehavior: listData.overflowBehavior,
+        enforcedRowCount,
+        phantomRowCount,
+        physicalMaxRowCount,
+        maxListSize,
+      });
+      try {
+        finalRowsSnapshot = await patchListRows(listId, updatedRows, token);
+      } catch (error) {
+        if (!isSubsplashMaxRowExceededError(error) || listData.overflowBehavior !== OverflowBehavior.REMOVEOLDEST) {
+          throw error;
+        }
+
+        const fallbackVisibleCapacity = Math.max(0, maxListSize - 1);
+        const fallbackFinalRows = updatedRows.slice(0, fallbackVisibleCapacity);
+        listDebugWarn('addToList.processListStep.simplePatch.hiddenCapacityFallback', {
+          listId,
+          itemId: itemToAdd.id,
+          maxListSize,
+          fallbackVisibleCapacity,
+          updatedRows: summarizeSubsplashRows(updatedRows),
+          fallbackFinalRows: summarizeSubsplashRows(fallbackFinalRows),
+          error,
+        });
+        finalRowsSnapshot = await applyRemoveOldestMutation({
+          listId,
+          itemId: itemToAdd.id,
+          currentRows,
+          finalRows: fallbackFinalRows,
+          token,
+        });
+      }
       listDebugLog('addToList.processListStep.simplePatch.complete', {
         listId,
         finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
@@ -1306,7 +1415,7 @@ const recoverPlacementAfterFailedMutation = async ({
 };
 
 const addToList = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
+  { secrets: subsplashSecretsWithRuntimeAlerts, memory: '512MiB' },
   async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
     listDebugLog('addToList.callable.start', {
       uid: request.auth?.uid,
@@ -1395,6 +1504,18 @@ const addToList = onCall(
             listId: destinationListIds[index],
             mediaItemId: mediaItem.id,
             errorPayload,
+          });
+          await captureFunctionsExceptionAndFlush(result.reason, {
+            tags: {
+              functionName: 'addtolist',
+              failureMode: 'handled-item-error',
+              listId: destinationListIds[index],
+            },
+            extra: {
+              destinationListIds,
+              mediaItemId: mediaItem.id,
+              errorPayload,
+            },
           });
           return {
             listId: destinationListIds[index],

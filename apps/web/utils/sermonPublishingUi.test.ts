@@ -88,7 +88,7 @@ describe('sermonPublishingUi', () => {
 
       expect(summary).toEqual({
         state: 'error',
-        message: 'Publish everywhere failed. Review the destination statuses below and retry the failed steps.',
+        message: 'Publish everywhere failed. Review the destination statuses below.',
       });
     });
   });

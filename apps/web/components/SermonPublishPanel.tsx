@@ -56,7 +56,12 @@ import {
 } from '../utils/subsplashPublishFlow';
 import { runSubsplashSeriesPublishSaga } from '../utils/subsplashSeriesPublishSaga';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../utils/seriesPublishUtils';
-import { summarizeAdvancedSelectionChanges } from '../utils/sermonPublishActions';
+import {
+  buildBasicPublishActionPlan,
+  createIdleDestinationActivityState,
+  DestinationActivityState,
+  summarizeAdvancedSelectionChanges,
+} from '../utils/sermonPublishActions';
 import { getSquareImageDownloadLink } from '../utils/utils';
 import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../utils/soundcloudAuthRecovery';
 import { PublishDestinationState, getListsDestinationState, summarizePublishRun } from '../utils/sermonPublishingUi';
@@ -223,9 +228,7 @@ const StatusChip: FunctionComponent<{
   status: PublishDestinationState;
   avatar?: ReactElement;
   tooltip?: ReactNode;
-  onRetry?: () => void;
-  retryDisabled?: boolean;
-}> = ({ label, status, avatar, tooltip, onRetry, retryDisabled = false }) => {
+}> = ({ label, status, avatar, tooltip }) => {
   const theme = useTheme();
   const tone = getStatusTone(status, theme);
   const chip = (
@@ -233,10 +236,6 @@ const StatusChip: FunctionComponent<{
       avatar={avatar}
       label={label}
       variant="filled"
-      onDelete={onRetry}
-      deleteIcon={
-        onRetry ? (retryDisabled ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />) : undefined
-      }
       sx={{
         height: { xs: 28, sm: 32 },
         borderRadius: 999,
@@ -382,6 +381,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const [isPublishingToSeries, setIsPublishingToSeries] = useState(false);
   const [isPublishingEverywhere, setIsPublishingEverywhere] = useState(false);
   const [activeRunMode, setActiveRunMode] = useState<ActiveRunMode>('idle');
+  const [destinationActivity, setDestinationActivity] = useState<DestinationActivityState>(() => createIdleDestinationActivityState());
   const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
   const [selectedSeriesEnabled, setSelectedSeriesEnabled] = useState(false);
   const [selectedSoundCloudEnabled, setSelectedSoundCloudEnabled] = useState(false);
@@ -390,9 +390,8 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter)
   );
   const listArray = useMemo(() => listArrayFirestore ?? [], [listArrayFirestore]);
-  const { selectedListsToPublish, selectedPublishedLists, deselectedPublishedLists } = useMemo(() => {
+  const { selectedListsToPublish, deselectedPublishedLists } = useMemo(() => {
     const nextSelectedListsToPublish: SermonList[] = [];
-    const nextSelectedPublishedLists: SermonList[] = [];
     const nextDeselectedPublishedLists: SermonList[] = [];
 
     for (const list of listArray) {
@@ -400,7 +399,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       const isUploaded = list.uploadStatus?.status === uploadStatus.UPLOADED;
 
       if (isSelected && isUploaded) {
-        nextSelectedPublishedLists.push(list);
         continue;
       }
 
@@ -416,7 +414,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
 
     return {
       selectedListsToPublish: nextSelectedListsToPublish,
-      selectedPublishedLists: nextSelectedPublishedLists,
       deselectedPublishedLists: nextDeselectedPublishedLists,
     };
   }, [listArray, selectedListIds]);
@@ -506,31 +503,35 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
 
   const isSoundCloudUploaded = sermon.status.soundCloud === uploadStatus.UPLOADED;
   const canPublishToSeries = canPublishSermonToSeries(sermon);
+  const isRunningBasicPublish = isPublishingEverywhere && activeRunMode === 'publish';
+  const isRunningBasicUnpublish = isPublishingEverywhere && activeRunMode === 'unpublish';
+  const isApplyingAdvancedChanges = isPublishingEverywhere && activeRunMode === 'advanced';
   const selectedSeriesToPublish = Boolean(selectedSeriesEnabled && sermon.seriesId && !seriesPublished && canPublishToSeries);
   const selectedSeriesToUnpublish = Boolean(selectedSeriesEnabled === false && sermon.seriesId && seriesPublished);
   const selectedSoundCloudToPublish = selectedSoundCloudEnabled && !isDevelopment && !isSoundCloudUploaded;
   const selectedSoundCloudToUnpublish = selectedSoundCloudEnabled === false && isSoundCloudUploaded;
-  const isRunningPublishEverywhere = isPublishingEverywhere && activeRunMode === 'publish';
-  const isRunningUnpublishEverywhere = isPublishingEverywhere && activeRunMode === 'unpublish';
-  const isApplyingAdvancedChanges = isPublishingEverywhere && activeRunMode === 'advanced';
-  const hasPublishedDestinations =
-    selectedPublishedLists.length > 0 ||
-    deselectedPublishedLists.length > 0 ||
-    seriesPublished === true ||
-    isSoundCloudUploaded;
+  const basicActionPlan = useMemo(() => buildBasicPublishActionPlan({
+    lists: listArray,
+    hasSeriesId: Boolean(sermon.seriesId),
+    seriesPublished,
+    canPublishToSeries,
+    isSoundCloudUploaded,
+    isDevelopment,
+  }), [
+    canPublishToSeries,
+    isSoundCloudUploaded,
+    listArray,
+    seriesPublished,
+    sermon.seriesId,
+  ]);
 
   const soundCloudStatus: PublishDestinationState = useMemo(() => {
-    if (
-      isUploadingToSoundCloud
-      || (isRunningPublishEverywhere && !isSoundCloudUploaded)
-      || (isRunningUnpublishEverywhere && isSoundCloudUploaded)
-      || (isApplyingAdvancedChanges && (selectedSoundCloudToPublish || selectedSoundCloudToUnpublish))
-    ) {
+    if (destinationActivity.soundCloudOperation !== 'idle') {
       return {
         state: 'publishing',
-        label: selectedSoundCloudToUnpublish || isRunningUnpublishEverywhere ? 'Unpublishing' : 'Publishing',
+        label: destinationActivity.soundCloudOperation === 'unpublish' ? 'Unpublishing' : 'Publishing',
         details:
-          selectedSoundCloudToUnpublish || isRunningUnpublishEverywhere
+          destinationActivity.soundCloudOperation === 'unpublish'
             ? 'Removing sermon from SoundCloud.'
             : 'Sending sermon to SoundCloud.',
       };
@@ -569,28 +570,20 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       details: 'Will be included in Publish Everywhere.',
     };
   }, [
-    isApplyingAdvancedChanges,
-    isRunningPublishEverywhere,
-    isRunningUnpublishEverywhere,
+    destinationActivity.soundCloudOperation,
     isSoundCloudUploaded,
-    isUploadingToSoundCloud,
-    selectedSoundCloudToPublish,
-    selectedSoundCloudToUnpublish,
     sermon.soundCloudTrackUrl,
     soundCloudError,
   ]);
 
   const listsStatus = useMemo<PublishDestinationState>(() => {
-    if (isUploadingToSubsplash || isRunningPublishEverywhere || isRunningUnpublishEverywhere || isApplyingAdvancedChanges) {
-      const unpublishCount = isRunningUnpublishEverywhere
-        ? selectedPublishedLists.length + deselectedPublishedLists.length
-        : deselectedPublishedLists.length;
-      const publishCount = isRunningPublishEverywhere ? selectedListsToPublish.length : selectedListsToPublish.length;
-      const isUnpublishingOnly = unpublishCount > 0 && publishCount === 0;
+    if (destinationActivity.listOperation !== 'idle') {
       return {
         state: 'publishing',
-        label: isUnpublishingOnly ? 'Unpublishing' : 'Publishing',
-        details: isUnpublishingOnly ? 'Removing sermon from Subsplash lists.' : 'Syncing sermon to Subsplash lists.',
+        label: destinationActivity.listOperation === 'unpublish' ? 'Unpublishing' : 'Publishing',
+        details: destinationActivity.listOperation === 'unpublish'
+          ? 'Removing sermon from Subsplash lists.'
+          : 'Syncing sermon to Subsplash lists.',
       };
     }
 
@@ -609,17 +602,11 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
 
     return baseState;
   }, [
-    deselectedPublishedLists.length,
     destinationErrors.lists,
-    isApplyingAdvancedChanges,
-    isRunningPublishEverywhere,
-    isRunningUnpublishEverywhere,
-    isUploadingToSubsplash,
+    destinationActivity.listOperation,
     listArrayFirestore,
     listError?.message,
     loading,
-    selectedListsToPublish.length,
-    selectedPublishedLists.length,
   ]);
 
   const isListDataLoading = loading && !listError && listArray.length === 0;
@@ -648,8 +635,8 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       };
     }
 
-    if (isPublishingToSeries || isRunningPublishEverywhere || isRunningUnpublishEverywhere || isApplyingAdvancedChanges) {
-      const isUnpublishingSeries = selectedSeriesToUnpublish || isRunningUnpublishEverywhere;
+    if (destinationActivity.seriesOperation !== 'idle') {
+      const isUnpublishingSeries = destinationActivity.seriesOperation === 'unpublish';
       return {
         state: 'publishing',
         label: isUnpublishingSeries ? 'Unpublishing' : 'Publishing',
@@ -702,14 +689,10 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   }, [
     canPublishToSeries,
     destinationErrors.series,
-    isApplyingAdvancedChanges,
-    isRunningPublishEverywhere,
-    isRunningUnpublishEverywhere,
-    isPublishingToSeries,
+    destinationActivity.seriesOperation,
     series,
     seriesLoading,
     seriesPublished,
-    selectedSeriesToUnpublish,
     sermon.seriesId,
   ]);
 
@@ -719,6 +702,18 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       severity: summary.state === 'success' ? 'success' : summary.state === 'partial' ? 'warning' : 'error',
       message: summary.message,
     });
+  }, []);
+
+  const runWithDestinationActivity = useCallback(async <T,>(
+    nextActivity: DestinationActivityState,
+    action: () => Promise<T>
+  ): Promise<T> => {
+    setDestinationActivity(nextActivity);
+    try {
+      return await action();
+    } finally {
+      setDestinationActivity(createIdleDestinationActivityState());
+    }
   }, []);
 
   const uploadToSoundCloud = useCallback(async (): Promise<SeriesPublishResult> => {
@@ -1324,15 +1319,21 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     const nextStatuses: PublishDestinationState[] = [];
     try {
       let mediaItemId = sermon.subsplashId;
+      const listsToPublish = listArray.filter((list) => basicActionPlan.publishListIds.includes(list.id));
 
-      if (selectedListsToPublish.length > 0) {
-        const listResult = await uploadToSubsplash(selectedListsToPublish, { suppressNotice: true });
+      if (listsToPublish.length > 0) {
+        const listResult = await runWithDestinationActivity({
+          listOperation: 'publish',
+          listIds: listsToPublish.map((list) => list.id),
+          seriesOperation: 'idle',
+          soundCloudOperation: 'idle',
+        }, async () => uploadToSubsplash(listsToPublish, { suppressNotice: true }));
         if (listResult.status === 'success') {
           mediaItemId = listResult.mediaItemId || mediaItemId;
           nextStatuses.push({
             state: 'published',
             label: 'Published',
-            details: `Published to ${selectedListsToPublish.length} list${selectedListsToPublish.length === 1 ? '' : 's'}.`,
+            details: `Published to ${listsToPublish.length} list${listsToPublish.length === 1 ? '' : 's'}.`,
           });
         } else {
           nextStatuses.push({
@@ -1341,56 +1342,61 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
             error: listResult.error,
           });
         }
-      } else if (listArray.length > 0 && selectedListIds.size === 0) {
-        nextStatuses.push({
-          state: 'not_configured',
-          label: 'Lists skipped',
-          details: 'All list targets were skipped in advanced publish config.',
-        });
       } else {
         nextStatuses.push(listsStatus);
       }
 
-      if (sermon.seriesId) {
-        if (!seriesPublished && canPublishToSeries) {
-          if (!mediaItemId) {
-            const prepResult = await uploadToSubsplash([], { suppressNotice: true });
-            if (prepResult.status === 'success') {
-              mediaItemId = prepResult.mediaItemId || mediaItemId;
-            } else {
-              nextStatuses.push({
-                state: 'error',
-                label: 'Series publish failed',
-                error: prepResult.error,
-              });
-            }
+      if (sermon.seriesId && basicActionPlan.publishSeries) {
+        if (!mediaItemId) {
+          const prepResult = await runWithDestinationActivity({
+            listOperation: 'idle',
+            listIds: [],
+            seriesOperation: 'publish',
+            soundCloudOperation: 'idle',
+          }, async () => uploadToSubsplash([], { suppressNotice: true }));
+          if (prepResult.status === 'success') {
+            mediaItemId = prepResult.mediaItemId || mediaItemId;
+          } else {
+            nextStatuses.push({
+              state: 'error',
+              label: 'Series publish failed',
+              error: prepResult.error,
+            });
           }
+        }
 
-          if (mediaItemId) {
-            const seriesResult = await publishToSeries({ mediaItemId, suppressNotice: true });
-            if (seriesResult.status === 'success') {
-              nextStatuses.push({
-                state: 'published',
-                label: 'Published',
-                details: series ? `${series.name} was published.` : 'Series membership was published.',
-              });
-            } else {
-              nextStatuses.push({
-                state: canPublishToSeries ? 'error' : 'blocked',
-                label: canPublishToSeries ? 'Series publish failed' : 'Series publish blocked',
-                error: seriesResult.error,
-              });
-            }
+        if (mediaItemId) {
+          const seriesResult = await runWithDestinationActivity({
+            listOperation: 'idle',
+            listIds: [],
+            seriesOperation: 'publish',
+            soundCloudOperation: 'idle',
+          }, async () => publishToSeries({ mediaItemId, suppressNotice: true }));
+          if (seriesResult.status === 'success') {
+            nextStatuses.push({
+              state: 'published',
+              label: 'Published',
+              details: series ? `${series.name} was published.` : 'Series membership was published.',
+            });
+          } else {
+            nextStatuses.push({
+              state: canPublishToSeries ? 'error' : 'blocked',
+              label: canPublishToSeries ? 'Series publish failed' : 'Series publish blocked',
+              error: seriesResult.error,
+            });
           }
-        } else {
-          nextStatuses.push(seriesStatus);
         }
       } else {
         nextStatuses.push(seriesStatus);
       }
 
-      if (!isDevelopment && !isSoundCloudUploaded) {
-        const soundCloudResult = await uploadToSoundCloud();
+      if (basicActionPlan.publishSoundCloud) {
+        const soundCloudResult = await runWithDestinationActivity({
+          listOperation: 'idle',
+          listIds: [],
+          seriesOperation: 'idle',
+          soundCloudOperation: 'publish',
+        }, async () => uploadToSoundCloud());
         nextStatuses.push(
           soundCloudResult.status === 'success'
             ? {
@@ -1412,18 +1418,19 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     } finally {
       setIsPublishingEverywhere(false);
       setActiveRunMode('idle');
+      setDestinationActivity(createIdleDestinationActivityState());
     }
   }, [
+    basicActionPlan.publishListIds,
+    basicActionPlan.publishSeries,
+    basicActionPlan.publishSoundCloud,
     canPublishToSeries,
     isPublishingEverywhere,
-    isSoundCloudUploaded,
-    listArray.length,
+    listArray,
     listsStatus,
     publishToSeries,
-    selectedListIds.size,
-    selectedListsToPublish,
+    runWithDestinationActivity,
     series,
-    seriesPublished,
     seriesStatus,
     sermon.seriesId,
     sermon.subsplashId,
@@ -1445,27 +1452,44 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     setSoundCloudError(null);
 
     try {
-      const hadPublishedLists = selectedPublishedLists.length + deselectedPublishedLists.length > 0;
-      const hadSeries = seriesPublished;
-      const hadSoundCloud = isSoundCloudUploaded;
+      const listIdsToUnpublish = new Set(basicActionPlan.unpublishListIds);
+      const publishedLists = listArray.filter((list) => listIdsToUnpublish.has(list.id));
+      const hadPublishedLists = publishedLists.length > 0;
+      const hadSeries = basicActionPlan.unpublishSeries;
+      const hadSoundCloud = basicActionPlan.unpublishSoundCloud;
       let hadError = false;
 
       if (hadPublishedLists) {
-        const listResult = await removeFromLists([...selectedPublishedLists, ...deselectedPublishedLists], { suppressNotice: true });
+        const listResult = await runWithDestinationActivity({
+          listOperation: 'unpublish',
+          listIds: publishedLists.map((list) => list.id),
+          seriesOperation: 'idle',
+          soundCloudOperation: 'idle',
+        }, async () => removeFromLists(publishedLists, { suppressNotice: true }));
         if (listResult.status === 'error') {
           hadError = true;
         }
       }
 
       if (hadSeries) {
-        const seriesResult = await unpublishFromSeries({ suppressNotice: true });
+        const seriesResult = await runWithDestinationActivity({
+          listOperation: 'idle',
+          listIds: [],
+          seriesOperation: 'unpublish',
+          soundCloudOperation: 'idle',
+        }, async () => unpublishFromSeries({ suppressNotice: true }));
         if (seriesResult.status === 'error') {
           hadError = true;
         }
       }
 
       if (hadSoundCloud) {
-        const soundCloudResult = await deleteFromSoundCloud({ suppressNotice: true });
+        const soundCloudResult = await runWithDestinationActivity({
+          listOperation: 'idle',
+          listIds: [],
+          seriesOperation: 'idle',
+          soundCloudOperation: 'unpublish',
+        }, async () => deleteFromSoundCloud({ suppressNotice: true }));
         if (soundCloudResult.status === 'error') {
           hadError = true;
         }
@@ -1480,15 +1504,17 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     } finally {
       setIsPublishingEverywhere(false);
       setActiveRunMode('idle');
+      setDestinationActivity(createIdleDestinationActivityState());
     }
   }, [
+    basicActionPlan.unpublishListIds,
+    basicActionPlan.unpublishSeries,
+    basicActionPlan.unpublishSoundCloud,
     deleteFromSoundCloud,
-    deselectedPublishedLists,
     isPublishingEverywhere,
-    isSoundCloudUploaded,
+    listArray,
     removeFromLists,
-    selectedPublishedLists,
-    seriesPublished,
+    runWithDestinationActivity,
     unpublishFromSeries,
   ]);
 
@@ -1507,7 +1533,12 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       let hadError = false;
 
       if (selectedListsToPublish.length > 0) {
-        const publishResult = await uploadToSubsplash(selectedListsToPublish, { suppressNotice: true });
+        const publishResult = await runWithDestinationActivity({
+          listOperation: 'publish',
+          listIds: selectedListsToPublish.map((list) => list.id),
+          seriesOperation: 'idle',
+          soundCloudOperation: 'idle',
+        }, async () => uploadToSubsplash(selectedListsToPublish, { suppressNotice: true }));
         if (publishResult.status === 'success') {
           actionMessages.push(`published to ${selectedListsToPublish.length} list${selectedListsToPublish.length === 1 ? '' : 's'}`);
         } else {
@@ -1516,7 +1547,12 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
 
       if (deselectedPublishedLists.length > 0) {
-        const unpublishResult = await removeFromLists(deselectedPublishedLists, { suppressNotice: true });
+        const unpublishResult = await runWithDestinationActivity({
+          listOperation: 'unpublish',
+          listIds: deselectedPublishedLists.map((list) => list.id),
+          seriesOperation: 'idle',
+          soundCloudOperation: 'idle',
+        }, async () => removeFromLists(deselectedPublishedLists, { suppressNotice: true }));
         if (unpublishResult.status === 'success') {
           actionMessages.push(`unpublished from ${deselectedPublishedLists.length} list${deselectedPublishedLists.length === 1 ? '' : 's'}`);
         } else {
@@ -1525,7 +1561,12 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
 
       if (selectedSeriesToPublish) {
-        const seriesResult = await publishToSeries({ suppressNotice: true });
+        const seriesResult = await runWithDestinationActivity({
+          listOperation: 'idle',
+          listIds: [],
+          seriesOperation: 'publish',
+          soundCloudOperation: 'idle',
+        }, async () => publishToSeries({ suppressNotice: true }));
         if (seriesResult.status === 'success') {
           actionMessages.push('published to series');
         } else {
@@ -1534,7 +1575,12 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
 
       if (selectedSeriesToUnpublish) {
-        const seriesResult = await unpublishFromSeries({ suppressNotice: true });
+        const seriesResult = await runWithDestinationActivity({
+          listOperation: 'idle',
+          listIds: [],
+          seriesOperation: 'unpublish',
+          soundCloudOperation: 'idle',
+        }, async () => unpublishFromSeries({ suppressNotice: true }));
         if (seriesResult.status === 'success') {
           actionMessages.push('unpublished from series');
         } else {
@@ -1543,7 +1589,12 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
 
       if (selectedSoundCloudToPublish) {
-        const soundCloudResult = await uploadToSoundCloud();
+        const soundCloudResult = await runWithDestinationActivity({
+          listOperation: 'idle',
+          listIds: [],
+          seriesOperation: 'idle',
+          soundCloudOperation: 'publish',
+        }, async () => uploadToSoundCloud());
         if (soundCloudResult.status === 'success') {
           actionMessages.push('published to SoundCloud');
         } else {
@@ -1552,7 +1603,12 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
 
       if (selectedSoundCloudToUnpublish) {
-        const soundCloudResult = await deleteFromSoundCloud({ suppressNotice: true });
+        const soundCloudResult = await runWithDestinationActivity({
+          listOperation: 'idle',
+          listIds: [],
+          seriesOperation: 'idle',
+          soundCloudOperation: 'unpublish',
+        }, async () => deleteFromSoundCloud({ suppressNotice: true }));
         if (soundCloudResult.status === 'success') {
           actionMessages.push('unpublished from SoundCloud');
         } else {
@@ -1577,6 +1633,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     } finally {
       setIsPublishingEverywhere(false);
       setActiveRunMode('idle');
+      setDestinationActivity(createIdleDestinationActivityState());
     }
   }, [
     deleteFromSoundCloud,
@@ -1584,6 +1641,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     isPublishingEverywhere,
     publishToSeries,
     removeFromLists,
+    runWithDestinationActivity,
     selectedListsToPublish,
     selectedSeriesToPublish,
     selectedSeriesToUnpublish,
@@ -1594,30 +1652,9 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     uploadToSubsplash,
   ]);
 
-  const retryFailedSteps = useCallback(async () => {
-    const failedLists = listsStatus.state === 'error' || listsStatus.state === 'partial';
-    const failedSeries = seriesStatus.state === 'error' || seriesStatus.state === 'blocked';
-    const failedSoundCloud = soundCloudStatus.state === 'error';
-
-    if (failedLists || failedSeries || failedSoundCloud) {
-      await publishEverywhere();
-    }
-  }, [listsStatus.state, publishEverywhere, seriesStatus.state, soundCloudStatus.state]);
-
-  const hasFailures = [listsStatus, seriesStatus, soundCloudStatus].some((status) =>
-    ['partial', 'error'].includes(status.state)
-  );
-
-  const retrySingleList = useCallback(
-    async (list: SermonList) => {
-      await uploadToSubsplash([list], { suppressNotice: true });
-    },
-    [uploadToSubsplash]
-  );
-
   const listChipTooltip = useCallback(
     (list: SermonList): ReactNode => {
-      const isSkipped = !selectedListIds.has(list.id);
+      const isSkipped = advancedOpen && !selectedListIds.has(list.id);
       if (isSkipped && list.uploadStatus?.status === uploadStatus.UPLOADED) {
         return 'Currently published. It will be unpublished when you apply these list changes.';
       }
@@ -1632,18 +1669,18 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
       return 'Ready to publish.';
     },
-    [selectedListIds]
+    [advancedOpen, selectedListIds]
   );
 
   const getListChipStatus = useCallback(
     (list: SermonList): PublishDestinationState => {
       const isPublishingSelectedList = (
-        isRunningPublishEverywhere
-        || (isApplyingAdvancedChanges && selectedListsToPublish.some((selectedList) => selectedList.id === list.id))
+        destinationActivity.listOperation === 'publish'
+        && destinationActivity.listIds.includes(list.id)
       );
       const isUnpublishingSelectedList = (
-        (isRunningUnpublishEverywhere && list.uploadStatus?.status === uploadStatus.UPLOADED)
-        || (isApplyingAdvancedChanges && deselectedPublishedLists.some((selectedList) => selectedList.id === list.id))
+        destinationActivity.listOperation === 'unpublish'
+        && destinationActivity.listIds.includes(list.id)
       );
 
       if (isPublishingSelectedList) {
@@ -1664,7 +1701,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       if (list.uploadStatus?.status === uploadStatus.ERROR) {
         return { state: 'error', label: 'Failed', error: list.uploadStatus.reason };
       }
-      if (!selectedListIds.has(list.id)) {
+      if (advancedOpen && !selectedListIds.has(list.id)) {
         return {
           state: 'not_configured',
           label: 'Skipped',
@@ -1673,19 +1710,15 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       return { state: 'not_published', label: 'Ready' };
     },
     [
-      deselectedPublishedLists,
-      isApplyingAdvancedChanges,
-      isRunningPublishEverywhere,
-      isRunningUnpublishEverywhere,
+      advancedOpen,
+      destinationActivity.listIds,
+      destinationActivity.listOperation,
       selectedListIds,
-      selectedListsToPublish,
     ]
   );
 
   const seriesChipTooltip =
     destinationErrors.series || (seriesPublished === true ? 'Published successfully.' : seriesStatus.details);
-  const canRetrySeries = Boolean(sermon.seriesId && !isBusy && seriesStatus.state === 'error');
-  const canRetrySoundCloud = soundCloudStatus.state === 'error' && !isBusy;
   const soundCloudExternalUrl = isSoundCloudUploaded && sermon.soundCloudTrackUrl ? sermon.soundCloudTrackUrl : null;
   const advancedSelectionSummary = useMemo(() => summarizeAdvancedSelectionChanges({
     publishListCount: selectedListsToPublish.length,
@@ -1703,46 +1736,27 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     selectedSoundCloudToUnpublish,
   ]);
 
-  const currentActionPlan = useMemo<ActionPlan>(() => {
-    if (advancedOpen) {
-      return {
-        label: advancedSelectionSummary.label,
-        run: applyAdvancedListChanges,
-        disabled: isBusy || !advancedSelectionSummary.hasChanges,
-        pendingLabel: 'Applying Destination Changes…',
-        color: advancedSelectionSummary.isMixedDirection ? 'warning' : advancedSelectionSummary.isPureUnpublish ? 'error' : 'primary',
-        icon: advancedSelectionSummary.isMixedDirection ? <RefreshIcon /> : advancedSelectionSummary.isPureUnpublish ? <CloudOffIcon /> : <CloudUploadIcon />,
-      };
-    }
-
-    if (hasPublishedDestinations) {
-      return {
-        label: 'Unpublish From Everywhere',
-        run: unpublishEverywhere,
-        disabled: isBusy,
-        pendingLabel: 'Unpublishing From Everywhere…',
-        color: 'error',
-        icon: <CloudOffIcon />,
-      };
-    }
-
-    return {
-      label: 'Publish Everywhere',
-      run: publishEverywhere,
-      disabled: isBusy,
-      pendingLabel: 'Publishing Everywhere…',
-      color: 'primary',
-      icon: <CloudUploadIcon />,
-    };
-  }, [
+  const advancedActionPlan = useMemo<ActionPlan>(() => ({
+    label: advancedSelectionSummary.label,
+    run: applyAdvancedListChanges,
+    disabled: isBusy || !advancedSelectionSummary.hasChanges,
+    pendingLabel: 'Applying Destination Changes…',
+    color: advancedSelectionSummary.isMixedDirection ? 'warning' : advancedSelectionSummary.isPureUnpublish ? 'error' : 'primary',
+    icon: advancedSelectionSummary.isMixedDirection ? <RefreshIcon /> : advancedSelectionSummary.isPureUnpublish ? <CloudOffIcon /> : <CloudUploadIcon />,
+  }), [
     advancedSelectionSummary,
-    advancedOpen,
     applyAdvancedListChanges,
-    hasPublishedDestinations,
     isBusy,
-    publishEverywhere,
-    unpublishEverywhere,
   ]);
+  const actionButtonSx = {
+    minHeight: { xs: 34, sm: 40, md: 44 },
+    px: { xs: 1.25, sm: 1.75 },
+    py: { xs: 0.45, sm: 0.9 },
+    fontSize: { xs: '0.76rem', sm: '0.9rem', md: '0.96rem' },
+    '& .MuiButton-startIcon svg': {
+      fontSize: { xs: '0.95rem', sm: '1.1rem', md: '1.2rem' },
+    },
+  };
 
   return (
     <Stack spacing={2.5}>
@@ -1770,7 +1784,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                 ))
               : listArray.map((list) => {
                   const chipStatus = getListChipStatus(list);
-                  const canRetryList = chipStatus.state === 'error' && !isBusy;
                   return (
                     <StatusChip
                       key={list.id}
@@ -1796,14 +1809,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                       }
                       status={chipStatus}
                       tooltip={listChipTooltip(list)}
-                      onRetry={
-                        canRetryList
-                          ? () => {
-                              void retrySingleList(list);
-                            }
-                          : undefined
-                      }
-                      retryDisabled={isUploadingToSubsplash}
                       avatar={
                         <AvatarWithDefaultImage
                           image={list.images?.find((image) => image.type === 'square')}
@@ -1852,14 +1857,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                 }
                 status={seriesStatus}
                 tooltip={seriesChipTooltip}
-                onRetry={
-                  canRetrySeries
-                    ? () => {
-                        void publishToSeries({ suppressNotice: true });
-                      }
-                    : undefined
-                }
-                retryDisabled={isPublishingToSeries}
                 avatar={
                   <AvatarWithDefaultImage
                     image={getSeriesAvatarImage(series)}
@@ -1897,14 +1894,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
               status={soundCloudStatus}
               tooltip={destinationErrors.soundcloud || soundCloudStatus.details}
               avatar={<SoundCloudChipAvatar />}
-              onRetry={
-                canRetrySoundCloud
-                  ? () => {
-                      void uploadToSoundCloud();
-                    }
-                  : undefined
-              }
-              retryDisabled={isUploadingToSoundCloud}
             />
           </Box>
         </Box>
@@ -1922,37 +1911,48 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         </Button>
         {!advancedOpen ? (
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} justifyContent="flex-end">
-            {hasFailures ? (
-              <Button
-                variant="outlined"
-                color="warning"
-                onClick={retryFailedSteps}
-                disabled={isBusy}
-              >
-                Retry Failed
-              </Button>
-            ) : null}
+            {basicActionPlan.showPublishButton ? (
               <Button
                 variant="contained"
                 size="large"
-                color={currentActionPlan.color}
-                startIcon={isPublishingEverywhere ? <CircularProgress size={18} color="inherit" /> : currentActionPlan.icon}
+                color="primary"
+                startIcon={isRunningBasicPublish ? <CircularProgress size={18} color="inherit" /> : <CloudUploadIcon />}
                 onClick={() => {
-                  void currentActionPlan.run();
+                  void publishEverywhere();
                 }}
-                disabled={currentActionPlan.disabled}
-                sx={{
-                  minHeight: { xs: 34, sm: 40, md: 44 },
-                  px: { xs: 1.25, sm: 1.75 },
-                  py: { xs: 0.45, sm: 0.9 },
-                  fontSize: { xs: '0.76rem', sm: '0.9rem', md: '0.96rem' },
-                  '& .MuiButton-startIcon svg': {
-                    fontSize: { xs: '0.95rem', sm: '1.1rem', md: '1.2rem' },
-                  },
-                }}
+                disabled={isBusy}
+                sx={actionButtonSx}
               >
-                {isPublishingEverywhere ? currentActionPlan.pendingLabel : currentActionPlan.label}
+                {isRunningBasicPublish ? 'Publishing…' : basicActionPlan.publishLabel}
               </Button>
+            ) : null}
+            {basicActionPlan.showUnpublishButton ? (
+              <Button
+                variant="contained"
+                size="large"
+                color="error"
+                startIcon={isRunningBasicUnpublish ? <CircularProgress size={18} color="inherit" /> : <CloudOffIcon />}
+                onClick={() => {
+                  void unpublishEverywhere();
+                }}
+                disabled={isBusy}
+                sx={actionButtonSx}
+              >
+                {isRunningBasicUnpublish ? 'Unpublishing From Everywhere…' : 'Unpublish From Everywhere'}
+              </Button>
+            ) : null}
+            {!basicActionPlan.showPublishButton && !basicActionPlan.showUnpublishButton ? (
+              <Button
+                variant="contained"
+                size="large"
+                color="primary"
+                startIcon={<CloudUploadIcon />}
+                disabled
+                sx={actionButtonSx}
+              >
+                Nothing to publish
+              </Button>
+            ) : null}
           </Stack>
         ) : null}
       </Stack>
@@ -2056,14 +2056,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                           label={chipStatus.label}
                           status={chipStatus}
                           tooltip={listChipTooltip(list)}
-                          onRetry={
-                            chipStatus.state === 'error' && !isBusy
-                              ? () => {
-                                  void retrySingleList(list);
-                                }
-                              : undefined
-                          }
-                          retryDisabled={isUploadingToSubsplash}
                         />
                       </Box>
                     );
@@ -2133,14 +2125,6 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                     }
                     status={seriesStatus}
                     tooltip={seriesChipTooltip}
-                    onRetry={
-                      canRetrySeries
-                        ? () => {
-                            void publishToSeries({ suppressNotice: true });
-                          }
-                        : undefined
-                    }
-                    retryDisabled={isPublishingToSeries}
                   />
                 </Box>
               )}
@@ -2195,50 +2179,24 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
                   }
                   status={soundCloudStatus}
                   tooltip={destinationErrors.soundcloud || soundCloudStatus.details}
-                  onRetry={
-                    canRetrySoundCloud
-                      ? () => {
-                          void uploadToSoundCloud();
-                        }
-                      : undefined
-                  }
-                  retryDisabled={isUploadingToSoundCloud}
                 />
               </Box>
             </Box>
           </Stack>
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} justifyContent="flex-end">
-            {hasFailures ? (
-              <Button
-                variant="outlined"
-                color="warning"
-                onClick={retryFailedSteps}
-                disabled={isBusy}
-              >
-                Retry Failed
-              </Button>
-            ) : null}
             <Button
               variant="contained"
               size="large"
-              color={currentActionPlan.color}
-              startIcon={isPublishingEverywhere ? <CircularProgress size={18} color="inherit" /> : currentActionPlan.icon}
+              color={advancedActionPlan.color}
+              startIcon={isApplyingAdvancedChanges ? <CircularProgress size={18} color="inherit" /> : advancedActionPlan.icon}
               onClick={() => {
-                void currentActionPlan.run();
+                void advancedActionPlan.run();
               }}
-              disabled={currentActionPlan.disabled}
-              sx={{
-                minHeight: { xs: 34, sm: 40, md: 44 },
-                px: { xs: 1.25, sm: 1.75 },
-                py: { xs: 0.45, sm: 0.9 },
-                fontSize: { xs: '0.76rem', sm: '0.9rem', md: '0.96rem' },
-                '& .MuiButton-startIcon svg': {
-                  fontSize: { xs: '0.95rem', sm: '1.1rem', md: '1.2rem' },
-                },
-              }}
+              disabled={advancedActionPlan.disabled}
+              sx={actionButtonSx}
             >
-              {isPublishingEverywhere ? currentActionPlan.pendingLabel : currentActionPlan.label}
+              {isApplyingAdvancedChanges ? advancedActionPlan.pendingLabel : advancedActionPlan.label}
             </Button>
           </Stack>
         </Stack>

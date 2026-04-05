@@ -75,3 +75,53 @@ export const initFunctionsSentry = (): void => {
 
   initialized = true;
 };
+
+type FunctionsSentryContext = {
+  tags?: Record<string, string>;
+  extra?: Record<string, unknown>;
+};
+
+const captureWithContext = (error: unknown, context?: FunctionsSentryContext): string | undefined => {
+  return Sentry.withScope((scope) => {
+    if (context?.tags) {
+      Object.entries(context.tags).forEach(([key, value]) => {
+        scope.setTag(key, value);
+      });
+    }
+    if (context?.extra) {
+      Object.entries(context.extra).forEach(([key, value]) => {
+        scope.setExtra(key, value);
+      });
+    }
+    return Sentry.captureException(error instanceof Error ? error : new Error(JSON.stringify(error)));
+  });
+};
+
+export const captureFunctionsException = (
+  error: unknown,
+  context?: FunctionsSentryContext
+): string | undefined => {
+  if (!initialized) {
+    initFunctionsSentry();
+  }
+
+  if (!Sentry.isEnabled()) {
+    return undefined;
+  }
+
+  return captureWithContext(error, context);
+};
+
+export const captureFunctionsExceptionAndFlush = async (
+  error: unknown,
+  context?: FunctionsSentryContext,
+  flushTimeoutMs: number = 2000
+): Promise<string | undefined> => {
+  const eventId = captureFunctionsException(error, context);
+  if (!eventId || !Sentry.isEnabled()) {
+    return eventId;
+  }
+
+  await Sentry.flush(flushTimeoutMs);
+  return eventId;
+};
