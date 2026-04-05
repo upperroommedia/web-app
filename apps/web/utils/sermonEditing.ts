@@ -16,14 +16,19 @@ export function isSermonPublishedExternally(sermon?: Sermon | null): boolean {
   );
 }
 
-export function canEditSermonRecord(sermon?: Sermon | null): boolean {
+export function canEditSermonMetadata(sermon?: Sermon | null): boolean {
   if (!sermon) return false;
-  return !isSermonProcessingLocked(sermon) && !isSermonPublishedExternally(sermon);
+  return !isSermonProcessingLocked(sermon);
+}
+
+export function canEditSermonRecord(sermon?: Sermon | null): boolean {
+  return canEditSermonMetadata(sermon);
 }
 
 export function canEditSermonAudio(sermon?: Sermon | null): boolean {
   if (!sermon) return false;
-  if (!canEditSermonRecord(sermon)) return false;
+  if (!canEditSermonMetadata(sermon)) return false;
+  if (isSermonPublishedExternally(sermon)) return false;
   if (typeof sermon.trimDurationSeconds !== 'number' || sermon.trimDurationSeconds <= 0) return false;
   return Boolean(sermon.youtubeUrl) || sermon.audioSource !== 'subsplash';
 }

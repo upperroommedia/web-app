@@ -1,6 +1,7 @@
 import { createEmptySermon } from '../types/Sermon';
 import { sermonStatusType, uploadStatus } from '../types/SermonTypes';
 import {
+  canEditSermonMetadata,
   canEditSermonAudio,
   canEditSermonRecord,
   isSermonProcessingLocked,
@@ -16,6 +17,8 @@ describe('sermonEditing helpers', () => {
 
     expect(isSermonProcessingLocked(pending)).toBe(true);
     expect(isSermonProcessingLocked(processing)).toBe(true);
+    expect(canEditSermonMetadata(pending)).toBe(false);
+    expect(canEditSermonMetadata(processing)).toBe(false);
     expect(canEditSermonRecord(pending)).toBe(false);
     expect(canEditSermonRecord(processing)).toBe(false);
   });
@@ -25,6 +28,7 @@ describe('sermonEditing helpers', () => {
     delete sermon.trimDurationSeconds;
     sermon.status.audioStatus = sermonStatusType.PROCESSED;
 
+    expect(canEditSermonMetadata(sermon)).toBe(true);
     expect(canEditSermonRecord(sermon)).toBe(true);
     expect(canEditSermonAudio(sermon)).toBe(false);
   });
@@ -34,17 +38,19 @@ describe('sermonEditing helpers', () => {
     sermon.status.audioStatus = sermonStatusType.PROCESSED;
     sermon.trimDurationSeconds = 1200;
 
+    expect(canEditSermonMetadata(sermon)).toBe(true);
     expect(canEditSermonRecord(sermon)).toBe(true);
     expect(canEditSermonAudio(sermon)).toBe(true);
   });
 
-  it('blocks editing for externally published sermons', () => {
+  it('allows metadata editing but blocks audio editing for externally published sermons', () => {
     const sermon = createEmptySermon('user-1');
     sermon.status.audioStatus = sermonStatusType.PROCESSED;
     sermon.trimDurationSeconds = 1200;
     sermon.status.soundCloud = uploadStatus.UPLOADED;
 
-    expect(canEditSermonRecord(sermon)).toBe(false);
+    expect(canEditSermonMetadata(sermon)).toBe(true);
+    expect(canEditSermonRecord(sermon)).toBe(true);
     expect(canEditSermonAudio(sermon)).toBe(false);
   });
 });

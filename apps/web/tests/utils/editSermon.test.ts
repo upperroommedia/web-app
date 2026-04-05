@@ -1,19 +1,28 @@
 import { createEmptySermon } from '../../types/Sermon';
 import { List, ListType, OverflowBehavior } from '../../types/List';
+import { uploadStatus } from '../../types/SermonTypes';
 
 const updateDocMock = jest.fn();
+const getDocMock = jest.fn();
 const getDocsMock = jest.fn();
 const writeBatchDeleteMock = jest.fn();
 const writeBatchSetMock = jest.fn();
+const writeBatchUpdateMock = jest.fn();
 const writeBatchCommitMock = jest.fn();
 const writeBatchMock = jest.fn();
 const docMock = jest.fn();
 const collectionGroupMock = jest.fn();
+const collectionMock = jest.fn();
 const queryMock = jest.fn();
 const whereMock = jest.fn();
+const orderByMock = jest.fn();
+const limitMock = jest.fn();
 const createFunctionV2Mock = jest.fn();
 const resolveCanonicalSermonListsMock = jest.fn();
+const resolveCanonicalFirestoreListMock = jest.fn();
 const runTransactionMock = jest.fn();
+const getDownloadURLMock = jest.fn();
+const refMock = jest.fn();
 
 jest.mock('../../firebase/firestore', () => ({
   __esModule: true,
@@ -21,18 +30,19 @@ jest.mock('../../firebase/firestore', () => ({
   Timestamp: {
     fromMillis: (millis: number) => ({ toMillis: () => millis }),
   },
-  deleteField: jest.fn(() => Symbol('deleteField')),
-  increment: jest.fn(),
-  limit: jest.fn(),
-  orderBy: jest.fn(),
+  deleteField: jest.fn(() => 'DELETE_FIELD'),
+  increment: jest.fn((value: number) => `increment:${value}`),
+  limit: (...args: unknown[]) => limitMock(...args),
+  orderBy: (...args: unknown[]) => orderByMock(...args),
   updateDoc: (...args: unknown[]) => updateDocMock(...args),
+  getDoc: (...args: unknown[]) => getDocMock(...args),
   getDocs: (...args: unknown[]) => getDocsMock(...args),
   writeBatch: (...args: unknown[]) => writeBatchMock(...args),
-  doc: (...args: unknown[]) => docMock(...args),
+  doc: (...args: string[]) => docMock(...args),
   collectionGroup: (...args: unknown[]) => collectionGroupMock(...args),
+  collection: (...args: unknown[]) => collectionMock(...args),
   query: (...args: unknown[]) => queryMock(...args),
   where: (...args: unknown[]) => whereMock(...args),
-  collection: jest.fn(),
   runTransaction: (...args: unknown[]) => runTransactionMock(...args),
 }));
 
@@ -46,9 +56,29 @@ jest.mock('../../utils/resolveCanonicalSermonLists', () => ({
   resolveCanonicalSermonLists: (...args: unknown[]) => resolveCanonicalSermonListsMock(...args),
 }));
 
+jest.mock('../../utils/resolveCanonicalFirestoreList', () => ({
+  __esModule: true,
+  resolveCanonicalFirestoreList: (...args: unknown[]) => resolveCanonicalFirestoreListMock(...args),
+}));
+
+jest.mock('../../firebase/storage', () => ({
+  __esModule: true,
+  getStorage: jest.fn(() => ({})),
+  getDownloadURL: (...args: unknown[]) => getDownloadURLMock(...args),
+  ref: (...args: unknown[]) => refMock(...args),
+}));
+
+jest.mock('../../firebase/firebase', () => ({
+  __esModule: true,
+  default: {},
+  isDevelopment: false,
+}));
+
 jest.mock('../../utils/callableConcurrency', () => ({
   __esModule: true,
   createOperationKey: jest.fn(() => 'operation-key'),
+  createPublishedMembershipHash: jest.fn(() => 'membership-hash'),
+  createRetryIntentKey: jest.fn((scope: string, id: string, suffix: string) => `${scope}:${id}:${suffix}`),
   parseLockBusyDetails: jest.fn(() => null),
 }));
 
@@ -64,27 +94,86 @@ const buildList = (overrides: Partial<List>): List =>
     ...overrides,
   }) as List;
 
-describe('editSermon list membership persistence', () => {
+const buildListDoc = (list: Partial<List> & { id: string }) => ({
+  id: list.id,
+  data: () => list,
+  ref: {
+    path: `sermons/sermon-1/sermonLists/${list.id}`,
+    parent: {
+      parent: {
+        id: 'sermon-1',
+      },
+    },
+  },
+});
+
+const buildListItemDoc = (listId: string) => ({
+  ref: {
+    parent: {
+      parent: {
+        id: listId,
+      },
+    },
+  },
+});
+
+const createFunctionMap = () => {
+  const map: Record<string, jest.Mock> = {
+    editSoundCloudSermon: jest.fn().mockResolvedValue({ soundCloudTrackUrl: 'https://soundcloud.test/updated' }),
+    editSubsplashSermon: jest.fn().mockResolvedValue(undefined),
+    addtolist: jest.fn().mockResolvedValue([]),
+    removefromlist: jest.fn().mockResolvedValue([]),
+    addtoseries: jest.fn().mockResolvedValue({ status: 'success' }),
+    removefromseries: jest.fn().mockResolvedValue({ status: 'success', message: 'ok', mediaItemId: 'subsplash-1' }),
+    reorderseriesitems: jest.fn().mockResolvedValue({ status: 'success' }),
+    createseries: jest.fn().mockResolvedValue({ status: 'success', subsplashId: 'series-subsplash-2' }),
+    createnewsubsplashlist: jest.fn().mockResolvedValue({ listId: 'subsplash-list-new' }),
+    uploadToSubsplash: jest.fn().mockResolvedValue({ id: 'subsplash-created' }),
+    deletefromsubsplash: jest.fn().mockResolvedValue(undefined),
+  };
+
+  createFunctionV2Mock.mockImplementation((name: string) => {
+    const fn = map[name];
+    if (!fn) {
+      throw new Error(`Unexpected callable requested in test: ${name}`);
+    }
+    return fn;
+  });
+
+  return map;
+};
+
+describe('editSermon remote edit reconciliation', () => {
   beforeEach(() => {
     jest.resetModules();
     updateDocMock.mockReset().mockResolvedValue(undefined);
+    getDocMock.mockReset().mockResolvedValue({ exists: () => false });
     getDocsMock.mockReset();
     writeBatchDeleteMock.mockReset();
     writeBatchSetMock.mockReset();
+    writeBatchUpdateMock.mockReset();
     writeBatchCommitMock.mockReset().mockResolvedValue(undefined);
     writeBatchMock.mockReset().mockReturnValue({
       delete: writeBatchDeleteMock,
       set: writeBatchSetMock,
+      update: writeBatchUpdateMock,
       commit: writeBatchCommitMock,
     });
     docMock.mockReset().mockImplementation((...segments: string[]) => ({
-      path: segments.join('/'),
+      path: segments.filter((segment) => typeof segment === 'string').join('/'),
       id: segments[segments.length - 1],
       withConverter() {
         return this;
       },
     }));
-    collectionGroupMock.mockReset().mockImplementation((...args: unknown[]) => args);
+    collectionGroupMock.mockReset().mockImplementation((...args: unknown[]) => ({ kind: 'collectionGroup', args }));
+    collectionMock.mockReset().mockImplementation((...args: unknown[]) => ({
+      kind: 'collection',
+      args,
+      withConverter() {
+        return this;
+      },
+    }));
     queryMock.mockReset().mockImplementation((...args: unknown[]) => ({
       args,
       withConverter() {
@@ -92,103 +181,389 @@ describe('editSermon list membership persistence', () => {
       },
     }));
     whereMock.mockReset().mockImplementation((...args: unknown[]) => args);
+    orderByMock.mockReset().mockImplementation((...args: unknown[]) => args);
+    limitMock.mockReset().mockImplementation((...args: unknown[]) => args);
     createFunctionV2Mock.mockReset();
     resolveCanonicalSermonListsMock.mockReset();
+    resolveCanonicalFirestoreListMock.mockReset();
     runTransactionMock.mockReset().mockResolvedValue(undefined);
+    getDownloadURLMock.mockReset().mockResolvedValue('https://storage.test/audio.mp3');
+    refMock.mockReset().mockReturnValue('storage-ref');
     global.alert = jest.fn();
   });
 
-  it('does not delete an existing derived list membership when canonical membership still contains it', async () => {
+  it('updates published metadata without churning list or series memberships', async () => {
+    const functions = createFunctionMap();
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.title = 'Original Title';
+    originalSermon.description = 'Original Description';
+    originalSermon.subsplashId = 'subsplash-1';
+    originalSermon.soundCloudTrackId = 'soundcloud-1';
+    originalSermon.status.subsplash = uploadStatus.UPLOADED;
+    originalSermon.status.soundCloud = uploadStatus.UPLOADED;
+
+    const updatedSermon = {
+      ...originalSermon,
+      title: 'Updated Title',
+      description: 'Updated Description',
+    };
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({ docs: [] });
+
+    await editSermon(updatedSermon, [], { originalSermon });
+
+    expect(functions.editSoundCloudSermon).toHaveBeenCalledTimes(1);
+    expect(functions.editSubsplashSermon).toHaveBeenCalledTimes(1);
+    expect(functions.addtolist).not.toHaveBeenCalled();
+    expect(functions.removefromlist).not.toHaveBeenCalled();
+    expect(functions.addtoseries).not.toHaveBeenCalled();
+    expect(functions.removefromseries).not.toHaveBeenCalled();
+    expect(writeBatchCommitMock).toHaveBeenCalledTimes(1);
+    expect(runTransactionMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps edits local when the sermon is not published anywhere', async () => {
+    const functions = createFunctionMap();
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.title = 'Original Title';
+
+    const updatedSermon = {
+      ...originalSermon,
+      title: 'Updated Title',
+      description: 'Updated Description',
+    };
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({ docs: [] });
+
+    await editSermon(updatedSermon, [], { originalSermon });
+
+    expect(functions.uploadToSubsplash).not.toHaveBeenCalled();
+    expect(functions.editSubsplashSermon).not.toHaveBeenCalled();
+    expect(functions.editSoundCloudSermon).not.toHaveBeenCalled();
+    expect(functions.addtolist).not.toHaveBeenCalled();
+    expect(functions.addtoseries).not.toHaveBeenCalled();
+    expect(writeBatchCommitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes the remote media item instead of issuing list-row removals when the last published membership is removed', async () => {
+    const functions = createFunctionMap();
     const editSermon = (await import('../../pages/api/editSermon')).default;
 
     const sermon = createEmptySermon('user-1');
     sermon.id = 'sermon-1';
-    sermon.subtitle = 'I’m New';
-    sermon.speakers = [
-      {
-        id: 'speaker-1',
-        name: 'Speaker',
-        images: [],
-        sermonCount: 0,
-        listId: 'speaker-list',
-      },
-    ];
+    sermon.subsplashId = 'subsplash-1';
+    sermon.status.subsplash = uploadStatus.UPLOADED;
 
-    const speakerList = buildList({
-      id: 'speaker-list',
-      name: 'TEST [TO DELETE]',
-      type: ListType.SPEAKER_LIST,
-    });
+    const publishedList = {
+      ...buildList({ id: 'list-a', name: 'List A', subsplashId: 'subsplash-list-a' }),
+      uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-a' },
+      publishGeneration: 0,
+    };
 
-    resolveCanonicalSermonListsMock.mockResolvedValue([speakerList]);
-    getDocsMock.mockResolvedValue({
-      docs: [
-        {
-          ref: {
-            parent: {
-              parent: {
-                id: 'speaker-list',
-              },
-            },
-          },
-        },
-      ],
-    });
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([publishedList])
+      .mockResolvedValueOnce([]);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [buildListDoc(publishedList)] })
+      .mockResolvedValueOnce({ docs: [buildListItemDoc('list-a')] });
 
-    await editSermon(sermon, []);
+    await editSermon(sermon, [], { originalSermon: sermon });
 
-    expect(resolveCanonicalSermonListsMock).toHaveBeenCalledWith(sermon, []);
-    expect(writeBatchDeleteMock).not.toHaveBeenCalled();
-    expect(writeBatchSetMock).not.toHaveBeenCalled();
-    expect(writeBatchCommitMock).toHaveBeenCalled();
+    expect(functions.deletefromsubsplash).toHaveBeenCalledTimes(1);
+    expect(functions.removefromlist).not.toHaveBeenCalled();
+    expect(functions.addtolist).not.toHaveBeenCalled();
+    expect(writeBatchDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ path: 'sermons/sermon-1/sermonLists/list-a' }));
+    expect(writeBatchDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ path: 'lists/list-a/listItems/sermon-1' }));
   });
 
-  it('does not auto-delete stale firebase list memberships when canonical membership excludes them', async () => {
+  it('adds only newly selected lists and persists their published upload status', async () => {
+    const functions = createFunctionMap();
+    functions.addtolist.mockResolvedValue([
+      {
+        listId: 'subsplash-list-b',
+        status: 'success',
+        listItemId: 'row-b',
+        actualPlacement: {
+          firestoreListId: 'list-b',
+          subsplashListId: 'subsplash-list-b',
+          overflowDepth: 0,
+          position: 1,
+          listItemId: 'row-b',
+        },
+      },
+    ]);
+
     const editSermon = (await import('../../pages/api/editSermon')).default;
 
     const sermon = createEmptySermon('user-1');
-    sermon.id = 'sermon-2';
-    sermon.subtitle = 'I’m New';
+    sermon.id = 'sermon-1';
+    sermon.subsplashId = 'subsplash-1';
+    sermon.status.subsplash = uploadStatus.UPLOADED;
 
-    const topicList = buildList({
-      id: 'topic-list',
-      name: 'Anger',
-      type: ListType.TOPIC_LIST,
-    });
+    const newList = buildList({ id: 'list-b', name: 'List B', subsplashId: 'subsplash-list-b' });
 
-    resolveCanonicalSermonListsMock.mockResolvedValue([topicList]);
-    getDocsMock.mockResolvedValue({
-      docs: [
-        {
-          ref: {
-            parent: {
-              parent: {
-                id: 'speaker-list',
-              },
-            },
-          },
-        },
-      ],
-    });
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([newList]);
+    resolveCanonicalFirestoreListMock.mockResolvedValue(newList);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({ docs: [] });
 
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await editSermon(sermon, [newList], { originalSermon: sermon });
 
-    await editSermon(sermon, [topicList]);
-
-    expect(writeBatchDeleteMock).not.toHaveBeenCalled();
+    expect(functions.addtolist).toHaveBeenCalledTimes(1);
+    expect(functions.removefromlist).not.toHaveBeenCalled();
     expect(writeBatchSetMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'lists/topic-list/listItems/sermon-2' }),
-      sermon
-    );
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      'editSermon.autoDeletePrevented',
+      expect.objectContaining({ path: 'sermons/sermon-1/sermonLists/list-b' }),
       expect.objectContaining({
-        sermonId: 'sermon-2',
-        staleListIds: ['speaker-list'],
-        canonicalListIds: ['topic-list'],
+        id: 'list-b',
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-b' },
       })
     );
+  });
 
+  it('creates the media item and missing subsplash list when publishing an unpublished sermon into a list', async () => {
+    const functions = createFunctionMap();
+    functions.addtolist.mockResolvedValue([
+      {
+        listId: 'subsplash-list-new',
+        status: 'success',
+        listItemId: 'row-new',
+      },
+    ]);
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const sermon = createEmptySermon('user-1');
+    sermon.id = 'sermon-1';
+
+    const newList = buildList({ id: 'list-new', name: 'List New' });
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([newList]);
+    resolveCanonicalFirestoreListMock.mockResolvedValue(newList);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({ docs: [] });
+
+    await editSermon(sermon, [newList], { originalSermon: sermon });
+
+    expect(functions.uploadToSubsplash).toHaveBeenCalledTimes(1);
+    expect(functions.createnewsubsplashlist).toHaveBeenCalledTimes(1);
+    expect(updateDocMock).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'lists/list-new' }),
+      { subsplashId: 'subsplash-list-new' }
+    );
+    expect(functions.addtolist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationListIds: ['subsplash-list-new'],
+        mediaItem: { id: 'subsplash-created', type: 'media-item' },
+      })
+    );
+    expect(writeBatchUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'sermons/sermon-1' }),
+      expect.objectContaining({ subsplashId: 'subsplash-created' })
+    );
+  });
+
+  it('syncs series reassignment by removing the old membership, adding the new one, and reordering', async () => {
+    const functions = createFunctionMap();
+    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.subsplashId = 'subsplash-1';
+    originalSermon.seriesId = 'series-a';
+    originalSermon.status.subsplash = uploadStatus.UPLOADED;
+
+    const updatedSermon = {
+      ...originalSermon,
+      seriesId: 'series-b',
+    };
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    getDocMock
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => ({ publishedToSubsplash: true, sermonSubsplashId: 'subsplash-1' }),
+      })
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => ({
+          id: 'series-b',
+          name: 'Series B',
+          ownerId: 'user-1',
+          summary: '',
+          images: [],
+          subsplashId: 'series-subsplash-b',
+        }),
+      });
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            data: () => ({ position: 7 }),
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            id: 'sermon-2',
+            data: () => ({
+              position: 7,
+              publishedToSubsplash: true,
+              sermonSubsplashId: 'subsplash-2',
+            }),
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        docs: [],
+      })
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            data: () => ({ position: 7 }),
+          },
+        ],
+      });
+
+    await editSermon(updatedSermon, [], { originalSermon });
+
+    expect(functions.removefromseries).toHaveBeenCalledTimes(1);
+    expect(functions.addtoseries).toHaveBeenCalledTimes(1);
+    expect(functions.reorderseriesitems).toHaveBeenCalledTimes(1);
+    expect(runTransactionMock).toHaveBeenCalledTimes(1);
     consoleWarnSpy.mockRestore();
+  });
+
+  it('reorders a newly published series membership even before the Firestore series item exists locally', async () => {
+    const functions = createFunctionMap();
+    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.subsplashId = 'subsplash-1';
+    originalSermon.status.subsplash = uploadStatus.UPLOADED;
+
+    const updatedSermon = {
+      ...originalSermon,
+      seriesId: 'series-b',
+    };
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    getDocMock.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({
+        id: 'series-b',
+        name: 'Series B',
+        ownerId: 'user-1',
+        summary: '',
+        images: [],
+        subsplashId: 'series-subsplash-b',
+      }),
+    });
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            data: () => ({ position: 7 }),
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            id: 'sermon-2',
+            data: () => ({
+              position: 7,
+              publishedToSubsplash: true,
+              sermonSubsplashId: 'subsplash-2',
+            }),
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            data: () => ({ position: 7 }),
+          },
+        ],
+      });
+
+    await editSermon(updatedSermon, [], { originalSermon });
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      'editSermon.reorderSeries.pendingInsertion',
+      expect.objectContaining({
+        seriesId: 'series-b',
+        sermonId: 'sermon-1',
+        pendingPosition: 8,
+      })
+    );
+    expect(functions.reorderseriesitems).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firestoreSeriesId: 'series-b',
+        itemOrder: [
+          { mediaItemId: 'subsplash-1', position: 2 },
+          { mediaItemId: 'subsplash-2', position: 1 },
+        ],
+      })
+    );
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('aborts the local save when a required remote mutation fails', async () => {
+    const functions = createFunctionMap();
+    functions.addtolist.mockRejectedValue(new Error('addtolist failed'));
+
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const sermon = createEmptySermon('user-1');
+    sermon.id = 'sermon-1';
+    sermon.subsplashId = 'subsplash-1';
+    sermon.status.subsplash = uploadStatus.UPLOADED;
+
+    const newList = buildList({ id: 'list-b', name: 'List B', subsplashId: 'subsplash-list-b' });
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([newList]);
+    resolveCanonicalFirestoreListMock.mockResolvedValue(newList);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({ docs: [] });
+
+    await expect(editSermon(sermon, [newList], { originalSermon: sermon })).rejects.toThrow('addtolist failed');
+
+    expect(writeBatchCommitMock).not.toHaveBeenCalled();
+    expect(global.alert).toHaveBeenCalledWith('addtolist failed');
   });
 });

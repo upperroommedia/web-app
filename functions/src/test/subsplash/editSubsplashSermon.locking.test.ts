@@ -140,4 +140,49 @@ describe('editSubsplashSermon lock contract', () => {
       },
     });
   });
+
+  it('sends empty tags and clearable subtitle/summary fields when metadata is removed', async () => {
+    await editHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        ...buildValidPayload(),
+        subtitle: '',
+        description: '',
+        speakers: [],
+        topics: [],
+      },
+    });
+
+    const requestConfig = mockAxios.mock.calls[0][0] as unknown as { data: string };
+    const requestData = JSON.parse(String(requestConfig.data));
+    expect(requestData.tags).toEqual([]);
+    expect(requestData.subtitle).toBe('');
+    expect(requestData.summary).toBe('');
+  });
+
+  it('uses the remote image id when present and falls back to the local id otherwise', async () => {
+    await editHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        ...buildValidPayload(),
+        images: [
+          { id: 'image-1', type: 'square', subsplashId: 'subsplash-image-1' },
+          { id: 'image-2', type: 'wide' },
+        ],
+      },
+    });
+
+    const requestConfig = mockAxios.mock.calls[0][0] as unknown as { data: string };
+    const requestData = JSON.parse(String(requestConfig.data));
+    expect(requestData._embedded.images).toEqual([
+      {
+        id: 'subsplash-image-1',
+        type: 'square',
+      },
+      {
+        id: 'image-2',
+        type: 'wide',
+      },
+    ]);
+  });
 });

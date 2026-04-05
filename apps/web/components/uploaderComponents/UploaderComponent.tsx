@@ -1177,11 +1177,11 @@ const Uploader = (props: UploaderProps) => {
                             };
                         promises.push(generateAddIntroOutroTask(data));
                         promises.push(
-                          editSermon(pendingSermon, sermonList, { originalSeriesId: props.existingSermon?.seriesId })
+                          editSermon(pendingSermon, sermonList, { originalSermon: props.existingSermon })
                         );
                       } else {
                         promises.push(
-                          editSermon(sermonToPersist, sermonList, { originalSeriesId: props.existingSermon?.seriesId })
+                          editSermon(sermonToPersist, sermonList, { originalSermon: props.existingSermon })
                         );
                       }
 
@@ -1189,6 +1189,8 @@ const Uploader = (props: UploaderProps) => {
                       // Mark as intentional navigation to bypass unsaved changes warning
                       markIntentionalNavigation();
                       props.setEditFormOpen?.(false);
+                    } catch (error) {
+                      console.error('Error editing sermon:', error);
                     } finally {
                       setIsEditing(false);
                     }

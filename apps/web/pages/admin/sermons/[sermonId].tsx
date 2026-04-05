@@ -67,7 +67,7 @@ import { useObject } from 'react-firebase-hooks/database';
 import database, { ref as dbRef } from '../../../firebase/database';
 import LinearProgress from '@mui/material/LinearProgress';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
-import { canEditSermonRecord, isSermonProcessingLocked, isSermonPublishedExternally } from '../../../utils/sermonEditing';
+import { canEditSermonMetadata, isSermonProcessingLocked, isSermonPublishedExternally } from '../../../utils/sermonEditing';
 import { parseProcessingProgress } from '../../../utils/processAudioProgress';
 import { reportHandledError, reportHandledMessage } from '../../../utils/reportHandledError';
 
@@ -461,7 +461,7 @@ const SermonDetailsPage = () => {
     || series?.images?.find((img) => img.type === 'square');
 
   // Check if user can edit/delete
-  const canEdit = sermon && (canPublish || user?.canUpload()) && canEditSermonRecord(sermon);
+  const canEdit = sermon && (canPublish || user?.canUpload()) && canEditSermonMetadata(sermon);
 
   const canDelete = sermon && (
     canPublish ||

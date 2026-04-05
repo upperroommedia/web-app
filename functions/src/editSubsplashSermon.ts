@@ -4,7 +4,6 @@ import axios from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from './uploadToSubsplash';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
-import { ImageType } from '@upperroom/shared/types/Image';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
@@ -61,30 +60,30 @@ const editSubsplashSermon = onCall(
               tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
             }
 
+            const validImages = Array.isArray(data.images)
+              ? data.images
+                  .map((image) =>
+                    image.subsplashId || image.id
+                      ? {
+                          id: image.subsplashId || image.id,
+                          type: image.type,
+                        }
+                      : undefined
+                  )
+                  .filter((image): image is { id: string; type: (typeof data.images)[number]['type'] } => Boolean(image))
+              : undefined;
+
             // only send non null values to subsplash
             const requestData = JSON.stringify({
               app_key: '9XTSHD',
-              ...(tags.length > 0 && { tags: tags }),
-              ...(data.title && { title: data.title }),
-              ...(data.subtitle && { subtitle: data.subtitle }),
-              ...(data.description && { summary: data.description }),
+              ...(Array.isArray(data.speakers) || Array.isArray(data.topics) ? { tags } : {}),
+              ...(typeof data.title === 'string' ? { title: data.title } : {}),
+              ...(typeof data.subtitle === 'string' ? { subtitle: data.subtitle } : {}),
+              ...(typeof data.description === 'string' ? { summary: data.description } : {}),
               ...(data.date && { date: data.date }),
-              ...(data.images && {
+              ...(validImages && {
                 _embedded: {
-                  images: data.images
-                    .map((image) => {
-                      const remoteImageId = image.subsplashId || image.id;
-                      if (!remoteImageId) {
-                        return undefined;
-                      }
-
-                      return {
-                        id: remoteImageId,
-                        type: image.type,
-                      };
-                    })
-                    .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined),
-                  // audio: { id: data.audioId },
+                  images: validImages,
                 },
               }),
             });

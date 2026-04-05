@@ -28,7 +28,7 @@ import firebase from '../../../../firebase/firebase';
 import { UNPROCESSED_SERMONS_BUCKET } from '../../../../constants/storage_constants';
 import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { SermonURL } from '../../../../components/EditSermonForm';
-import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../../../utils/sermonEditing';
+import { canEditSermonAudio, canEditSermonMetadata, isSermonProcessingLocked } from '../../../../utils/sermonEditing';
 import { markIntentionalNavigation } from '../../../../utils/intentionalNavigation';
 
 const storage = getStorage(firebase);
@@ -79,7 +79,7 @@ const EditSermonPage = () => {
       const sermonData = sermonDoc.data();
       
       // Check permissions
-      const canEdit = (canPublish || user.canUpload()) && canEditSermonRecord(sermonData);
+      const canEdit = (canPublish || user.canUpload()) && canEditSermonMetadata(sermonData);
       
       if (!canEdit) {
         setError(
