@@ -1071,7 +1071,8 @@ const SeriesDetailsPage = () => {
 
   const getPublishedRemoteOrderWithAdditions = useCallback(
     (sourceItems: SeriesDisplayItem[], additions: Map<string, string>) => {
-      return sourceItems
+      const encounteredAdditionSermonIds = new Set<string>();
+      const orderedMediaItemIds = sourceItems
         .filter((item) => {
           if (item.sermonId && additions.has(item.sermonId)) {
             return true;
@@ -1080,11 +1081,20 @@ const SeriesDetailsPage = () => {
         })
         .map((item) => {
           if (item.sermonId && additions.has(item.sermonId)) {
+            encounteredAdditionSermonIds.add(item.sermonId);
             return additions.get(item.sermonId);
           }
           return item.remoteMediaItemId;
         })
         .filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId));
+
+      for (const [sermonId, mediaItemId] of additions.entries()) {
+        if (!encounteredAdditionSermonIds.has(sermonId) && mediaItemId) {
+          orderedMediaItemIds.push(mediaItemId);
+        }
+      }
+
+      return orderedMediaItemIds;
     },
     []
   );
