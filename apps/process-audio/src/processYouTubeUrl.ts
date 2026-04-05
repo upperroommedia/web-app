@@ -3359,7 +3359,7 @@ export const downloadYouTubeAudioToFile = async (
 
         let progressPercent: number | null = null;
         let progressSource: 'percent' | 'ffmpeg_time' | 'fragment_estimate' = 'percent';
-        const fragmentProgress = config.fragmentCount > 0 ? extractFragmentProgressFromLine(chunk) : null;
+        const fragmentProgress = extractFragmentProgressFromLine(chunk);
         const ffmpegTimeSeconds = extractFfmpegTime(chunk);
         if (fragmentProgress && fragmentProgress.total > 0) {
           progressPercent = fragmentProgress.percent;
@@ -3504,17 +3504,83 @@ export const downloadYouTubeAudioToFile = async (
       }, stallPollIntervalMs);
     });
 
-  const getInitialDownloadAttempt = async (): Promise<{ mode: YouTubeExtractionMode; extraCookieArgs: string[] }> => {
+  const buildResolvedFallbackAttempt = (resolved: {
+    formatId: string;
+    extractionMode: YouTubeExtractionMode;
+    protocol: string | null;
+    fragmentCount: number;
+    durationSeconds: number | null;
+  }): DownloadAttemptConfig => {
+    const downloadPolicy = resolveYouTubeDownloadPolicy(resolved.protocol, resolved.fragmentCount);
+    return {
+      formatSpec: resolved.formatId,
+      logFormatId: resolved.formatId,
+      protocol: resolved.protocol,
+      fragmentCount: resolved.fragmentCount,
+      durationSeconds: resolved.durationSeconds,
+      dashConcurrency: downloadPolicy.dashConcurrency,
+      abortOnUnavailableFragments: downloadPolicy.abortOnUnavailableFragments,
+      useConcurrentFragments: true,
+      useRequestPacing: true,
+      useExternalDownloader: downloadPolicy.useExternalDownloader,
+      noPart: false,
+      noContinue: false,
+      extractAudio: false,
+      attemptStrategy: 'resolved_fallback',
+    };
+  };
+
+  const getInitialDownloadAttempt = async (): Promise<{
+    mode: YouTubeExtractionMode;
+    extraCookieArgs: string[];
+    config: DownloadAttemptConfig;
+    resolvedFallbackAttempt?: DownloadAttemptConfig;
+  }> => {
     if (!shouldUseCookiesForPublicVideos()) {
-      return { mode: 'public_provider', extraCookieArgs: [] };
+      return { mode: 'public_provider', extraCookieArgs: [], config: directAudioAttempt };
     }
 
     cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
-    if (shouldPreferCookieProvider(cookieContext) && !cookieContext.cookieBreakerOpen) {
-      return { mode: 'cookie_provider', extraCookieArgs: cookieContext.args };
+    const mode: YouTubeExtractionMode =
+      shouldPreferCookieProvider(cookieContext) && !cookieContext.cookieBreakerOpen ? 'cookie_provider' : 'public_provider';
+    const extraCookieArgs = mode === 'cookie_provider' ? cookieContext.args : [];
+
+    const resolvedSelection = await resolvePreferredAudioFormatId(
+      ytdlpPath,
+      url,
+      realtimeDB,
+      isDevelopment,
+      log,
+      ctx,
+      'download',
+      (context) => {
+        cookieContext = context;
+      }
+    );
+    const resolvedFallbackAttempt = buildResolvedFallbackAttempt(resolvedSelection);
+
+    if (resolveYouTubeDownloadPolicy(resolvedSelection.protocol, resolvedSelection.fragmentCount).dashFragmentedDownload) {
+      log.info('Skipping direct-audio YouTube download attempt for DASH/fragmented selection', {
+        url,
+        formatId: resolvedSelection.formatId,
+        protocol: resolvedSelection.protocol,
+        fragmentCount: resolvedSelection.fragmentCount,
+        extractionMode: resolvedSelection.extractionMode,
+      });
+      return {
+        mode: resolvedSelection.extractionMode,
+        extraCookieArgs: cookieContext?.args || extraCookieArgs,
+        config: resolvedFallbackAttempt,
+        resolvedFallbackAttempt,
+      };
     }
 
-    return { mode: 'public_provider', extraCookieArgs: [] };
+    return {
+      mode,
+      extraCookieArgs,
+      config: directAudioAttempt,
+      resolvedFallbackAttempt,
+    };
   };
 
   const directAudioAttempt: DownloadAttemptConfig = {
@@ -3569,9 +3635,13 @@ export const downloadYouTubeAudioToFile = async (
   };
 
   try {
+    const initialAttempt = await getInitialDownloadAttempt();
+    if (initialAttempt.config.attemptStrategy !== 'direct_audio') {
+      return await runAttemptWithOptionalBrowserRefresh(initialAttempt.mode, initialAttempt.config, initialAttempt.extraCookieArgs);
+    }
+
     try {
-      const initialAttempt = await getInitialDownloadAttempt();
-      return await runAttemptWithOptionalBrowserRefresh(initialAttempt.mode, directAudioAttempt, initialAttempt.extraCookieArgs);
+      return await runAttemptWithOptionalBrowserRefresh(initialAttempt.mode, initialAttempt.config, initialAttempt.extraCookieArgs);
     } catch (directAudioError) {
       const directAudioMessage = directAudioError instanceof Error ? directAudioError.message : String(directAudioError);
       log.warn('Primary direct-audio YouTube download failed; falling back to resolved format selection', {
@@ -3580,36 +3650,25 @@ export const downloadYouTubeAudioToFile = async (
         error: directAudioMessage,
       });
 
-      const { formatId, extractionMode, protocol, fragmentCount, durationSeconds } = await resolvePreferredAudioFormatId(
-        ytdlpPath,
-        url,
-        realtimeDB,
-        isDevelopment,
-        log,
-        ctx,
-        'download',
-        (context) => {
-          cookieContext = context;
-        }
-      );
+      let extractionMode = initialAttempt.mode;
+      let resolvedFallbackAttempt = initialAttempt.resolvedFallbackAttempt;
 
-      const downloadPolicy = resolveYouTubeDownloadPolicy(protocol, fragmentCount);
-      const resolvedFallbackAttempt: DownloadAttemptConfig = {
-        formatSpec: formatId,
-        logFormatId: formatId,
-        protocol,
-        fragmentCount,
-        durationSeconds,
-        dashConcurrency: downloadPolicy.dashConcurrency,
-        abortOnUnavailableFragments: downloadPolicy.abortOnUnavailableFragments,
-        useConcurrentFragments: true,
-        useRequestPacing: true,
-        useExternalDownloader: downloadPolicy.useExternalDownloader,
-        noPart: false,
-        noContinue: false,
-        extractAudio: false,
-        attemptStrategy: 'resolved_fallback',
-      };
+      if (!resolvedFallbackAttempt) {
+        const resolvedSelection = await resolvePreferredAudioFormatId(
+          ytdlpPath,
+          url,
+          realtimeDB,
+          isDevelopment,
+          log,
+          ctx,
+          'download',
+          (context) => {
+            cookieContext = context;
+          }
+        );
+        extractionMode = resolvedSelection.extractionMode;
+        resolvedFallbackAttempt = buildResolvedFallbackAttempt(resolvedSelection);
+      }
 
       return await runAttemptWithOptionalBrowserRefresh(
         extractionMode,
