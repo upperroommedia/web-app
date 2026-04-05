@@ -250,6 +250,91 @@ describe('publish strict preflight', () => {
     );
   });
 
+  it('allows latest-list publish with a large remote-only published set and preserves those current remote rows', async () => {
+    const rootSubsplashListId = 'latest-remote-only-large-root';
+    const rootFirestoreListId = 'latest-remote-only-large-root-firestore';
+
+    subsplashMock.createList(rootSubsplashListId, 'Latest', 199, 200);
+    subsplashMock.failPatchWhenHiddenCapacityIsFull(rootSubsplashListId);
+    subsplashMock.listRows.set(
+      rootSubsplashListId,
+      Array.from({ length: 199 }, (_, index) => ({
+        id: `row-${index + 1}`,
+        app_key: '9XTSHD',
+        method: 'static',
+        position: index + 1,
+        type: 'media-item' as const,
+        _embedded: {
+          'source-list': { id: rootSubsplashListId },
+          'media-item': { id: `remote-only-${index + 1}` },
+        },
+      }))
+    );
+
+    await createListDocument({
+      id: rootFirestoreListId,
+      subsplashId: rootSubsplashListId,
+      title: 'Latest',
+      overflowBehavior: OverflowBehavior.REMOVEOLDEST,
+      count: 199,
+      logicalCount: 199,
+      hasOverflowPages: false,
+      isRootList: true,
+      rootListId: rootFirestoreListId,
+      overflowDepth: 0,
+    });
+
+    await createSermonDocument({
+      id: 'sermon-new-latest-remote-only',
+      title: 'Newest Sermon',
+      subtitle: '',
+      description: '',
+      speakers: [],
+      dateMillis: Date.now(),
+      sourceStartTime: 0,
+      durationSeconds: 1000,
+      topics: [],
+      dateString: '4/5/2026',
+      status: {
+        subsplash: uploadStatus.NOT_UPLOADED,
+        soundCloud: uploadStatus.NOT_UPLOADED,
+        audioStatus: sermonStatusType.PROCESSED,
+      },
+      images: [],
+      createdAtMillis: Date.now(),
+      editedAtMillis: Date.now(),
+      subsplashId: 'brand-new-media-item',
+      numberOfLists: 1,
+      numberOfListsUploadedTo: 0,
+    });
+
+    subsplashMock.clearHistory();
+
+    const result = await addToListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootSubsplashListId],
+        mediaItem: { id: 'brand-new-media-item', type: 'media-item' },
+        maxListSize: 200,
+        operationKey: 'latest-remote-only-large-publish',
+      },
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        listId: rootSubsplashListId,
+        status: 'success',
+      }),
+    ]);
+
+    const rows = subsplashMock.getListRows(rootSubsplashListId);
+    expect(rows).toHaveLength(199);
+    expect(rows[0]._embedded['media-item']?.id).toBe('brand-new-media-item');
+    expect(rows[1]._embedded['media-item']?.id).toBe('remote-only-1');
+    expect(rows.some((row) => row._embedded['media-item']?.id === 'remote-only-198')).toBe(true);
+    expect(rows.some((row) => row._embedded['media-item']?.id === 'remote-only-199')).toBe(false);
+  });
+
   it('blocks publish when the current Subsplash chain has malformed continuation rows', async () => {
     const rootSubsplashListId = 'publish-blocked-invalid-continuation-root';
     const overflowSubsplashListId = 'publish-blocked-invalid-continuation-overflow';

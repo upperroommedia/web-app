@@ -421,6 +421,80 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     expect(unrelatedMembership.data()?.uploadStatus?.listItemId).toBe('row-2');
   });
 
+  it('allows remove from a structurally valid remote-only published list without Firebase mirrors', async () => {
+    const listId = 'remove-remote-only-valid-root';
+    const firestoreListId = 'remove-remote-only-valid-root-firestore';
+    subsplashMock.createList(listId, 'Remote Only Root', 3, 5);
+    subsplashMock.listRows.set(listId, [
+      {
+        id: 'row-1',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'remote-only-1' },
+        },
+      },
+      {
+        id: 'row-2',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'remote-only-2' },
+        },
+      },
+      {
+        id: 'row-3',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 3,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'remote-only-3' },
+        },
+      },
+    ]);
+
+    await createListDocument({
+      id: firestoreListId,
+      subsplashId: listId,
+      title: 'Remote Only Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 3,
+      logicalCount: 3,
+      hasOverflowPages: false,
+      isRootList: true,
+      rootListId: firestoreListId,
+      overflowDepth: 0,
+    });
+
+    const result = await removeFromListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        listIds: [listId],
+        listItemIds: ['row-2'],
+        itemIds: ['remote-only-2'],
+        itemTypes: ['media-item'],
+      },
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        listId,
+        status: 'success',
+      }),
+    ]);
+
+    const rows = subsplashMock.getListRows(listId);
+    expect(rows.map((row) => row._embedded['media-item']?.id)).toEqual(['remote-only-1', 'remote-only-3']);
+  });
+
   it('should find and remove item from overflow list', async () => {
     const rootListId = 'remove-test-root-list';
     const overflowListId = 'remove-test-overflow-list';
