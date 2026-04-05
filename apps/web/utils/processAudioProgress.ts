@@ -11,6 +11,7 @@ export interface ProcessingProgressState {
   percent: number;
   stagePercent: number;
   overallPercent: number | null;
+  hasPercent: boolean;
   stage: ProcessingProgressStage;
   stageLabel: string;
   updatedAt: string | null;
@@ -21,10 +22,12 @@ function clampPercent(value: number): number {
 }
 
 function buildFallbackProgress(percent: number): ProcessingProgressState {
+  const clampedPercent = clampPercent(percent);
   return {
-    percent: clampPercent(percent),
-    stagePercent: clampPercent(percent),
+    percent: clampedPercent,
+    stagePercent: clampedPercent,
     overallPercent: null,
+    hasPercent: clampedPercent > 0,
     stage: 'processing',
     stageLabel: 'Processing',
     updatedAt: null,
@@ -58,11 +61,16 @@ export function parseProcessingProgress(value: unknown): ProcessingProgressState
     typeof rawOverallPercent === 'number' && Number.isFinite(rawOverallPercent)
       ? clampPercent(rawOverallPercent)
       : null;
+  const hasPercent =
+    (typeof rawStagePercent === 'number' && Number.isFinite(rawStagePercent) && clampPercent(rawStagePercent) > 0) ||
+    (typeof rawOverallPercent === 'number' && Number.isFinite(rawOverallPercent) && clampPercent(rawOverallPercent) > 0) ||
+    (typeof rawPercent === 'number' && Number.isFinite(rawPercent) && clampPercent(rawPercent) > 0);
 
   return {
     percent: stagePercent,
     stagePercent,
     overallPercent,
+    hasPercent,
     stage: stage as ProcessingProgressStage,
     stageLabel,
     updatedAt,

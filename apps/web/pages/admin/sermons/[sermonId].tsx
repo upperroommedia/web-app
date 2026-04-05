@@ -125,6 +125,7 @@ const SermonDetailsPage = () => {
   const processingProgress = processingProgressState?.percent ?? 0;
   const processingStageLabel = processingProgressState?.stageLabel ?? 'Processing';
   const isQueuedForProcessing = processingProgressState?.stage === 'queued';
+  const isProcessingProgressIndeterminate = isQueuedForProcessing || !processingProgressState?.hasPercent;
 
   const isAdmin = user?.isAdmin() ?? false;
   const canPublish = user?.canPublish() ?? false;
@@ -718,7 +719,7 @@ const SermonDetailsPage = () => {
                                 label={
                                   sermon.status.audioStatus === sermonStatusType.PROCESSING
                                     ? processingProgressState
-                                      ? `${processingStageLabel}${processingProgress > 0 && !isQueuedForProcessing ? ` (${processingProgress}%)` : ''}`
+                                      ? `${processingStageLabel}${processingProgressState.hasPercent && processingProgress > 0 ? ` (${processingProgress}%)` : ''}`
                                       : statusInfo.label
                                     : statusInfo.label
                                 }
@@ -730,8 +731,8 @@ const SermonDetailsPage = () => {
                             {sermon.status.audioStatus === sermonStatusType.PROCESSING && processingProgressState && (
                               <Box sx={{ mt: 1, maxWidth: 220 }}>
                                 <LinearProgress
-                                  variant={isQueuedForProcessing ? 'indeterminate' : 'determinate'}
-                                  value={isQueuedForProcessing ? undefined : processingProgress}
+                                  variant={isProcessingProgressIndeterminate ? 'indeterminate' : 'determinate'}
+                                  value={isProcessingProgressIndeterminate ? undefined : processingProgress}
                                   sx={{
                                     height: 6,
                                     borderRadius: 3,

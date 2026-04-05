@@ -438,6 +438,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const processingProgress = processingProgressState?.percent ?? 0;
   const processingStageLabel = processingProgressState?.stageLabel ?? 'Processing';
   const isQueuedForProcessing = processingProgressState?.stage === 'queued';
+  const isProcessingProgressIndeterminate = isQueuedForProcessing || !processingProgressState?.hasPercent;
   const imageSize = isDesktop ? 150 : isTablet ? 90 : 70;
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
   const seriesImage = series?.images?.find((img) => img.type === 'wide')
@@ -638,7 +639,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   const renderProcessingChip = () => (
     isProcessing ? (
       <Chip
-        label={`${processingStageLabel}${processingProgress > 0 ? ` ${processingProgress}%` : ''}`}
+        label={`${processingStageLabel}${processingProgressState?.hasPercent && processingProgress > 0 ? ` ${processingProgress}%` : ''}`}
         size="small"
         color="warning"
         variant="outlined"
@@ -945,8 +946,8 @@ const SermonListCard: FunctionComponent<Props> = ({
 
               {isProcessing && processingProgressState && (
                 <LinearProgress
-                  variant={isQueuedForProcessing ? 'indeterminate' : 'determinate'}
-                  value={isQueuedForProcessing ? undefined : processingProgress}
+                  variant={isProcessingProgressIndeterminate ? 'indeterminate' : 'determinate'}
+                  value={isProcessingProgressIndeterminate ? undefined : processingProgress}
                   sx={{
                     height: 2,
                     borderRadius: 1,
