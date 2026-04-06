@@ -18,6 +18,10 @@ describe('resolveSessionSubsplashMediaItemId', () => {
     expect(resolveSessionSubsplashMediaItemId(undefined, 'persisted-media', undefined)).toBe('persisted-media');
   });
 
+  it('does not fall back to a stale persisted sermon subsplash id after the session clears a deleted media item', () => {
+    expect(resolveSessionSubsplashMediaItemId(null, 'persisted-media', undefined)).toBeUndefined();
+  });
+
   it('ignores empty ids from any source', () => {
     expect(resolveSessionSubsplashMediaItemId('  ', ' persisted-media ', '')).toBe('persisted-media');
   });

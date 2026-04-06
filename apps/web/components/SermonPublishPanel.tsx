@@ -163,8 +163,9 @@ export const resolveSessionSubsplashMediaItemId = (
   preferredMediaItemId?: string | null
 ): string | undefined =>
   normalizeMediaItemId(preferredMediaItemId)
-  || normalizeMediaItemId(sessionMediaItemId)
-  || normalizeMediaItemId(sermonSubsplashId);
+  || (sessionMediaItemId === null
+    ? undefined
+    : normalizeMediaItemId(sessionMediaItemId) || normalizeMediaItemId(sermonSubsplashId));
 
 const areSetsEqual = (left: Set<string>, right: Set<string>): boolean => {
   if (left.size !== right.size) {
@@ -396,7 +397,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const [series, setSeries] = useState<Series | null>(() => (sermon.seriesId ? buildSeriesPreview(sermon.seriesId) : null));
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [seriesPublished, setSeriesPublished] = useState<boolean | null>(sermon.seriesId ? null : false);
-  const [sessionSubsplashMediaItemId, setSessionSubsplashMediaItemId] = useState<string | undefined>(() =>
+  const [sessionSubsplashMediaItemId, setSessionSubsplashMediaItemId] = useState<string | null | undefined>(() =>
     normalizeMediaItemId(sermon.subsplashId)
   );
   const [soundCloudError, setSoundCloudError] = useState<ReactNode | null>(null);
@@ -1443,11 +1444,15 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   }, [onUpdate, sermon.id, sermon.soundCloudTrackId, user]);
 
   const deleteSubsplashMedia = useCallback(async (): Promise<boolean> => {
-    return deleteSubsplashMediaAndLocalState({
+    const deleted = await deleteSubsplashMediaAndLocalState({
       sermonId: sermon.id,
       subsplashId: sermon.subsplashId,
       seriesId: sermon.seriesId,
     });
+    if (deleted) {
+      setSessionSubsplashMediaItemId(null);
+    }
+    return deleted;
   }, [sermon.id, sermon.seriesId, sermon.subsplashId]);
 
   const publishEverywhere = useCallback(async () => {
