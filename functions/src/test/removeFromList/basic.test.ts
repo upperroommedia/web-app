@@ -736,31 +736,33 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     expect(result).toHaveLength(1);
     expect(result[0].status).toBe('success');
     
-    // Removing one item drops the logical count to 200, so the overflow page should collapse.
+    // Removing one item should not rebalance the overflow chain.
     const overflowRows = subsplashMock.getListRows(overflowListId);
-    expect(overflowRows).toHaveLength(0);
+    expect(overflowRows).toHaveLength(1);
+    expect(overflowRows[0]._embedded['media-item']?.id).toBe('item-2');
     
-    // Root page should now contain all 200 media rows with no continuation link.
+    // Root page should remain untouched and keep the continuation link.
     const rootRowsAfter = subsplashMock.getListRows(rootListId);
     expect(rootRowsAfter).toHaveLength(200);
-    expect(rootRowsAfter.every((row) => row.type === 'media-item')).toBe(true);
-    expect(rootRowsAfter[rootRowsAfter.length - 1]._embedded['media-item']?.id).toBe('item-2');
+    expect(rootRowsAfter.slice(0, 199).every((row) => row.type === 'media-item')).toBe(true);
+    expect(rootRowsAfter[199].type).toBe('list');
+    expect(rootRowsAfter[199]._embedded.list?.id).toBe(overflowListId);
 
     const rootDoc = await getListBySubsplashId(rootListId);
     const overflowDoc = await getListBySubsplashId(overflowListId);
     expect(rootDoc!.data()).toMatchObject({
-      count: 200,
+      count: 199,
       logicalCount: 200,
-      hasOverflowPages: false,
+      hasOverflowPages: true,
       isRootList: true,
       rootListId: rootFirestoreId,
       overflowDepth: 0,
     });
     expect(overflowDoc!.data()).toMatchObject({
-      count: 0,
+      count: 1,
       isMoreSermonsList: true,
     });
-    expect(rootDoc!.data()?.moreSermonsRef).toBeUndefined();
+    expect(rootDoc!.data()?.moreSermonsRef).toBe(overflowListId);
   });
 
   it('should handle item not found in overflow chain (treat as success)', async () => {
@@ -1011,18 +1013,20 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     expect(overflow2Rows).toHaveLength(0);
 
     const rootRowsAfter = subsplashMock.getListRows(rootListId);
-    expect(rootRowsAfter).toHaveLength(0);
+    expect(rootRowsAfter).toHaveLength(1);
+    expect(rootRowsAfter[0].type).toBe('list');
+    expect(rootRowsAfter[0]._embedded.list?.id).toBe(overflowList1Id);
 
     const rootDoc = await getListBySubsplashId(rootListId);
     expect(rootDoc!.data()).toMatchObject({
       count: 0,
       logicalCount: 0,
-      hasOverflowPages: false,
+      hasOverflowPages: true,
       isRootList: true,
       rootListId: rootFirestoreId,
       overflowDepth: 0,
     });
-    expect(rootDoc!.data().moreSermonsRef).toBeUndefined();
+    expect(rootDoc!.data().moreSermonsRef).toBe(overflowList1Id);
   });
 
   it('should replay duplicate operation keys without repeating delete work', async () => {
