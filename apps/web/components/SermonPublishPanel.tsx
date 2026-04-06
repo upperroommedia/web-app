@@ -68,6 +68,7 @@ import { PublishDestinationState, getListsDestinationState, summarizePublishRun 
 import { runPublishEverywhereFlow } from '../utils/publishEverywhereFlow';
 import { deleteSubsplashMediaAndLocalState } from '../utils/deleteSubsplashMediaAndLocalState';
 import { getSubsplashUnpublishStrategy } from '../utils/getSubsplashUnpublishStrategy';
+import { buildPublishedSeriesOrder, getNextSeriesPosition } from '../utils/seriesPublishOrder';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import type { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '@upperroom/contracts/uploadToSoundCloud';
 import type { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
@@ -1091,7 +1092,8 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const reorderSeriesFromFirebaseOrder = useCallback(async (
     seriesId: string,
     newlyPublishedSermonId: string,
-    newlyPublishedMediaItemId: string
+    newlyPublishedMediaItemId: string,
+    pendingPosition?: number
   ): Promise<void> => {
     const orderedItemsSnapshot = await getDocs(
       query(collection(firestore, `series/${seriesId}/seriesItems`), orderBy('position', 'desc'))
@@ -1100,26 +1102,23 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       const data = seriesItemDoc.data() as {
         publishedToSubsplash?: boolean;
         sermonSubsplashId?: string;
+        position?: number;
       };
 
-      const isPublished = seriesItemDoc.id === newlyPublishedSermonId ? true : data.publishedToSubsplash === true;
-      const mediaItemId = seriesItemDoc.id === newlyPublishedSermonId ? newlyPublishedMediaItemId : data.sermonSubsplashId;
       return {
         sermonId: seriesItemDoc.id,
-        isPublished,
-        mediaItemId,
+        publishedToSubsplash: data.publishedToSubsplash,
+        sermonSubsplashId: data.sermonSubsplashId,
+        position: data.position,
       };
     });
 
-    if (!orderedItems.some((item) => item.sermonId === newlyPublishedSermonId)) {
-      throw new Error('Series item is missing from Firestore order. Refresh and try again.');
-    }
-
-    const publishedItems = orderedItems.filter((item) => item.isPublished);
-    const missingMediaId = publishedItems.find((item) => !item.mediaItemId);
-    if (missingMediaId) {
-      throw new Error(`Published series item ${missingMediaId.sermonId} is missing a Subsplash media ID.`);
-    }
+    const publishedItems = buildPublishedSeriesOrder(
+      orderedItems,
+      newlyPublishedSermonId,
+      newlyPublishedMediaItemId,
+      pendingPosition
+    );
 
     const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
     const reorderResult = await reorderFunction({
@@ -1195,6 +1194,20 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       }
 
       const seriesItemRef = doc(firestore, `series/${series.id}/seriesItems`, sermon.id);
+      const seriesItemSnapshot = await getDoc(seriesItemRef);
+      const pendingSeriesPosition = seriesItemSnapshot.exists()
+        ? undefined
+        : getNextSeriesPosition(
+            (
+              await getDocs(query(collection(firestore, `series/${series.id}/seriesItems`), orderBy('position', 'desc')))
+            ).docs.map((seriesItemDoc) => {
+              const data = seriesItemDoc.data() as { position?: number };
+              return {
+                sermonId: seriesItemDoc.id,
+                position: data.position,
+              };
+            })
+          );
       const addToSeriesFunction = createFunctionV2<AddToSeriesInputType, AddToSeriesOutputType>('addtoseries');
       const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
       const sagaResult = await runSubsplashSeriesPublishSaga({
@@ -1209,8 +1222,18 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
               series.id
             ),
           }),
+        prepareLocalSeriesItem: async (resolvedMediaItemId) => {
+          await setDoc(
+            seriesItemRef,
+            {
+              sermonSubsplashId: resolvedMediaItemId,
+              ...(typeof pendingSeriesPosition === 'number' ? { position: pendingSeriesPosition } : {}),
+            },
+            { merge: true }
+          );
+        },
         reorderSeries: async (resolvedMediaItemId) => {
-          await reorderSeriesFromFirebaseOrder(series.id, sermon.id, resolvedMediaItemId);
+          await reorderSeriesFromFirebaseOrder(series.id, sermon.id, resolvedMediaItemId, pendingSeriesPosition);
         },
         rollbackSeriesMembership: async (resolvedMediaItemId) => {
           const rollbackResult = await removeFromSeriesFunction({
@@ -1231,6 +1254,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
             {
               publishedToSubsplash: true,
               sermonSubsplashId: resolvedMediaItemId,
+              ...(typeof pendingSeriesPosition === 'number' ? { position: pendingSeriesPosition } : {}),
             },
             { merge: true }
           );
@@ -1245,6 +1269,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
             {
               publishedToSubsplash: false,
               sermonSubsplashId: deleteField(),
+              ...(typeof pendingSeriesPosition === 'number' ? { position: pendingSeriesPosition } : {}),
             },
             { merge: true }
           );

@@ -58,7 +58,10 @@ const EditSermonPage = () => {
   const canPublish = user?.canPublish() ?? false;
 
   // Check if audio trimmer should be shown (only if not published)
-  const showAudioTrimmer = useMemo(() => Boolean(sermon && canEditSermonAudio(sermon) && !sermon.youtubeUrl), [sermon]);
+  const showAudioTrimmer = useMemo(
+    () => Boolean(sermon && canEditSermonAudio(sermon, sermonLists || []) && !sermon.youtubeUrl),
+    [sermon, sermonLists]
+  );
 
   // Fetch sermon data
   const fetchSermonData = useCallback(async () => {

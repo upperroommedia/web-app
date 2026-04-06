@@ -50,6 +50,7 @@ import {
   createSubsplashSeriesUnpublishIntentKey,
   createSubsplashUploadIntentKey,
 } from '../../utils/subsplashPublishFlow';
+import { buildPublishedSeriesOrder } from '../../utils/seriesPublishOrder';
 import { seriesConverter } from '../../types/Series';
 import firebase, { isDevelopment } from '../../firebase/firebase';
 import { getDownloadURL, getStorage, ref } from '../../firebase/storage';
@@ -243,36 +244,12 @@ const reorderSeriesFromFirebaseOrder = async (
     const resolvedMediaItemId = seriesItemDoc.id === sermonId ? mediaItemId : normalizeString(data.sermonSubsplashId);
     return {
       sermonId: seriesItemDoc.id,
-      isPublished,
-      mediaItemId: resolvedMediaItemId,
+      publishedToSubsplash: isPublished,
+      sermonSubsplashId: resolvedMediaItemId,
       position: typeof data.position === 'number' ? data.position : 0,
     };
   });
-
-  if (!orderedItems.some((item) => item.sermonId === sermonId)) {
-    if (typeof pendingPosition === 'number') {
-      console.warn('editSermon.reorderSeries.pendingInsertion', {
-        seriesId,
-        sermonId,
-        pendingPosition,
-      });
-      orderedItems.push({
-        sermonId,
-        isPublished: true,
-        mediaItemId,
-        position: pendingPosition,
-      });
-      orderedItems.sort((left, right) => right.position - left.position);
-    } else {
-      throw new Error('Series item is missing from Firestore order. Refresh and try again.');
-    }
-  }
-
-  const publishedItems = orderedItems.filter((item) => item.isPublished);
-  const missingMediaId = publishedItems.find((item) => !item.mediaItemId);
-  if (missingMediaId) {
-    throw new Error(`Published series item ${missingMediaId.sermonId} is missing a Subsplash media ID.`);
-  }
+  const publishedItems = buildPublishedSeriesOrder(orderedItems, sermonId, mediaItemId, pendingPosition);
 
   const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>('reorderseriesitems');
   const reorderResult = await reorderFunction({

@@ -64,7 +64,12 @@ import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
-import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../utils/sermonEditing';
+import {
+  canEditSermonAudio,
+  canEditSermonRecord,
+  isSermonProcessingLocked,
+  isSermonPublishedAnywhere,
+} from '../../utils/sermonEditing';
 import { clearIntentionalNavigation, isIntentionalNavigation, markIntentionalNavigation } from '../../utils/intentionalNavigation';
 import { removeCategoryScopedLists } from '../../utils/categoryScopedLists';
 
@@ -764,8 +769,8 @@ const Uploader = (props: UploaderProps) => {
   );
 
   const canEditExistingAudio = useMemo(
-    () => (props.existingSermon ? canEditSermonAudio(props.existingSermon) : false),
-    [props.existingSermon]
+    () => (props.existingSermon ? canEditSermonAudio(props.existingSermon, props.existingList || []) : false),
+    [props.existingList, props.existingSermon]
   );
   const existingSermonHasSavedTrimSettings = useMemo(
     () =>
@@ -788,8 +793,8 @@ const Uploader = (props: UploaderProps) => {
     if (isSermonProcessingLocked(props.existingSermon)) {
       return 'This sermon cannot be edited while audio is queued or processing.';
     }
-    if (!canEditExistingSermon) {
-      return 'Cannot edit audio when sermon has been uploaded to SoundCloud or Subsplash.';
+    if (isSermonPublishedAnywhere(props.existingSermon, props.existingList || [])) {
+      return 'Cannot edit audio when this sermon is already published anywhere.';
     }
     if (!existingSermonHasSavedTrimSettings) {
       return 'This sermon audio cannot be edited because it does not have saved trim-source settings.';
@@ -802,9 +807,9 @@ const Uploader = (props: UploaderProps) => {
     }
     return null;
   }, [
-    canEditExistingSermon,
     existingSermonHasSavedTrimSettings,
     isExistingYouTubeSermon,
+    props.existingList,
     props.existingSermon,
     props.existingSermonUrl?.status,
   ]);

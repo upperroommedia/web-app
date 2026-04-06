@@ -594,13 +594,9 @@ describe('editSermon remote edit reconciliation', () => {
 
     await editSermon(updatedSermon, [], { originalSermon });
 
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
+    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
       'editSermon.reorderSeries.pendingInsertion',
-      expect.objectContaining({
-        seriesId: 'series-b',
-        sermonId: 'sermon-1',
-        pendingPosition: 8,
-      })
+      expect.anything()
     );
     expect(functions.reorderseriesitems).toHaveBeenCalledWith(
       expect.objectContaining({

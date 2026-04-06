@@ -16,7 +16,7 @@ const createDeferred = <T,>() => {
 };
 
 describe('runPublishEverywhereFlow', () => {
-  it('starts SoundCloud immediately and fans out lists and series after media item prep', async () => {
+  it('starts SoundCloud immediately and runs lists before series after media item prep', async () => {
     const events: string[] = [];
     const ensureDeferred = createDeferred<{ mediaItemId: string }>();
     const listsDeferred = createDeferred<Result>();
@@ -60,16 +60,18 @@ describe('runPublishEverywhereFlow', () => {
     ensureDeferred.resolve({ mediaItemId: 'media-1' });
     await new Promise(process.nextTick);
     await new Promise(process.nextTick);
-    expect(events.slice(0, 5)).toEqual([
+    expect(events.slice(0, 4)).toEqual([
       'soundcloud:start',
       'ensure:start',
       'ensure:done:media-1',
       'lists:start:media-1',
-      'series:start:media-1',
     ]);
 
     soundCloudDeferred.resolve({ status: 'success' });
     listsDeferred.resolve({ status: 'success' });
+    await new Promise(process.nextTick);
+    await new Promise(process.nextTick);
+    expect(events).toContain('series:start:media-1');
     seriesDeferred.resolve({ status: 'success' });
 
     await expect(flowPromise).resolves.toEqual({
@@ -202,6 +204,50 @@ describe('runPublishEverywhereFlow', () => {
       seriesResult: { status: 'success' },
       soundCloudResult: null,
       mediaItemId: 'media-3',
+    });
+  });
+
+  it('waits for list publish to finish before starting series publish when both are selected', async () => {
+    const events: string[] = [];
+    const listsDeferred = createDeferred<Result>();
+    const seriesDeferred = createDeferred<Result>();
+
+    const flowPromise = runPublishEverywhereFlow<Result, Result, Result>({
+      shouldPublishLists: true,
+      shouldPublishSeries: true,
+      shouldPublishSoundCloud: false,
+      ensureMediaItem: jest.fn().mockResolvedValue({ mediaItemId: 'media-4' }),
+      publishLists: jest.fn(async (mediaItemId: string) => {
+        events.push(`lists:start:${mediaItemId}`);
+        const result = await listsDeferred.promise;
+        events.push(`lists:done:${result.status}`);
+        return result;
+      }),
+      publishSeries: jest.fn(async (mediaItemId: string) => {
+        events.push(`series:start:${mediaItemId}`);
+        const result = await seriesDeferred.promise;
+        events.push(`series:done:${result.status}`);
+        return result;
+      }),
+      publishSoundCloud: jest.fn().mockResolvedValue({ status: 'success' }),
+      createPrepErrorResult: (error: string) => ({ status: 'error', error }),
+    });
+
+    await new Promise(process.nextTick);
+    expect(events).toEqual(['lists:start:media-4']);
+
+    listsDeferred.resolve({ status: 'success' });
+    await new Promise(process.nextTick);
+    await new Promise(process.nextTick);
+    expect(events).toEqual(['lists:start:media-4', 'lists:done:success', 'series:start:media-4']);
+
+    seriesDeferred.resolve({ status: 'success' });
+
+    await expect(flowPromise).resolves.toEqual({
+      listResult: { status: 'success' },
+      seriesResult: { status: 'success' },
+      soundCloudResult: null,
+      mediaItemId: 'media-4',
     });
   });
 });

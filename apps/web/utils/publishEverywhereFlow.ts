@@ -65,22 +65,26 @@ export async function runPublishEverywhereFlow<
     }
   }
 
-  const listPromise = shouldPublishLists
-    ? prepError || !mediaItemId
-      ? Promise.resolve(createPrepErrorResult(prepError || 'Failed to prepare media item.') as TListResult)
-      : publishLists(mediaItemId)
-    : null;
-  const seriesPromise = shouldPublishSeries
-    ? prepError || !mediaItemId
-      ? Promise.resolve(createPrepErrorResult(prepError || 'Failed to prepare media item.') as TSeriesResult)
-      : publishSeries(mediaItemId)
-    : null;
+  let listResult: TListResult | null = null;
+  let seriesResult: TSeriesResult | null = null;
 
-  const [listResult, seriesResult, soundCloudResult] = await Promise.all([
-    listPromise ?? Promise.resolve<TListResult | null>(null),
-    seriesPromise ?? Promise.resolve<TSeriesResult | null>(null),
-    soundCloudPromise ?? Promise.resolve<TSoundCloudResult | null>(null),
-  ]);
+  // Lists and series both mutate the same Subsplash media item, so they must not
+  // run in parallel or the second mutation can lose the media-item lock.
+  if (shouldPublishLists) {
+    listResult = prepError || !mediaItemId
+      ? createPrepErrorResult(prepError || 'Failed to prepare media item.') as TListResult
+      : await publishLists(mediaItemId);
+  }
+
+  if (shouldPublishSeries) {
+    seriesResult = prepError || !mediaItemId
+      ? createPrepErrorResult(prepError || 'Failed to prepare media item.') as TSeriesResult
+      : await publishSeries(mediaItemId);
+  }
+
+  const soundCloudResult = soundCloudPromise
+    ? await soundCloudPromise
+    : null;
 
   return {
     listResult,
