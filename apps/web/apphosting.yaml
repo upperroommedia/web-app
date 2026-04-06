@@ -53,6 +53,12 @@ env:
     availability:
       - RUNTIME
 
+  - variable: IMAGE_PROCESSING_FUNCTION_URL
+    secret: IMAGE_PROCESSING_FUNCTION_URL
+    availability:
+      - BUILD
+      - RUNTIME
+
   - variable: ADMIN_REQUEST_RECIPIENTS
     secret: ADMIN_REQUEST_RECIPIENTS
     availability:

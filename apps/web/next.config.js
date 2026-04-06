@@ -120,6 +120,7 @@ const resolveSentryRelease = () => {
 
 const sentryRelease = resolveSentryRelease();
 const sentryDsn = readFirstDefinedEnv('NEXT_PUBLIC_SENTRY_DSN', 'SENTRY_DSN');
+const imageProcessingFunctionUrl = readFirstDefinedEnv('IMAGE_PROCESSING_FUNCTION_URL');
 
 if (sentryRelease) {
   process.env.NEXT_PUBLIC_SENTRY_RELEASE = process.env.NEXT_PUBLIC_SENTRY_RELEASE || sentryRelease;
@@ -150,6 +151,9 @@ const nextConfig = {
       : {}),
   },
   images: {
+    loader: 'custom',
+    loaderFile: './loader.js',
+    unoptimized: false,
     dangerouslyAllowLocalIP: process.env.NODE_ENV === 'development',
     remotePatterns: [
       { protocol: 'https', hostname: 'graph.facebook.com' },
@@ -183,6 +187,18 @@ const nextConfig = {
             value: 'noindex, nofollow, noarchive, nosnippet, noimageindex',
           },
         ],
+      },
+    ];
+  },
+  async rewrites() {
+    if (!imageProcessingFunctionUrl) {
+      return [];
+    }
+
+    return [
+      {
+        source: '/_fah/image/:path*',
+        destination: `${imageProcessingFunctionUrl.replace(/\/$/, '')}/:path*`,
       },
     ];
   },
