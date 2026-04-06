@@ -77,6 +77,7 @@ export interface PatchSeriesPayload {
  */
 export interface PatchMediaItemSeriesPayload {
   id: string;
+  app_key: string;
   position?: number;
   _embedded: {
     'media-series': { id: string } | null;

@@ -12,6 +12,15 @@ import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { repairMismatchedSubsplashImageRefs } from './helpers/subsplashImageRefs';
 
+const normalizeOptionalText = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   extends Partial<Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'audioUrl' | 'autoPublish'>> {
   operationKey: string;
@@ -80,13 +89,14 @@ const editSubsplashSermon = onCall(
                   })
                   .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined)
               : undefined;
+            const normalizedSubtitle = normalizeOptionalText(data.subtitle);
 
             // only send non null values to subsplash
             const requestData = JSON.stringify({
               app_key: '9XTSHD',
               ...(Array.isArray(data.speakers) || Array.isArray(data.topics) ? { tags } : {}),
               ...(typeof data.title === 'string' ? { title: data.title } : {}),
-              ...(typeof data.subtitle === 'string' ? { subtitle: data.subtitle } : {}),
+              ...(normalizedSubtitle ? { subtitle: normalizedSubtitle } : {}),
               ...(typeof data.description === 'string' ? { summary: data.description } : {}),
               ...(data.date && { date: data.date }),
               ...(validImages && {

@@ -244,6 +244,7 @@ export async function patchMediaItemSeries(
 
   const payload: PatchMediaItemSeriesPayload = {
     id: mediaItemId,
+    app_key: APP_KEY,
     ...(options?.position !== undefined && { position: options.position }),
     _embedded: embeddedPayload,
   };
