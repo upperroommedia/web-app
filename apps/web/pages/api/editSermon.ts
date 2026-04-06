@@ -431,7 +431,6 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
 
     const currentCanonicalIds = new Set(currentCanonicalSermonLists.map((list) => list.id));
     const nextCanonicalIds = new Set(nextCanonicalSermonLists.map((list) => list.id));
-    const listsToAdd = nextCanonicalSermonLists.filter((list) => !currentCanonicalIds.has(list.id));
     const listsToRemove = currentSermonLists.filter(
       (list) => currentCanonicalIds.has(list.id) && !nextCanonicalIds.has(list.id)
     );
@@ -446,7 +445,11 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
     const nextSeriesId = normalizeString(sermon.seriesId);
     const previousSeriesPublication = await getSeriesPublicationState(previousSeriesId, sermon.id);
     const unpublishSeries = Boolean(previousSeriesId && previousSeriesPublication.published && previousSeriesId !== nextSeriesId);
-    const publishSeries = Boolean(nextSeriesId && previousSeriesId !== nextSeriesId);
+    const publishSeries = Boolean(
+      nextSeriesId
+      && previousSeriesId !== nextSeriesId
+      && previousSeriesPublication.published
+    );
     const metadataChanged = hasRemoteMetadataChanges(originalSermon, sermon);
 
     let activeSubsplashId = normalizeString(originalSermon.subsplashId);
@@ -553,6 +556,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
           ...sermon.status,
           subsplash: activeSubsplashId ? uploadStatus.UPLOADED : uploadStatus.NOT_UPLOADED,
         },
+        subsplashUploadGeneration: sermon.subsplashUploadGeneration ?? originalSermon.subsplashUploadGeneration ?? 0,
         ...(activeSubsplashId ? { subsplashId: activeSubsplashId } : {}),
       };
       if (!activeSubsplashId) {
@@ -631,6 +635,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         ...sermon.status,
         subsplash: uploadStatus.NOT_UPLOADED,
       },
+      subsplashUploadGeneration: (sermon.subsplashUploadGeneration ?? originalSermon.subsplashUploadGeneration ?? 0) + 1,
     };
     delete finalSermonForLocalWrite.subsplashId;
     if (soundCloudTrackUrlUpdate) {

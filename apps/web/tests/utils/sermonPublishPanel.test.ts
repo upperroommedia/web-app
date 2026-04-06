@@ -3,7 +3,10 @@ jest.mock('../../context/user/UserContext', () => ({
   default: () => ({ user: null }),
 }));
 
-import { resolveSessionSubsplashMediaItemId } from '../../components/SermonPublishPanel';
+import {
+  resolveSessionSubsplashMediaItemId,
+  resolveSessionSubsplashUploadGeneration,
+} from '../../components/SermonPublishPanel';
 
 describe('resolveSessionSubsplashMediaItemId', () => {
   it('prefers the explicit media item id from the active publish action', () => {
@@ -24,5 +27,19 @@ describe('resolveSessionSubsplashMediaItemId', () => {
 
   it('ignores empty ids from any source', () => {
     expect(resolveSessionSubsplashMediaItemId('  ', ' persisted-media ', '')).toBe('persisted-media');
+  });
+});
+
+describe('resolveSessionSubsplashUploadGeneration', () => {
+  it('prefers the in-session override after a delete before Firestore refresh catches up', () => {
+    expect(resolveSessionSubsplashUploadGeneration(3, 2)).toBe(3);
+  });
+
+  it('falls back to the sermon generation when there is no session override', () => {
+    expect(resolveSessionSubsplashUploadGeneration(undefined, 4)).toBe(4);
+  });
+
+  it('defaults to zero when neither source exists', () => {
+    expect(resolveSessionSubsplashUploadGeneration(undefined, undefined)).toBe(0);
   });
 });

@@ -230,6 +230,9 @@ const SermonDetailsPage = () => {
         deleteSermonId: sermon.id,
       };
 
+      if (sermon.seriesId) {
+        deleteIntentQuery.deleteSeriesId = sermon.seriesId;
+      }
       if (sermon.subsplashId) {
         deleteIntentQuery.deleteSubsplashId = sermon.subsplashId;
       }

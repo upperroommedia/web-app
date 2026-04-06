@@ -533,15 +533,13 @@ describe('editSermon remote edit reconciliation', () => {
     consoleWarnSpy.mockRestore();
   });
 
-  it('reorders a newly published series membership even before the Firestore series item exists locally', async () => {
+  it('keeps a newly assigned series local when the sermon was not previously published to a series', async () => {
     const functions = createFunctionMap();
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const editSermon = (await import('../../pages/api/editSermon')).default;
 
     const originalSermon = createEmptySermon('user-1');
     originalSermon.id = 'sermon-1';
-    originalSermon.subsplashId = 'subsplash-1';
-    originalSermon.status.subsplash = uploadStatus.UPLOADED;
+    originalSermon.title = 'Original Title';
 
     const updatedSermon = {
       ...originalSermon,
@@ -551,63 +549,25 @@ describe('editSermon remote edit reconciliation', () => {
     resolveCanonicalSermonListsMock
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
-    getDocMock.mockResolvedValueOnce({
-      exists: () => true,
-      data: () => ({
-        id: 'series-b',
-        name: 'Series B',
-        ownerId: 'user-1',
-        summary: '',
-        images: [],
-        subsplashId: 'series-subsplash-b',
-      }),
+    getDocMock.mockResolvedValue({
+      exists: () => false,
     });
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
-      .mockResolvedValueOnce({
-        docs: [
-          {
-            data: () => ({ position: 7 }),
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        docs: [
-          {
-            id: 'sermon-2',
-            data: () => ({
-              position: 7,
-              publishedToSubsplash: true,
-              sermonSubsplashId: 'subsplash-2',
-            }),
-          },
-        ],
-      })
       .mockResolvedValueOnce({ docs: [] })
-      .mockResolvedValueOnce({
-        docs: [
-          {
-            data: () => ({ position: 7 }),
-          },
-        ],
-      });
+      .mockResolvedValueOnce({ docs: [] });
 
     await editSermon(updatedSermon, [], { originalSermon });
 
-    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
-      'editSermon.reorderSeries.pendingInsertion',
-      expect.anything()
+    expect(functions.uploadToSubsplash).not.toHaveBeenCalled();
+    expect(functions.addtoseries).not.toHaveBeenCalled();
+    expect(functions.reorderseriesitems).not.toHaveBeenCalled();
+    expect(runTransactionMock).toHaveBeenCalledTimes(1);
+    expect(runTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function)
     );
-    expect(functions.reorderseriesitems).toHaveBeenCalledWith(
-      expect.objectContaining({
-        firestoreSeriesId: 'series-b',
-        itemOrder: [
-          { mediaItemId: 'subsplash-1', position: 2 },
-          { mediaItemId: 'subsplash-2', position: 1 },
-        ],
-      })
-    );
-    consoleWarnSpy.mockRestore();
+    expect(writeBatchCommitMock).toHaveBeenCalledTimes(1);
   });
 
   it('aborts the local save when removing a published list fails remotely', async () => {

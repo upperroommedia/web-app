@@ -82,6 +82,7 @@ export async function deleteSubsplashMediaAndLocalState({
   await updateDoc(doc(firestore, 'sermons', sermonId).withConverter(sermonConverter), {
     subsplashId: deleteField(),
     numberOfListsUploadedTo: 0,
+    subsplashUploadGeneration: increment(1),
     'status.subsplash': uploadStatus.NOT_UPLOADED,
   });
 

@@ -132,6 +132,7 @@ describe('deleteSubsplashMediaAndLocalState', () => {
     expect(updateDocMock).toHaveBeenCalledWith('SERMON_DOC_REF', {
       subsplashId: 'DELETE_FIELD',
       numberOfListsUploadedTo: 0,
+      subsplashUploadGeneration: { __increment__: 1 },
       'status.subsplash': 'NOT_UPLOADED',
     });
   });

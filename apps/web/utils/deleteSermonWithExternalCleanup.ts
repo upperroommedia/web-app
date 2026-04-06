@@ -6,6 +6,7 @@ import { createFunctionV2 } from './createFunction';
 
 export interface DeleteSermonWithExternalCleanupInput {
   sermonId: string;
+  seriesId?: string;
   subsplashId?: string;
   soundCloudTrackId?: string;
 }
@@ -54,6 +55,7 @@ const createExternalCleanupError = (error: unknown): ExternalCleanupError => {
 
 export async function deleteSermonWithExternalCleanup({
   sermonId,
+  seriesId,
   subsplashId,
   soundCloudTrackId,
 }: DeleteSermonWithExternalCleanupInput): Promise<void> {
@@ -76,6 +78,10 @@ export async function deleteSermonWithExternalCleanup({
     }
 
     await Promise.all(externalCleanupPromises);
+
+    if (seriesId) {
+      await deleteDoc(doc(firestore, 'series', seriesId, 'seriesItems', sermonId));
+    }
 
     await deleteDoc(doc(firestore, 'sermons', sermonId).withConverter(sermonConverter));
   } catch (error) {

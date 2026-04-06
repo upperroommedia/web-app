@@ -52,6 +52,7 @@ import {
   createSubsplashSeriesUnpublishIntentKey,
   createSubsplashUploadIntentKey,
   didAllListPublishesSucceed,
+  getNextPublishGeneration,
   summarizeListPublishErrors,
 } from '../utils/subsplashPublishFlow';
 import { runSubsplashSeriesPublishSaga } from '../utils/subsplashSeriesPublishSaga';
@@ -166,6 +167,21 @@ export const resolveSessionSubsplashMediaItemId = (
   || (sessionMediaItemId === null
     ? undefined
     : normalizeMediaItemId(sessionMediaItemId) || normalizeMediaItemId(sermonSubsplashId));
+
+export const resolveSessionSubsplashUploadGeneration = (
+  sessionUploadGeneration?: number | null,
+  sermonUploadGeneration?: number | null
+): number => {
+  if (typeof sessionUploadGeneration === 'number' && Number.isFinite(sessionUploadGeneration)) {
+    return sessionUploadGeneration;
+  }
+
+  if (typeof sermonUploadGeneration === 'number' && Number.isFinite(sermonUploadGeneration)) {
+    return sermonUploadGeneration;
+  }
+
+  return 0;
+};
 
 const areSetsEqual = (left: Set<string>, right: Set<string>): boolean => {
   if (left.size !== right.size) {
@@ -400,6 +416,9 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const [sessionSubsplashMediaItemId, setSessionSubsplashMediaItemId] = useState<string | null | undefined>(() =>
     normalizeMediaItemId(sermon.subsplashId)
   );
+  const [sessionSubsplashUploadGeneration, setSessionSubsplashUploadGeneration] = useState<number>(() =>
+    resolveSessionSubsplashUploadGeneration(undefined, sermon.subsplashUploadGeneration)
+  );
   const [soundCloudError, setSoundCloudError] = useState<ReactNode | null>(null);
   const [destinationErrors, setDestinationErrors] = useState<{
     lists?: string;
@@ -424,6 +443,10 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   useEffect(() => {
     setSessionSubsplashMediaItemId(normalizeMediaItemId(sermon.subsplashId));
   }, [sermon.id, sermon.subsplashId]);
+
+  useEffect(() => {
+    setSessionSubsplashUploadGeneration(resolveSessionSubsplashUploadGeneration(undefined, sermon.subsplashUploadGeneration));
+  }, [sermon.id, sermon.subsplashUploadGeneration]);
 
   const [listArrayFirestore, loading, listError] = useCollectionData(
     collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter)
@@ -835,7 +858,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     const uploadOperationKey = createSubsplashUploadIntentKey(
       'manage-publishing-upload',
       sermon.id,
-      sermon.subsplashUploadGeneration
+      resolveSessionSubsplashUploadGeneration(sessionSubsplashUploadGeneration, sermon.subsplashUploadGeneration)
     );
     const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
     const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
@@ -862,7 +885,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     });
     setSessionSubsplashMediaItemId(response.id);
     return { mediaItemId: response.id };
-  }, [sermon, sessionSubsplashMediaItemId, user?.uid]);
+  }, [sermon, sessionSubsplashMediaItemId, sessionSubsplashUploadGeneration, user?.uid]);
 
   const uploadToSubsplash = useCallback(async (
     listsToUploadTo: SermonList[],
@@ -1446,14 +1469,16 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
   const deleteSubsplashMedia = useCallback(async (): Promise<boolean> => {
     const deleted = await deleteSubsplashMediaAndLocalState({
       sermonId: sermon.id,
-      subsplashId: sermon.subsplashId,
+      subsplashId: resolveSessionSubsplashMediaItemId(sessionSubsplashMediaItemId, sermon.subsplashId),
       seriesId: sermon.seriesId,
     });
     if (deleted) {
       setSessionSubsplashMediaItemId(null);
+      setSessionSubsplashUploadGeneration(getNextPublishGeneration(sermon.subsplashUploadGeneration));
+      setSeriesPublished(false);
     }
     return deleted;
-  }, [sermon.id, sermon.seriesId, sermon.subsplashId]);
+  }, [sermon.id, sermon.seriesId, sermon.subsplashId, sermon.subsplashUploadGeneration, sessionSubsplashMediaItemId]);
 
   const publishEverywhere = useCallback(async () => {
     if (isPublishingEverywhere) {
@@ -1488,7 +1513,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         shouldPublishLists,
         shouldPublishSeries,
         shouldPublishSoundCloud,
-        initialMediaItemId: sermon.subsplashId,
+        initialMediaItemId: resolveSessionSubsplashMediaItemId(sessionSubsplashMediaItemId, sermon.subsplashId),
         ensureMediaItem: async () => {
           try {
             return await ensureSubsplashMediaItem();
@@ -1582,6 +1607,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     seriesStatus,
     sermon.seriesId,
     sermon.subsplashId,
+    sessionSubsplashMediaItemId,
     setNoticeFromRun,
     soundCloudStatus,
     syncDestinationActivity,

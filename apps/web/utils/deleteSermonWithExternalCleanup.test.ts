@@ -37,12 +37,17 @@ const withConverterMock = jest.fn((converter: unknown) => {
   void converter;
   return 'sermon-doc-ref';
 });
-const docMock = jest.fn((firestore: unknown, collectionName: string, documentId: string) => {
+const docMock = jest.fn((firestore: unknown, ...pathSegments: string[]) => {
   void firestore;
-  void collectionName;
-  void documentId;
+  const path = pathSegments.join('/');
+  if (pathSegments.length === 2 && pathSegments[0] === 'sermons') {
+    return {
+      path,
+      withConverter: withConverterMock,
+    };
+  }
   return {
-    withConverter: withConverterMock,
+    path,
   };
 });
 
@@ -85,6 +90,7 @@ describe('deleteSermonWithExternalCleanup', () => {
   it('passes a generated operationKey to deletefromsubsplash cleanup callable', async () => {
     await deleteSermonWithExternalCleanup({
       sermonId: 'sermon-1',
+      seriesId: 'series-1',
       subsplashId: 'subsplash-1',
     });
 
@@ -93,7 +99,9 @@ describe('deleteSermonWithExternalCleanup', () => {
       operationKey: 'operation-key-123',
       subsplashId: 'subsplash-1',
     });
-    expect(deleteDocMock).toHaveBeenCalledTimes(1);
+    expect(deleteDocMock).toHaveBeenNthCalledWith(1, { path: 'series/series-1/seriesItems/sermon-1' });
+    expect(deleteDocMock).toHaveBeenNthCalledWith(2, 'sermon-doc-ref');
+    expect(deleteDocMock).toHaveBeenCalledTimes(2);
   });
 
   it('blocks local Firestore deletion when external cleanup fails', async () => {
@@ -107,6 +115,16 @@ describe('deleteSermonWithExternalCleanup', () => {
     ).rejects.toThrow('Subsplash delete failed');
 
     expect(deleteDocMock).not.toHaveBeenCalled();
+  });
+
+  it('removes the Firestore series item before deleting the sermon document', async () => {
+    await deleteSermonWithExternalCleanup({
+      sermonId: 'sermon-4',
+      seriesId: 'series-4',
+    });
+
+    expect(deleteDocMock).toHaveBeenNthCalledWith(1, { path: 'series/series-4/seriesItems/sermon-4' });
+    expect(deleteDocMock).toHaveBeenNthCalledWith(2, 'sermon-doc-ref');
   });
 
   it('preserves lock contention metadata for caller retry handling', async () => {

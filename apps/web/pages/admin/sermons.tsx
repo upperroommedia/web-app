@@ -33,6 +33,7 @@ const getDeleteIntentPayloadFromRoute = (
   asPath: string
 ): {
   sermonId: string;
+  seriesId?: string;
   subsplashId?: string;
   soundCloudTrackId?: string;
 } | null => {
@@ -46,6 +47,7 @@ const getDeleteIntentPayloadFromRoute = (
 
   return {
     sermonId: deleteSermonId,
+    seriesId: getQueryString(query.deleteSeriesId) ?? routeParams.get('deleteSeriesId') ?? undefined,
     subsplashId: getQueryString(query.deleteSubsplashId) ?? routeParams.get('deleteSubsplashId') ?? undefined,
     soundCloudTrackId:
       getQueryString(query.deleteSoundCloudTrackId) ?? routeParams.get('deleteSoundCloudTrackId') ?? undefined,
@@ -84,12 +86,13 @@ const AdminSermons = () => {
     const {
       deleteIntent,
       deleteSermonId,
+      deleteSeriesId,
       deleteSubsplashId,
       deleteSoundCloudTrackId,
       ...remainingQuery
     } = router.query;
 
-    if (!deleteIntent && !deleteSermonId && !deleteSubsplashId && !deleteSoundCloudTrackId) {
+    if (!deleteIntent && !deleteSermonId && !deleteSeriesId && !deleteSubsplashId && !deleteSoundCloudTrackId) {
       return;
     }
 
@@ -105,13 +108,7 @@ const AdminSermons = () => {
 
   const deleteIntentPayload = useMemo(() => {
     return getDeleteIntentPayloadFromRoute(router.query, router.asPath);
-  }, [
-    router.asPath,
-    router.query.deleteIntent,
-    router.query.deleteSermonId,
-    router.query.deleteSubsplashId,
-    router.query.deleteSoundCloudTrackId,
-  ]);
+  }, [router.asPath, router.query]);
   const effectiveHiddenSermonIds = useMemo(() => {
     if (!deleteIntentPayload) {
       return hiddenSermonIds;
@@ -129,6 +126,7 @@ const AdminSermons = () => {
 
     const deleteAttemptKey = [
       deleteIntentPayload.sermonId,
+      deleteIntentPayload.seriesId || '',
       deleteIntentPayload.subsplashId || '',
       deleteIntentPayload.soundCloudTrackId || '',
     ].join(':');
