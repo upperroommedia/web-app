@@ -19,7 +19,6 @@ const orderByMock = jest.fn();
 const limitMock = jest.fn();
 const createFunctionV2Mock = jest.fn();
 const resolveCanonicalSermonListsMock = jest.fn();
-const resolveCanonicalFirestoreListMock = jest.fn();
 const runTransactionMock = jest.fn();
 const getDownloadURLMock = jest.fn();
 const refMock = jest.fn();
@@ -54,11 +53,6 @@ jest.mock('../../utils/createFunction', () => ({
 jest.mock('../../utils/resolveCanonicalSermonLists', () => ({
   __esModule: true,
   resolveCanonicalSermonLists: (...args: unknown[]) => resolveCanonicalSermonListsMock(...args),
-}));
-
-jest.mock('../../utils/resolveCanonicalFirestoreList', () => ({
-  __esModule: true,
-  resolveCanonicalFirestoreList: (...args: unknown[]) => resolveCanonicalFirestoreListMock(...args),
 }));
 
 jest.mock('../../firebase/storage', () => ({
@@ -190,7 +184,6 @@ describe('editSermon remote edit reconciliation', () => {
     limitMock.mockReset().mockImplementation((...args: unknown[]) => args);
     createFunctionV2Mock.mockReset();
     resolveCanonicalSermonListsMock.mockReset();
-    resolveCanonicalFirestoreListMock.mockReset();
     runTransactionMock.mockReset().mockResolvedValue(undefined);
     getDownloadURLMock.mockReset().mockResolvedValue('https://storage.test/audio.mp3');
     refMock.mockReset().mockReturnValue('storage-ref');
@@ -297,23 +290,8 @@ describe('editSermon remote edit reconciliation', () => {
     expect(writeBatchDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ path: 'lists/list-a/listItems/sermon-1' }));
   });
 
-  it('adds only newly selected lists and persists their published upload status without writing undefined fields', async () => {
+  it('keeps newly selected lists local on edit and does not auto-publish them to Subsplash', async () => {
     const functions = createFunctionMap();
-    functions.addtolist.mockResolvedValue([
-      {
-        listId: 'subsplash-list-b',
-        status: 'success',
-        listItemId: 'row-b',
-        actualPlacement: {
-          firestoreListId: 'list-b',
-          subsplashListId: 'subsplash-list-b',
-          overflowDepth: 0,
-          position: 1,
-          listItemId: 'row-b',
-        },
-      },
-    ]);
-
     const editSermon = (await import('../../pages/api/editSermon')).default;
 
     const originalSermon = createEmptySermon('user-1');
@@ -332,21 +310,20 @@ describe('editSermon remote edit reconciliation', () => {
     resolveCanonicalSermonListsMock
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([newList]);
-    resolveCanonicalFirestoreListMock.mockResolvedValue(newList);
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
 
     await editSermon(sermon, [newList], { originalSermon });
 
-    expect(functions.addtolist).toHaveBeenCalledTimes(1);
+    expect(functions.addtolist).not.toHaveBeenCalled();
     expect(functions.editSubsplashSermon).toHaveBeenCalledTimes(1);
     expect(functions.removefromlist).not.toHaveBeenCalled();
     expect(writeBatchSetMock).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'sermons/sermon-1/sermonLists/list-b' }),
       expect.objectContaining({
         id: 'list-b',
-        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-b' },
+        uploadStatus: { status: uploadStatus.NOT_UPLOADED },
       })
     );
     const listItemWrite = getListItemWrite('list-b');
@@ -363,12 +340,12 @@ describe('editSermon remote edit reconciliation', () => {
     originalSermon.id = 'sermon-1';
     originalSermon.subsplashId = 'subsplash-1';
     originalSermon.status.subsplash = uploadStatus.UPLOADED;
-    originalSermon.speakers = [{ id: 'speaker-1', name: 'Speaker One', images: [], listId: 'speaker-list-1' }];
+    originalSermon.speakers = [{ id: 'speaker-1', name: 'Speaker One', images: [], listId: 'speaker-list-1', sermonCount: 1 }];
     originalSermon.topics = ['Old Topic'];
 
     const updatedSermon = {
       ...originalSermon,
-      speakers: [{ id: 'speaker-2', name: 'Speaker Two', images: [], listId: 'speaker-list-2' }],
+      speakers: [{ id: 'speaker-2', name: 'Speaker Two', images: [], listId: 'speaker-list-2', sermonCount: 1 }],
       topics: ['New Topic'],
       youtubeUrl: undefined,
     };
@@ -410,12 +387,12 @@ describe('editSermon remote edit reconciliation', () => {
     originalSermon.id = 'sermon-1';
     originalSermon.subsplashId = 'subsplash-1';
     originalSermon.status.subsplash = uploadStatus.UPLOADED;
-    originalSermon.speakers = [{ id: 'speaker-1', name: 'Speaker One', images: [], listId: 'speaker-list-1' }];
+    originalSermon.speakers = [{ id: 'speaker-1', name: 'Speaker One', images: [], listId: 'speaker-list-1', sermonCount: 1 }];
     originalSermon.topics = ['Old Topic'];
 
     const updatedSermon = {
       ...originalSermon,
-      speakers: [{ id: 'speaker-2', name: 'Speaker Two', images: [], listId: 'speaker-list-2' }],
+      speakers: [{ id: 'speaker-2', name: 'Speaker Two', images: [], listId: 'speaker-list-2', sermonCount: 1 }],
       topics: ['New Topic'],
       youtubeUrl: undefined,
     };
@@ -450,15 +427,8 @@ describe('editSermon remote edit reconciliation', () => {
     expect(Object.prototype.hasOwnProperty.call(listItemData, 'youtubeUrl')).toBe(false);
   });
 
-  it('creates the media item and missing subsplash list when publishing an unpublished sermon into a list', async () => {
+  it('keeps added lists local when editing an unpublished sermon', async () => {
     const functions = createFunctionMap();
-    functions.addtolist.mockResolvedValue([
-      {
-        listId: 'subsplash-list-new',
-        status: 'success',
-        listItemId: 'row-new',
-      },
-    ]);
     const editSermon = (await import('../../pages/api/editSermon')).default;
 
     const sermon = createEmptySermon('user-1');
@@ -469,28 +439,21 @@ describe('editSermon remote edit reconciliation', () => {
     resolveCanonicalSermonListsMock
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([newList]);
-    resolveCanonicalFirestoreListMock.mockResolvedValue(newList);
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
 
     await editSermon(sermon, [newList], { originalSermon: sermon });
 
-    expect(functions.uploadToSubsplash).toHaveBeenCalledTimes(1);
-    expect(functions.createnewsubsplashlist).toHaveBeenCalledTimes(1);
-    expect(updateDocMock).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'lists/list-new' }),
-      { subsplashId: 'subsplash-list-new' }
-    );
-    expect(functions.addtolist).toHaveBeenCalledWith(
+    expect(functions.uploadToSubsplash).not.toHaveBeenCalled();
+    expect(functions.createnewsubsplashlist).not.toHaveBeenCalled();
+    expect(functions.addtolist).not.toHaveBeenCalled();
+    expect(writeBatchSetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'sermons/sermon-1/sermonLists/list-new' }),
       expect.objectContaining({
-        destinationListIds: ['subsplash-list-new'],
-        mediaItem: { id: 'subsplash-created', type: 'media-item' },
+        id: 'list-new',
+        uploadStatus: { status: uploadStatus.NOT_UPLOADED },
       })
-    );
-    expect(writeBatchUpdateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'sermons/sermon-1' }),
-      expect.objectContaining({ subsplashId: 'subsplash-created' })
     );
   });
 
@@ -651,9 +614,9 @@ describe('editSermon remote edit reconciliation', () => {
     consoleWarnSpy.mockRestore();
   });
 
-  it('aborts the local save when a required remote mutation fails', async () => {
+  it('aborts the local save when removing a published list fails remotely', async () => {
     const functions = createFunctionMap();
-    functions.addtolist.mockRejectedValue(new Error('addtolist failed'));
+    functions.removefromlist.mockRejectedValue(new Error('removefromlist failed'));
 
     const editSermon = (await import('../../pages/api/editSermon')).default;
 
@@ -662,19 +625,27 @@ describe('editSermon remote edit reconciliation', () => {
     sermon.subsplashId = 'subsplash-1';
     sermon.status.subsplash = uploadStatus.UPLOADED;
 
-    const newList = buildList({ id: 'list-b', name: 'List B', subsplashId: 'subsplash-list-b' });
+    const existingList = {
+      ...buildList({ id: 'list-a', name: 'List A', subsplashId: 'subsplash-list-a' }),
+      uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-a' },
+      publishGeneration: 0,
+    };
+    const retainedList = {
+      ...buildList({ id: 'list-b', name: 'List B', subsplashId: 'subsplash-list-b' }),
+      uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-b' },
+      publishGeneration: 0,
+    };
 
     resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([newList]);
-    resolveCanonicalFirestoreListMock.mockResolvedValue(newList);
+      .mockResolvedValueOnce([existingList, retainedList])
+      .mockResolvedValueOnce([retainedList]);
     getDocsMock
-      .mockResolvedValueOnce({ docs: [] })
-      .mockResolvedValueOnce({ docs: [] });
+      .mockResolvedValueOnce({ docs: [buildListDoc(existingList), buildListDoc(retainedList)] })
+      .mockResolvedValueOnce({ docs: [buildListItemDoc('list-a'), buildListItemDoc('list-b')] });
 
-    await expect(editSermon(sermon, [newList], { originalSermon: sermon })).rejects.toThrow('addtolist failed');
+    await expect(editSermon(sermon, [retainedList], { originalSermon: sermon })).rejects.toThrow('removefromlist failed');
 
     expect(writeBatchCommitMock).not.toHaveBeenCalled();
-    expect(global.alert).toHaveBeenCalledWith('addtolist failed');
+    expect(global.alert).toHaveBeenCalledWith('removefromlist failed');
   });
 });

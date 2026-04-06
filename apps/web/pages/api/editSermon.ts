@@ -23,15 +23,10 @@ import {
   EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA,
   EditSoundCloudSermonReturnType,
 } from '@upperroom/contracts/editSoundCloudSermon';
-import type { AddtoListInputType, AddToListOutputType } from '@upperroom/contracts/addToList';
 import type { RemoveFromListInputType, RemoveFromListOutputType } from '@upperroom/contracts/removeFromList';
 import type { AddToSeriesInputType, AddToSeriesOutputType } from '@upperroom/contracts/addToSeries';
 import type { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '@upperroom/contracts/removeFromSeries';
 import type { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
-import type {
-  CreateNewSubsplashListInputType,
-  CreateNewSubsplashListOutputType,
-} from '@upperroom/contracts/createNewSubsplashList';
 import type {
   UPLOAD_TO_SUBSPLASH_INCOMING_DATA,
 } from '@upperroom/contracts/uploadToSubsplash';
@@ -48,8 +43,6 @@ import { resolveCanonicalSermonLists } from '../../utils/resolveCanonicalSermonL
 import { reportHandledError } from '../../utils/reportHandledError';
 import { getSubsplashUnpublishStrategy } from '../../utils/getSubsplashUnpublishStrategy';
 import {
-  createSubsplashListAddIntentKey,
-  createSubsplashListCreateIntentKey,
   createSubsplashListRemoveIntentKey,
   createSubsplashSeriesCreateIntentKey,
   createSubsplashSeriesPublishIntentKey,
@@ -57,7 +50,6 @@ import {
   createSubsplashSeriesUnpublishIntentKey,
   createSubsplashUploadIntentKey,
 } from '../../utils/subsplashPublishFlow';
-import { resolveCanonicalFirestoreList } from '../../utils/resolveCanonicalFirestoreList';
 import { seriesConverter } from '../../types/Series';
 import firebase, { isDevelopment } from '../../firebase/firebase';
 import { getDownloadURL, getStorage, ref } from '../../firebase/storage';
@@ -67,16 +59,12 @@ interface EditSermonOptions {
   originalSermon?: Sermon;
 }
 
-type AddedPublishedListResult = {
-  list: List;
-  uploadStatus: { status: uploadStatus.UPLOADED; listItemId: string };
-  physicalPlacement?: {
-    firestoreListId: string;
-    subsplashListId: string;
-    overflowDepth: number;
-    position: number;
-    listItemId?: string;
-  };
+type MirroredPhysicalPlacement = {
+  firestoreListId: string;
+  subsplashListId: string;
+  overflowDepth: number;
+  position: number;
+  listItemId?: string;
 };
 
 type SeriesPublicationState = {
@@ -160,84 +148,6 @@ const ensureSubsplashMediaItem = async (sermon: Sermon): Promise<string> => {
   });
 
   return response.id;
-};
-
-const ensureSubsplashList = async (list: List, sermonId: string): Promise<List> => {
-  const canonicalList = await resolveCanonicalFirestoreList(list);
-  if (!canonicalList) {
-    throw new Error(`List "${list.name}" could not be resolved to a Firestore list document.`);
-  }
-
-  if (canonicalList.subsplashId) {
-    return canonicalList;
-  }
-
-  const createNewSubsplashList = createFunctionV2<CreateNewSubsplashListInputType, CreateNewSubsplashListOutputType>(
-    'createnewsubsplashlist'
-  );
-  const { listId } = await createNewSubsplashList({
-    title: canonicalList.name,
-    subtitle: '',
-    images: canonicalList.images,
-    operationKey: createSubsplashListCreateIntentKey('edit-sermon-list-create', sermonId, canonicalList.id),
-  });
-  await updateDoc(doc(firestore, 'lists', canonicalList.id), { subsplashId: listId });
-
-  return { ...canonicalList, subsplashId: listId };
-};
-
-const addSermonToLists = async (
-  sermon: Sermon,
-  mediaItemId: string,
-  listsToAdd: List[]
-): Promise<Map<string, AddedPublishedListResult>> => {
-  const results = new Map<string, AddedPublishedListResult>();
-  if (listsToAdd.length === 0) {
-    return results;
-  }
-
-  const resolvedLists = await Promise.all(listsToAdd.map((list) => ensureSubsplashList(list, sermon.id)));
-  const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
-  const addResults = await addToList({
-    destinationListIds: resolvedLists.map((list) => list.subsplashId as string),
-    mediaItem: { id: mediaItemId, type: 'media-item' },
-    operationKey: createSubsplashListAddIntentKey(
-      'edit-sermon-list-add',
-      sermon.id,
-      resolvedLists.map((list) => ({
-        id: list.id,
-        publishGeneration: (list as SermonList).publishGeneration ?? 0,
-      }))
-    ),
-  });
-
-  const resolvedBySubsplashId = new Map(
-    resolvedLists.map((list) => [list.subsplashId as string, list])
-  );
-
-  for (const result of addResults) {
-    if (result.status !== 'success') {
-      throw new Error(result.error || `Failed to publish list ${result.listId}.`);
-    }
-
-    const resolvedList = resolvedBySubsplashId.get(result.listId);
-    if (!resolvedList) {
-      throw new Error(`ListId for Subsplash list ${result.listId} was not found.`);
-    }
-
-    const resolvedListItemId = result.actualPlacement?.listItemId ?? result.listItemId;
-    if (!resolvedListItemId) {
-      throw new Error(`Successful list publish for ${resolvedList.id} did not return a resolved listItemId.`);
-    }
-
-    results.set(resolvedList.id, {
-      list: resolvedList,
-      uploadStatus: { status: uploadStatus.UPLOADED, listItemId: resolvedListItemId },
-      physicalPlacement: result.actualPlacement,
-    });
-  }
-
-  return results;
 };
 
 const removeSermonFromLists = async (
@@ -501,7 +411,7 @@ const buildMirroredListItemData = (
   sermon: Sermon,
   options?: {
     uploadStatus?: SermonList['uploadStatus'];
-    physicalPlacement?: AddedPublishedListResult['physicalPlacement'];
+    physicalPlacement?: MirroredPhysicalPlacement;
   }
 ): Record<string, unknown> => {
   return {
@@ -515,7 +425,7 @@ const buildMirroredListItemPatch = (
   sermon: Sermon,
   options?: {
     uploadStatus?: SermonList['uploadStatus'];
-    physicalPlacement?: AddedPublishedListResult['physicalPlacement'];
+    physicalPlacement?: MirroredPhysicalPlacement;
   }
 ): Record<string, unknown> => {
   return {
@@ -569,7 +479,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       listCountToUnpublish: publishedListsToRemove.length,
       seriesPublished: previousSeriesPublication.published,
       unpublishSeries,
-      publishListCount: listsToAdd.length,
+      publishListCount: 0,
       publishSeries,
     });
 
@@ -598,7 +508,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       });
       activeSubsplashId = undefined;
     } else {
-      if ((listsToAdd.length > 0 || publishSeries) && !activeSubsplashId) {
+      if (publishSeries && !activeSubsplashId) {
         activeSubsplashId = await ensureSubsplashMediaItem(sermon);
       }
 
@@ -616,10 +526,6 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         }
         await unpublishSeriesMembership(previousSeriesId, sermon.id, mediaItemIdToRemove);
       }
-
-      const addedPublishedLists = activeSubsplashId
-        ? await addSermonToLists(sermon, activeSubsplashId, listsToAdd)
-        : new Map<string, AddedPublishedListResult>();
 
       if (publishSeries) {
         if (!activeSubsplashId || !nextSeriesId) {
@@ -656,16 +562,6 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
 
       nextCanonicalSermonLists.forEach((list) => {
         const currentList = currentSermonListMap.get(list.id);
-        const addedPublishedList = addedPublishedLists.get(list.id);
-        if (addedPublishedList) {
-          finalCanonicalListMap.set(list.id, {
-            ...addedPublishedList.list,
-            uploadStatus: addedPublishedList.uploadStatus,
-            publishGeneration: currentList?.publishGeneration ?? 0,
-          });
-          return;
-        }
-
         finalCanonicalListMap.set(list.id, {
           ...currentList,
           ...list,
@@ -720,16 +616,13 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         );
 
         const listItemRef = doc(firestore, `lists/${listId}/listItems/${sermon.id}`);
-        const addedPublishedList = addedPublishedLists.get(listId);
         const listItemExists = currentListItemIds.has(listId);
         const mirroredListItemWrite = listItemExists
           ? buildMirroredListItemPatch(sermonForLocalWrite, {
               uploadStatus: finalList.uploadStatus,
-              physicalPlacement: addedPublishedList?.physicalPlacement,
             })
           : buildMirroredListItemData(sermonForLocalWrite, {
               uploadStatus: finalList.uploadStatus,
-              physicalPlacement: addedPublishedList?.physicalPlacement,
             });
 
         batch.set(listItemRef, mirroredListItemWrite, { merge: true });
