@@ -24,7 +24,11 @@ import {
 import { getConfiguredMaxListSize, getPageContentCapacity } from './helpers/listCapacity';
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SubsplashListRow } from './types/Subsplash';
-import { canReconstructRemoteRow, getRemoteRowResourceId } from './helpers/remoteChainItems';
+import {
+  canReconstructRemoteRow,
+  getLogicalContentRows,
+  getRemoteRowResourceId,
+} from './helpers/remoteChainItems';
 import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 
 export interface RemoveFromListInputType {
@@ -206,14 +210,20 @@ const deleteRowsMissingFromTarget = async (
 };
 
 const buildTargetPages = (nodes: OverflowChainNode[], maxListSize: number): SubsplashListRow[][] => {
-  const mediaRows = nodes.flatMap((node) => node.remoteRows.filter((row) => row.type !== 'list'));
+  const logicalRows = nodes.flatMap((node, nodeIndex) => {
+    const expectedNextSubsplashListId = nodes[nodeIndex + 1]?.subsplashListId;
+    return getLogicalContentRows({
+      rows: node.remoteRows,
+      expectedNextSubsplashListId,
+    });
+  });
   const pages: SubsplashListRow[][] = [];
   let cursor = 0;
 
-  while (cursor < mediaRows.length) {
-    const remaining = mediaRows.length - cursor;
+  while (cursor < logicalRows.length) {
+    const remaining = logicalRows.length - cursor;
     const takeCount = getPageContentCapacity(remaining, maxListSize);
-    pages.push(mediaRows.slice(cursor, cursor + takeCount));
+    pages.push(logicalRows.slice(cursor, cursor + takeCount));
     cursor += takeCount;
   }
 

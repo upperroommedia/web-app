@@ -495,6 +495,146 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     expect(rows.map((row) => row._embedded['media-item']?.id)).toEqual(['remote-only-1', 'remote-only-3']);
   });
 
+  it('preserves child list rows when removing a media item from a root list whose content is mostly child lists', async () => {
+    const listId = 'remove-list-row-root';
+    const firestoreListId = 'remove-list-row-root-firestore';
+
+    subsplashMock.createList(listId, 'Pascha Sermons', 4, 200);
+    subsplashMock.listRows.set(listId, [
+      {
+        id: 'child-row-1',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: listId },
+          list: { id: 'child-list-1', title: 'Pascha Week 2026' },
+        },
+      },
+      {
+        id: 'child-row-2',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: listId },
+          list: { id: 'child-list-2', title: 'Pascha Week 2025' },
+        },
+      },
+      {
+        id: 'remove-me-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 3,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'remove-me-media' },
+        },
+      },
+      {
+        id: 'keep-me-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 4,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'keep-me-media' },
+        },
+      },
+    ] satisfies SubsplashListRow[]);
+
+    await createListDocument({
+      id: firestoreListId,
+      subsplashId: listId,
+      title: 'Pascha Sermons',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 4,
+      logicalCount: 4,
+      hasOverflowPages: false,
+      isRootList: true,
+      rootListId: firestoreListId,
+      overflowDepth: 0,
+    });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-to-remove')
+      .set({
+        id: 'sermon-to-remove',
+        title: 'Sermon To Remove',
+        subsplashId: 'remove-me-media',
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'remove-me-row' },
+      });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('lists')
+      .doc(firestoreListId)
+      .collection('listItems')
+      .doc('sermon-to-keep')
+      .set({
+        id: 'sermon-to-keep',
+        title: 'Sermon To Keep',
+        subsplashId: 'keep-me-media',
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'keep-me-row' },
+      });
+
+    await firebaseAdmin
+      .firestore()
+      .collection('sermons')
+      .doc('sermon-to-remove')
+      .collection('sermonLists')
+      .doc(firestoreListId)
+      .set({
+        id: firestoreListId,
+        name: 'Pascha Sermons',
+        overflowBehavior: OverflowBehavior.CREATENEWLIST,
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'remove-me-row' },
+        publishGeneration: 0,
+      });
+
+    const result = await removeFromListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        listIds: [listId],
+        listItemIds: ['remove-me-row'],
+        itemIds: ['remove-me-media'],
+        itemTypes: ['media-item'],
+        sermonIds: ['sermon-to-remove'],
+      },
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        listId,
+        status: 'success',
+      }),
+    ]);
+
+    const remainingRows = subsplashMock.getListRows(listId);
+    expect(
+      remainingRows.map((row) => ({
+        type: row.type,
+        resourceId: row.type === 'list' ? row._embedded.list?.id : row._embedded['media-item']?.id,
+      }))
+    ).toEqual([
+      { type: 'list', resourceId: 'child-list-1' },
+      { type: 'list', resourceId: 'child-list-2' },
+      { type: 'media-item', resourceId: 'keep-me-media' },
+    ]);
+
+    const updatedListDoc = await firebaseAdmin.firestore().collection('lists').doc(firestoreListId).get();
+    expect(updatedListDoc.data()?.count).toBe(3);
+    expect(updatedListDoc.data()?.logicalCount).toBe(3);
+  });
+
   it('should find and remove item from overflow list', async () => {
     const rootListId = 'remove-test-root-list';
     const overflowListId = 'remove-test-overflow-list';
