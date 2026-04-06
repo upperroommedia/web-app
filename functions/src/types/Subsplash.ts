@@ -119,6 +119,7 @@ export type SubsplashListRowPatch = SubsplashListRowReference | SubsplashListRow
 
 export interface SubsplashPatchPayload {
   id: string;
+  list_rows_count?: number;
   _embedded: {
     'display-options'?: Array<{ id: string }>;
     'images'?: Array<{ id: string; type: string }>;

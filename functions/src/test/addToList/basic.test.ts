@@ -818,6 +818,7 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       const rowCount = payload._embedded['list-rows'].length;
       expect(rowCount).toBeLessThanOrEqual(10);
       expect(rowCount).toBeGreaterThan(0);
+      expect(payload.list_rows_count).toBe(rowCount);
     }
     
     // Verify final state: list should have exactly 10 items (9 content + 1 link)
