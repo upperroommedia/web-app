@@ -54,6 +54,13 @@ const addToSeries = onCall(
     const normalizedSeriesSubsplashId = seriesSubsplashId.trim();
     const normalizedMediaItemId = mediaItemId.trim();
     const normalizedOperationKey = operationKey?.trim() || `add-to-series:${normalizedSeriesSubsplashId}:${normalizedMediaItemId}:${randomUUID()}`;
+    logger.log('addToSeries.request', {
+      seriesSubsplashId: normalizedSeriesSubsplashId,
+      mediaItemId: normalizedMediaItemId,
+      hasPosition: typeof position === 'number',
+      position: typeof position === 'number' ? position : undefined,
+      operationKey: normalizedOperationKey,
+    });
 
     try {
       return await withIdempotency(normalizedOperationKey, async () => {
@@ -91,6 +98,13 @@ const addToSeries = onCall(
         );
       });
     } catch (err) {
+      logger.error('addToSeries.failed', {
+        seriesSubsplashId: normalizedSeriesSubsplashId,
+        mediaItemId: normalizedMediaItemId,
+        position: typeof position === 'number' ? position : undefined,
+        operationKey: normalizedOperationKey,
+        error: err instanceof Error ? { message: err.message, stack: err.stack } : err,
+      });
       throw handleError(err);
     }
   }

@@ -13,6 +13,9 @@ import {
   PatchMediaItemSeriesPayload,
   SubsplashSeriesMediaItem,
 } from '../types/SubsplashSeries';
+import {
+  getSubsplashMediaItemDiagnostics,
+} from './subsplashMediaItems';
 
 const APP_KEY = '9XTSHD';
 const MAX_RETRY_ATTEMPTS = 3;
@@ -271,7 +274,69 @@ export async function patchMediaItemSeries(
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
       : error;
-    logger.error(`Failed to patch media item ${mediaItemId}`, errorMessage);
+    const mediaItemDiagnostics = await getSubsplashMediaItemDiagnostics(mediaItemId, token);
+    const targetSeriesDiagnostics = seriesId
+      ? await getSeriesDetails(seriesId, token)
+        .then((series) => ({
+          found: true,
+          summary: {
+            id: series.id,
+            title: series.title,
+            status: series.status,
+            publishedAt: series.published_at ?? undefined,
+            itemCount: series.media_items_count,
+            publishedItemCount: series.published_media_items_count,
+          },
+        }))
+        .catch((seriesError: unknown) => ({
+          found: false,
+          error: seriesError instanceof Error ? seriesError.message : String(seriesError),
+        }))
+      : undefined;
+
+    if (
+      seriesId &&
+      mediaItemDiagnostics.found &&
+      mediaItemDiagnostics.item._embedded?.['media-series']?.id === seriesId
+    ) {
+      logger.warn('patchMediaItemSeries received an upstream error but the media item is already assigned to the target series', {
+        mediaItemId,
+        seriesId,
+        requestSummary: {
+          position: options?.position,
+          hasAudio: Boolean(options?.audio),
+          imageCount: options?.images?.length ?? 0,
+        },
+        upstreamError: errorMessage,
+        mediaItemDiagnostics: mediaItemDiagnostics.summary,
+        targetSeriesDiagnostics,
+      });
+      return mediaItemDiagnostics.item as SubsplashSeriesMediaItem;
+    }
+
+    logger.error(`Failed to patch media item ${mediaItemId}`, {
+      upstreamError: errorMessage,
+      requestSummary: {
+        mediaItemId,
+        seriesId,
+        position: options?.position,
+        hasAudio: Boolean(options?.audio),
+        imageCount: options?.images?.length ?? 0,
+      },
+      mediaItemDiagnostics: mediaItemDiagnostics.found
+        ? mediaItemDiagnostics.summary
+        : mediaItemDiagnostics,
+      targetSeriesDiagnostics,
+      payloadSummary: {
+        id: payload.id,
+        position: payload.position,
+        embedded: {
+          mediaSeriesId: payload._embedded?.['media-series']?.id ?? null,
+          audioId: payload._embedded?.audio?.id,
+          imageIds: payload._embedded?.images?.map((image) => image.id) ?? [],
+        },
+      },
+    });
     throw new HttpsError('internal', `Failed to update media item series: ${JSON.stringify(errorMessage)}`);
   }
 }

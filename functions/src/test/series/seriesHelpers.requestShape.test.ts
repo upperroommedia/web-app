@@ -56,4 +56,46 @@ describe('seriesHelpers patchMediaItemSeries request shape', () => {
       })
     );
   });
+
+  it('treats a bad PATCH response as success when the remote item is already assigned to the target series', async () => {
+    mockAxios
+      .mockRejectedValueOnce({
+        response: {
+          data: {
+            errors: [{ code: 'bad_request', detail: 'the request is invalid or malformed' }],
+          },
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        data: {
+          id: 'media-item-1',
+          position: 3,
+          _embedded: {
+            'media-series': { id: 'series-1' },
+          },
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        data: {
+          id: 'series-1',
+          title: 'Series 1',
+          status: 'published',
+          media_items_count: 1,
+          published_media_items_count: 1,
+        },
+      } as never);
+
+    const result = await patchMediaItemSeries('media-item-1', 'series-1', 'fake-token');
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'media-item-1',
+        position: 3,
+        _embedded: {
+          'media-series': { id: 'series-1' },
+        },
+      })
+    );
+    expect(mockAxios).toHaveBeenCalledTimes(3);
+  });
 });
