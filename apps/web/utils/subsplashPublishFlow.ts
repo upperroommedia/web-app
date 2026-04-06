@@ -2,6 +2,7 @@ import { AddToListOutputType } from '@upperroom/contracts/addToList';
 import { SermonList } from '../types/SermonList';
 import { uploadStatus } from '../types/SermonTypes';
 import {
+  createOperationKey,
   createPublishedMembershipHash,
   createRetryIntentKey,
 } from './callableConcurrency';
@@ -25,15 +26,9 @@ export const createSubsplashListCreateIntentKey = (
 export const createSubsplashListAddIntentKey = (
   scope: string,
   sermonId: string,
-  destinationLists: Array<Pick<SermonList, 'id' | 'publishGeneration'>>
+  _destinationLists: Array<Pick<SermonList, 'id' | 'publishGeneration'>>
 ): string => {
-  return createRetryIntentKey(
-    scope,
-    sermonId,
-    `lists:${createPublishedMembershipHash(
-      destinationLists.map((list) => `${list.id}@${list.publishGeneration ?? 0}`)
-    )}`
-  );
+  return createOperationKey(scope, sermonId);
 };
 
 export const createSubsplashListRemoveIntentKey = (
@@ -87,13 +82,9 @@ export const createSubsplashSeriesUnpublishIntentKey = (
 export const createSubsplashSeriesReorderIntentKey = (
   scope: string,
   seriesId: string,
-  publishedMediaItemIds: string[]
+  _publishedMediaItemIds: string[]
 ): string => {
-  return createRetryIntentKey(
-    scope,
-    seriesId,
-    `series-reorder:${createPublishedMembershipHash(publishedMediaItemIds)}`
-  );
+  return createOperationKey(scope, seriesId);
 };
 
 export interface ListPublishAggregate {

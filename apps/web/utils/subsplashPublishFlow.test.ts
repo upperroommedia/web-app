@@ -42,7 +42,7 @@ describe('subsplashPublishFlow', () => {
       );
     });
 
-    it('reuses the same list-add key for the same destination set regardless of order', () => {
+    it('creates a fresh list-add key for each invocation even when the destination set is unchanged', () => {
       const first = createSubsplashListAddIntentKey(
         'manage-publishing-list-add',
         'sermon-1',
@@ -61,10 +61,12 @@ describe('subsplashPublishFlow', () => {
         ]
       );
 
-      expect(first).toBe(second);
+      expect(first).toMatch(/^manage-publishing-list-add:sermon-1:[a-f0-9-]{36}$/);
+      expect(second).toMatch(/^manage-publishing-list-add:sermon-1:[a-f0-9-]{36}$/);
+      expect(first).not.toBe(second);
     });
 
-    it('changes the list-add key when a membership publish generation advances', () => {
+    it('creates a fresh list-add key even when only the publish generation changes', () => {
       const first = createSubsplashListAddIntentKey(
         'manage-publishing-list-add',
         'sermon-1',
@@ -128,7 +130,7 @@ describe('subsplashPublishFlow', () => {
       );
     });
 
-    it('reuses the same series reorder key for the same published membership set regardless of order', () => {
+    it('creates a fresh series reorder key for each invocation even when membership is unchanged', () => {
       const first = createSubsplashSeriesReorderIntentKey(
         'manage-publishing-series-reorder',
         'series-1',
@@ -140,7 +142,9 @@ describe('subsplashPublishFlow', () => {
         ['media-a', 'media-b']
       );
 
-      expect(first).toBe(second);
+      expect(first).toMatch(/^manage-publishing-series-reorder:series-1:[a-f0-9-]{36}$/);
+      expect(second).toMatch(/^manage-publishing-series-reorder:series-1:[a-f0-9-]{36}$/);
+      expect(first).not.toBe(second);
     });
   });
 
