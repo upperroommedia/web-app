@@ -117,6 +117,11 @@ const buildListItemDoc = (listId: string) => ({
   },
 });
 
+const getListItemWrite = (listId: string) =>
+  writeBatchSetMock.mock.calls.find(
+    ([ref]) => (ref as { path?: string }).path === `lists/${listId}/listItems/sermon-1`
+  );
+
 const createFunctionMap = () => {
   const map: Record<string, jest.Mock> = {
     editSoundCloudSermon: jest.fn().mockResolvedValue({ soundCloudTrackUrl: 'https://soundcloud.test/updated' }),
@@ -292,7 +297,7 @@ describe('editSermon remote edit reconciliation', () => {
     expect(writeBatchDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ path: 'lists/list-a/listItems/sermon-1' }));
   });
 
-  it('adds only newly selected lists and persists their published upload status', async () => {
+  it('adds only newly selected lists and persists their published upload status without writing undefined fields', async () => {
     const functions = createFunctionMap();
     functions.addtolist.mockResolvedValue([
       {
@@ -311,10 +316,16 @@ describe('editSermon remote edit reconciliation', () => {
 
     const editSermon = (await import('../../pages/api/editSermon')).default;
 
-    const sermon = createEmptySermon('user-1');
-    sermon.id = 'sermon-1';
-    sermon.subsplashId = 'subsplash-1';
-    sermon.status.subsplash = uploadStatus.UPLOADED;
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.subsplashId = 'subsplash-1';
+    originalSermon.status.subsplash = uploadStatus.UPLOADED;
+    originalSermon.topics = ['Old Topic'];
+
+    const sermon = {
+      ...originalSermon,
+      topics: ['New Topic'],
+    };
 
     const newList = buildList({ id: 'list-b', name: 'List B', subsplashId: 'subsplash-list-b' });
 
@@ -326,9 +337,10 @@ describe('editSermon remote edit reconciliation', () => {
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
 
-    await editSermon(sermon, [newList], { originalSermon: sermon });
+    await editSermon(sermon, [newList], { originalSermon });
 
     expect(functions.addtolist).toHaveBeenCalledTimes(1);
+    expect(functions.editSubsplashSermon).toHaveBeenCalledTimes(1);
     expect(functions.removefromlist).not.toHaveBeenCalled();
     expect(writeBatchSetMock).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'sermons/sermon-1/sermonLists/list-b' }),
@@ -337,6 +349,105 @@ describe('editSermon remote edit reconciliation', () => {
         uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-b' },
       })
     );
+    const listItemWrite = getListItemWrite('list-b');
+    expect(listItemWrite).toBeDefined();
+    const listItemData = listItemWrite?.[1] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(listItemData, 'youtubeUrl')).toBe(false);
+  });
+
+  it('refreshes existing mirrored list items on repeated speaker and topic edits', async () => {
+    const functions = createFunctionMap();
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.subsplashId = 'subsplash-1';
+    originalSermon.status.subsplash = uploadStatus.UPLOADED;
+    originalSermon.speakers = [{ id: 'speaker-1', name: 'Speaker One', images: [], listId: 'speaker-list-1' }];
+    originalSermon.topics = ['Old Topic'];
+
+    const updatedSermon = {
+      ...originalSermon,
+      speakers: [{ id: 'speaker-2', name: 'Speaker Two', images: [], listId: 'speaker-list-2' }],
+      topics: ['New Topic'],
+      youtubeUrl: undefined,
+    };
+
+    const existingList = {
+      ...buildList({ id: 'list-a', name: 'List A', subsplashId: 'subsplash-list-a' }),
+      uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-a' },
+      publishGeneration: 0,
+    };
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([existingList])
+      .mockResolvedValueOnce([existingList]);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [buildListDoc(existingList)] })
+      .mockResolvedValueOnce({ docs: [buildListItemDoc('list-a')] });
+
+    await editSermon(updatedSermon, [existingList], { originalSermon });
+
+    expect(functions.editSubsplashSermon).toHaveBeenCalledTimes(1);
+    const listItemWrite = getListItemWrite('list-a');
+    expect(listItemWrite).toBeDefined();
+    expect(listItemWrite?.[2]).toEqual({ merge: true });
+    expect(listItemWrite?.[1]).toEqual(
+      expect.objectContaining({
+        speakers: updatedSermon.speakers,
+        topics: ['New Topic'],
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-a' },
+        youtubeUrl: 'DELETE_FIELD',
+      })
+    );
+  });
+
+  it('backfills a missing mirrored list item without writing an undefined youtubeUrl payload', async () => {
+    const functions = createFunctionMap();
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.subsplashId = 'subsplash-1';
+    originalSermon.status.subsplash = uploadStatus.UPLOADED;
+    originalSermon.speakers = [{ id: 'speaker-1', name: 'Speaker One', images: [], listId: 'speaker-list-1' }];
+    originalSermon.topics = ['Old Topic'];
+
+    const updatedSermon = {
+      ...originalSermon,
+      speakers: [{ id: 'speaker-2', name: 'Speaker Two', images: [], listId: 'speaker-list-2' }],
+      topics: ['New Topic'],
+      youtubeUrl: undefined,
+    };
+
+    const existingList = {
+      ...buildList({ id: 'list-a', name: 'List A', subsplashId: 'subsplash-list-a' }),
+      uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-a' },
+      publishGeneration: 0,
+    };
+
+    resolveCanonicalSermonListsMock
+      .mockResolvedValueOnce([existingList])
+      .mockResolvedValueOnce([existingList]);
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [buildListDoc(existingList)] })
+      .mockResolvedValueOnce({ docs: [] });
+
+    await editSermon(updatedSermon, [existingList], { originalSermon });
+
+    expect(functions.editSubsplashSermon).toHaveBeenCalledTimes(1);
+    const listItemWrite = getListItemWrite('list-a');
+    expect(listItemWrite).toBeDefined();
+    expect(listItemWrite?.[2]).toEqual({ merge: true });
+    const listItemData = listItemWrite?.[1] as Record<string, unknown>;
+    expect(listItemData).toEqual(
+      expect.objectContaining({
+        speakers: updatedSermon.speakers,
+        topics: ['New Topic'],
+        uploadStatus: { status: uploadStatus.UPLOADED, listItemId: 'row-a' },
+      })
+    );
+    expect(Object.prototype.hasOwnProperty.call(listItemData, 'youtubeUrl')).toBe(false);
   });
 
   it('creates the media item and missing subsplash list when publishing an unpublished sermon into a list', async () => {

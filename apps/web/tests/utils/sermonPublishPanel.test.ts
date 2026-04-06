@@ -1,0 +1,24 @@
+jest.mock('../../context/user/UserContext', () => ({
+  __esModule: true,
+  default: () => ({ user: null }),
+}));
+
+import { resolveSessionSubsplashMediaItemId } from '../../components/SermonPublishPanel';
+
+describe('resolveSessionSubsplashMediaItemId', () => {
+  it('prefers the explicit media item id from the active publish action', () => {
+    expect(resolveSessionSubsplashMediaItemId('session-media', 'persisted-media', 'explicit-media')).toBe('explicit-media');
+  });
+
+  it('reuses the same-session media item id before Firestore refresh catches up', () => {
+    expect(resolveSessionSubsplashMediaItemId('session-media', undefined, undefined)).toBe('session-media');
+  });
+
+  it('falls back to the persisted sermon subsplash id when there is no session override', () => {
+    expect(resolveSessionSubsplashMediaItemId(undefined, 'persisted-media', undefined)).toBe('persisted-media');
+  });
+
+  it('ignores empty ids from any source', () => {
+    expect(resolveSessionSubsplashMediaItemId('  ', ' persisted-media ', '')).toBe('persisted-media');
+  });
+});

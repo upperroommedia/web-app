@@ -64,7 +64,7 @@ export interface PatchSeriesPayload {
   id: string;
   title?: string;
   subtitle?: string;
-  summary?: string;
+  summary?: string | null;
   published_at?: string | null;
   _embedded?: {
     images?: Array<{ id: string; type: string }>;

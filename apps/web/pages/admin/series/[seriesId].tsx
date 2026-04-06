@@ -97,6 +97,7 @@ import type {
   GetSeriesRemoteStateRemoteItem,
 } from '../../../../../packages/contracts/getSeriesRemoteState';
 import { serverTimestamp, deleteField } from 'firebase/firestore';
+import { getSeriesItemPublishChipState } from '../../../utils/seriesItemPublishChipState';
 
 interface SeriesItemWithSermon extends SeriesItem {
   sermon?: Sermon;
@@ -334,6 +335,11 @@ const SortableItem = memo(({
   const placeholderSecondaryText = isDarkMode
     ? alpha(theme.palette.text.secondary, 0.82)
     : alpha(theme.palette.text.secondary, 0.6);
+  const publishChipState = getSeriesItemPublishChipState({
+    publishedToSubsplash: item.publishedToSubsplash,
+    isPublishing,
+    isUnpublishing,
+  });
 
   const localImage = item.sermon?.images?.find((img) => img.type === 'square')
     || item.sermon?.images?.find((img) => img.type === 'wide')
@@ -587,43 +593,30 @@ const SortableItem = memo(({
               }}
             />
           )}
-          {item.publishedToSubsplash ? (
-            <Chip
-              icon={<CheckCircleIcon />}
-              label="Published"
-              size="small"
-              color="success"
-              variant="outlined"
-              sx={{
-                height: 20,
-                '& .MuiChip-label': {
-                  px: 0.75,
-                  fontSize: '0.62rem',
-                },
-                '& .MuiChip-icon': {
-                  fontSize: '0.85rem',
-                },
-              }}
-            />
-          ) : (
-            <Chip
-              icon={<PendingIcon />}
-              label="Not Published"
-              size="small"
-              color="warning"
-              variant="outlined"
-              sx={{
-                height: 20,
-                '& .MuiChip-label': {
-                  px: 0.75,
-                  fontSize: '0.62rem',
-                },
-                '& .MuiChip-icon': {
-                  fontSize: '0.85rem',
-                },
-              }}
-            />
-          )}
+          <Chip
+            icon={
+              publishChipState.isBusy
+                ? <CircularProgress size={13} color="inherit" />
+                : publishChipState.color === 'success'
+                  ? <CheckCircleIcon />
+                  : <PendingIcon />
+            }
+            label={publishChipState.label}
+            size="small"
+            color={publishChipState.color}
+            variant={publishChipState.variant}
+            title={publishChipState.tooltip}
+            sx={{
+              height: 20,
+              '& .MuiChip-label': {
+                px: 0.75,
+                fontSize: '0.62rem',
+              },
+              '& .MuiChip-icon': {
+                fontSize: '0.85rem',
+              },
+            }}
+          />
         </Box>
       </Box>
 
@@ -763,37 +756,27 @@ const SortableItem = memo(({
                 }}
               />
             )}
-            {item.publishedToSubsplash ? (
-              <Chip
-                icon={<CheckCircleIcon />}
-                label="Published"
-                size="small"
-                color="success"
-                variant="outlined"
-                sx={{
-                  height: 22,
-                  '& .MuiChip-label': {
-                    px: 1,
-                    fontSize: '0.7rem',
-                  },
-                }}
-              />
-            ) : (
-              <Chip
-                icon={<PendingIcon />}
-                label="Not Published"
-                size="small"
-                color="warning"
-                variant="outlined"
-                sx={{
-                  height: 22,
-                  '& .MuiChip-label': {
-                    px: 1,
-                    fontSize: '0.7rem',
-                  },
-                }}
-              />
-            )}
+            <Chip
+              icon={
+                publishChipState.isBusy
+                  ? <CircularProgress size={13} color="inherit" />
+                  : publishChipState.color === 'success'
+                    ? <CheckCircleIcon />
+                    : <PendingIcon />
+              }
+              label={publishChipState.label}
+              size="small"
+              color={publishChipState.color}
+              variant={publishChipState.variant}
+              title={publishChipState.tooltip}
+              sx={{
+                height: 22,
+                '& .MuiChip-label': {
+                  px: 1,
+                  fontSize: '0.7rem',
+                },
+              }}
+            />
           </Box>
         </Box>
 

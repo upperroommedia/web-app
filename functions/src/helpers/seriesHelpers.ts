@@ -389,7 +389,7 @@ export async function patchSeriesMetadata(
   updates: {
     title?: string;
     subtitle?: string;
-    summary?: string;
+    summary?: string | null;
     publishedAt?: string | null;
     images?: Array<{ id: string; type: string }>;
   },
@@ -401,9 +401,9 @@ export async function patchSeriesMetadata(
 
   const payload: PatchSeriesPayload = {
     id: seriesId,
-    ...(updates.title && { title: updates.title }),
-    ...(updates.subtitle && { subtitle: updates.subtitle }),
-    ...(updates.summary && { summary: updates.summary }),
+    ...(updates.title !== undefined ? { title: updates.title } : {}),
+    ...(updates.subtitle !== undefined ? { subtitle: updates.subtitle } : {}),
+    ...(updates.summary !== undefined ? { summary: updates.summary } : {}),
     ...(updates.publishedAt !== undefined && { published_at: updates.publishedAt }),
     ...(Object.keys(embeddedPayload).length > 0 && { _embedded: embeddedPayload }),
   };

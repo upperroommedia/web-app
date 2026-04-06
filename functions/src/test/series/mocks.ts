@@ -137,7 +137,7 @@ export class SubsplashSeriesMock {
       series.subtitle = payload.subtitle;
     }
     if (payload.summary !== undefined) {
-      series.summary = payload.summary;
+      series.summary = payload.summary ?? undefined;
     }
     if (payload.published_at !== undefined) {
       series.published_at = payload.published_at;

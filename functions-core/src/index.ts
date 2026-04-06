@@ -67,6 +67,7 @@ import removefromseries from '../../functions/src/removeFromSeries';
 import reorderseriesitems from '../../functions/src/reorderSeriesItems';
 import bulkaddtoseries from '../../functions/src/bulkAddToSeries';
 import getseriesremotestate from '../../functions/src/getSeriesRemoteState';
+import updateseriesmetadata from '../../functions/src/updateSeriesMetadata';
 import reorderlistitems from '../../functions/src/reorderListItems';
 import resolvelistpublisheddrift from '../../functions/src/resolveListPublishedDrift';
 
@@ -129,5 +130,6 @@ exports.removefromseries = removefromseries;
 exports.reorderseriesitems = reorderseriesitems;
 exports.bulkaddtoseries = bulkaddtoseries;
 exports.getseriesremotestate = getseriesremotestate;
+exports.updateseriesmetadata = updateseriesmetadata;
 exports.reorderlistitems = reorderlistitems;
 exports.resolvelistpublisheddrift = resolvelistpublisheddrift;

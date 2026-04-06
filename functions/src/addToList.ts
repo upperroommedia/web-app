@@ -292,6 +292,27 @@ const findItemInOverflowChain = async (
   return null;
 };
 
+const findItemInOverflowChainWithRetry = async (
+  rootSubsplashListId: string,
+  itemToAdd: SubsplashMediaItem,
+  token: string
+): Promise<{ listId: string; listItemId: string } | null> => {
+  const retryDelaysMs = [0, 50, 150, 300, 500];
+
+  for (const delayMs of retryDelaysMs) {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    const resolvedPlacement = await findItemInOverflowChain(rootSubsplashListId, itemToAdd, token);
+    if (resolvedPlacement) {
+      return resolvedPlacement;
+    }
+  }
+
+  return null;
+};
+
 const findAllItemPlacementsInOverflowChain = async (
   rootListId: string,
   itemToAdd: SubsplashMediaItem,
@@ -1269,6 +1290,17 @@ async function processListStep(
     listItemId = existingListItemId;
   } else {
     listItemId = await resolveListItemIdWithRetry(listId, itemToAdd, token, finalRowsSnapshot);
+    if (!listItemId) {
+      const recoveredPlacement = await findItemInOverflowChainWithRetry(listId, itemToAdd, token);
+      if (recoveredPlacement?.listItemId) {
+        listItemId = recoveredPlacement.listItemId;
+        listDebugWarn('addToList.processListStep.resolveListItemId.recoveredFromChain', {
+          listId,
+          itemId: itemToAdd.id,
+          recoveredPlacement,
+        });
+      }
+    }
   }
 
   if (!listItemId) {
@@ -1364,7 +1396,7 @@ const recoverPlacementAfterFailedMutation = async ({
     }
   | null
 > => {
-  const resolvedPlacement = await findItemInOverflowChain(rootListId, mediaItem, token);
+  const resolvedPlacement = await findItemInOverflowChainWithRetry(rootListId, mediaItem, token);
   if (!resolvedPlacement) {
     return null;
   }

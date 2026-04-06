@@ -255,4 +255,66 @@ describe('addToList - post-patch row identity', () => {
     const mediaIds = rootRows.map((row) => row._embedded['media-item']?.id);
     expect(mediaIds).toEqual(expect.arrayContaining(['sermon-retry', 'seed-1']));
   });
+
+  it('recovers from longer stale post-patch reads by retrying overflow-chain placement lookup', async () => {
+    const rootListId = 'post-patch-chain-recovery-root-list';
+    const overflowListId = 'post-patch-chain-recovery-overflow-list';
+
+    subsplashMock.createList(rootListId, 'Chain Recovery Root List', 2, 3);
+    subsplashMock.createList(overflowListId, 'More Chain Recovery Root List', 0, 3);
+    subsplashMock.listRows.set(rootListId, [
+      createMediaRow(rootListId, 'seed-1', 1),
+      createListLinkRow(rootListId, overflowListId, 2),
+    ]);
+
+    await createListDocument({
+      id: 'chain-recovery-root-firestore-list',
+      subsplashId: rootListId,
+      title: 'Chain Recovery Root List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      moreSermonsRef: overflowListId,
+      count: 2,
+      logicalCount: 1,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: 'chain-recovery-root-firestore-list',
+      overflowDepth: 0,
+    });
+    await createListDocument({
+      id: 'chain-recovery-overflow-firestore-list',
+      subsplashId: overflowListId,
+      title: 'More Chain Recovery Root List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      isMoreSermonsList: true,
+      rootListId: 'chain-recovery-root-firestore-list',
+      overflowDepth: 1,
+      count: 0,
+    });
+
+    subsplashMock.returnStaleListRowsAfterNextPatch(rootListId, 6);
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'sermon-chain-recovery', type: 'media-item' },
+        maxListSize: 3,
+        operationKey: 'post-patch-chain-recovery-1',
+      },
+    };
+
+    const result = await addToListHandler(request);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+    if (result[0].status !== 'success') {
+      throw new Error(`Expected success, received ${result[0].status}`);
+    }
+    expect(result[0].listItemId).toBeDefined();
+
+    const rootRows = subsplashMock.getListRows(rootListId);
+    expect(rootRows.map((row) => row._embedded['media-item']?.id)).toEqual(
+      expect.arrayContaining(['sermon-chain-recovery', 'seed-1'])
+    );
+  });
 });

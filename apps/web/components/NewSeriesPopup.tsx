@@ -17,10 +17,9 @@ import useAuth from '../context/user/UserContext';
 import { createFunctionV2 } from '../utils/createFunction';
 import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
 import { Series, emptySeries } from '../types/Series';
-import firestore, { doc, updateDoc } from '../firebase/firestore';
-import { serverTimestamp } from 'firebase/firestore';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
+import { saveSeriesMetadata } from '../utils/saveSeriesMetadata';
 
 interface NewSeriesPopupProps {
   open: boolean;
@@ -30,7 +29,6 @@ interface NewSeriesPopupProps {
 }
 
 const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
-const getDerivedSubtitle = (publishedItemCount: number): string => `${publishedItemCount} part series`;
 
 const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   const { user } = useAuth();
@@ -105,24 +103,14 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     setError(null);
 
     try {
-      // If editing existing series, update it directly in Firestore
+      // Published series sync to Subsplash immediately; drafts stay local-only.
       if (props.existingSeries) {
-        await updateDoc(doc(firestore, 'series', props.existingSeries.id), {
-          name: formData.name.trim(),
-          subtitle: getDerivedSubtitle(props.existingSeries.publishedItemCount || 0),
-          summary: formData.summary.trim() || null,
+        const updatedSeries = await saveSeriesMetadata({
+          series: props.existingSeries,
+          name: formData.name,
+          summary: formData.summary,
           images: formData.images,
-          updatedAt: serverTimestamp(),
         });
-
-        // Create updated series object to pass back
-        const updatedSeries: Series = {
-          ...props.existingSeries,
-          name: formData.name.trim(),
-          subtitle: getDerivedSubtitle(props.existingSeries.publishedItemCount || 0),
-          summary: formData.summary.trim() || undefined,
-          images: formData.images,
-        };
 
         props.onSeriesCreated?.(updatedSeries);
         props.setOpen(false);
@@ -142,7 +130,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
             ...emptySeries,
             id: result.firestoreId,
             name: formData.name.trim(),
-            subtitle: getDerivedSubtitle(0),
+            subtitle: '0 part series',
             summary: formData.summary.trim() || undefined,
             images: formData.images,
             ownerId: user.uid,
