@@ -119,10 +119,16 @@ const resolveSentryRelease = () => {
 };
 
 const sentryRelease = resolveSentryRelease();
+const sentryDsn = readFirstDefinedEnv('NEXT_PUBLIC_SENTRY_DSN', 'SENTRY_DSN');
 
 if (sentryRelease) {
   process.env.NEXT_PUBLIC_SENTRY_RELEASE = process.env.NEXT_PUBLIC_SENTRY_RELEASE || sentryRelease;
   process.env.SENTRY_RELEASE = process.env.SENTRY_RELEASE || sentryRelease;
+}
+
+if (sentryDsn) {
+  process.env.NEXT_PUBLIC_SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN || sentryDsn;
+  process.env.SENTRY_DSN = process.env.SENTRY_DSN || sentryDsn;
 }
 
 const nextConfig = {
@@ -130,6 +136,12 @@ const nextConfig = {
   outputFileTracingRoot: repoRoot,
   reactStrictMode: true,
   env: {
+    ...(sentryDsn
+      ? {
+          NEXT_PUBLIC_SENTRY_DSN: sentryDsn,
+          SENTRY_DSN: sentryDsn,
+        }
+      : {}),
     ...(sentryRelease
       ? {
           NEXT_PUBLIC_SENTRY_RELEASE: sentryRelease,
