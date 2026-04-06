@@ -3,7 +3,6 @@ import { SermonList } from '../types/SermonList';
 import { uploadStatus } from '../types/SermonTypes';
 import {
   createOperationKey,
-  createPublishedMembershipHash,
   createRetryIntentKey,
 } from './callableConcurrency';
 
@@ -34,13 +33,9 @@ export const createSubsplashListAddIntentKey = (
 export const createSubsplashListRemoveIntentKey = (
   scope: string,
   sermonId: string,
-  destinationListIds: string[]
+  _destinationListIds: string[]
 ): string => {
-  return createRetryIntentKey(
-    scope,
-    sermonId,
-    `remove-lists:${createPublishedMembershipHash(destinationListIds)}`
-  );
+  return createOperationKey(scope, sermonId);
 };
 
 export const getNextPublishGeneration = (currentGeneration?: number): number => {
@@ -48,7 +43,7 @@ export const getNextPublishGeneration = (currentGeneration?: number): number => 
 };
 
 export const createSubsplashDeleteIntentKey = (scope: string, sermonId: string): string => {
-  return createRetryIntentKey(scope, sermonId, 'remote-media-delete');
+  return createOperationKey(scope, sermonId);
 };
 
 export const createSubsplashSeriesCreateIntentKey = (scope: string, seriesId: string): string => {
@@ -58,25 +53,25 @@ export const createSubsplashSeriesCreateIntentKey = (scope: string, seriesId: st
 export const createSubsplashSeriesPublishIntentKey = (
   scope: string,
   sermonId: string,
-  seriesId: string
+  _seriesId: string
 ): string => {
-  return createRetryIntentKey(scope, sermonId, `series-publish:${seriesId}`);
+  return createOperationKey(scope, sermonId);
 };
 
 export const createSubsplashSeriesRollbackIntentKey = (
   scope: string,
   sermonId: string,
-  seriesId: string
+  _seriesId: string
 ): string => {
-  return createRetryIntentKey(scope, sermonId, `series-rollback:${seriesId}`);
+  return createOperationKey(scope, sermonId);
 };
 
 export const createSubsplashSeriesUnpublishIntentKey = (
   scope: string,
   sermonId: string,
-  seriesId: string
+  _seriesId: string
 ): string => {
-  return createRetryIntentKey(scope, sermonId, `series-unpublish:${seriesId}`);
+  return createOperationKey(scope, sermonId);
 };
 
 export const createSubsplashSeriesReorderIntentKey = (

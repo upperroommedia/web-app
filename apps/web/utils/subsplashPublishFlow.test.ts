@@ -81,7 +81,7 @@ describe('subsplashPublishFlow', () => {
       expect(first).not.toBe(second);
     });
 
-    it('reuses the same list-remove key for the same destination set regardless of order', () => {
+    it('creates a fresh list-remove key for each invocation even when the destination set is unchanged', () => {
       const first = createSubsplashListRemoveIntentKey(
         'manage-publishing-list-remove',
         'sermon-1',
@@ -93,15 +93,18 @@ describe('subsplashPublishFlow', () => {
         ['list-a', 'list-b']
       );
 
-      expect(first).toBe(second);
+      expect(first).toMatch(/^manage-publishing-list-remove:sermon-1:[a-f0-9-]{36}$/);
+      expect(second).toMatch(/^manage-publishing-list-remove:sermon-1:[a-f0-9-]{36}$/);
+      expect(first).not.toBe(second);
     });
 
-    it('reuses the same delete key for the same sermon delete intent', () => {
-      expect(
-        createSubsplashDeleteIntentKey('manage-publishing-delete', 'sermon-1')
-      ).toBe(
-        createSubsplashDeleteIntentKey('manage-publishing-delete', 'sermon-1')
-      );
+    it('creates a fresh delete key for each invocation', () => {
+      const first = createSubsplashDeleteIntentKey('manage-publishing-delete', 'sermon-1');
+      const second = createSubsplashDeleteIntentKey('manage-publishing-delete', 'sermon-1');
+
+      expect(first).toMatch(/^manage-publishing-delete:sermon-1:[a-f0-9-]{36}$/);
+      expect(second).toMatch(/^manage-publishing-delete:sermon-1:[a-f0-9-]{36}$/);
+      expect(first).not.toBe(second);
     });
 
     it('reuses the same series create key for the same series', () => {
@@ -112,22 +115,47 @@ describe('subsplashPublishFlow', () => {
       );
     });
 
-    it('reuses the same series publish/rollback/unpublish keys for the same sermon-series pair', () => {
-      expect(
-        createSubsplashSeriesPublishIntentKey('manage-publishing-series-publish', 'sermon-1', 'series-1')
-      ).toBe(
-        createSubsplashSeriesPublishIntentKey('manage-publishing-series-publish', 'sermon-1', 'series-1')
+    it('creates fresh series publish/rollback/unpublish keys for each invocation', () => {
+      const publishFirst = createSubsplashSeriesPublishIntentKey(
+        'manage-publishing-series-publish',
+        'sermon-1',
+        'series-1'
       );
-      expect(
-        createSubsplashSeriesRollbackIntentKey('manage-publishing-series-rollback', 'sermon-1', 'series-1')
-      ).toBe(
-        createSubsplashSeriesRollbackIntentKey('manage-publishing-series-rollback', 'sermon-1', 'series-1')
+      const publishSecond = createSubsplashSeriesPublishIntentKey(
+        'manage-publishing-series-publish',
+        'sermon-1',
+        'series-1'
       );
-      expect(
-        createSubsplashSeriesUnpublishIntentKey('manage-publishing-series-unpublish', 'sermon-1', 'series-1')
-      ).toBe(
-        createSubsplashSeriesUnpublishIntentKey('manage-publishing-series-unpublish', 'sermon-1', 'series-1')
+      const rollbackFirst = createSubsplashSeriesRollbackIntentKey(
+        'manage-publishing-series-rollback',
+        'sermon-1',
+        'series-1'
       );
+      const rollbackSecond = createSubsplashSeriesRollbackIntentKey(
+        'manage-publishing-series-rollback',
+        'sermon-1',
+        'series-1'
+      );
+      const unpublishFirst = createSubsplashSeriesUnpublishIntentKey(
+        'manage-publishing-series-unpublish',
+        'sermon-1',
+        'series-1'
+      );
+      const unpublishSecond = createSubsplashSeriesUnpublishIntentKey(
+        'manage-publishing-series-unpublish',
+        'sermon-1',
+        'series-1'
+      );
+
+      expect(publishFirst).toMatch(/^manage-publishing-series-publish:sermon-1:[a-f0-9-]{36}$/);
+      expect(publishSecond).toMatch(/^manage-publishing-series-publish:sermon-1:[a-f0-9-]{36}$/);
+      expect(publishFirst).not.toBe(publishSecond);
+      expect(rollbackFirst).toMatch(/^manage-publishing-series-rollback:sermon-1:[a-f0-9-]{36}$/);
+      expect(rollbackSecond).toMatch(/^manage-publishing-series-rollback:sermon-1:[a-f0-9-]{36}$/);
+      expect(rollbackFirst).not.toBe(rollbackSecond);
+      expect(unpublishFirst).toMatch(/^manage-publishing-series-unpublish:sermon-1:[a-f0-9-]{36}$/);
+      expect(unpublishSecond).toMatch(/^manage-publishing-series-unpublish:sermon-1:[a-f0-9-]{36}$/);
+      expect(unpublishFirst).not.toBe(unpublishSecond);
     });
 
     it('creates a fresh series reorder key for each invocation even when membership is unchanged', () => {
