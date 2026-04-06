@@ -18,20 +18,20 @@ import {
 
 describe('subsplashPublishFlow', () => {
   describe('intent keys', () => {
-    it('reuses the same upload key for the same sermon publish intent', () => {
-      expect(
-        createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 0)
-      ).toBe(
-        createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 0)
-      );
+    it('creates a fresh upload key for each invocation', () => {
+      const first = createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 0);
+      const second = createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 0);
+
+      expect(first).toMatch(/^manage-publishing-upload:sermon-1:[a-f0-9-]{36}$/);
+      expect(second).toMatch(/^manage-publishing-upload:sermon-1:[a-f0-9-]{36}$/);
+      expect(first).not.toBe(second);
     });
 
-    it('changes the upload key when the sermon upload generation advances', () => {
-      expect(
-        createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 0)
-      ).not.toBe(
-        createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 1)
-      );
+    it('keeps upload keys fresh even when the upload generation advances', () => {
+      const first = createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 0);
+      const second = createSubsplashUploadIntentKey('manage-publishing-upload', 'sermon-1', 1);
+
+      expect(first).not.toBe(second);
     });
 
     it('reuses the same list-create key for the same local list retry', () => {
