@@ -141,6 +141,10 @@ describe('createSeries - Basic Functionality', () => {
   });
 
   it('should patch Subsplash series images using subsplashId when local image ids differ', async () => {
+    subsplashSeriesMock.createImage('square', { id: 'subsplash-square', title: 'Square' });
+    subsplashSeriesMock.createImage('wide', { id: 'subsplash-wide', title: 'Wide' });
+    subsplashSeriesMock.createImage('banner', { id: 'subsplash-banner', title: 'Banner' });
+
     const request: TestRequest<CreateSeriesInputType> = {
       auth: { token: { role: 'admin' } },
       data: {
@@ -181,6 +185,59 @@ describe('createSeries - Basic Functionality', () => {
       { id: 'subsplash-wide', type: 'wide' },
       { id: 'subsplash-banner', type: 'banner' },
     ]);
+  });
+
+  it('should repair remote image refs when the stored Subsplash image type does not match Firebase', async () => {
+    subsplashSeriesMock.createImage('square', { id: 'subsplash-square', title: 'Square' });
+    subsplashSeriesMock.createImage('square', { id: 'subsplash-wide', title: 'Wide But Wrong Type' });
+    subsplashSeriesMock.createImage('square', { id: 'subsplash-banner', title: 'Banner But Wrong Type' });
+
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        title: 'Series With Repaired Image Refs',
+        ownerId: TEST_USER_ID,
+        images: [
+          {
+            id: 'firebase-square',
+            subsplashId: 'subsplash-square',
+            type: 'square',
+            downloadLink: 'https://example.com/square.jpg',
+            name: 'Square',
+          },
+          {
+            id: 'firebase-wide',
+            subsplashId: 'subsplash-wide',
+            type: 'wide',
+            downloadLink: 'https://example.com/wide.jpg',
+            name: 'Wide',
+          },
+          {
+            id: 'firebase-banner',
+            subsplashId: 'subsplash-banner',
+            type: 'banner',
+            downloadLink: 'https://example.com/banner.jpg',
+            name: 'Banner',
+          },
+        ],
+      },
+    };
+
+    const result = await createSeriesHandler(request);
+    expect(result.status).toBe('success');
+
+    const remoteSeries = subsplashSeriesMock.getSeries(result.subsplashId!);
+    expect(remoteSeries?._embedded?.images).toHaveLength(3);
+    expect(remoteSeries?._embedded?.images?.[0]).toEqual({ id: 'subsplash-square', type: 'square' });
+    expect(remoteSeries?._embedded?.images?.[1].id).not.toBe('subsplash-wide');
+    expect(remoteSeries?._embedded?.images?.[1].type).toBe('wide');
+    expect(remoteSeries?._embedded?.images?.[2].id).not.toBe('subsplash-banner');
+    expect(remoteSeries?._embedded?.images?.[2].type).toBe('banner');
+
+    const firestoreSeries = await getSeriesBySubsplashId(result.subsplashId!);
+    expect(firestoreSeries?.images[0].subsplashId).toBe('subsplash-square');
+    expect(firestoreSeries?.images[1].subsplashId).toBe(remoteSeries?._embedded?.images?.[1].id);
+    expect(firestoreSeries?.images[2].subsplashId).toBe(remoteSeries?._embedded?.images?.[2].id);
   });
 
   it('should update existing firestore series when firestoreId is provided', async () => {

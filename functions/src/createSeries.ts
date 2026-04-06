@@ -12,6 +12,7 @@ import {
   getSeriesSubtitleFromPublishedCount,
   patchSeriesMetadata,
 } from './helpers/seriesHelpers';
+import { repairMismatchedSubsplashImageRefs } from './helpers/subsplashImageRefs';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
@@ -22,7 +23,7 @@ import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 const firestoreDB = firebaseAdmin.firestore();
 
 const toSubsplashSeriesImageRefs = (
-  images: NonNullable<CreateSeriesInputType['images']>
+  images: Array<Pick<NonNullable<CreateSeriesInputType['images']>[number], 'id' | 'type' | 'subsplashId'>>
 ): Array<{ id: string; type: string }> =>
   images
     .map((image) => {
@@ -148,17 +149,21 @@ const createSeries = onCall(
 
             // Authenticate with Subsplash
             const token = await authenticateSubsplash();
+            const repairedImagesToPersist =
+              imagesToPersist.length > 0
+                ? await repairMismatchedSubsplashImageRefs(imagesToPersist, token)
+                : imagesToPersist;
 
             // Create series in Subsplash
             let syncedSubsplashSeries = await createSubsplashSeries(title.trim(), token, {
               subtitle: initialSubtitle,
               summary: summary?.trim(),
             });
-            if (imagesToPersist.length > 0) {
+            if (repairedImagesToPersist.length > 0) {
               syncedSubsplashSeries = await patchSeriesMetadata(
                 syncedSubsplashSeries.id,
                 {
-                  images: toSubsplashSeriesImageRefs(imagesToPersist),
+                  images: toSubsplashSeriesImageRefs(repairedImagesToPersist),
                 },
                 token
               );
@@ -176,7 +181,7 @@ const createSeries = onCall(
               id: seriesRef.id,
               name: syncedSubsplashSeries.title,
               subtitle: syncedSubsplashSeries.subtitle || initialSubtitle,
-              images: imagesToPersist,
+              images: repairedImagesToPersist,
               itemCount: syncedSubsplashSeries.media_items_count,
               publishedItemCount: syncedSubsplashSeries.published_media_items_count,
               status: syncedSubsplashSeries.status,
@@ -197,6 +202,17 @@ const createSeries = onCall(
             }
 
             await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
+            const repairedImageWrites = repairedImagesToPersist.filter((image) => image.subsplashId && image.subsplashId !== image.id);
+            await Promise.all(
+              repairedImageWrites.map((image) =>
+                firestoreDB.collection('images').doc(image.id).set(
+                  {
+                    subsplashId: image.subsplashId,
+                  },
+                  { merge: true }
+                )
+              )
+            );
 
             logger.log(`Created series: Firestore ID=${seriesRef.id}, Subsplash ID=${syncedSubsplashSeries.id}`);
 

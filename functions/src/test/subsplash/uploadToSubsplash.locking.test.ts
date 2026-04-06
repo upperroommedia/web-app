@@ -143,4 +143,65 @@ describe('uploadToSubsplash lock contract', () => {
       },
     });
   });
+
+  it('repairs mismatched remote image ids before creating the media item', async () => {
+    mockAxios.mockImplementation((config: unknown) => {
+      const request = config as { method?: string; url?: string; data?: unknown; responseType?: string };
+      const method = request.method?.toUpperCase();
+      if (method === 'GET' && request.url === 'https://core.subsplash.com/files/v1/images/wide-remote') {
+        return Promise.resolve({ data: { id: 'wide-remote', type: 'square' } } as never);
+      }
+      if (method === 'GET' && request.url === 'https://example.com/wide.jpg') {
+        return Promise.resolve({
+          data: Buffer.from('fake-image'),
+          headers: { 'content-type': 'image/jpeg' },
+        } as never);
+      }
+      if (method === 'POST' && request.url === 'https://core.subsplash.com/files/v1/images') {
+        return Promise.resolve({
+          data: {
+            id: 'wide-repaired',
+            _links: { presigned_upload_url: { href: 'https://upload.test/wide-repaired' } },
+          },
+        } as never);
+      }
+      if (method === 'PUT' && request.url === 'https://upload.test/wide-repaired') {
+        return Promise.resolve({ data: null, status: 200 } as never);
+      }
+      if (method === 'POST' && request.url === ' https://core.subsplash.com/files/v1/audios') {
+        return Promise.resolve({ data: { id: 'audio-1' } } as never);
+      }
+      if (method === 'POST' && request.url === 'https://core.subsplash.com/transcoder/v1/jobs') {
+        return Promise.resolve({ data: { status: 'queued' } } as never);
+      }
+      if (method === 'POST' && request.url === 'https://core.subsplash.com/media/v1/media-items') {
+        return Promise.resolve({ data: { id: 'media-item-1' } } as never);
+      }
+      return Promise.reject(new Error(`Unhandled axios request: ${method} ${request.url}`));
+    });
+
+    await uploadHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        ...buildValidPayload(),
+        images: [
+          {
+            id: 'local-wide',
+            subsplashId: 'wide-remote',
+            type: 'wide',
+            downloadLink: 'https://example.com/wide.jpg',
+            name: 'Wide',
+          },
+        ],
+      },
+    });
+
+    const mediaItemCall = mockAxios.mock.calls.find(
+      ([config]) => (config as { url?: string }).url === 'https://core.subsplash.com/media/v1/media-items'
+    );
+    expect(mediaItemCall).toBeDefined();
+    const requestConfig = mediaItemCall?.[0] as unknown as { data: string };
+    const requestData = JSON.parse(String(requestConfig.data));
+    expect(requestData._embedded.images).toEqual([{ id: 'wide-repaired', type: 'wide' }]);
+  });
 });

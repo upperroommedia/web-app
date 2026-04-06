@@ -9,6 +9,7 @@ import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import { repairMismatchedSubsplashImageRefs } from './helpers/subsplashImageRefs';
 
 export interface CreateNewSubsplashListInputType {
   title: string;
@@ -60,6 +61,10 @@ export async function createNewSubsplashList(input: CreateNewSubsplashListInputT
   const operationKey = getOperationKey(input.operationKey);
 
   const runMutation = async (): Promise<CreateNewSubsplashListOutputType> => {
+    const token = await authenticateSubsplash();
+    const repairedImages = input.images
+      ? await repairMismatchedSubsplashImageRefs(input.images, token)
+      : undefined;
     const url = 'https://core.subsplash.com/builder/v1/lists';
     const payload = {
       app_key: '9XTSHD',
@@ -70,9 +75,9 @@ export async function createNewSubsplashList(input: CreateNewSubsplashListInputT
       title: input.title,
       ...(input.subtitle && { subtitle: input.subtitle }),
       type: 'standard',
-      _embedded: input.images
+      _embedded: repairedImages
         ? {
-            images: input.images
+            images: repairedImages
               .map((image) => {
                 const remoteImageId = image.subsplashId || image.id;
                 if (!remoteImageId) {
@@ -87,7 +92,7 @@ export async function createNewSubsplashList(input: CreateNewSubsplashListInputT
           }
         : {},
     };
-    const config = createAxiosConfig(url, await authenticateSubsplash(), 'POST', payload);
+    const config = createAxiosConfig(url, token, 'POST', payload);
     const response = (await axios(config)).data;
     // the response also returns the display options for the list which determine how the list is displayed on the different platforms
     // since this will not be changable through our ui, the display options are not returned

@@ -49,6 +49,7 @@ jest.mock('firebase-functions/v2/https', () => ({
 export class SubsplashSeriesMock {
   series: Map<string, SubsplashSeries> = new Map();
   mediaItems: Map<string, SubsplashSeriesMediaItem> = new Map();
+  images: Map<string, { id: string; type: 'square' | 'wide' | 'banner'; title?: string }> = new Map();
   operations: Array<{ type: 'unlink' | 'deleteSeries'; mediaItemId?: string; seriesId?: string }> = [];
   private idCounter = 0;
 
@@ -59,6 +60,7 @@ export class SubsplashSeriesMock {
   reset() {
     this.series.clear();
     this.mediaItems.clear();
+    this.images.clear();
     this.operations = [];
     this.idCounter = 0;
   }
@@ -71,6 +73,17 @@ export class SubsplashSeriesMock {
   private generateMediaItemId(): string {
     this.idCounter++;
     return `media-item-${Date.now()}-${this.idCounter}`;
+  }
+
+  createImage(type: 'square' | 'wide' | 'banner', options?: { id?: string; title?: string }) {
+    const id = options?.id || `image-${Date.now()}-${++this.idCounter}`;
+    const image = { id, type, title: options?.title };
+    this.images.set(id, image);
+    return image;
+  }
+
+  getImage(id: string) {
+    return this.images.get(id);
   }
 
   /**
@@ -385,6 +398,51 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
       return Promise.resolve({ data: subsplashSeriesMock.patchSeriesMetadata(seriesId, payload), status: 200 });
     }
 
+    // GET /files/v1/images/{id} - Get image details
+    const getImageMatch = url.match(/files\/v1\/images\/([a-zA-Z0-9-]+)$/);
+    if (method === 'GET' && getImageMatch) {
+      const imageId = getImageMatch[1];
+      const image = subsplashSeriesMock.getImage(imageId);
+      if (!image) {
+        return Promise.reject({ response: { status: 404, data: { error: 'Image not found' } } });
+      }
+      return Promise.resolve({ data: image, status: 200 });
+    }
+
+    // POST /files/v1/images - Create image shell for upload
+    if (method === 'POST' && url.includes('/files/v1/images')) {
+      const payload = config.data as { type: 'square' | 'wide' | 'banner'; title?: string };
+      const image = subsplashSeriesMock.createImage(payload.type, { title: payload.title });
+      return Promise.resolve({
+        data: {
+          id: image.id,
+          type: image.type,
+          _links: {
+            presigned_upload_url: {
+              href: `https://upload.test/${image.id}`,
+            },
+          },
+        },
+        status: 201,
+      });
+    }
+
+    // PUT presigned upload URL
+    if (method === 'PUT' && url.startsWith('https://upload.test/')) {
+      return Promise.resolve({ data: null, status: 200, statusText: 'OK' });
+    }
+
+    // GET source image download links used during repairs
+    if (method === 'GET' && url.startsWith('https://example.com/')) {
+      return Promise.resolve({
+        data: Buffer.from('fake-image-bytes'),
+        status: 200,
+        headers: {
+          'content-type': 'image/jpeg',
+        },
+      });
+    }
+
     // GET /media/v1/media-items?filter[media_series]=... - Get series items
     if (method === 'GET' && url.includes('/media/v1/media-items') && url.includes('filter[media_series]')) {
       const match = url.match(/filter\[media_series\]=([a-zA-Z0-9-]+)/);
@@ -429,9 +487,19 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
 
 jest.mock('axios', () => {
   const actual = jest.requireActual('axios');
+  const axiosWithHelpers = Object.assign(mockAxios, {
+    get: (url: string, config?: { responseType?: string }) =>
+      mockAxios({
+        method: 'GET',
+        url,
+        ...config,
+      }),
+    isAxiosError:
+      actual.isAxiosError || ((error: unknown) => Boolean(error && typeof error === 'object' && 'isAxiosError' in error)),
+  });
   return {
     __esModule: true,
-    default: mockAxios,
+    default: axiosWithHelpers,
     isAxiosError: actual.isAxiosError || ((error: unknown) => error && typeof error === 'object' && 'isAxiosError' in error),
   };
 });

@@ -4,11 +4,13 @@ import axios from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from './uploadToSubsplash';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
+import { ImageType } from '@upperroom/shared/types/Image';
 import handleError from './handleError';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import { repairMismatchedSubsplashImageRefs } from './helpers/subsplashImageRefs';
 
 export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   extends Partial<Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'audioUrl' | 'autoPublish'>> {
@@ -43,8 +45,8 @@ const editSubsplashSermon = onCall(
       return await withIdempotency(operationKey, async () =>
         withSubsplashLocks(
           [`media-item:${subsplashId}`],
-          async () => {
-            const bearerToken = await authenticateSubsplash();
+	          async () => {
+	            const bearerToken = await authenticateSubsplash();
             // create media item with title
             let tags: string[] = [];
             if (Array.isArray(data.speakers)) {
@@ -60,17 +62,23 @@ const editSubsplashSermon = onCall(
               tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
             }
 
-            const validImages = Array.isArray(data.images)
-              ? data.images
-                  .map((image) =>
-                    image.subsplashId || image.id
-                      ? {
-                          id: image.subsplashId || image.id,
-                          type: image.type,
-                        }
-                      : undefined
-                  )
-                  .filter((image): image is { id: string; type: (typeof data.images)[number]['type'] } => Boolean(image))
+            const repairedImages = Array.isArray(data.images)
+              ? await repairMismatchedSubsplashImageRefs(data.images, bearerToken)
+              : undefined;
+            const validImages = Array.isArray(repairedImages)
+              ? repairedImages
+                  .map((image) => {
+                    const remoteImageId = image.subsplashId || image.id;
+                    if (!remoteImageId) {
+                      return undefined;
+                    }
+
+                    return {
+                      id: remoteImageId,
+                      type: image.type,
+                    };
+                  })
+                  .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined)
               : undefined;
 
             // only send non null values to subsplash

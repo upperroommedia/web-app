@@ -9,6 +9,7 @@ import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { syncOverflowChainNames } from './helpers/listOverflowChain';
+import { repairMismatchedSubsplashImageRefs } from './helpers/subsplashImageRefs';
 
 export interface EditSubsplashListInputType {
   listId: string;
@@ -33,31 +34,34 @@ const editSubpslashList = onCall(
     }
     const data = request.data;
 
-    const requestData = JSON.stringify({
-      app_key: '9XTSHD',
-      ...(data.title && { title: data.title }),
-      ...(data.subtitle && { subtitle: data.subtitle }),
-      ...(data.images && {
-        _embedded: {
-          images: data.images
-            .map((image) => {
-              const remoteImageId = image.subsplashId || image.id;
-              if (!remoteImageId) {
-                return undefined;
-              }
-              return {
-                id: remoteImageId,
-                type: image.type,
-              };
-            })
-            .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined),
-        },
-      }),
-    });
-    logger.log('request data', requestData);
     const operationKey = getOperationKey(data.operationKey);
     const runMutation = async (): Promise<EditSubsplashListOutputType> => {
       const token = await authenticateSubsplash();
+      const repairedImages = data.images
+        ? await repairMismatchedSubsplashImageRefs(data.images, token)
+        : undefined;
+      const requestData = JSON.stringify({
+        app_key: '9XTSHD',
+        ...(data.title && { title: data.title }),
+        ...(data.subtitle && { subtitle: data.subtitle }),
+        ...(repairedImages && {
+          _embedded: {
+            images: repairedImages
+              .map((image) => {
+                const remoteImageId = image.subsplashId || image.id;
+                if (!remoteImageId) {
+                  return undefined;
+                }
+                return {
+                  id: remoteImageId,
+                  type: image.type,
+                };
+              })
+              .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined),
+          },
+        }),
+      });
+      logger.log('request data', requestData);
       const config = createAxiosConfig(
         `https://core.subsplash.com/builder/v1/lists/${data.listId}`,
         token,

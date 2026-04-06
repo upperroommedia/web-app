@@ -10,6 +10,7 @@ import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { emitOperationalAlert } from './notifications/emitOperationalAlert';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import { repairMismatchedSubsplashImageRefs } from './helpers/subsplashImageRefs';
 
 export interface UPLOAD_TO_SUBSPLASH_INCOMING_DATA {
   operationKey: string;
@@ -98,6 +99,7 @@ const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts },
           const transcodeResponse = await transcodeAudio(data.audioUrl, audioId, bearerToken);
           logger.info(`Transcode Statues: ${transcodeResponse.data.status}`);
           // uploadToSubsplash with the audio id
+          const repairedImages = await repairMismatchedSubsplashImageRefs(data.images, bearerToken);
 
           const requestData = JSON.stringify({
             app_key: '9XTSHD',
@@ -109,7 +111,7 @@ const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts },
             date: data.date,
             auto_publish: data.autoPublish ?? false,
             _embedded: {
-              images: data.images
+              images: repairedImages
                 .map((image) => {
                   const remoteImageId = image.subsplashId || image.id;
                   if (!remoteImageId) {
