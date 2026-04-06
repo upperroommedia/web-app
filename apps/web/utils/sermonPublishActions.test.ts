@@ -174,6 +174,29 @@ describe('sermonPublishActions', () => {
       });
     });
 
+    it('treats an unresolved series publish state as publishable for newly assigned series', () => {
+      expect(buildBasicPublishActionPlan({
+        lists: [],
+        hasSeriesId: true,
+        seriesPublished: null,
+        canPublishToSeries: true,
+        isSoundCloudUploaded: true,
+        isDevelopment: false,
+      })).toEqual({
+        publishListIds: [],
+        unpublishListIds: [],
+        publishSeries: true,
+        unpublishSeries: false,
+        publishSoundCloud: false,
+        unpublishSoundCloud: true,
+        publishLabel: 'Publish to series',
+        hasPublishTargets: true,
+        hasUnpublishTargets: true,
+        showPublishButton: true,
+        showUnpublishButton: true,
+      });
+    });
+
     it('returns no publish targets when nothing is configured or eligible', () => {
       expect(buildBasicPublishActionPlan({
         lists: [],

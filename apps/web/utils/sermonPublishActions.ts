@@ -139,7 +139,7 @@ export const buildBasicPublishActionPlan = (
     .map((list) => list.id);
   const publishSeries = Boolean(
     input.hasSeriesId
-    && input.seriesPublished === false
+    && input.seriesPublished !== true
     && input.canPublishToSeries
   );
   const unpublishSeries = Boolean(input.hasSeriesId && input.seriesPublished === true);

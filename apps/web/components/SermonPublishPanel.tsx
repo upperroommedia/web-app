@@ -1151,12 +1151,36 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       return { status: 'error', error: message };
     }
 
-    const mediaItemId = resolveSessionSubsplashMediaItemId(
+    let mediaItemId = resolveSessionSubsplashMediaItemId(
       sessionSubsplashMediaItemId,
       sermon.subsplashId,
       options?.mediaItemId
     );
-    if (!series || !mediaItemId) {
+
+    if (!mediaItemId) {
+      try {
+        const latestSermonSnapshot = await getDoc(doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter));
+        mediaItemId = normalizeMediaItemId(
+          latestSermonSnapshot.exists() ? latestSermonSnapshot.data()?.subsplashId : undefined
+        );
+        if (mediaItemId) {
+          setSessionSubsplashMediaItemId(mediaItemId);
+        }
+      } catch (error) {
+        console.error('Error loading latest sermon publish state before series publish:', error);
+      }
+    }
+
+    if (!series) {
+      const message = 'Series details are still loading. Please retry.';
+      if (!options?.suppressNotice) {
+        setNotice({ severity: 'error', message });
+      }
+      setDestinationErrors((previous) => ({ ...previous, series: message }));
+      return { status: 'error', error: message };
+    }
+
+    if (!mediaItemId) {
       const message = 'Sermon must be uploaded to Subsplash first before adding to series.';
       if (!options?.suppressNotice) {
         setNotice({ severity: 'error', message });

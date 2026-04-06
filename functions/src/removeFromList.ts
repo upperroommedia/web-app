@@ -29,6 +29,7 @@ import {
   getLogicalContentRows,
   getRemoteRowResourceId,
 } from './helpers/remoteChainItems';
+import type { RemoteNodeRows } from './helpers/remoteChainItems';
 import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 
 export interface RemoveFromListInputType {
@@ -103,8 +104,23 @@ const findItemPlacementInOverflowChain = async (
   rootListId: string,
   itemId: string,
   itemType: string,
-  token: string
+  token: string,
+  preloadedNodes?: RemoteNodeRows[]
 ): Promise<{ listId: string; listItemId: string } | null> => {
+  if (preloadedNodes && preloadedNodes.length > 0) {
+    for (const node of preloadedNodes) {
+      const matchingRow = node.rows.find((row) => row.type === itemType && getRemoteRowResourceId(row) === itemId && row.id);
+      if (matchingRow?.id) {
+        return {
+          listId: node.subsplashListId,
+          listItemId: matchingRow.id,
+        };
+      }
+    }
+
+    return null;
+  }
+
   const firestoreDB = firebaseAdmin.firestore();
   const visitedListIds = new Set<string>();
   let currentListId: string | undefined = rootListId;
@@ -150,6 +166,23 @@ type OverflowChainNode = {
   subsplashListId: string;
   remoteRows: SubsplashListRow[];
 };
+
+const cloneRow = (row: SubsplashListRow): SubsplashListRow =>
+  JSON.parse(JSON.stringify(row)) as SubsplashListRow;
+
+const cloneOverflowChainNodes = (nodes: OverflowChainNode[]): OverflowChainNode[] =>
+  nodes.map((node) => ({
+    firestoreListId: node.firestoreListId,
+    subsplashListId: node.subsplashListId,
+    remoteRows: node.remoteRows.map(cloneRow),
+  }));
+
+const toOverflowChainNodes = (remoteNodes: RemoteNodeRows[]): OverflowChainNode[] =>
+  remoteNodes.map((node) => ({
+    firestoreListId: node.firestoreListId,
+    subsplashListId: node.subsplashListId,
+    remoteRows: node.rows.map(cloneRow),
+  }));
 
 type PublishedPlacement = {
   firestoreListId: string;
@@ -409,14 +442,16 @@ export const rebalanceOverflowChainAfterRemoval = async ({
   removedSermonId,
   token,
   maxListSize,
+  existingNodes,
 }: {
   rootSubsplashListId: string;
   removedMediaItemId: string;
   removedSermonId?: string;
   token: string;
   maxListSize?: number;
+  existingNodes?: OverflowChainNode[];
 }): Promise<void> => {
-  const nodes = await loadOverflowChainNodes(rootSubsplashListId, token);
+  const nodes = existingNodes ? cloneOverflowChainNodes(existingNodes) : await loadOverflowChainNodes(rootSubsplashListId, token);
   if (nodes.length === 0) {
     return;
   }
@@ -550,18 +585,31 @@ export const removeFromList = async (
       itemTypes,
     });
 
+    const resolvedRootListIds = await Promise.all(listIds.map((listId) => resolveRootFirestoreListIdBySubsplashListId(listId)));
+    const removalsPerRootListId = resolvedRootListIds.reduce<Map<string, number>>((counts, rootFirestoreListId) => {
+      if (!rootFirestoreListId) {
+        return counts;
+      }
+
+      counts.set(rootFirestoreListId, (counts.get(rootFirestoreListId) ?? 0) + 1);
+      return counts;
+    }, new Map());
+    const rootListIdsByInputListId = new Map<string, string>();
+    const preflightStatesByRootListId = new Map<string, Awaited<ReturnType<typeof ensureCanPerformStrictPublishedMutation>>>();
     const uniqueListIds = [...new Set(listIds)];
     for (const listId of uniqueListIds) {
       const rootFirestoreListId = await resolveRootFirestoreListIdBySubsplashListId(listId);
       if (!rootFirestoreListId) {
         continue;
       }
+      rootListIdsByInputListId.set(listId, rootFirestoreListId);
 
       listDebugLog('removeFromList.runRemoval.strictPreflight.start', {
         listId,
         rootFirestoreListId,
       });
-      await ensureCanPerformStrictPublishedMutation(rootFirestoreListId, token, 'remove');
+      const driftState = await ensureCanPerformStrictPublishedMutation(rootFirestoreListId, token, 'remove');
+      preflightStatesByRootListId.set(rootFirestoreListId, driftState);
       listDebugLog('removeFromList.runRemoval.strictPreflight.success', {
         listId,
         rootFirestoreListId,
@@ -574,6 +622,11 @@ export const removeFromList = async (
       const itemId = itemIds[index];
       const itemType = itemTypes[index];
       const sermonId = sermonIds?.[index];
+      const rootFirestoreListId = rootListIdsByInputListId.get(listId) ?? await resolveRootFirestoreListIdBySubsplashListId(listId);
+      const preflightState = rootFirestoreListId ? preflightStatesByRootListId.get(rootFirestoreListId) : undefined;
+      const canReusePreloadedNodes =
+        Boolean(rootFirestoreListId) && (removalsPerRootListId.get(rootFirestoreListId as string) ?? 0) === 1;
+      const preloadedNodes = preflightState && canReusePreloadedNodes ? toOverflowChainNodes(preflightState.remoteNodes) : undefined;
       listDebugLog('removeFromList.item.start', {
         listId,
         listItemId,
@@ -583,7 +636,13 @@ export const removeFromList = async (
       });
       
       try {
-        const resolvedPlacement = await findItemPlacementInOverflowChain(listId, itemId, itemType, token);
+        const resolvedPlacement = await findItemPlacementInOverflowChain(
+          listId,
+          itemId,
+          itemType,
+          token,
+          canReusePreloadedNodes ? preflightState?.remoteNodes : undefined
+        );
         if (!resolvedPlacement) {
           listDebugWarn('removeFromList.item.notFoundInChain', {
             listId,
@@ -596,6 +655,7 @@ export const removeFromList = async (
             removedMediaItemId: itemId,
             removedSermonId: sermonId,
             token,
+            existingNodes: preloadedNodes,
           });
           return { listId, listItemId, foundInOriginalList: false, itemNotFound: true };
         }
@@ -623,11 +683,22 @@ export const removeFromList = async (
           itemType,
           resolvedPlacement,
         });
+        const nodesAfterDelete = preloadedNodes
+          ? preloadedNodes.map((node) =>
+              node.subsplashListId !== resolvedPlacement.listId
+                ? node
+                : {
+                    ...node,
+                    remoteRows: node.remoteRows.filter((row) => row.id !== resolvedPlacement.listItemId),
+                  }
+            )
+          : undefined;
         await rebalanceOverflowChainAfterRemoval({
           rootSubsplashListId: listId,
           removedMediaItemId: itemId,
           removedSermonId: sermonId,
           token,
+          existingNodes: nodesAfterDelete,
         });
         return {
           listId: resolvedPlacement.listId,
@@ -650,6 +721,7 @@ export const removeFromList = async (
             removedMediaItemId: itemId,
             removedSermonId: sermonId,
             token,
+            existingNodes: preloadedNodes,
           });
           return { listId, listItemId, foundInOriginalList: false, itemNotFound: true };
         }
@@ -736,7 +808,7 @@ export const removeFromList = async (
   }
 };
 const removeFromListCallable = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
+  { secrets: subsplashSecretsWithRuntimeAlerts, memory: '512MiB' },
   async (request: CallableRequest<RemoveFromListInputType>): Promise<RemoveFromListOutputType> => {
     listDebugLog('removeFromList.callable.start', {
       uid: request.auth?.uid,
