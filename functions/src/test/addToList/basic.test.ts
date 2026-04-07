@@ -307,6 +307,104 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     ]);
   });
 
+  it('repairs hidden full-capacity metadata by patching only the visible root capacity', async () => {
+    const rootListId = 'phantom-cap-root';
+    const overflowListId = 'phantom-cap-overflow';
+    subsplashMock.createList(rootListId, 'Palm Sunday Sermons', 200, 200);
+    subsplashMock.createList(overflowListId, 'More Palm Sunday Sermons', 0, 200);
+    subsplashMock.failPatchWhenHiddenCapacityIsFull(rootListId);
+
+    const rootRows: SubsplashListRow[] = [
+      ...Array.from({ length: 197 }, (_, index) => ({
+        id: `root-row-${index + 1}`,
+        app_key: '9XTSHD',
+        method: 'static' as const,
+        position: index + 1,
+        type: 'media-item' as const,
+        _embedded: {
+          'source-list': { id: rootListId },
+          'media-item': { id: `root-item-${index + 1}` },
+        },
+      })),
+      {
+        id: 'root-link-row',
+        app_key: '9XTSHD',
+        method: 'static' as const,
+        position: 198,
+        type: 'list' as const,
+        _embedded: {
+          'source-list': { id: rootListId },
+          list: { id: overflowListId },
+        },
+      },
+    ];
+    const overflowRows: SubsplashListRow[] = Array.from({ length: 3 }, (_, index) => ({
+      id: `overflow-row-${index + 1}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: index + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: overflowListId },
+        'media-item': { id: `overflow-item-${index + 1}` },
+      },
+    }));
+    subsplashMock.listRows.set(rootListId, rootRows);
+    subsplashMock.listRows.set(overflowListId, overflowRows);
+
+    const rootFirestoreId = await createListDocument({
+      subsplashId: rootListId,
+      title: 'Palm Sunday Sermons',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 197,
+      logicalCount: 212,
+      maxListSize: 200,
+      moreSermonsRef: overflowListId,
+    });
+    await createListDocument({
+      subsplashId: overflowListId,
+      title: 'More Palm Sunday Sermons',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 3,
+      maxListSize: 200,
+      isMoreSermonsList: true,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+    });
+    await createSermonDocument(buildSermon('sermon-phantom', 'new-phantom-item'));
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'new-phantom-item', type: 'media-item' as const },
+        maxListSize: 200,
+      },
+    };
+
+    const result = await addToListHandler(request);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+
+    const updatedRootRows = subsplashMock.getListRows(rootListId);
+    expect(updatedRootRows).toHaveLength(198);
+    expect(subsplashMock.getList(rootListId)?.list_rows_count).toBe(198);
+    expect(updatedRootRows[0]._embedded['media-item']?.id).toBe('new-phantom-item');
+    expect(updatedRootRows[197].type).toBe('list');
+    expect(updatedRootRows[197]._embedded.list?.id).toBe(overflowListId);
+
+    const updatedRootMediaIds = updatedRootRows
+      .filter((row) => row.type === 'media-item')
+      .map((row) => row._embedded['media-item']?.id);
+    expect(updatedRootMediaIds).toHaveLength(197);
+    expect(updatedRootMediaIds).not.toContain('root-item-197');
+
+    const updatedOverflowRows = subsplashMock.getListRows(overflowListId);
+    expect(updatedOverflowRows).toHaveLength(4);
+    expect(updatedOverflowRows[0]._embedded['media-item']?.id).toBe('root-item-197');
+  });
+
   it('adopts an existing nested list as the overflow list when its title matches the root list', async () => {
     const rootListId = 'root-adopt-overflow';
     const existingOverflowListId = 'existing-overflow-list';
