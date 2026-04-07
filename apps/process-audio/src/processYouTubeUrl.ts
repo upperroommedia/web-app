@@ -3053,7 +3053,6 @@ async function resolvePreferredAudioFormatId(
     getPreferredYtDlpJsRuntime(),
   ];
   applyPreferredIpFamilyArgs(baseArgs);
-  applyYtDlpRequestPacingArgs(baseArgs);
 
   const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
     const args = [...baseArgs];
