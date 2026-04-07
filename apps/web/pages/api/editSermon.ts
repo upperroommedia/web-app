@@ -39,7 +39,6 @@ import { List, listConverter } from '../../types/List';
 import { SermonList, sermonListConverter } from '../../types/SermonList';
 import { buildEditableSermonPatch } from '../../utils/buildEditableSermonPatch';
 import { createOperationKey, parseLockBusyDetails } from '../../utils/callableConcurrency';
-import { resolveCanonicalSermonLists } from '../../utils/resolveCanonicalSermonLists';
 import { reportHandledError } from '../../utils/reportHandledError';
 import { getSubsplashUnpublishStrategy } from '../../utils/getSubsplashUnpublishStrategy';
 import {
@@ -426,13 +425,10 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter)
     );
     const currentSermonLists = currentSermonListSnapshot.docs.map((snapshot) => snapshot.data());
-    const currentCanonicalSermonLists = await resolveCanonicalSermonLists(originalSermon, currentSermonLists);
-    const nextCanonicalSermonLists = await resolveCanonicalSermonLists(sermon, sermonList);
 
-    const currentCanonicalIds = new Set(currentCanonicalSermonLists.map((list) => list.id));
-    const nextCanonicalIds = new Set(nextCanonicalSermonLists.map((list) => list.id));
+    const nextVisibleListIds = new Set(sermonList.map((list) => list.id));
     const listsToRemove = currentSermonLists.filter(
-      (list) => currentCanonicalIds.has(list.id) && !nextCanonicalIds.has(list.id)
+      (list) => !nextVisibleListIds.has(list.id)
     );
     const publishedListsToRemove = listsToRemove.filter(
       (list) =>
@@ -540,7 +536,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       const finalCanonicalListMap = new Map<string, SermonList>();
       const currentSermonListMap = new Map(currentSermonLists.map((list) => [list.id, list]));
 
-      nextCanonicalSermonLists.forEach((list) => {
+      sermonList.forEach((list) => {
         const currentList = currentSermonListMap.get(list.id);
         finalCanonicalListMap.set(list.id, {
           ...currentList,
@@ -628,7 +624,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         .map((snapshot) => getListIdFromListItemDoc(snapshot))
         .filter((listId): listId is string => Boolean(listId))
     );
-    const finalCanonicalIds = new Set(nextCanonicalSermonLists.map((list) => list.id));
+    const finalVisibleListIds = new Set(sermonList.map((list) => list.id));
     const finalSermonForLocalWrite: Sermon = {
       ...sermon,
       status: {
@@ -653,17 +649,17 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
     });
 
     currentSermonListSnapshot.docs.forEach((snapshot) => {
-      if (!finalCanonicalIds.has(snapshot.id)) {
+      if (!finalVisibleListIds.has(snapshot.id)) {
         batch.delete(snapshot.ref);
       }
     });
     currentListItemIds.forEach((listId) => {
-      if (!finalCanonicalIds.has(listId)) {
+      if (!finalVisibleListIds.has(listId)) {
         batch.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
       }
     });
 
-    nextCanonicalSermonLists.forEach((list) => {
+    sermonList.forEach((list) => {
       batch.set(
         doc(firestore, `sermons/${sermon.id}/sermonLists/${list.id}`).withConverter(sermonListConverter),
         {
