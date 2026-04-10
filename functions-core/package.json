@@ -23,7 +23,7 @@
     "headers": "^0.9.6",
     "https-proxy-agent": "^7.0.4",
     "image-size": "^1.1.1",
-    "lodash": "^4.17.23",
+    "lodash": "^4.18.1",
     "mkdirp": "^2.1.6",
     "node-fetch": "3.3.0",
     "p-limit": "^6.2.0",
