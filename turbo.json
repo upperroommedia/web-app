@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
   "tasks": {
     "app-dev": {
       "cache": false,
@@ -11,7 +12,20 @@
         "functions-integrations#build"
       ],
       "with": [
-        "//#emulators"
+        "//#emulators",
+        "functions-core#build-watch",
+        "functions-media#build-watch",
+        "functions-image#build-watch",
+        "functions-integrations#build-watch",
+        "//#process-audio"
+      ]
+    },
+    "//#process-audio": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "PROCESS_AUDIO_FILE_HOST_PORT",
+        "PROCESS_AUDIO_YOUTUBE_HOST_PORT"
       ]
     },
     "//#emulators": {
