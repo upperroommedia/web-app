@@ -40,7 +40,7 @@
     "algoliasearch": "catalog:",
     "classnames": "^2.5.1",
     "date-fns": "^4.1.0",
-    "dompurify": "^3.3.2",
+    "dompurify": "^3.4.0",
     "firebase": "catalog:",
     "firebase-admin": "catalog:",
     "fuse.js": "^7.0.0",
