@@ -76,4 +76,15 @@ describe('reportHandledError helpers', () => {
     expect(captureExceptionMock).toHaveBeenCalledTimes(1);
     expect(captureExceptionMock).toHaveBeenCalledWith(error);
   });
+
+  it('does not bridge firebase sdk logger errors into Sentry', async () => {
+    const { installConsoleErrorCapture } = await import('../../utils/reportHandledError');
+
+    installConsoleErrorCapture();
+
+    const error = new Error('INTERNAL ASSERTION FAILED: Pending promise was never set');
+    console.error('[2026-04-19T21:59:26.121Z]  @firebase/auth:', error);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
 });

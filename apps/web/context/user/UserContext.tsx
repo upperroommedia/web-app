@@ -5,13 +5,13 @@ import {
   // FacebookAuthProvider,
   GoogleAuthProvider,
   OAuthProvider,
+  signInWithRedirect,
   onIdTokenChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
   UserCredential,
-  browserPopupRedirectResolver,
 } from 'firebase/auth';
 import auth from '../../firebase/auth';
 import { SignupForm, userCredentials } from '../types';
@@ -19,6 +19,8 @@ import nookies from 'nookies';
 import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '../../types/User';
 import Stack from '@mui/material/Stack';
 import Image from 'next/image';
+import { getFirebaseAuthDomain } from '../../shared/firebaseProjectConfig';
+import { shouldPreferFirebaseRedirectAuth } from '../../utils/authRedirect';
 
 const getAuthErrorCode = (error: unknown): string | undefined =>
   typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
@@ -29,10 +31,10 @@ interface Context {
   user: User | undefined;
   loading: boolean;
   login: (loginForm: userCredentials) => Promise<string | void>;
-  loginWithGoogle: () => Promise<UserCredential>;
+  loginWithGoogle: () => Promise<UserCredential | null>;
   // loginWithFacebook: () => Promise<any>;
-  loginWithApple: () => Promise<UserCredential>;
-  loginWithMicrosoft: () => Promise<UserCredential>;
+  loginWithApple: () => Promise<UserCredential | null>;
+  loginWithMicrosoft: () => Promise<UserCredential | null>;
   signup: (loginForm: SignupForm) => Promise<string | void>;
   logoutUser: () => Promise<void>;
   resetPassword: (email: string) => Promise<unknown>;
@@ -122,9 +124,25 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const signInWithProvider = async (provider: GoogleAuthProvider | OAuthProvider): Promise<UserCredential | null> => {
+    if (
+      typeof window !== 'undefined' &&
+      shouldPreferFirebaseRedirectAuth({
+        userAgent: window.navigator.userAgent,
+        currentHostname: window.location.hostname,
+        authDomain: getFirebaseAuthDomain(),
+      })
+    ) {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+
+    return signInWithPopup(auth, provider);
+  };
+
   const loginWithGoogle = async () => {
       const provider = new GoogleAuthProvider();
-      return await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+      return signInWithProvider(provider);
   };
 
   // const loginWithFacebook = async () => {
@@ -138,12 +156,12 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
 
   const loginWithApple = async () => {
       const provider = new OAuthProvider('apple.com');
-      return await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+      return signInWithProvider(provider);
   };
 
   const loginWithMicrosoft = async () => {
       const provider = new OAuthProvider('microsoft.com');
-      return await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+      return signInWithProvider(provider);
   };
 
   const signup = async (loginForm: SignupForm) => {

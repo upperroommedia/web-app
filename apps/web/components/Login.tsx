@@ -19,8 +19,9 @@ const INVITE_LOGIN_NOTICE_KEY = 'invite-claim-login-notice';
 
 const Login = () => {
   const router = useRouter();
-  const { loginWithGoogle, loginWithApple, loginWithMicrosoft, login } = useAuth();
+  const { user, loading, loginWithGoogle, loginWithApple, loginWithMicrosoft, login } = useAuth();
   const [devLoginLoading, setDevLoginLoading] = useState(false);
+  const [providerLoginLoading, setProviderLoginLoading] = useState<string | null>(null);
 
   // const [data, setData] = useState({
   //   email: '',
@@ -99,10 +100,50 @@ const Login = () => {
     setInviteNoticeOpen(true);
   }, [router.isReady]);
 
-  const handleLogin = async (loginFunction: () => Promise<UserCredential>) => {
+  useEffect(() => {
+    if (!router.isReady || loading || !user) {
+      return;
+    }
+
+    const callbackDestination = resolveAuthCallbackDestination(router.query.callbackurl, router.query.callbackUrl);
+    void router.replace(callbackDestination);
+  }, [loading, router, router.isReady, router.query.callbackurl, router.query.callbackUrl, user]);
+
+  const handleLogin = async (providerName: string, loginFunction: () => Promise<UserCredential | null>) => {
+    if (providerLoginLoading) {
+      return;
+    }
+
+    setProviderLoginLoading(providerName);
     let credential: UserCredential | null = null;
     try {
       credential = await loginFunction();
+      if (!credential) {
+        return;
+      }
+
+      const callbackDestination = getCallbackDestination();
+      if (callbackDestination.startsWith('/invite/claim')) {
+        const additionalInfo = getAdditionalUserInfo(credential);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(
+            INVITE_CLAIM_AUTH_META_KEY,
+            JSON.stringify({
+              uid: credential.user.uid ?? null,
+              email: credential.user.email ?? null,
+              isNewUser: additionalInfo?.isNewUser === true,
+              providerId: additionalInfo?.providerId ?? null,
+              capturedAtMs: Date.now(),
+            })
+          );
+        }
+      } else if (typeof window !== 'undefined') {
+        sessionStorage.removeItem(INVITE_CLAIM_AUTH_META_KEY);
+      }
+
+      // Success - redirect user
+      await router.push(callbackDestination);
+      return;
     } catch (error) {
       if (isAuthError(error)) {
         if (error.code === AuthErrorCodes.CREDENTIAL_ALREADY_IN_USE || error.code === AuthErrorCodes.NEED_CONFIRMATION) {
@@ -115,49 +156,36 @@ const Login = () => {
           setErrorMessage('This email is already associated with another sign-in method. Please sign in with your existing provider first, then try linking Microsoft from your profile.');
           setOpen(true);
           return;
-        } else if (error.code === AuthErrorCodes.POPUP_CLOSED_BY_USER || error.code === AuthErrorCodes.USER_CANCELLED || error.code === AuthErrorCodes.EXPIRED_POPUP_REQUEST) {
+        } else if (
+          error.code === AuthErrorCodes.POPUP_CLOSED_BY_USER ||
+          error.code === AuthErrorCodes.USER_CANCELLED ||
+          error.code === AuthErrorCodes.EXPIRED_POPUP_REQUEST ||
+          error.code === 'auth/cancelled-popup-request'
+        ) {
           return;
         } else if (error.code === AuthErrorCodes.POPUP_BLOCKED) {
           setTitle('Popup Blocked');
           setErrorMessage('Your browser blocked the authentication popup. Please allow popups for this site and try again.');
           setOpen(true);
           return;
-        } else {
-          setTitle('Authentication Error');
-          setErrorMessage(error.message);
-          setOpen(true);
-          return;
         }
-      } else {
+
         setTitle('Authentication Error');
-        setErrorMessage('Something went wrong. Please try again or contact support.');
+        setErrorMessage(error.message);
         setOpen(true);
         return;
       }
-    }
 
-    const callbackDestination = getCallbackDestination();
-    if (callbackDestination.startsWith('/invite/claim')) {
-      const additionalInfo = credential ? getAdditionalUserInfo(credential) : null;
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem(
-          INVITE_CLAIM_AUTH_META_KEY,
-          JSON.stringify({
-            uid: credential?.user.uid ?? null,
-            email: credential?.user.email ?? null,
-            isNewUser: additionalInfo?.isNewUser === true,
-            providerId: additionalInfo?.providerId ?? null,
-            capturedAtMs: Date.now(),
-          })
-        );
-      }
-    } else if (typeof window !== 'undefined') {
-      sessionStorage.removeItem(INVITE_CLAIM_AUTH_META_KEY);
+      setTitle('Authentication Error');
+      setErrorMessage('Something went wrong. Please try again or contact support.');
+      setOpen(true);
+      return;
+    } finally {
+      setProviderLoginLoading(null);
     }
-
-    // Success - redirect user
-    router.push(callbackDestination);
   };
+
+  const authActionDisabled = providerLoginLoading !== null || devLoginLoading;
 
   return (
     <div
@@ -227,9 +255,11 @@ const Login = () => {
             Forgot Password?
           </Button>
           <p style={{ textAlign: 'center' }}>or</p> */}
-        <GoogleLoginButton onClick={() => handleLogin(loginWithGoogle)} />
-        <MicrosoftLoginButton onClick={() => handleLogin(loginWithMicrosoft)} />
-        <AppleLoginButton onClick={() => handleLogin(loginWithApple)} />
+        <div style={{ pointerEvents: authActionDisabled ? 'none' : 'auto', opacity: authActionDisabled ? 0.7 : 1 }}>
+          <GoogleLoginButton onClick={() => handleLogin('google', loginWithGoogle)} />
+          <MicrosoftLoginButton onClick={() => handleLogin('microsoft', loginWithMicrosoft)} />
+          <AppleLoginButton onClick={() => handleLogin('apple', loginWithApple)} />
+        </div>
         
         {isDevelopment && (
           <>
