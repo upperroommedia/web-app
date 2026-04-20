@@ -50,6 +50,7 @@ firestore-coverage.html
 .vscode
 .cursor
 .turbo
+.worktrees/
 .agents
 .github/*
 !.github/workflows/
