@@ -1,5 +1,8 @@
 import firebaseAdmin from 'firebase-admin';
-import { applicationDefault } from 'firebase-admin/app';
+import { applicationDefault, cert } from 'firebase-admin/app';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import logger from './WinstonLogger';
 const isDevelopment = process.env.NODE_ENV === 'development';
 const DEFAULT_FIREBASE_PROJECT_ID = 'urm-app';
@@ -17,6 +20,12 @@ type FirebaseConfigEnv = {
   databaseURL?: string;
 };
 
+type ServiceAccountEnv = {
+  project_id: string;
+  client_email: string;
+  private_key: string;
+};
+
 const parseFirebaseConfigEnv = (): FirebaseConfigEnv | null => {
   const raw = process.env.FIREBASE_CONFIG;
   if (!raw || !raw.trim().startsWith('{')) return null;
@@ -28,6 +37,43 @@ const parseFirebaseConfigEnv = (): FirebaseConfigEnv | null => {
 };
 
 const getFirebaseConfigFromEnv = (): FirebaseConfigEnv => parseFirebaseConfigEnv() ?? {};
+
+const parseServiceAccountFromEnv = (): ServiceAccountEnv | null => {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(raw, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded) as Partial<ServiceAccountEnv>;
+    if (!parsed.project_id || !parsed.client_email || !parsed.private_key) {
+      throw new Error('missing required service account fields');
+    }
+    return parsed as ServiceAccountEnv;
+  } catch (error) {
+    logger.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+};
+
+const ensureGoogleApplicationCredentialsFile = (serviceAccount: ServiceAccountEnv): string => {
+  const credentialsPath = join(tmpdir(), `process-audio-${serviceAccount.project_id}-adc.json`);
+  const serialized = `${JSON.stringify(serviceAccount, null, 2)}\n`;
+
+  if (!existsSync(credentialsPath) || readFileSync(credentialsPath, 'utf8') !== serialized) {
+    writeFileSync(credentialsPath, serialized, { encoding: 'utf8', mode: 0o600 });
+    chmodSync(credentialsPath, 0o600);
+  }
+
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+  }
+
+  return credentialsPath;
+};
 
 const resolveStorageBucket = (projectId: string): string =>
   process.env.FIREBASE_STORAGE_BUCKET || getFirebaseConfigFromEnv().storageBucket || `${projectId}.appspot.com`;
@@ -43,6 +89,7 @@ const resolveDatabaseUrl = (projectId: string): string => {
 if (!firebaseAdmin.apps.length) {
   const firebaseProjectId = resolveFirebaseProjectId();
   const storageBucket = resolveStorageBucket(firebaseProjectId);
+  const serviceAccount = !isDevelopment ? parseServiceAccountFromEnv() : null;
 
   if (isDevelopment) {
     logger.info('Setting Admin SDK to use emulator');
@@ -84,6 +131,15 @@ if (!firebaseAdmin.apps.length) {
       },
     });
   } else {
+    if (serviceAccount) {
+      const credentialsPath = ensureGoogleApplicationCredentialsFile(serviceAccount);
+      logger.info('Configured production ADC from FIREBASE_SERVICE_ACCOUNT_JSON', {
+        firebaseProjectId,
+        clientEmail: serviceAccount.client_email,
+        credentialsPath,
+      });
+    }
+
     logger.info('Using non-emulator Firebase services', {
       firebaseProjectId,
       storageBucket,
@@ -104,7 +160,7 @@ if (!firebaseAdmin.apps.length) {
     projectId: string;
     storageBucket: string;
     databaseURL: string;
-    credential?: ReturnType<typeof applicationDefault>;
+    credential?: ReturnType<typeof applicationDefault> | ReturnType<typeof cert>;
   } = {
     projectId: firebaseProjectId, // Required for emulators to work properly
     storageBucket,
@@ -113,7 +169,13 @@ if (!firebaseAdmin.apps.length) {
 
   if (!isDevelopment) {
     // Only add credentials in production
-    initConfig.credential = applicationDefault();
+    initConfig.credential = serviceAccount
+      ? cert({
+          projectId: serviceAccount.project_id,
+          clientEmail: serviceAccount.client_email,
+          privateKey: serviceAccount.private_key,
+        })
+      : applicationDefault();
   }
 
   firebaseAdmin.initializeApp(initConfig);
