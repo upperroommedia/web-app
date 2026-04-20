@@ -24,6 +24,7 @@ import {
   completeProcessAudioSuccess,
   deferStaleYouTubeRequest,
   extractCloudTaskId,
+  resumeDeferredYouTubeQueueOnStartup,
 } from './processAudioQueueStore';
 import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
 import { getProcessAudioConcurrencyConfig } from './concurrency';
@@ -272,8 +273,16 @@ async function recoverOrphanedHetznerProcessAudioStateOnStartup(): Promise<void>
     await Promise.all(updates);
   }
 
+  const deferredQueueRecovery = await resumeDeferredYouTubeQueueOnStartup({
+    database: realtimeDB,
+    ctx: createContext(undefined, 'startup-recovery'),
+  });
+
   startupLogger.info('Completed orphaned process-audio startup recovery', {
     recoveredCount,
+    deferredQueueResumed: deferredQueueRecovery.resumed,
+    deferredQueueNextProbeSermonId: deferredQueueRecovery.nextProbeSermonId,
+    deferredQueueRemaining: deferredQueueRecovery.deferredRemaining,
   });
 }
 

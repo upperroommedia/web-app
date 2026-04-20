@@ -700,6 +700,80 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
   });
 }
 
+export async function resumeDeferredYouTubeQueueOnStartup(args: {
+  database: Database;
+  ctx?: LogContext;
+}): Promise<{ resumed: boolean; deferredRemaining: number; nextProbeSermonId: string | null }> {
+  const { database, ctx } = args;
+  const log = createLoggerWithContext(ctx);
+  const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
+  const { queueState, deferredEntries } = await getQueueStateAndDeferredEntries(database);
+
+  if (deferredEntries.length === 0) {
+    if (queueState.blocked || queueState.probeStatus !== 'idle' || queueState.deferredYouTubeTaskCount !== 0) {
+      await queueStateRef.set(buildInitialYouTubeQueueState());
+      log.info('Reset stale YouTube queue state on startup with no deferred entries remaining', {
+        blocked: queueState.blocked,
+        probeStatus: queueState.probeStatus,
+        deferredRemaining: 0,
+      });
+    }
+
+    return {
+      resumed: false,
+      deferredRemaining: 0,
+      nextProbeSermonId: null,
+    };
+  }
+
+  const nextProbe = selectNextDeferredProbe(deferredEntries, queueState.probeMode);
+  if (!nextProbe) {
+    await queueStateRef.set({
+      ...buildInitialYouTubeQueueState(),
+      probeStatus: 'waiting_for_auth_required_request',
+      deferredYouTubeTaskCount: deferredEntries.length,
+    } satisfies StoredYouTubeQueueState);
+
+    log.info('Deferred YouTube queue still has items on startup but no probe candidate could be selected', {
+      deferredRemaining: deferredEntries.length,
+    });
+
+    return {
+      resumed: false,
+      deferredRemaining: deferredEntries.length,
+      nextProbeSermonId: null,
+    };
+  }
+
+  const now = getNowIsoString();
+  await enqueueDeferredRequestIgnoringPause(database, nextProbe, `startup:${now}:${nextProbe.sermonId}`);
+  await queueStateRef.set({
+    ...queueState,
+    blocked: false,
+    blockerReason: null,
+    blockedAt: null,
+    probeMode: nextProbe.probeMode,
+    probeStatus: 'probing',
+    probeTaskSermonId: nextProbe.sermonId,
+    probeRequestVersion: nextProbe.requestVersion,
+    probeStartedAt: now,
+    deferredYouTubeTaskCount: Math.max(0, deferredEntries.length - 1),
+  } satisfies StoredYouTubeQueueState);
+
+  log.info('Resumed deferred YouTube queue on startup', {
+    nextProbeSermonId: nextProbe.sermonId,
+    previousBlocked: queueState.blocked,
+    previousProbeStatus: queueState.probeStatus,
+    deferredRemaining: Math.max(0, deferredEntries.length - 1),
+  });
+
+  return {
+    resumed: true,
+    deferredRemaining: Math.max(0, deferredEntries.length - 1),
+    nextProbeSermonId: nextProbe.sermonId,
+  };
+}
+
 export async function deferStaleYouTubeRequest(args: {
   database: Database;
   payload: AddIntroOutroInputType;
