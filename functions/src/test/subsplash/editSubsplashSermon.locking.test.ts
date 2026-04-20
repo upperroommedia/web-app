@@ -141,7 +141,7 @@ describe('editSubsplashSermon lock contract', () => {
     });
   });
 
-  it('sends empty tags and clearable subtitle/summary fields when metadata is removed', async () => {
+  it('omits blank subtitle while preserving clearable summary fields when metadata is removed', async () => {
     await editHandler({
       auth: { token: { role: 'admin' } },
       data: {
@@ -160,8 +160,10 @@ describe('editSubsplashSermon lock contract', () => {
     const requestConfig = patchCall?.[0] as unknown as { data: string };
     const requestData = JSON.parse(String(requestConfig.data));
     expect(requestData.tags).toEqual([]);
-    expect(requestData.subtitle).toBe('');
+    expect(Object.prototype.hasOwnProperty.call(requestData, 'subtitle')).toBe(false);
     expect(requestData.summary).toBe('');
+    expect(Object.prototype.hasOwnProperty.call(requestData._embedded ?? {}, 'audio')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(requestData._embedded ?? {}, 'media-series')).toBe(false);
   });
 
   it('uses the remote image id when present and falls back to the local id otherwise', async () => {

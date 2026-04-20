@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from './subsplashUtils';
-import { patchMediaItemSeries } from './helpers/seriesHelpers';
+import { unlinkMediaItemFromSeries } from './helpers/seriesHelpers';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
@@ -53,7 +53,12 @@ const removeFromSeries = onCall(
             const token = await authenticateSubsplash();
 
             // Remove media item from series by setting series to null
-            await patchMediaItemSeries(normalizedMediaItemId, null, token);
+            const unlinkResult = await unlinkMediaItemFromSeries(normalizedMediaItemId, token);
+            if (unlinkResult.status === 'not-found') {
+              logger.warn(
+                `Media item ${normalizedMediaItemId} was already absent from Subsplash; treating removeFromSeries as a no-op.`
+              );
+            }
 
             logger.log(`Successfully removed media item ${normalizedMediaItemId} from series`);
 

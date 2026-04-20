@@ -129,4 +129,53 @@ describe('saveSeriesMetadata', () => {
     expect(updatedSeries.status).toBe('published');
     expect(updatedSeries.slug).toBe('published-series');
   });
+
+  it('preserves full local image metadata when the remote callable returns minimal image refs', async () => {
+    const updateSeriesMetadataCallable = jest.fn().mockResolvedValue({
+      status: 'success',
+      firestoreId: 'series-1',
+      subsplashId: 'subsplash-series-1',
+      title: 'Published Series',
+      subtitle: '4 part series',
+      summary: 'Remote summary',
+      images: [{ id: 'image-1', type: 'square', subsplashId: 'subsplash-image-1' }],
+      remoteStatus: 'published',
+    });
+    createFunctionV2Mock.mockReturnValue(updateSeriesMetadataCallable);
+
+    const { saveSeriesMetadata } = await import('../../utils/saveSeriesMetadata');
+    const seriesImages = [
+      {
+        id: 'image-1',
+        type: 'square',
+        size: 'original',
+        width: 1024,
+        height: 1024,
+        downloadLink: 'https://example.com/square.jpg',
+        name: 'square.jpg',
+        dateAddedMillis: 1,
+      } as Series['images'][number],
+    ];
+    const series = buildSeries({
+      name: 'Before Save',
+      subsplashId: 'subsplash-series-1',
+      status: 'published',
+      publishedItemCount: 4,
+      images: seriesImages,
+    });
+
+    const updatedSeries = await saveSeriesMetadata({
+      series,
+      name: 'Published Series',
+      summary: 'Remote summary',
+      images: seriesImages,
+    });
+
+    expect(updatedSeries.images).toEqual([
+      {
+        ...seriesImages[0],
+        subsplashId: 'subsplash-image-1',
+      },
+    ]);
+  });
 });

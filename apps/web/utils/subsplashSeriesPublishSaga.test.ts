@@ -8,6 +8,7 @@ describe('runSubsplashSeriesPublishSaga', () => {
       mediaItemId: 'media-1',
       confirmedSeriesId: 'series-remote-1',
     });
+    const prepareLocalSeriesItem = jest.fn().mockResolvedValue(undefined);
     const reorderSeries = jest.fn().mockResolvedValue(undefined);
     const rollbackSeriesMembership = jest.fn().mockResolvedValue(undefined);
     const persistLocalPublished = jest.fn().mockResolvedValue(undefined);
@@ -16,6 +17,7 @@ describe('runSubsplashSeriesPublishSaga', () => {
     const result = await runSubsplashSeriesPublishSaga({
       ensureSeriesSubsplashId,
       addToSeries,
+      prepareLocalSeriesItem,
       reorderSeries,
       rollbackSeriesMembership,
       persistLocalPublished,
@@ -29,9 +31,43 @@ describe('runSubsplashSeriesPublishSaga', () => {
       remotePublished: true,
       localPublished: true,
     });
+    expect(prepareLocalSeriesItem).toHaveBeenCalledWith('media-1');
     expect(persistLocalPublished).toHaveBeenCalledWith('media-1');
+    expect(prepareLocalSeriesItem.mock.invocationCallOrder[0]).toBeLessThan(reorderSeries.mock.invocationCallOrder[0]);
     expect(rollbackSeriesMembership).not.toHaveBeenCalled();
     expect(persistLocalUnpublished).not.toHaveBeenCalled();
+  });
+
+  it('rolls back remote publish and keeps local state unpublished when preparing local series state fails', async () => {
+    const rollbackSeriesMembership = jest.fn().mockResolvedValue(undefined);
+    const persistLocalUnpublished = jest.fn().mockResolvedValue(undefined);
+    const reorderSeries = jest.fn().mockResolvedValue(undefined);
+
+    const result = await runSubsplashSeriesPublishSaga({
+      ensureSeriesSubsplashId: jest.fn().mockResolvedValue('series-remote-1'),
+      addToSeries: jest.fn().mockResolvedValue({
+        status: 'success',
+        mediaItemId: 'media-1',
+        confirmedSeriesId: 'series-remote-1',
+      }),
+      prepareLocalSeriesItem: jest.fn().mockRejectedValue(new Error('missing local series row')),
+      reorderSeries,
+      rollbackSeriesMembership,
+      persistLocalPublished: jest.fn().mockResolvedValue(undefined),
+      persistLocalUnpublished,
+    });
+
+    expect(result).toEqual({
+      status: 'error',
+      mediaItemId: 'media-1',
+      seriesSubsplashId: 'series-remote-1',
+      remotePublished: false,
+      localPublished: false,
+      error: 'missing local series row',
+    });
+    expect(reorderSeries).not.toHaveBeenCalled();
+    expect(rollbackSeriesMembership).toHaveBeenCalledWith('media-1');
+    expect(persistLocalUnpublished).toHaveBeenCalled();
   });
 
   it('rolls back remote publish and keeps local state unpublished when reorder fails but rollback succeeds', async () => {
@@ -45,6 +81,7 @@ describe('runSubsplashSeriesPublishSaga', () => {
         mediaItemId: 'media-1',
         confirmedSeriesId: 'series-remote-1',
       }),
+      prepareLocalSeriesItem: jest.fn().mockResolvedValue(undefined),
       reorderSeries: jest.fn().mockRejectedValue(new Error('reorder failed')),
       rollbackSeriesMembership,
       persistLocalPublished: jest.fn().mockResolvedValue(undefined),
@@ -73,6 +110,7 @@ describe('runSubsplashSeriesPublishSaga', () => {
         mediaItemId: 'media-1',
         confirmedSeriesId: 'series-remote-1',
       }),
+      prepareLocalSeriesItem: jest.fn().mockResolvedValue(undefined),
       reorderSeries: jest.fn().mockRejectedValue(new Error('reorder failed')),
       rollbackSeriesMembership: jest.fn().mockRejectedValue(new Error('rollback failed')),
       persistLocalPublished,
@@ -95,6 +133,7 @@ describe('runSubsplashSeriesPublishSaga', () => {
         mediaItemId: 'media-1',
         confirmedSeriesId: 'series-remote-2',
       }),
+      prepareLocalSeriesItem: jest.fn().mockResolvedValue(undefined),
       reorderSeries: jest.fn().mockResolvedValue(undefined),
       rollbackSeriesMembership: jest.fn().mockResolvedValue(undefined),
       persistLocalPublished: jest.fn().mockResolvedValue(undefined),

@@ -30,6 +30,7 @@ import { useCollectionDataOnce } from 'react-firebase-hooks/firestore';
 import { SermonURL } from '../../../../components/EditSermonForm';
 import { canEditSermonAudio, canEditSermonMetadata, isSermonProcessingLocked } from '../../../../utils/sermonEditing';
 import { markIntentionalNavigation } from '../../../../utils/intentionalNavigation';
+import { reportHandledError, reportHandledMessage } from '../../../../utils/reportHandledError';
 
 const storage = getStorage(firebase);
 
@@ -58,7 +59,10 @@ const EditSermonPage = () => {
   const canPublish = user?.canPublish() ?? false;
 
   // Check if audio trimmer should be shown (only if not published)
-  const showAudioTrimmer = useMemo(() => Boolean(sermon && canEditSermonAudio(sermon) && !sermon.youtubeUrl), [sermon]);
+  const showAudioTrimmer = useMemo(
+    () => Boolean(sermon && canEditSermonAudio(sermon, sermonLists || []) && !sermon.youtubeUrl),
+    [sermon, sermonLists]
+  );
 
   // Fetch sermon data
   const fetchSermonData = useCallback(async () => {
@@ -71,6 +75,14 @@ const EditSermonPage = () => {
       // Fetch sermon
       const sermonDoc = await getDoc(doc(firestore, 'sermons', sermonId).withConverter(sermonConverter));
       if (!sermonDoc.exists()) {
+        reportHandledMessage('Sermon not found while loading edit page.', {
+          area: 'edit-sermon-page',
+          action: 'load-sermon',
+          level: 'warning',
+          extras: {
+            sermonId,
+          },
+        });
         setError('Sermon not found');
         setLoading(false);
         return;
@@ -82,10 +94,25 @@ const EditSermonPage = () => {
       const canEdit = (canPublish || user.canUpload()) && canEditSermonMetadata(sermonData);
       
       if (!canEdit) {
+        const message = isSermonProcessingLocked(sermonData)
+          ? 'This sermon cannot be edited while audio is queued or processing.'
+          : 'You do not have permission to edit this sermon';
+        reportHandledMessage(message, {
+          area: 'edit-sermon-page',
+          action: 'permission-check',
+          level: 'warning',
+          extras: {
+            sermonId,
+            userId: user.uid,
+            canPublish,
+            canUpload: user.canUpload(),
+            subsplashStatus: sermonData.status?.subsplash,
+            soundCloudStatus: sermonData.status?.soundCloud,
+            audioStatus: sermonData.status?.audioStatus,
+          },
+        });
         setError(
-          isSermonProcessingLocked(sermonData)
-            ? 'This sermon cannot be edited while audio is queued or processing.'
-            : 'You do not have permission to edit this sermon'
+          message
         );
         setLoading(false);
         return;
@@ -94,6 +121,14 @@ const EditSermonPage = () => {
       setSermon(sermonData);
     } catch (err: unknown) {
       console.error('Error fetching sermon:', err);
+      reportHandledError(err, {
+        area: 'edit-sermon-page',
+        action: 'load-sermon',
+        extras: {
+          sermonId,
+          userId: user.uid,
+        },
+      });
       setError(getErrorMessage(err, 'Failed to fetch sermon'));
     }
 

@@ -3,6 +3,7 @@ import { AddToSeriesOutputType } from '@upperroom/contracts/addToSeries';
 export interface SeriesPublishSagaDependencies {
   ensureSeriesSubsplashId: () => Promise<string>;
   addToSeries: (seriesSubsplashId: string) => Promise<AddToSeriesOutputType>;
+  prepareLocalSeriesItem: (resolvedMediaItemId: string) => Promise<void>;
   reorderSeries: (resolvedMediaItemId: string) => Promise<void>;
   rollbackSeriesMembership: (resolvedMediaItemId: string) => Promise<void>;
   persistLocalPublished: (resolvedMediaItemId: string) => Promise<void>;
@@ -57,6 +58,7 @@ export const runSubsplashSeriesPublishSaga = async (
   }
 
   try {
+    await dependencies.prepareLocalSeriesItem(resolvedMediaItemId);
     await dependencies.reorderSeries(resolvedMediaItemId);
     await dependencies.persistLocalPublished(resolvedMediaItemId);
 

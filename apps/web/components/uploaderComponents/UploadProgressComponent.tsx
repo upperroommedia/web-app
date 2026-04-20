@@ -305,7 +305,7 @@ export default function UploadProgressComponent({
                 : isComplete
                   ? 'Upload Complete!'
                   : isIndeterminate
-                    ? 'Processing YouTube...'
+                    ? 'Uploading Sermon...'
                     : getUploadMessage(uploadProgress.percent)}
             </Typography>
 

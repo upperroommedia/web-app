@@ -211,7 +211,9 @@ describe('removeFromSeries - Error Handling', () => {
       },
     };
 
-    await expect(removeFromSeriesHandler(request)).rejects.toThrow();
+    const result = await removeFromSeriesHandler(request);
+    expect(result.status).toBe('success');
+    expect(result.mediaItemId).toBe('non-existent-item');
   });
 });
 
@@ -228,7 +230,7 @@ describe('removeFromSeries - Locking and Idempotency', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Replay Item', {
       seriesId: subsplashSeries.id,
     });
-    const patchSpy = jest.spyOn(seriesHelpers, 'patchMediaItemSeries');
+    const unlinkSpy = jest.spyOn(seriesHelpers, 'unlinkMediaItemFromSeries');
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
       auth: { token: { role: 'admin' } },
@@ -242,7 +244,7 @@ describe('removeFromSeries - Locking and Idempotency', () => {
     const secondResult = await removeFromSeriesHandler(request);
 
     expect(firstResult).toEqual(secondResult);
-    expect(patchSpy).toHaveBeenCalledTimes(1);
+    expect(unlinkSpy).toHaveBeenCalledTimes(1);
   });
 
   it('should return busy payload details when operation key is already in progress', async () => {

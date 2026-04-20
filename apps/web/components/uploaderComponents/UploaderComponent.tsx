@@ -2,13 +2,13 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import editSermon from '../../pages/api/editSermon';
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 
 import firestore, { collection, getDocs, query, where, doc, getDoc } from '../../firebase/firestore';
 import { createEmptySermon } from '../../types/Sermon';
-import { Sermon, sermonStatusType } from '../../types/SermonTypes';
+import { Sermon } from '../../types/SermonTypes';
 
 import Button from '@mui/material/Button';
 // import ImageUploader from '../components/ImageUploader';
@@ -64,7 +64,12 @@ import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import { useAlgoliaSearch } from '../../context/search/AlgoliaSearchContext';
-import { canEditSermonAudio, canEditSermonRecord, isSermonProcessingLocked } from '../../utils/sermonEditing';
+import {
+  canEditSermonAudio,
+  canEditSermonRecord,
+  isSermonProcessingLocked,
+  isSermonPublishedAnywhere,
+} from '../../utils/sermonEditing';
 import { clearIntentionalNavigation, isIntentionalNavigation, markIntentionalNavigation } from '../../utils/intentionalNavigation';
 import { removeCategoryScopedLists } from '../../utils/categoryScopedLists';
 
@@ -764,8 +769,8 @@ const Uploader = (props: UploaderProps) => {
   );
 
   const canEditExistingAudio = useMemo(
-    () => (props.existingSermon ? canEditSermonAudio(props.existingSermon) : false),
-    [props.existingSermon]
+    () => (props.existingSermon ? canEditSermonAudio(props.existingSermon, props.existingList || []) : false),
+    [props.existingList, props.existingSermon]
   );
   const existingSermonHasSavedTrimSettings = useMemo(
     () =>
@@ -788,8 +793,8 @@ const Uploader = (props: UploaderProps) => {
     if (isSermonProcessingLocked(props.existingSermon)) {
       return 'This sermon cannot be edited while audio is queued or processing.';
     }
-    if (!canEditExistingSermon) {
-      return 'Cannot edit audio when sermon has been uploaded to SoundCloud or Subsplash.';
+    if (isSermonPublishedAnywhere(props.existingSermon, props.existingList || [])) {
+      return 'Cannot edit audio when this sermon is already published anywhere.';
     }
     if (!existingSermonHasSavedTrimSettings) {
       return 'This sermon audio cannot be edited because it does not have saved trim-source settings.';
@@ -802,9 +807,9 @@ const Uploader = (props: UploaderProps) => {
     }
     return null;
   }, [
-    canEditExistingSermon,
     existingSermonHasSavedTrimSettings,
     isExistingYouTubeSermon,
+    props.existingList,
     props.existingSermon,
     props.existingSermonUrl?.status,
   ]);
@@ -1141,17 +1146,7 @@ const Uploader = (props: UploaderProps) => {
                               youtubeUrl: props.existingSermon.youtubeUrl,
                             }
                           : sermon;
-                      const promises = [];
-
                       if (audioSettingsChanged) {
-                        const pendingSermon = {
-                          ...sermonToPersist,
-                          status: {
-                            ...sermonToPersist.status,
-                            audioStatus: sermonStatusType.PENDING,
-                            message: '',
-                          },
-                        };
                         const generateAddIntroOutroTask =
                           createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
                         const { introRef, outroRef } = await getIntroAndOutro(sermonToPersist);
@@ -1175,17 +1170,14 @@ const Uploader = (props: UploaderProps) => {
                               introUrl: introRef,
                               outroUrl: outroRef,
                             };
-                        promises.push(generateAddIntroOutroTask(data));
-                        promises.push(
-                          editSermon(pendingSermon, sermonList, { originalSermon: props.existingSermon })
-                        );
-                      } else {
-                        promises.push(
-                          editSermon(sermonToPersist, sermonList, { originalSermon: props.existingSermon })
-                        );
-                      }
 
-                      await Promise.all(promises);
+                        // Persist trim metadata before the callable flips the sermon into PENDING/PROCESSING.
+                        // Firestore rules intentionally reject client writes once processing has started.
+                        await editSermon(sermonToPersist, sermonList, { originalSermon: props.existingSermon });
+                        await generateAddIntroOutroTask(data);
+                      } else {
+                        await editSermon(sermonToPersist, sermonList, { originalSermon: props.existingSermon });
+                      }
                       // Mark as intentional navigation to bypass unsaved changes warning
                       markIntentionalNavigation();
                       props.setEditFormOpen?.(false);

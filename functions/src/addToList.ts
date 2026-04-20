@@ -30,6 +30,7 @@ import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedList
 import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
 import { getConfiguredMaxListSize } from './helpers/listCapacity';
 import { canReconstructRemoteRow, getRemoteRowResourceId, getRemoteRowTitle } from './helpers/remoteChainItems';
+import { getSubsplashMediaItemDiagnostics } from './helpers/subsplashMediaItems';
 import { rebalanceOverflowChainAfterRemoval } from './removeFromList';
 import { captureFunctionsExceptionAndFlush } from './sentry';
 
@@ -259,6 +260,49 @@ const resolveListItemIdWithRetry = async (
   }
 
   return undefined;
+};
+
+const collectListResolutionDiagnostics = async ({
+  listId,
+  itemToAdd,
+  token,
+  finalRowsSnapshot,
+}: {
+  listId: string;
+  itemToAdd: SubsplashMediaItem;
+  token: string;
+  finalRowsSnapshot?: SubsplashListRow[];
+}): Promise<Record<string, unknown>> => {
+  const [latestRowsResult, mediaItemDiagnostics] = await Promise.all([
+    getFullListRows(listId, token)
+      .then((rows) => ({ ok: true as const, rows }))
+      .catch((error: unknown) => ({
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      })),
+    getSubsplashMediaItemDiagnostics(itemToAdd.id, token),
+  ]);
+
+  const latestRows = latestRowsResult.ok ? latestRowsResult.rows : undefined;
+  const currentSeriesId = mediaItemDiagnostics.found
+    ? mediaItemDiagnostics.item._embedded?.['media-series']?.id
+    : undefined;
+  const rowsReferencingMediaItem = latestRows?.filter((row) => getRemoteRowResourceId(row) === itemToAdd.id) ?? [];
+  const rowsReferencingCurrentSeries = currentSeriesId
+    ? latestRows?.filter((row) => row.type === 'media-series' && getRemoteRowResourceId(row) === currentSeriesId) ?? []
+    : [];
+
+  return {
+    finalRowsSnapshot: finalRowsSnapshot ? summarizeSubsplashRows(finalRowsSnapshot) : undefined,
+    latestRows: latestRowsResult.ok && latestRows
+      ? summarizeSubsplashRows(latestRows)
+      : { error: latestRowsResult.ok ? 'No latest rows returned' : latestRowsResult.error },
+    mediaItemDiagnostics: mediaItemDiagnostics.found
+      ? mediaItemDiagnostics.summary
+      : mediaItemDiagnostics,
+    rowsReferencingMediaItem: summarizeSubsplashRows(rowsReferencingMediaItem),
+    rowsReferencingCurrentSeries: summarizeSubsplashRows(rowsReferencingCurrentSeries),
+  };
 };
 
 const findItemInOverflowChain = async (
@@ -1304,10 +1348,16 @@ async function processListStep(
   }
 
   if (!listItemId) {
+    const resolutionDiagnostics = await collectListResolutionDiagnostics({
+      listId,
+      itemToAdd,
+      token,
+      finalRowsSnapshot,
+    });
     listDebugError('addToList.processListStep.resolveListItemId.failed', {
       listId,
       itemId: itemToAdd.id,
-      finalRowsSnapshot: finalRowsSnapshot ? summarizeSubsplashRows(finalRowsSnapshot) : undefined,
+      ...resolutionDiagnostics,
     });
     throw new HttpsError('internal', `Added item ${itemToAdd.id} could not be resolved in list ${listId} after patch.`);
   }

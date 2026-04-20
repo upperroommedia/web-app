@@ -268,6 +268,7 @@ export async function patchListRows(
   // Build payload matching HAR file structure
   const payload: SubsplashPatchPayload = {
     id: listId,
+    list_rows_count: reindexedRows.length,
     _embedded: {
       // Preserve existing display-options if they exist
       ...(
