@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/nextjs';
 import type { SeverityLevel } from '@sentry/nextjs';
 
 const CONSOLE_ERROR_CAPTURE_FLAG = '__urmConsoleErrorCaptureInstalled';
+const FIREBASE_LOGGER_PATTERN = /@firebase\/[a-z0-9-]+:/i;
 
 type HandledErrorContext = {
   area: string;
@@ -13,6 +14,12 @@ type HandledErrorContext = {
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const shouldSkipConsoleCapture = (args: unknown[]): boolean => {
+  const [firstArg] = args;
+
+  return typeof firstArg === 'string' && FIREBASE_LOGGER_PATTERN.test(firstArg);
+};
 
 const toError = (error: unknown, fallbackMessage: string): Error => {
   if (error instanceof Error) {
@@ -84,6 +91,10 @@ export const installConsoleErrorCapture = (): void => {
     originalConsoleError(...args);
 
     if (isCapturing) {
+      return;
+    }
+
+    if (shouldSkipConsoleCapture(args)) {
       return;
     }
 

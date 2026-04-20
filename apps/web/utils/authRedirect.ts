@@ -1,5 +1,6 @@
 const DEFAULT_AUTH_DESTINATION = '/';
 const SAFE_REDIRECT_ORIGIN = 'https://urm.local';
+const NON_SAFARI_IOS_BROWSER_TOKENS = ['CriOS', 'FxiOS', 'EdgiOS', 'OPiOS', 'DuckDuckGo', 'GSA'];
 
 const hasControlCharacters = (value: string): boolean => /[\u0000-\u001F\u007F]/.test(value);
 
@@ -82,3 +83,36 @@ export const resolveAuthCallbackDestination = (
   return normalizeRawCallback(rawValue);
 };
 
+export const isMobileSafariUserAgent = (userAgent: string): boolean => {
+  if (!/\b(iPhone|iPad|iPod)\b/i.test(userAgent)) {
+    return false;
+  }
+
+  if (!/Safari/i.test(userAgent) || !/AppleWebKit/i.test(userAgent)) {
+    return false;
+  }
+
+  return !NON_SAFARI_IOS_BROWSER_TOKENS.some((token) => userAgent.includes(token));
+};
+
+type RedirectAuthPreferenceInput = {
+  authDomain: string | null | undefined;
+  currentHostname: string | null | undefined;
+  userAgent: string | null | undefined;
+};
+
+export const shouldPreferFirebaseRedirectAuth = ({
+  authDomain,
+  currentHostname,
+  userAgent,
+}: RedirectAuthPreferenceInput): boolean => {
+  if (!authDomain || !currentHostname || !userAgent) {
+    return false;
+  }
+
+  if (!isMobileSafariUserAgent(userAgent)) {
+    return false;
+  }
+
+  return authDomain.trim().toLowerCase() === currentHostname.trim().toLowerCase();
+};

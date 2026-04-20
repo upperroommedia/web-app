@@ -1,6 +1,8 @@
 import {
   isSafeInternalCallbackDestination,
+  isMobileSafariUserAgent,
   resolveAuthCallbackDestination,
+  shouldPreferFirebaseRedirectAuth,
 } from './authRedirect';
 
 describe('resolveAuthCallbackDestination', () => {
@@ -59,3 +61,45 @@ describe('isSafeInternalCallbackDestination', () => {
   });
 });
 
+describe('isMobileSafariUserAgent', () => {
+  it('detects mobile safari on iphone', () => {
+    expect(
+      isMobileSafariUserAgent(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+      )
+    ).toBe(true);
+  });
+
+  it('rejects ios browsers that are not safari', () => {
+    expect(
+      isMobileSafariUserAgent(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/135.0.7049.53 Mobile/15E148 Safari/604.1'
+      )
+    ).toBe(false);
+  });
+});
+
+describe('shouldPreferFirebaseRedirectAuth', () => {
+  const mobileSafariUserAgent =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+
+  it('does not switch to redirect on mobile safari when auth runs on a firebaseapp.com helper domain', () => {
+    expect(
+      shouldPreferFirebaseRedirectAuth({
+        userAgent: mobileSafariUserAgent,
+        currentHostname: 'uploader.upperroommedia.org',
+        authDomain: 'urm-app.firebaseapp.com',
+      })
+    ).toBe(false);
+  });
+
+  it('allows redirect when mobile safari is running against a same-host auth domain', () => {
+    expect(
+      shouldPreferFirebaseRedirectAuth({
+        userAgent: mobileSafariUserAgent,
+        currentHostname: 'uploader.upperroommedia.org',
+        authDomain: 'uploader.upperroommedia.org',
+      })
+    ).toBe(true);
+  });
+});
