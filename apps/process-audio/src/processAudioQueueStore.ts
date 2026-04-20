@@ -1,9 +1,11 @@
 import type { Database } from 'firebase-admin/database';
 import { getFunctions, type TaskQueue } from 'firebase-admin/functions';
+import { GoogleAuth } from 'google-auth-library';
 import { createHash } from 'node:crypto';
 import type { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import type {
   ProcessAudioSourceType,
+  ProcessAudioTaskQueueName,
   StoredDeferredYouTubeRequest,
   StoredProcessAudioRequestState,
   StoredYouTubeQueueState,
@@ -36,6 +38,8 @@ const PROCESS_AUDIO_BASE_URLS = {
 const CLAIM_ACQUIRE_ATTEMPTS = 20;
 const CLAIM_ACQUIRE_DELAY_MS = 150;
 const PROCESS_AUDIO_TASK_TIMEOUT_SECONDS = 1800;
+const PROCESS_AUDIO_TASKS_LOCATION = process.env.PROCESS_AUDIO_TASKS_LOCATION?.trim() || 'us-central1';
+const CLOUD_TASKS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
@@ -43,6 +47,16 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
 };
 
 const getNowIsoString = (): string => new Date().toISOString();
+
+const getProcessAudioProjectId = (): string => {
+  return (
+    process.env.GCLOUD_PROJECT ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.PROJECT_ID ||
+    'urm-app'
+  );
+};
 
 const getProcessAudioSourceType = (payload: AddIntroOutroInputType): ProcessAudioSourceType => {
   return 'youtubeUrl' in payload ? 'youtube' : 'storage';
@@ -212,6 +226,99 @@ function getProcessAudioTargetUri(sourceType: ProcessAudioSourceType = 'storage'
   return `${getProcessAudioBaseUrl(sourceType)}/process-audio`;
 }
 
+type CloudTasksCreateTaskRequest = {
+  url: string;
+  init: {
+    method: 'POST';
+    headers: Record<string, string>;
+    body: string;
+  };
+};
+
+type CloudTasksApiDeps = {
+  fetchImpl?: typeof fetch;
+  authFactory?: () => Promise<{ getAccessToken: () => Promise<string | null | undefined> }>;
+};
+
+export function buildCloudTasksCreateTaskRequest(args: {
+  payload: AddIntroOutroInputType;
+  queueName: ProcessAudioTaskQueueName;
+  taskId: string;
+  projectId?: string;
+  location?: string;
+}): CloudTasksCreateTaskRequest {
+  const { payload, queueName, taskId, projectId = getProcessAudioProjectId(), location = PROCESS_AUDIO_TASKS_LOCATION } =
+    args;
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
+  const taskResourcePrefix = `projects/${projectId}/locations/${location}/queues/${queueName}`;
+  const taskRequestBody = {
+    task: {
+      name: `${taskResourcePrefix}/tasks/${taskId}`,
+      dispatchDeadline: `${PROCESS_AUDIO_TASK_TIMEOUT_SECONDS}s`,
+      httpRequest: {
+        httpMethod: 'POST',
+        url: getProcessAudioTargetUri(getProcessAudioSourceType(payload)),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: Buffer.from(JSON.stringify({ data: sanitizedPayload }), 'utf8').toString('base64'),
+      },
+    },
+  };
+
+  return {
+    url: `https://cloudtasks.googleapis.com/v2/${taskResourcePrefix}/tasks`,
+    init: {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(taskRequestBody),
+    },
+  };
+}
+
+export async function enqueueTaskViaCloudTasksApi(
+  payload: AddIntroOutroInputType,
+  queueName: ProcessAudioTaskQueueName,
+  taskId: string,
+  deps: CloudTasksApiDeps = {}
+): Promise<void> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const authClient =
+    (await deps.authFactory?.()) ??
+    (await new GoogleAuth({
+      scopes: [CLOUD_TASKS_SCOPE],
+    }).getClient());
+  const accessToken = await authClient.getAccessToken();
+
+  if (!accessToken) {
+    throw new Error(`Failed to acquire an access token for Cloud Tasks queue ${queueName}.`);
+  }
+
+  const request = buildCloudTasksCreateTaskRequest({
+    payload,
+    queueName,
+    taskId,
+  });
+  const response = await fetchImpl(request.url, {
+    ...request.init,
+    headers: {
+      ...request.init.headers,
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const responseBody = await response.text();
+    throw new Error(
+      `Failed to create Cloud Task ${taskId} in queue ${queueName}: HTTP ${response.status} ${
+        response.statusText || ''
+      } ${responseBody}`.trim()
+    );
+  }
+}
+
 const isTaskMissingError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
@@ -301,17 +408,8 @@ function isYouTubeQueuePaused(queueState: StoredYouTubeQueueState): boolean {
   return queueState.blocked || queueState.probeStatus === 'probing' || queueState.probeStatus === 'waiting_for_auth_required_request';
 }
 
-async function enqueueTask(
-  queue: TaskQueue<AddIntroOutroInputType>,
-  payload: AddIntroOutroInputType,
-  taskId: string
-): Promise<void> {
-  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
-  await queue.enqueue(sanitizedPayload, {
-    id: taskId,
-    dispatchDeadlineSeconds: PROCESS_AUDIO_TASK_TIMEOUT_SECONDS,
-    uri: getProcessAudioTargetUri(getProcessAudioSourceType(payload)),
-  });
+async function enqueueTask(payload: AddIntroOutroInputType, taskId: string): Promise<void> {
+  await enqueueTaskViaCloudTasksApi(payload, getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(payload)), taskId);
 }
 
 async function enqueueDeferredRequestIgnoringPause(
@@ -331,7 +429,7 @@ async function enqueueDeferredRequestIgnoringPause(
     const taskId = computeProcessAudioTaskId(entry.sermonId, entry.requestVersion, `${ownerId}:${now}`);
 
     await deleteExistingTask(queue, state.queuedTaskId);
-    await enqueueTask(queue, entry.payload, taskId);
+    await enqueueTask(entry.payload, taskId);
 
     await Promise.all([
       requestRef.set({
@@ -535,7 +633,7 @@ export async function completeProcessAudioSuccess(args: {
         });
       } else {
         await deleteExistingTask(queue, requestState.queuedTaskId);
-        await enqueueTask(queue, nextPayload, nextTaskId);
+        await enqueueTask(nextPayload, nextTaskId);
       }
 
       await requestRef.set({
