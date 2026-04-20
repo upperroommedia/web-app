@@ -444,13 +444,16 @@ const computeOverflowContentKeepLimit = ({
   maxListSize,
   physicalMaxRowCount,
   updatedRowCount,
+  phantomRowCount,
 }: {
   listId: string;
   maxListSize: number;
   physicalMaxRowCount: number;
   updatedRowCount: number;
+  phantomRowCount: number;
 }): number => {
-  const logicalKeepLimit = Math.max(0, maxListSize - 1);
+  const effectiveVisibleCapacity = Math.max(0, maxListSize - phantomRowCount);
+  const logicalKeepLimit = Math.max(0, effectiveVisibleCapacity - 1);
   if (physicalMaxRowCount < 200 || updatedRowCount < physicalMaxRowCount) {
     return logicalKeepLimit;
   }
@@ -459,14 +462,16 @@ const computeOverflowContentKeepLimit = ({
   const adjustedKeepLimit = Math.min(logicalKeepLimit, physicalKeepLimit);
 
   if (adjustedKeepLimit < logicalKeepLimit) {
-    listDebugLog('addToList.computeOverflowContentKeepLimit.reserveSafetySlot', {
-      listId,
-      maxListSize,
-      physicalMaxRowCount,
-      updatedRowCount,
-      logicalKeepLimit,
-      adjustedKeepLimit,
-    });
+      listDebugLog('addToList.computeOverflowContentKeepLimit.reserveSafetySlot', {
+        listId,
+        maxListSize,
+        physicalMaxRowCount,
+        updatedRowCount,
+        phantomRowCount,
+        effectiveVisibleCapacity,
+        logicalKeepLimit,
+        adjustedKeepLimit,
+      });
   }
 
   return adjustedKeepLimit;
@@ -1176,6 +1181,7 @@ async function processListStep(
           maxListSize,
           physicalMaxRowCount,
           updatedRowCount: updatedRows.length,
+          phantomRowCount,
         });
         const itemsToKeep = contentRows.slice(0, contentKeepLimit);
         const itemsToPropagate = contentRows.slice(contentKeepLimit);

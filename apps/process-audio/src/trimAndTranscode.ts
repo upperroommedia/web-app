@@ -250,7 +250,7 @@ const trimAndTranscode = async (
         duration,
         outputBase: youtubeSourceFileBase,
       });
-      await setProcessAudioProgress(realtimeDBRef, 0, 'downloading', 'Downloading audio').catch((err) => {
+      await setProcessAudioProgress(realtimeDBRef, 0, 'processing', 'Probing YouTube Format').catch((err) => {
         log.error('Failed to initialize download progress', {
           error: err instanceof Error ? err.message : String(err),
         });

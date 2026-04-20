@@ -4,8 +4,7 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
-import { createListRow, getFullListRows, patchListRows } from './helpers/addToListHelpers';
-import { syncOverflowChainMetadata } from './helpers/listOverflowChain';
+import { getFullListRows } from './helpers/addToListHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
@@ -21,11 +20,9 @@ import {
   listDebugWarn,
   summarizeSubsplashRows,
 } from './helpers/listDebugLogger';
-import { getConfiguredMaxListSize, getPageContentCapacity } from './helpers/listCapacity';
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SubsplashListRow } from './types/Subsplash';
 import {
-  canReconstructRemoteRow,
   getLogicalContentRows,
   getRemoteRowResourceId,
 } from './helpers/remoteChainItems';
@@ -220,102 +217,6 @@ const loadOverflowChainNodes = async (rootSubsplashListId: string, token: string
   return nodes;
 };
 
-const deleteRowsMissingFromTarget = async (
-  node: OverflowChainNode,
-  targetRows: SubsplashListRow[],
-  token: string
-): Promise<void> => {
-  const targetIds = new Set(
-    targetRows
-      .map((row) => row.id?.trim())
-      .filter((rowId): rowId is string => Boolean(rowId))
-  );
-
-  const rowsToDelete = node.remoteRows.filter((row) => row.id && !targetIds.has(row.id));
-  for (const rowToDelete of rowsToDelete) {
-    const deleteConfig = createAxiosConfig(
-      `https://core.subsplash.com/builder/v1/list-rows/${rowToDelete.id}`,
-      token,
-      'DELETE'
-    );
-    await axios(deleteConfig);
-  }
-};
-
-const buildTargetPages = (nodes: OverflowChainNode[], maxListSize: number): SubsplashListRow[][] => {
-  const logicalRows = nodes.flatMap((node, nodeIndex) => {
-    const expectedNextSubsplashListId = nodes[nodeIndex + 1]?.subsplashListId;
-    return getLogicalContentRows({
-      rows: node.remoteRows,
-      expectedNextSubsplashListId,
-    });
-  });
-  const pages: SubsplashListRow[][] = [];
-  let cursor = 0;
-
-  while (cursor < logicalRows.length) {
-    const remaining = logicalRows.length - cursor;
-    const takeCount = getPageContentCapacity(remaining, maxListSize);
-    pages.push(logicalRows.slice(cursor, cursor + takeCount));
-    cursor += takeCount;
-  }
-
-  while (pages.length < nodes.length) {
-    pages.push([]);
-  }
-
-  return pages;
-};
-
-const buildTargetRowsForNode = (
-  node: OverflowChainNode,
-  pageRows: SubsplashListRow[],
-  nextNode: OverflowChainNode | undefined
-): SubsplashListRow[] => {
-  const nextRows = pageRows.map((row) => {
-    const sourceListId = row._embedded?.['source-list']?.id;
-    if (sourceListId === node.subsplashListId) {
-      return { ...row };
-    }
-
-    const resourceId = getRemoteRowResourceId(row);
-    if (!resourceId || !canReconstructRemoteRow(row)) {
-      throw new HttpsError(
-        'failed-precondition',
-        `Row ${row.id ?? 'unknown'} cannot be moved across overflow pages because Subsplash did not provide a reconstructible resource identity.`
-      );
-    }
-
-    return createListRow(
-      {
-        id: resourceId,
-        type: row.type,
-      },
-      node.subsplashListId,
-      0
-    );
-  });
-
-  if (!nextNode || pageRows.length === 0 && nextNode === undefined) {
-    return nextRows;
-  }
-
-  if (!nextNode) {
-    return nextRows;
-  }
-
-  const existingLinkRow = node.remoteRows.find(
-    (row) => row.type === 'list' && row._embedded.list?.id === nextNode.subsplashListId
-  );
-  nextRows.push(
-    existingLinkRow
-      ? { ...existingLinkRow }
-      : createListRow({ id: nextNode.subsplashListId, type: 'list' }, node.subsplashListId, nextRows.length + 1)
-  );
-
-  return nextRows;
-};
-
 const updateRootProjectionAfterRemoval = async ({
   rootFirestoreListId,
   removedMediaItemId,
@@ -436,12 +337,93 @@ const updateRootProjectionAfterRemoval = async ({
   await batch.commit();
 };
 
+const buildPlacementsByMediaItemId = (nodes: OverflowChainNode[]): Map<string, PublishedPlacement> => {
+  const placementsByMediaItemId = new Map<string, PublishedPlacement>();
+
+  nodes.forEach((node, index) => {
+    const expectedNextSubsplashListId = nodes[index + 1]?.subsplashListId;
+    getLogicalContentRows({
+      rows: node.remoteRows,
+      expectedNextSubsplashListId,
+    })
+      .filter((row) => row.type !== 'list')
+      .forEach((row) => {
+        const mediaItemId = getRemoteRowResourceId(row);
+        if (!mediaItemId) {
+          return;
+        }
+
+        placementsByMediaItemId.set(mediaItemId, {
+          firestoreListId: node.firestoreListId,
+          subsplashListId: node.subsplashListId,
+          overflowDepth: index,
+          position: row.position,
+          listItemId: row.id,
+        });
+      });
+  });
+
+  return placementsByMediaItemId;
+};
+
+const syncOverflowChainMetadataWithoutRebalancing = async (
+  nodes: OverflowChainNode[],
+  rootFirestoreListId: string
+): Promise<void> => {
+  const firestoreDB = firebaseAdmin.firestore();
+  const logicalCountsBySubsplashListId = new Map<string, number>();
+
+  nodes.forEach((node, index) => {
+    const expectedNextSubsplashListId = nodes[index + 1]?.subsplashListId;
+    logicalCountsBySubsplashListId.set(
+      node.subsplashListId,
+      getLogicalContentRows({
+        rows: node.remoteRows,
+        expectedNextSubsplashListId,
+      }).length
+    );
+  });
+
+  const logicalCount = [...logicalCountsBySubsplashListId.values()].reduce((sum, count) => sum + count, 0);
+  const hasOverflowPages = nodes.length > 1;
+  const now = Date.now();
+  const batch = firestoreDB.batch();
+
+  nodes.forEach((node, index) => {
+    batch.set(
+      firestoreDB.collection('lists').doc(node.firestoreListId),
+      {
+        count: logicalCountsBySubsplashListId.get(node.subsplashListId) ?? 0,
+        updatedAtMillis: now,
+        ...(index === 0
+          ? {
+              isRootList: true,
+              isMoreSermonsList: false,
+              rootListId: rootFirestoreListId,
+              overflowDepth: 0,
+              logicalCount,
+              hasOverflowPages,
+            }
+          : {
+              isRootList: false,
+              isMoreSermonsList: true,
+              rootListId: rootFirestoreListId,
+              overflowDepth: index,
+            }),
+      },
+      { merge: true }
+    );
+  });
+
+  await batch.commit();
+};
+
 export const rebalanceOverflowChainAfterRemoval = async ({
   rootSubsplashListId,
   removedMediaItemId,
   removedSermonId,
   token,
-  maxListSize,
+  maxListSize: _maxListSize,
   existingNodes,
 }: {
   rootSubsplashListId: string;
@@ -456,25 +438,9 @@ export const rebalanceOverflowChainAfterRemoval = async ({
     return;
   }
 
-  const rootListSnapshot = await firebaseAdmin.firestore().collection('lists').doc(nodes[0].firestoreListId).get();
-  const rootListData = rootListSnapshot.data();
-  const configuredMaxListSize =
-    typeof rootListData?.maxListSize === 'number' &&
-    Number.isFinite(rootListData.maxListSize) &&
-    rootListData.maxListSize > 0
-      ? rootListData.maxListSize
-      : undefined;
-  const effectiveMaxListSize =
-    (typeof maxListSize === 'number' && Number.isFinite(maxListSize) && maxListSize > 0
-      ? maxListSize
-      : undefined) ??
-    configuredMaxListSize ??
-    getConfiguredMaxListSize();
-
-  listDebugLog('removeFromList.rebalance.start', {
+  listDebugLog('removeFromList.refreshAfterRemoval.start', {
     rootSubsplashListId,
     removedMediaItemId,
-    maxListSize: effectiveMaxListSize,
     nodes: nodes.map((node) => ({
       firestoreListId: node.firestoreListId,
       subsplashListId: node.subsplashListId,
@@ -482,57 +448,15 @@ export const rebalanceOverflowChainAfterRemoval = async ({
     })),
   });
 
-  const targetPages = buildTargetPages(nodes, effectiveMaxListSize);
-  const placementsByMediaItemId = new Map<string, PublishedPlacement>();
-
-  for (let index = 0; index < nodes.length; index += 1) {
-    const node = nodes[index];
-    const shouldHaveLink = index + 1 < targetPages.length && targetPages[index + 1].length > 0;
-    const nextNode = shouldHaveLink ? nodes[index + 1] : undefined;
-    const targetRows = buildTargetRowsForNode(node, targetPages[index], nextNode);
-
-    listDebugLog('removeFromList.rebalance.partition', {
-      rootSubsplashListId,
-      firestoreListId: node.firestoreListId,
-      subsplashListId: node.subsplashListId,
-      targetRows: summarizeSubsplashRows(targetRows),
-    });
-
-    await deleteRowsMissingFromTarget(node, targetRows, token);
-    const appliedRows =
-      targetRows.length > 0 ? await patchListRows(node.subsplashListId, targetRows, token) : [];
-
-    appliedRows
-      .filter((row) => row.type !== 'list')
-      .forEach((row) => {
-        const mediaItemId = getRemoteRowResourceId(row);
-        if (!mediaItemId) {
-          return;
-        }
-
-        const contentPosition =
-          appliedRows
-            .filter((candidate) => candidate.type !== 'list')
-            .findIndex((candidate) => candidate.id === row.id) + 1;
-
-        placementsByMediaItemId.set(mediaItemId, {
-          firestoreListId: node.firestoreListId,
-          subsplashListId: node.subsplashListId,
-          overflowDepth: index,
-          position: contentPosition,
-          listItemId: row.id,
-        });
-      });
-  }
-
-  await syncOverflowChainMetadata(rootSubsplashListId, token);
+  const placementsByMediaItemId = buildPlacementsByMediaItemId(nodes);
+  await syncOverflowChainMetadataWithoutRebalancing(nodes, nodes[0].firestoreListId);
   await updateRootProjectionAfterRemoval({
     rootFirestoreListId: nodes[0].firestoreListId,
     removedMediaItemId,
     removedSermonId,
     placementsByMediaItemId,
   });
-  listDebugLog('removeFromList.rebalance.complete', {
+  listDebugLog('removeFromList.refreshAfterRemoval.complete', {
     rootSubsplashListId,
     removedMediaItemId,
     placements: [...placementsByMediaItemId.entries()].map(([mediaItemId, placement]) => ({

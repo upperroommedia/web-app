@@ -18,7 +18,6 @@ const whereMock = jest.fn();
 const orderByMock = jest.fn();
 const limitMock = jest.fn();
 const createFunctionV2Mock = jest.fn();
-const resolveCanonicalSermonListsMock = jest.fn();
 const runTransactionMock = jest.fn();
 const getDownloadURLMock = jest.fn();
 const refMock = jest.fn();
@@ -48,11 +47,6 @@ jest.mock('../../firebase/firestore', () => ({
 jest.mock('../../utils/createFunction', () => ({
   __esModule: true,
   createFunctionV2: (...args: unknown[]) => createFunctionV2Mock(...args),
-}));
-
-jest.mock('../../utils/resolveCanonicalSermonLists', () => ({
-  __esModule: true,
-  resolveCanonicalSermonLists: (...args: unknown[]) => resolveCanonicalSermonListsMock(...args),
 }));
 
 jest.mock('../../firebase/storage', () => ({
@@ -183,7 +177,6 @@ describe('editSermon remote edit reconciliation', () => {
     orderByMock.mockReset().mockImplementation((...args: unknown[]) => args);
     limitMock.mockReset().mockImplementation((...args: unknown[]) => args);
     createFunctionV2Mock.mockReset();
-    resolveCanonicalSermonListsMock.mockReset();
     runTransactionMock.mockReset().mockResolvedValue(undefined);
     getDownloadURLMock.mockReset().mockResolvedValue('https://storage.test/audio.mp3');
     refMock.mockReset().mockReturnValue('storage-ref');
@@ -209,9 +202,6 @@ describe('editSermon remote edit reconciliation', () => {
       description: 'Updated Description',
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
@@ -242,9 +232,6 @@ describe('editSermon remote edit reconciliation', () => {
       description: 'Updated Description',
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
@@ -274,9 +261,6 @@ describe('editSermon remote edit reconciliation', () => {
       publishGeneration: 0,
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([publishedList])
-      .mockResolvedValueOnce([]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [buildListDoc(publishedList)] })
       .mockResolvedValueOnce({ docs: [buildListItemDoc('list-a')] });
@@ -307,9 +291,6 @@ describe('editSermon remote edit reconciliation', () => {
 
     const newList = buildList({ id: 'list-b', name: 'List B', subsplashId: 'subsplash-list-b' });
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([newList]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
@@ -356,9 +337,6 @@ describe('editSermon remote edit reconciliation', () => {
       publishGeneration: 0,
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([existingList])
-      .mockResolvedValueOnce([existingList]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [buildListDoc(existingList)] })
       .mockResolvedValueOnce({ docs: [buildListItemDoc('list-a')] });
@@ -403,9 +381,6 @@ describe('editSermon remote edit reconciliation', () => {
       publishGeneration: 0,
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([existingList])
-      .mockResolvedValueOnce([existingList]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [buildListDoc(existingList)] })
       .mockResolvedValueOnce({ docs: [] });
@@ -436,9 +411,6 @@ describe('editSermon remote edit reconciliation', () => {
 
     const newList = buildList({ id: 'list-new', name: 'List New' });
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([newList]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
@@ -473,9 +445,6 @@ describe('editSermon remote edit reconciliation', () => {
       seriesId: 'series-b',
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
     getDocMock
       .mockResolvedValueOnce({
         exists: () => true,
@@ -546,9 +515,6 @@ describe('editSermon remote edit reconciliation', () => {
       seriesId: 'series-b',
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
     getDocMock.mockResolvedValue({
       exists: () => false,
     });
@@ -592,9 +558,6 @@ describe('editSermon remote edit reconciliation', () => {
       publishGeneration: 0,
     };
 
-    resolveCanonicalSermonListsMock
-      .mockResolvedValueOnce([existingList, retainedList])
-      .mockResolvedValueOnce([retainedList]);
     getDocsMock
       .mockResolvedValueOnce({ docs: [buildListDoc(existingList), buildListDoc(retainedList)] })
       .mockResolvedValueOnce({ docs: [buildListItemDoc('list-a'), buildListItemDoc('list-b')] });

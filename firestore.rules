@@ -82,7 +82,8 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow delete: if isAdmin();
       allow update: if isAdmin() && sermonClientUpdateAllowed();
-      allow read, update: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && sermonClientUpdateAllowed();
+      allow read: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid;
+      allow update: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && sermonClientUpdateAllowed();
       allow delete: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && (resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED');
       allow create: if canUpload();
     }

@@ -4,9 +4,6 @@ import {
   type Firestore,
   connectFirestoreEmulator,
   getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
 } from 'firebase/firestore';
 import firebase, { isDevelopment } from './firebase';
 
@@ -20,16 +17,7 @@ const createBrowserFirestore = (): Firestore => {
     return globalThis.__URM_FIRESTORE__;
   }
 
-  try {
-    globalThis.__URM_FIRESTORE__ = initializeFirestore(firebase, {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
-    });
-  } catch (error) {
-    console.warn('Falling back to default Firestore cache configuration.', error);
-    globalThis.__URM_FIRESTORE__ = getFirestore(firebase);
-  }
+  globalThis.__URM_FIRESTORE__ = getFirestore(firebase);
 
   return globalThis.__URM_FIRESTORE__;
 };

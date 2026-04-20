@@ -1,4 +1,5 @@
 import { useContext, createContext, useEffect, useRef, useState } from 'react';
+import * as Sentry from '@sentry/nextjs';
 import {
   createUserWithEmailAndPassword,
   // FacebookAuthProvider,
@@ -57,12 +58,28 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       }
       if (!user) {
         setUser(undefined);
+        Sentry.setUser(null);
+        Sentry.setTag('role', 'anonymous');
+        Sentry.setContext('auth', null);
         nookies.destroy(null, 'token');
         nookies.set(null, 'token', '', { path: '/' });
       } else {
         try {
           const token = await user.getIdToken();
           const role = (await user.getIdTokenResult()).claims.role as UserRoleType;
+          Sentry.setUser({
+            id: user.uid,
+            email: user.email ?? undefined,
+            username: user.displayName ?? undefined,
+            role,
+          });
+          Sentry.setTag('role', role);
+          Sentry.setContext('auth', {
+            uid: user.uid,
+            role,
+            emailVerified: user.emailVerified,
+            providerIds: user.providerData.map((provider) => provider.providerId).filter(Boolean),
+          });
           setUser({
             ...user,
             firstName: user.displayName ?? '',

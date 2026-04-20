@@ -11,7 +11,8 @@ export const createSubsplashUploadIntentKey = (
   sermonId: string,
   uploadGeneration?: number
 ): string => {
-  return createRetryIntentKey(scope, sermonId, `remote-media-upload:${uploadGeneration ?? 0}`);
+  void uploadGeneration;
+  return createOperationKey(scope, sermonId);
 };
 
 export const createSubsplashListCreateIntentKey = (

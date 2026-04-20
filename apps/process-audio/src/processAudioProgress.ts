@@ -2,6 +2,7 @@ import type { Reference } from 'firebase-admin/database';
 
 export type ProcessAudioProgressStage =
   | 'queued'
+  | 'processing'
   | 'downloading'
   | 'transcoding'
   | 'trimming'

@@ -444,7 +444,7 @@ describe('overflow chain end-to-end regression', () => {
         rootSubsplashListId,
         expectedOrder,
         maxListSize,
-        [[buildSermonId(6), buildSermonId(4)], [buildSermonId(3), buildSermonId(2), buildSermonId(1)]]
+        [[buildSermonId(6)], [buildSermonId(4), buildSermonId(3)], [buildSermonId(2), buildSermonId(1)]]
       );
 
       const removedProjection = await firestore
@@ -464,9 +464,8 @@ describe('overflow chain end-to-end regression', () => {
         .get();
       expect(promotedProjection.data()?.uploadStatus?.status).toBe(uploadStatus.UPLOADED);
       expect(promotedProjection.data()?.physicalPlacement).toMatchObject({
-        firestoreListId: rootFirestoreListId,
-        overflowDepth: 0,
-        position: 2,
+        overflowDepth: 1,
+        position: 1,
       });
     } finally {
       if (previousMaxListSizeOverride) {
@@ -557,7 +556,7 @@ describe('overflow chain end-to-end regression', () => {
         rootSubsplashListId,
         [buildSermonId(6), buildSermonId(4), buildSermonId(3), buildSermonId(1)],
         maxListSize,
-        [[buildSermonId(6), buildSermonId(4)], [buildSermonId(3), buildSermonId(1)]]
+        [[buildSermonId(6)], [buildSermonId(4), buildSermonId(3)], [buildSermonId(1)]]
       );
 
       const removedRootProjection = await firestore
@@ -748,29 +747,43 @@ describe('overflow chain end-to-end regression', () => {
         mediaItemId !== buildSermonId(25) &&
         mediaItemId !== buildSermonId(50)
     );
+    const expectedPagesAfterDeletes = reorderedState.expectedPages
+      .map((pageMediaIds) =>
+        pageMediaIds.filter(
+          (mediaItemId) =>
+            mediaItemId !== buildSermonId(1) &&
+            mediaItemId !== buildSermonId(25) &&
+            mediaItemId !== buildSermonId(50)
+        )
+      )
+      .filter((pageMediaIds) => pageMediaIds.length > 0);
     const afterDeletesState = await assertChainMatches(
       rootFirestoreListId,
       rootSubsplashListId,
       expectedAfterDeletes,
-      maxListSize
+      maxListSize,
+      expectedPagesAfterDeletes
     );
 
     expect(afterDeletesState.pageSummaries[0].mediaIds).toEqual([
       buildSermonId(2),
       buildSermonId(3),
       buildSermonId(4),
-      buildSermonId(5),
     ]);
     expect(afterDeletesState.pageSummaries[5].mediaIds).toEqual([
+      buildSermonId(21),
       buildSermonId(22),
       buildSermonId(23),
       buildSermonId(24),
-      buildSermonId(26),
+    ]);
+    expect(afterDeletesState.pageSummaries[12].mediaIds).toEqual([
+      buildSermonId(49),
     ]);
     expect(afterDeletesState.pageSummaries[11].mediaIds).toEqual([
+      buildSermonId(45),
+      buildSermonId(46),
       buildSermonId(47),
       buildSermonId(48),
-      buildSermonId(49),
     ]);
   });
 

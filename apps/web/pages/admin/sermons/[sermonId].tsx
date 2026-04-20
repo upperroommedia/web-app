@@ -42,6 +42,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import UploadIcon from '@mui/icons-material/Upload';
 import AddIcon from '@mui/icons-material/Add';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import Link from 'next/link';
 import { alpha, useTheme } from '@mui/material/styles';
 
@@ -50,6 +51,7 @@ import AvatarWithDefaultImage from '../../../components/AvatarWithDefaultImage';
 import DeleteEntityPopup from '../../../components/DeleteEntityPopup';
 import SermonPublishPanel from '../../../components/SermonPublishPanel';
 import firestore, { doc, getDoc, getDocs, collection, updateDoc, setDoc, query, orderBy, where, limit, serverTimestamp } from '../../../firebase/firestore';
+import storage, { ref, getDownloadURL } from '../../../firebase/storage';
 import { sermonStatusType } from '../../../types/SermonTypes';
 import { sermonConverter } from '../../../types/Sermon';
 import { Series, seriesConverter } from '../../../types/Series';
@@ -66,6 +68,7 @@ import { useDocument } from 'react-firebase-hooks/firestore';
 import { useObject } from 'react-firebase-hooks/database';
 import database, { ref as dbRef } from '../../../firebase/database';
 import LinearProgress from '@mui/material/LinearProgress';
+import MuiLink from '@mui/material/Link';
 import { getIntroAndOutro } from '../../../utils/uploadUtils';
 import { canEditSermonMetadata, isSermonProcessingLocked, isSermonPublishedExternally } from '../../../utils/sermonEditing';
 import { parseProcessingProgress } from '../../../utils/processAudioProgress';
@@ -152,6 +155,15 @@ const SermonDetailsPage = () => {
       setSeries(null);
     }
   }, []);
+
+  const [sourceAudioUrl, setSourceAudioUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sermon || sermon.youtubeUrl) return;
+    getDownloadURL(ref(storage, `sermons/${sermon.id}`))
+      .then(setSourceAudioUrl)
+      .catch(() => setSourceAudioUrl(null));
+  }, [sermon?.id, sermon?.youtubeUrl]);
 
   // Fetch series and uploader when relevant ids change (narrow deps to avoid refetch on every sermon snapshot)
   useEffect(() => {
@@ -432,9 +444,10 @@ const SermonDetailsPage = () => {
 
   // Format duration to nearest second
   const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   // Get status chip info
@@ -793,15 +806,51 @@ const SermonDetailsPage = () => {
                     </Button>
                   )}
                 </Stack>
-                <Stack direction="row" spacing={1} alignItems="center" justifyContent="flex-end" sx={{ mt: 1.5 }}>
-                  <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 28 }, height: { xs: 20, sm: 28 } }} />
-                  <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, textAlign: 'right' }}
-                  >
-                    Uploaded by {uploaderName}
-                  </Typography>
+                <Stack spacing={0.75} alignItems="flex-end" sx={{ mt: 1.5 }}>
+                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="flex-end">
+                    <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 28 }, height: { xs: 20, sm: 28 } }} />
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, textAlign: 'right' }}
+                    >
+                      Uploaded by {uploaderName}
+                    </Typography>
+                  </Stack>
+                  {sermon.youtubeUrl && typeof sermon.sourceStartTime === 'number' && (
+                    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' } }}>
+                        <strong>Source:</strong>
+                      </Typography>
+                      <MuiLink
+                        href={sermon.sourceStartTime > 0 ? `${sermon.youtubeUrl}${sermon.youtubeUrl.includes('?') ? '&' : '?'}t=${Math.floor(sermon.sourceStartTime)}` : sermon.youtubeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        variant="body2"
+                        sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' } }}
+                      >
+                        YouTube{sermon.sourceStartTime > 0 ? ` ${formatDuration(sermon.sourceStartTime)}` : ''}
+                      </MuiLink>
+                      <OpenInNewIcon sx={{ fontSize: { xs: 14, sm: 16 }, color: 'primary.main' }} />
+                    </Stack>
+                  )}
+                  {sourceAudioUrl && (
+                    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' } }}>
+                        <strong>Source:</strong>
+                      </Typography>
+                      <MuiLink
+                        href={sourceAudioUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        variant="body2"
+                        sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' } }}
+                      >
+                        File Upload{sermon.sourceStartTime > 0 ? ` ${formatDuration(sermon.sourceStartTime)}` : ''}
+                      </MuiLink>
+                      <OpenInNewIcon sx={{ fontSize: { xs: 14, sm: 16 }, color: 'primary.main' }} />
+                    </Stack>
+                  )}
                 </Stack>
               </Box>
             </Box>
