@@ -30,6 +30,32 @@ if [[ -z "$SSH_TARGET" ]]; then
   exit 65
 fi
 
+ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}'" <<'EOF'
+set -euo pipefail
+
+remote_dir="$1"
+profile_dir="${remote_dir}/state/shared-browser-profile/.config/google-chrome"
+required_units=(
+  process-audio-browser-xvfb.service
+  process-audio-browser-openbox.service
+  process-audio-browser-x11vnc.service
+  process-audio-browser-novnc.service
+  process-audio-browser-chrome.service
+  process-audio-browser-refresh.service
+)
+
+systemctl is-active --quiet process-audio-browser-auth.target
+
+for unit in "${required_units[@]}"; do
+  systemctl is-active --quiet "$unit"
+done
+
+if [[ ! -f "${profile_dir}/Default/Cookies" ]]; then
+  echo "Shared Chrome profile is missing ${profile_dir}/Default/Cookies" >&2
+  exit 1
+fi
+EOF
+
 json_output_file="$(mktemp)"
 trap 'rm -f "$json_output_file"' EXIT
 

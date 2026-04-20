@@ -302,6 +302,9 @@ Wants=process-audio-browser-x11vnc.service
 Wants=process-audio-browser-novnc.service
 Wants=process-audio-browser-chrome.service
 Wants=process-audio-browser-refresh.service
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload

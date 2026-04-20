@@ -897,6 +897,9 @@ function shouldAttemptBrowserCookieRefresh(message: string, mode: YouTubeExtract
 }
 
 async function triggerBrowserYoutubeRefresh(log: ReturnType<typeof createLoggerWithContext>, ctx: LogContext): Promise<void> {
+  ctx.youtubeCookieRefreshAttempted = true;
+  ctx.youtubeCookieRefreshSucceeded = false;
+
   const beforeStats = await readBrowserCookieDbStats();
   const controlDir = getBrowserRefreshControlDir();
   const refreshUrl = getBrowserRefreshUrl();
@@ -979,7 +982,6 @@ async function triggerBrowserYoutubeRefresh(log: ReturnType<typeof createLoggerW
   await sleep(getBrowserRefreshWaitMs());
 
   const afterStats = await readBrowserCookieDbStats();
-  ctx.youtubeCookieRefreshAttempted = true;
   ctx.youtubeCookieRefreshSucceeded = true;
   log.info('Shared browser YouTube session refresh completed', {
     refreshUrl,

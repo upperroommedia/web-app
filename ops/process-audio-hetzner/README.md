@@ -350,6 +350,8 @@ bash scripts/verify-hetzner-ytdlp-smoke.sh staging
 bash scripts/verify-hetzner-ytdlp-smoke.sh production
 ```
 
+The smoke script now fails fast if the host browser auth stack is down. A passing `/healthz` is not enough; the shared Chrome profile and these systemd units must be active before `yt-dlp` verification is meaningful.
+
 Optional Sentry smoke from a live container:
 
 ```bash
@@ -382,7 +384,7 @@ Services started by the host auth stack:
 - `process-audio-browser-refresh.service`
 - `process-audio-browser-auth.target`
 
-The services are enabled to come back after reboot.
+The auth target is expected to be enabled under `multi-user.target` so the full stack comes back after reboot.
 
 ### Accessing the Browser
 

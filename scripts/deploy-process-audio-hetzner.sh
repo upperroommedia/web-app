@@ -39,6 +39,37 @@ if [[ -z "$SSH_TARGET" ]]; then
   exit 66
 fi
 
+ensure_browser_auth_stack() {
+  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}'" <<'EOF'
+set -euo pipefail
+
+remote_dir="$1"
+profile_dir="${remote_dir}/state/shared-browser-profile/.config/google-chrome"
+required_units=(
+  process-audio-browser-xvfb.service
+  process-audio-browser-openbox.service
+  process-audio-browser-x11vnc.service
+  process-audio-browser-novnc.service
+  process-audio-browser-chrome.service
+  process-audio-browser-refresh.service
+)
+
+systemctl start process-audio-browser-auth.target
+systemctl is-active --quiet process-audio-browser-auth.target
+
+for unit in "${required_units[@]}"; do
+  systemctl is-active --quiet "$unit"
+done
+
+if [[ ! -f "${profile_dir}/Default/Cookies" ]]; then
+  echo "Shared Chrome profile is missing ${profile_dir}/Default/Cookies" >&2
+  exit 1
+fi
+
+printf 'Browser auth stack active. Cookie DB mtime=%s\n' "$(stat -c %y "${profile_dir}/Default/Cookies")"
+EOF
+}
+
 staging_hostname="${PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME:-}"
 production_hostname="${PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME:-}"
 
@@ -207,5 +238,7 @@ prune_build_artifacts
 docker compose up -d --build --no-deps "process-audio-${target_env}"
 docker compose up -d --no-deps caddy
 EOF
+
+ensure_browser_auth_stack
 
 echo "Deployed process-audio Hetzner stack for ${TARGET_ENV} to ${SSH_TARGET}:${REMOTE_DIR}"

@@ -595,11 +595,21 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
     const youtubeFailureClass = youtubeFailureAnalysis?.failureClass;
     const browserFallbackUnavailable =
       browserFallbackError?.code === 'auth_required' || browserFallbackError?.code === 'session_unhealthy';
-    const alertCode = youtubeFailureAnalysis?.alertCode ?? 'PROCESS_AUDIO_RUNTIME_FAILURE';
-    const alertSummary =
-      youtubeFailureClass && alertCode !== 'youtube_runtime_failure'
-        ? `process-audio Cloud Run request failed during YouTube extraction (${alertCode}).`
-        : 'process-audio Cloud Run request failed while processing sermon audio.';
+    const cookieRefreshFailed =
+      audioSource.type === 'YouTubeUrl' &&
+      youtubeFailureClass === 'cookie_session_stale_or_challenged' &&
+      ctx.youtubeCookieRefreshAttempted === true &&
+      ctx.youtubeCookieRefreshSucceeded === false;
+    const alertCode = cookieRefreshFailed
+      ? 'YOUTUBE_COOKIE_REFRESH_STACK_DOWN'
+      : (youtubeFailureAnalysis?.alertCode ?? 'PROCESS_AUDIO_RUNTIME_FAILURE');
+    const alertSummary = cookieRefreshFailed
+      ? 'process-audio deferred a YouTube request because the shared browser refresh stack could not recover the authenticated session.'
+      : (
+        youtubeFailureClass && alertCode !== 'youtube_runtime_failure'
+          ? `process-audio Cloud Run request failed during YouTube extraction (${alertCode}).`
+          : 'process-audio Cloud Run request failed while processing sermon audio.'
+      );
 
     if (audioSource.type === 'YouTubeUrl' && youtubeFailureClass === 'cookie_session_stale_or_challenged') {
       const staleResult = await deferStaleYouTubeRequest({
@@ -630,6 +640,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
               browserFallbackEnabled,
               localBrowserProfileBrowser: localBrowserProfileDir ? localBrowserProfileBrowser : null,
               poTokenProviderBaseUrl: process.env.YTDLP_POT_PROVIDER_BASE_URL || null,
+              cookieRefreshFailed,
               youtubeFailureClass: youtubeFailureClass ?? null,
               youtubeFailureStage: youtubeFailureAnalysis?.stage ?? null,
               youtubeFailureSignals: youtubeFailureAnalysis ?? null,
