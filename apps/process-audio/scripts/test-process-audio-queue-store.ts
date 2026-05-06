@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   buildCloudTasksCreateTaskRequest,
   enqueueTaskViaCloudTasksApi,
+  normalizeCloudTasksAccessToken,
 } from '../src/processAudioQueueStore';
 
 async function main(): Promise<void> {
@@ -80,8 +81,36 @@ async function main(): Promise<void> {
 
   assert.equal(fetchUrl, request.url);
   assert.equal(fetchInit?.method, 'POST');
+  assert.ok(fetchInit);
   assert.equal((fetchInit?.headers as Record<string, string>).Authorization, 'Bearer test-token');
   assert.equal((fetchInit?.headers as Record<string, string>)['Content-Type'], 'application/json');
+
+  fetchUrl = undefined;
+  fetchInit = undefined;
+  let secondAuthorizationHeader: string | undefined;
+
+  await enqueueTaskViaCloudTasksApi(youtubePayload, 'processaudioyoutubetask', 'pa-test-task', {
+    authFactory: async () => ({
+      getAccessToken: async () => ({ token: 'object-token' }),
+    }),
+    fetchImpl: async (url, init) => {
+      fetchUrl = String(url);
+      fetchInit = init;
+      secondAuthorizationHeader = (init?.headers as Record<string, string> | undefined)?.Authorization;
+      return new Response('{}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+    },
+  });
+
+  assert.equal(fetchUrl, request.url);
+  assert.ok(fetchInit);
+  assert.equal(secondAuthorizationHeader, 'Bearer object-token');
+  assert.equal(normalizeCloudTasksAccessToken({ token: '  object-token  ' }), 'object-token');
+  assert.equal(normalizeCloudTasksAccessToken({}), null);
 }
 
 void main().catch((error) => {

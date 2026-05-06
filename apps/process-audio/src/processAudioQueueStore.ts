@@ -237,8 +237,28 @@ type CloudTasksCreateTaskRequest = {
 
 type CloudTasksApiDeps = {
   fetchImpl?: typeof fetch;
-  authFactory?: () => Promise<{ getAccessToken: () => Promise<string | null | undefined> }>;
+  authFactory?: () => Promise<{ getAccessToken: () => Promise<CloudTasksAccessTokenResponse> }>;
 };
+
+type CloudTasksAccessTokenResponse =
+  | string
+  | {
+      token?: string | null;
+    }
+  | null
+  | undefined;
+
+export function normalizeCloudTasksAccessToken(accessToken: CloudTasksAccessTokenResponse): string | null {
+  if (typeof accessToken === 'string') {
+    return accessToken.trim() || null;
+  }
+
+  if (accessToken && typeof accessToken === 'object' && typeof accessToken.token === 'string') {
+    return accessToken.token.trim() || null;
+  }
+
+  return null;
+}
 
 export function buildCloudTasksCreateTaskRequest(args: {
   payload: AddIntroOutroInputType;
@@ -290,7 +310,7 @@ export async function enqueueTaskViaCloudTasksApi(
     (await new GoogleAuth({
       scopes: [CLOUD_TASKS_SCOPE],
     }).getClient());
-  const accessToken = await authClient.getAccessToken();
+  const accessToken = normalizeCloudTasksAccessToken(await authClient.getAccessToken());
 
   if (!accessToken) {
     throw new Error(`Failed to acquire an access token for Cloud Tasks queue ${queueName}.`);
@@ -448,6 +468,46 @@ async function enqueueDeferredRequestIgnoringPause(
   });
 }
 
+async function drainDeferredYouTubeRequestsAfterProbe(args: {
+  database: Database;
+  entries: StoredDeferredYouTubeRequest[];
+  ownerId: string;
+  probeMode: YouTubeQueueProbeMode;
+  probeSucceededAt: string;
+  log: ReturnType<typeof createLoggerWithContext>;
+}): Promise<void> {
+  const { database, entries, ownerId, probeMode, probeSucceededAt, log } = args;
+
+  for (const entry of entries) {
+    try {
+      await enqueueDeferredRequestIgnoringPause(database, entry, `${ownerId}:${entry.sermonId}`);
+    } catch (error) {
+      log.error('Failed to enqueue deferred YouTube request after successful probe', {
+        error: error instanceof Error ? error.message : String(error),
+        deferredSermonId: entry.sermonId,
+        probeMode,
+      });
+    }
+  }
+
+  const { deferredEntries } = await getQueueStateAndDeferredEntries(database);
+  if (deferredEntries.length === 0) {
+    await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
+      ...buildInitialYouTubeQueueState(),
+      deferredYouTubeTaskCount: 0,
+    } satisfies Partial<StoredYouTubeQueueState>);
+    return;
+  }
+
+  await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
+    ...buildInitialYouTubeQueueState(),
+    probeStatus: 'probe_succeeded',
+    probeMode,
+    probeLastSucceededAt: probeSucceededAt,
+    deferredYouTubeTaskCount: deferredEntries.length,
+  } satisfies Partial<StoredYouTubeQueueState>);
+}
+
 function didBrowserProbeSucceed(queueState: StoredYouTubeQueueState, payload: AddIntroOutroInputType): boolean {
   return (
     getProcessAudioSourceType(payload) === 'youtube' &&
@@ -562,13 +622,13 @@ export async function completeProcessAudioSuccess(args: {
           deferredYouTubeTaskCount: remainingEntries.length,
         } satisfies StoredYouTubeQueueState);
 
-        for (const entry of remainingEntries) {
-          await enqueueDeferredRequestIgnoringPause(database, entry, `drain:${requestId}:${entry.sermonId}`);
-        }
-
-        await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
-          ...buildInitialYouTubeQueueState(),
-          deferredYouTubeTaskCount: 0,
+        await drainDeferredYouTubeRequestsAfterProbe({
+          database,
+          entries: remainingEntries,
+          ownerId: `drain:${requestId}`,
+          probeMode: browserProbeSucceeded ? 'browser_fallback' : 'cookie_provider',
+          probeSucceededAt: now,
+          log,
         });
       } else {
         await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
@@ -594,13 +654,13 @@ export async function completeProcessAudioSuccess(args: {
         deferredYouTubeTaskCount: remainingEntries.length,
       } satisfies StoredYouTubeQueueState);
 
-      for (const entry of remainingEntries) {
-        await enqueueDeferredRequestIgnoringPause(database, entry, `drain:${requestId}:${entry.sermonId}`);
-      }
-
-      await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
-        ...buildInitialYouTubeQueueState(),
-        deferredYouTubeTaskCount: 0,
+      await drainDeferredYouTubeRequestsAfterProbe({
+        database,
+        entries: remainingEntries,
+        ownerId: `drain:${requestId}`,
+        probeMode: 'browser_fallback',
+        probeSucceededAt: now,
+        log,
       });
     }
 
