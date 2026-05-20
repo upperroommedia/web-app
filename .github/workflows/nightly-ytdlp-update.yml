@@ -99,8 +99,8 @@ jobs:
           import os, pathlib, re
           path = pathlib.Path('apps/process-audio/Dockerfile')
           text = path.read_text()
-          updated = re.sub(r'(^ARG YT_DLP_VERSION=).+$', rf"\1{os.environ['LATEST_YTDLP_VERSION']}", text, flags=re.MULTILINE)
-          updated = re.sub(r'(^ARG FFMPEG_VERSION=).+$', rf"\1{os.environ['LATEST_FFMPEG_VERSION']}", updated, flags=re.MULTILINE)
+          updated = re.sub(r'(^ARG YT_DLP_VERSION=).+$', rf"\g<1>{os.environ['LATEST_YTDLP_VERSION']}", text, flags=re.MULTILINE)
+          updated = re.sub(r'(^ARG FFMPEG_VERSION=).+$', rf"\g<1>{os.environ['LATEST_FFMPEG_VERSION']}", updated, flags=re.MULTILINE)
           assert updated != text, 'Dockerfile did not change during media tool version bump'
           path.write_text(updated)
           PY
