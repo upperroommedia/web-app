@@ -10,6 +10,8 @@ import logger, { createLoggerWithContext } from './WinstonLogger';
 import { LogContext } from './context';
 
 const SAFE_LOCAL_PATH_ROOTS = [path.resolve(os.tmpdir()), path.resolve(process.cwd(), '.tmp')];
+const YOUTUBE_VIDEO_ID_PATTERN = /^[\w-]{11}$/;
+const EMBEDDED_URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi;
 
 export const sanitizeTempFileName = (fileName: string): string => {
   let sanitized = path.basename(fileName).replace(/[^A-Za-z0-9._-]+/g, '_');
@@ -76,6 +78,63 @@ export const throwErrorOnSpecificStderr = (stderrLine: string) => {
     }
   }
 };
+
+const trimTrailingPunctuation = (value: string): string => value.replace(/[),.;]+$/u, '');
+
+const extractYouTubeVideoIdFromUrl = (value: string): string | null => {
+  try {
+    const url = new URL(trimTrailingPunctuation(value));
+    const host = url.hostname.replace(/^www\./u, '');
+
+    let videoId: string | null = null;
+
+    switch (host) {
+      case 'youtube.com':
+      case 'youtube-nocookie.com':
+        if (url.pathname === '/watch') {
+          videoId = url.searchParams.get('v');
+        } else if (url.pathname.startsWith('/embed/')) {
+          videoId = url.pathname.split('/embed/')[1];
+        } else if (url.pathname.startsWith('/live/')) {
+          videoId = url.pathname.split('/live/')[1];
+        } else if (url.pathname.startsWith('/shorts/')) {
+          videoId = url.pathname.split('/shorts/')[1];
+        }
+        break;
+
+      case 'youtu.be':
+        videoId = url.pathname.split('/')[1];
+        break;
+
+      default:
+        return null;
+    }
+
+    videoId = videoId?.split('?')[0].split('&')[0].split('#')[0] ?? null;
+    return videoId && YOUTUBE_VIDEO_ID_PATTERN.test(videoId) ? videoId : null;
+  } catch {
+    return null;
+  }
+};
+
+export function normalizeYouTubeUrl(input: string): string | null {
+  const value = input.trim();
+  if (!value) return null;
+
+  if (YOUTUBE_VIDEO_ID_PATTERN.test(value)) {
+    return `https://www.youtube.com/watch?v=${value}`;
+  }
+
+  const embeddedUrls = value.match(EMBEDDED_URL_PATTERN) ?? [];
+  for (const candidate of [value, ...embeddedUrls]) {
+    const videoId = extractYouTubeVideoIdFromUrl(candidate);
+    if (videoId) {
+      return `https://www.youtube.com/watch?v=${videoId}`;
+    }
+  }
+
+  return null;
+}
 
 /**
  * Log process memory and optionally "our" /tmp usage (sum of tempFiles sizes).
@@ -374,8 +433,8 @@ export function validateAddIntroOutroData(data: unknown): data is ProcessAudioIn
 
   // Validate audio source (youtubeUrl or storageFilePath)
   if ('youtubeUrl' in inputData) {
-    if (typeof inputData.youtubeUrl !== 'string' || !inputData.youtubeUrl) {
-      logger.error('Invalid Argument', 'youtubeUrl must be a non-empty string');
+    if (typeof inputData.youtubeUrl !== 'string' || !normalizeYouTubeUrl(inputData.youtubeUrl)) {
+      logger.error('Invalid Argument', 'youtubeUrl must contain a valid YouTube URL or video ID');
       return false;
     }
   } else if ('storageFilePath' in inputData) {
@@ -420,7 +479,7 @@ export function getAudioSource(data: ProcessAudioInputType): AudioSource {
   if ('youtubeUrl' in data) {
     return {
       id: data.id,
-      source: removeTimestampParam(data.youtubeUrl),
+      source: removeTimestampParam(normalizeYouTubeUrl(data.youtubeUrl) ?? data.youtubeUrl),
       type: 'YouTubeUrl',
     };
   } else {
