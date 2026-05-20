@@ -15,73 +15,9 @@ import { getErrorMessage, showError } from './uploaderComponents/utils';
 import useDebounce from '@/hooks/useDebounce';
 import { EditableTimeInput, TrimSlider, useTrimmerStore } from './trimmer';
 import { logTrimmerDebug } from '@/utils/trimmerDebug';
+import { extractYouTubeVideoId, normalizeYouTubeUrl } from '@/utils/youtubeUrl';
 import { TrimmerPlayerSnapshot } from './trimmer/playerAdapter';
 import { YouTubeIframeAdapter } from './trimmer/youtubeIframeAdapter';
-
-/**
- * Extract YouTube video ID from various URL formats.
- */
-function extractYouTubeVideoId(input: string): string | null {
-  if (!input) return null;
-
-  const value = input.trim();
-
-  // If it's already just an ID (11 characters typical)
-  if (/^[\w-]{11}$/.test(value)) {
-    return value;
-  }
-
-  try {
-    const url = new URL(value);
-    const host = url.hostname.replace(/^www\./, '');
-
-    let videoId: string | null = null;
-
-    switch (host) {
-      case 'youtube.com':
-      case 'youtube-nocookie.com':
-        if (url.pathname === '/watch') {
-          videoId = url.searchParams.get('v');
-        } else if (url.pathname.startsWith('/embed/')) {
-          videoId = url.pathname.split('/embed/')[1];
-        } else if (url.pathname.startsWith('/live/')) {
-          videoId = url.pathname.split('/live/')[1];
-        } else if (url.pathname.startsWith('/shorts/')) {
-          videoId = url.pathname.split('/shorts/')[1];
-        }
-        break;
-
-      case 'youtu.be':
-        videoId = url.pathname.split('/')[1];
-        break;
-
-      default:
-        return null;
-    }
-
-    if (!videoId) return null;
-
-    // Clean up videoId (remove query params or fragments)
-    videoId = videoId.split('?')[0].split('&')[0].split('#')[0];
-
-    // Validate it looks like a proper YouTube video ID
-    if (!/^[\w-]{11}$/.test(videoId)) return null;
-
-    return videoId;
-  } catch {
-    // If it's not a URL, maybe it's just a malformed ID string
-    return value.match(/[\w-]{11}/)?.[0] || null;
-  }
-}
-
-/**
- * Normalize a YouTube URL or ID into a canonical watch URL.
- */
-export function normalizeYouTubeUrl(input: string): string | null {
-  const videoId = extractYouTubeVideoId(input);
-  if (!videoId) return null;
-  return `https://www.youtube.com/watch?v=${videoId}`;
-}
 
 /**
  * Detect iOS (iPhone, iPad, iPod). Used to defer YouTube iframe load until user tap
@@ -146,8 +82,9 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   const lastMutedRef = useRef(false);
 
   const debouncedInput = useDebounce(inputText, 500);
-  const debouncedInputRef = useRef(debouncedInput);
   const videoId = useMemo(() => extractYouTubeVideoId(debouncedInput), [debouncedInput]);
+  const normalizedUrl = useMemo(() => normalizeYouTubeUrl(debouncedInput), [debouncedInput]);
+  const normalizedUrlRef = useRef(normalizedUrl);
 
   // Trimmer store state and actions
   const storeTrimStart = useTrimmerStore((state) => state.trimStart);
@@ -165,8 +102,8 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   const shouldLoadRef = useRef(shouldLoad);
 
   useEffect(() => {
-    debouncedInputRef.current = debouncedInput;
-  }, [debouncedInput]);
+    normalizedUrlRef.current = normalizedUrl;
+  }, [normalizedUrl]);
 
   useEffect(() => {
     shouldLoadRef.current = shouldLoad;
@@ -248,8 +185,9 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
         setStoreIsReady(snapshot.ready);
       }
 
-      if (snapshot.ready && shouldLoadRef.current) {
-        setAudioSource({ source: debouncedInputRef.current, type: 'YoutubeUrl' });
+      const sourceUrl = normalizedUrlRef.current;
+      if (snapshot.ready && shouldLoadRef.current && sourceUrl) {
+        setAudioSource({ source: sourceUrl, type: 'YoutubeUrl' });
         setAudioSourceError(false, '');
       }
 
@@ -382,13 +320,24 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
     queueMicrotask(() => {
       setIsIframeVisible(false);
     });
-    setAudioSource({ source: debouncedInputRef.current, type: 'YoutubeUrl' });
+    if (!normalizedUrl) return;
+
+    setAudioSource({ source: normalizedUrl, type: 'YoutubeUrl' });
     setAudioSourceError(false, '');
 
     adapter.load(videoId, savedTrimStart).catch(() => {
       // Adapter-level errors are surfaced via `onError`.
     });
-  }, [savedTrimStart, setAudioSource, setAudioSourceError, setStoreIsLoading, setStoreIsReady, shouldLoad, videoId]);
+  }, [
+    normalizedUrl,
+    savedTrimStart,
+    setAudioSource,
+    setAudioSourceError,
+    setStoreIsLoading,
+    setStoreIsReady,
+    shouldLoad,
+    videoId,
+  ]);
 
   useEffect(() => {
     if (!shouldLoad || !isReady) {
