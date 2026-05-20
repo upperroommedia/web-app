@@ -7,59 +7,22 @@ on:
 
 permissions:
   contents: write
-  id-token: write
+  pull-requests: write
 
 concurrency:
   group: process-audio-hetzner-host
   cancel-in-progress: false
 
 jobs:
-  update-and-deploy:
+  update-media-tool-pr:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      PROCESS_AUDIO_HETZNER_STAGING_HOSTNAME: yt-worker-staging.upperroommedia.org
-      PROCESS_AUDIO_HETZNER_PRODUCTION_HOSTNAME: yt-worker.upperroommedia.org
+    timeout-minutes: 15
     steps:
       - name: Checkout staging branch
         uses: actions/checkout@v5
         with:
           ref: staging
           fetch-depth: 0
-
-      - name: Validate required secrets
-        env:
-          PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-          SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
-          SSH_KEY: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          [[ -n "$PROVIDER" ]] || { echo "::error::Missing GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
-          [[ -n "$SERVICE_ACCOUNT" ]] || { echo "::error::Missing GCP_SERVICE_ACCOUNT_EMAIL"; exit 1; }
-          [[ -n "$SSH_TARGET" ]] || { echo "::error::Missing HETZNER_PROCESS_AUDIO_SSH_TARGET"; exit 1; }
-          [[ -n "$SSH_KEY" ]] || { echo "::error::Missing HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY"; exit 1; }
-
-      - name: Authenticate to Google Cloud (OIDC)
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Set up SSH access for Hetzner
-        env:
-          SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
-          SSH_KEY: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          host_part="${SSH_TARGET##*@}"
-          ssh-keyscan -H "$host_part" >> ~/.ssh/known_hosts
 
       - id: version-check
         name: Resolve latest stable yt-dlp and ffmpeg versions
@@ -69,7 +32,10 @@ jobs:
           current_ffmpeg_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG FFMPEG_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate FFMPEG_VERSION in Dockerfile'; print(match.group(1).strip())")"
 
           latest_ytdlp_version="$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest yt-dlp release tag found'; print(tag.lstrip('v'))")"
-          latest_ffmpeg_version="$(curl -fsSL https://ffmpeg.org/releases/ | python3 -c "import re, sys; html = sys.stdin.read(); versions = sorted(set(re.findall(r'ffmpeg-([0-9]+(?:\\.[0-9]+){1,2})\\.tar\\.xz', html)), key=lambda s: [int(x) for x in s.split('.')]); assert versions, 'No ffmpeg release versions found'; print(versions[-1])")"
+          latest_ffmpeg_version="$(curl -fsSL https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest | python3 -c "import json, re, sys; data = json.load(sys.stdin); names = {asset.get('name', '') for asset in data.get('assets', [])}; versions = []; pattern = re.compile(r'^ffmpeg-n([0-9]+(?:\\.[0-9]+){1,2})-latest-linux64-gpl-\\1\\.tar\\.xz$'); [versions.append(match.group(1)) for name in names for match in [pattern.match(name)] if match and f'ffmpeg-n{match.group(1)}-latest-linuxarm64-gpl-{match.group(1)}.tar.xz' in names]; assert versions, 'No compatible BtbN ffmpeg release assets found'; print(sorted(set(versions), key=lambda s: [int(x) for x in s.split('.')])[-1])")"
+          for arch in linux64 linuxarm64; do
+            curl -fsSI "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n${latest_ffmpeg_version}-latest-${arch}-gpl-${latest_ffmpeg_version}.tar.xz" >/dev/null
+          done
 
           should_update=false
           if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" ]]; then
@@ -105,47 +71,28 @@ jobs:
           path.write_text(updated)
           PY
 
-      - name: Commit and push version bump
+      - name: Commit and open version bump PR
         if: steps.version-check.outputs.should_update == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           LATEST_YTDLP_VERSION: ${{ steps.version-check.outputs.latest_ytdlp_version }}
           LATEST_FFMPEG_VERSION: ${{ steps.version-check.outputs.latest_ffmpeg_version }}
         run: |
           set -euo pipefail
+          branch_name="automation/media-tool-update"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch_name"
           git add apps/process-audio/Dockerfile
           git commit -m "Bump media tools to yt-dlp ${LATEST_YTDLP_VERSION} and ffmpeg ${LATEST_FFMPEG_VERSION}"
-          git push origin HEAD:staging
+          git push --force-with-lease origin HEAD:"$branch_name"
 
-      - name: Deploy staging Hetzner worker
-        if: steps.version-check.outputs.should_update == 'true'
-        env:
-          PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
-        run: ./scripts/deploy-process-audio-hetzner.sh staging
-
-      - name: Verify staging health
-        if: steps.version-check.outputs.should_update == 'true'
-        run: bash scripts/wait-for-process-audio-health.sh https://yt-worker-staging.upperroommedia.org/healthz
-
-      - name: Run staging yt-dlp smoke test
-        if: steps.version-check.outputs.should_update == 'true'
-        env:
-          PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
-        run: bash scripts/verify-hetzner-ytdlp-smoke.sh staging
-
-      - name: Deploy production Hetzner worker
-        if: steps.version-check.outputs.should_update == 'true'
-        env:
-          PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
-        run: ./scripts/deploy-process-audio-hetzner.sh production
-
-      - name: Verify production health
-        if: steps.version-check.outputs.should_update == 'true'
-        run: bash scripts/wait-for-process-audio-health.sh https://yt-worker.upperroommedia.org/healthz
-
-      - name: Run production yt-dlp smoke test
-        if: steps.version-check.outputs.should_update == 'true'
-        env:
-          PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
-        run: bash scripts/verify-hetzner-ytdlp-smoke.sh production
+          title="Bump media tools to yt-dlp ${LATEST_YTDLP_VERSION} and ffmpeg ${LATEST_FFMPEG_VERSION}"
+          body=$'Automated media-tool version bump for the process-audio Hetzner worker.\n\nThis PR targets `staging` because the branch is protected and requires normal PR checks before deploy workflows can run.'
+          existing_pr="$(gh pr list --base staging --head "$branch_name" --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing_pr" ]]; then
+            gh pr edit "$existing_pr" --title "$title" --body "$body"
+            gh pr view "$existing_pr" --json url --jq .url
+          else
+            gh pr create --base staging --head "$branch_name" --title "$title" --body "$body"
+          fi
