@@ -17,6 +17,7 @@ import firebaseAdmin from './firebaseAdmin';
 import logger, { createLoggerWithContext, sentryLogLevels } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
+import { getYouTubeBrowserAuthHealth } from './processYouTubeUrl';
 import { analyzeYouTubeFailure } from './youtubeExtractionPolicy';
 import {
   cleanupDeletedSermonProcessAudioState,
@@ -343,7 +344,9 @@ app.get('/', (req, res) => {
   `);
 });
 
-app.get('/healthz', (req, res) => {
+app.get('/healthz', async (req, res) => {
+  const youtubeBrowserAuthHealth = youtubeProcessingEnabled ? await getYouTubeBrowserAuthHealth() : null;
+
   res.status(200).json({
     ok: true,
     service: 'process-audio',
@@ -360,6 +363,7 @@ app.get('/healthz', (req, res) => {
     browserFallbackEnabled,
     inProcessBrowserFallbackConfigured,
     localBrowserProfileDir: localBrowserProfileDir || null,
+    youtubeBrowserAuthHealth,
     finalBrowserFallbackConfigured,
     poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
     ytDlpJsRuntime: ytDlpJsRuntimeInfo?.runtime ?? null,

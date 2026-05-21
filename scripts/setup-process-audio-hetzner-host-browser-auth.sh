@@ -77,7 +77,7 @@ exec /usr/bin/dbus-launch --exit-with-session \
     --no-default-browser-check \
     --password-store=basic \
     --disable-crash-reporter \
-    --remote-debugging-address=0.0.0.0 \
+    --remote-debugging-address=127.0.0.1 \
     --remote-debugging-port=9222 \
     --user-data-dir="$PROFILE_DIR" \
     --disable-features=Translate,MediaRouter \
@@ -100,6 +100,7 @@ REFRESH_CONTROL_DIR = "$REFRESH_CONTROL_DIR"
 USER_NAME = "$USER_NAME"
 COOKIE_DB_PATH = os.path.join(PROFILE_DIR, "Default", "Cookies")
 LOCK_PATH = os.path.join(REFRESH_CONTROL_DIR, ".refresh.lock")
+STALE_FILE_SECONDS = 60 * 60
 
 
 def cookie_stats():
@@ -173,10 +174,25 @@ def process_request(request_path: str):
         except FileNotFoundError:
             pass
 
+def cleanup_stale_files():
+    now = time.time()
+    for file_name in os.listdir(REFRESH_CONTROL_DIR):
+        if not (file_name.endswith(".request.json") or file_name.endswith(".result.json")):
+            continue
+        file_path = os.path.join(REFRESH_CONTROL_DIR, file_name)
+        try:
+            if now - os.stat(file_path).st_mtime > STALE_FILE_SECONDS:
+                os.remove(file_path)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     os.makedirs(REFRESH_CONTROL_DIR, exist_ok=True)
     while True:
+        cleanup_stale_files()
         request_files = sorted(
             file_name
             for file_name in os.listdir(REFRESH_CONTROL_DIR)

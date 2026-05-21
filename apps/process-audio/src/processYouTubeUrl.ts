@@ -6,7 +6,7 @@ import { Writable } from 'stream';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { mkdtemp, readFile, rm, stat, unlink, writeFile } from 'fs/promises';
+import { access, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'fs/promises';
 import { Database } from 'firebase-admin/database';
 import { GoogleAuth } from 'google-auth-library';
 import { createLoggerWithContext } from './WinstonLogger';
@@ -41,6 +41,24 @@ interface MediaUrlBindingDetails {
   host: string | null;
   boundIp: string | null;
   boundIpFamily: 'ipv4' | 'ipv6' | 'unknown' | null;
+}
+
+export interface YouTubeBrowserAuthHealth {
+  profileDirConfigured: boolean;
+  profileDir: string | null;
+  browser: 'chrome' | 'chromium';
+  cookiesDb: {
+    path: string | null;
+    exists: boolean;
+    mtimeMs: number | null;
+    size: number | null;
+  };
+  refreshControlDir: {
+    configured: boolean;
+    path: string | null;
+    exists: boolean;
+    writable: boolean;
+  };
 }
 
 /**
@@ -673,6 +691,49 @@ async function readBrowserCookieDbStats(): Promise<{ exists: boolean; mtimeMs: n
   } catch {
     return { exists: false, mtimeMs: null, size: null };
   }
+}
+
+export async function getYouTubeBrowserAuthHealth(): Promise<YouTubeBrowserAuthHealth> {
+  const profileDir = getLocalBrowserProfileDir();
+  const cookiesDbPath = getLocalBrowserCookiesDbPath();
+  const cookieStats = await readBrowserCookieDbStats();
+  const refreshControlDir = getBrowserRefreshControlDir();
+  let refreshControlExists = false;
+  let refreshControlWritable = false;
+
+  if (refreshControlDir) {
+    try {
+      const refreshStats = await stat(refreshControlDir);
+      refreshControlExists = refreshStats.isDirectory();
+    } catch {
+      refreshControlExists = false;
+    }
+
+    if (refreshControlExists) {
+      try {
+        await access(refreshControlDir, fs.constants.W_OK);
+        refreshControlWritable = true;
+      } catch {
+        refreshControlWritable = false;
+      }
+    }
+  }
+
+  return {
+    profileDirConfigured: !!profileDir,
+    profileDir: profileDir || null,
+    browser: getLocalBrowserProfileBrowser(),
+    cookiesDb: {
+      path: cookiesDbPath || null,
+      ...cookieStats,
+    },
+    refreshControlDir: {
+      configured: !!refreshControlDir,
+      path: refreshControlDir || null,
+      exists: refreshControlExists,
+      writable: refreshControlWritable,
+    },
+  };
 }
 
 function getBrowserFallbackProfileArchiveObject(): string {

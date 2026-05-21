@@ -350,7 +350,7 @@ bash scripts/verify-hetzner-ytdlp-smoke.sh staging
 bash scripts/verify-hetzner-ytdlp-smoke.sh production
 ```
 
-The smoke script now fails fast if the host browser auth stack is down. A passing `/healthz` is not enough; the shared Chrome profile and these systemd units must be active before `yt-dlp` verification is meaningful.
+The smoke script now fails fast if the host browser auth stack is down or the refresh watcher handshake is broken. A passing `/healthz` is not enough; the shared Chrome profile, refresh control directory, and these systemd units must be active before `yt-dlp` verification is meaningful.
 
 Optional Sentry smoke from a live container:
 

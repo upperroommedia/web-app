@@ -35,6 +35,7 @@ set -euo pipefail
 
 remote_dir="$1"
 profile_dir="${remote_dir}/state/shared-browser-profile/.config/google-chrome"
+refresh_control_dir="${remote_dir}/state/browser-refresh-control"
 required_units=(
   process-audio-browser-xvfb.service
   process-audio-browser-openbox.service
@@ -54,6 +55,45 @@ if [[ ! -f "${profile_dir}/Default/Cookies" ]]; then
   echo "Shared Chrome profile is missing ${profile_dir}/Default/Cookies" >&2
   exit 1
 fi
+
+if [[ ! -d "$refresh_control_dir" || ! -w "$refresh_control_dir" ]]; then
+  echo "Browser refresh control dir is missing or not writable: ${refresh_control_dir}" >&2
+  exit 1
+fi
+
+request_id="smoke-$(date +%s)-$$"
+request_path="${refresh_control_dir}/${request_id}.request.json"
+result_path="${refresh_control_dir}/${request_id}.result.json"
+trap 'rm -f "$request_path" "$result_path"' EXIT
+
+cat >"$request_path" <<JSON
+{"reason":"hetzner_ytdlp_smoke","requestId":"$request_id","createdAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+JSON
+
+deadline=$((SECONDS + 30))
+while [[ ! -f "$result_path" && $SECONDS -lt $deadline ]]; do
+  sleep 1
+done
+
+if [[ ! -f "$result_path" ]]; then
+  echo "Timed out waiting for browser refresh watcher result in ${refresh_control_dir}" >&2
+  exit 1
+fi
+
+python3 - "$result_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    result = json.load(handle)
+
+if not result.get("ok"):
+    raise SystemExit(f"Browser refresh watcher failed: {result}")
+
+after = result.get("after") or {}
+if not after.get("exists"):
+    raise SystemExit(f"Browser refresh watcher did not see a cookie DB after refresh: {result}")
+PY
 EOF
 
 json_output_file="$(mktemp)"

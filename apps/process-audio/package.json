@@ -12,6 +12,7 @@
     "dev": "just dev",
     "verify:youtube:routing": "NODE_ENV=development node scripts/verify-youtube-routing.js",
     "verify:youtube:url-normalization": "ts-node --project tsconfig.json scripts/verify-youtube-url-normalization.ts",
+    "verify:youtube:browser-auth-health": "ts-node --project tsconfig.json scripts/verify-youtube-browser-auth-health.ts",
     "verify:youtube:loop": "bash scripts/test-youtube-loop.sh",
     "verify:youtube:policy": "node scripts/verify-youtube-policy.js",
     "verify:alerts": "node scripts/verify-operational-alert-recipients.js"
