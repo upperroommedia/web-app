@@ -38,6 +38,15 @@ const getOrCreateSearchClient = (appId: string, apiKey: string): SearchClient =>
   return nextClient;
 };
 
+const getCallableErrorCode = (error: unknown): string | null => {
+  if (typeof error !== 'object' || error === null) {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+};
+
 export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
   const appId = process.env.NEXT_PUBLIC_ALGOLIA_APP_ID ?? null;
@@ -80,7 +89,17 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
           GenerateSecuredApiKeyInputType,
           GenerateSecuredApiKeyOutputType
         >('generatesecuredapikey');
-        const securedKey = await generateSecuredApiKey({ userId: user.uid });
+        let securedKey: GenerateSecuredApiKeyOutputType;
+        try {
+          securedKey = await generateSecuredApiKey({ userId: user.uid });
+        } catch (generateError) {
+          if (getCallableErrorCode(generateError) !== 'functions/unauthenticated') {
+            throw generateError;
+          }
+
+          await user.getIdToken(true);
+          securedKey = await generateSecuredApiKey({ userId: user.uid });
+        }
         if (!cancelled) {
           setApiKey(securedKey);
         }

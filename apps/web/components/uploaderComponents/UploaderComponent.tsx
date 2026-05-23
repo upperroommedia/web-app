@@ -269,7 +269,7 @@ const Uploader = (props: UploaderProps) => {
         const subtitlesFromBundle = await getSubtitlesFromBundle();
         setSubtitles(subtitlesFromBundle);
       } catch (error) {
-        console.error('Error loading subtitles from bundle, falling back to Firestore:', error);
+        console.warn('Error loading subtitles from bundle, falling back to Firestore:', error);
         // Fallback to manual fetch
         // Note: We can't use != filter here because Firestore requires inequality fields to be first in orderBy
         // Instead, we filter client-side after fetching
@@ -327,7 +327,8 @@ const Uploader = (props: UploaderProps) => {
       if (!sermonEdited && !isUploading) return;
       if (window.confirm(warningText)) return;
       router.events.emit('routeChangeError');
-      throw new Error('routeChange aborted.');
+      const routeAbortError = Object.assign(new Error('routeChange aborted.'), { cancelled: true });
+      throw routeAbortError;
     };
     window.addEventListener('beforeunload', handleWindowClose);
     router.events.on('routeChangeStart', handleBrowseAway);

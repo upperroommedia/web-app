@@ -1,5 +1,4 @@
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
-import { getAnalytics, isSupported } from 'firebase/analytics';
 import {
   getFirebaseAuthDomain,
   getFirebaseDatabaseUrl,
@@ -47,6 +46,5 @@ if (!apps.length) {
 } else {
   firebase = apps[0];
 }
-export const analytics = isSupported().then((value) => (value ? getAnalytics(firebase) : null));
 export default firebase as FirebaseApp;
 export * from 'firebase/app';

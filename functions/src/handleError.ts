@@ -1,5 +1,6 @@
 import { AxiosError, isAxiosError } from 'axios';
 import { CallableRequest, HttpsError } from 'firebase-functions/v2/https';
+import { SUBSPLASH_LOCK_BUSY_CODE } from './locks/lockTypes';
 import { emitOperationalAlert, hasOperationalAlertBeenEmitted } from './notifications/emitOperationalAlert';
 import { captureFunctionsExceptionAndFlush } from './sentry';
 
@@ -15,6 +16,7 @@ export interface HandleErrorOptions {
   summary?: string;
   context?: Record<string, unknown>;
   request?: CallableRequest<unknown>;
+  suppressReporting?: boolean;
 }
 
 type RetryAfterDetails = {
@@ -23,6 +25,21 @@ type RetryAfterDetails = {
 };
 
 const getAxiosStatus = (error: AxiosError): number | undefined => error.response?.status;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const hasDetailsCode = (error: unknown, code: string): boolean => {
+  if (!isRecord(error) || !isRecord(error.details)) {
+    return false;
+  }
+
+  return error.details.code === code;
+};
+
+const isExpectedOperationalError = (error: HttpsError): boolean => {
+  return error.code === 'aborted' && hasDetailsCode(error, SUBSPLASH_LOCK_BUSY_CODE);
+};
 
 const parseRetryAfter = (value: unknown): RetryAfterDetails => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -94,6 +111,15 @@ const toHttpsError = (error: unknown): HttpsError => {
       });
     }
 
+    if (typeof status === 'number' && status >= 500 && status < 600) {
+      return new HttpsError('unavailable', axiosError.message, {
+        code: 'UPSTREAM_UNAVAILABLE',
+        upstream_status: status,
+        ...retryAfter,
+        upstream,
+      });
+    }
+
     return new HttpsError('internal', axiosError.message, upstream);
   }
   if (error instanceof Error) {
@@ -127,6 +153,10 @@ const handleError = (error: unknown, options: HandleErrorOptions = {}): HttpsErr
     ...(triggeringUser && typeof options.context?.triggeringUser === 'undefined' ? { triggeringUser } : {}),
     ...(options.context ?? {}),
   };
+
+  if (options.suppressReporting || isExpectedOperationalError(httpsError)) {
+    return httpsError;
+  }
 
   if (!hasOperationalAlertBeenEmitted(error)) {
     void captureFunctionsExceptionAndFlush(error, {

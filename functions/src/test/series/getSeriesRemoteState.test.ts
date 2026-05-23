@@ -85,6 +85,7 @@ describe('getSeriesRemoteState', () => {
     expect(result.remoteOnlyItemCount).toBe(1);
     expect(result.trackedFirebaseItems).toBe(1);
     expect(result.remoteMembershipHash).toContain(remoteOnlyItem.id);
+    expect(result.mediaItemMembershipHash).toBe([remoteOnlyItem.id, trackedRemoteItem.id].sort().join('|'));
 
     const trackedItem = result.remoteItems.find((item) => item.mediaItemId === trackedRemoteItem.id);
     expect(trackedItem).toMatchObject({

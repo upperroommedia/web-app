@@ -16,6 +16,7 @@ import { runWithConcurrency } from './utils/runWithConcurrency';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
+import { createSeriesMediaItemMembershipHash } from './helpers/seriesRemoteState';
 
 type AddStatus = 'success' | 'error';
 
@@ -86,11 +87,6 @@ const normalizeMembershipHash = (expectedHash: string): string => {
   return normalized;
 };
 
-const toMembershipHash = (mediaItemIds: string[]): string => {
-  const normalized = Array.from(new Set(mediaItemIds.map((mediaItemId) => mediaItemId.trim()).filter(Boolean))).sort();
-  return normalized.length > 0 ? normalized.join('|') : 'empty';
-};
-
 const getErrorMessage = (error: unknown): string => {
   if (error && typeof error === 'object') {
     if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
@@ -103,6 +99,14 @@ const getErrorMessage = (error: unknown): string => {
   }
 
   return 'Unknown error';
+};
+
+const isExpectedMembershipConflict = (error: unknown): error is HttpsError => {
+  return (
+    error instanceof HttpsError &&
+    error.code === 'failed-precondition' &&
+    error.message === 'Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.'
+  );
 };
 
 const fetchRemoteSeriesMembership = async (
@@ -269,7 +273,9 @@ const bulkAddToSeries = onCall(
           async () => {
             const token = await authenticateSubsplash();
             const remoteMembershipBeforeAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
-            const remoteMembershipHash = toMembershipHash(Array.from(remoteMembershipBeforeAdds.keys()));
+            const remoteMembershipHash = createSeriesMediaItemMembershipHash(
+              Array.from(remoteMembershipBeforeAdds.keys()).map((id) => ({ id }))
+            );
             if (normalizedExpectedMembershipHash !== remoteMembershipHash) {
               throw new HttpsError(
                 'failed-precondition',
@@ -397,6 +403,9 @@ const bulkAddToSeries = onCall(
         );
       });
     } catch (err) {
+      if (isExpectedMembershipConflict(err)) {
+        throw err;
+      }
       throw handleError(err);
     }
   }

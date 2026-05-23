@@ -129,4 +129,99 @@ describe('handleError', () => {
       })
     );
   });
+
+  it('maps upstream 5xx responses to unavailable with upstream metadata', () => {
+    const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
+    const error = new AxiosError(
+      'Request failed with status code 502',
+      'ERR_BAD_RESPONSE',
+      undefined,
+      undefined,
+      {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: {
+          'retry-after': '5',
+        },
+        config: { headers: {} } as never,
+        data: {
+          message: 'upstream temporarily unavailable',
+        },
+      }
+    );
+
+    const normalized = handleError(error);
+
+    expect(normalized).toBeInstanceOf(HttpsError);
+    expect(normalized.code).toBe('unavailable');
+    expect(normalized.details).toMatchObject({
+      code: 'UPSTREAM_UNAVAILABLE',
+      upstream_status: 502,
+      retry_after_seconds: 5,
+      retry_after_ms: 5000,
+      upstream: {
+        message: 'upstream temporarily unavailable',
+      },
+    });
+    expect(sentrySpy).toHaveBeenCalledWith(error, {
+      tags: {
+        normalizedErrorCode: 'unavailable',
+      },
+      extra: {
+        normalizedErrorCode: 'unavailable',
+      },
+    });
+    expect(emitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          normalizedErrorCode: 'unavailable',
+        }),
+      })
+    );
+  });
+
+  it('can suppress reporting for caller-classified transient upstream failures', () => {
+    const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
+    const error = new AxiosError(
+      'Request failed with status code 503',
+      'ERR_BAD_RESPONSE',
+      undefined,
+      undefined,
+      {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: {},
+        config: { headers: {} } as never,
+        data: {
+          message: 'service unavailable',
+        },
+      }
+    );
+
+    const normalized = handleError(error, { suppressReporting: true });
+
+    expect(normalized).toBeInstanceOf(HttpsError);
+    expect(normalized.code).toBe('unavailable');
+    expect(sentrySpy).not.toHaveBeenCalled();
+    expect(emitSpy).not.toHaveBeenCalled();
+  });
+
+  it('treats Subsplash lock contention as an expected retry path', () => {
+    const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
+    const error = new HttpsError('aborted', 'Subsplash lock contention prevented this mutation.', {
+      code: 'SUBSPLASH_LOCK_BUSY',
+      locked_keys: ['series:series-123'],
+      wait_ms: 10000,
+      retry_after_ms: 1000,
+    });
+
+    const normalized = handleError(error);
+
+    expect(normalized).toBe(error);
+    expect(sentrySpy).not.toHaveBeenCalled();
+    expect(emitSpy).not.toHaveBeenCalled();
+  });
 });

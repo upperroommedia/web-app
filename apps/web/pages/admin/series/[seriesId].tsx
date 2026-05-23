@@ -85,6 +85,7 @@ import {
   parseLockBusyDetails,
 } from '../../../utils/callableConcurrency';
 import { canPublishSermonToSeries, SERIES_PUBLISH_BLOCKED_MESSAGE } from '../../../utils/seriesPublishUtils';
+import { canEditSermonMetadata } from '../../../utils/sermonEditing';
 import { reportHandledError, reportHandledMessage } from '../../../utils/reportHandledError';
 import { UPLOAD_TO_SUBSPLASH_INCOMING_DATA } from '@upperroom/contracts/uploadToSubsplash';
 import { ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType } from '@upperroom/contracts/reorderSeriesItems';
@@ -123,6 +124,14 @@ type InlineNotice = {
   severity: 'success' | 'info' | 'warning' | 'error';
   message: string;
 } | null;
+
+type SeriesPublishAttemptResult =
+  | { ok: true }
+  | { ok: false; error?: unknown };
+
+type PublishedOrderToken =
+  | { type: 'addition'; sermonId: string; mediaItemId: string | undefined }
+  | { type: 'remote'; mediaItemId: string };
 
 const cloneSeriesDisplayItems = (source: SeriesDisplayItem[]): SeriesDisplayItem[] =>
   source.map((item) => ({
@@ -274,6 +283,25 @@ const getErrorField = (error: unknown, field: 'code' | 'message'): string | unde
 
 const getErrorMessage = (error: unknown, fallbackMessage: string): string =>
   getErrorField(error, 'message') || fallbackMessage;
+
+const SERIES_REMOTE_MEMBERSHIP_CHANGED_MESSAGE =
+  'Series membership changed in Subsplash. Refresh the series and retry.';
+
+const isExpectedSeriesManagementError = (error: unknown): boolean => {
+  if (parseLockBusyDetails(error)) {
+    return true;
+  }
+
+  const message = getErrorMessage(error, '');
+  return (
+    message.includes('cannot be added while audio is queued or processing') ||
+    message.includes('cannot be added to a series while audio is queued or processing') ||
+    message.includes('You do not have permission to add') ||
+    message.includes('You do not have permission to update this series') ||
+    message === 'Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.' ||
+    message === SERIES_REMOTE_MEMBERSHIP_CHANGED_MESSAGE
+  );
+};
 
 interface SortableItemProps {
   item: SeriesDisplayItem;
@@ -886,6 +914,19 @@ const SeriesDetailsPage = () => {
 
   const isAdmin = user?.isAdmin() ?? false;
 
+  const fetchRemoteSeriesState = useCallback(async (): Promise<GetSeriesRemoteStateOutputType> => {
+    if (!seriesId) {
+      throw new Error('Series id is required to fetch remote state.');
+    }
+
+    const getSeriesRemoteStateFunction = createFunctionV2<{ firestoreSeriesId: string }, GetSeriesRemoteStateOutputType>(
+      'getseriesremotestate'
+    );
+    return getSeriesRemoteStateFunction({
+      firestoreSeriesId: seriesId,
+    });
+  }, [seriesId]);
+
   // Fetch series and items
   const fetchSeriesData = useCallback(async () => {
     if (!seriesId) return;
@@ -910,10 +951,6 @@ const SeriesDetailsPage = () => {
         setLoading(false);
         return;
       }
-
-      const getSeriesRemoteStateFunction = createFunctionV2<{ firestoreSeriesId: string }, GetSeriesRemoteStateOutputType>(
-        'getseriesremotestate'
-      );
 
       // Fetch series items
       const itemsQuery = query(
@@ -953,9 +990,7 @@ const SeriesDetailsPage = () => {
       let nextRemoteSeriesState: GetSeriesRemoteStateOutputType | null = null;
       if (seriesData.subsplashId) {
         try {
-          nextRemoteSeriesState = await getSeriesRemoteStateFunction({
-            firestoreSeriesId: seriesId,
-          });
+          nextRemoteSeriesState = await fetchRemoteSeriesState();
         } catch (remoteError) {
           console.error('Error fetching remote series state:', remoteError);
         }
@@ -978,7 +1013,7 @@ const SeriesDetailsPage = () => {
     }
 
     setLoading(false);
-  }, [seriesId, user?.uid, isAdmin]);
+  }, [fetchRemoteSeriesState, seriesId, user?.uid, isAdmin]);
 
   useEffect(() => {
     fetchSeriesData();
@@ -1042,40 +1077,77 @@ const SeriesDetailsPage = () => {
     []
   );
 
-  const getPublishedRemoteMembership = useCallback(
-    (sourceItems: SeriesDisplayItem[]) => (
-      getRemoteDisplayItems(sourceItems)
-        .filter((item) => item.remoteStatus === 'published' || item.publishedToSubsplash)
-        .map((item) => item.remoteMediaItemId)
-        .filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId))
-    ),
-    [getRemoteDisplayItems]
+  const createFreshRemoteMembershipHash = useCallback(
+    (remoteState: GetSeriesRemoteStateOutputType): string =>
+      remoteState.mediaItemMembershipHash
+      || createPublishedMembershipHash(remoteState.remoteItems.map((item) => item.mediaItemId)),
+    []
   );
 
   const getPublishedRemoteOrderWithAdditions = useCallback(
-    (sourceItems: SeriesDisplayItem[], additions: Map<string, string>) => {
-      const encounteredAdditionSermonIds = new Set<string>();
-      const orderedMediaItemIds = sourceItems
-        .filter((item) => {
-          if (item.sermonId && additions.has(item.sermonId)) {
-            return true;
-          }
-          return item.remoteStatus === 'published' || item.publishedToSubsplash;
-        })
-        .map((item) => {
-          if (item.sermonId && additions.has(item.sermonId)) {
-            encounteredAdditionSermonIds.add(item.sermonId);
-            return additions.get(item.sermonId);
-          }
-          return item.remoteMediaItemId;
-        })
-        .filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId));
+    (
+      sourceItems: SeriesDisplayItem[],
+      remoteState: GetSeriesRemoteStateOutputType,
+      additions: Map<string, string>
+    ) => {
+      const freshPublishedOrder = remoteState.remoteItems
+        .filter((item) => item.remoteStatus === 'published')
+        .map((item) => item.mediaItemId);
+      const remotePublishedMediaItemIds = new Set(freshPublishedOrder);
+      const orderedMediaItemIds: string[] = [];
+      const seenMediaItemIds = new Set<string>();
+      const additionsByAnchor = new Map<string, string[]>();
+      const trailingAdditions: string[] = [];
+      const anchoredAdditionSermonIds = new Set<string>();
 
-      for (const [sermonId, mediaItemId] of additions.entries()) {
-        if (!encounteredAdditionSermonIds.has(sermonId) && mediaItemId) {
-          orderedMediaItemIds.push(mediaItemId);
+      const appendMediaItemId = (mediaItemId: string | undefined): void => {
+        if (!mediaItemId || seenMediaItemIds.has(mediaItemId)) {
+          return;
         }
-      }
+        orderedMediaItemIds.push(mediaItemId);
+        seenMediaItemIds.add(mediaItemId);
+      };
+
+      const sourceTokens = sourceItems
+        .map((item): PublishedOrderToken | null => {
+          if (item.sermonId && additions.has(item.sermonId)) {
+            return { type: 'addition' as const, sermonId: item.sermonId, mediaItemId: additions.get(item.sermonId) };
+          }
+          if (item.remoteMediaItemId && remotePublishedMediaItemIds.has(item.remoteMediaItemId)) {
+            return { type: 'remote' as const, mediaItemId: item.remoteMediaItemId };
+          }
+          return null;
+        })
+        .filter((token): token is PublishedOrderToken => token !== null);
+
+      sourceTokens.forEach((token, index) => {
+        if (token.type !== 'addition' || !token.mediaItemId) {
+          return;
+        }
+        anchoredAdditionSermonIds.add(token.sermonId);
+        const anchor = sourceTokens
+          .slice(index + 1)
+          .find((candidate) => candidate.type === 'remote' && remotePublishedMediaItemIds.has(candidate.mediaItemId));
+        if (anchor?.type === 'remote') {
+          const anchoredAdditions = additionsByAnchor.get(anchor.mediaItemId) || [];
+          anchoredAdditions.push(token.mediaItemId);
+          additionsByAnchor.set(anchor.mediaItemId, anchoredAdditions);
+          return;
+        }
+        trailingAdditions.push(token.mediaItemId);
+      });
+
+      additions.forEach((mediaItemId, sermonId) => {
+        if (!anchoredAdditionSermonIds.has(sermonId)) {
+          trailingAdditions.push(mediaItemId);
+        }
+      });
+
+      freshPublishedOrder.forEach((mediaItemId) => {
+        additionsByAnchor.get(mediaItemId)?.forEach(appendMediaItemId);
+        appendMediaItemId(mediaItemId);
+      });
+      trailingAdditions.forEach(appendMediaItemId);
 
       return orderedMediaItemIds;
     },
@@ -1217,8 +1289,8 @@ const SeriesDetailsPage = () => {
 
   const publishItemToSeries = useCallback(async (
     seriesItem: SeriesDisplayItem,
-    options?: { suppressAlert?: boolean }
-  ): Promise<boolean> => {
+    options?: { suppressAlert?: boolean; orderSourceItems?: SeriesDisplayItem[] }
+  ): Promise<SeriesPublishAttemptResult> => {
     if (!seriesItem.sermon || !seriesItem.sermonId) {
       if (!options?.suppressAlert) {
         setPageNotice({
@@ -1226,7 +1298,7 @@ const SeriesDetailsPage = () => {
           message: 'Sermon details are missing for this item. Refresh and retry.',
         });
       }
-      return false;
+      return { ok: false };
     }
 
     if (!canPublishSermonToSeries(seriesItem.sermon)) {
@@ -1236,17 +1308,27 @@ const SeriesDetailsPage = () => {
           message: SERIES_PUBLISH_BLOCKED_MESSAGE,
         });
       }
-      return false;
+      return { ok: false };
     }
 
     setPublishingItemId(seriesItem.id);
     try {
       const seriesSubsplashId = await ensureSeriesSubsplashId();
       const mediaItemId = await uploadSermonToSubsplash(seriesItem.sermon);
-      const currentPublishedMembership = getPublishedRemoteMembership(items);
-      const expectedPublishedMembershipHash = createPublishedMembershipHash(currentPublishedMembership);
+      const latestRemoteSeriesState = await fetchRemoteSeriesState();
+      if (
+        remoteSeriesState &&
+        latestRemoteSeriesState.remoteMembershipHash !== remoteSeriesState.remoteMembershipHash
+      ) {
+        throw new Error(SERIES_REMOTE_MEMBERSHIP_CHANGED_MESSAGE);
+      }
+      const expectedPublishedMembershipHash = createFreshRemoteMembershipHash(latestRemoteSeriesState);
       const additions = new Map<string, string>([[seriesItem.sermonId, mediaItemId]]);
-      const publishedItemOrder = getPublishedRemoteOrderWithAdditions(items, additions);
+      const publishedItemOrder = getPublishedRemoteOrderWithAdditions(
+        options?.orderSourceItems ?? items,
+        latestRemoteSeriesState,
+        additions
+      );
       const intentFingerprint = [
         `${seriesItem.sermonId}:${mediaItemId}`,
         `order:${publishedItemOrder.join(',')}`,
@@ -1282,25 +1364,31 @@ const SeriesDetailsPage = () => {
         });
       }
 
-      return true;
+      return { ok: true };
     } catch (err: unknown) {
-      console.error('Error publishing series item:', err);
+      if (isExpectedSeriesManagementError(err)) {
+        console.warn('Series item publish was blocked:', err);
+      } else {
+        console.error('Error publishing series item:', err);
+      }
       if (!options?.suppressAlert) {
         setPageNotice({
           severity: 'error',
           message: `Error publishing item to series: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`,
         });
       }
-      return false;
+      return { ok: false, error: err };
     } finally {
       setPublishingItemId(null);
     }
   }, [
+    createFreshRemoteMembershipHash,
     ensureSeriesSubsplashId,
+    fetchRemoteSeriesState,
     fetchSeriesData,
-    getPublishedRemoteMembership,
     getPublishedRemoteOrderWithAdditions,
     items,
+    remoteSeriesState,
     seriesId,
     syncSeriesItemPublishedState,
     uploadSermonToSubsplash,
@@ -1640,6 +1728,20 @@ const SeriesDetailsPage = () => {
 
       const latestSermon = { ...sermonDoc.data(), id: sermon.id } as Sermon;
       const previousSeriesId = latestSermon.seriesId ?? null;
+      const existingSeriesItemDoc = await getDoc(doc(firestore, `series/${seriesId}/seriesItems`, latestSermon.id));
+      if (existingSeriesItemDoc.exists()) {
+        await fetchSeriesData();
+        return true;
+      }
+      if (previousSeriesId && previousSeriesId !== seriesId) {
+        throw new Error(`${latestSermon.title} is already assigned to another series. Refresh and retry.`);
+      }
+      if (!isAdmin && latestSermon.uploaderId !== user?.uid) {
+        throw new Error('You do not have permission to add this sermon to the series.');
+      }
+      if (!canEditSermonMetadata(latestSermon)) {
+        throw new Error('This sermon cannot be added to a series while audio is queued or processing.');
+      }
 
       const seriesDoc = await getDoc(doc(firestore, 'series', seriesId));
       if (!seriesDoc.exists()) {
@@ -1655,6 +1757,9 @@ const SeriesDetailsPage = () => {
         alert('This series no longer exists. Redirecting to series list.');
         router.push('/admin/series');
         return false;
+      }
+      if (!isAdmin && seriesDoc.data()?.ownerId !== user?.uid) {
+        throw new Error('You do not have permission to update this series.');
       }
 
       const seriesItemData: Partial<SeriesItem> = {
@@ -1687,10 +1792,16 @@ const SeriesDetailsPage = () => {
 
       // Keep state fully consistent: if sermon is already in Subsplash, immediately publish it to series too.
       if (isSermonPublishedToSubsplash(latestSermon)) {
-        const publishSucceeded = await publishItemToSeries(newItem, { suppressAlert: true });
-        if (!publishSucceeded) {
+        const publishResult = await publishItemToSeries(newItem, {
+          suppressAlert: true,
+          orderSourceItems: [newItem, ...items],
+        });
+        if (!publishResult.ok) {
           await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, latestSermon.id));
           await updateDoc(doc(firestore, 'sermons', latestSermon.id), { seriesId: previousSeriesId });
+          if (publishResult.error) {
+            throw publishResult.error;
+          }
           throw new Error(
             `${latestSermon.title} is already published to Subsplash, but automatic series publish failed. The sermon was not added to this series.`
           );
@@ -1701,19 +1812,23 @@ const SeriesDetailsPage = () => {
 
       return true;
     } catch (err: unknown) {
-      console.error('Error adding item:', err);
-      reportHandledError(err, {
-        area: 'admin-series-details',
-        action: 'add-item',
-        extras: {
-          seriesId,
-          sermonId: sermon.id,
-        },
-      });
+      if (isExpectedSeriesManagementError(err)) {
+        console.warn('Series item add was blocked:', err);
+      } else {
+        console.error('Error adding item:', err);
+        reportHandledError(err, {
+          area: 'admin-series-details',
+          action: 'add-item',
+          extras: {
+            seriesId,
+            sermonId: sermon.id,
+          },
+        });
+      }
       alert(`Error adding item: ${getErrorMessage(err, 'Unknown error')}`);
       return false;
     }
-  }, [fetchSeriesData, isSermonPublishedToSubsplash, items, publishItemToSeries, router, seriesId]);
+  }, [fetchSeriesData, isAdmin, isSermonPublishedToSubsplash, items, publishItemToSeries, router, seriesId, user?.uid]);
 
   const addSelectedSermons = useCallback(async () => {
     if (isAddingSelectedSermons) {
@@ -1729,6 +1844,7 @@ const SeriesDetailsPage = () => {
     }
 
     setIsAddingSelectedSermons(true);
+    let localAdditionsForRollback: Array<{ sermonId: string; previousSeriesId: string | null }> = [];
     try {
       if (sermonsToAdd.length === 1) {
         setActiveAddingSermonId(sermonsToAdd[0].id);
@@ -1756,16 +1872,76 @@ const SeriesDetailsPage = () => {
         router.push('/admin/series');
         return;
       }
+      if (!isAdmin && seriesDoc.data()?.ownerId !== user?.uid) {
+        throw new Error('You do not have permission to update this series.');
+      }
+
+      const latestSermonDocs = await Promise.all(
+        sermonsToAdd.map(async (sermon) => {
+          const sermonSnapshot = await getDoc(doc(firestore, 'sermons', sermon.id));
+          if (!sermonSnapshot.exists()) {
+            throw new Error(`${sermon.title} no longer exists. Refresh and retry.`);
+          }
+          return { ...sermonSnapshot.data(), id: sermon.id } as Sermon;
+        })
+      );
+      const existingItemIds = new Set(items.map((item) => item.sermonId).filter((itemId): itemId is string => Boolean(itemId)));
+      const existingSeriesItemSnapshots = await Promise.all(
+        latestSermonDocs.map((sermon) => getDoc(doc(firestore, `series/${seriesId}/seriesItems`, sermon.id)))
+      );
+      const freshExistingItemIds = new Set(
+        existingSeriesItemSnapshots
+          .filter((snapshot) => snapshot.exists())
+          .map((snapshot) => snapshot.id)
+      );
+      const alreadyAssignedSermon = latestSermonDocs.find((sermon) => Boolean(sermon.seriesId && sermon.seriesId !== seriesId));
+      if (alreadyAssignedSermon) {
+        throw new Error(`${alreadyAssignedSermon.title} is already assigned to another series. Refresh and retry.`);
+      }
+
+      const freshSermonsToAdd = latestSermonDocs.filter((sermon) =>
+        !existingItemIds.has(sermon.id) &&
+        !freshExistingItemIds.has(sermon.id) &&
+        sermon.seriesId !== seriesId
+      );
+
+      if (freshSermonsToAdd.length === 0) {
+        setSermonSearchQuery('');
+        setSelectedSermonIds(new Set());
+        setAddItemPopup(false);
+        return;
+      }
+
+      const blockedSermon = freshSermonsToAdd.find((sermon) =>
+        (!isAdmin && sermon.uploaderId !== user?.uid) || !canEditSermonMetadata(sermon)
+      );
+      if (blockedSermon) {
+        throw new Error(
+          !canEditSermonMetadata(blockedSermon)
+            ? `${blockedSermon.title} cannot be added while audio is queued or processing.`
+            : `You do not have permission to add ${blockedSermon.title} to this series.`
+        );
+      }
 
       const currentMaxPosition = items.length > 0
         ? Math.max(...items.map((item) => item.position))
         : 0;
 
-      const additions = sermonsToAdd.map((sermon, index, source) => ({
+      const additions = freshSermonsToAdd.map((sermon, index, source) => ({
         sermon,
         previousSeriesId: sermon.seriesId ?? null,
         position: currentMaxPosition + (source.length - index),
       }));
+
+      const willPublishExistingSubsplashItems = additions.some(({ sermon }) => isSermonPublishedToSubsplash(sermon));
+      const latestRemoteSeriesState = willPublishExistingSubsplashItems ? await fetchRemoteSeriesState() : null;
+      if (
+        latestRemoteSeriesState &&
+        remoteSeriesState &&
+        createFreshRemoteMembershipHash(latestRemoteSeriesState) !== createFreshRemoteMembershipHash(remoteSeriesState)
+      ) {
+        throw new Error(SERIES_REMOTE_MEMBERSHIP_CHANGED_MESSAGE);
+      }
 
       const MAX_SERMONS_PER_BATCH = 200;
       for (let index = 0; index < additions.length; index += MAX_SERMONS_PER_BATCH) {
@@ -1790,6 +1966,10 @@ const SeriesDetailsPage = () => {
 
         await batch.commit();
       }
+      localAdditionsForRollback = additions.map(({ sermon, previousSeriesId }) => ({
+        sermonId: sermon.id,
+        previousSeriesId,
+      }));
 
       const newItems = additions.map(({ sermon, position }) => createLocalDisplayItem({
         id: sermon.id,
@@ -1818,15 +1998,19 @@ const SeriesDetailsPage = () => {
         }
 
         const seriesSubsplashId = await ensureSeriesSubsplashId();
+        const remoteStateForPublish = latestRemoteSeriesState ?? await fetchRemoteSeriesState();
         const reorderedItems = [...orderedNewItems, ...items];
-        const publishedItemOrder = getPublishedRemoteOrderWithAdditions(reorderedItems, mediaItemIdBySermonId);
+        const publishedItemOrder = getPublishedRemoteOrderWithAdditions(
+          reorderedItems,
+          remoteStateForPublish,
+          mediaItemIdBySermonId
+        );
 
         if (publishedItemOrder.length === 0) {
           throw new Error('Cannot publish to series because one or more published sermons are missing Subsplash media IDs.');
         }
 
-        const currentPublishedMembership = getPublishedRemoteMembership(items);
-        const expectedPublishedMembershipHash = createPublishedMembershipHash(currentPublishedMembership);
+        const expectedPublishedMembershipHash = createFreshRemoteMembershipHash(remoteStateForPublish);
 
         const bulkAdds = publishedCandidates.map((item) => {
           const mediaItemId = item.sermonId ? mediaItemIdBySermonId.get(item.sermonId) : undefined;
@@ -1930,6 +2114,7 @@ const SeriesDetailsPage = () => {
           return;
         }
 
+        localAdditionsForRollback = [];
         const publishBatch = writeBatch(firestore);
         const publishedSermonIds = new Set<string>();
         bulkResult.results.forEach((result) => {
@@ -1947,8 +2132,10 @@ const SeriesDetailsPage = () => {
           );
         });
         await publishBatch.commit();
+        localAdditionsForRollback = [];
       }
 
+      localAdditionsForRollback = [];
       if (orderedNewItems.length > 0) {
         setSermonSearchQuery('');
         setSelectedSermonIds(new Set());
@@ -1965,7 +2152,26 @@ const SeriesDetailsPage = () => {
       }
       await fetchSeriesData();
     } catch (err: unknown) {
-      console.error('Error adding selected sermons:', err);
+      if (localAdditionsForRollback.length > 0) {
+        try {
+          const rollbackBatch = writeBatch(firestore);
+          localAdditionsForRollback.forEach(({ sermonId, previousSeriesId }) => {
+            rollbackBatch.delete(doc(firestore, `series/${seriesId}/seriesItems`, sermonId));
+            rollbackBatch.update(doc(firestore, 'sermons', sermonId), {
+              seriesId: previousSeriesId,
+            });
+          });
+          await rollbackBatch.commit();
+        } catch (rollbackError) {
+          console.error('Failed to roll back local series additions after publish failure:', rollbackError);
+        }
+      }
+
+      if (isExpectedSeriesManagementError(err)) {
+        console.warn('Selected sermon add was blocked:', err);
+      } else {
+        console.error('Error adding selected sermons:', err);
+      }
       setAddItemNotice({
         severity: 'error',
         message: `Error adding selected sermons: ${getLockBusyMessage(err, getErrorMessage(err, 'Unknown error'))}`,
@@ -1977,17 +2183,20 @@ const SeriesDetailsPage = () => {
   }, [
     addItemToSeries,
     availableSermons,
+    createFreshRemoteMembershipHash,
     ensureSeriesSubsplashId,
+    fetchRemoteSeriesState,
     isAddingSelectedSermons,
     isSermonPublishedToSubsplash,
+    isAdmin,
     items,
     router,
     selectedSermonIds,
     seriesId,
     fetchSeriesData,
-    getPublishedRemoteMembership,
     getPublishedRemoteOrderWithAdditions,
     uploadSermonToSubsplash,
+    user?.uid,
   ]);
 
   // Delete series

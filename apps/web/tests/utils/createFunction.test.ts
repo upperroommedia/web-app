@@ -92,4 +92,86 @@ describe('createFunction helpers', () => {
     expect(startSpanMock).toHaveBeenCalled();
     expect(captureExceptionMock).toHaveBeenCalledWith(error);
   });
+
+  it('does not capture expected bulkaddtoseries membership conflicts', async () => {
+    const error = Object.assign(
+      new Error('Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.'),
+      { code: 'functions/failed-precondition' }
+    );
+    const callable = jest.fn().mockRejectedValue(error);
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ id: string }, { ok: boolean }>('bulkaddtoseries');
+
+    await expect(invoke({ id: 'sermon-123' })).rejects.toBe(error);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('does not capture expected Subsplash lock contention callable errors', async () => {
+    const error = Object.assign(new Error('Subsplash lock contention prevented this mutation.'), {
+      code: 'functions/aborted',
+      details: {
+        code: 'SUBSPLASH_LOCK_BUSY',
+        locked_keys: ['series:series-123'],
+        wait_ms: 10000,
+        retry_after_ms: 1000,
+      },
+    });
+    const callable = jest.fn().mockRejectedValue(error);
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ id: string }, { ok: boolean }>('reorderseriesitems');
+
+    await expect(invoke({ id: 'series-123' })).rejects.toBe(error);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('does not capture optional getusersbyids display lookup timeouts', async () => {
+    const error = Object.assign(new Error('deadline exceeded'), {
+      code: 'functions/deadline-exceeded',
+    });
+    const callable = jest.fn().mockRejectedValue(error);
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ uids: string[] }, { users: unknown[] }>('getusersbyids');
+
+    await expect(invoke({ uids: ['user-123'] })).rejects.toBe(error);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('does not capture generate secured key unauthenticated session errors', async () => {
+    const error = Object.assign(new Error('unauthenticated'), {
+      code: 'functions/unauthenticated',
+    });
+    const callable = jest.fn().mockRejectedValue(error);
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunction } = await import('../../utils/createFunction');
+    const invoke = createFunction<{ userId: string }, string>('generatesecuredapikey');
+
+    await expect(invoke({ userId: 'user-123' })).rejects.toBe(error);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('does not capture transient upstream publish callable failures', async () => {
+    const error = Object.assign(new Error('upstream unavailable'), {
+      code: 'functions/unavailable',
+    });
+    const callable = jest.fn().mockRejectedValue(error);
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ audioStoragePath: string }, { soundCloudTrackId: string }>('uploadtosoundcloud');
+
+    await expect(invoke({ audioStoragePath: 'audio/sermon.mp3' })).rejects.toBe(error);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
 });

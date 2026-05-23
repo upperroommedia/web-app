@@ -193,7 +193,7 @@ export class BundleManager<T> {
       // Clear loading promise on error
       this.loadingPromise = null;
 
-      console.error(`Error loading ${this.config.displayName} from bundle:`, error);
+      console.warn(`Error loading ${this.config.displayName} from bundle:`, error);
 
       // Fallback to cached data if available
       if (this.cachedData) {
@@ -208,7 +208,7 @@ export class BundleManager<T> {
           this.cachedData = cachedData;
           return cachedData;
         } catch (parseError) {
-          console.error(`Error parsing cached ${this.config.displayName} from localStorage:`, parseError);
+          console.warn(`Error parsing cached ${this.config.displayName} from localStorage:`, parseError);
           localStorage.removeItem(this.dataCacheKey);
         }
       }

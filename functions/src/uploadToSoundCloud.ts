@@ -2,6 +2,7 @@ import handleError from './handleError';
 import { normalizeSoundCloudApiError, uploadTrack } from './soundcloudClient';
 import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { AxiosError, isAxiosError } from 'axios';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
@@ -23,6 +24,12 @@ export type UploadToSoundCloudReturnType = {
   soundCloudTrackId: string;
   soundCloudTrackUrl?: string;
 };
+
+const isTransientUpstreamError = (error: unknown): error is AxiosError =>
+  isAxiosError(error) &&
+  typeof error.response?.status === 'number' &&
+  error.response.status >= 500 &&
+  error.response.status < 600;
 
 const uploadToSoundCloudCall = onCall(
   {
@@ -87,6 +94,20 @@ const uploadToSoundCloudCall = onCall(
           },
         });
         throw error;
+      }
+
+      if (isTransientUpstreamError(error)) {
+        logger.warn('uploadToSoundCloud transient upstream failure', {
+          status: error.response?.status,
+          audioStoragePath: data.audioStoragePath,
+        });
+        throw handleError(error, {
+          suppressReporting: true,
+          context: {
+            functionName: 'uploadToSoundCloud',
+            audioStoragePath: data.audioStoragePath,
+          },
+        });
       }
 
       await emitOperationalAlert({

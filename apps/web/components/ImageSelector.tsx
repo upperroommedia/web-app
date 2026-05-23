@@ -164,15 +164,6 @@ const ImageSelector = (props: {
           });
         });
       } else {
-        reportHandledMessage('An image with this name already exists.', {
-          area: 'image-selector',
-          action: 'save-image-duplicate-name',
-          level: 'warning',
-          extras: {
-            name,
-            selectedImageType: props.selectedImageFromSpeakerDetails.type,
-          },
-        });
         alert('An image with this name already exists, please use a different name');
         setImageUploading(false);
       }

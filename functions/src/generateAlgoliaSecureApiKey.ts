@@ -43,9 +43,14 @@ const generateSecuredApiKey = onCall(
       throw handleError(error, {
         alertCode: 'GENERATE_ALGOLIA_SECURED_KEY_FAILURE',
         summary: 'generateAlgoliaSecureApiKey failed while generating a restricted API key.',
+        request,
         context: {
           functionName: 'generateSecuredApiKey',
           userId: request.data.userId,
+          hasAlgoliaAppId: Boolean(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID?.trim() || process.env.ALGOLIA_APP_ID?.trim()),
+          hasAlgoliaSearchApiKey: Boolean(
+            process.env.ALGOLIA_SEARCH_API_KEY?.trim() || process.env.NEXT_PUBLIC_ALGOLIA_API_KEY?.trim()
+          ),
         },
       });
     }

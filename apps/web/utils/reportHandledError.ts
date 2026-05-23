@@ -15,10 +15,51 @@ type HandledErrorContext = {
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const getErrorCode = (value: unknown): string | null => {
+  if (!isObjectRecord(value)) {
+    return null;
+  }
+
+  const code = value.code;
+  return typeof code === 'string' && code.trim().length > 0 ? code.trim() : null;
+};
+
+const getErrorMessage = (value: unknown): string => {
+  if (value instanceof Error) {
+    return value.message;
+  }
+
+  if (!isObjectRecord(value)) {
+    return '';
+  }
+
+  const message = value.message;
+  return typeof message === 'string' ? message : '';
+};
+
+const isLockBusyError = (value: unknown): boolean =>
+  (
+    getErrorCode(value) === 'functions/aborted' &&
+    isObjectRecord(value) &&
+    isObjectRecord(value.details) &&
+    value.details.code === 'SUBSPLASH_LOCK_BUSY'
+  ) ||
+  getErrorMessage(value) === 'Subsplash lock contention prevented this mutation.';
+
+const isFirebaseInstallationsNoise = (value: unknown): boolean => {
+  const code = getErrorCode(value);
+  const message = getErrorMessage(value);
+  return code === 'installations/request-failed' || message.includes('installations/request-failed');
+};
+
 const shouldSkipConsoleCapture = (args: unknown[]): boolean => {
   const [firstArg] = args;
 
-  return typeof firstArg === 'string' && FIREBASE_LOGGER_PATTERN.test(firstArg);
+  return (
+    (typeof firstArg === 'string' && FIREBASE_LOGGER_PATTERN.test(firstArg)) ||
+    args.some(isLockBusyError) ||
+    args.some(isFirebaseInstallationsNoise)
+  );
 };
 
 const toError = (error: unknown, fallbackMessage: string): Error => {

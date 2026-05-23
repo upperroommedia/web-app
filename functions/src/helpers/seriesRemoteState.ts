@@ -20,6 +20,11 @@ const createRemoteMembershipHash = (remoteItems: Array<{ id: string; status: str
     .join('|');
 };
 
+const createMediaItemMembershipHash = (remoteItems: Array<{ id: string }>): string => {
+  const normalized = Array.from(new Set(remoteItems.map((item) => item.id.trim()).filter(Boolean))).sort();
+  return normalized.length > 0 ? normalized.join('|') : 'empty';
+};
+
 const compareRemoteItems = (
   left: { position: number | null; updated_at?: string; id: string },
   right: { position: number | null; updated_at?: string; id: string }
@@ -132,6 +137,7 @@ export const loadSeriesRemoteState = async (
     firestoreSeriesId,
     subsplashSeriesId,
     remoteMembershipHash: createRemoteMembershipHash(remoteItemsSorted),
+    mediaItemMembershipHash: createMediaItemMembershipHash(remoteItemsSorted),
     totalRemoteItems: remoteItems.length,
     trackedFirebaseItems: remoteItems.filter((item) => item.isTrackedInFirebase).length,
     remoteOnlyItemCount: remoteItems.filter((item) => item.isSubsplashOnlyPlaceholder).length,
@@ -141,3 +147,4 @@ export const loadSeriesRemoteState = async (
 };
 
 export const createSeriesRemoteMembershipHash = createRemoteMembershipHash;
+export const createSeriesMediaItemMembershipHash = createMediaItemMembershipHash;

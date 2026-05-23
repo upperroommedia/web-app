@@ -8,7 +8,9 @@ const CustomErrorComponent: NextPage<ErrorProps> = (props) => {
 };
 
 CustomErrorComponent.getInitialProps = async (contextData) => {
-  await Sentry.captureUnderscoreErrorException(contextData);
+  if (contextData.err) {
+    await Sentry.captureUnderscoreErrorException(contextData);
+  }
   return Error.getInitialProps(contextData);
 };
 

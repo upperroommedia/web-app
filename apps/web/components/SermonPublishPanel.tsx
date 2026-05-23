@@ -515,7 +515,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
               updatedAtMillis: Date.now(),
             },
     }).catch((error) => {
-      console.error('Failed to persist sermon publish activity', {
+      console.warn('Failed to persist sermon publish activity', {
         sermonId: sermon.id,
         error,
       });

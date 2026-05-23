@@ -572,14 +572,18 @@ const applyRemoveOldestMutation = async ({
         finalRows: summarizeSubsplashRows(finalRows),
       });
 
-      const healedRowsSnapshot = await patchListRows(listId, visibleRowsAfterDelete, token);
+      const compactedFinalRows = finalRows.slice(0, visibleRowsAfterDelete.length);
+      const compactedVisibleRowsBeforeInsert = compactedFinalRows.filter((row) => row.id);
+
+      const healedRowsSnapshot = await patchListRows(listId, compactedVisibleRowsBeforeInsert, token);
       listDebugLog('addToList.processListStep.removeOldest.hiddenCapacityRetry.healedVisibleRows', {
         listId,
         itemId,
+        compactedFinalRows: summarizeSubsplashRows(compactedFinalRows),
         healedRowsSnapshot: summarizeSubsplashRows(healedRowsSnapshot),
       });
 
-      finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+      finalRowsSnapshot = await patchListRows(listId, compactedFinalRows, token);
       listDebugLog('addToList.processListStep.removeOldest.hiddenCapacityRetry.complete', {
         listId,
         itemId,

@@ -1,6 +1,6 @@
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
-import axios, { AxiosResponse } from 'axios';
+import axios, { AxiosError, AxiosResponse, isAxiosError } from 'axios';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { ISpeaker } from '@upperroom/shared/types/Speaker';
 import { ImageType } from '@upperroom/shared/types/Image';
@@ -49,6 +49,12 @@ const transcodeAudio = async (audioSrc: string, audioId: string, bearerToken: st
   const axiosConfig = createAxiosConfig('https://core.subsplash.com/transcoder/v1/jobs', bearerToken, 'POST', data);
   return await axios(axiosConfig);
 };
+
+const isTransientUpstreamError = (error: unknown): error is AxiosError =>
+  isAxiosError(error) &&
+  typeof error.response?.status === 'number' &&
+  error.response.status >= 500 &&
+  error.response.status < 600;
 
 const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts }, async (request: CallableRequest<UPLOAD_TO_SUBSPLASH_INCOMING_DATA>): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
@@ -140,6 +146,22 @@ const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts },
       )
     );
   } catch (error) {
+    if (isTransientUpstreamError(error)) {
+      logger.warn('uploadToSubsplash transient upstream failure', {
+        status: error.response?.status,
+        operationKey,
+        lockKey,
+      });
+      throw handleError(error, {
+        suppressReporting: true,
+        context: {
+          functionName: 'uploadToSubsplash',
+          operationKey,
+          lockKey,
+        },
+      });
+    }
+
     logger.error(error);
     await emitOperationalAlert({
       alertCode: 'PUBLISH_SUBSPLASH_UPLOAD_RUNTIME_FAILURE',

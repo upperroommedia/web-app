@@ -87,4 +87,46 @@ describe('reportHandledError helpers', () => {
 
     expect(captureExceptionMock).not.toHaveBeenCalled();
   });
+
+  it('does not bridge Subsplash lock contention into Sentry', async () => {
+    const { installConsoleErrorCapture } = await import('../../utils/reportHandledError');
+
+    installConsoleErrorCapture();
+
+    console.error('Error publishing to series:', {
+      code: 'functions/aborted',
+      message: 'Subsplash lock contention prevented this mutation.',
+      details: {
+        code: 'SUBSPLASH_LOCK_BUSY',
+        locked_keys: ['series:series-123'],
+        wait_ms: 10000,
+        retry_after_ms: 1000,
+      },
+    });
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('does not bridge plain lock contention errors into Sentry', async () => {
+    const { installConsoleErrorCapture } = await import('../../utils/reportHandledError');
+
+    installConsoleErrorCapture();
+
+    console.error('Error publishing to series:', new Error('Subsplash lock contention prevented this mutation.'));
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('does not bridge Firebase installations request noise into Sentry', async () => {
+    const { installConsoleErrorCapture } = await import('../../utils/reportHandledError');
+
+    installConsoleErrorCapture();
+
+    console.error({
+      code: 'installations/request-failed',
+      message: 'Firebase: Error (installations/request-failed).',
+    });
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
 });

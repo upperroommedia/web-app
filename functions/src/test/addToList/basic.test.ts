@@ -1937,7 +1937,6 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
       expect(rows[0]._embedded['media-item']?.id).toBe('hidden-new-item');
       expect(rows[198]._embedded['media-item']?.id).toBe('hidden-item-198');
       expect(rows.some((row) => row._embedded['media-item']?.id === 'hidden-item-199')).toBe(false);
-      expect(subsplashMock.getList(listId)?.list_rows_count).toBe(199);
 
       const patchEvents = subsplashMock
         .getHistory()

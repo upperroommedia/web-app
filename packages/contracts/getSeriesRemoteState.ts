@@ -26,6 +26,7 @@ export interface GetSeriesRemoteStateOutputType {
   firestoreSeriesId: string;
   subsplashSeriesId: string;
   remoteMembershipHash: string;
+  mediaItemMembershipHash: string;
   totalRemoteItems: number;
   trackedFirebaseItems: number;
   remoteOnlyItemCount: number;

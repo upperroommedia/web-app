@@ -26,9 +26,11 @@ import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algol
 import {
   reconcileAdminSermonSearchResults,
 } from '../utils/sermonSearchResults';
+import useAuth from '../context/user/UserContext';
 
 const FIRESTORE_IN_QUERY_LIMIT = 10;
 const HYDRATION_SKELETON_DELAY_MS = 1000;
+const UNAUTHENTICATED_UPLOADER_SENTINEL = '__unauthenticated__';
 
 const chunkIds = (ids: string[], chunkSize: number): string[][] => {
   const chunks: string[][] = [];
@@ -61,7 +63,7 @@ const useDelayedTrue = (value: boolean, delayMs: number): boolean => {
   return delayedValue;
 };
 
-const useLiveVisibleSermons = (sermonIds: string[]) => {
+const useLiveVisibleSermons = (sermonIds: string[], viewer: { uid?: string; isAdmin: boolean }) => {
   const [state, setState] = useState<{
     liveSermonsById: Record<string, Sermon>;
     resolvedIds: Set<string>;
@@ -109,9 +111,13 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
     });
 
     const unsubscribeCallbacks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
+      const queryConstraints = [
+        where(documentId(), 'in', idChunk),
+        ...(viewer.isAdmin ? [] : [where('uploaderId', '==', viewer.uid ?? UNAUTHENTICATED_UPLOADER_SENTINEL)]),
+      ];
       const sermonsQuery = query(
         collection(firestore, 'sermons').withConverter(sermonConverter),
-        where(documentId(), 'in', idChunk)
+        ...queryConstraints
       );
 
       return onSnapshot(
@@ -138,7 +144,7 @@ const useLiveVisibleSermons = (sermonIds: string[]) => {
     return () => {
       unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
     };
-  }, [sermonIdsKey]);
+  }, [sermonIdsKey, viewer.isAdmin, viewer.uid]);
 
   return useMemo(() => {
     if (sermonIds.length === 0) {
@@ -166,17 +172,26 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const { hits } = useHits();
   const { status, results, indexUiState } = useInstantSearch();
   const { currentSermonId, setCurrentSermon } = useAudioPlayer();
+  const { user } = useAuth();
   const playing = useMediaState('playing');
+  const userUid = user?.uid;
+  const isAdmin = user?.isAdmin() ?? false;
   const hasSettledResults = !results.__isArtificial && status === 'idle';
   const pendingSermonsQuery = useMemo(
-    () =>
-      query(
-        collection(firestore, 'sermons').withConverter(sermonConverter),
+    () => {
+      const queryConstraints = [
         where('searchPending', '==', true),
+        ...(isAdmin ? [] : [where('uploaderId', '==', userUid ?? UNAUTHENTICATED_UPLOADER_SENTINEL)]),
         orderBy('editedAtMillis', 'desc'),
-        limit(20)
-      ),
-    []
+        limit(20),
+      ];
+
+      return query(
+        collection(firestore, 'sermons').withConverter(sermonConverter),
+        ...queryConstraints
+      );
+    },
+    [isAdmin, userUid]
   );
   const [pendingSermons] = useCollectionData(pendingSermonsQuery);
   const hiddenSermonIdSet = useMemo(() => new Set(hiddenSermonIds), [hiddenSermonIds]);
@@ -193,7 +208,10 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const hasActiveRefinements = Object.values(refinementList).some((values) => values.length > 0);
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
-  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds);
+  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds, {
+    uid: userUid,
+    isAdmin,
+  });
   const unresolvedVisibleHitIds = useMemo(
     () =>
       visibleHitIds.filter((sermonId) => !liveSermonsById[sermonId] && !resolvedLiveSermonIds.has(sermonId)),
