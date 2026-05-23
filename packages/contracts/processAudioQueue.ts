@@ -56,6 +56,10 @@ export interface StoredProcessAudioRequestState {
   nextRequestVersion: string | null;
   nextUpdatedAt: string | null;
   deferredAt: string | null;
+  transientRetryReason?: string | null;
+  transientRetryCount?: number;
+  transientRetryNextRunAt?: string | null;
+  transientRetryLastFailureMessage?: string | null;
   updatedAt: string;
 }
 

@@ -23,6 +23,7 @@ import {
   cleanupDeletedSermonProcessAudioState,
   completeProcessAudioFailure,
   completeProcessAudioSuccess,
+  deferPostLiveArchiveYouTubeRequest,
   deferStaleYouTubeRequest,
   extractCloudTaskId,
   resumeDeferredYouTubeQueueOnStartup,
@@ -623,6 +624,55 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
           ? `process-audio Cloud Run request failed during YouTube extraction (${alertCode}).`
           : 'process-audio Cloud Run request failed while processing sermon audio.'
       );
+
+    if (audioSource.type === 'YouTubeUrl' && youtubeFailureClass === 'post_live_archive_not_ready') {
+      const postLiveResult = await deferPostLiveArchiveYouTubeRequest({
+        database: realtimeDB,
+        payload: data,
+        requestId: ctx.requestId,
+        taskId,
+        failureClass: youtubeFailureClass,
+        failureMessage: message,
+      });
+
+      if (postLiveResult.scheduled) {
+        try {
+          await docRef.update({
+            status: {
+              ...sermonStatus,
+              audioStatus: sermonStatusType.PENDING,
+              message: 'Waiting for YouTube to finish processing the livestream archive before retrying.',
+            },
+          });
+        } catch (updateError) {
+          log.error('Failed to update document status after post-live archive defer', { error: updateError });
+        }
+
+        log.info('Deferred post-live YouTube archive processing until the VOD is ready', {
+          sermonId: data.id,
+          requestId: ctx.requestId,
+          scheduledTaskId: postLiveResult.scheduledTaskId,
+          scheduledFor: postLiveResult.scheduledFor,
+          retryCount: postLiveResult.retryCount,
+          maxRetryCount: postLiveResult.maxRetryCount,
+        });
+
+        res.status(202).json({
+          deferred: true,
+          reason: youtubeFailureClass,
+          retryCount: postLiveResult.retryCount,
+          scheduledFor: postLiveResult.scheduledFor,
+        });
+        return;
+      }
+
+      log.warn('Post-live YouTube archive retry budget exhausted; treating as process-audio failure', {
+        sermonId: data.id,
+        requestId: ctx.requestId,
+        retryCount: postLiveResult.retryCount,
+        maxRetryCount: postLiveResult.maxRetryCount,
+      });
+    }
 
     if (audioSource.type === 'YouTubeUrl' && youtubeFailureClass === 'cookie_session_stale_or_challenged') {
       const staleResult = await deferStaleYouTubeRequest({

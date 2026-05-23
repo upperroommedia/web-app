@@ -5,6 +5,7 @@ export type YouTubeFailureClass =
   | 'public_path_bot_blocked'
   | 'cookie_session_stale_or_challenged'
   | 'account_required_content'
+  | 'post_live_archive_not_ready'
   | 'browser_fallback_failed'
   | 'unknown_youtube_extractor_failure';
 
@@ -12,6 +13,7 @@ export type YouTubeAlertCode =
   | 'public_ip_or_reputation_block'
   | 'cookie_session_stale'
   | 'account_required_no_valid_session'
+  | 'post_live_archive_not_ready'
   | 'browser_fallback_failed'
   | 'provider_unhealthy'
   | 'youtube_runtime_failure';
@@ -20,6 +22,7 @@ export type YouTubeFailureStage =
   | 'webpage_request'
   | 'player_response'
   | 'cookie_session'
+  | 'post_live_archive'
   | 'browser_fallback'
   | 'unknown';
 
@@ -44,6 +47,17 @@ export function classifyYouTubeFailure(message: string, mode: YouTubeExtractionM
 
   if (lower.includes('this video appears to require an authenticated youtube session')) {
     return 'account_required_content';
+  }
+
+  if (
+    lower.includes('this live event has ended') ||
+    lower.includes('the livestream has not finished processing') ||
+    lower.includes('post-live manifestless mode') ||
+    lower.includes('live_status=post_live') ||
+    lower.includes('live status is post_live') ||
+    lower.includes('livestream archive is still being processed')
+  ) {
+    return 'post_live_archive_not_ready';
   }
 
   if (
@@ -91,6 +105,7 @@ export function shouldEscalateToCookieProvider(
   useCookiesForPublicVideos: boolean
 ): boolean {
   if (!hasCookieFallback) return false;
+  if (failureClass === 'post_live_archive_not_ready') return false;
   if (useCookiesForPublicVideos) return true;
 
   return failureClass === 'account_required_content' || failureClass === 'public_path_bot_blocked';
@@ -125,6 +140,8 @@ export function annotateYouTubeFailure(
       return `${message} The configured YouTube cookie session appears stale or challenged. Rotate the yt-dlp cookies from a fresh private browsing session and retry.`;
     case 'account_required_content':
       return `${message} This video appears to require an authenticated YouTube session. Verify dedicated service-account cookies are configured and healthy.`;
+    case 'post_live_archive_not_ready':
+      return `${message} YouTube has ended the live event but has not made the livestream archive formats available yet. The worker will retry after YouTube finishes processing the archive.`;
     case 'browser_fallback_failed':
       return `${message} Browser fallback also failed. Inspect the browser fallback worker and its persistent authenticated profile.`;
     case 'unknown_youtube_extractor_failure':
@@ -145,6 +162,8 @@ export function toYouTubeAlertCode(failureClass: YouTubeFailureClass): YouTubeAl
       return 'cookie_session_stale';
     case 'account_required_content':
       return 'account_required_no_valid_session';
+    case 'post_live_archive_not_ready':
+      return 'post_live_archive_not_ready';
     case 'browser_fallback_failed':
       return 'browser_fallback_failed';
     case 'unknown_youtube_extractor_failure':
@@ -163,10 +182,18 @@ export function analyzeYouTubeFailure(message: string, mode: YouTubeExtractionMo
     lower.includes("sign in to confirm you're not a bot") || lower.includes('sign in to confirm you’re not a bot');
   const sawUnplayable = lower.includes('unplayable');
   const sawPageReload = lower.includes('the page needs to be reloaded');
+  const sawPostLiveArchive =
+    failureClass === 'post_live_archive_not_ready' ||
+    lower.includes('this live event has ended') ||
+    lower.includes('post-live manifestless mode') ||
+    lower.includes('live_status=post_live') ||
+    lower.includes('live status is post_live');
 
   let stage: YouTubeFailureStage = 'unknown';
   if (mode === 'browser_fallback') {
     stage = 'browser_fallback';
+  } else if (sawPostLiveArchive) {
+    stage = 'post_live_archive';
   } else if (mode === 'cookie_provider' && (sawPageReload || lower.includes('cookie circuit breaker'))) {
     stage = 'cookie_session';
   } else if (sawHttp429 || sawUnableToDownloadWebpage) {

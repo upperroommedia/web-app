@@ -38,6 +38,14 @@ const PROCESS_AUDIO_BASE_URLS = {
 const CLAIM_ACQUIRE_ATTEMPTS = 20;
 const CLAIM_ACQUIRE_DELAY_MS = 150;
 const PROCESS_AUDIO_TASK_TIMEOUT_SECONDS = 1800;
+const POST_LIVE_ARCHIVE_RETRY_DELAYS_SECONDS = [
+  30 * 60,
+  60 * 60,
+  2 * 60 * 60,
+  4 * 60 * 60,
+  6 * 60 * 60,
+];
+const DEFAULT_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT = 12;
 const PROCESS_AUDIO_TASKS_LOCATION = process.env.PROCESS_AUDIO_TASKS_LOCATION?.trim() || 'us-central1';
 const CLOUD_TASKS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,6 +55,32 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
 };
 
 const getNowIsoString = (): string => new Date().toISOString();
+
+const parsePositiveIntegerEnv = (name: string): number | null => {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+export const getPostLiveArchiveRetryDelaySeconds = (retryCount: number): number => {
+  const configuredDelaySeconds = parsePositiveIntegerEnv('YOUTUBE_POST_LIVE_ARCHIVE_RETRY_DELAY_SECONDS');
+  if (configuredDelaySeconds) {
+    return configuredDelaySeconds;
+  }
+
+  const normalizedRetryCount = Math.max(1, Math.floor(retryCount));
+  return POST_LIVE_ARCHIVE_RETRY_DELAYS_SECONDS[
+    Math.min(normalizedRetryCount - 1, POST_LIVE_ARCHIVE_RETRY_DELAYS_SECONDS.length - 1)
+  ];
+};
+
+const getPostLiveArchiveMaxRetryCount = (): number =>
+  parsePositiveIntegerEnv('YOUTUBE_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT') ??
+  DEFAULT_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT;
 
 const getProcessAudioProjectId = (): string => {
   return (
@@ -61,6 +95,23 @@ const getProcessAudioProjectId = (): string => {
 const getProcessAudioSourceType = (payload: AddIntroOutroInputType): ProcessAudioSourceType => {
   return 'youtubeUrl' in payload ? 'youtube' : 'storage';
 };
+
+type ProcessAudioTaskQueueLike = Pick<TaskQueue<AddIntroOutroInputType>, 'delete'>;
+
+let processAudioTaskQueueFactory:
+  | ((queueName: ProcessAudioTaskQueueName) => ProcessAudioTaskQueueLike)
+  | null = null;
+let cloudTasksApiDepsForTesting: CloudTasksApiDeps | null = null;
+
+export function setProcessAudioTaskQueueFactoryForTesting(
+  factory: ((queueName: ProcessAudioTaskQueueName) => ProcessAudioTaskQueueLike) | null
+): void {
+  processAudioTaskQueueFactory = factory;
+}
+
+export function setCloudTasksApiDepsForTesting(deps: CloudTasksApiDeps | null): void {
+  cloudTasksApiDepsForTesting = deps;
+}
 
 const sanitizeProcessAudioPayload = (payload: AddIntroOutroInputType): AddIntroOutroInputType => {
   const basePayload = {
@@ -266,14 +317,22 @@ export function buildCloudTasksCreateTaskRequest(args: {
   taskId: string;
   projectId?: string;
   location?: string;
+  scheduledFor?: Date;
 }): CloudTasksCreateTaskRequest {
-  const { payload, queueName, taskId, projectId = getProcessAudioProjectId(), location = PROCESS_AUDIO_TASKS_LOCATION } =
-    args;
+  const {
+    payload,
+    queueName,
+    taskId,
+    projectId = getProcessAudioProjectId(),
+    location = PROCESS_AUDIO_TASKS_LOCATION,
+    scheduledFor,
+  } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const taskResourcePrefix = `projects/${projectId}/locations/${location}/queues/${queueName}`;
   const taskRequestBody = {
     task: {
       name: `${taskResourcePrefix}/tasks/${taskId}`,
+      ...(scheduledFor ? { scheduleTime: scheduledFor.toISOString() } : {}),
       dispatchDeadline: `${PROCESS_AUDIO_TASK_TIMEOUT_SECONDS}s`,
       httpRequest: {
         httpMethod: 'POST',
@@ -302,7 +361,8 @@ export async function enqueueTaskViaCloudTasksApi(
   payload: AddIntroOutroInputType,
   queueName: ProcessAudioTaskQueueName,
   taskId: string,
-  deps: CloudTasksApiDeps = {}
+  deps: CloudTasksApiDeps = {},
+  options: { scheduledFor?: Date } = {}
 ): Promise<void> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const authClient =
@@ -320,6 +380,7 @@ export async function enqueueTaskViaCloudTasksApi(
     payload,
     queueName,
     taskId,
+    scheduledFor: options.scheduledFor,
   });
   const response = await fetchImpl(request.url, {
     ...request.init,
@@ -345,7 +406,7 @@ const isTaskMissingError = (error: unknown): boolean => {
   return normalized.includes('task') && normalized.includes('not found');
 };
 
-async function deleteExistingTask(queue: TaskQueue<AddIntroOutroInputType>, taskId: string | null | undefined): Promise<void> {
+async function deleteExistingTask(queue: ProcessAudioTaskQueueLike, taskId: string | null | undefined): Promise<void> {
   if (!taskId) return;
 
   try {
@@ -356,6 +417,10 @@ async function deleteExistingTask(queue: TaskQueue<AddIntroOutroInputType>, task
     }
     throw error;
   }
+}
+
+function getProcessAudioTaskQueue(queueName: ProcessAudioTaskQueueName): ProcessAudioTaskQueueLike {
+  return processAudioTaskQueueFactory?.(queueName) ?? getFunctions().taskQueue<AddIntroOutroInputType>(queueName);
 }
 
 async function withProcessAudioQueueClaim<T>(
@@ -428,8 +493,14 @@ function isYouTubeQueuePaused(queueState: StoredYouTubeQueueState): boolean {
   return queueState.blocked || queueState.probeStatus === 'probing' || queueState.probeStatus === 'waiting_for_auth_required_request';
 }
 
-async function enqueueTask(payload: AddIntroOutroInputType, taskId: string): Promise<void> {
-  await enqueueTaskViaCloudTasksApi(payload, getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(payload)), taskId);
+async function enqueueTask(payload: AddIntroOutroInputType, taskId: string, scheduledFor?: Date): Promise<void> {
+  await enqueueTaskViaCloudTasksApi(
+    payload,
+    getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(payload)),
+    taskId,
+    cloudTasksApiDepsForTesting ?? {},
+    { scheduledFor }
+  );
 }
 
 async function enqueueDeferredRequestIgnoringPause(
@@ -437,7 +508,7 @@ async function enqueueDeferredRequestIgnoringPause(
   entry: StoredDeferredYouTubeRequest,
   ownerId: string
 ): Promise<void> {
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource('youtube'));
+  const queue = getProcessAudioTaskQueue(getProcessAudioTaskQueueNameForSource('youtube'));
 
   await withProcessAudioQueueClaim(database, entry.sermonId, ownerId, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${entry.sermonId}`);
@@ -580,7 +651,7 @@ export async function completeProcessAudioSuccess(args: {
   const { database, payload, requestId, taskId, ctx } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const log = createLoggerWithContext(ctx);
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(
+  const queue = getProcessAudioTaskQueue(
     getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(sanitizedPayload))
   );
 
@@ -710,6 +781,10 @@ export async function completeProcessAudioSuccess(args: {
         nextRequestVersion: null,
         nextUpdatedAt: null,
         deferredAt,
+        transientRetryReason: null,
+        transientRetryCount: 0,
+        transientRetryNextRunAt: null,
+        transientRetryLastFailureMessage: null,
         updatedAt: now,
       } satisfies StoredProcessAudioRequestState);
       return;
@@ -724,6 +799,10 @@ export async function completeProcessAudioSuccess(args: {
       runningRequestVersion: null,
       runningAt: null,
       deferredAt: null,
+      transientRetryReason: null,
+      transientRetryCount: 0,
+      transientRetryNextRunAt: null,
+      transientRetryLastFailureMessage: null,
       updatedAt: now,
     } satisfies StoredProcessAudioRequestState);
 
@@ -759,9 +838,178 @@ export async function completeProcessAudioFailure(args: {
       runningTaskId: null,
       runningRequestVersion: null,
       runningAt: null,
+      deferredAt: null,
+      transientRetryReason: null,
+      transientRetryCount: 0,
+      transientRetryNextRunAt: null,
+      transientRetryLastFailureMessage: null,
       updatedAt: now,
     } satisfies StoredProcessAudioRequestState);
   });
+}
+
+export async function deferPostLiveArchiveYouTubeRequest(args: {
+  database: Database;
+  payload: AddIntroOutroInputType;
+  requestId: string;
+  taskId: string | null;
+  failureClass: string;
+  failureMessage: string;
+}): Promise<{
+  scheduled: boolean;
+  scheduledTaskId: string | null;
+  scheduledFor: string | null;
+  retryCount: number;
+  maxRetryCount: number;
+}> {
+  const { database, payload, requestId, taskId, failureClass, failureMessage } = args;
+  const sanitizedPayload = sanitizeProcessAudioPayload(payload);
+  const maxRetryCount = getPostLiveArchiveMaxRetryCount();
+  let scheduledTaskId: string | null = null;
+  let scheduledForIso: string | null = null;
+  let retryCount = 1;
+
+  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `post-live:${requestId}`, async () => {
+    const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
+    const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
+    const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
+    const [requestSnapshot, queueStateSnapshot, deferredSnapshot] = await Promise.all([
+      requestRef.get(),
+      queueStateRef.get(),
+      database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get(),
+    ]);
+    const now = getNowIsoString();
+    const requestState = requestSnapshot.exists()
+      ? (requestSnapshot.val() as StoredProcessAudioRequestState)
+      : buildProcessAudioRequestState(sanitizedPayload, computeProcessAudioRequestVersion(sanitizedPayload), now);
+    const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
+    const remainingDeferredEntries = sortDeferredEntries(
+      Object.values((deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {}).filter(
+        (entry) => entry.sermonId !== sanitizedPayload.id
+      )
+    );
+    const latestPayload = sanitizeProcessAudioPayload(requestState.nextPayload ?? requestState.currentPayload ?? sanitizedPayload);
+    const latestVersion =
+      requestState.nextRequestVersion ??
+      requestState.currentRequestVersion ??
+      computeProcessAudioRequestVersion(latestPayload);
+    const previousRetryCount =
+      requestState.transientRetryReason === failureClass && typeof requestState.transientRetryCount === 'number'
+        ? requestState.transientRetryCount
+        : 0;
+
+    const releaseCurrentProbe = async (): Promise<void> => {
+      if (queueState.probeStatus !== 'probing' || queueState.probeTaskSermonId !== sanitizedPayload.id) {
+        await deferredRef.remove();
+        return;
+      }
+
+      const nextProbe = selectNextDeferredProbe(remainingDeferredEntries, queueState.probeMode);
+      if (!nextProbe) {
+        await Promise.all([
+          deferredRef.remove(),
+          queueStateRef.set({
+            ...buildInitialYouTubeQueueState(),
+            probeLastFailedAt: now,
+            probeLastFailureClass: failureClass,
+            probeLastFailureMessage: failureMessage.slice(0, 1000),
+            deferredYouTubeTaskCount: 0,
+          } satisfies StoredYouTubeQueueState),
+        ]);
+        return;
+      }
+
+      try {
+        await enqueueDeferredRequestIgnoringPause(database, nextProbe, `post-live:${requestId}:${nextProbe.sermonId}`);
+        await Promise.all([
+          deferredRef.remove(),
+          queueStateRef.set({
+          ...queueState,
+          blocked: false,
+          blockerReason: null,
+          blockedAt: null,
+          probeMode: nextProbe.probeMode,
+          probeStatus: 'probing',
+          probeTaskSermonId: nextProbe.sermonId,
+          probeRequestVersion: nextProbe.requestVersion,
+          probeStartedAt: now,
+          probeLastFailedAt: now,
+          probeLastFailureClass: failureClass,
+          probeLastFailureMessage: failureMessage.slice(0, 1000),
+          deferredYouTubeTaskCount: Math.max(0, remainingDeferredEntries.length - 1),
+          } satisfies StoredYouTubeQueueState),
+        ]);
+      } catch (error) {
+        await Promise.all([
+          deferredRef.remove(),
+          queueStateRef.set({
+            ...buildInitialYouTubeQueueState(),
+            probeStatus: 'waiting_for_auth_required_request',
+            probeLastFailedAt: now,
+            probeLastFailureClass: 'probe_advance_failed',
+            probeLastFailureMessage: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
+            deferredYouTubeTaskCount: remainingDeferredEntries.length,
+          } satisfies StoredYouTubeQueueState),
+        ]);
+      }
+    };
+
+    retryCount = previousRetryCount + 1;
+    if (retryCount > maxRetryCount) {
+      await releaseCurrentProbe();
+      return;
+    }
+
+    const delaySeconds = getPostLiveArchiveRetryDelaySeconds(retryCount);
+    const scheduledFor = new Date(Date.now() + delaySeconds * 1000);
+    const nowToken = `${now}:${requestId}:post-live:${retryCount}`;
+    const nextTaskId = computeProcessAudioTaskId(sanitizedPayload.id, latestVersion, nowToken);
+    const queue = getProcessAudioTaskQueue(
+      getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(latestPayload))
+    );
+
+    if (requestState.queuedTaskId && requestState.queuedTaskId !== taskId) {
+      await deleteExistingTask(queue, requestState.queuedTaskId);
+    }
+
+    await enqueueTask(latestPayload, nextTaskId, scheduledFor);
+
+    scheduledTaskId = nextTaskId;
+    scheduledForIso = scheduledFor.toISOString();
+
+    await requestRef.set({
+      ...requestState,
+      sermonId: sanitizedPayload.id,
+      sourceType: 'youtube',
+      currentPayload: latestPayload,
+      currentRequestVersion: latestVersion,
+      queuedTaskId: nextTaskId,
+      queuedAt: now,
+      runningRequestId: null,
+      runningTaskId: null,
+      runningRequestVersion: null,
+      runningAt: null,
+      nextPayload: null,
+      nextRequestVersion: null,
+      nextUpdatedAt: null,
+      deferredAt: now,
+      transientRetryReason: failureClass,
+      transientRetryCount: retryCount,
+      transientRetryNextRunAt: scheduledForIso,
+      transientRetryLastFailureMessage: failureMessage.slice(0, 1000),
+      updatedAt: now,
+    } satisfies StoredProcessAudioRequestState);
+
+    await releaseCurrentProbe();
+  });
+
+  return {
+    scheduled: scheduledTaskId !== null,
+    scheduledTaskId,
+    scheduledFor: scheduledForIso,
+    retryCount,
+    maxRetryCount,
+  };
 }
 
 export async function cleanupDeletedSermonProcessAudioState(args: {
@@ -774,7 +1022,7 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
   const { database, payload, requestId, taskId, ctx } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const log = createLoggerWithContext(ctx);
-  const queue = getFunctions().taskQueue<AddIntroOutroInputType>(
+  const queue = getProcessAudioTaskQueue(
     getProcessAudioTaskQueueNameForSource(getProcessAudioSourceType(sanitizedPayload))
   );
 

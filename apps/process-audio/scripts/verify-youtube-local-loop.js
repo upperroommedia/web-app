@@ -331,6 +331,39 @@ const cases = [
     },
   },
   {
+    name: 'post-live-rescue-download',
+    kind: 'download',
+    scenario: 'post_live_rescue_success',
+    browserFallback: false,
+    useCookiesForPublicVideos: true,
+    browserProfileCookies: true,
+    realtimeDb: {
+      'yt-dlp-cookies': encodeCookies(),
+      'yt-dlp-cookies-meta': {
+        rotatedAt: new Date().toISOString(),
+      },
+    },
+    assert(result, _cookieMeta, artifact) {
+      if (!fs.existsSync(result)) {
+        throw new Error('post-live-rescue-download did not create the output file');
+      }
+      if (!artifact?.attempts?.[0]?.hasFormatSelector) {
+        throw new Error('post-live-rescue-download did not start with the normal format selector');
+      }
+      if (artifact?.attempts?.[1]?.hasFormatSelector) {
+        throw new Error('post-live-rescue-download did not retry without the audio-only preselector');
+      }
+      if (!artifact?.attempts?.[1]?.args?.includes('--live-from-start')) {
+        throw new Error('post-live-rescue-download did not use the post-live rescue probe');
+      }
+      const downloadAttempt = artifact?.attempts?.find((attempt) => !attempt.isJson && attempt.args?.includes('-o'));
+      const formatIndex = downloadAttempt?.args?.indexOf('-f') ?? -1;
+      if (!downloadAttempt || downloadAttempt.args?.[formatIndex + 1] !== '96') {
+        throw new Error('post-live-rescue-download did not download the rescued HLS format directly');
+      }
+    },
+  },
+  {
     name: 'cookie-preferred-section',
     kind: 'section',
     scenario: 'public_bot_cookie_ok',

@@ -28,10 +28,16 @@ function main() {
     classifyYouTubeFailure('ERROR: LOGIN_REQUIRED private members-only age-restricted', 'public_provider'),
     'account_required_content'
   );
+  assert.equal(
+    classifyYouTubeFailure('ERROR: [youtube] Foujg31dBG8: This live event has ended.', 'public_provider'),
+    'post_live_archive_not_ready'
+  );
 
   assert.equal(shouldEscalateToCookieProvider('account_required_content', true, false), true);
   assert.equal(shouldEscalateToCookieProvider('public_path_bot_blocked', true, false), true);
   assert.equal(shouldEscalateToCookieProvider('unknown_youtube_extractor_failure', true, false), false);
+  assert.equal(shouldEscalateToCookieProvider('post_live_archive_not_ready', true, false), false);
+  assert.equal(shouldEscalateToCookieProvider('post_live_archive_not_ready', true, true), false);
   assert.equal(shouldEscalateToCookieProvider('account_required_content', false, false), false);
   assert.equal(shouldEscalateToCookieProvider('unknown_youtube_extractor_failure', true, true), true);
 
@@ -54,6 +60,15 @@ function main() {
   assert.equal(analyzedCookieFailure.stage, 'cookie_session');
   assert.equal(shouldEscalateToBrowserFallback(analyzedCookieFailure, true), false);
 
+  const analyzedPostLiveFailure = analyzeYouTubeFailure(
+    'yt-dlp download format selection exited with code 1. stderr: ERROR: [youtube] Foujg31dBG8: This live event has ended.',
+    'public_provider'
+  );
+  assert.equal(analyzedPostLiveFailure.failureClass, 'post_live_archive_not_ready');
+  assert.equal(analyzedPostLiveFailure.alertCode, 'post_live_archive_not_ready');
+  assert.equal(analyzedPostLiveFailure.stage, 'post_live_archive');
+  assert.equal(shouldEscalateToBrowserFallback(analyzedPostLiveFailure, true), false);
+
   const analyzedUnknownFailure = analyzeYouTubeFailure('ERROR: [youtube] extractor exploded', 'public_provider');
   assert.equal(shouldEscalateToBrowserFallback(analyzedUnknownFailure, true), false);
   assert.equal(shouldEscalateToBrowserFallback(analyzedPublicBotBlock, false), false);
@@ -64,6 +79,14 @@ function main() {
     'cookie_provider'
   );
   assert.match(annotated, /Rotate the yt-dlp cookies/i);
+
+  const annotatedPostLive = annotateYouTubeFailure(
+    'ERROR: [youtube] Foujg31dBG8: This live event has ended.',
+    'post_live_archive_not_ready',
+    'public_provider'
+  );
+  assert.match(annotatedPostLive, /livestream archive/i);
+  assert.doesNotMatch(annotatedPostLive, /unknown YouTube extraction error/i);
 
   console.log('youtube policy verification passed');
 }

@@ -1,9 +1,80 @@
 import assert from 'node:assert/strict';
 import {
   buildCloudTasksCreateTaskRequest,
+  deferPostLiveArchiveYouTubeRequest,
   enqueueTaskViaCloudTasksApi,
+  getPostLiveArchiveRetryDelaySeconds,
   normalizeCloudTasksAccessToken,
+  setCloudTasksApiDepsForTesting,
+  setProcessAudioTaskQueueFactoryForTesting,
 } from '../src/processAudioQueueStore';
+
+class MockSnapshot {
+  constructor(private readonly value: unknown) {}
+
+  exists(): boolean {
+    return this.value !== undefined && this.value !== null;
+  }
+
+  val(): unknown {
+    return this.value;
+  }
+}
+
+class MockRef {
+  constructor(private readonly store: Record<string, unknown>, private readonly key: string) {}
+
+  async get(): Promise<MockSnapshot> {
+    if (Object.prototype.hasOwnProperty.call(this.store, this.key)) {
+      return new MockSnapshot(this.store[this.key]);
+    }
+
+    const prefix = `${this.key}/`;
+    const children = Object.entries(this.store).reduce<Record<string, unknown>>((acc, [key, value]) => {
+      if (key.startsWith(prefix)) {
+        const childKey = key.slice(prefix.length).split('/')[0];
+        acc[childKey] = value;
+      }
+      return acc;
+    }, {});
+
+    return new MockSnapshot(Object.keys(children).length > 0 ? children : undefined);
+  }
+
+  async set(value: unknown): Promise<void> {
+    this.store[this.key] = value;
+  }
+
+  async update(patch: Record<string, unknown>): Promise<void> {
+    this.store[this.key] = {
+      ...((this.store[this.key] as Record<string, unknown> | undefined) ?? {}),
+      ...patch,
+    };
+  }
+
+  async remove(): Promise<void> {
+    delete this.store[this.key];
+  }
+
+  async transaction(updateFn: (current: unknown) => unknown): Promise<{ committed: boolean; snapshot: MockSnapshot }> {
+    const next = updateFn(this.store[this.key]);
+    if (typeof next === 'undefined') {
+      return { committed: false, snapshot: new MockSnapshot(this.store[this.key]) };
+    }
+    this.store[this.key] = next;
+    return { committed: true, snapshot: new MockSnapshot(next) };
+  }
+}
+
+function createMockDatabase(initialData: Record<string, unknown> = {}) {
+  const store = { ...initialData };
+  return {
+    store,
+    ref(key: string): MockRef {
+      return new MockRef(store, key);
+    },
+  };
+}
 
 async function main(): Promise<void> {
   const youtubePayload = {
@@ -29,6 +100,7 @@ async function main(): Promise<void> {
   const parsedBody = JSON.parse(request.init.body) as {
     task: {
       name: string;
+      scheduleTime?: string;
       dispatchDeadline: string;
       httpRequest: {
         httpMethod: string;
@@ -59,6 +131,25 @@ async function main(): Promise<void> {
       youtubeUrl: 'https://www.youtube.com/watch?v=dKaZ89SkVYY',
     },
   });
+  assert.equal(parsedBody.task.scheduleTime, undefined);
+
+  const scheduledRequest = buildCloudTasksCreateTaskRequest({
+    payload: youtubePayload,
+    queueName: 'processaudioyoutubetask',
+    taskId: 'pa-test-task-scheduled',
+    projectId: 'urm-app',
+    location: 'us-central1',
+    scheduledFor: new Date('2026-05-10T20:30:00.000Z'),
+  });
+  const scheduledBody = JSON.parse(scheduledRequest.init.body) as {
+    task: {
+      scheduleTime?: string;
+    };
+  };
+  assert.equal(scheduledBody.task.scheduleTime, '2026-05-10T20:30:00.000Z');
+  assert.equal(getPostLiveArchiveRetryDelaySeconds(1), 30 * 60);
+  assert.equal(getPostLiveArchiveRetryDelaySeconds(3), 2 * 60 * 60);
+  assert.equal(getPostLiveArchiveRetryDelaySeconds(50), 6 * 60 * 60);
 
   let fetchUrl: string | undefined;
   let fetchInit: RequestInit | undefined;
@@ -111,6 +202,214 @@ async function main(): Promise<void> {
   assert.equal(secondAuthorizationHeader, 'Bearer object-token');
   assert.equal(normalizeCloudTasksAccessToken({ token: '  object-token  ' }), 'object-token');
   assert.equal(normalizeCloudTasksAccessToken({}), null);
+
+  const createdTasks: Array<{ url: string; body: { task: { name: string; scheduleTime?: string } } }> = [];
+  await enqueueTaskViaCloudTasksApi(
+    youtubePayload,
+    'processaudioyoutubetask',
+    'pa-scheduled-post-live',
+    {
+      authFactory: async () => ({
+        getAccessToken: async () => 'scheduled-token',
+      }),
+      fetchImpl: async (url, init) => {
+        createdTasks.push({
+          url: String(url),
+          body: JSON.parse(String(init?.body)),
+        });
+        return new Response('{}', {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      },
+    },
+    { scheduledFor: new Date('2026-05-10T21:00:00.000Z') }
+  );
+  assert.equal(createdTasks[0]?.body.task.scheduleTime, '2026-05-10T21:00:00.000Z');
+
+  const runPostLiveDeferralCase = async (options: { taskDeleteThrows: boolean }) => {
+    const deletedTaskIds: string[] = [];
+    setProcessAudioTaskQueueFactoryForTesting(() => ({
+      async delete(taskId: string): Promise<void> {
+        deletedTaskIds.push(taskId);
+        if (options.taskDeleteThrows && taskId === 'next-old-task') {
+          throw new Error('simulated next probe enqueue failure');
+        }
+      },
+    }));
+
+    const postLiveStore = createMockDatabase({
+      'processAudioQueues/youtube/state': {
+        blocked: false,
+        blockerReason: null,
+        blockedAt: null,
+        blockerEpisodeId: null,
+        probeMode: 'cookie_provider',
+        probeStatus: 'probing',
+        probeTaskSermonId: 'sermon-123',
+        probeRequestVersion: 'current-version',
+        probeStartedAt: '2026-05-10T19:00:00.000Z',
+        probeLastSucceededAt: null,
+        probeLastFailedAt: null,
+        probeLastFailureClass: null,
+        probeLastFailureMessage: null,
+        alertSentAt: null,
+        deferredYouTubeTaskCount: 2,
+      },
+      'processAudioQueues/youtube/deferred/sermon-123': {
+        sermonId: 'sermon-123',
+        payload: youtubePayload,
+        requestVersion: 'current-version',
+        deferredAt: '2026-05-10T19:00:00.000Z',
+        reason: 'cookie_session_stale_or_challenged',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: null,
+        lastFailureClass: null,
+      },
+      'processAudioQueues/youtube/deferred/sermon-456': {
+        sermonId: 'sermon-456',
+        payload: {
+          id: 'sermon-456',
+          startTime: 0,
+          duration: 300,
+          youtubeUrl: 'https://www.youtube.com/watch?v=nextVideo123',
+        },
+        requestVersion: 'next-version',
+        deferredAt: '2026-05-10T19:05:00.000Z',
+        reason: 'cookie_session_stale_or_challenged',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: null,
+        lastFailureClass: null,
+      },
+      'processAudioRequests/sermon-123': {
+        sermonId: 'sermon-123',
+        sourceType: 'youtube',
+        currentPayload: youtubePayload,
+        currentRequestVersion: 'current-version',
+        queuedTaskId: 'current-task',
+        queuedAt: '2026-05-10T19:00:00.000Z',
+        runningRequestId: 'req-1',
+        runningTaskId: 'current-task',
+        runningRequestVersion: 'current-version',
+        runningAt: '2026-05-10T19:01:00.000Z',
+        nextPayload: null,
+        nextRequestVersion: null,
+        nextUpdatedAt: null,
+        deferredAt: null,
+        transientRetryReason: null,
+        transientRetryCount: 0,
+        transientRetryNextRunAt: null,
+        transientRetryLastFailureMessage: null,
+        updatedAt: '2026-05-10T19:01:00.000Z',
+      },
+      'processAudioRequests/sermon-456': {
+        sermonId: 'sermon-456',
+        sourceType: 'youtube',
+        currentPayload: {
+          id: 'sermon-456',
+          startTime: 0,
+          duration: 300,
+          youtubeUrl: 'https://www.youtube.com/watch?v=nextVideo123',
+        },
+        currentRequestVersion: 'next-version',
+        queuedTaskId: options.taskDeleteThrows ? 'next-old-task' : null,
+        queuedAt: null,
+        runningRequestId: null,
+        runningTaskId: null,
+        runningRequestVersion: null,
+        runningAt: null,
+        nextPayload: null,
+        nextRequestVersion: null,
+        nextUpdatedAt: null,
+        deferredAt: '2026-05-10T19:05:00.000Z',
+        transientRetryReason: null,
+        transientRetryCount: 0,
+        transientRetryNextRunAt: null,
+        transientRetryLastFailureMessage: null,
+        updatedAt: '2026-05-10T19:05:00.000Z',
+      },
+    });
+
+    const originalFetch = globalThis.fetch;
+    const scheduledRetryBodies: Array<{ task: { name: string; scheduleTime?: string } }> = [];
+    const scheduledFetch = (async (_url, init) => {
+      scheduledRetryBodies.push(JSON.parse(String(init?.body)));
+      return new Response('{}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+    }) as typeof fetch;
+    setCloudTasksApiDepsForTesting({
+      authFactory: async () => ({
+        getAccessToken: async () => 'post-live-token',
+      }),
+      fetchImpl: scheduledFetch,
+    });
+    globalThis.fetch = scheduledFetch;
+
+    try {
+      const result = await deferPostLiveArchiveYouTubeRequest({
+        database: postLiveStore as any,
+        payload: youtubePayload,
+        requestId: 'req-1',
+        taskId: 'current-task',
+        failureClass: 'post_live_archive_not_ready',
+        failureMessage: 'ERROR: [youtube] sermon-123: This live event has ended.',
+      });
+
+      assert.equal(result.scheduled, true);
+      assert.equal(result.retryCount, 1);
+      assert.equal(scheduledRetryBodies.length, options.taskDeleteThrows ? 1 : 2);
+      assert.ok(scheduledRetryBodies[0]?.task.scheduleTime);
+      if (!options.taskDeleteThrows) {
+        assert.equal(scheduledRetryBodies[1]?.task.scheduleTime, undefined);
+      }
+      assert.equal(postLiveStore.store['processAudioQueues/youtube/deferred/sermon-123'], undefined);
+      const queueState = postLiveStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>;
+      if (options.taskDeleteThrows) {
+        assert.equal(queueState.probeStatus, 'waiting_for_auth_required_request');
+        assert.equal(queueState.deferredYouTubeTaskCount, 1);
+      } else {
+        assert.equal(queueState.probeStatus, 'probing');
+        assert.equal(queueState.probeTaskSermonId, 'sermon-456');
+        assert.equal(queueState.deferredYouTubeTaskCount, 0);
+      }
+      const currentRequest = postLiveStore.store['processAudioRequests/sermon-123'] as Record<string, unknown>;
+      assert.equal(currentRequest.transientRetryReason, 'post_live_archive_not_ready');
+      assert.equal(currentRequest.transientRetryCount, 1);
+      assert.ok(currentRequest.transientRetryNextRunAt);
+      const nextRequest = postLiveStore.store['processAudioRequests/sermon-456'] as Record<string, unknown>;
+      if (options.taskDeleteThrows) {
+        assert.equal(nextRequest.queuedTaskId, 'next-old-task');
+      } else {
+        assert.notEqual(nextRequest.queuedTaskId, null);
+      }
+
+      process.env.YOUTUBE_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT = '1';
+      const exhaustedResult = await deferPostLiveArchiveYouTubeRequest({
+        database: postLiveStore as any,
+        payload: youtubePayload,
+        requestId: 'req-2',
+        taskId: currentRequest.queuedTaskId as string,
+        failureClass: 'post_live_archive_not_ready',
+        failureMessage: 'ERROR: [youtube] sermon-123: This live event has ended.',
+      });
+      assert.equal(exhaustedResult.scheduled, false);
+      assert.equal(exhaustedResult.retryCount, 2);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setCloudTasksApiDepsForTesting(null);
+      delete process.env.YOUTUBE_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT;
+      setProcessAudioTaskQueueFactoryForTesting(null);
+    }
+  };
+
+  await runPostLiveDeferralCase({ taskDeleteThrows: false });
+  await runPostLiveDeferralCase({ taskDeleteThrows: true });
 }
 
 void main().catch((error) => {

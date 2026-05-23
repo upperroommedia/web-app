@@ -90,6 +90,10 @@ const buildProcessAudioRequestState = (
     nextRequestVersion: null,
     nextUpdatedAt: null,
     deferredAt: null,
+    transientRetryReason: null,
+    transientRetryCount: 0,
+    transientRetryNextRunAt: null,
+    transientRetryLastFailureMessage: null,
     updatedAt,
   };
 };
@@ -369,6 +373,10 @@ export async function queueOrReplaceProcessAudioRequest(args: {
         nextPayload,
         nextRequestVersion: nextPayload ? requestVersion : null,
         nextUpdatedAt: nextPayload ? now : null,
+        transientRetryReason: null,
+        transientRetryCount: 0,
+        transientRetryNextRunAt: null,
+        transientRetryLastFailureMessage: null,
         updatedAt: now,
       } satisfies StoredProcessAudioRequestState);
       return { action: 'running_replaced', requestVersion, sourceType };
@@ -391,6 +399,10 @@ export async function queueOrReplaceProcessAudioRequest(args: {
       runningTaskId: null,
       runningRequestVersion: null,
       runningAt: null,
+      transientRetryReason: null,
+      transientRetryCount: 0,
+      transientRetryNextRunAt: null,
+      transientRetryLastFailureMessage: null,
       updatedAt: now,
     };
 

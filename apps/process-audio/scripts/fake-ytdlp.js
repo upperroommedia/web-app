@@ -11,6 +11,7 @@ const hasExtractorArgs = args.includes('--extractor-args');
 const isJson = args.includes('-J');
 const isHealthcheck = args.includes('--skip-download');
 const isDirectUrl = args.includes('-g');
+const hasFormatSelector = args.includes('-f');
 const sectionIndex = args.indexOf('--download-sections');
 const isSectionDownload = sectionIndex !== -1;
 const outputIndex = args.indexOf('-o');
@@ -20,7 +21,7 @@ const logFile = process.env.FAKE_YTDLP_LOG_FILE;
 if (logFile) {
   fs.appendFileSync(
     logFile,
-    `${JSON.stringify({ args, hasCookies, isJson, isHealthcheck, isDirectUrl, isSectionDownload })}\n`
+    `${JSON.stringify({ args, hasCookies, isJson, isHealthcheck, isDirectUrl, isSectionDownload, hasFormatSelector })}\n`
   );
 }
 
@@ -89,6 +90,36 @@ function buildAudioJsonWithUrl(url) {
         http_headers: {
           'User-Agent': 'fake-ytdlp-test-agent',
         },
+      },
+    ],
+  };
+}
+
+function buildPostLiveMuxedJson() {
+  return {
+    duration: 3650,
+    live_status: 'post_live',
+    was_live: true,
+    formats: [
+      {
+        format_id: '140',
+        ext: 'm4a',
+        vcodec: 'none',
+        abr: 128,
+        protocol: 'http_dash_segments',
+        fragments: [{ url: 'https://example.com/dash-frag-1.m4s' }],
+      },
+      {
+        format_id: '96',
+        ext: 'mp4',
+        vcodec: 'avc1.4d401f',
+        abr: 96,
+        protocol: 'm3u8_native',
+        url: 'https://example.com/post-live.m3u8',
+        fragments: [
+          { url: 'https://example.com/live-frag-1.ts' },
+          { url: 'https://example.com/live-frag-2.ts' },
+        ],
       },
     ],
   };
@@ -170,6 +201,22 @@ switch (scenario) {
     }
     if (isSectionDownload) {
       succeedSectionDownload();
+    }
+    process.exit(0);
+    break;
+
+  case 'post_live_rescue_success':
+    if (isJson && hasFormatSelector) {
+      fail('ERROR: [youtube] testvideo: This live event has ended.');
+    }
+    if (isJson) {
+      succeedJson(buildPostLiveMuxedJson());
+    }
+    if (outputTemplate) {
+      succeedSectionDownload();
+    }
+    if (isDirectUrl) {
+      succeedDirectUrl();
     }
     process.exit(0);
     break;

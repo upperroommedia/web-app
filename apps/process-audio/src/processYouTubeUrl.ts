@@ -1846,12 +1846,13 @@ function selectPreferredAudioFormat(
   info?: Pick<YouTubeJsonInfo, 'live_status' | 'was_live'>
 ): YouTubeFragmentFormat | undefined {
   const completedLivestream = isCompletedYouTubeLivestream(info);
+  const postLiveArchive = info?.live_status === 'post_live';
   const audioOnlyCandidates = formats.filter((f) => f && f.vcodec === 'none');
   const livestreamMuxedCandidates = completedLivestream
     ? formats.filter((f) => f && f.vcodec !== 'none' && (f.protocol || '').toLowerCase().includes('m3u8'))
     : [];
   const candidates = completedLivestream
-    ? [...audioOnlyCandidates, ...livestreamMuxedCandidates]
+    ? (postLiveArchive ? [...livestreamMuxedCandidates, ...audioOnlyCandidates] : [...audioOnlyCandidates, ...livestreamMuxedCandidates])
     : audioOnlyCandidates;
   if (candidates.length === 0) return undefined;
 
@@ -1881,9 +1882,9 @@ function selectPreferredAudioFormat(
       if (descriptor.includes('default')) s += 300;
       if (targetLanguage && language === targetLanguage) s += 200;
       if (!completedLivestream && isAudioOnly) s += 400;
-      if (completedLivestream && isAudioOnly) s += 2200;
+      if (completedLivestream && isAudioOnly) s += postLiveArchive ? 500 : 2200;
       if (completedLivestream && isAudioOnly && protocol === 'https') s += 700;
-      if (completedLivestream && !isAudioOnly && protocol.includes('m3u8')) s += 1200;
+      if (completedLivestream && !isAudioOnly && protocol.includes('m3u8')) s += postLiveArchive ? 2600 : 1200;
       if (completedLivestream && protocol.includes('dash')) s -= 1000;
       if (completedLivestream && protocol.includes('http_dash_segments')) s -= 4000;
       if (protocol === 'https') s += 120;
@@ -1912,9 +1913,9 @@ function selectPreferredAudioFormat(
       if (descriptor.includes('default')) s += 300;
       if (targetLanguage && language === targetLanguage) s += 200;
       if (!completedLivestream && isAudioOnly) s += 400;
-      if (completedLivestream && isAudioOnly) s += 2200;
+      if (completedLivestream && isAudioOnly) s += postLiveArchive ? 500 : 2200;
       if (completedLivestream && isAudioOnly && protocol === 'https') s += 700;
-      if (completedLivestream && !isAudioOnly && protocol.includes('m3u8')) s += 1200;
+      if (completedLivestream && !isAudioOnly && protocol.includes('m3u8')) s += postLiveArchive ? 2600 : 1200;
       if (completedLivestream && protocol.includes('dash')) s -= 1000;
       if (completedLivestream && protocol.includes('http_dash_segments')) s -= 4000;
       if (protocol === 'https') s += 120;
@@ -3104,6 +3105,7 @@ async function resolvePreferredAudioFormatId(
   protocol: string | null;
   fragmentCount: number;
   durationSeconds: number | null;
+  postLiveArchive: boolean;
 }> {
   const baseArgs = [
     '-J',
@@ -3117,8 +3119,25 @@ async function resolvePreferredAudioFormatId(
   ];
   applyPreferredIpFamilyArgs(baseArgs);
 
-  const buildArgs = (mode: YouTubeExtractionMode, extraCookieArgs: string[] = []): string[] => {
-    const args = [...baseArgs];
+  const buildArgs = (
+    mode: YouTubeExtractionMode,
+    extraCookieArgs: string[] = [],
+    options: { postLiveRescue?: boolean } = {}
+  ): string[] => {
+    const args = options.postLiveRescue
+      ? [
+          '-J',
+          '--no-playlist',
+          '--skip-download',
+          '--live-from-start',
+          '--no-js-runtimes',
+          '--js-runtimes',
+          getPreferredYtDlpJsRuntime(),
+        ]
+      : [...baseArgs];
+    if (options.postLiveRescue) {
+      applyPreferredIpFamilyArgs(args);
+    }
     if (extraCookieArgs.length > 0) {
       args.push(...extraCookieArgs);
     }
@@ -3127,9 +3146,52 @@ async function resolvePreferredAudioFormatId(
     return args;
   };
 
+  const runSelectionWithPostLiveRescue = async (
+    mode: YouTubeExtractionMode,
+    extraCookieArgs: string[] = []
+  ): Promise<string> => {
+    try {
+      const { stdout } = await runCommandWithCapture(
+        ytdlpPath,
+        buildArgs(mode, extraCookieArgs),
+        `yt-dlp ${purpose} format selection`,
+        mode,
+        ctx
+      );
+      return stdout;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (classifyYouTubeFailure(message, mode) !== 'post_live_archive_not_ready') {
+        throw error;
+      }
+
+      log.warn('Retrying YouTube post-live format selection without the audio-only preselector', {
+        url,
+        purpose,
+        extractionMode: mode,
+        originalError: message,
+      });
+
+      const { stdout } = await runCommandWithCapture(
+        ytdlpPath,
+        buildArgs(mode, extraCookieArgs, { postLiveRescue: true }),
+        `yt-dlp ${purpose} post-live rescue format selection`,
+        mode,
+        ctx
+      );
+      return stdout;
+    }
+  };
+
   const parseSelectedFormat = (
     stdout: string
-  ): { formatId: string; protocol: string | null; fragmentCount: number; durationSeconds: number | null } => {
+  ): {
+    formatId: string;
+    protocol: string | null;
+    fragmentCount: number;
+    durationSeconds: number | null;
+    postLiveArchive: boolean;
+  } => {
     const parsed = JSON.parse(stdout) as YouTubeJsonInfo;
     const selected = selectPreferredAudioFormat(parsed.formats || [], parsed.language, parsed);
     if (!selected?.format_id) {
@@ -3159,6 +3221,7 @@ async function resolvePreferredAudioFormatId(
       protocol: selected.protocol || null,
       fragmentCount,
       durationSeconds,
+      postLiveArchive: parsed.live_status === 'post_live',
     };
   };
 
@@ -3166,24 +3229,12 @@ async function resolvePreferredAudioFormatId(
     const cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
     onCookieContext?.(cookieContext);
     const mode: YouTubeExtractionMode = cookieContext.hasCookies ? 'cookie_provider' : 'public_provider';
-    const { stdout } = await runCommandWithCapture(
-      ytdlpPath,
-      buildArgs(mode, cookieContext.args),
-      `yt-dlp ${purpose} format selection`,
-      mode,
-      ctx
-    );
+    const stdout = await runSelectionWithPostLiveRescue(mode, cookieContext.args);
     return { ...parseSelectedFormat(stdout), extractionMode: mode };
   }
 
   onCookieContext?.(undefined);
-  const { stdout } = await runCommandWithCapture(
-    ytdlpPath,
-    buildArgs('public_provider'),
-    `yt-dlp ${purpose} format selection`,
-    'public_provider',
-    ctx
-  );
+  const stdout = await runSelectionWithPostLiveRescue('public_provider');
   return { ...parseSelectedFormat(stdout), extractionMode: 'public_provider' };
 }
 
@@ -3572,6 +3623,7 @@ export const downloadYouTubeAudioToFile = async (
     protocol: string | null;
     fragmentCount: number;
     durationSeconds: number | null;
+    postLiveArchive?: boolean;
   }): DownloadAttemptConfig => {
     const downloadPolicy = resolveYouTubeDownloadPolicy(resolved.protocol, resolved.fragmentCount);
     return {
@@ -3621,13 +3673,18 @@ export const downloadYouTubeAudioToFile = async (
     );
     const resolvedFallbackAttempt = buildResolvedFallbackAttempt(resolvedSelection);
 
-    if (resolveYouTubeDownloadPolicy(resolvedSelection.protocol, resolvedSelection.fragmentCount).dashFragmentedDownload) {
-      log.info('Skipping direct-audio YouTube download attempt for DASH/fragmented selection', {
+    const shouldUseResolvedSelectionFirst =
+      resolvedSelection.postLiveArchive ||
+      resolveYouTubeDownloadPolicy(resolvedSelection.protocol, resolvedSelection.fragmentCount).dashFragmentedDownload;
+
+    if (shouldUseResolvedSelectionFirst) {
+      log.info('Skipping direct-audio YouTube download attempt for resolved fragmented/post-live selection', {
         url,
         formatId: resolvedSelection.formatId,
         protocol: resolvedSelection.protocol,
         fragmentCount: resolvedSelection.fragmentCount,
         extractionMode: resolvedSelection.extractionMode,
+        postLiveArchive: resolvedSelection.postLiveArchive,
       });
       return {
         mode: resolvedSelection.extractionMode,
