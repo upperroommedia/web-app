@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { ConsoleMessage, Page } from '@playwright/test';
 
 function createSilentWav(durationSeconds = 0.5, sampleRate = 44100) {
   const numSamples = Math.floor(durationSeconds * sampleRate);
@@ -25,14 +26,27 @@ async function loginAsDevAdmin(page: import('@playwright/test').Page) {
   const devLoginButton = page.getByRole('button', { name: /Dev Login/i });
   await expect(devLoginButton).toBeVisible();
   await devLoginButton.click();
-  await expect(page.getByLabel('Upload from Youtube Url toggle')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Upload from Youtube Url' })).toBeVisible();
+}
+
+function collectTrimmerBrowserErrors(page: Page) {
+  const messages: string[] = [];
+  page.on('console', (message: ConsoleMessage) => {
+    if (message.type() === 'error') {
+      messages.push(message.text());
+    }
+  });
+  page.on('pageerror', (error) => {
+    messages.push(error.message);
+  });
+  return messages;
 }
 
 test.describe('Audio trimmer', () => {
   test('scrub, trim end, and reset without console errors', async ({ page }) => {
     await loginAsDevAdmin(page);
 
-    const toggle = page.getByLabel('Upload from Youtube Url toggle');
+    const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
       await toggle.click();
     }
@@ -66,7 +80,7 @@ test.describe('Audio trimmer', () => {
   test('scrub while playing stays stable', async ({ page }) => {
     await loginAsDevAdmin(page);
 
-    const toggle = page.getByLabel('Upload from Youtube Url toggle');
+    const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
       await toggle.click();
     }
@@ -94,7 +108,7 @@ test.describe('Audio trimmer', () => {
   test('drag playhead while playing does not jump', async ({ page }) => {
     await loginAsDevAdmin(page);
 
-    const toggle = page.getByLabel('Upload from Youtube Url toggle');
+    const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
       await toggle.click();
     }
@@ -127,7 +141,7 @@ test.describe('Audio trimmer', () => {
     await page.setViewportSize({ width: 360, height: 640 });
     await loginAsDevAdmin(page);
 
-    const toggle = page.getByLabel('Upload from Youtube Url toggle');
+    const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
     if (await toggle.isChecked()) {
       await toggle.click();
     }
@@ -161,5 +175,65 @@ test.describe('Audio trimmer', () => {
     await page.keyboard.press('Control+A');
     await page.keyboard.type('0000100');
     await expect(trimStartInput).toHaveValue(/00:00:10/);
+  });
+
+  test('local upload waveform uses file data when object URL fetch fails', async ({ page }) => {
+    const browserErrors = collectTrimmerBrowserErrors(page);
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (target.startsWith('blob:')) {
+          return Promise.reject(new TypeError('Load failed'));
+        }
+        return originalFetch(input, init);
+      };
+    });
+
+    await loginAsDevAdmin(page);
+
+    const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
+    if (await toggle.isChecked()) {
+      await toggle.click();
+    }
+
+    const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
+    await dropzone.locator('input').setInputFiles({
+      name: 'sample.wav',
+      mimeType: 'audio/wav',
+      buffer: createSilentWav(),
+    });
+
+    await expect(page.getByRole('textbox', { name: 'Trim Start' })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: 'Play' })).toBeEnabled({ timeout: 10000 });
+    expect(browserErrors).toEqual([]);
+  });
+
+  test('rejected media play promise does not surface as a browser error', async ({ page }) => {
+    const browserErrors = collectTrimmerBrowserErrors(page);
+    await page.addInitScript(() => {
+      HTMLMediaElement.prototype.play = () =>
+        Promise.reject(new DOMException('The operation is not supported.', 'NotSupportedError'));
+    });
+
+    await loginAsDevAdmin(page);
+
+    const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url' });
+    if (await toggle.isChecked()) {
+      await toggle.click();
+    }
+
+    const dropzone = page.getByText('Drag & drop audio files here, or click to select files').locator('..');
+    await dropzone.locator('input').setInputFiles({
+      name: 'sample.wav',
+      mimeType: 'audio/wav',
+      buffer: createSilentWav(),
+    });
+
+    const playButton = page.getByRole('button', { name: 'Play' });
+    await expect(playButton).toBeEnabled({ timeout: 10000 });
+    await playButton.click({ force: true });
+    await expect(playButton).toBeEnabled();
+    expect(browserErrors).toEqual([]);
   });
 });

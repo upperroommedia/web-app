@@ -10,6 +10,11 @@ export interface UploadableFile {
   preview: string;
 }
 
+export function revokeUploadableFilePreview(source: UploadableFile | undefined): void {
+  if (!source?.preview || !Url) return;
+  Url.revokeObjectURL(source.preview);
+}
+
 interface DropZoneProps {
   setAudioSource: Dispatch<SetStateAction<AudioSource | undefined>>;
   audioSourceError?: UploaderFieldError;
@@ -49,7 +54,12 @@ const DropZone = ({ setAudioSource, audioSourceError, setAudioSourceError }: Dro
         preview: Url.createObjectURL(acceptedFiles[0]),
         name: acceptedFiles[0].name.replace(/\.[^/.]+$/, ''),
       };
-      setAudioSource({ source: mappedAccepted, type: 'File' });
+      setAudioSource((currentSource) => {
+        if (currentSource?.type === 'File') {
+          revokeUploadableFilePreview(currentSource.source);
+        }
+        return { source: mappedAccepted, type: 'File' };
+      });
     },
     [setAudioSource, setAudioSourceError]
   );

@@ -1,6 +1,6 @@
 // An audio trimmer component that allows the user to trim audio files.
 // Uses the shared trimmer components for consistent UI and state management.
-import { FunctionComponent, SetStateAction, useEffect, useMemo, useRef, Dispatch, useCallback } from 'react';
+import { FunctionComponent, SetStateAction, useEffect, useMemo, useRef, Dispatch, useCallback, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import {
   EditableTimeInput,
@@ -13,6 +13,7 @@ import {
 
 interface AudioTrimmerProps {
   url: string;
+  audioBlob?: Blob;
   trimStart: number;
   trimDuration?: number;
   setTrimStart: (trimStartTime: number) => void;
@@ -22,6 +23,7 @@ interface AudioTrimmerProps {
 
 const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   url,
+  audioBlob,
   trimStart,
   trimDuration,
   setTrimStart,
@@ -29,17 +31,34 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   setHasTrimmed,
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const savedTrimStartRef = useRef(trimStart);
-  const savedTrimEndRef = useRef(trimDuration && trimDuration > 0 ? trimStart + trimDuration : undefined);
-  const savedTrimStart = savedTrimStartRef.current;
-  const savedTrimEnd = savedTrimEndRef.current;
+  const [mediaStatus, setMediaStatus] = useState<{ url: string; status: 'ready' | 'error' } | null>(null);
+  const [savedTrimStart] = useState(() => trimStart);
+  const [savedTrimEnd] = useState(() => (trimDuration && trimDuration > 0 ? trimStart + trimDuration : undefined));
+  const isMediaPlayable = mediaStatus?.url === url && mediaStatus.status === 'ready';
 
   // Initialize audio element
   useEffect(() => {
-    audioRef.current = new Audio(url);
+    const audio = new Audio(url);
+    audio.preload = 'metadata';
+    audioRef.current = audio;
+
+    const handleMediaReady = () => {
+      setMediaStatus({ url, status: audio.error ? 'error' : 'ready' });
+    };
+    const handleMediaError = () => {
+      setMediaStatus({ url, status: 'error' });
+    };
+
+    audio.addEventListener('loadedmetadata', handleMediaReady);
+    audio.addEventListener('canplay', handleMediaReady);
+    audio.addEventListener('error', handleMediaError);
+
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
+      audio.removeEventListener('loadedmetadata', handleMediaReady);
+      audio.removeEventListener('canplay', handleMediaReady);
+      audio.removeEventListener('error', handleMediaError);
+      audio.pause();
+      if (audioRef.current === audio) {
         audioRef.current = null;
       }
     };
@@ -99,36 +118,23 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
   );
 
   const waveformElement = useMemo(
-    () => <AudioWaveform url={url} height={80} />,
-    [url]
+    () => <AudioWaveform url={url} audioBlob={audioBlob} height={80} />,
+    [url, audioBlob]
   );
 
   return (
     <Stack spacing={2} sx={{ width: '100%', py: 2 }}>
       {/* Timeline with waveform */}
-      <TrimmerTimeline
-        onSeek={handleSeek}
-        height={80}
-        backgroundElement={waveformElement}
-      />
+      <TrimmerTimeline onSeek={handleSeek} height={80} backgroundElement={waveformElement} />
 
       {/* Controls and Time Inputs */}
       <Stack spacing={2} sx={{ display: { xs: 'flex', sm: 'none' } }}>
-        <Stack
-          direction="row"
-          spacing={2}
-          alignItems="stretch"
-          justifyContent="space-between"
-        >
+        <Stack direction="row" spacing={2} alignItems="stretch" justifyContent="space-between">
           <EditableTimeInput type="start" label="Trim Start" resetValue={savedTrimStart} />
           <EditableTimeInput type="end" label="Trim End" resetValue={savedTrimEnd} />
         </Stack>
-        <Stack
-          direction="row"
-          alignItems="center"
-          justifyContent="center"
-        >
-          <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} />
+        <Stack direction="row" alignItems="center" justifyContent="center">
+          <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} disabled={!isMediaPlayable} />
         </Stack>
       </Stack>
       <Stack
@@ -139,7 +145,7 @@ const AudioTrimmer: FunctionComponent<AudioTrimmerProps> = ({
         sx={{ display: { xs: 'none', sm: 'flex' } }}
       >
         <EditableTimeInput type="start" label="Trim Start" resetValue={savedTrimStart} />
-        <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} />
+        <TrimmerControls onPlayPause={togglePlayPause} onSeek={handleSeek} disabled={!isMediaPlayable} />
         <EditableTimeInput type="end" label="Trim End" resetValue={savedTrimEnd} />
       </Stack>
     </Stack>

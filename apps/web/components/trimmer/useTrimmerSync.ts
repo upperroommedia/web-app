@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useTrimmerStore } from '../../context/trimmerStore';
 import { useMediaRemote, type MediaPlayerInstance } from '@vidstack/react';
 import { logTrimmerDebug } from '@/utils/trimmerDebug';
+import { safePlayMediaElement } from './trimmerMedia';
 
 interface UseTrimmerSyncOptions {
   /** Called when seeking is needed */
@@ -78,10 +79,12 @@ export function useAudioTrimmerSync(
       audioRef.current.pause();
       if (loopWithinTrim) {
         audioRef.current.currentTime = trimStart;
-        audioRef.current.play();
+        safePlayMediaElement(audioRef.current, () => {
+          setIsPlaying(false);
+        });
       }
     }
-  }, [audioRef, isScrubbing, trimEnd, trimStart, autoPauseAtEnd, loopWithinTrim, setCurrentTime]);
+  }, [audioRef, isScrubbing, trimEnd, trimStart, autoPauseAtEnd, loopWithinTrim, setCurrentTime, setIsPlaying]);
 
   // Handle play/pause events
   const handlePlay = useCallback(() => {
@@ -103,9 +106,11 @@ export function useAudioTrimmerSync(
       }
     } else if (wasPlayingBeforeScrubRef.current) {
       wasPlayingBeforeScrubRef.current = false;
-      audio.play().catch(() => {});
+      safePlayMediaElement(audio, () => {
+        setIsPlaying(false);
+      });
     }
-  }, [audioRef, isScrubbing]);
+  }, [audioRef, isScrubbing, setIsPlaying]);
 
   // Sync store time changes to audio element (when initiated by user input).
   // Use store.subscribe so we don't subscribe to currentTime/lastChangeSource in React
@@ -115,7 +120,10 @@ export function useAudioTrimmerSync(
       const state = useTrimmerStore.getState();
       if (!audioRef.current || state.isScrubbing) return;
       if (state.lastChangeSource !== 'input' && state.lastChangeSource !== 'timeline') return;
-      if (lastRequestedStoreTimeRef.current !== null && Math.abs(state.currentTime - lastRequestedStoreTimeRef.current) < 0.001) {
+      if (
+        lastRequestedStoreTimeRef.current !== null &&
+        Math.abs(state.currentTime - lastRequestedStoreTimeRef.current) < 0.001
+      ) {
         return;
       }
       lastRequestedStoreTimeRef.current = state.currentTime;
@@ -185,9 +193,11 @@ export function useAudioTrimmerSync(
       if (audioRef.current.currentTime < trimStart || audioRef.current.currentTime >= trimEnd) {
         audioRef.current.currentTime = trimStart;
       }
-      audioRef.current.play();
+      safePlayMediaElement(audioRef.current, () => {
+        setIsPlaying(false);
+      });
     }
-  }, [audioRef, trimStart, trimEnd]);
+  }, [audioRef, trimStart, trimEnd, setIsPlaying]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -248,7 +258,10 @@ export function useVidstackTrimmerSync(
       // from the trimmer UI interaction handlers. Keep this subscription input-only to
       // avoid duplicate seek request paths and request ordering races.
       if (state.lastChangeSource !== 'input') return;
-      if (lastRequestedStoreTimeRef.current !== null && Math.abs(state.currentTime - lastRequestedStoreTimeRef.current) < 0.001) {
+      if (
+        lastRequestedStoreTimeRef.current !== null &&
+        Math.abs(state.currentTime - lastRequestedStoreTimeRef.current) < 0.001
+      ) {
         return;
       }
       lastRequestedStoreTimeRef.current = state.currentTime;

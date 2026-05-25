@@ -3,10 +3,13 @@ import Box from '@mui/material/Box';
 import { alpha, useTheme } from '@mui/material/styles';
 import { colors } from '../../styles/theme';
 import { keyframes } from '@mui/system';
+import { logWaveformPreviewFailure, readWaveformAudioData } from './trimmerMedia';
 
 interface AudioWaveformProps {
   /** URL of the audio file */
   url: string;
+  /** Original local file/blob, if the URL is a browser object URL. */
+  audioBlob?: Blob;
   /** Height of the waveform in pixels */
   height?: number;
   /** Color of the waveform bars */
@@ -17,7 +20,7 @@ interface AudioWaveformProps {
  * Audio waveform visualization using Web Audio API and Canvas.
  * Decodes audio and renders a visual waveform representation.
  */
-function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
+function AudioWaveform({ url, audioBlob, height = 80, color }: AudioWaveformProps) {
   const theme = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -25,6 +28,7 @@ function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const peaksComputedForUrl = useRef<string | null>(null);
+  const waveformUnavailableForUrl = useRef<string | null>(null);
   const [barCount, setBarCount] = useState(0);
 
   // Use theme accent color if not provided
@@ -87,34 +91,37 @@ function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
   // Fetch and decode audio
   useEffect(() => {
     // Skip if we've already computed peaks for this URL
-    if (!barCount || peaksComputedForUrl.current === `${url}|${barCount}`) {
+    if (
+      !barCount ||
+      peaksComputedForUrl.current === `${url}|${barCount}` ||
+      waveformUnavailableForUrl.current === url
+    ) {
       return;
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
 
     const loadAudio = async () => {
+      let audioContext: AudioContext | null = null;
       setIsLoading(true);
       setError(null);
 
       try {
-        // Fetch audio data
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error('Failed to fetch audio');
-        }
-
-        const arrayBuffer = await response.arrayBuffer();
+        const arrayBuffer = await readWaveformAudioData({
+          url,
+          blob: audioBlob,
+          signal: abortController.signal,
+        });
         if (cancelled) return;
 
         // Decode audio
         const AudioContextCtor =
-          window.AudioContext ||
-          (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!AudioContextCtor) {
           throw new Error('Web Audio API is not supported in this browser');
         }
-        const audioContext = new AudioContextCtor();
+        audioContext = new AudioContextCtor();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         if (cancelled) return;
 
@@ -124,15 +131,17 @@ function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
 
         setPeaks(computedPeaks);
         peaksComputedForUrl.current = `${url}|${barCount}`;
-
-        // Clean up audio context
-        await audioContext.close();
+        waveformUnavailableForUrl.current = null;
       } catch (err) {
         if (!cancelled) {
-          console.error('Error loading audio waveform:', err);
+          logWaveformPreviewFailure(err);
+          waveformUnavailableForUrl.current = url;
           setError('Failed to load waveform');
         }
       } finally {
+        if (audioContext) {
+          await audioContext.close().catch(() => {});
+        }
         if (!cancelled) {
           setIsLoading(false);
         }
@@ -143,8 +152,9 @@ function AudioWaveform({ url, height = 80, color }: AudioWaveformProps) {
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
-  }, [url, computePeaks, barCount]);
+  }, [url, audioBlob, computePeaks, barCount]);
 
   // Draw waveform on canvas
   useEffect(() => {
@@ -288,15 +298,7 @@ const waveAnimation = keyframes`
   }
 `;
 
-function WaveformLoadingAnimation({
-  color,
-  height,
-  barCount,
-}: {
-  color: string;
-  height: number;
-  barCount: number;
-}) {
+function WaveformLoadingAnimation({ color, height, barCount }: { color: string; height: number; barCount: number }) {
   const safeBarCount = Math.max(30, barCount);
   const bars = useMemo(() => {
     return Array.from({ length: safeBarCount }, (_, i) => {

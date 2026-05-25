@@ -59,7 +59,7 @@ import UploadProgressComponent from './UploadProgressComponent';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
 import { AudioSource } from '../../pages/api/uploadFile';
-import DropZone from '../DropZone';
+import DropZone, { revokeUploadableFilePreview } from '../DropZone';
 import BundleListSelector from '../BundleListSelector';
 import { getLatestListFromBundle, getSubtitlesFromBundle } from '../../utils/bundleHelpers';
 import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
@@ -70,7 +70,11 @@ import {
   isSermonProcessingLocked,
   isSermonPublishedAnywhere,
 } from '../../utils/sermonEditing';
-import { clearIntentionalNavigation, isIntentionalNavigation, markIntentionalNavigation } from '../../utils/intentionalNavigation';
+import {
+  clearIntentionalNavigation,
+  isIntentionalNavigation,
+  markIntentionalNavigation,
+} from '../../utils/intentionalNavigation';
 import { removeCategoryScopedLists } from '../../utils/categoryScopedLists';
 
 const AudioTrimmerComponent = dynamic(() => import('../audioTrimmerComponents/AudioTrimmerComponent'));
@@ -105,18 +109,18 @@ const Uploader = (props: UploaderProps) => {
     (): FormErrors =>
       !props.existingSermon
         ? {
-          title: { error: true, message: createFormErrorMessage('title'), initialState: true },
-          description: { error: true, message: createFormErrorMessage('description'), initialState: true },
-          subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
-          series: { error: true, message: 'You must select a series', initialState: true },
-          speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
-          audioSource: {
-            error: true,
-            message: 'You must select an audio source before uploading',
-            initialState: true,
-          },
-          topics: { error: true, message: 'You must select at least one topic', initialState: true },
-        }
+            title: { error: true, message: createFormErrorMessage('title'), initialState: true },
+            description: { error: true, message: createFormErrorMessage('description'), initialState: true },
+            subtitle: { error: true, message: 'You must select a subtitle', initialState: true },
+            series: { error: true, message: 'You must select a series', initialState: true },
+            speakers: { error: true, message: 'You must select at least one speaker', initialState: true },
+            audioSource: {
+              error: true,
+              message: 'You must select an audio source before uploading',
+              initialState: true,
+            },
+            topics: { error: true, message: 'You must select at least one topic', initialState: true },
+          }
         : {},
     [props.existingSermon]
   );
@@ -195,7 +199,9 @@ const Uploader = (props: UploaderProps) => {
       if (!props.existingSermon?.seriesId) return;
 
       try {
-        const seriesDoc = await getDoc(doc(firestore, 'series', props.existingSermon.seriesId).withConverter(seriesConverter));
+        const seriesDoc = await getDoc(
+          doc(firestore, 'series', props.existingSermon.seriesId).withConverter(seriesConverter)
+        );
 
         if (seriesDoc.exists()) {
           setSelectedSeries(seriesDoc.data());
@@ -666,7 +672,12 @@ const Uploader = (props: UploaderProps) => {
   const clearAudioTrimmer = useCallback(() => {
     setAudioSourceError(true, 'You must select an audio source before uploading');
     setUseYouTubeUrl(false);
-    setAudioSource(undefined);
+    setAudioSource((currentSource) => {
+      if (currentSource?.type === 'File') {
+        revokeUploadableFilePreview(currentSource.source);
+      }
+      return undefined;
+    });
     setTrimStartTime(0);
   }, [setAudioSource, setTrimStartTime, setAudioSourceError]);
 
@@ -708,20 +719,20 @@ const Uploader = (props: UploaderProps) => {
     const targetUrl = `/admin/sermons/${uploadedSermon.id}`;
 
     // Mark navigation as intentional to skip unsaved changes warning
-      markIntentionalNavigation();
-      setIsNavigatingToSermon(true);
+    markIntentionalNavigation();
+    setIsNavigatingToSermon(true);
 
-      try {
-        const didNavigate = await router.push(targetUrl);
-        if (!didNavigate) {
-          clearIntentionalNavigation();
-          setIsNavigatingToSermon(false);
-        }
-      } catch (error) {
-        console.error('Failed to navigate to sermon details:', error);
+    try {
+      const didNavigate = await router.push(targetUrl);
+      if (!didNavigate) {
         clearIntentionalNavigation();
         setIsNavigatingToSermon(false);
       }
+    } catch (error) {
+      console.error('Failed to navigate to sermon details:', error);
+      clearIntentionalNavigation();
+      setIsNavigatingToSermon(false);
+    }
   }, [uploadedSermon, isNavigatingToSermon, router]);
 
   // Dismiss the upload modal and stay on page
@@ -777,8 +788,8 @@ const Uploader = (props: UploaderProps) => {
     () =>
       Boolean(
         props.existingSermon &&
-        typeof props.existingSermon.trimDurationSeconds === 'number' &&
-        props.existingSermon.trimDurationSeconds > 0
+          typeof props.existingSermon.trimDurationSeconds === 'number' &&
+          props.existingSermon.trimDurationSeconds > 0
       ),
     [props.existingSermon]
   );
@@ -983,46 +994,46 @@ const Uploader = (props: UploaderProps) => {
             (sermon.subtitle === BIBLE_STUDIES_STRING ||
               sermon.subtitle === SUNDAY_HOMILIES_STRING ||
               sermon.subtitle === PASCHA_WEEK_STRING) && (
-            <Box sx={{ display: 'flex', gap: '1ch', width: 1, flexDirection: { xs: 'column', xl: 'row' } }}>
-              {(sermon.subtitle === BIBLE_STUDIES_STRING || sermon.subtitle === SUNDAY_HOMILIES_STRING) && (
-                <>
-                  <BibleChapterSelector
+              <Box sx={{ display: 'flex', gap: '1ch', width: 1, flexDirection: { xs: 'column', xl: 'row' } }}>
+                {(sermon.subtitle === BIBLE_STUDIES_STRING || sermon.subtitle === SUNDAY_HOMILIES_STRING) && (
+                  <>
+                    <BibleChapterSelector
+                      sermonSubtitle={sermon.subtitle}
+                      setSermonList={setSermonList}
+                      selectedChapter={selectedChapter}
+                      setSelectedChapter={setSelectedChapter}
+                      bibleChapterError={formErrors?.bibleChapter}
+                      setBibleChapterError={setBibleChapterError}
+                    />
+                    <SundayHomilyMonthSelector
+                      sermonSubtitle={sermon.subtitle}
+                      date={date}
+                      setSermonList={setSermonList}
+                      selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
+                      setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
+                      sundayHomiliesYear={sundayHomiliesYear}
+                      setSundayHomiliesYear={setSundayHomiliesYear}
+                      sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
+                      setSundayHomiliesMonthError={setSundayHomiliesMonthError}
+                    />
+                  </>
+                )}
+                {sermon.subtitle === PASCHA_WEEK_STRING && (
+                  <HolyWeekSelector
                     sermonSubtitle={sermon.subtitle}
                     setSermonList={setSermonList}
-                    selectedChapter={selectedChapter}
-                    setSelectedChapter={setSelectedChapter}
-                    bibleChapterError={formErrors?.bibleChapter}
-                    setBibleChapterError={setBibleChapterError}
+                    selectedHolyWeekYear={selectedHolyWeekYear}
+                    setSelectedHolyWeekYear={setSelectedHolyWeekYear}
+                    selectedHolyWeekDay={selectedHolyWeekDay}
+                    setSelectedHolyWeekDay={setSelectedHolyWeekDay}
+                    holyWeekYearError={formErrors?.holyWeekYear}
+                    setHolyWeekYearError={setHolyWeekYearError}
+                    holyWeekDayError={formErrors?.holyWeekDay}
+                    setHolyWeekDayError={setHolyWeekDayError}
                   />
-                  <SundayHomilyMonthSelector
-                    sermonSubtitle={sermon.subtitle}
-                    date={date}
-                    setSermonList={setSermonList}
-                    selectedSundayHomiliesMonth={selectedSundayHomiliesMonth}
-                    setSelectedSundayHomiliesMonth={setSelectedSundayHomiliesMonth}
-                    sundayHomiliesYear={sundayHomiliesYear}
-                    setSundayHomiliesYear={setSundayHomiliesYear}
-                    sundayHomiliesMonthError={formErrors?.sundayHomiliesMonth}
-                    setSundayHomiliesMonthError={setSundayHomiliesMonthError}
-                  />
-                </>
-              )}
-              {sermon.subtitle === PASCHA_WEEK_STRING && (
-                <HolyWeekSelector
-                  sermonSubtitle={sermon.subtitle}
-                  setSermonList={setSermonList}
-                  selectedHolyWeekYear={selectedHolyWeekYear}
-                  setSelectedHolyWeekYear={setSelectedHolyWeekYear}
-                  selectedHolyWeekDay={selectedHolyWeekDay}
-                  setSelectedHolyWeekDay={setSelectedHolyWeekDay}
-                  holyWeekYearError={formErrors?.holyWeekYear}
-                  setHolyWeekYearError={setHolyWeekYearError}
-                  holyWeekDayError={formErrors?.holyWeekDay}
-                  setHolyWeekDayError={setHolyWeekDayError}
-                />
-              )}
-            </Box>
-          )}
+                )}
+              </Box>
+            )}
           <SpeakerSelector
             sermonSpeakers={sermon.speakers}
             sermonImages={sermon.images}
@@ -1093,11 +1104,11 @@ const Uploader = (props: UploaderProps) => {
             <Stack width={1}>
               {canEditExistingAudio ? (
                 isExistingYouTubeSermon ? (
-                    <YouTubeTrimmer
-                      initialUrl={props.existingSermon?.youtubeUrl}
-                      allowUrlEdit={false}
-                      trimStart={sermon.sourceStartTime}
-                      duration={sermon.trimDurationSeconds ?? 0}
+                  <YouTubeTrimmer
+                    initialUrl={props.existingSermon?.youtubeUrl}
+                    allowUrlEdit={false}
+                    trimStart={sermon.sourceStartTime}
+                    duration={sermon.trimDurationSeconds ?? 0}
                     setDuration={setTrimDuration}
                     setTrimStart={setTrimStartTime}
                     setAudioSource={setAudioSource}
@@ -1188,10 +1199,7 @@ const Uploader = (props: UploaderProps) => {
                       setIsEditing(false);
                     }
                   }}
-                  disabled={
-                    !canEditExistingSermon ||
-                    !existingSermonHasChanges
-                  }
+                  disabled={!canEditExistingSermon || !existingSermonHasChanges}
                   variant="contained"
                 >
                   {isEditing ? <CircularProgress size="1.5rem" /> : 'Update Sermon'}
@@ -1206,6 +1214,7 @@ const Uploader = (props: UploaderProps) => {
               {audioSource?.type === 'File' ? (
                 <AudioTrimmerComponent
                   url={audioSource.source.preview}
+                  audioBlob={audioSource.source.file}
                   trimStart={sermon.sourceStartTime}
                   setTrimStart={setTrimStartTime}
                   setTrimDuration={setTrimDuration}
