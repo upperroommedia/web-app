@@ -64,7 +64,7 @@
     "react-instantsearch": "^7.15.8",
     "react-social-login-buttons": "^4.1.1",
     "sharp": "^0.33.5",
-    "tmp": "^0.2.5",
+    "tmp": "^0.2.6",
     "uuid": "catalog:",
     "zustand": "^5.0.10"
   },
