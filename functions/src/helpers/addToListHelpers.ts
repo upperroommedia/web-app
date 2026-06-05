@@ -37,6 +37,14 @@ const getAxiosData = (error: unknown): unknown =>
 const isTransientSubsplashError = (status?: number): boolean =>
   status === 429 || status === 502 || status === 503 || status === 504;
 
+const isSafeToRetrySubsplashRequest = ({
+  method,
+  status,
+}: {
+  method: string;
+  status?: number;
+}): boolean => method.toUpperCase() === 'GET' && isTransientSubsplashError(status);
+
 const sleep = async (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -61,7 +69,10 @@ async function runSubsplashRequest<T>(
       lastError = error;
       const upstreamStatus = getAxiosStatus(error);
       const upstream = getAxiosData(error);
-      const isRetryable = isTransientSubsplashError(upstreamStatus);
+      const isRetryable = isSafeToRetrySubsplashRequest({
+        method: context.method,
+        status: upstreamStatus,
+      });
 
       logger.warn('Subsplash request failed', {
         ...context,

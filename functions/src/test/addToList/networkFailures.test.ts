@@ -541,6 +541,107 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     );
   });
 
+  it('does not duplicate overflow rows when a patch succeeds upstream before returning 502', async () => {
+    const rootListId = 'networkFailures-dedupe-root';
+    const overflowListId = 'networkFailures-dedupe-overflow';
+
+    subsplashMock.createList(rootListId, 'Dedupe Root', 10);
+    subsplashMock.createList(overflowListId, 'More Dedupe Root', 1);
+
+    const rootRows: SubsplashListRow[] = Array.from({ length: 9 }, (_, i) => ({
+      id: `dedupe-root-row-${i}`,
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: i + 1,
+      type: 'media-item' as const,
+      _embedded: {
+        'source-list': { id: rootListId },
+        'media-item': { id: `dedupe-root-item-${i}` },
+      },
+    }));
+    rootRows.push({
+      id: 'dedupe-root-link-row',
+      app_key: '9XTSHD',
+      method: 'static' as const,
+      position: 10,
+      type: 'list' as const,
+      _embedded: {
+        'source-list': { id: rootListId },
+        list: { id: overflowListId, title: 'More Dedupe Root' },
+      },
+    });
+    subsplashMock.listRows.set(rootListId, rootRows);
+
+    subsplashMock.listRows.set(overflowListId, [
+      {
+        id: 'dedupe-overflow-row-1',
+        app_key: '9XTSHD',
+        method: 'static' as const,
+        position: 1,
+        type: 'media-item' as const,
+        _embedded: {
+          'source-list': { id: overflowListId },
+          'media-item': { id: 'dedupe-overflow-item-1' },
+        },
+      },
+    ]);
+
+    const rootFirestoreId = await createListDocument({
+      subsplashId: rootListId,
+      title: 'Dedupe Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      moreSermonsRef: overflowListId,
+      count: 10,
+      isRootList: true,
+      rootListId,
+      overflowDepth: 0,
+      hasOverflowPages: true,
+      logicalCount: 10,
+    });
+
+    await createListDocument({
+      subsplashId: overflowListId,
+      title: 'More Dedupe Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      isMoreSermonsList: true,
+      isRootList: false,
+      rootListId: rootFirestoreId,
+      overflowDepth: 1,
+      count: 1,
+      logicalCount: 10,
+    });
+
+    let shouldFailAfterMutation = true;
+    networkFailureInjector.registerFailure(`patchListAfterMutation:${overflowListId}`, () => {
+      if (!shouldFailAfterMutation) {
+        return false;
+      }
+      shouldFailAfterMutation = false;
+      return true;
+    });
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'dedupe-brand-new-item', type: 'media-item' },
+        maxListSize: 10,
+      },
+    };
+
+    const result = await addToListHandler(request);
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+
+    const overflowMediaIds = subsplashMock
+      .getListRows(overflowListId)
+      .filter((row) => row.type === 'media-item')
+      .map((row) => row._embedded['media-item']?.id)
+      .filter((id): id is string => Boolean(id));
+
+    expect(overflowMediaIds).toEqual(['dedupe-root-item-8', 'dedupe-overflow-item-1']);
+  });
+
   it('should handle network failure on second call but succeed on retry', async () => {
     const listId = 'networkFailures-test-list-2';
     subsplashMock.createList(listId, 'Test List');
