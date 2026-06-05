@@ -56,6 +56,15 @@ const isTransientUpstreamError = (error: unknown): error is AxiosError =>
   error.response.status >= 500 &&
   error.response.status < 600;
 
+const normalizeOptionalText = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts }, async (request: CallableRequest<UPLOAD_TO_SUBSPLASH_INCOMING_DATA>): Promise<unknown> => {
   logger.log('uploadToSubsplash called');
   if (!canUserRolePublish(request.auth?.token.role)) {
@@ -106,13 +115,14 @@ const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts },
           logger.info(`Transcode Statues: ${transcodeResponse.data.status}`);
           // uploadToSubsplash with the audio id
           const repairedImages = await repairMismatchedSubsplashImageRefs(data.images, bearerToken);
+          const normalizedSubtitle = normalizeOptionalText(data.subtitle);
 
           const requestData = JSON.stringify({
             app_key: '9XTSHD',
             scriptures: [],
             tags: tags,
             title: data.title,
-            subtitle: data.subtitle,
+            ...(normalizedSubtitle ? { subtitle: normalizedSubtitle } : {}),
             summary: data.description,
             date: data.date,
             auto_publish: data.autoPublish ?? false,

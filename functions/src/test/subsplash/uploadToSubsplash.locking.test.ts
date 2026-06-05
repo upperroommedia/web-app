@@ -204,4 +204,22 @@ describe('uploadToSubsplash lock contract', () => {
     const requestData = JSON.parse(String(requestConfig.data));
     expect(requestData._embedded.images).toEqual([{ id: 'wide-repaired', type: 'wide' }]);
   });
+
+  it('omits blank subtitle values from the create payload', async () => {
+    await uploadHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        ...buildValidPayload(),
+        subtitle: '   ',
+      },
+    });
+
+    const mediaItemCall = mockAxios.mock.calls.find(
+      ([config]) => (config as { url?: string }).url === 'https://core.subsplash.com/media/v1/media-items'
+    );
+    expect(mediaItemCall).toBeDefined();
+    const requestConfig = mediaItemCall?.[0] as unknown as { data: string };
+    const requestData = JSON.parse(String(requestConfig.data));
+    expect(Object.prototype.hasOwnProperty.call(requestData, 'subtitle')).toBe(false);
+  });
 });
