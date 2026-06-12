@@ -55,7 +55,7 @@
     "mocha": "^10.2.0",
     "tsc-alias": "^1.8.16",
     "ts-node": "^10.9.2",
-    "turbo": "^2.5.8",
+    "turbo": "^2.9.14",
     "typescript": "catalog:"
   },
   "pnpm": {
