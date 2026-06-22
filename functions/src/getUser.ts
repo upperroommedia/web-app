@@ -1,15 +1,15 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { https, logger } from 'firebase-functions/v2';
 import { CallableRequest } from 'firebase-functions/v2/https';
-import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User } from '@upperroom/shared/types/User';
-import { IdTokenResult } from 'firebase/auth';
+import { DirectoryUser } from '@upperroom/shared/types/User';
 import { FunctionOutputType } from '@upperroom/shared/types/Function';
 import handleError from './handleError';
+import { toDirectoryUser } from './userDirectory';
 export interface GetUserInputType {
   uid: string;
 }
 
-export type GetUserOutputType = FunctionOutputType<User>;
+export type GetUserOutputType = FunctionOutputType<DirectoryUser>;
 
 const getUser = https.onCall(async (request: CallableRequest<GetUserInputType>): Promise<GetUserOutputType> => {
   // check if user is admin (true "admin" custom claim), return error if not
@@ -21,42 +21,7 @@ const getUser = https.onCall(async (request: CallableRequest<GetUserInputType>):
     // List batch of users, 1000 at a time.
     const user = await firebaseAdmin.auth().getUser(request.data.uid);
     logger.debug('listUsersResult', user);
-    const userOutput: User = {
-      uid: user.uid,
-      email: user.email ?? null,
-      photoURL: user.photoURL ?? null,
-      displayName: user.displayName ?? null,
-      role: user.customClaims?.role,
-      firstName: '',
-      lastName: '',
-      canUpload: (): boolean => canUserRoleUpload(user.customClaims?.role),
-      canPublish: (): boolean => canUserRolePublish(user.customClaims?.role),
-      isAdmin: (): boolean => isUserRoleAdmin(user.customClaims?.role),
-      emailVerified: false,
-      isAnonymous: false,
-      metadata: user.metadata,
-      providerData: user.providerData,
-      refreshToken: '',
-      tenantId: user.tenantId ?? null,
-      delete: function (): Promise<void> {
-        throw new Error('Function not implemented.');
-      },
-      getIdToken: function (): Promise<string> {
-        throw new Error('Function not implemented.');
-      },
-      getIdTokenResult: function (): Promise<IdTokenResult> {
-        throw new Error('Function not implemented.');
-      },
-      reload: function (): Promise<void> {
-        throw new Error('Function not implemented.');
-      },
-      toJSON: function (): object {
-        throw new Error('Function not implemented.');
-      },
-      phoneNumber: user.phoneNumber ?? null,
-      providerId: '',
-    };
-    return { status: 'success', data: userOutput };
+    return { status: 'success', data: toDirectoryUser(user) };
   } catch (error) {
     handleError(error, {
       alertCode: 'GET_USER_RUNTIME_FAILURE',

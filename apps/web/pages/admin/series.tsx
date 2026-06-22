@@ -40,7 +40,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import useAuth from '../../context/user/UserContext';
 import { alpha, useTheme } from '@mui/material/styles';
 import UserAvatar from '../../components/UserAvatar';
-import type { User as AppUser } from '../../types/User';
+import type { DirectoryUser as AppUser } from '../../types/User';
 import type { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '@upperroom/contracts/getUsersByIds';
 import {
   createOperationKey,

@@ -22,7 +22,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import { visuallyHidden } from '@mui/utils';
 import { Order, ROLES } from '../context/types';
 import useAuth from '../context/user/UserContext';
-import { UserWithLoading } from '../types/User';
+import { DirectoryUserWithLoading } from '../types/User';
 
 type SortKey = 'name' | 'username' | 'email' | 'provider' | 'joined' | 'lastSignIn' | 'role';
 
@@ -41,7 +41,7 @@ const headCells: readonly HeadCell[] = [
   { id: 'role', label: 'Role' },
 ];
 
-const getDisplayName = (user: UserWithLoading): string => {
+const getDisplayName = (user: DirectoryUserWithLoading): string => {
   const mergedName = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
   if (user.displayName?.trim()) {
     return user.displayName.trim();
@@ -52,7 +52,7 @@ const getDisplayName = (user: UserWithLoading): string => {
   return '--';
 };
 
-const getUsername = (user: UserWithLoading): string => {
+const getUsername = (user: DirectoryUserWithLoading): string => {
   if (!user.email) {
     return '--';
   }
@@ -60,7 +60,7 @@ const getUsername = (user: UserWithLoading): string => {
   return username?.trim().length ? username : '--';
 };
 
-const getPrimaryProviderId = (user: UserWithLoading): string => {
+const getPrimaryProviderId = (user: DirectoryUserWithLoading): string => {
   const providerId = user.providerData?.[0]?.providerId ?? '';
   return providerId.trim().length ? providerId : '--';
 };
@@ -95,7 +95,7 @@ const formatMetadataDate = (value: string | undefined | null): string => {
   return parsed > 0 ? new Date(parsed).toLocaleString() : '--';
 };
 
-const getSortValue = (user: UserWithLoading, key: SortKey): string | number => {
+const getSortValue = (user: DirectoryUserWithLoading, key: SortKey): string | number => {
   switch (key) {
     case 'name':
       return getDisplayName(user).toLowerCase();
@@ -123,7 +123,7 @@ const compareValues = (a: string | number, b: string | number): number => {
   return String(a).localeCompare(String(b));
 };
 
-const stableSort = (array: UserWithLoading[], order: Order, orderBy: SortKey): UserWithLoading[] =>
+const stableSort = (array: DirectoryUserWithLoading[], order: Order, orderBy: SortKey): DirectoryUserWithLoading[] =>
   [...array].sort((a, b) => {
     const comparison = compareValues(getSortValue(a, orderBy), getSortValue(b, orderBy));
     return order === 'asc' ? comparison : -comparison;
@@ -204,7 +204,7 @@ const UserTableToolbar = ({ searchValue, onSearchChange, actions }: UserTableToo
 const COLUMN_COUNT = headCells.length + 1;
 
 const UserTable = (props: {
-  usersWithLoading: UserWithLoading[];
+  usersWithLoading: DirectoryUserWithLoading[];
   handleRoleChange: (uid: string, role: string) => Promise<void>;
   loading: boolean;
   toolbarActions?: ReactNode;
@@ -387,13 +387,13 @@ const UserTable = (props: {
 
 function userTablesAreEqual(
   prevProps: {
-    usersWithLoading: UserWithLoading[];
+    usersWithLoading: DirectoryUserWithLoading[];
     loading: boolean;
     toolbarActions?: ReactNode;
     handleRoleChange: (uid: string, role: string) => Promise<void>;
   },
   nextProps: {
-    usersWithLoading: UserWithLoading[];
+    usersWithLoading: DirectoryUserWithLoading[];
     loading: boolean;
     toolbarActions?: ReactNode;
     handleRoleChange: (uid: string, role: string) => Promise<void>;

@@ -1,13 +1,13 @@
 import Typography from '@mui/material/Typography';
 import Avatar, { AvatarProps } from '@mui/material/Avatar';
 import Image from 'next/image';
-import { User } from '../types/User';
+import { DirectoryUser, User } from '../types/User';
 import Skeleton from '@mui/material/Skeleton';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
 
 interface IUserAvatar extends AvatarProps {
-  user?: User;
+  user?: DirectoryUser | User;
   loading?: boolean;
   fallbackLabel?: string;
 }

@@ -40,7 +40,7 @@ import database, { ref } from '../firebase/database';
 import firestore, { doc, getDoc } from '../firebase/firestore';
 import Tooltip from '@mui/material/Tooltip';
 import CircularProgress from '@mui/material/CircularProgress';
-import { User } from '../types/User';
+import { DirectoryUser, User } from '../types/User';
 import { createFunctionV2 } from '../utils/createFunction';
 import { createIdleDestinationActivityState } from '../utils/sermonPublishActions';
 import type { DestinationActivityState } from '../utils/sermonPublishActions';
@@ -53,15 +53,15 @@ import { parseProcessingProgress } from '../utils/processAudioProgress';
 
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
-const uploaderCache = new Map<string, User>();
+const uploaderCache = new Map<string, DirectoryUser | User>();
 const pendingUploaderIds = new Set<string>();
-const pendingUploaderResolvers = new Map<string, Array<(user: User | undefined) => void>>();
+const pendingUploaderResolvers = new Map<string, Array<(user: DirectoryUser | User | undefined) => void>>();
 let uploaderBatchScheduled = false;
 let uploaderBatchInFlight = false;
 const seriesCache = new Map<string, Series | null>();
 const pendingSeriesRequests = new Map<string, Promise<Series | null>>();
 
-const resolvePendingUploader = (uid: string, user: User | undefined) => {
+const resolvePendingUploader = (uid: string, user: DirectoryUser | User | undefined) => {
   const resolvers = pendingUploaderResolvers.get(uid);
   if (!resolvers) {
     return;
@@ -120,7 +120,7 @@ const flushUploaderBatch = async () => {
   }
 };
 
-const requestUploaderInBatch = (uid: string): Promise<User | undefined> => {
+const requestUploaderInBatch = (uid: string): Promise<DirectoryUser | User | undefined> => {
   const cachedUser = uploaderCache.get(uid);
   if (cachedUser) {
     return Promise.resolve(cachedUser);
@@ -241,7 +241,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   );
 
   const [snapshot, _loading, _error] = useObject(processingProgressRef);
-  const [uploader, setUploader] = useState<User>();
+  const [uploader, setUploader] = useState<DirectoryUser | User>();
   const [uploaderLoading, setUploaderLoading] = useState(false);
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
   const [publishPopup, setPublishPopup] = useState(false);

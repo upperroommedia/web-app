@@ -62,7 +62,7 @@ import { createFunctionV2 } from '../../../utils/createFunction';
 import { createOperationKey } from '../../../utils/callableConcurrency';
 import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types';
 import UserAvatar from '../../../components/UserAvatar';
-import { User } from '../../../types/User';
+import { DirectoryUser, User } from '../../../types/User';
 import { GetUsersByIdsInputType, GetUsersByIdsOutputType } from '@upperroom/contracts/getUsersByIds';
 import { useDocument } from 'react-firebase-hooks/firestore';
 import { useObject } from 'react-firebase-hooks/database';
@@ -99,7 +99,7 @@ const SermonDetailsPage = () => {
   const pageContainerSx = { maxWidth: 1400, mx: 'auto', width: '100%', px: { xs: 0.5, sm: 2, md: 3 } };
 
   const [series, setSeries] = useState<Series | null>(null);
-  const [uploader, setUploader] = useState<User | undefined>(undefined);
+  const [uploader, setUploader] = useState<DirectoryUser | User | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [showStatusTooltip, setShowStatusTooltip] = useState(false);
   const [deletePopup, setDeletePopup] = useState(false);

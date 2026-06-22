@@ -1,56 +1,18 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { https, logger } from 'firebase-functions/v2';
 import { CallableRequest } from 'firebase-functions/v2/https';
-import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User, UserRoleType } from '@upperroom/shared/types/User';
-import { IdTokenResult } from 'firebase/auth';
+import { DirectoryUser, UserRoleType } from '@upperroom/shared/types/User';
 import { FunctionOutputType } from '@upperroom/shared/types/Function';
 import handleError from './handleError';
+import { toDirectoryUser } from './userDirectory';
 
 export interface GetUsersByIdsInputType {
   uids: string[];
 }
 
-export type GetUsersByIdsOutputType = FunctionOutputType<User[]>;
+export type GetUsersByIdsOutputType = FunctionOutputType<DirectoryUser[]>;
 
 const USER_FETCH_CHUNK_SIZE = 100; // Firebase Admin getUsers supports up to 100 identifiers per call.
-
-function toOutputUser(user: firebaseAdmin.auth.UserRecord): User {
-  return {
-    uid: user.uid,
-    email: user.email ?? null,
-    photoURL: user.photoURL ?? null,
-    displayName: user.displayName ?? null,
-    role: user.customClaims?.role as UserRoleType | undefined,
-    firstName: '',
-    lastName: '',
-    canUpload: (): boolean => canUserRoleUpload(user.customClaims?.role),
-    canPublish: (): boolean => canUserRolePublish(user.customClaims?.role),
-    isAdmin: (): boolean => isUserRoleAdmin(user.customClaims?.role),
-    emailVerified: false,
-    isAnonymous: false,
-    metadata: user.metadata,
-    providerData: user.providerData,
-    refreshToken: '',
-    tenantId: user.tenantId ?? null,
-    delete: function (): Promise<void> {
-      throw new Error('Function not implemented.');
-    },
-    getIdToken: function (): Promise<string> {
-      throw new Error('Function not implemented.');
-    },
-    getIdTokenResult: function (): Promise<IdTokenResult> {
-      throw new Error('Function not implemented.');
-    },
-    reload: function (): Promise<void> {
-      throw new Error('Function not implemented.');
-    },
-    toJSON: function (): object {
-      throw new Error('Function not implemented.');
-    },
-    phoneNumber: user.phoneNumber ?? null,
-    providerId: '',
-  };
-}
 
 const getUsersByIds = https.onCall(async (request: CallableRequest<GetUsersByIdsInputType>): Promise<GetUsersByIdsOutputType> => {
   const requesterRole = request.auth?.token.role as UserRoleType | undefined;
@@ -78,7 +40,7 @@ const getUsersByIds = https.onCall(async (request: CallableRequest<GetUsersByIds
 
   try {
     const auth = firebaseAdmin.auth();
-    const users: User[] = [];
+    const users: DirectoryUser[] = [];
     const foundUids = new Set<string>();
 
     for (let i = 0; i < requestedUids.length; i += USER_FETCH_CHUNK_SIZE) {
@@ -87,7 +49,7 @@ const getUsersByIds = https.onCall(async (request: CallableRequest<GetUsersByIds
 
       for (const userRecord of response.users) {
         foundUids.add(userRecord.uid);
-        users.push(toOutputUser(userRecord));
+        users.push(toDirectoryUser(userRecord));
       }
     }
 

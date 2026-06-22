@@ -26,3 +26,36 @@ export interface User extends adminFirebase.User {
 export type UserWithLoading = User & {
   loading: boolean;
 };
+
+export type DirectoryUser = {
+  uid: string;
+  email: string | null;
+  photoURL: string | null;
+  displayName: string | null;
+  role?: UserRoleType;
+  firstName: string;
+  lastName: string;
+  emailVerified: boolean;
+  isAnonymous: boolean;
+  metadata: {
+    creationTime?: string;
+    lastSignInTime?: string;
+    lastRefreshTime?: string | null;
+  };
+  providerData: Array<{
+    uid: string;
+    displayName?: string | null;
+    email?: string | null;
+    photoURL?: string | null;
+    providerId: string;
+    phoneNumber?: string | null;
+  }>;
+  refreshToken: string;
+  tenantId: string | null;
+  phoneNumber: string | null;
+  providerId: string;
+};
+
+export type DirectoryUserWithLoading = DirectoryUser & {
+  loading: boolean;
+};

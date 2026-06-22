@@ -1,17 +1,17 @@
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { https, logger } from 'firebase-functions/v2';
 import { CallableRequest } from 'firebase-functions/v2/https';
-import { canUserRolePublish, canUserRoleUpload, isUserRoleAdmin, User } from '@upperroom/shared/types/User';
-import { IdTokenResult } from 'firebase/auth';
+import { DirectoryUser } from '@upperroom/shared/types/User';
 import { FunctionOutputType } from '@upperroom/shared/types/Function';
 import handleError from './handleError';
+import { toDirectoryUser } from './userDirectory';
 
 export interface ListUsersInputType {
   maxResults?: number;
   pageToken?: string;
 }
 
-export type ListUsersOutputType = FunctionOutputType<User[]>;
+export type ListUsersOutputType = FunctionOutputType<DirectoryUser[]>;
 
 const listUsers = https.onCall(async (request: CallableRequest<ListUsersInputType>): Promise<ListUsersOutputType> => {
   // check if user is admin (true "admin" custom claim), return error if not
@@ -20,50 +20,13 @@ const listUsers = https.onCall(async (request: CallableRequest<ListUsersInputTyp
     return { status: 'error', error: `Unauthorized.` };
   }
   logger.debug('listAllUsers', request.data);
-  const listAllUsers = async (maxResults?: number, nextPageToken?: string): Promise<User[]> => {
-    let result: User[] = [];
+  const listAllUsers = async (maxResults?: number, nextPageToken?: string): Promise<DirectoryUser[]> => {
+    let result: DirectoryUser[] = [];
     try {
       // List batch of users, 1000 at a time.
       const listUsersResult = await firebaseAdmin.auth().listUsers(maxResults, nextPageToken);
       logger.debug('listUsersResult', listUsersResult);
-      result = listUsersResult.users.map((user) => {
-        const userOutput: User = {
-          uid: user.uid,
-          email: user.email ?? null,
-          photoURL: user.photoURL ?? null,
-          displayName: user.displayName ?? null,
-          role: user.customClaims?.role,
-          firstName: '',
-          lastName: '',
-          canUpload: (): boolean => canUserRoleUpload(user.customClaims?.role),
-          canPublish: (): boolean => canUserRolePublish(user.customClaims?.role),
-          isAdmin: (): boolean => isUserRoleAdmin(user.customClaims?.role),
-          emailVerified: false,
-          isAnonymous: false,
-          metadata: user.metadata,
-          providerData: user.providerData,
-          refreshToken: '',
-          tenantId: user.tenantId ?? null,
-          delete: function (): Promise<void> {
-            throw new Error('Function not implemented.');
-          },
-          getIdToken: function (): Promise<string> {
-            throw new Error('Function not implemented.');
-          },
-          getIdTokenResult: function (): Promise<IdTokenResult> {
-            throw new Error('Function not implemented.');
-          },
-          reload: function (): Promise<void> {
-            throw new Error('Function not implemented.');
-          },
-          toJSON: function (): object {
-            throw new Error('Function not implemented.');
-          },
-          phoneNumber: user.phoneNumber ?? null,
-          providerId: '',
-        };
-        return userOutput;
-      });
+      result = listUsersResult.users.map(toDirectoryUser);
       if (listUsersResult.pageToken) {
         result = result.concat(await listAllUsers(maxResults, listUsersResult.pageToken));
       }

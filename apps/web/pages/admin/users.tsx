@@ -52,7 +52,7 @@ import {
 } from '@upperroom/contracts/roleRequests/roleRequestTypes';
 import { SetUserRoleInputType, SetUserRoleOutputType } from '@upperroom/contracts/setUserRole';
 import AppLayout from '../../layout/AppLayout';
-import { UserWithLoading } from '../../types/User';
+import { DirectoryUserWithLoading } from '../../types/User';
 import { createFunctionV2 } from '../../utils/createFunction';
 
 type CreateInviteOutputType = { status: 'success'; data: CreateInviteResultData } | { status: 'error'; error: string };
@@ -74,9 +74,9 @@ const formatRequestStatus = (value: string): string =>
     .join(' ');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-let listUsersInFlight: Promise<UserWithLoading[]> | null = null;
+let listUsersInFlight: Promise<DirectoryUserWithLoading[]> | null = null;
 
-const fetchUsersWithDedupe = async (): Promise<UserWithLoading[]> => {
+const fetchUsersWithDedupe = async (): Promise<DirectoryUserWithLoading[]> => {
   if (listUsersInFlight) {
     return listUsersInFlight;
   }
@@ -98,7 +98,7 @@ const fetchUsersWithDedupe = async (): Promise<UserWithLoading[]> => {
 
 const AdminUsers = () => {
   const isMountedRef = useRef(true);
-  const [usersWithLoading, setUsersWithLoading] = useState<UserWithLoading[]>([]);
+  const [usersWithLoading, setUsersWithLoading] = useState<DirectoryUserWithLoading[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [pageNotice, setPageNotice] = useState<{ severity: NoticeSeverity; text: string } | null>(null);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
