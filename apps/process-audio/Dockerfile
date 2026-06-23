@@ -142,6 +142,11 @@ COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
 COPY --from=build --chown=node:node /workspace/packages ./packages
 COPY --from=build --chown=node:node /workspace/apps/process-audio ./apps/process-audio
 
+# Keep Google OAuth token fetches uncompressed. On the Hetzner runtime, gtoken's
+# node-fetch transport can intermittently fail compressed token responses with
+# ERR_STREAM_PREMATURE_CLOSE, which blocks deferred YouTube queue recovery.
+RUN node -e "const fs = require('node:fs'); const file = '/workspace/node_modules/gtoken/build/src/index.js'; const needle = \"headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\"; const replacement = \"headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept-Encoding': 'identity' },\"; let source = fs.readFileSync(file, 'utf8'); if (!source.includes(replacement)) { if (!source.includes(needle)) { throw new Error('Unable to patch gtoken token request headers'); } source = source.replace(needle, replacement); fs.writeFileSync(file, source); }"
+
 # The final image should not depend on pnpm's workspace symlink layout surviving
 # multi-stage copies. Flatten the two local workspace packages into the app-local
 # node_modules tree so Node can resolve exported subpaths reliably at runtime.
