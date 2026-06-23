@@ -212,16 +212,32 @@ prune_build_artifacts() {
 
 remove_service_for_rebuild() {
   local service_name="$1"
-  local image_id=""
   local container_name="process-audio-hetzner-${service_name}-1"
+  local image_ids=()
+  local container_ids=()
+  local image_id
 
-  image_id="$(docker compose images -q "$service_name" 2>/dev/null | head -n 1 || true)"
+  mapfile -t image_ids < <(docker compose images -q "$service_name" 2>/dev/null | sed '/^$/d' | sort -u || true)
+
+  docker compose stop "$service_name" >/dev/null 2>&1 || true
   docker compose rm -sf "$service_name" >/dev/null 2>&1 || true
-  docker rm -f "$container_name" >/dev/null 2>&1 || true
 
-  if [[ -n "$image_id" ]]; then
-    docker image rm -f "$image_id" >/dev/null 2>&1 || true
+  mapfile -t container_ids < <(
+    {
+      docker ps -aq --filter "name=^/${container_name}$"
+      docker ps -aq \
+        --filter "label=com.docker.compose.project=process-audio-hetzner" \
+        --filter "label=com.docker.compose.service=${service_name}"
+    } | sed '/^$/d' | sort -u
+  )
+
+  if ((${#container_ids[@]} > 0)); then
+    docker rm -f "${container_ids[@]}" >/dev/null 2>&1 || true
   fi
+
+  for image_id in "${image_ids[@]}"; do
+    docker image rm -f "$image_id" >/dev/null 2>&1 || true
+  done
 }
 
 if [[ "$target_env" == "all" ]]; then
