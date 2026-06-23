@@ -32,11 +32,43 @@ steps:
 
   # Step 2: Push Docker image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        image="${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${COMMIT_SHA}"
+        for attempt in 1 2 3 4 5; do
+          if docker push "$${image}"; then
+            exit 0
+          fi
+
+          status="$$?"
+          if [[ "$${attempt}" == "5" ]]; then
+            exit "$${status}"
+          fi
+
+          sleep "$$((attempt * 15))"
+        done
 
   # Step 3: Refresh the shared cache tag with the freshly built image.
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        image="${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_AR_REPO}/${_IMAGE_NAME}:${_CACHE_TAG}"
+        for attempt in 1 2 3 4 5; do
+          if docker push "$${image}"; then
+            exit 0
+          fi
+
+          status="$$?"
+          if [[ "$${attempt}" == "5" ]]; then
+            exit "$${status}"
+          fi
+
+          sleep "$$((attempt * 15))"
+        done
 
   # Step 4: Deploy the storage-only Cloud Run service.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
