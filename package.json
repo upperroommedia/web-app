@@ -46,17 +46,19 @@
     "test:e2e": "pnpm --dir apps/web run test:e2e",
     "test:e2e:headed": "pnpm --dir apps/web run test:e2e:headed"
   },
+  "dependencies": {
+    "@types/node": "catalog:",
+    "turbo": "^2.5.8",
+    "typescript": "catalog:"
+  },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",
-    "@types/node": "catalog:",
     "concurrently": "^9.2.1",
     "firebase-admin": "catalog:",
     "firebase-tools": "^15.9.0",
     "mocha": "^10.2.0",
     "tsc-alias": "^1.8.16",
-    "ts-node": "^10.9.2",
-    "turbo": "^2.5.8",
-    "typescript": "catalog:"
+    "ts-node": "^10.9.2"
   },
   "pnpm": {
     "overrides": {
