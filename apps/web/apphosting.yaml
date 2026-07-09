@@ -21,6 +21,14 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: PNPM_CONFIG_PROD
+    value: 'false'
+    availability:
+      - BUILD
+  - variable: NPM_CONFIG_PRODUCTION
+    value: 'false'
+    availability:
+      - BUILD
 
   - variable: NEXT_PUBLIC_ALGOLIA_APP_ID
     secret: ALGOLIA_APP_ID
