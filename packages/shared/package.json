@@ -7,8 +7,12 @@
     "build:ci": "pnpm run build"
   },
   "dependencies": {
+    "@types/lodash": "^4.17.17",
+    "@types/uuid": "^9.0.7",
     "firebase": "catalog:",
-    "firebase-admin": "catalog:"
+    "firebase-admin": "catalog:",
+    "lodash": "catalog:",
+    "uuid": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
