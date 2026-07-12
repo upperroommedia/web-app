@@ -4,6 +4,6 @@ set -eu
 ROOT_DIR=$(git rev-parse --show-toplevel)
 cd "$ROOT_DIR"
 
-npm --prefix apps/web exec tsc -p tsconfig.json
-npm --prefix apps/web exec eslint .
-npm --prefix apps/web exec prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path ../../.gitignore
+npm --prefix apps/web exec -- tsc -p tsconfig.json
+npm --prefix apps/web exec -- eslint .
+npm --prefix apps/web exec -- prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path ../../.gitignore
