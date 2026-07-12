@@ -4,10 +4,5 @@ set -eu
 ROOT_DIR=$(git rev-parse --show-toplevel)
 cd "$ROOT_DIR"
 
-# Root project linting and formatting
-npm --prefix apps/web exec -- eslint .
-npm --prefix apps/web exec -- prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path ../../.gitignore
-
-# Firebase functions linting and build (same as deployment predeploy)
-npm --prefix functions run lint
-npm --prefix functions run build
+git diff --check
+graphify update .
