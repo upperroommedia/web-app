@@ -1719,5 +1719,13 @@
   "1717": "triage-labels.md",
   "1718": "algoliasearch",
   "1719": "reorderSeriesItems.test.js",
+  "1720": "createSeries.test.js",
+  "1721": "NetworkFailureInjector",
+  "1722": "removeFromSeries.test.js",
+  "1723": "deriveSubsplashStatus.js",
+  "1724": "sermonCountInvariantGuard.js",
+  "1725": "CancelToken",
+  "1726": "date-fns",
+  "1727": "algoliasearch",
   "1728": "axios"
 }
