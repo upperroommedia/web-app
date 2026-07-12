@@ -1,9 +1,13 @@
 #!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
+set -eu
+
+ROOT_DIR=$(git rev-parse --show-toplevel)
+cd "$ROOT_DIR"
 
 # Root project linting and formatting
-pnpm style:lint
-pnpm make-pretty
+npm --prefix apps/web exec eslint .
+npm --prefix apps/web exec prettier --write '**/*.{js,jsx,ts,tsx}' --ignore-path ../../.gitignore
 
 # Firebase functions linting and build (same as deployment predeploy)
-cd functions && npm run lint && npm run build && cd ..
+npm --prefix functions run lint
+npm --prefix functions run build
