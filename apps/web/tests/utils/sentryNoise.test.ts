@@ -104,4 +104,17 @@ describe('shouldDropClientSentryEvent', () => {
       })
     ).toBe(true);
   });
+
+  it('drops handled Algolia transport retry errors', () => {
+    expect(
+      shouldDropClientSentryEvent({
+        exception: {
+          values: [{ type: 'RetryError', value: 'Unreachable hosts - the search service could not be reached.' }],
+        },
+        tags: {
+          'error.surface': 'handled-ui',
+        },
+      })
+    ).toBe(true);
+  });
 });

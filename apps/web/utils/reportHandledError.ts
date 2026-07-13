@@ -52,13 +52,24 @@ const isFirebaseInstallationsNoise = (value: unknown): boolean => {
   return code === 'installations/request-failed' || message.includes('installations/request-failed');
 };
 
+const isAlgoliaTransportRetryError = (value: unknown): boolean => {
+  if (!isObjectRecord(value) && !(value instanceof Error)) {
+    return false;
+  }
+
+  const name = value instanceof Error ? value.name : value.name;
+  const message = getErrorMessage(value);
+  return name === 'RetryError' && message.includes('Unreachable hosts');
+};
+
 const shouldSkipConsoleCapture = (args: unknown[]): boolean => {
   const [firstArg] = args;
 
   return (
     (typeof firstArg === 'string' && FIREBASE_LOGGER_PATTERN.test(firstArg)) ||
     args.some(isLockBusyError) ||
-    args.some(isFirebaseInstallationsNoise)
+    args.some(isFirebaseInstallationsNoise) ||
+    (firstArg === 'Search error:' && args.some(isAlgoliaTransportRetryError))
   );
 };
 
