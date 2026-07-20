@@ -31,6 +31,15 @@ const isTransientUpstreamError = (error: unknown): error is AxiosError =>
   error.response.status >= 500 &&
   error.response.status < 600;
 
+const normalizeCaughtSoundCloudError = (error: unknown): unknown => {
+  try {
+    normalizeSoundCloudApiError(error);
+  } catch (normalizedError) {
+    return normalizedError;
+  }
+  return error;
+};
+
 const uploadToSoundCloudCall = onCall(
   {
     // Production OOMs occurred at 258-272 MiB while streaming multipart uploads.
@@ -83,9 +92,11 @@ const uploadToSoundCloudCall = onCall(
         ...(uploadResult.permalinkUrl ? { soundCloudTrackUrl: uploadResult.permalinkUrl } : {}),
       };
     } catch (error) {
-      if (error instanceof HttpsError) {
+      const normalizedError = normalizeCaughtSoundCloudError(error);
+
+      if (normalizedError instanceof HttpsError) {
         await emitSoundCloudReconnectAlertIfNeeded({
-          error,
+          error: normalizedError,
           alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
           summary: 'uploadToSoundCloud callable requires SoundCloud re-authorization.',
           context: {
@@ -93,15 +104,15 @@ const uploadToSoundCloudCall = onCall(
             audioStoragePath: data.audioStoragePath,
           },
         });
-        throw error;
+        throw normalizedError;
       }
 
-      if (isTransientUpstreamError(error)) {
+      if (isTransientUpstreamError(normalizedError)) {
         logger.warn('uploadToSoundCloud transient upstream failure', {
-          status: error.response?.status,
+          status: normalizedError.response?.status,
           audioStoragePath: data.audioStoragePath,
         });
-        throw handleError(error, {
+        throw handleError(normalizedError, {
           suppressReporting: true,
           context: {
             functionName: 'uploadToSoundCloud',
@@ -113,25 +124,13 @@ const uploadToSoundCloudCall = onCall(
       await emitOperationalAlert({
         alertCode: 'PUBLISH_SOUNDCLOUD_UPLOAD_RUNTIME_FAILURE',
         summary: 'uploadToSoundCloud callable failed during publish upload flow.',
-        error: (() => {
-          try {
-            normalizeSoundCloudApiError(error);
-          } catch (normalizedError) {
-            return normalizedError;
-          }
-          return error;
-        })(),
+        error: normalizedError,
         context: {
           functionName: 'uploadToSoundCloud',
           audioStoragePath: data.audioStoragePath,
         },
       });
-      try {
-        normalizeSoundCloudApiError(error);
-      } catch (normalizedError) {
-        throw handleError(normalizedError);
-      }
-      throw handleError(error);
+      throw handleError(normalizedError);
     }
   }
 );
