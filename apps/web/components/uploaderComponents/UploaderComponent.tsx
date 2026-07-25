@@ -273,7 +273,7 @@ const Uploader = (props: UploaderProps) => {
       try {
         setSubtitlesLoading(true);
         const subtitlesFromBundle = await getSubtitlesFromBundle();
-        setSubtitles(subtitlesFromBundle);
+        setSubtitles(subtitlesFromBundle.filter(isDiscoverableRootList));
       } catch (error) {
         console.warn('Error loading subtitles from bundle, falling back to Firestore:', error);
         // Fallback to manual fetch
