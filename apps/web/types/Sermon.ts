@@ -75,6 +75,50 @@ export const getDateString = (date: Date) => {
   return `${months[date.getMonth()]} ${date.getDate()}`;
 };
 
+type FirestoreTimestampLike = {
+  toMillis?: () => number;
+  toDate?: () => Date;
+  seconds?: number;
+  nanoseconds?: number;
+};
+
+export const normalizeSermonDateMillis = (date: unknown, fallbackMillis: number): number => {
+  if (date instanceof Date) {
+    const millis = date.getTime();
+    return Number.isFinite(millis) ? millis : fallbackMillis;
+  }
+
+  if (typeof date === 'number') {
+    return Number.isFinite(date) ? date : fallbackMillis;
+  }
+
+  if (typeof date === 'string') {
+    const millis = Date.parse(date);
+    return Number.isFinite(millis) ? millis : fallbackMillis;
+  }
+
+  if (date && typeof date === 'object') {
+    const timestamp = date as FirestoreTimestampLike;
+
+    if (typeof timestamp.toMillis === 'function') {
+      const millis = timestamp.toMillis();
+      return Number.isFinite(millis) ? millis : fallbackMillis;
+    }
+
+    if (typeof timestamp.toDate === 'function') {
+      const millis = timestamp.toDate().getTime();
+      return Number.isFinite(millis) ? millis : fallbackMillis;
+    }
+
+    if (typeof timestamp.seconds === 'number') {
+      const millis = timestamp.seconds * 1000 + Math.floor((timestamp.nanoseconds ?? 0) / 1_000_000);
+      return Number.isFinite(millis) ? millis : fallbackMillis;
+    }
+  }
+
+  return fallbackMillis;
+};
+
 /* This converter takes care of converting a Sermon to a FirebaseSermon on upload
  *  and a FirebaseSermon to a Sermon on download.
  */
@@ -91,13 +135,12 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data();
     const currentTime = Timestamp.now();
+    const dateMillis = normalizeSermonDateMillis(date, currentTime.toMillis());
     const convertedSermon: Sermon = {
       ...createEmptySermon(),
       ...data,
-      ...(snapshot.data().date && {
-        dateMillis: snapshot.data()?.date?.toMillis() || currentTime.toMillis(),
-        dateString: getDateString(snapshot.data()?.date?.toDate() || currentTime.toDate()),
-      }),
+      dateMillis,
+      dateString: getDateString(new Date(dateMillis)),
       id: snapshot.id,
     };
     if (!Object.prototype.hasOwnProperty.call(data, 'trimDurationSeconds')) {
