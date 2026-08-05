@@ -80,5 +80,13 @@ export const shouldDropClientSentryEvent = (event: Event): boolean => {
     return true;
   }
 
+  if (
+    exceptionType === 'RetryError' &&
+    exceptionValue.includes('Unreachable hosts') &&
+    getTagValue(event, 'error.surface') === 'handled-ui'
+  ) {
+    return true;
+  }
+
   return false;
 };

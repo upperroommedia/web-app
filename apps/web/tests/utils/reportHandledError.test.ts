@@ -129,4 +129,16 @@ describe('reportHandledError helpers', () => {
 
     expect(captureExceptionMock).not.toHaveBeenCalled();
   });
+
+  it('does not bridge handled Algolia transport retry errors into Sentry', async () => {
+    const { installConsoleErrorCapture } = await import('../../utils/reportHandledError');
+
+    installConsoleErrorCapture();
+
+    const error = new Error('Unreachable hosts - the search service could not be reached.');
+    error.name = 'RetryError';
+    console.error('Search error:', error);
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
 });
