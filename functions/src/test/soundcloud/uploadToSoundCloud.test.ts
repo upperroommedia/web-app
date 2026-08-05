@@ -4,6 +4,12 @@ import {
 } from './mocks';
 import uploadToSoundCloud from '../../uploadToSoundCloud';
 import type { UploadToSoundCloudInputType, UploadToSoundCloudReturnType } from '../../uploadToSoundCloud';
+import { HttpsError } from 'firebase-functions/v2/https';
+import { emitOperationalAlert } from '../../notifications/emitOperationalAlert';
+
+jest.mock('../../notifications/emitOperationalAlert', () => ({
+  emitOperationalAlert: jest.fn(async () => undefined),
+}));
 
 const handler = uploadToSoundCloud as unknown as (req: {
   auth?: { token?: { role?: string } };
@@ -104,25 +110,60 @@ describe('uploadToSoundCloud', () => {
   it('surfaces invalid SoundCloud credentials as failed-precondition', async () => {
     mockUploadTrack.mockRejectedValue(new Error('Request failed with status code 401'));
     mockNormalizeSoundCloudApiError.mockImplementation(() => {
-      throw Object.assign(new Error('Invalid SoundCloud token'), { code: 'failed-precondition' });
+      throw new HttpsError('failed-precondition', 'Invalid SoundCloud token');
     });
 
-    await handler({
-      auth: { token: { role: 'admin' } },
-      data: {
-        audioStoragePath: 'intro-outro-sermons/sermon-1',
-        title: 'Test',
-        speakers: [],
-        tags: [],
-        description: '',
+    await expect(
+      handler({
+        auth: { token: { role: 'admin' } },
+        data: {
+          audioStoragePath: 'intro-outro-sermons/sermon-1',
+          title: 'Test',
+          speakers: [],
+          tags: [],
+          description: '',
+        },
+      })
+    ).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'Invalid SoundCloud token',
+    });
+  });
+
+  it('surfaces SoundCloud upload validation failures without emitting a runtime alert', async () => {
+    const validationError = new HttpsError(
+      'invalid-argument',
+      'SoundCloud rejected the track upload. Check the title, description, tags, artwork, and audio file, then try again.',
+      {
+        code: 'SOUNDCLOUD_UPLOAD_REJECTED',
+        upstream_status: 400,
+      }
+    );
+    mockUploadTrack.mockRejectedValue(new Error('Request failed with status code 400'));
+    mockNormalizeSoundCloudApiError.mockImplementation(() => {
+      throw validationError;
+    });
+
+    await expect(
+      handler({
+        auth: { token: { role: 'admin' } },
+        data: {
+          audioStoragePath: 'intro-outro-sermons/sermon-validation',
+          title: 'Rejected upload',
+          speakers: ['Speaker A'],
+          tags: ['tag-a'],
+          description: 'Description.',
+          imageSource: 'https://storage.example.test/artwork.jpg',
+        },
+      })
+    ).rejects.toMatchObject({
+      code: 'invalid-argument',
+      message: expect.stringContaining('SoundCloud rejected the track upload'),
+      details: {
+        code: 'SOUNDCLOUD_UPLOAD_REJECTED',
+        upstream_status: 400,
       },
-      })
-      .then(() => {
-        throw new Error('Expected handler to reject');
-      })
-      .catch((error: { code?: string; message?: string }) => {
-        expect(error.code).toBe('internal');
-        expect(error.message).toBe('Invalid SoundCloud token');
-      });
+    });
+    expect(emitOperationalAlert).not.toHaveBeenCalled();
   });
 });

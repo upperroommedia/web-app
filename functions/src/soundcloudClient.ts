@@ -10,6 +10,7 @@ import axios, { AxiosError, isAxiosError } from 'axios';
 import FormData from 'form-data';
 import { Bucket } from '@google-cloud/storage';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
+import { HttpsError } from 'firebase-functions/v2/https';
 import { basename, extname } from 'node:path';
 import { Readable } from 'node:stream';
 
@@ -47,6 +48,17 @@ export const normalizeSoundCloudApiError = (error: unknown): never => {
   if (isAxiosError(error) && error.response?.status === 401) {
     throw createSoundCloudReconnectRequiredError(
       'SoundCloud authorization is missing or expired. Reconnect SoundCloud from Admin > Advanced and try again.'
+    );
+  }
+
+  if (isAxiosError(error) && error.response?.status === 400) {
+    throw new HttpsError(
+      'invalid-argument',
+      'SoundCloud rejected the track upload. Check the title, description, tags, artwork, and audio file, then try again.',
+      {
+        code: 'SOUNDCLOUD_UPLOAD_REJECTED',
+        upstream_status: 400,
+      }
     );
   }
 
