@@ -46,12 +46,12 @@ export type AddToListHandler = (request: TestRequest) => Promise<import('../../a
 // NOTE: Firestore is NOT mocked - we use the real emulator via setup.ts
 jest.mock('../../subsplashUtils', () => ({
   authenticateSubsplash: jest.fn().mockResolvedValue('fake-token'),
-  createAxiosConfig: jest.fn((url: string, token: string, method: string, data?: unknown) => ({ 
-    url, 
-    token, 
-    method, 
-    data, 
-    headers: {} 
+  createAxiosConfig: jest.fn((url: string, token: string, method: string, data?: unknown) => ({
+    url,
+    token,
+    method,
+    data,
+    headers: {},
   })),
 }));
 
@@ -61,13 +61,15 @@ jest.mock('../../subsplashUtils', () => ({
 // The logger works fine in tests without mocking
 
 jest.mock('firebase-functions/v2/https', () => ({
-  onCall: jest.fn(<T,>(
-    optsOrHandler: ((request: CallableRequest<T>) => Promise<unknown>) | unknown,
-    maybeHandler?: (request: CallableRequest<T>) => Promise<unknown>
-  ) => {
-    const handler = typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler;
-    return handler as unknown as (request: TestRequest) => Promise<unknown>;
-  }),
+  onCall: jest.fn(
+    <T>(
+      optsOrHandler: ((request: CallableRequest<T>) => Promise<unknown>) | unknown,
+      maybeHandler?: (request: CallableRequest<T>) => Promise<unknown>
+    ) => {
+      const handler = typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler;
+      return handler as unknown as (request: TestRequest) => Promise<unknown>;
+    }
+  ),
   HttpsError: class extends Error {
     code: string;
     details?: unknown;
@@ -77,7 +79,7 @@ jest.mock('firebase-functions/v2/https', () => ({
       this.details = details;
     }
   },
-  CallableRequest: {} // Type only, not needed at runtime
+  CallableRequest: {}, // Type only, not needed at runtime
 }));
 
 // --- Subsplash Mock Implementation ---
@@ -94,6 +96,7 @@ export class SubsplashMock {
   private history: MockSubsplashHistoryEntry[] = [];
   private fullCapacityPatchCreateFailures: Set<string> = new Set();
   private hiddenFullCapacityPatchCreateFailures: Set<string> = new Set();
+  private multipleListRowPatchFailures: Set<string> = new Set();
 
   constructor() {
     this.reset();
@@ -111,6 +114,7 @@ export class SubsplashMock {
     this.history = [];
     this.fullCapacityPatchCreateFailures.clear();
     this.hiddenFullCapacityPatchCreateFailures.clear();
+    this.multipleListRowPatchFailures.clear();
   }
 
   createList(id: string, title: string, count: number = 0, maxItemCount?: number, subtitle?: string): SubsplashList {
@@ -171,6 +175,10 @@ export class SubsplashMock {
     this.hiddenFullCapacityPatchCreateFailures.add(listId);
   }
 
+  failPatchWhenMultipleListRowsArePresent(listId: string) {
+    this.multipleListRowPatchFailures.add(listId);
+  }
+
   setPatchRetainsOmittedRows(value: boolean) {
     this.patchRetainsOmittedRows = value;
   }
@@ -206,28 +214,48 @@ export class SubsplashMock {
   patchList(id: string, payload: SubsplashPatchPayload) {
     if (!this.lists.has(id)) throw new Error(`List ${id} not found`);
     const list = this.lists.get(id)!;
-    
+
     // Validate: Subsplash rejects patches with more than maxListSize items
     const rowCount = payload._embedded['list-rows'].length;
     const maxAllowed = list.max_item_count ?? this.maxListSize;
     if (rowCount > maxAllowed) {
-      throw new Error(`Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`);
+      throw new Error(
+        `Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`
+      );
+    }
+
+    const listRowCount = payload._embedded['list-rows'].filter((row) => {
+      if ('type' in row) {
+        return row.type === 'list';
+      }
+
+      const existingRow =
+        'id' in row ? (this.listRows.get(id) || []).find((candidate) => candidate.id === row.id) : undefined;
+      return existingRow?.type === 'list';
+    }).length;
+    if (this.multipleListRowPatchFailures.has(id) && listRowCount > 1) {
+      const error = new Error(`Subsplash list cannot patch multiple continuation rows for ${id}.`);
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamStatus = 400;
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamData = {
+        errors: [{ code: 'bad_request', detail: 'multiple continuation rows are not valid' }],
+      };
+      throw error;
     }
 
     const existingRows = this.listRows.get(id) || [];
-    const containsNewRows = payload._embedded['list-rows'].some((row) => !('id' in row) || ('app_key' in row));
+    const containsNewRows = payload._embedded['list-rows'].some((row) => !('id' in row) || 'app_key' in row);
     const existingRowsIncludeContinuationLink = existingRows.some((row) => row.type === 'list');
     if (
       this.fullCapacityPatchCreateFailures.has(id) &&
       containsNewRows &&
-      (
-        existingRows.length >= maxAllowed ||
+      (existingRows.length >= maxAllowed ||
         list.list_rows_count >= maxAllowed ||
-        (existingRowsIncludeContinuationLink && existingRows.length >= maxAllowed - 1)
-      ) &&
+        (existingRowsIncludeContinuationLink && existingRows.length >= maxAllowed - 1)) &&
       rowCount >= maxAllowed
     ) {
-      const error = new Error(`Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`);
+      const error = new Error(
+        `Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`
+      );
       (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamStatus = 400;
       (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamData = {
         errors: [{ code: 'bad_request', detail: `max number of list rows exceeded: ${maxAllowed}` }],
@@ -235,12 +263,10 @@ export class SubsplashMock {
       throw error;
     }
 
-    if (
-      this.hiddenFullCapacityPatchCreateFailures.has(id) &&
-      containsNewRows &&
-      rowCount >= maxAllowed - 1
-    ) {
-      const error = new Error(`Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`);
+    if (this.hiddenFullCapacityPatchCreateFailures.has(id) && containsNewRows && rowCount >= maxAllowed - 1) {
+      const error = new Error(
+        `Subsplash list cannot have more than ${maxAllowed} items. Attempted to patch with ${rowCount} items.`
+      );
       (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamStatus = 400;
       (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamData = {
         errors: [{ code: 'bad_request', detail: `max number of list rows exceeded: ${maxAllowed}` }],
@@ -248,48 +274,46 @@ export class SubsplashMock {
       throw error;
     }
 
-    if (
-      this.hiddenFullCapacityPatchCreateFailures.has(id) &&
-      !containsNewRows &&
-      rowCount <= maxAllowed - 2
-    ) {
+    if (this.hiddenFullCapacityPatchCreateFailures.has(id) && !containsNewRows && rowCount <= maxAllowed - 2) {
       this.hiddenFullCapacityPatchCreateFailures.delete(id);
     }
-    
+
     list.list_rows_count = rowCount;
-    
+
     const existingRowsSnapshot = JSON.parse(JSON.stringify(existingRows)) as SubsplashListRow[];
-    
-    const requestedRows: SubsplashListRow[] = payload._embedded['list-rows'].map((row: SubsplashListRow | SubsplashListRowReference, index: number): SubsplashListRow => {
-      if ('id' in row && 'position' in row && !('app_key' in row)) {
-        const existingRow = existingRows.find(r => r.id === row.id);
-        if (existingRow) {
+
+    const requestedRows: SubsplashListRow[] = payload._embedded['list-rows'].map(
+      (row: SubsplashListRow | SubsplashListRowReference, index: number): SubsplashListRow => {
+        if ('id' in row && 'position' in row && !('app_key' in row)) {
+          const existingRow = existingRows.find((r) => r.id === row.id);
+          if (existingRow) {
+            return {
+              ...existingRow,
+              position: row.position,
+            };
+          }
           return {
-            ...existingRow,
-            position: row.position
+            id: row.id,
+            app_key: '9XTSHD',
+            method: 'static' as const,
+            position: row.position,
+            type: 'media-item' as const,
+            _embedded: {
+              'source-list': { id },
+            },
           };
         }
+
+        const fullRow = row as SubsplashListRow;
         return {
-          id: row.id,
-          app_key: '9XTSHD',
-          method: 'static' as const,
-          position: row.position,
-          type: 'media-item' as const,
-          _embedded: {
-            'source-list': { id }
-          }
+          ...fullRow,
+          // Generate deterministic-but-unique row IDs across parallel list patches.
+          // Date.now() + index can collide when multiple lists are patched in the same millisecond.
+          id: fullRow.id || `row-${id}-${Date.now()}-${this.rowIdCounter++}`,
+          position: fullRow.position || index + 1,
         };
       }
-      
-      const fullRow = row as SubsplashListRow;
-      return {
-        ...fullRow,
-        // Generate deterministic-but-unique row IDs across parallel list patches.
-        // Date.now() + index can collide when multiple lists are patched in the same millisecond.
-        id: fullRow.id || `row-${id}-${Date.now()}-${this.rowIdCounter++}`,
-        position: fullRow.position || index + 1
-      };
-    });
+    );
 
     const newRows = this.patchRetainsOmittedRows
       ? [
@@ -308,7 +332,7 @@ export class SubsplashMock {
     }
     return { ...list, _embedded: { 'list-rows': newRows } };
   }
-  
+
   postList(title: string, subtitle?: string): SubsplashList {
     const id = `list-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     return this.createList(id, title, 0, undefined, subtitle);
@@ -330,10 +354,10 @@ export class NetworkFailureInjector {
   shouldFail(key: string): boolean {
     const count = (this.callCounts.get(key) || 0) + 1;
     this.callCounts.set(key, count);
-    
+
     const failureFn = this.failures.get(key);
     if (!failureFn) return false;
-    
+
     return failureFn();
   }
 
@@ -400,9 +424,10 @@ jest.mock('axios', () => {
       if (!config.data) {
         return Promise.reject(new Error('Missing payload for PATCH request'));
       }
-      const payload = typeof config.data === 'string' 
-        ? JSON.parse(config.data) as SubsplashPatchPayload
-        : config.data as SubsplashPatchPayload;
+      const payload =
+        typeof config.data === 'string'
+          ? (JSON.parse(config.data) as SubsplashPatchPayload)
+          : (config.data as SubsplashPatchPayload);
       let updatedList;
       try {
         updatedList = subsplashMock.patchList(listId, payload);
@@ -444,17 +469,19 @@ jest.mock('axios', () => {
           response: {
             status: 502,
             statusText: 'Bad Gateway',
-            data: { errors: [{ code: 'bad_gateway', detail: `Upstream patch applied but connection failed for ${listId}` }] },
+            data: {
+              errors: [{ code: 'bad_gateway', detail: `Upstream patch applied but connection failed for ${listId}` }],
+            },
             headers: {},
-            config: {}
+            config: {},
           },
           isAxiosError: true,
-          toJSON: () => ({ message: 'Request failed with status code 502', name: 'AxiosError' })
+          toJSON: () => ({ message: 'Request failed with status code 502', name: 'AxiosError' }),
         });
       }
       return Promise.resolve({ data: updatedList });
     }
-    
+
     if (method === 'POST' && url.includes('/builder/v1/lists')) {
       const failureKey = 'postList';
       if (networkFailureInjector.shouldFail(failureKey)) {
@@ -470,30 +497,30 @@ jest.mock('axios', () => {
     const deleteRowMatch = url.match(/builder\/v1\/list-rows\/([a-zA-Z0-9-]+)$/);
     if (method === 'DELETE' && deleteRowMatch) {
       const listItemId = deleteRowMatch[1];
-      
+
       // Find which list contains this row
       for (const [listId, rows] of subsplashMock.listRows.entries()) {
-        const row = rows.find(r => r.id === listItemId);
+        const row = rows.find((r) => r.id === listItemId);
         if (row) {
           // Remove the row from the list
-          const updatedRows = rows.filter(r => r.id !== listItemId);
+          const updatedRows = rows.filter((r) => r.id !== listItemId);
           // Reindex positions
           updatedRows.forEach((r, index) => {
             r.position = index + 1;
           });
           subsplashMock.listRows.set(listId, updatedRows);
           subsplashMock.recordHistory('delete-row', listId);
-          
+
           // Update list count
           const list = subsplashMock.getList(listId);
           if (list) {
             list.list_rows_count = updatedRows.length;
           }
-          
+
           return Promise.resolve({ status: 204, data: null });
         }
       }
-      
+
       // Row not found - return 404 in axios error format
       // Axios errors have a specific structure that axios checks with isAxiosError
       const axiosError = {
@@ -505,10 +532,10 @@ jest.mock('axios', () => {
           statusText: 'Not Found',
           data: { errors: [{ code: 'not_found', detail: 'List row not found' }] },
           headers: {},
-          config: {}
+          config: {},
         },
         isAxiosError: true,
-        toJSON: () => ({ message: axiosError.message, name: axiosError.name })
+        toJSON: () => ({ message: axiosError.message, name: axiosError.name }),
       };
       return Promise.reject(axiosError);
     }
@@ -517,7 +544,6 @@ jest.mock('axios', () => {
   });
 
   return Object.assign(mockAxios, {
-    isAxiosError: (error: unknown) =>
-      Boolean(error && typeof error === 'object' && 'isAxiosError' in error),
+    isAxiosError: (error: unknown) => Boolean(error && typeof error === 'object' && 'isAxiosError' in error),
   });
 });

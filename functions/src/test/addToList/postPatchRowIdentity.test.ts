@@ -1,10 +1,6 @@
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { SubsplashListRow } from '../../types/Subsplash';
-import {
-  subsplashMock,
-  TestRequest,
-  AddToListHandler,
-} from './mocks';
+import { subsplashMock, TestRequest, AddToListHandler } from './mocks';
 import { createListDocument, clearFirestore } from './firestoreHelpers';
 import addToList from '../../addToList';
 
@@ -30,8 +26,13 @@ const createMediaRow = (listId: string, mediaId: string, position: number): Subs
   },
 });
 
-const createListLinkRow = (sourceListId: string, targetListId: string, position: number): SubsplashListRow => ({
-  id: `row-${sourceListId}-link-${targetListId}`,
+const createListLinkRow = (
+  sourceListId: string,
+  targetListId: string,
+  position: number,
+  rowIdSuffix = targetListId
+): SubsplashListRow => ({
+  id: `row-${sourceListId}-link-${rowIdSuffix}`,
   app_key: '9XTSHD',
   method: 'static',
   position,
@@ -185,7 +186,13 @@ describe('addToList - post-patch row identity', () => {
     });
 
     const rootRows = subsplashMock.getListRows(rootListId);
-    expect(rootRows.map((row) => row._embedded['media-item']?.id)).toEqual(['rapid-3', 'rapid-2', 'rapid-1', 'seed-1', undefined]);
+    expect(rootRows.map((row) => row._embedded['media-item']?.id)).toEqual([
+      'rapid-3',
+      'rapid-2',
+      'rapid-1',
+      'seed-1',
+      undefined,
+    ]);
     expect(rootRows[rootRows.length - 1].type).toBe('list');
 
     const overflowRows = subsplashMock.getListRows(overflowListId);
@@ -316,5 +323,83 @@ describe('addToList - post-patch row identity', () => {
     expect(rootRows.map((row) => row._embedded['media-item']?.id)).toEqual(
       expect.arrayContaining(['sermon-chain-recovery', 'seed-1'])
     );
+  });
+
+  it('removes duplicate continuation rows before the overflow preflight patch', async () => {
+    const rootListId = 'duplicate-link-root-list';
+    const overflowListId = 'duplicate-link-overflow-list';
+
+    subsplashMock.createList(rootListId, 'Duplicate Link Root List', 6, 6);
+    subsplashMock.createList(overflowListId, 'More Duplicate Link Root List', 0, 5);
+    subsplashMock.failPatchWhenMultipleListRowsArePresent(rootListId);
+    subsplashMock.listRows.set(rootListId, [
+      createMediaRow(rootListId, 'seed-1', 1),
+      createMediaRow(rootListId, 'seed-2', 2),
+      createMediaRow(rootListId, 'seed-3', 3),
+      createMediaRow(rootListId, 'seed-4', 4),
+      createListLinkRow(rootListId, overflowListId, 5, 'primary-overflow'),
+      createListLinkRow(rootListId, overflowListId, 6, 'duplicate-overflow'),
+    ]);
+
+    await createListDocument({
+      id: 'duplicate-link-root-firestore-list',
+      subsplashId: rootListId,
+      title: 'Duplicate Link Root List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      moreSermonsRef: overflowListId,
+      count: 6,
+      logicalCount: 4,
+      hasOverflowPages: true,
+      isRootList: true,
+      rootListId: 'duplicate-link-root-firestore-list',
+      overflowDepth: 0,
+    });
+    await createListDocument({
+      id: 'duplicate-link-overflow-firestore-list',
+      subsplashId: overflowListId,
+      title: 'More Duplicate Link Root List',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      isMoreSermonsList: true,
+      rootListId: 'duplicate-link-root-firestore-list',
+      overflowDepth: 1,
+      count: 0,
+    });
+
+    const result = await addToListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [rootListId],
+        mediaItem: { id: 'sermon-after-duplicate', type: 'media-item' },
+        maxListSize: 5,
+        operationKey: 'duplicate-continuation-link-repro-1',
+      },
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+
+    const rootRows = subsplashMock.getListRows(rootListId);
+    const continuationRows = rootRows.filter((row) => row.type === 'list' && row._embedded.list?.id === overflowListId);
+    expect(continuationRows).toHaveLength(1);
+    expect(rootRows.map((row) => row._embedded['media-item']?.id)).toEqual([
+      'sermon-after-duplicate',
+      'seed-1',
+      'seed-2',
+      'seed-3',
+      undefined,
+    ]);
+
+    const overflowRows = subsplashMock.getListRows(overflowListId);
+    expect(overflowRows.map((row) => row._embedded['media-item']?.id)).toContain('seed-4');
+
+    const deletedDuplicateLink = subsplashMock
+      .getHistory()
+      .some(
+        (entry) =>
+          entry.event === 'delete-row' &&
+          entry.listId === rootListId &&
+          !entry.rows.some((row) => row.id === 'row-duplicate-link-root-list-link-duplicate-overflow')
+      );
+    expect(deletedDuplicateLink).toBe(true);
   });
 });

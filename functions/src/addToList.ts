@@ -294,12 +294,11 @@ const collectListResolutionDiagnostics = async ({
 
   return {
     finalRowsSnapshot: finalRowsSnapshot ? summarizeSubsplashRows(finalRowsSnapshot) : undefined,
-    latestRows: latestRowsResult.ok && latestRows
-      ? summarizeSubsplashRows(latestRows)
-      : { error: latestRowsResult.ok ? 'No latest rows returned' : latestRowsResult.error },
-    mediaItemDiagnostics: mediaItemDiagnostics.found
-      ? mediaItemDiagnostics.summary
-      : mediaItemDiagnostics,
+    latestRows:
+      latestRowsResult.ok && latestRows
+        ? summarizeSubsplashRows(latestRows)
+        : { error: latestRowsResult.ok ? 'No latest rows returned' : latestRowsResult.error },
+    mediaItemDiagnostics: mediaItemDiagnostics.found ? mediaItemDiagnostics.summary : mediaItemDiagnostics,
     rowsReferencingMediaItem: summarizeSubsplashRows(rowsReferencingMediaItem),
     rowsReferencingCurrentSeries: summarizeSubsplashRows(rowsReferencingCurrentSeries),
   };
@@ -462,16 +461,16 @@ const computeOverflowContentKeepLimit = ({
   const adjustedKeepLimit = Math.min(logicalKeepLimit, physicalKeepLimit);
 
   if (adjustedKeepLimit < logicalKeepLimit) {
-      listDebugLog('addToList.computeOverflowContentKeepLimit.reserveSafetySlot', {
-        listId,
-        maxListSize,
-        physicalMaxRowCount,
-        updatedRowCount,
-        phantomRowCount,
-        effectiveVisibleCapacity,
-        logicalKeepLimit,
-        adjustedKeepLimit,
-      });
+    listDebugLog('addToList.computeOverflowContentKeepLimit.reserveSafetySlot', {
+      listId,
+      maxListSize,
+      physicalMaxRowCount,
+      updatedRowCount,
+      phantomRowCount,
+      effectiveVisibleCapacity,
+      logicalKeepLimit,
+      adjustedKeepLimit,
+    });
   }
 
   return adjustedKeepLimit;
@@ -516,10 +515,41 @@ const isSubsplashMaxRowExceededError = (error: unknown): boolean => {
 
   const upstreamDetails = maybeError.details?.upstream?.errors;
   if (Array.isArray(upstreamDetails)) {
-    return upstreamDetails.some((entry) => typeof entry?.detail === 'string' && entry.detail.includes('max number of list rows exceeded'));
+    return upstreamDetails.some(
+      (entry) => typeof entry?.detail === 'string' && entry.detail.includes('max number of list rows exceeded')
+    );
   }
 
   return typeof maybeError.message === 'string' && maybeError.message.includes('max number of list rows exceeded');
+};
+
+const getDuplicateContinuationRows = (currentRows: SubsplashListRow[], nextListId?: string): SubsplashListRow[] => {
+  if (!nextListId) {
+    return [];
+  }
+
+  const matchingLinkRows = currentRows.filter(
+    (row) => row.type === 'list' && getRemoteRowResourceId(row) === nextListId
+  );
+  if (matchingLinkRows.length <= 1) {
+    return [];
+  }
+
+  return matchingLinkRows.slice(1).filter((row) => Boolean(row.id));
+};
+
+const removeRowsById = (rows: SubsplashListRow[], rowsToRemove: SubsplashListRow[]): SubsplashListRow[] => {
+  const idsToRemove = new Set(
+    rowsToRemove
+      .map((row) => row.id)
+      .filter((rowId): rowId is string => typeof rowId === 'string' && rowId.trim().length > 0)
+  );
+
+  if (idsToRemove.size === 0) {
+    return rows;
+  }
+
+  return rows.filter((row) => !row.id || !idsToRemove.has(row.id));
 };
 
 const applyRemoveOldestMutation = async ({
@@ -645,7 +675,6 @@ const applyRemoveOldestMutation = async ({
       'Failed to update latest list in Subsplash and automatic rollback status could not be determined.'
     );
   }
-
 };
 
 const ensureImmediateOverflowListLinkInFirestore = async ({
@@ -834,6 +863,26 @@ async function processListStep(
     currentRows: summarizeSubsplashRows(currentRows),
   });
 
+  const knownContinuationListId = normalizeString(listData.moreSermonsRef);
+  if (listData.overflowBehavior === OverflowBehavior.CREATENEWLIST && knownContinuationListId) {
+    const duplicateContinuationRows = getDuplicateContinuationRows(currentRows, knownContinuationListId);
+    for (const rowToDelete of duplicateContinuationRows) {
+      await deleteListRow(rowToDelete.id!, listId, token);
+    }
+    if (duplicateContinuationRows.length > 0) {
+      currentRows = removeRowsById(currentRows, duplicateContinuationRows);
+      enforcedRowCount = Math.max(0, enforcedRowCount - duplicateContinuationRows.length);
+      listDebugWarn('addToList.processListStep.remoteState.removedDuplicateContinuationRows', {
+        listId,
+        nextListId: knownContinuationListId,
+        duplicateContinuationRows: summarizeSubsplashRows(duplicateContinuationRows),
+        enforcedRowCount,
+        physicalMaxRowCount,
+        currentRows: summarizeSubsplashRows(currentRows),
+      });
+    }
+  }
+
   ensureExistingRowCountDoesNotExceedConfiguredMax({
     listId,
     enforcedRowCount,
@@ -849,8 +898,7 @@ async function processListStep(
     const currentPlacementToKeep = currentPlacements[0]?.listItemId;
     const placementsToDelete = existingPlacementsInChain.filter(
       (placement) =>
-        placement.listId !== listId ||
-        (currentPlacementToKeep ? placement.listItemId !== currentPlacementToKeep : true)
+        placement.listId !== listId || (currentPlacementToKeep ? placement.listItemId !== currentPlacementToKeep : true)
     );
 
     if (placementsToDelete.length > 0) {
@@ -898,10 +946,7 @@ async function processListStep(
     const existingRow = currentRows.find((row) => getRemoteRowResourceId(row) === itemToAdd.id);
     existingListItemId = existingRow?.id;
     if (existingRow && existingRow.position !== 1) {
-      const reorderedRows = [
-        existingRow,
-        ...currentRows.filter((row) => row.id !== existingRow.id),
-      ];
+      const reorderedRows = [existingRow, ...currentRows.filter((row) => row.id !== existingRow.id)];
       finalRowsSnapshot = await patchListRows(listId, reorderedRows, token);
       currentRows = finalRowsSnapshot;
       listDebugLog('addToList.processListStep.promoteExistingRow.complete', {
@@ -1134,9 +1179,10 @@ async function processListStep(
                     })
                   : buildRootListMetadata({
                       rootListId: listDoc.id,
-                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
+                      logicalCount:
+                        typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
                       hasOverflowPages: true,
-                  })),
+                    })),
               },
               merge: true,
             };
@@ -1171,7 +1217,8 @@ async function processListStep(
                     })
                   : buildRootListMetadata({
                       rootListId: listDoc.id,
-                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
+                      logicalCount:
+                        typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
                       hasOverflowPages: true,
                     })),
               },
@@ -1205,6 +1252,20 @@ async function processListStep(
             propagateCount: itemsToPropagate.length,
             rowsToDelete: summarizeSubsplashRows(itemsToPropagate.filter((r) => Boolean(r.id))),
           });
+          const duplicateContinuationRows = getDuplicateContinuationRows(currentRows, nextListId);
+          for (const rowToDelete of duplicateContinuationRows) {
+            await deleteListRow(rowToDelete.id!, listId, token);
+          }
+          if (duplicateContinuationRows.length > 0) {
+            currentRows = removeRowsById(currentRows, duplicateContinuationRows);
+            listDebugWarn('addToList.processListStep.overflowDeleteAndPropagate.removedDuplicateContinuationRows', {
+              listId,
+              nextListId,
+              duplicateContinuationRows: summarizeSubsplashRows(duplicateContinuationRows),
+              currentRows: summarizeSubsplashRows(currentRows),
+            });
+          }
+
           await ensureListIsPatchableBeforeDestructiveMutation(listId, currentRows, token);
 
           const rowsToDelete = itemsToPropagate.filter((r) => r.id);
@@ -1218,7 +1279,9 @@ async function processListStep(
             if (!resourceId || !canReconstructRemoteRow(itemRow)) {
               throw new HttpsError(
                 'failed-precondition',
-                `Row ${itemRow.id ?? 'unknown'} cannot be shifted into overflow because Subsplash did not provide a reconstructible resource identity.`
+                `Row ${
+                  itemRow.id ?? 'unknown'
+                } cannot be shifted into overflow because Subsplash did not provide a reconstructible resource identity.`
               );
             }
 
@@ -1238,6 +1301,19 @@ async function processListStep(
         }
 
         const existingLinkRow = currentRows.find((r) => r.type === 'list' && r._embedded.list?.id === nextListId);
+        const duplicateContinuationRows = getDuplicateContinuationRows(currentRows, nextListId);
+        for (const rowToDelete of duplicateContinuationRows) {
+          await deleteListRow(rowToDelete.id!, listId, token);
+        }
+        if (duplicateContinuationRows.length > 0) {
+          currentRows = removeRowsById(currentRows, duplicateContinuationRows);
+          listDebugWarn('addToList.processListStep.overflowPatch.removedDuplicateContinuationRows', {
+            listId,
+            nextListId,
+            duplicateContinuationRows: summarizeSubsplashRows(duplicateContinuationRows),
+            currentRows: summarizeSubsplashRows(currentRows),
+          });
+        }
         const rowsToPatchAfterDelete = itemsToKeep.filter((r) => r.id);
         if (existingLinkRow) {
           rowsToPatchAfterDelete.push(existingLinkRow);
@@ -1443,19 +1519,16 @@ const recoverPlacementAfterFailedMutation = async ({
   rootListId: string;
   mediaItem: SubsplashMediaItem;
   token: string;
-}): Promise<
-  | {
-      listItemId?: string;
-      actualPlacement?: {
-        firestoreListId: string;
-        subsplashListId: string;
-        overflowDepth: number;
-        position: number;
-        listItemId?: string;
-      };
-    }
-  | null
-> => {
+}): Promise<{
+  listItemId?: string;
+  actualPlacement?: {
+    firestoreListId: string;
+    subsplashListId: string;
+    overflowDepth: number;
+    position: number;
+    listItemId?: string;
+  };
+} | null> => {
   const resolvedPlacement = await findItemInOverflowChainWithRetry(rootListId, mediaItem, token);
   if (!resolvedPlacement) {
     return null;
@@ -1554,69 +1627,73 @@ const addToList = onCall(
           })
         );
 
-        const outputs = await Promise.all(results.map(async (result, index): Promise<OutputTypes> => {
-          if (result.status === 'fulfilled') {
-            return {
-              listId: destinationListIds[index],
-              status: 'success',
-              ...(result.value.listItemId ? { listItemId: result.value.listItemId } : {}),
-              ...(result.value.actualPlacement ? { actualPlacement: result.value.actualPlacement } : {}),
-            };
-          }
-
-          const errorPayload = getErrorPayload(result.reason);
-          try {
-            const recoveredPlacement = await recoverPlacementAfterFailedMutation({
-              rootListId: destinationListIds[index],
-              mediaItem,
-              token,
-            });
-            if (recoveredPlacement) {
-              listDebugWarn('addToList.callable.runMutation.itemRecoveredAfterError', {
-                listId: destinationListIds[index],
-                mediaItemId: mediaItem.id,
-                errorPayload,
-                recoveredPlacement,
-              });
+        const outputs = await Promise.all(
+          results.map(async (result, index): Promise<OutputTypes> => {
+            if (result.status === 'fulfilled') {
               return {
                 listId: destinationListIds[index],
                 status: 'success',
-                ...(recoveredPlacement.listItemId ? { listItemId: recoveredPlacement.listItemId } : {}),
-                ...(recoveredPlacement.actualPlacement ? { actualPlacement: recoveredPlacement.actualPlacement } : {}),
+                ...(result.value.listItemId ? { listItemId: result.value.listItemId } : {}),
+                ...(result.value.actualPlacement ? { actualPlacement: result.value.actualPlacement } : {}),
               };
             }
-          } catch (recoveryError) {
-            listDebugWarn('addToList.callable.runMutation.itemRecoveryFailed', {
-              listId: destinationListIds[index],
-              mediaItemId: mediaItem.id,
-              errorPayload,
-              recoveryError: getErrorPayload(recoveryError),
-            });
-          }
 
-          listDebugError('addToList.callable.runMutation.itemFailed', {
-            listId: destinationListIds[index],
-            mediaItemId: mediaItem.id,
-            errorPayload,
-          });
-          await captureFunctionsExceptionAndFlush(result.reason, {
-            tags: {
-              functionName: 'addtolist',
-              failureMode: 'handled-item-error',
+            const errorPayload = getErrorPayload(result.reason);
+            try {
+              const recoveredPlacement = await recoverPlacementAfterFailedMutation({
+                rootListId: destinationListIds[index],
+                mediaItem,
+                token,
+              });
+              if (recoveredPlacement) {
+                listDebugWarn('addToList.callable.runMutation.itemRecoveredAfterError', {
+                  listId: destinationListIds[index],
+                  mediaItemId: mediaItem.id,
+                  errorPayload,
+                  recoveredPlacement,
+                });
+                return {
+                  listId: destinationListIds[index],
+                  status: 'success',
+                  ...(recoveredPlacement.listItemId ? { listItemId: recoveredPlacement.listItemId } : {}),
+                  ...(recoveredPlacement.actualPlacement
+                    ? { actualPlacement: recoveredPlacement.actualPlacement }
+                    : {}),
+                };
+              }
+            } catch (recoveryError) {
+              listDebugWarn('addToList.callable.runMutation.itemRecoveryFailed', {
+                listId: destinationListIds[index],
+                mediaItemId: mediaItem.id,
+                errorPayload,
+                recoveryError: getErrorPayload(recoveryError),
+              });
+            }
+
+            listDebugError('addToList.callable.runMutation.itemFailed', {
               listId: destinationListIds[index],
-            },
-            extra: {
-              destinationListIds,
               mediaItemId: mediaItem.id,
               errorPayload,
-            },
-          });
-          return {
-            listId: destinationListIds[index],
-            status: 'error',
-            ...errorPayload,
-          };
-        }));
+            });
+            await captureFunctionsExceptionAndFlush(result.reason, {
+              tags: {
+                functionName: 'addtolist',
+                failureMode: 'handled-item-error',
+                listId: destinationListIds[index],
+              },
+              extra: {
+                destinationListIds,
+                mediaItemId: mediaItem.id,
+                errorPayload,
+              },
+            });
+            return {
+              listId: destinationListIds[index],
+              status: 'error',
+              ...errorPayload,
+            };
+          })
+        );
 
         return outputs;
       };
