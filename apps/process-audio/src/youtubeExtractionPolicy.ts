@@ -72,6 +72,13 @@ export function classifyYouTubeFailure(message: string, mode: YouTubeExtractionM
     return 'cookie_session_stale_or_challenged';
   }
 
+  // yt-dlp can complete extraction with cookies and a PO token, then have YouTube
+  // reject the subsequent authenticated media request. This is the production
+  // signature emitted for an expired or challenged shared browser session.
+  if (mode === 'cookie_provider' && lower.includes('unable to download video data: http error 403')) {
+    return 'cookie_session_stale_or_challenged';
+  }
+
   if (lower.includes('the page needs to be reloaded') || lower.includes('unplayable')) {
     return mode === 'cookie_provider' ? 'cookie_session_stale_or_challenged' : 'public_path_bot_blocked';
   }
@@ -204,7 +211,10 @@ export function analyzeYouTubeFailure(message: string, mode: YouTubeExtractionMo
     stage = 'browser_fallback';
   } else if (sawPostLiveArchive) {
     stage = 'post_live_archive';
-  } else if (mode === 'cookie_provider' && (sawPageReload || lower.includes('cookie circuit breaker'))) {
+  } else if (
+    mode === 'cookie_provider' &&
+    (failureClass === 'cookie_session_stale_or_challenged' || sawPageReload || lower.includes('cookie circuit breaker'))
+  ) {
     stage = 'cookie_session';
   } else if (sawHttp429 || sawUnableToDownloadWebpage) {
     stage = 'webpage_request';
