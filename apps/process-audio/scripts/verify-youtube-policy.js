@@ -5,6 +5,7 @@ const {
   classifyYouTubeFailure,
   shouldEscalateToBrowserFallback,
   shouldEscalateToCookieProvider,
+  shouldUseExternalDownloaderForYouTubeDownload,
   annotateYouTubeFailure,
 } = require('../dist/youtubeExtractionPolicy');
 
@@ -72,6 +73,10 @@ function main() {
   const analyzedUnknownFailure = analyzeYouTubeFailure('ERROR: [youtube] extractor exploded', 'public_provider');
   assert.equal(shouldEscalateToBrowserFallback(analyzedUnknownFailure, true), false);
   assert.equal(shouldEscalateToBrowserFallback(analyzedPublicBotBlock, false), false);
+
+  assert.equal(shouldUseExternalDownloaderForYouTubeDownload('public_provider'), true);
+  assert.equal(shouldUseExternalDownloaderForYouTubeDownload('cookie_provider'), false);
+  assert.equal(shouldUseExternalDownloaderForYouTubeDownload('browser_fallback'), false);
 
   const annotated = annotateYouTubeFailure(
     'ERROR: [youtube] The page needs to be reloaded.',

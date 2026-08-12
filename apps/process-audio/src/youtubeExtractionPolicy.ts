@@ -126,6 +126,16 @@ export function shouldEscalateToBrowserFallback(
   );
 }
 
+/**
+ * External downloaders make a separate request for the media URL. That is not
+ * safe for the cookie-backed provider: YouTube can bind the URL and PO token
+ * to the authenticated yt-dlp request context, which an external downloader
+ * cannot reproduce reliably.
+ */
+export function shouldUseExternalDownloaderForYouTubeDownload(mode: YouTubeExtractionMode): boolean {
+  return mode === 'public_provider';
+}
+
 export function annotateYouTubeFailure(
   message: string,
   failureClass: YouTubeFailureClass,

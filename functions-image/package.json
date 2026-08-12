@@ -11,7 +11,7 @@
     "build-watch": "concurrently --kill-others-on-fail --names tsc,alias --prefix '[{name}]' --prefix-colors 'blue,magenta' \"tsc -w --preserveWatchOutput -p tsconfig.json\" \"tsc-alias -w -p tsconfig.json\""
   },
   "dependencies": {
-    "@sentry/node": "^10.47.0",
+    "@sentry/node": "^10.70.0",
     "@google-cloud/functions-framework": "^3.2.0",
     "@google-cloud/storage": "7.19.0",
     "axios": "^1.13.6",
