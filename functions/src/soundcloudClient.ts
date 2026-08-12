@@ -111,21 +111,29 @@ const parseKnownLength = (rawValue: unknown): number | undefined => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 };
 
-const inferFilenameFromPath = (value: string, fallback: string): string => {
+export const inferMultipartFilename = (value: string, fallback: string): string => {
   const trimmed = value.trim();
   if (!trimmed) {
     return fallback;
   }
 
   const candidate = basename(trimmed);
-  return candidate.length > 0 ? candidate : fallback;
+  if (!candidate) {
+    return fallback;
+  }
+
+  if (extname(candidate)) {
+    return candidate;
+  }
+
+  const fallbackExtension = extname(fallback);
+  return fallbackExtension ? `${candidate}${fallbackExtension}` : candidate;
 };
 
 const inferFilenameFromUrl = (source: string, fallback: string): string => {
   try {
     const url = new URL(source);
-    const candidate = basename(decodeURIComponent(url.pathname));
-    return candidate.length > 0 ? candidate : fallback;
+    return inferMultipartFilename(decodeURIComponent(url.pathname), fallback);
   } catch {
     return fallback;
   }
@@ -155,7 +163,7 @@ async function createBucketStreamSource(
 ): Promise<MultipartStreamSource> {
   const file = bucket.file(storagePath);
   const [metadata] = await file.getMetadata();
-  const filename = inferFilenameFromPath(storagePath, fallbackFilename);
+  const filename = inferMultipartFilename(storagePath, fallbackFilename);
   return {
     stream: file.createReadStream(),
     filename,

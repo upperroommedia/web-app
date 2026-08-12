@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { Bucket } from '@google-cloud/storage';
 import {
   deleteTrack,
+  inferMultipartFilename,
   isSoundCloudTrackNotFoundError,
   updateTrack,
   uploadTrack,
@@ -45,7 +46,7 @@ describe('soundcloudClient', () => {
 
     const trackResult = await uploadTrack('access-token', {
       bucket,
-      audioStoragePath: 'audio/file.mp3',
+      audioStoragePath: 'intro-outro-sermons/e9a3bcad-4764-4938-a33b-957459d20b8e',
       title: 'Test track',
       tags: ['sermon'],
       description: 'Description',
@@ -56,6 +57,36 @@ describe('soundcloudClient', () => {
     });
     expect(bucket.__file.getMetadata).toHaveBeenCalled();
     expect(bucket.__file.createReadStream).toHaveBeenCalled();
+    const multipartBody = mockedAxios.post.mock.calls[0]?.[1] as unknown as { _streams?: unknown[] };
+    expect(
+      multipartBody._streams?.some(
+        (entry) =>
+          typeof entry === 'string' &&
+          entry.includes('filename="e9a3bcad-4764-4938-a33b-957459d20b8e.mp3"')
+      )
+    ).toBe(true);
+  });
+
+  it('adds the known audio extension to extensionless production storage paths', () => {
+    expect(
+      inferMultipartFilename(
+        'intro-outro-sermons/e9a3bcad-4764-4938-a33b-957459d20b8e',
+        'audio.mp3'
+      )
+    ).toBe('e9a3bcad-4764-4938-a33b-957459d20b8e.mp3');
+  });
+
+  it('adds the known artwork extension to extensionless storage paths', () => {
+    expect(
+      inferMultipartFilename(
+        '/v0/b/urm-app.appspot.com/o/sermon-images/square-artwork-id',
+        'artwork.jpg'
+      )
+    ).toBe('square-artwork-id.jpg');
+  });
+
+  it('preserves a source filename that already declares its format', () => {
+    expect(inferMultipartFilename('audio/sermon.wav', 'audio.mp3')).toBe('sermon.wav');
   });
 
   it('URL-encodes track identifiers for metadata updates', async () => {
@@ -115,18 +146,26 @@ describe('soundcloudClient', () => {
       },
     });
 
+    const extensionlessArtworkUrl =
+      'https://firebasestorage.googleapis.com/v0/b/example/o/sermon-images%2Fsquare-artwork-id?alt=media';
     await uploadTrack('access-token', {
       bucket,
       audioStoragePath: 'audio/file.mp3',
-      imageSource: 'https://storage.googleapis.com/example/image.png',
+      imageSource: extensionlessArtworkUrl,
       title: 'Test track',
       tags: ['sermon'],
       description: 'Description',
     });
 
-    expect(mockedAxios.get).toHaveBeenCalledWith('https://storage.googleapis.com/example/image.png', {
+    expect(mockedAxios.get).toHaveBeenCalledWith(extensionlessArtworkUrl, {
       responseType: 'stream',
     });
+    const multipartBody = mockedAxios.post.mock.calls[0]?.[1] as unknown as { _streams?: unknown[] };
+    expect(
+      multipartBody._streams?.some(
+        (entry) => typeof entry === 'string' && entry.includes('filename="square-artwork-id.jpg"')
+      )
+    ).toBe(true);
   });
 
   it('streams artwork updates from storage instead of downloading buffers', async () => {
