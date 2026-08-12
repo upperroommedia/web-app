@@ -26,6 +26,13 @@ function main() {
     'cookie_session_stale_or_challenged'
   );
   assert.equal(
+    classifyYouTubeFailure(
+      'ERROR: unable to download video data: HTTP Error 403: Forbidden',
+      'cookie_provider'
+    ),
+    'cookie_session_stale_or_challenged'
+  );
+  assert.equal(
     classifyYouTubeFailure('ERROR: LOGIN_REQUIRED private members-only age-restricted', 'public_provider'),
     'account_required_content'
   );
@@ -60,6 +67,14 @@ function main() {
   assert.equal(analyzedCookieFailure.failureClass, 'cookie_session_stale_or_challenged');
   assert.equal(analyzedCookieFailure.stage, 'cookie_session');
   assert.equal(shouldEscalateToBrowserFallback(analyzedCookieFailure, true), false);
+
+  const analyzedCookieMedia403 = analyzeYouTubeFailure(
+    'yt-dlp file download exited with code 1. stderr: ERROR: unable to download video data: HTTP Error 403: Forbidden',
+    'cookie_provider'
+  );
+  assert.equal(analyzedCookieMedia403.failureClass, 'cookie_session_stale_or_challenged');
+  assert.equal(analyzedCookieMedia403.alertCode, 'cookie_session_stale');
+  assert.equal(analyzedCookieMedia403.stage, 'cookie_session');
 
   const analyzedPostLiveFailure = analyzeYouTubeFailure(
     'yt-dlp download format selection exited with code 1. stderr: ERROR: [youtube] Foujg31dBG8: This live event has ended.',
