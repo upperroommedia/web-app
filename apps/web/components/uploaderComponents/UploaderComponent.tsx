@@ -2,6 +2,7 @@
  * Page for uploaders to use to upload, trim, and add intro/outro to audio file
  */
 import editSermon from '../../pages/api/editSermon';
+import { isSermonProcessingConflict } from '../../utils/sermonEditing';
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
@@ -1194,7 +1195,9 @@ const Uploader = (props: UploaderProps) => {
                       markIntentionalNavigation();
                       props.setEditFormOpen?.(false);
                     } catch (error) {
-                      console.error('Error editing sermon:', error);
+                      if (!isSermonProcessingConflict(error)) {
+                        console.error('Error editing sermon:', error);
+                      }
                     } finally {
                       setIsEditing(false);
                     }

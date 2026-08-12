@@ -7,7 +7,6 @@ import firestore, {
   getDocs,
   query,
   where,
-  writeBatch,
   runTransaction,
   increment,
   orderBy,
@@ -54,6 +53,10 @@ import { seriesConverter } from '../../types/Series';
 import firebase, { isDevelopment } from '../../firebase/firebase';
 import { getDownloadURL, getStorage, ref } from '../../firebase/storage';
 import { UNPROCESSED_SERMONS_BUCKET } from '../../constants/storage_constants';
+import {
+  assertSermonNotProcessing,
+  isSermonProcessingConflict,
+} from '../../utils/sermonEditing';
 
 interface EditSermonOptions {
   originalSermon?: Sermon;
@@ -354,6 +357,11 @@ const persistSeriesMembershipChange = async (
 };
 
 const showMutationFailure = (error: unknown, sermonId: string): never => {
+  if (isSermonProcessingConflict(error)) {
+    alert(error.message);
+    throw error;
+  }
+
   const busyDetails = parseLockBusyDetails(error);
   if (busyDetails) {
     const retryInSeconds = Math.max(1, Math.ceil(busyDetails.retry_after_ms / 1000));
@@ -421,6 +429,9 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
   const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
 
   try {
+    const latestSermonSnapshot = await getDoc(sermonRef);
+    assertSermonNotProcessing(latestSermonSnapshot.exists() ? latestSermonSnapshot.data() : null);
+
     const currentSermonListSnapshot = await getDocs(
       collection(firestore, `sermons/${sermon.id}/sermonLists`).withConverter(sermonListConverter)
     );
@@ -562,50 +573,52 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         sermonForLocalWrite.soundCloudTrackUrl = soundCloudTrackUrlUpdate;
       }
 
-      const batch = writeBatch(firestore);
       const staleSermonListIds = currentSermonLists
         .map((list) => list.id)
         .filter((listId) => !finalCanonicalListMap.has(listId));
       const staleListItemIds = Array.from(currentListItemIds).filter((listId) => !finalCanonicalListMap.has(listId));
 
-      batch.update(sermonRef, {
-        ...buildEditableSermonPatch(sermonForLocalWrite),
-        ...(activeSubsplashId ? { subsplashId: activeSubsplashId } : { subsplashId: deleteField() }),
-        ...(soundCloudTrackUrlUpdate
-          ? { soundCloudTrackUrl: soundCloudTrackUrlUpdate }
-          : {}),
-        searchPending: true,
-        searchIndexedAtMillis: deleteField(),
-        searchSyncError: deleteField(),
+      await runTransaction(firestore, async (transaction) => {
+        const latestSermon = await transaction.get(sermonRef);
+        assertSermonNotProcessing(latestSermon.exists() ? latestSermon.data() : null);
+
+        transaction.update(sermonRef, {
+          ...buildEditableSermonPatch(sermonForLocalWrite),
+          ...(activeSubsplashId ? { subsplashId: activeSubsplashId } : { subsplashId: deleteField() }),
+          ...(soundCloudTrackUrlUpdate
+            ? { soundCloudTrackUrl: soundCloudTrackUrlUpdate }
+            : {}),
+          searchPending: true,
+          searchIndexedAtMillis: deleteField(),
+          searchSyncError: deleteField(),
+        });
+
+        staleSermonListIds.forEach((listId) => {
+          transaction.delete(doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`));
+        });
+        staleListItemIds.forEach((listId) => {
+          transaction.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
+        });
+
+        finalCanonicalListMap.forEach((finalList, listId) => {
+          transaction.set(
+            doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`).withConverter(sermonListConverter),
+            finalList
+          );
+
+          const listItemRef = doc(firestore, `lists/${listId}/listItems/${sermon.id}`);
+          const listItemExists = currentListItemIds.has(listId);
+          const mirroredListItemWrite = listItemExists
+            ? buildMirroredListItemPatch(sermonForLocalWrite, {
+                uploadStatus: finalList.uploadStatus,
+              })
+            : buildMirroredListItemData(sermonForLocalWrite, {
+                uploadStatus: finalList.uploadStatus,
+              });
+
+          transaction.set(listItemRef, mirroredListItemWrite, { merge: true });
+        });
       });
-
-      staleSermonListIds.forEach((listId) => {
-        batch.delete(doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`));
-      });
-      staleListItemIds.forEach((listId) => {
-        batch.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
-      });
-
-      finalCanonicalListMap.forEach((finalList, listId) => {
-        batch.set(
-          doc(firestore, `sermons/${sermon.id}/sermonLists/${listId}`).withConverter(sermonListConverter),
-          finalList
-        );
-
-        const listItemRef = doc(firestore, `lists/${listId}/listItems/${sermon.id}`);
-        const listItemExists = currentListItemIds.has(listId);
-        const mirroredListItemWrite = listItemExists
-          ? buildMirroredListItemPatch(sermonForLocalWrite, {
-              uploadStatus: finalList.uploadStatus,
-            })
-          : buildMirroredListItemData(sermonForLocalWrite, {
-              uploadStatus: finalList.uploadStatus,
-            });
-
-        batch.set(listItemRef, mirroredListItemWrite, { merge: true });
-      });
-
-      await batch.commit();
       await persistSeriesMembershipChange(
         sermonForLocalWrite,
         previousSeriesId,
@@ -638,48 +651,50 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       finalSermonForLocalWrite.soundCloudTrackUrl = soundCloudTrackUrlUpdate;
     }
 
-    const batch = writeBatch(firestore);
-    batch.update(sermonRef, {
-      ...buildEditableSermonPatch(finalSermonForLocalWrite),
-      subsplashId: deleteField(),
-      ...(soundCloudTrackUrlUpdate ? { soundCloudTrackUrl: soundCloudTrackUrlUpdate } : {}),
-      searchPending: true,
-      searchIndexedAtMillis: deleteField(),
-      searchSyncError: deleteField(),
-    });
+    await runTransaction(firestore, async (transaction) => {
+      const latestSermon = await transaction.get(sermonRef);
+      assertSermonNotProcessing(latestSermon.exists() ? latestSermon.data() : null);
 
-    currentSermonListSnapshot.docs.forEach((snapshot) => {
-      if (!finalVisibleListIds.has(snapshot.id)) {
-        batch.delete(snapshot.ref);
-      }
-    });
-    currentListItemIds.forEach((listId) => {
-      if (!finalVisibleListIds.has(listId)) {
-        batch.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
-      }
-    });
+      transaction.update(sermonRef, {
+        ...buildEditableSermonPatch(finalSermonForLocalWrite),
+        subsplashId: deleteField(),
+        ...(soundCloudTrackUrlUpdate ? { soundCloudTrackUrl: soundCloudTrackUrlUpdate } : {}),
+        searchPending: true,
+        searchIndexedAtMillis: deleteField(),
+        searchSyncError: deleteField(),
+      });
 
-    sermonList.forEach((list) => {
-      batch.set(
-        doc(firestore, `sermons/${sermon.id}/sermonLists/${list.id}`).withConverter(sermonListConverter),
-        {
-          ...list,
-          uploadStatus: { status: uploadStatus.NOT_UPLOADED },
-          publishGeneration: 0,
+      currentSermonListSnapshot.docs.forEach((snapshot) => {
+        if (!finalVisibleListIds.has(snapshot.id)) {
+          transaction.delete(snapshot.ref);
         }
-      );
-      const listItemRef = doc(firestore, `lists/${list.id}/listItems/${sermon.id}`);
-      const listItemExists = currentListItemIds.has(list.id);
-      batch.set(
-        listItemRef,
-        listItemExists
-          ? buildMirroredListItemPatch(finalSermonForLocalWrite)
-          : buildMirroredListItemData(finalSermonForLocalWrite),
-        { merge: true }
-      );
-    });
+      });
+      currentListItemIds.forEach((listId) => {
+        if (!finalVisibleListIds.has(listId)) {
+          transaction.delete(doc(firestore, `lists/${listId}/listItems/${sermon.id}`));
+        }
+      });
 
-    await batch.commit();
+      sermonList.forEach((list) => {
+        transaction.set(
+          doc(firestore, `sermons/${sermon.id}/sermonLists/${list.id}`).withConverter(sermonListConverter),
+          {
+            ...list,
+            uploadStatus: { status: uploadStatus.NOT_UPLOADED },
+            publishGeneration: 0,
+          }
+        );
+        const listItemRef = doc(firestore, `lists/${list.id}/listItems/${sermon.id}`);
+        const listItemExists = currentListItemIds.has(list.id);
+        transaction.set(
+          listItemRef,
+          listItemExists
+            ? buildMirroredListItemPatch(finalSermonForLocalWrite)
+            : buildMirroredListItemData(finalSermonForLocalWrite),
+          { merge: true }
+        );
+      });
+    });
     await persistSeriesMembershipChange(finalSermonForLocalWrite, previousSeriesId, nextSeriesId, undefined, false);
   } catch (error) {
     showMutationFailure(error, sermon.id);
