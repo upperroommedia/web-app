@@ -533,16 +533,25 @@ const SermonDetailsPage = () => {
           <CardContent sx={{ p: { xs: 1.5, sm: 2, md: 3 } }}>
             {/* Header with Image, Info, and Actions */}
             <Box
+              data-testid="sermon-detail-header"
               sx={{
-                display: 'flex',
-                flexDirection: 'row',
+                display: 'grid',
+                gridTemplateColumns: {
+                  xs: '80px minmax(0, 1fr)',
+                  sm: '120px minmax(0, 1fr) 120px',
+                  md: '160px minmax(0, 1fr) 160px',
+                },
+                gridTemplateAreas: {
+                  xs: '"artwork info" "actions actions"',
+                  sm: '"artwork info actions"',
+                },
                 gap: { xs: 1.5, sm: 2, md: 3 },
                 mb: { xs: 2, sm: 3 },
                 alignItems: 'flex-start',
               }}
             >
               {/* Cover Image - On the left */}
-              <Box sx={{ flexShrink: 0 }}>
+              <Box data-testid="sermon-detail-artwork" sx={{ gridArea: 'artwork', flexShrink: 0 }}>
                 <Stack spacing={1.25} sx={{ width: { xs: 80, sm: 120, md: 160 } }}>
                   <Box
                     sx={{
@@ -583,7 +592,7 @@ const SermonDetailsPage = () => {
               </Box>
 
               {/* Info Section - Center */}
-              <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Box data-testid="sermon-detail-info" sx={{ gridArea: 'info', minWidth: 0 }}>
                 <Stack spacing={{ xs: 1.25, sm: 1.75, md: 2 }}>
                   <Box>
                     <Typography
@@ -592,6 +601,7 @@ const SermonDetailsPage = () => {
                       gutterBottom
                       sx={{
                         fontSize: { xs: '1.25rem', sm: '1.5rem', md: '2rem' },
+                        overflowWrap: 'break-word',
                       }}
                     >
                       {sermon.title}
@@ -772,23 +782,25 @@ const SermonDetailsPage = () => {
 
               {/* Action Buttons - On the right */}
               <Box
+                data-testid="sermon-detail-actions"
                 sx={{
+                  gridArea: 'actions',
                   flexShrink: 0,
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  minWidth: { xs: 92, sm: 120, md: 160 },
-                  minHeight: { xs: 120, sm: 160, md: 205 },
+                  minWidth: 0,
+                  minHeight: { xs: 0, sm: 160, md: 205 },
                 }}
               >
-                <Stack spacing={0.75} sx={{ width: '100%' }}>
+                <Stack direction={{ xs: 'row', sm: 'column' }} spacing={0.75} sx={{ width: '100%' }}>
                   {canEdit && (
                     <Button
                       variant="outlined"
                       size="small"
                       startIcon={<EditIcon />}
                       onClick={() => router.push(`/admin/sermons/${sermonId}/edit`)}
-                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, minHeight: { sm: 40 } }}
+                      sx={{ flex: { xs: 1, sm: 'initial' }, fontSize: { xs: '0.75rem', sm: '0.8rem' }, minHeight: { xs: 38, sm: 40 } }}
                     >
                       Edit
                     </Button>
@@ -800,19 +812,27 @@ const SermonDetailsPage = () => {
                       size="small"
                       startIcon={<DeleteIcon />}
                       onClick={() => setDeletePopup(true)}
-                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, minHeight: { sm: 40 } }}
+                      sx={{ flex: { xs: 1, sm: 'initial' }, fontSize: { xs: '0.75rem', sm: '0.8rem' }, minHeight: { xs: 38, sm: 40 } }}
                     >
                       Delete
                     </Button>
                   )}
                 </Stack>
-                <Stack spacing={0.75} alignItems="flex-end" sx={{ mt: 1.5 }}>
+                <Stack
+                  direction={{ xs: 'row', sm: 'column' }}
+                  spacing={0.75}
+                  alignItems={{ xs: 'center', sm: 'flex-end' }}
+                  justifyContent={{ xs: 'space-between', sm: 'flex-end' }}
+                  flexWrap="wrap"
+                  useFlexGap
+                  sx={{ mt: { xs: 1.25, sm: 1.5 }, minWidth: 0 }}
+                >
                   <Stack direction="row" spacing={1} alignItems="center" justifyContent="flex-end">
                     <UserAvatar user={uploader} sx={{ width: { xs: 20, sm: 28 }, height: { xs: 20, sm: 28 } }} />
                     <Typography
                       variant="body2"
                       color="text.secondary"
-                      sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, textAlign: 'right' }}
+                      sx={{ fontSize: { xs: '0.72rem', sm: '0.8rem' }, textAlign: { xs: 'left', sm: 'right' } }}
                     >
                       Uploaded by {uploaderName}
                     </Typography>
@@ -855,7 +875,7 @@ const SermonDetailsPage = () => {
               </Box>
             </Box>
 
-            <Divider sx={{ my: 3 }} />
+            <Divider sx={{ my: { xs: 2, sm: 3 } }} />
 
             {/* Description */}
             <Box sx={{ mb: { xs: 2, sm: 3 } }}>
