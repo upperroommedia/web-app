@@ -3,10 +3,13 @@ import { sermonStatusType, uploadStatus } from '../types/SermonTypes';
 import { createEmptySermonList } from '../types/SermonList';
 import { ListType } from '../types/List';
 import {
+  assertSermonNotProcessing,
   canEditSermonMetadata,
   canEditSermonAudio,
   canEditSermonRecord,
+  isSermonProcessingConflict,
   isSermonProcessingLocked,
+  SermonProcessingConflictError,
 } from './sermonEditing';
 
 describe('sermonEditing helpers', () => {
@@ -23,6 +26,27 @@ describe('sermonEditing helpers', () => {
     expect(canEditSermonMetadata(processing)).toBe(false);
     expect(canEditSermonRecord(pending)).toBe(false);
     expect(canEditSermonRecord(processing)).toBe(false);
+  });
+
+  it('raises a recognizable conflict when processing starts during an edit', () => {
+    const processing = createEmptySermon('user-1');
+    processing.status.audioStatus = sermonStatusType.PROCESSING;
+
+    expect(() => assertSermonNotProcessing(processing)).toThrow(SermonProcessingConflictError);
+
+    try {
+      assertSermonNotProcessing(processing);
+    } catch (error) {
+      expect(isSermonProcessingConflict(error)).toBe(true);
+      expect((error as Error).message).toContain('Wait for processing to finish');
+    }
+  });
+
+  it('allows a non-processing sermon through the edit guard', () => {
+    const sermon = createEmptySermon('user-1');
+    sermon.status.audioStatus = sermonStatusType.ERROR;
+
+    expect(() => assertSermonNotProcessing(sermon)).not.toThrow();
   });
 
   it('disables audio editing for legacy sermons without trimDurationSeconds', () => {

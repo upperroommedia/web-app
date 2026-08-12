@@ -10,9 +10,26 @@ type PublishedListState = {
 export function isSermonProcessingLocked(sermon?: Sermon | null): boolean {
   if (!sermon) return false;
   return (
-    sermon.status.audioStatus === sermonStatusType.PENDING ||
-    sermon.status.audioStatus === sermonStatusType.PROCESSING
+    sermon.status?.audioStatus === sermonStatusType.PENDING ||
+    sermon.status?.audioStatus === sermonStatusType.PROCESSING
   );
+}
+
+export class SermonProcessingConflictError extends Error {
+  constructor() {
+    super('Audio processing started while this sermon was being edited. Wait for processing to finish, then try again.');
+    this.name = 'SermonProcessingConflictError';
+  }
+}
+
+export function assertSermonNotProcessing(sermon?: Sermon | null): void {
+  if (isSermonProcessingLocked(sermon)) {
+    throw new SermonProcessingConflictError();
+  }
+}
+
+export function isSermonProcessingConflict(error: unknown): error is SermonProcessingConflictError {
+  return error instanceof SermonProcessingConflictError;
 }
 
 export function isSermonPublishedExternally(sermon?: Sermon | null): boolean {

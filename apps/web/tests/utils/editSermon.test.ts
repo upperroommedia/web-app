@@ -1,6 +1,6 @@
 import { createEmptySermon } from '../../types/Sermon';
 import { List, ListType, OverflowBehavior } from '../../types/List';
-import { uploadStatus } from '../../types/SermonTypes';
+import { sermonStatusType, uploadStatus } from '../../types/SermonTypes';
 
 const updateDocMock = jest.fn();
 const getDocMock = jest.fn();
@@ -19,6 +19,7 @@ const orderByMock = jest.fn();
 const limitMock = jest.fn();
 const createFunctionV2Mock = jest.fn();
 const runTransactionMock = jest.fn();
+const transactionGetMock = jest.fn();
 const getDownloadURLMock = jest.fn();
 const refMock = jest.fn();
 
@@ -177,7 +178,23 @@ describe('editSermon remote edit reconciliation', () => {
     orderByMock.mockReset().mockImplementation((...args: unknown[]) => args);
     limitMock.mockReset().mockImplementation((...args: unknown[]) => args);
     createFunctionV2Mock.mockReset();
-    runTransactionMock.mockReset().mockResolvedValue(undefined);
+    transactionGetMock.mockReset().mockImplementation(async (ref: { path?: string }) => ({
+      exists: () => true,
+      data: () => {
+        if (!ref.path?.startsWith('sermons/')) {
+          return {};
+        }
+        const editableSermon = createEmptySermon('user-1');
+        editableSermon.status.audioStatus = sermonStatusType.ERROR;
+        return editableSermon;
+      },
+    }));
+    runTransactionMock.mockReset().mockImplementation(async (_firestore, callback) => callback({
+      delete: writeBatchDeleteMock,
+      get: transactionGetMock,
+      set: writeBatchSetMock,
+      update: writeBatchUpdateMock,
+    }));
     getDownloadURLMock.mockReset().mockResolvedValue('https://storage.test/audio.mp3');
     refMock.mockReset().mockReturnValue('storage-ref');
     global.alert = jest.fn();
@@ -214,8 +231,7 @@ describe('editSermon remote edit reconciliation', () => {
     expect(functions.removefromlist).not.toHaveBeenCalled();
     expect(functions.addtoseries).not.toHaveBeenCalled();
     expect(functions.removefromseries).not.toHaveBeenCalled();
-    expect(writeBatchCommitMock).toHaveBeenCalledTimes(1);
-    expect(runTransactionMock).not.toHaveBeenCalled();
+    expect(runTransactionMock).toHaveBeenCalledTimes(1);
   });
 
   it('keeps edits local when the sermon is not published anywhere', async () => {
@@ -243,7 +259,7 @@ describe('editSermon remote edit reconciliation', () => {
     expect(functions.editSoundCloudSermon).not.toHaveBeenCalled();
     expect(functions.addtolist).not.toHaveBeenCalled();
     expect(functions.addtoseries).not.toHaveBeenCalled();
-    expect(writeBatchCommitMock).toHaveBeenCalledTimes(1);
+    expect(runTransactionMock).toHaveBeenCalledTimes(1);
   });
 
   it('deletes the remote media item instead of issuing list-row removals when the last published membership is removed', async () => {
@@ -438,6 +454,7 @@ describe('editSermon remote edit reconciliation', () => {
     originalSermon.id = 'sermon-1';
     originalSermon.subsplashId = 'subsplash-1';
     originalSermon.seriesId = 'series-a';
+    originalSermon.status.audioStatus = sermonStatusType.ERROR;
     originalSermon.status.subsplash = uploadStatus.UPLOADED;
 
     const updatedSermon = {
@@ -446,6 +463,10 @@ describe('editSermon remote edit reconciliation', () => {
     };
 
     getDocMock
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => originalSermon,
+      })
       .mockResolvedValueOnce({
         exists: () => true,
         data: () => ({ publishedToSubsplash: true, sermonSubsplashId: 'subsplash-1' }),
@@ -498,7 +519,7 @@ describe('editSermon remote edit reconciliation', () => {
     expect(functions.removefromseries).toHaveBeenCalledTimes(1);
     expect(functions.addtoseries).toHaveBeenCalledTimes(1);
     expect(functions.reorderseriesitems).toHaveBeenCalledTimes(1);
-    expect(runTransactionMock).toHaveBeenCalledTimes(1);
+    expect(runTransactionMock).toHaveBeenCalledTimes(2);
     consoleWarnSpy.mockRestore();
   });
 
@@ -528,12 +549,12 @@ describe('editSermon remote edit reconciliation', () => {
     expect(functions.uploadToSubsplash).not.toHaveBeenCalled();
     expect(functions.addtoseries).not.toHaveBeenCalled();
     expect(functions.reorderseriesitems).not.toHaveBeenCalled();
-    expect(runTransactionMock).toHaveBeenCalledTimes(1);
+    expect(runTransactionMock).toHaveBeenCalledTimes(2);
     expect(runTransactionMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function)
     );
-    expect(writeBatchCommitMock).toHaveBeenCalledTimes(1);
+    expect(writeBatchCommitMock).not.toHaveBeenCalled();
   });
 
   it('aborts the local save when removing a published list fails remotely', async () => {
@@ -564,7 +585,44 @@ describe('editSermon remote edit reconciliation', () => {
 
     await expect(editSermon(sermon, [retainedList], { originalSermon: sermon })).rejects.toThrow('removefromlist failed');
 
-    expect(writeBatchCommitMock).not.toHaveBeenCalled();
+    expect(runTransactionMock).not.toHaveBeenCalled();
     expect(global.alert).toHaveBeenCalledWith('removefromlist failed');
+  });
+
+  it('reports a processing conflict without attempting the local write when processing starts after preflight', async () => {
+    createFunctionMap();
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const sermon = createEmptySermon('user-1');
+    sermon.id = 'sermon-1';
+    sermon.status.audioStatus = sermonStatusType.ERROR;
+
+    getDocMock.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => sermon,
+    });
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({ docs: [] });
+
+    const processingSermon = createEmptySermon('user-1');
+    processingSermon.id = sermon.id;
+    processingSermon.status.audioStatus = sermonStatusType.PROCESSING;
+    transactionGetMock.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => processingSermon,
+    });
+
+    await expect(editSermon(sermon, [], { originalSermon: sermon })).rejects.toThrow(
+      'Audio processing started while this sermon was being edited'
+    );
+
+    expect(runTransactionMock).toHaveBeenCalledTimes(1);
+    expect(writeBatchUpdateMock).not.toHaveBeenCalled();
+    expect(writeBatchSetMock).not.toHaveBeenCalled();
+    expect(writeBatchDeleteMock).not.toHaveBeenCalled();
+    expect(global.alert).toHaveBeenCalledWith(
+      'Audio processing started while this sermon was being edited. Wait for processing to finish, then try again.'
+    );
   });
 });
