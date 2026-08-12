@@ -20,6 +20,7 @@ import {
   classifyYouTubeFailure,
   shouldEscalateToBrowserFallback,
   shouldEscalateToCookieProvider,
+  shouldUseExternalDownloaderForYouTubeDownload,
   YouTubeExtractionMode,
   YouTubeFailureClass,
 } from './youtubeExtractionPolicy';
@@ -3311,11 +3312,19 @@ export const downloadYouTubeAudioToFile = async (
     if (extraCookieArgs.length > 0) {
       args.push(...extraCookieArgs);
     }
-    if (config.useExternalDownloader) {
+    if (config.useExternalDownloader && shouldUseExternalDownloaderForYouTubeDownload(mode)) {
       maybeApplyYtDlpExternalDownloaderArgs(args, log, {
         protocol: config.protocol,
         fragmentCount: config.fragmentCount,
         context: 'file_download',
+      });
+    } else if (config.useExternalDownloader) {
+      log.info('Skipping yt-dlp external downloader for cookie-backed YouTube download', {
+        extractionMode: mode,
+        protocol: config.protocol,
+        fragmentCount: config.fragmentCount,
+        attemptStrategy: config.attemptStrategy,
+        reason: 'external_downloaders_cannot_preserve_authenticated_media_request_context',
       });
     }
     args.push('--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());

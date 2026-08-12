@@ -25,9 +25,9 @@ catalog:
   fast-average-color-node: ^3.1.0
   ffmpeg-static: ^5.2.0
   ffprobe-static: ^3.1.0
-  firebase: ^12.10.0
+  firebase: ^12.17.1
   firebase-admin: ^13.7.0
-  firebase-functions: ^7.1.1
+  firebase-functions: ^7.3.2
   form-data: ^4.0.0
   google-auth-library: ^9.15.1
   headers: ^0.9.6
