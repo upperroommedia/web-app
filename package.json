@@ -65,7 +65,7 @@
       "@google-cloud/storage": "7.19.0",
       "@types/react": "19.2.14",
       "@types/react-dom": "19.2.3",
-      "algoliasearch": "5.27.0",
+      "algoliasearch": "5.56.0",
       "@tootallnate/once": "3.0.1",
       "cookie": "0.7.0",
       "fast-xml-parser": "4.5.4",

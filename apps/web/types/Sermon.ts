@@ -75,6 +75,62 @@ export const getDateString = (date: Date) => {
   return `${months[date.getMonth()]} ${date.getDate()}`;
 };
 
+type FirestoreDateLike = {
+  toMillis?: () => number;
+  seconds?: number;
+  nanoseconds?: number;
+  _seconds?: number;
+  _nanoseconds?: number;
+};
+
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/**
+ * Firestore normally hydrates `date` as a Timestamp, but legacy list-item
+ * mirrors can contain an older scalar or a JSON-serialized Timestamp. Keep a
+ * malformed mirror from taking down the entire list details page.
+ */
+export const getSermonDateMillis = (value: unknown, fallbackMillis: number): number => {
+  if (value instanceof Date) {
+    const millis = value.getTime();
+    return Number.isFinite(millis) ? millis : fallbackMillis;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallbackMillis;
+  }
+
+  if (typeof value === 'string') {
+    const millis = Date.parse(value);
+    return Number.isFinite(millis) ? millis : fallbackMillis;
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return fallbackMillis;
+  }
+
+  const dateLike = value as FirestoreDateLike;
+  if (typeof dateLike.toMillis === 'function') {
+    try {
+      const millis = dateLike.toMillis();
+      if (Number.isFinite(millis)) {
+        return millis;
+      }
+    } catch {
+      // Fall through to serialized Timestamp fields.
+    }
+  }
+
+  const seconds = finiteNumber(dateLike.seconds) ?? finiteNumber(dateLike._seconds);
+  if (seconds !== null) {
+    const nanoseconds = finiteNumber(dateLike.nanoseconds) ?? finiteNumber(dateLike._nanoseconds) ?? 0;
+    return seconds * 1_000 + nanoseconds / 1_000_000;
+  }
+
+  return fallbackMillis;
+};
+
 /* This converter takes care of converting a Sermon to a FirebaseSermon on upload
  *  and a FirebaseSermon to a Sermon on download.
  */
@@ -88,15 +144,20 @@ export const sermonConverter: FirestoreDataConverter<Sermon> = {
     return { ...cleanedSermon, date: Timestamp.fromMillis(sermon.dateMillis) };
   },
   fromFirestore: (snapshot: QueryDocumentSnapshot<FirebaseSermon>): Sermon => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date, ...data } = snapshot.data();
     const currentTime = Timestamp.now();
+    const legacyDateMillis = (data as Partial<Sermon>).dateMillis;
+    const fallbackMillis =
+      typeof legacyDateMillis === 'number' && Number.isFinite(legacyDateMillis)
+        ? legacyDateMillis
+        : currentTime.toMillis();
+    const dateMillis = getSermonDateMillis(date, fallbackMillis);
     const convertedSermon: Sermon = {
       ...createEmptySermon(),
       ...data,
-      ...(snapshot.data().date && {
-        dateMillis: snapshot.data()?.date?.toMillis() || currentTime.toMillis(),
-        dateString: getDateString(snapshot.data()?.date?.toDate() || currentTime.toDate()),
+      ...(date && {
+        dateMillis,
+        dateString: getDateString(new Date(dateMillis)),
       }),
       id: snapshot.id,
     };

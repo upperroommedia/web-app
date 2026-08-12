@@ -28,6 +28,7 @@ jest.mock('@sentry/nextjs', () => ({
 
 describe('createFunction helpers', () => {
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.resetModules();
     httpsCallableMock.mockReset();
     httpsCallableFromURLMock.mockReset();
@@ -91,6 +92,83 @@ describe('createFunction helpers', () => {
 
     expect(startSpanMock).toHaveBeenCalled();
     expect(captureExceptionMock).toHaveBeenCalledWith(error);
+  });
+
+  it('retries pure callable reads after a transport failure', async () => {
+    jest.spyOn(globalThis, 'setTimeout').mockImplementation((callback: TimerHandler) => {
+      if (typeof callback === 'function') {
+        callback();
+      }
+      return 0 as unknown as NodeJS.Timeout;
+    });
+    const transportError = Object.assign(new Error('internal'), { code: 'functions/internal' });
+    const callable = jest
+      .fn()
+      .mockRejectedValueOnce(transportError)
+      .mockResolvedValueOnce({ data: 'secured-key' });
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunction } = await import('../../utils/createFunction');
+    const invoke = createFunction<{ userId: string }, string>('generatesecuredapikey');
+
+    await expect(invoke({ userId: 'user-123' })).resolves.toBe('secured-key');
+    expect(callable).toHaveBeenCalledTimes(2);
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('retries operation-keyed mutations with the same idempotent payload', async () => {
+    jest.spyOn(globalThis, 'setTimeout').mockImplementation((callback: TimerHandler) => {
+      if (typeof callback === 'function') {
+        callback();
+      }
+      return 0 as unknown as NodeJS.Timeout;
+    });
+    const transportError = Object.assign(new Error('deadline exceeded'), {
+      code: 'functions/deadline-exceeded',
+    });
+    const callable = jest
+      .fn()
+      .mockRejectedValueOnce(transportError)
+      .mockResolvedValueOnce({ data: { ok: true } });
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ id: string; operationKey?: string }, { ok: boolean }>('removefromlist');
+
+    await expect(
+      invoke(
+        { id: 'sermon-123' },
+        { metadata: { operationKey: 'remove-sermon-123' } }
+      )
+    ).resolves.toEqual({ ok: true });
+    expect(callable).toHaveBeenCalledTimes(2);
+    expect(callable).toHaveBeenNthCalledWith(1, {
+      id: 'sermon-123',
+      operationKey: 'remove-sermon-123',
+    });
+    expect(callable).toHaveBeenNthCalledWith(2, {
+      id: 'sermon-123',
+      operationKey: 'remove-sermon-123',
+    });
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('does not retry a server-classified internal failure', async () => {
+    const serverError = Object.assign(new Error('Subsplash request failed'), {
+      code: 'functions/internal',
+      details: { code: 'SUBSPLASH_REQUEST_FAILED' },
+    });
+    const callable = jest.fn().mockRejectedValue(serverError);
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ id: string; operationKey?: string }, { ok: boolean }>('addtolist');
+
+    await expect(
+      invoke({ id: 'sermon-123' }, { metadata: { operationKey: 'add-sermon-123' } })
+    ).rejects.toBe(serverError);
+    expect(callable).toHaveBeenCalledTimes(1);
+    expect(captureExceptionMock).toHaveBeenCalledWith(serverError);
   });
 
   it('does not capture expected bulkaddtoseries membership conflicts', async () => {

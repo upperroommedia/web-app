@@ -1,9 +1,11 @@
 import type { Event } from '@sentry/nextjs';
 
-const getExceptionValue = (event: Event): string => {
-  const value = event.exception?.values?.[0]?.value;
-  return typeof value === 'string' ? value : '';
-};
+const getExceptionValues = (event: Event): string[] =>
+  (event.exception?.values ?? [])
+    .map((exception) => exception.value)
+    .filter((value): value is string => typeof value === 'string');
+
+const getExceptionValue = (event: Event): string => getExceptionValues(event)[0] ?? '';
 
 const getExceptionType = (event: Event): string => {
   const type = event.exception?.values?.[0]?.type;
@@ -35,7 +37,7 @@ export const shouldDropClientSentryEvent = (event: Event): boolean => {
   const transaction = event.transaction || '';
   const requestUrl = getRequestUrl(event);
 
-  if (exceptionValue === 'routeChange aborted.') {
+  if (getExceptionValues(event).some((value) => value === 'routeChange aborted.')) {
     return true;
   }
 
