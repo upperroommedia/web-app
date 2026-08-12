@@ -250,4 +250,23 @@ describe('runPublishEverywhereFlow', () => {
       mediaItemId: 'media-4',
     });
   });
+
+  it('passes a list-recovered media item id to the following series publish', async () => {
+    const publishSeries = jest.fn().mockResolvedValue({ status: 'success' });
+
+    const result = await runPublishEverywhereFlow<Result & { mediaItemId?: string }, Result, Result>({
+      shouldPublishLists: true,
+      shouldPublishSeries: true,
+      shouldPublishSoundCloud: false,
+      initialMediaItemId: 'stale-media',
+      ensureMediaItem: jest.fn(),
+      publishLists: jest.fn().mockResolvedValue({ status: 'success', mediaItemId: 'replacement-media' }),
+      publishSeries,
+      publishSoundCloud: jest.fn(),
+      createPrepErrorResult: (error: string) => ({ status: 'error', error }),
+    });
+
+    expect(publishSeries).toHaveBeenCalledWith('replacement-media');
+    expect(result.mediaItemId).toBe('replacement-media');
+  });
 });

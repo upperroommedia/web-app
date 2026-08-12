@@ -94,6 +94,7 @@ export class SubsplashMock {
   private history: MockSubsplashHistoryEntry[] = [];
   private fullCapacityPatchCreateFailures: Set<string> = new Set();
   private hiddenFullCapacityPatchCreateFailures: Set<string> = new Set();
+  private missingMediaItemIds: Set<string> = new Set();
 
   constructor() {
     this.reset();
@@ -111,6 +112,7 @@ export class SubsplashMock {
     this.history = [];
     this.fullCapacityPatchCreateFailures.clear();
     this.hiddenFullCapacityPatchCreateFailures.clear();
+    this.missingMediaItemIds.clear();
   }
 
   createList(id: string, title: string, count: number = 0, maxItemCount?: number, subtitle?: string): SubsplashList {
@@ -153,6 +155,15 @@ export class SubsplashMock {
       return undefined;
     }
     return JSON.parse(JSON.stringify(item)) as MockSubsplashMediaItem;
+  }
+
+  markMediaItemMissing(id: string) {
+    this.missingMediaItemIds.add(id);
+    this.mediaItems.delete(id);
+  }
+
+  isMediaItemMissing(id: string): boolean {
+    return this.missingMediaItemIds.has(id);
   }
 
   getHistory(): MockSubsplashHistoryEntry[] {
@@ -387,7 +398,16 @@ jest.mock('axios', () => {
       if (mediaItem) {
         return Promise.resolve({ data: mediaItem, status: 200 });
       }
-      return Promise.reject({ response: { status: 404, data: { error: 'Media item not found' } } });
+      if (!subsplashMock.isMediaItemMissing(mediaItemId)) {
+        return Promise.resolve({ data: { id: mediaItemId, title: mediaItemId }, status: 200 });
+      }
+      return Promise.reject({
+        message: 'Request failed with status code 404',
+        name: 'AxiosError',
+        code: 'ERR_BAD_REQUEST',
+        response: { status: 404, data: { error: 'Media item not found' } },
+        isAxiosError: true,
+      });
     }
 
     const patchListMatch = url.match(/builder\/v1\/lists\/([a-zA-Z0-9-]+)$/);

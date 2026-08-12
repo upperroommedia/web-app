@@ -67,7 +67,11 @@ import { getSquareImageDownloadLink } from '../utils/utils';
 import { getSoundCloudRecoveryMessage, isSoundCloudReconnectRequiredClientError } from '../utils/soundcloudAuthRecovery';
 import { PublishDestinationState, getListsDestinationState, summarizePublishRun } from '../utils/sermonPublishingUi';
 import { runPublishEverywhereFlow } from '../utils/publishEverywhereFlow';
-import { deleteSubsplashMediaAndLocalState } from '../utils/deleteSubsplashMediaAndLocalState';
+import {
+  clearMissingSubsplashMediaLocalState,
+  deleteSubsplashMediaAndLocalState,
+} from '../utils/deleteSubsplashMediaAndLocalState';
+import { runWithMissingSubsplashMediaRecovery } from '../utils/subsplashMediaRecovery';
 import { getSubsplashUnpublishStrategy } from '../utils/getSubsplashUnpublishStrategy';
 import { buildPublishedSeriesOrder, getNextSeriesPosition } from '../utils/seriesPublishOrder';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
@@ -848,17 +852,37 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     }
   }, [onUpdate, sermon, user]);
 
-  const ensureSubsplashMediaItem = useCallback(async (): Promise<SubsplashMediaItemResult> => {
+  const ensureSubsplashMediaItem = useCallback(async (
+    options?: { forceCreate?: boolean }
+  ): Promise<SubsplashMediaItemResult> => {
     const existingMediaItemId = resolveSessionSubsplashMediaItemId(sessionSubsplashMediaItemId, sermon.subsplashId);
-    if (existingMediaItemId) {
+    if (existingMediaItemId && !options?.forceCreate) {
       return { mediaItemId: existingMediaItemId };
+    }
+
+    const currentUploadGeneration = resolveSessionSubsplashUploadGeneration(
+      sessionSubsplashUploadGeneration,
+      sermon.subsplashUploadGeneration
+    );
+    const uploadGeneration = options?.forceCreate
+      ? getNextPublishGeneration(currentUploadGeneration)
+      : currentUploadGeneration;
+
+    if (options?.forceCreate) {
+      await clearMissingSubsplashMediaLocalState({
+        sermonId: sermon.id,
+        seriesId: sermon.seriesId,
+      });
+      setSessionSubsplashMediaItemId(null);
+      setSessionSubsplashUploadGeneration(uploadGeneration);
+      setSeriesPublished(false);
     }
 
     const uploadToSubsplashCallable = createFunctionV2<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, void>('uploadToSubsplash');
     const uploadOperationKey = createSubsplashUploadIntentKey(
       'manage-publishing-upload',
       sermon.id,
-      resolveSessionSubsplashUploadGeneration(sessionSubsplashUploadGeneration, sermon.subsplashUploadGeneration)
+      uploadGeneration
     );
     const url = await getDownloadURL(ref(storage, `intro-outro-sermons/${sermon.id}`));
     const data: Omit<UPLOAD_TO_SUBSPLASH_INCOMING_DATA, 'operationKey' | 'lockKey'> = {
@@ -882,6 +906,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     await updateDoc(sermonRef, {
       subsplashId: response.id,
       approverId: user?.uid,
+      ...(options?.forceCreate ? { subsplashUploadGeneration: uploadGeneration } : {}),
     });
     setSessionSubsplashMediaItemId(response.id);
     return { mediaItemId: response.id };
@@ -898,7 +923,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
       const subsplashIdToListIdMap = new Map<string, string>();
       const addToList = createFunctionV2<AddtoListInputType, AddToListOutputType>('addtolist');
       const sermonRef = doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter);
-      const id = resolveSessionSubsplashMediaItemId(
+      let id = resolveSessionSubsplashMediaItemId(
         sessionSubsplashMediaItemId,
         sermon.subsplashId,
         options?.existingMediaItemId
@@ -931,20 +956,27 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         })
       );
 
-      const addToListReturn = listsMetadata.length === 0
-        ? []
-        : await addToList({
-          destinationListIds: listsMetadata.map((metadata) => metadata.listId),
-          mediaItem: { id, type: 'media-item' },
-          operationKey: createSubsplashListAddIntentKey(
-            'manage-publishing-list-add',
-            sermon.id,
-            listsToUploadTo.map((list) => ({
-              id: list.id,
-              publishGeneration: list.publishGeneration,
-            }))
-          ),
+      const runAddToList = (activeMediaItemId: string) => addToList({
+        destinationListIds: listsMetadata.map((metadata) => metadata.listId),
+        mediaItem: { id: activeMediaItemId, type: 'media-item' },
+        operationKey: createSubsplashListAddIntentKey(
+          'manage-publishing-list-add',
+          sermon.id,
+          listsToUploadTo.map((list) => ({
+            id: list.id,
+            publishGeneration: list.publishGeneration,
+          }))
+        ),
+      });
+      const addToListAttempt = listsMetadata.length === 0
+        ? { result: [] as AddToListOutputType, mediaItemId: id }
+        : await runWithMissingSubsplashMediaRecovery({
+          mediaItemId: id,
+          run: runAddToList,
+          recreateMediaItem: () => ensureSubsplashMediaItem({ forceCreate: true }),
         });
+      const addToListReturn = addToListAttempt.result;
+      id = addToListAttempt.mediaItemId;
       const targetListIds = listsMetadata.map((metadata) => metadata.listId);
 
       const batch = writeBatch(firestore);
@@ -1734,6 +1766,10 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     try {
       const actionMessages: string[] = [];
       let hadError = false;
+      let activeSubsplashMediaItemId = resolveSessionSubsplashMediaItemId(
+        sessionSubsplashMediaItemId,
+        sermon.subsplashId
+      );
       const currentlyPublishedLists = listArray.filter((list) => list.uploadStatus?.status === uploadStatus.UPLOADED);
       const subsplashUnpublishStrategy = getSubsplashUnpublishStrategy({
         hasSubsplashId: Boolean(sermon.subsplashId),
@@ -1752,6 +1788,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
           seriesOperation: 'idle',
           soundCloudOperation: 'idle',
         }, async () => uploadToSubsplash(selectedListsToPublish, { suppressNotice: true }));
+        activeSubsplashMediaItemId = publishResult.mediaItemId ?? activeSubsplashMediaItemId;
         if (publishResult.status === 'success') {
           actionMessages.push(`published to ${selectedListsToPublish.length} list${selectedListsToPublish.length === 1 ? '' : 's'}`);
         } else {
@@ -1793,7 +1830,10 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
           listIds: [],
           seriesOperation: 'publish',
           soundCloudOperation: 'idle',
-        }, async () => publishToSeries({ suppressNotice: true }));
+        }, async () => publishToSeries({
+          mediaItemId: activeSubsplashMediaItemId,
+          suppressNotice: true,
+        }));
         if (seriesResult.status === 'success') {
           actionMessages.push('published to series');
         } else {
@@ -1873,6 +1913,7 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
     removeFromLists,
     runWithDestinationActivity,
     sermon.subsplashId,
+    sessionSubsplashMediaItemId,
     selectedListsToPublish,
     selectedSeriesToPublish,
     selectedSeriesToUnpublish,

@@ -1,6 +1,7 @@
 type StatusResult = {
   status: 'success' | 'error';
   error?: string;
+  mediaItemId?: string;
 };
 
 type MediaItemResult = {
@@ -74,6 +75,9 @@ export async function runPublishEverywhereFlow<
     listResult = prepError || !mediaItemId
       ? createPrepErrorResult(prepError || 'Failed to prepare media item.') as TListResult
       : await publishLists(mediaItemId);
+    if (listResult?.status === 'success' && listResult.mediaItemId) {
+      mediaItemId = listResult.mediaItemId;
+    }
   }
 
   if (shouldPublishSeries) {
