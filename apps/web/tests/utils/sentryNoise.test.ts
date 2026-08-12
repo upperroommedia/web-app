@@ -11,6 +11,19 @@ describe('shouldDropClientSentryEvent', () => {
     ).toBe(true);
   });
 
+  it('drops route abort errors even when Sentry appends another exception first', () => {
+    expect(
+      shouldDropClientSentryEvent({
+        exception: {
+          values: [
+            { type: 'Error', value: 'Navigation cancelled' },
+            { type: 'Error', value: 'routeChange aborted.' },
+          ],
+        },
+      })
+    ).toBe(true);
+  });
+
   it('drops firestore abort noise', () => {
     expect(
       shouldDropClientSentryEvent({

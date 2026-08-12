@@ -129,4 +129,16 @@ describe('reportHandledError helpers', () => {
 
     expect(captureExceptionMock).not.toHaveBeenCalled();
   });
+
+  it('does not report expected sermon access denials from the detail page', async () => {
+    const { installConsoleErrorCapture } = await import('../../utils/reportHandledError');
+
+    installConsoleErrorCapture();
+    console.error('Error fetching sermon:', {
+      code: 'permission-denied',
+      message: 'Missing or insufficient permissions.',
+    });
+
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
 });

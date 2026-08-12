@@ -13,6 +13,7 @@ import { AddIntroOutroInputType } from '@upperroom/contracts/addIntroOutro/types
 import { getIntroAndOutro } from '../../utils/uploadUtils';
 import { UploadProgress } from '../../context/types';
 import { createOperationKey } from '../../utils/callableConcurrency';
+import { retryStorageUpload } from '../../utils/retryStorageUpload';
 
 export type AudioSource =
   | {
@@ -152,58 +153,61 @@ const uploadFile = async (props: UploadFileProps) => {
     }
     // handle processing youtube video
   } else {
-    await new Promise<void>((resolve, reject) => {
-      uploadBytesResumable(sermonRef, audioSource.source.file, metadata).on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 98;
-          props.setUploadProgress({ error: false, percent: Math.round(progress), message: 'Uploading...' });
-          switch (snapshot.state) {
-            case 'paused':
-              break;
-            case 'running':
-              break;
-          }
-        },
-        async (error) => {
-           
-          console.error(error);
+    try {
+      await retryStorageUpload({
+        upload: () =>
+          new Promise<void>((resolve, reject) => {
+            uploadBytesResumable(sermonRef, audioSource.source.file, metadata).on(
+              'state_changed',
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 98;
+                props.setUploadProgress({
+                  error: false,
+                  percent: Math.round(progress),
+                  message: 'Uploading...',
+                });
+              },
+              reject,
+              resolve
+            );
+          }),
+        onRetry: (attempt, maxAttempts) => {
           props.setUploadProgress({
-            error: true,
-            message: `Error uploading file: ${JSON.stringify(error)}`,
+            error: false,
+            message: `Connection interrupted. Restarting upload (${attempt}/${maxAttempts})...`,
             percent: 0,
           });
-          await deleteDoc(doc(firestore, 'sermons', props.sermon.id));
-          reject(error);
         },
-        async () => {
-          await addFirestoreDocument(props.sermon, props.sermonList, props.setUploadProgress);
-          try {
-            const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
-            const data: AddIntroOutroInputType = {
-              id: props.sermon.id,
-              storageFilePath: sermonRef.fullPath,
-              startTime: props.trimStart,
-              duration: props.sermon.trimDurationSeconds ?? 0,
-              deleteOriginal: true,
-              introUrl: introRef,
-              outroUrl: outroRef,
-            };
-            await generateAddIntroOutroTask(data, {
-              metadata: { operationKey: createOperationKey('upload-file-add-intro-outro', props.sermon.id) },
-            });
-            props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
-            resolve();
-          } catch (e) {
-             
-            console.error('Error generatingAddIntroOutroTask', e);
-            props.setUploadProgress({ error: true, message: `${JSON.stringify(e)}`, percent: 0 });
-            await Promise.all([deleteDoc(doc(firestore, 'sermons', props.sermon.id)), deleteObject(sermonRef)]);
-            reject(e);
-          }
-        }
-      );
-    });
+      });
+
+      await addFirestoreDocument(props.sermon, props.sermonList, props.setUploadProgress);
+      const generateAddIntroOutroTask = createFunctionV2<AddIntroOutroInputType>('addintrooutrotaskgenerator');
+      const data: AddIntroOutroInputType = {
+        id: props.sermon.id,
+        storageFilePath: sermonRef.fullPath,
+        startTime: props.trimStart,
+        duration: props.sermon.trimDurationSeconds ?? 0,
+        deleteOriginal: true,
+        introUrl: introRef,
+        outroUrl: outroRef,
+      };
+      await generateAddIntroOutroTask(data, {
+        metadata: { operationKey: createOperationKey('upload-file-add-intro-outro', props.sermon.id) },
+      });
+      props.setUploadProgress({ error: false, percent: 100, message: 'Upload Successful!' });
+    } catch (error) {
+      console.error('Error uploading or processing file:', error);
+      props.setUploadProgress({
+        error: true,
+        message: `Error uploading file: ${JSON.stringify(error)}`,
+        percent: 0,
+      });
+      await Promise.all([
+        deleteDoc(doc(firestore, 'sermons', props.sermon.id)),
+        deleteObject(sermonRef).catch(() => undefined),
+      ]);
+      throw error;
+    }
   }
 };
 export default uploadFile;
