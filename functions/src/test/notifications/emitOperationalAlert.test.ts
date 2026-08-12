@@ -3,6 +3,7 @@ import { logger } from 'firebase-functions/v2';
 import { emitOperationalAlert } from '../../notifications/emitOperationalAlert';
 import * as queueEmailModule from '../../notifications/queueEmail';
 import * as sentryModule from '../../sentry';
+import { buildSubsplashLockBusyError } from '../../locks/contentionError';
 import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 jest.setTimeout(45_000);
@@ -101,6 +102,36 @@ describe('emitOperationalAlert', () => {
 
     const snapshot = await firestore.collection('mail').get();
     expect(snapshot.size).toBe(initialCount + 2);
+  });
+
+  it('suppresses expected Subsplash lock contention before Sentry and email delivery', async () => {
+    const loggerSpy = jest.spyOn(logger, 'info').mockImplementation(() => {});
+    const initialCount = (await firestore.collection('mail').get()).size;
+    const error = buildSubsplashLockBusyError({
+      lockedKeys: ['media-item:media-123'],
+      waitMs: 10_000,
+      retryAfterMs: 1_000,
+    });
+
+    await emitOperationalAlert({
+      alertCode: 'PUBLISH_SUBSPLASH_EDIT_RUNTIME_FAILURE',
+      summary: 'editSubsplashSermon callable failed during publish edit flow.',
+      error,
+      context: {
+        functionName: 'editSubsplashSermon',
+        operationKey: 'edit-media-123',
+        subsplashId: 'media-123',
+      },
+    });
+
+    expect(sentryModule.captureFunctionsExceptionAndFlush).not.toHaveBeenCalled();
+    expect((await firestore.collection('mail').get()).size).toBe(initialCount);
+    expect(loggerSpy).toHaveBeenCalledWith(
+      'expected operational error suppressed',
+      expect.objectContaining({
+        alertCode: 'PUBLISH_SUBSPLASH_EDIT_RUNTIME_FAILURE',
+      })
+    );
   });
 
   it('includes Advanced page recovery instructions for SoundCloud reconnect alerts', async () => {
