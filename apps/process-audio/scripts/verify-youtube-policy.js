@@ -12,6 +12,7 @@ const {
   buildBrowserPoTokenExtractorArg,
   isValidBrowserPoToken,
   isYouTubeMedia403,
+  mergeBrowserPoTokenExtractorArg,
 } = require('../dist/youtubeBrowserPoToken');
 
 function main() {
@@ -104,6 +105,11 @@ function main() {
   assert.equal(isValidBrowserPoToken(browserPoToken), true);
   assert.equal(isValidBrowserPoToken('too-short'), false);
   assert.equal(buildBrowserPoTokenExtractorArg(browserPoToken), `youtube:po_token=mweb.gvs+${browserPoToken}`);
+  assert.equal(
+    mergeBrowserPoTokenExtractorArg('youtube:player_client=default,mweb,-web_creator', browserPoToken),
+    `youtube:player_client=default,mweb,-web_creator;po_token=mweb.gvs+${browserPoToken}`
+  );
+  assert.throws(() => mergeBrowserPoTokenExtractorArg('vimeo:client=web', browserPoToken), /YouTube extractor/i);
   assert.throws(() => buildBrowserPoTokenExtractorArg('too-short'), /invalid token/i);
 
   const annotated = annotateYouTubeFailure(

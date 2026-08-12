@@ -30,7 +30,7 @@ import type {
   BrowserFallbackRequest,
   BrowserFallbackResolveAudioUrlResponse,
 } from '@upperroom/contracts/browserFallback';
-import { buildBrowserPoTokenExtractorArg, isValidBrowserPoToken, isYouTubeMedia403 } from './youtubeBrowserPoToken';
+import { isValidBrowserPoToken, isYouTubeMedia403, mergeBrowserPoTokenExtractorArg } from './youtubeBrowserPoToken';
 
 interface ObservedOutboundIdentity {
   ipv4: string | null;
@@ -1411,13 +1411,16 @@ async function readYouTubeCookieStatus(realtimeDB: Database): Promise<ValidateYo
 function applyYouTubeExtractorArgs(
   args: string[],
   mode: YouTubeExtractionMode,
-  log: ReturnType<typeof createLoggerWithContext>
+  log: ReturnType<typeof createLoggerWithContext>,
+  browserPoToken?: string
 ): void {
   const providerBaseUrl = getPoTokenProviderBaseUrl();
+  const withBrowserPoToken = (extractorArgs: string): string =>
+    browserPoToken ? mergeBrowserPoTokenExtractorArg(extractorArgs, browserPoToken) : extractorArgs;
 
   if (mode === 'cookie_provider') {
     if (!providerBaseUrl) {
-      args.push('--extractor-args', COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS);
+      args.push('--extractor-args', withBrowserPoToken(COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS));
 
       log.info('Applying yt-dlp extractor args for cookie-backed extraction', {
         mode,
@@ -1427,7 +1430,7 @@ function applyYouTubeExtractorArgs(
       return;
     }
 
-    args.push('--extractor-args', POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS);
+    args.push('--extractor-args', withBrowserPoToken(POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS));
 
     const providerArgs = [`base_url=${providerBaseUrl}`];
     if (shouldDisableInnertubeForPoTokenProvider()) {
@@ -1452,7 +1455,7 @@ function applyYouTubeExtractorArgs(
     return;
   }
 
-  args.push('--extractor-args', POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS);
+  args.push('--extractor-args', withBrowserPoToken(POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS));
 
   const providerArgs = [`base_url=${providerBaseUrl}`];
   if (shouldDisableInnertubeForPoTokenProvider()) {
@@ -3343,7 +3346,8 @@ export const downloadYouTubeAudioToFile = async (
   const buildArgs = (
     mode: YouTubeExtractionMode,
     config: DownloadAttemptConfig,
-    extraCookieArgs: string[] = []
+    extraCookieArgs: string[] = [],
+    browserPoToken?: string
   ): string[] => {
     const args = ['-f', config.formatSpec, '--no-playlist', '-o', `${outputFilePath}.%(ext)s`];
     if (config.useConcurrentFragments) {
@@ -3388,7 +3392,7 @@ export const downloadYouTubeAudioToFile = async (
       });
     }
     args.push('--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());
-    applyYouTubeExtractorArgs(args, mode, log);
+    applyYouTubeExtractorArgs(args, mode, log, browserPoToken);
     args.push(url);
     return args;
   };
@@ -3417,10 +3421,11 @@ export const downloadYouTubeAudioToFile = async (
   const execute = async (
     mode: YouTubeExtractionMode,
     config: DownloadAttemptConfig,
-    extraCookieArgs: string[] = []
+    extraCookieArgs: string[] = [],
+    browserPoToken?: string
   ): Promise<string> =>
     new Promise<string>((resolve, reject) => {
-      const args = buildArgs(mode, config, extraCookieArgs);
+      const args = buildArgs(mode, config, extraCookieArgs, browserPoToken);
       const command = redactYouTubeCommandForLogs(`${ytdlpPath} ${args.join(' ')}`);
       const stallTimeoutMs = getYtdlpDownloadStallTimeoutMs();
       const stallPollIntervalMs = Math.min(getYtdlpDownloadStallPollIntervalMs(), stallTimeoutMs);
@@ -3805,11 +3810,7 @@ export const downloadYouTubeAudioToFile = async (
             formatId: config.logFormatId,
             attemptStrategy: config.attemptStrategy,
           });
-          return await execute(mode, config, [
-            ...extraCookieArgs,
-            '--extractor-args',
-            buildBrowserPoTokenExtractorArg(poToken),
-          ]);
+          return await execute(mode, config, extraCookieArgs, poToken);
         } catch (poTokenError) {
           log.error('Session-bound browser PO token recovery failed', {
             error: poTokenError instanceof Error ? poTokenError.message : String(poTokenError),

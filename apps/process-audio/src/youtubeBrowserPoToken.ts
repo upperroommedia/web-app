@@ -13,3 +13,11 @@ export function buildBrowserPoTokenExtractorArg(poToken: string): string {
   }
   return `youtube:po_token=mweb.gvs+${poToken}`;
 }
+
+export function mergeBrowserPoTokenExtractorArg(baseExtractorArg: string, poToken: string): string {
+  const tokenExtractorArg = buildBrowserPoTokenExtractorArg(poToken);
+  if (!baseExtractorArg.startsWith('youtube:')) {
+    throw new Error('Browser PO token can only be merged into YouTube extractor arguments.');
+  }
+  return `${baseExtractorArg};${tokenExtractorArg.slice('youtube:'.length)}`;
+}
