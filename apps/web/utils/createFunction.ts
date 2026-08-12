@@ -38,6 +38,48 @@ const getErrorDetailsCode = (error: unknown): string | null => {
   return typeof code === 'string' && code.trim().length > 0 ? code.trim() : null;
 };
 
+const RETRYABLE_READ_CALLABLES = new Set(['generatesecuredapikey', 'getusersbyids']);
+const CALLABLE_RETRY_DELAYS_MS = [250, 1_000] as const;
+
+export const isRetryableCallableTransportError = (error: unknown): boolean => {
+  const errorCode = getErrorCode(error);
+  if (errorCode === 'functions/deadline-exceeded' || errorCode === 'functions/unavailable') {
+    return true;
+  }
+
+  return errorCode === 'functions/internal' && getErrorDetailsCode(error) === null;
+};
+
+const hasOperationKey = (value: unknown): boolean =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  typeof (value as { operationKey?: unknown }).operationKey === 'string' &&
+  Boolean((value as { operationKey: string }).operationKey.trim());
+
+const waitForRetry = (delayMs: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+
+const invokeCallableWithRetry = async <T, R>(
+  callable: (data: T) => Promise<{ data: R }>,
+  payload: T,
+  canRetry: boolean
+): Promise<R> => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return (await callable(payload)).data;
+    } catch (error) {
+      const retryDelayMs = CALLABLE_RETRY_DELAYS_MS[attempt];
+      if (!canRetry || typeof retryDelayMs === 'undefined' || !isRetryableCallableTransportError(error)) {
+        throw error;
+      }
+      await waitForRetry(retryDelayMs);
+    }
+  }
+};
+
 export const isExpectedCallableClientError = (name: string, error: unknown): boolean => {
   const errorCode = getErrorCode(error);
   const errorMessage = getErrorMessage(error);
@@ -97,7 +139,7 @@ export const createFunction = <T = unknown, R = unknown>(name: string): ((data: 
   return async (data: T) =>
     Sentry.startSpan({ name: `firebase.callable.${name}`, op: 'firebase.callable' }, async () => {
       try {
-        return (await callable(data)).data;
+        return await invokeCallableWithRetry(callable, data, RETRYABLE_READ_CALLABLES.has(name));
       } catch (error) {
         captureCallableException(name, error);
         throw error;
@@ -140,7 +182,7 @@ export const createFunctionV2 = <T = unknown, R = unknown, M extends object = Ca
     const payload = mergeCallableDataWithMetadata(data, options);
     return Sentry.startSpan({ name: `firebase.callable.${name}`, op: 'firebase.callable' }, async () => {
       try {
-        return (await callable(payload)).data;
+        return await invokeCallableWithRetry(callable, payload, hasOperationKey(payload));
       } catch (error) {
         captureCallableException(name, error);
         throw error;
