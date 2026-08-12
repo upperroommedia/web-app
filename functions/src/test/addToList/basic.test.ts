@@ -49,6 +49,35 @@ describe('addToList - Basic Functionality (Real Firestore Emulator)', () => {
     subsplashMock.maxListSize = 10; // Set to 10 for testing
   });
 
+  it('rejects a deleted media item before mutating any destination list', async () => {
+    const firstListId = 'missing-media-list-1';
+    const secondListId = 'missing-media-list-2';
+    const missingMediaItemId = 'missing-media-item';
+    subsplashMock.createList(firstListId, 'First List');
+    subsplashMock.createList(secondListId, 'Second List');
+    subsplashMock.markMediaItemMissing(missingMediaItemId);
+
+    const request: TestRequest = {
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [firstListId, secondListId],
+        mediaItem: { id: missingMediaItemId, type: 'media-item' },
+        maxListSize: 10,
+      },
+    };
+
+    await expect(addToListHandler(request)).rejects.toMatchObject({
+      code: 'not-found',
+      details: {
+        code: 'SUBSPLASH_MEDIA_ITEM_NOT_FOUND',
+        media_item_id: missingMediaItemId,
+      },
+    });
+    expect(subsplashMock.getHistory()).toEqual([]);
+    expect(subsplashMock.getListRows(firstListId)).toEqual([]);
+    expect(subsplashMock.getListRows(secondListId)).toEqual([]);
+  });
+
   it('should add item to empty list', async () => {
     const listId = 'basic-test-list-1';
     subsplashMock.createList(listId, 'Test List');

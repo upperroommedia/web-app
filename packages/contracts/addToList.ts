@@ -1,5 +1,7 @@
 import { SubsplashMediaItem } from './types/Subsplash';
 
+export const SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE = 'SUBSPLASH_MEDIA_ITEM_NOT_FOUND' as const;
+
 export interface AddtoListInputType {
   destinationListIds: string[];
   mediaItem: SubsplashMediaItem;

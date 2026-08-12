@@ -174,4 +174,22 @@ describe('createFunction helpers', () => {
 
     expect(captureExceptionMock).not.toHaveBeenCalled();
   });
+
+  it('does not capture an addtolist missing-media error that the client automatically recovers', async () => {
+    const error = Object.assign(new Error('Media item no longer exists.'), {
+      code: 'functions/not-found',
+      details: {
+        code: 'SUBSPLASH_MEDIA_ITEM_NOT_FOUND',
+        media_item_id: 'stale-media',
+      },
+    });
+    const callable = jest.fn().mockRejectedValue(error);
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ mediaItem: { id: string } }, unknown>('addtolist');
+
+    await expect(invoke({ mediaItem: { id: 'stale-media' } })).rejects.toBe(error);
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
 });

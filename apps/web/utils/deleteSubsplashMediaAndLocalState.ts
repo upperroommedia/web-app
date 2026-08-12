@@ -21,22 +21,17 @@ interface DeleteSubsplashMediaAndLocalStateInput {
   seriesId?: string;
 }
 
-export async function deleteSubsplashMediaAndLocalState({
+interface ClearSubsplashMediaLocalStateInput {
+  sermonId: string;
+  seriesId?: string;
+  incrementListPublishGeneration: boolean;
+}
+
+const clearSubsplashMediaLocalState = async ({
   sermonId,
-  subsplashId,
   seriesId,
-}: DeleteSubsplashMediaAndLocalStateInput): Promise<boolean> {
-  const normalizedSubsplashId = subsplashId?.trim();
-  if (!normalizedSubsplashId) {
-    return false;
-  }
-
-  const deleteFromSubsplash = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>('deletefromsubsplash');
-  await deleteFromSubsplash({
-    subsplashId: normalizedSubsplashId,
-    operationKey: createSubsplashDeleteIntentKey('manage-publishing-delete', sermonId),
-  });
-
+  incrementListPublishGeneration,
+}: ClearSubsplashMediaLocalStateInput): Promise<void> => {
   const sermonListsSnapshot = await getDocs(
     collection(firestore, `sermons/${sermonId}/sermonLists`).withConverter(sermonListConverter)
   );
@@ -51,7 +46,7 @@ export async function deleteSubsplashMediaAndLocalState({
       sermonListDoc.ref,
       {
         uploadStatus: { status: uploadStatus.NOT_UPLOADED },
-        publishGeneration: increment(1),
+        ...(incrementListPublishGeneration ? { publishGeneration: increment(1) } : {}),
       },
       { merge: true }
     );
@@ -84,6 +79,39 @@ export async function deleteSubsplashMediaAndLocalState({
     numberOfListsUploadedTo: 0,
     subsplashUploadGeneration: increment(1),
     'status.subsplash': uploadStatus.NOT_UPLOADED,
+  });
+};
+
+export const clearMissingSubsplashMediaLocalState = async ({
+  sermonId,
+  seriesId,
+}: Pick<ClearSubsplashMediaLocalStateInput, 'sermonId' | 'seriesId'>): Promise<void> =>
+  clearSubsplashMediaLocalState({
+    sermonId,
+    seriesId,
+    incrementListPublishGeneration: false,
+  });
+
+export async function deleteSubsplashMediaAndLocalState({
+  sermonId,
+  subsplashId,
+  seriesId,
+}: DeleteSubsplashMediaAndLocalStateInput): Promise<boolean> {
+  const normalizedSubsplashId = subsplashId?.trim();
+  if (!normalizedSubsplashId) {
+    return false;
+  }
+
+  const deleteFromSubsplash = createFunctionV2<DeleteFromSubsplashInputType, DeleteFromSubsplashReturnType>('deletefromsubsplash');
+  await deleteFromSubsplash({
+    subsplashId: normalizedSubsplashId,
+    operationKey: createSubsplashDeleteIntentKey('manage-publishing-delete', sermonId),
+  });
+
+  await clearSubsplashMediaLocalState({
+    sermonId,
+    seriesId,
+    incrementListPublishGeneration: true,
   });
 
   return true;

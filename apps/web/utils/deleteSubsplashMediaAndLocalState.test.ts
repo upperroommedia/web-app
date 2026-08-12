@@ -1,4 +1,7 @@
-import { deleteSubsplashMediaAndLocalState } from './deleteSubsplashMediaAndLocalState';
+import {
+  clearMissingSubsplashMediaLocalState,
+  deleteSubsplashMediaAndLocalState,
+} from './deleteSubsplashMediaAndLocalState';
 
 const createFunctionV2Mock = jest.fn((name: string) => {
   void name;
@@ -123,6 +126,36 @@ describe('deleteSubsplashMediaAndLocalState', () => {
     );
     expect(batchSetMock).toHaveBeenCalledWith(
       { path: 'series/series-1/seriesItems/sermon-1' },
+      {
+        publishedToSubsplash: false,
+        sermonSubsplashId: 'DELETE_FIELD',
+      },
+      { merge: true }
+    );
+    expect(updateDocMock).toHaveBeenCalledWith('SERMON_DOC_REF', {
+      subsplashId: 'DELETE_FIELD',
+      numberOfListsUploadedTo: 0,
+      subsplashUploadGeneration: { __increment__: 1 },
+      'status.subsplash': 'NOT_UPLOADED',
+    });
+  });
+
+  it('clears stale local publishing state without deleting an already-missing remote item', async () => {
+    await clearMissingSubsplashMediaLocalState({
+      sermonId: 'sermon-missing',
+      seriesId: 'series-missing',
+    });
+
+    expect(deleteFromSubsplashMock).not.toHaveBeenCalled();
+    expect(batchSetMock).toHaveBeenCalledWith(
+      'SERMON_LIST_A_REF',
+      {
+        uploadStatus: { status: 'NOT_UPLOADED' },
+      },
+      { merge: true }
+    );
+    expect(batchSetMock).toHaveBeenCalledWith(
+      { path: 'series/series-missing/seriesItems/sermon-missing' },
       {
         publishedToSubsplash: false,
         sermonSubsplashId: 'DELETE_FIELD',

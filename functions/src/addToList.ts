@@ -1,4 +1,6 @@
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
+import { isAxiosError } from 'axios';
+import { SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE } from '@upperroom/contracts/addToList';
 import { authenticateSubsplash } from './subsplashUtils';
 import { SubsplashListRow, SubsplashMediaItem } from './types/Subsplash';
 import {
@@ -30,7 +32,7 @@ import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedList
 import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
 import { getConfiguredMaxListSize } from './helpers/listCapacity';
 import { canReconstructRemoteRow, getRemoteRowResourceId, getRemoteRowTitle } from './helpers/remoteChainItems';
-import { getSubsplashMediaItemDiagnostics } from './helpers/subsplashMediaItems';
+import { getSubsplashMediaItemDetails, getSubsplashMediaItemDiagnostics } from './helpers/subsplashMediaItems';
 import { rebalanceOverflowChainAfterRemoval } from './removeFromList';
 import { captureFunctionsExceptionAndFlush } from './sentry';
 
@@ -110,6 +112,36 @@ const normalizeString = (value: unknown): string | undefined => {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
 };
+
+const assertSubsplashMediaItemExists = async (
+  mediaItem: SubsplashMediaItem,
+  token: string
+): Promise<void> => {
+  try {
+    await getSubsplashMediaItemDetails(mediaItem.id, token);
+  } catch (error) {
+    if (isAxiosError(error) && error.response?.status === 404) {
+      throw new HttpsError(
+        'not-found',
+        `Media item ${mediaItem.id} no longer exists in Subsplash.`,
+        {
+          code: SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE,
+          media_item_id: mediaItem.id,
+        }
+      );
+    }
+
+    throw error;
+  }
+};
+
+const isMissingSubsplashMediaItemError = (error: unknown): boolean =>
+  error instanceof HttpsError &&
+  error.code === 'not-found' &&
+  typeof error.details === 'object' &&
+  error.details !== null &&
+  'code' in error.details &&
+  error.details.code === SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE;
 
 const normalizeMatchWords = (value: string): string[] =>
   value
@@ -1547,6 +1579,7 @@ const addToList = onCall(
           destinationListIds,
           mediaItemId: mediaItem.id,
         });
+        await assertSubsplashMediaItemExists(mediaItem, token);
         const results = await Promise.allSettled(
           destinationListIds.map(async (listId) => {
             const result = await processListStep(listId, mediaItem, token, maxListSize);
@@ -1659,7 +1692,14 @@ const addToList = onCall(
         mediaItemId: mediaItem.id,
         errorPayload,
       });
-      throw handleError(err);
+      throw handleError(err, {
+        suppressReporting: isMissingSubsplashMediaItemError(err),
+        context: {
+          functionName: 'addtolist',
+          destinationListIds,
+          mediaItemId: mediaItem.id,
+        },
+      });
     }
   }
 );

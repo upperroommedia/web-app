@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs';
 import functions, { httpsCallable } from '../firebase/functions';
+import { SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE } from '@upperroom/contracts/addToList';
 
 const getErrorCode = (error: unknown): string | null => {
   if (typeof error !== 'object' || error === null) {
@@ -63,6 +64,11 @@ export const isExpectedCallableClientError = (name: string, error: unknown): boo
     (
       (name === 'uploadtosoundcloud' || name === 'uploadToSubsplash') &&
       errorCode === 'functions/unavailable'
+    ) ||
+    (
+      name === 'addtolist' &&
+      errorCode === 'functions/not-found' &&
+      detailsCode === SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE
     )
   );
 };
