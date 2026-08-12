@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import handleError from './handleError';
 import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjectConfig';
+import { normalizeHttpContentType } from './helpers/httpResponseHeaders';
 export interface SaveImageInputType {
   url: string;
   name: string;
@@ -44,7 +45,7 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     // logger.log('axiosResponse', axiosResponse);
     const headers = axiosResponse.headers;
     logger.log('headers', headers);
-    const blobType = headers['content-type'];
+    const blobType = normalizeHttpContentType(headers['content-type']);
     logger.log('blobType', blobType);
     const imageBlob = axiosResponse.data;
     logger.log(imageBlob);
@@ -58,7 +59,9 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     await bucket.upload(tempFilePath, {
       destination: destinationFilePath,
     });
-    await bucket.file(destinationFilePath).setMetadata({ contentType: blobType });
+    if (blobType) {
+      await bucket.file(destinationFilePath).setMetadata({ contentType: blobType });
+    }
     // Delete the temporary file (crucial)
     return { status: 'success' };
   } catch (error) {
