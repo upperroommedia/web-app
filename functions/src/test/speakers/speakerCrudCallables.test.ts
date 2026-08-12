@@ -242,6 +242,138 @@ describe('speaker CRUD callables', () => {
     });
   });
 
+  it('reconciles an exact remote speaker tag when Firestore drift causes the create to return 400', async () => {
+    const squareImage = createSquareImage('reconciled-square');
+    const remoteTagId = 'remote-speaker-tag';
+    const firstPageTags = Array.from({ length: 100 }, (_, index) => ({
+      id: `other-speaker-${index}`,
+      title: `Other Speaker ${index}`,
+    }));
+    const duplicateError = {
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          errors: [{ code: 'invalid_request' }],
+        },
+      },
+    };
+
+    mockAxios
+      .mockRejectedValueOnce(duplicateError)
+      .mockResolvedValueOnce({
+        data: {
+          count: 100,
+          total: 101,
+          _embedded: { tags: firstPageTags },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          count: 1,
+          total: 101,
+          _embedded: {
+            tags: [{ id: remoteTagId, title: '  speaker DRIFT  ' }],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {},
+        status: 200,
+      });
+
+    const result = await createSpeakerHandler({
+      auth: defaultAuth,
+      data: {
+        speaker: {
+          name: 'Speaker Drift',
+          shortDescription: 'Recovered speaker',
+          images: [squareImage],
+        },
+      },
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.speaker.tagId).toBe(remoteTagId);
+    expect(mockAxios).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        method: 'GET',
+        url: expect.stringContaining('page%5Bnumber%5D=1'),
+      })
+    );
+    expect(mockAxios).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        method: 'GET',
+        url: expect.stringContaining('page%5Bnumber%5D=2'),
+      })
+    );
+    expect(mockAxios).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
+        method: 'PATCH',
+        url: `https://core.subsplash.com/tags/v1/tags/${remoteTagId}`,
+        data: expect.objectContaining({
+          title: 'Speaker Drift',
+          short_description: 'Recovered speaker',
+          _embedded: {
+            'square-image': {
+              id: squareImage.id,
+              type: 'square',
+            },
+          },
+        }),
+      })
+    );
+
+    const persistedSpeaker = await speakersCollection.doc(result.speakerId).get();
+    expect(persistedSpeaker.data()).toMatchObject({
+      id: result.speakerId,
+      name: 'Speaker Drift',
+      tagId: remoteTagId,
+    });
+  });
+
+  it('preserves a non-duplicate Subsplash 400 when no matching remote speaker exists', async () => {
+    const duplicateError = {
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          errors: [{ code: 'invalid_request' }],
+        },
+      },
+    };
+
+    mockAxios
+      .mockRejectedValueOnce(duplicateError)
+      .mockResolvedValueOnce({
+        data: {
+          count: 0,
+          total: 0,
+          _embedded: { tags: [] },
+        },
+      });
+
+    await expect(
+      createSpeakerHandler({
+        auth: defaultAuth,
+        data: {
+          speaker: {
+            name: 'Invalid Remote Payload',
+            images: [createSquareImage('invalid-remote-square')],
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: 'internal',
+    });
+
+    expect(mockAxios).toHaveBeenCalledTimes(2);
+    expect(await speakersCollection.get()).toHaveProperty('empty', true);
+  });
+
   it('creates and associates a speaker list using all selected speaker images', async () => {
     const squareImage = createSquareImage('speaker-square');
     const wideImage = createWideImage('speaker-wide');
