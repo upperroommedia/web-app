@@ -1,6 +1,11 @@
 import axios from 'axios';
 import type { Bucket } from '@google-cloud/storage';
-import { deleteTrack, updateTrack, uploadTrack } from '../../soundcloudClient';
+import {
+  deleteTrack,
+  isSoundCloudTrackNotFoundError,
+  updateTrack,
+  uploadTrack,
+} from '../../soundcloudClient';
 import { Readable } from 'node:stream';
 
 jest.mock('axios');
@@ -85,6 +90,14 @@ describe('soundcloudClient', () => {
       'https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A12345',
       expect.any(Object)
     );
+  });
+
+  it('recognizes a missing remote track from a SoundCloud 404 response', () => {
+    const notFoundError = { response: { status: 404 } };
+    mockedAxios.isAxiosError.mockImplementation((error: unknown) => error === notFoundError);
+
+    expect(isSoundCloudTrackNotFoundError(notFoundError)).toBe(true);
+    expect(isSoundCloudTrackNotFoundError({ response: { status: 404 } })).toBe(false);
   });
 
   it('streams remote artwork instead of buffering it before upload', async () => {

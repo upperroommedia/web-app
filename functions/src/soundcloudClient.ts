@@ -53,6 +53,9 @@ export const normalizeSoundCloudApiError = (error: unknown): never => {
   throw error;
 };
 
+export const isSoundCloudTrackNotFoundError = (error: unknown): boolean =>
+  isAxiosError(error) && error.response?.status === 404;
+
 function encodeTrackIdentifier(trackIdentifier: string): string {
   return encodeURIComponent(trackIdentifier);
 }

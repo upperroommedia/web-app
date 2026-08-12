@@ -5,12 +5,14 @@ export const mockTokenValue = 'fake-soundcloud-token';
 export const mockNormalizeSoundCloudApiError = jest.fn((error: unknown) => {
   throw error;
 });
+export const mockIsSoundCloudTrackNotFoundError = jest.fn((_error: unknown): boolean => false);
 
 jest.mock('../../soundcloudClient', () => ({
   uploadTrack: (...args: unknown[]) => mockUploadTrack(...args),
   updateTrack: (...args: unknown[]) => mockUpdateTrack(...args),
   deleteTrack: (...args: unknown[]) => mockDeleteTrack(...args),
   normalizeSoundCloudApiError: (error: unknown) => mockNormalizeSoundCloudApiError(error),
+  isSoundCloudTrackNotFoundError: (error: unknown) => mockIsSoundCloudTrackNotFoundError(error),
 }));
 
 jest.mock('../../soundcloudSecrets', () => ({

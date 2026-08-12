@@ -18,7 +18,7 @@ catalog:
   '@typescript-eslint/eslint-plugin': ^8.34.0
   '@typescript-eslint/parser': ^8.34.0
   algoliasearch: ^5.27.0
-  axios: ^1.13.6
+  axios: ^1.19.0
   buffer-image-size: ^0.6.4
   eslint: ^9.28.0
   eslint-plugin-import: ^2.29.1

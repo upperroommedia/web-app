@@ -48,6 +48,7 @@ jest.mock('../../soundcloudClient', () => ({
   uploadTrack: (...args: unknown[]) => mockUploadTrack(...args),
   updateTrack: (...args: unknown[]) => mockUpdateTrack(...args),
   deleteTrack: (...args: unknown[]) => mockDeleteTrack(...args),
+  isSoundCloudTrackNotFoundError: () => false,
   normalizeSoundCloudApiError: (error: unknown) => {
     throw error;
   },

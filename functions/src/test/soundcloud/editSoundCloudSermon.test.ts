@@ -1,4 +1,8 @@
-import { mockNormalizeSoundCloudApiError, mockUpdateTrack } from './mocks';
+import {
+  mockIsSoundCloudTrackNotFoundError,
+  mockNormalizeSoundCloudApiError,
+  mockUpdateTrack,
+} from './mocks';
 import editSoundCloudSermon from '../../editSoundCloudSermon';
 import type { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA, EditSoundCloudSermonReturnType } from '../../editSoundCloudSermon';
 
@@ -17,6 +21,7 @@ describe('editSoundCloudSermon', () => {
     mockNormalizeSoundCloudApiError.mockImplementation((error: unknown) => {
       throw error;
     });
+    mockIsSoundCloudTrackNotFoundError.mockReturnValue(false);
   });
 
   it('calls updateTrack when authenticated and data is valid', async () => {
@@ -99,5 +104,20 @@ describe('editSoundCloudSermon', () => {
         expect(error.code).toBe('internal');
         expect(error.message).toBe('Invalid SoundCloud token');
       });
+  });
+
+  it('returns a reconciliation result when the stored track no longer exists', async () => {
+    const notFoundError = new Error('Request failed with status code 404');
+    mockUpdateTrack.mockRejectedValue(notFoundError);
+    mockIsSoundCloudTrackNotFoundError.mockImplementation((error: unknown) => error === notFoundError);
+
+    await expect(handler({
+      auth: { token: { role: 'admin' } },
+      data: { trackId: 'soundcloud:tracks:deleted', title: 'Updated title' },
+    })).resolves.toEqual({
+      soundCloudTrackMissing: true,
+    });
+
+    expect(mockNormalizeSoundCloudApiError).not.toHaveBeenCalled();
   });
 });

@@ -417,6 +417,8 @@ const buildMirroredListItemPatch = (
     youtubeUrl: sermon.youtubeUrl ?? deleteField(),
     seriesId: sermon.seriesId ?? deleteField(),
     subsplashId: sermon.subsplashId ?? deleteField(),
+    soundCloudTrackId: sermon.soundCloudTrackId ?? deleteField(),
+    soundCloudTrackUrl: sermon.soundCloudTrackUrl ?? deleteField(),
     ...(options?.uploadStatus?.status === uploadStatus.UPLOADED
       ? { uploadStatus: options.uploadStatus }
       : { uploadStatus: deleteField() }),
@@ -471,6 +473,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
     });
 
     let soundCloudTrackUrlUpdate: string | undefined;
+    let soundCloudTrackMissing = false;
     if (normalizeString(originalSermon.soundCloudTrackId) && metadataChanged) {
       const editSoundCloudSermon = createFunctionV2<
         EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA,
@@ -485,6 +488,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         imageSource: getSquareImageDownloadLink(sermon),
       });
       soundCloudTrackUrlUpdate = soundCloudResult?.soundCloudTrackUrl;
+      soundCloudTrackMissing = soundCloudResult?.soundCloudTrackMissing === true;
     }
 
     if (unpublishStrategy === 'delete_media' && activeSubsplashId) {
@@ -572,6 +576,11 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       if (soundCloudTrackUrlUpdate) {
         sermonForLocalWrite.soundCloudTrackUrl = soundCloudTrackUrlUpdate;
       }
+      if (soundCloudTrackMissing) {
+        sermonForLocalWrite.status.soundCloud = uploadStatus.NOT_UPLOADED;
+        delete sermonForLocalWrite.soundCloudTrackId;
+        delete sermonForLocalWrite.soundCloudTrackUrl;
+      }
 
       const staleSermonListIds = currentSermonLists
         .map((list) => list.id)
@@ -587,6 +596,12 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
           ...(activeSubsplashId ? { subsplashId: activeSubsplashId } : { subsplashId: deleteField() }),
           ...(soundCloudTrackUrlUpdate
             ? { soundCloudTrackUrl: soundCloudTrackUrlUpdate }
+            : {}),
+          ...(soundCloudTrackMissing
+            ? {
+                soundCloudTrackId: deleteField(),
+                soundCloudTrackUrl: deleteField(),
+              }
             : {}),
           searchPending: true,
           searchIndexedAtMillis: deleteField(),
@@ -650,6 +665,11 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
     if (soundCloudTrackUrlUpdate) {
       finalSermonForLocalWrite.soundCloudTrackUrl = soundCloudTrackUrlUpdate;
     }
+    if (soundCloudTrackMissing) {
+      finalSermonForLocalWrite.status.soundCloud = uploadStatus.NOT_UPLOADED;
+      delete finalSermonForLocalWrite.soundCloudTrackId;
+      delete finalSermonForLocalWrite.soundCloudTrackUrl;
+    }
 
     await runTransaction(firestore, async (transaction) => {
       const latestSermon = await transaction.get(sermonRef);
@@ -659,6 +679,12 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         ...buildEditableSermonPatch(finalSermonForLocalWrite),
         subsplashId: deleteField(),
         ...(soundCloudTrackUrlUpdate ? { soundCloudTrackUrl: soundCloudTrackUrlUpdate } : {}),
+        ...(soundCloudTrackMissing
+          ? {
+              soundCloudTrackId: deleteField(),
+              soundCloudTrackUrl: deleteField(),
+            }
+          : {}),
         searchPending: true,
         searchIndexedAtMillis: deleteField(),
         searchSyncError: deleteField(),
