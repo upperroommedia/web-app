@@ -44,6 +44,11 @@ interface CreateSubsplashSpeakerTagOutputType {
   tagId: string;
 }
 
+interface SubsplashSpeakerTagSummaryType {
+  id: string;
+  title: string;
+}
+
 interface UpdateSubsplashSpeakerTagImageInputType {
   tagId: string;
   squareImage: ImageType;
@@ -370,6 +375,7 @@ const getUpdateSpeakerTagLockKey = (tagId: string): string => {
 const SPEAKER_TAG_RETRY_ATTEMPTS = 3;
 const SPEAKER_TAG_RETRY_BASE_DELAY_MS = 400;
 const SPEAKER_TAG_RETRY_MAX_DELAY_MS = 5000;
+const SUBSPLASH_SPEAKER_PAGE_SIZE = 100;
 
 const sleep = async (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -463,6 +469,72 @@ const getSubsplashErrorCode = (payload: unknown): string | undefined => {
   return typeof code === 'string' ? code : undefined;
 };
 
+const findSubsplashSpeakerTagByTitle = async (
+  title: string,
+  accessToken: string
+): Promise<SubsplashSpeakerTagSummaryType | undefined> => {
+  const normalizedTitle = normalizeSpeakerNameForDuplicateCheck(title);
+  let pageNumber = 1;
+  let retrievedCount = 0;
+
+  while (true) {
+    const url =
+      'https://core.subsplash.com/tags/v1/tags' +
+      '?filter%5Bapp_key%5D=9XTSHD' +
+      '&filter%5Btype%5D=speaker' +
+      `&page%5Bnumber%5D=${pageNumber}` +
+      `&page%5Bsize%5D=${SUBSPLASH_SPEAKER_PAGE_SIZE}` +
+      '&sort=title';
+    const config = createAxiosConfig(url, accessToken, 'GET', undefined, {
+      'collection-total': 'include',
+    });
+    const response = (await withSubsplashSpeakerRetry(
+      'findSpeakerTagByTitle',
+      () => axios(config)
+    )).data as {
+      count?: unknown;
+      total?: unknown;
+      _embedded?: { tags?: unknown };
+    };
+    const tags = Array.isArray(response._embedded?.tags)
+      ? response._embedded.tags
+      : [];
+
+    const match = tags.find((candidate): candidate is SubsplashSpeakerTagSummaryType => {
+      if (!candidate || typeof candidate !== 'object') {
+        return false;
+      }
+      const record = candidate as { id?: unknown; title?: unknown };
+      return (
+        typeof record.id === 'string' &&
+        typeof record.title === 'string' &&
+        normalizeSpeakerNameForDuplicateCheck(record.title) === normalizedTitle
+      );
+    });
+    if (match) {
+      return match;
+    }
+
+    const responseCount = typeof response.count === 'number'
+      ? response.count
+      : tags.length;
+    const total = typeof response.total === 'number'
+      ? response.total
+      : undefined;
+    retrievedCount += responseCount;
+
+    if (
+      tags.length === 0 ||
+      (total !== undefined && retrievedCount >= total) ||
+      (total === undefined && tags.length < SUBSPLASH_SPEAKER_PAGE_SIZE)
+    ) {
+      return undefined;
+    }
+
+    pageNumber += 1;
+  }
+};
+
 export const createSubsplashSpeakerTag = async (
   input: CreateSubsplashSpeakerTagInputType
 ): Promise<CreateSubsplashSpeakerTagOutputType> => {
@@ -481,8 +553,35 @@ export const createSubsplashSpeakerTag = async (
       },
     };
 
-    const config = createAxiosConfig(url, await authenticateSubsplash(), input.tagId ? 'PATCH' : 'POST', payload);
-    const response = (await withSubsplashSpeakerRetry('createSpeakerTag', () => axios(config))).data as { id?: unknown };
+    const accessToken = await authenticateSubsplash();
+    const config = createAxiosConfig(url, accessToken, input.tagId ? 'PATCH' : 'POST', payload);
+    let response: { id?: unknown };
+    try {
+      response = (await withSubsplashSpeakerRetry('createSpeakerTag', () => axios(config))).data as { id?: unknown };
+    } catch (error) {
+      if (input.tagId || getAxiosStatusCode(error) !== 400) {
+        throw error;
+      }
+
+      const existingTag = await findSubsplashSpeakerTagByTitle(input.title, accessToken);
+      if (!existingTag) {
+        throw error;
+      }
+
+      logger.warn('Reusing an existing Subsplash speaker tag that is missing from Firestore', {
+        speakerTitle: input.title,
+        tagId: existingTag.id,
+      });
+
+      const reconcileConfig = createAxiosConfig(
+        `https://core.subsplash.com/tags/v1/tags/${existingTag.id}`,
+        accessToken,
+        'PATCH',
+        payload
+      );
+      await withSubsplashSpeakerRetry('reconcileExistingSpeakerTag', () => axios(reconcileConfig));
+      response = { id: existingTag.id };
+    }
     const tagId = typeof response.id === 'string' ? response.id : input.tagId || '';
     if (!tagId) {
       throw new HttpsError('internal', 'Subsplash did not return a tag id.');
