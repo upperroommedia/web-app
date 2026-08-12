@@ -88,8 +88,8 @@ catalogs:
       specifier: ^5.9.3
       version: 5.9.3
     uuid:
-      specifier: ^9.0.1
-      version: 9.0.1
+      specifier: ^14.0.0
+      version: 14.0.0
     ytdl-core:
       specifier: ^4.11.5
       version: 4.11.5
@@ -162,7 +162,7 @@ importers:
         version: 1.62.1
       uuid:
         specifier: 'catalog:'
-        version: 9.0.1
+        version: 14.0.0
     devDependencies:
       '@types/express':
         specifier: ^5.0.3
@@ -211,7 +211,7 @@ importers:
         version: 9.15.1(encoding@0.1.13)
       uuid:
         specifier: 'catalog:'
-        version: 9.0.1
+        version: 14.0.0
       winston:
         specifier: ^3.18.3
         version: 3.19.0
@@ -362,7 +362,7 @@ importers:
         version: 0.2.5
       uuid:
         specifier: 'catalog:'
-        version: 9.0.1
+        version: 14.0.0
       zustand:
         specifier: ^5.0.10
         version: 5.0.11(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
@@ -555,7 +555,7 @@ importers:
         version: 0.33.5
       uuid:
         specifier: 'catalog:'
-        version: 9.0.1
+        version: 14.0.0
       ytdl-core:
         specifier: 'catalog:'
         version: 4.11.5
@@ -3730,6 +3730,7 @@ packages:
   basic-ftp@5.2.0:
     resolution: {integrity: sha512-VoMINM2rqJwJgfdHq6RiUudKt2BV+FY5ZFezP/ypmwayk68+NzzAQy4XXLlqsGD4MCzq3DrmNFD/uUmBJuGoXw==}
     engines: {node: '>=10.0.0'}
+    deprecated: Security vulnerability fixed in 5.2.1, please upgrade
 
   bignumber.js@9.3.1:
     resolution: {integrity: sha512-Ko0uX15oIUS7wJ3Rb30Fs6SkVbLmPBAKdlm7q9+ak9bbIeFf0MwuBsQV6z7+X768/cHsfg+WlysDWJcmthjsjQ==}
@@ -7847,6 +7848,10 @@ packages:
 
   uuid@11.1.0:
     resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
+    hasBin: true
+
+  uuid@14.0.0:
+    resolution: {integrity: sha512-Qo+uWgilfSmAhXCMav1uYFynlQO7fMFiMVZsQqZRMIXp0O7rR7qjkj+cPvBHLgBqi960QCoo/PH2/6ZtVqKvrg==}
     hasBin: true
 
   uuid@8.3.2:
@@ -16447,6 +16452,8 @@ snapshots:
   utils-merge@1.0.1: {}
 
   uuid@11.1.0: {}
+
+  uuid@14.0.0: {}
 
   uuid@8.3.2: {}
 

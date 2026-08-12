@@ -40,5 +40,5 @@ catalog:
   node-vibrant: ^4.0.3
   p-limit: ^6.2.0
   typescript: ^5.9.3
-  uuid: ^9.0.1
+  uuid: ^14.0.0
   ytdl-core: ^4.11.5
