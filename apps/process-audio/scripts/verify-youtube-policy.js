@@ -38,6 +38,17 @@ function main() {
     ),
     'cookie_session_stale_or_challenged'
   );
+  const fragmentedMedia403 =
+    'ERROR: [download] Got error: HTTP Error 403: Forbidden. Giving up after 10 retries\n' +
+    'ERROR: fragment 844 not found, unable to continue';
+  assert.equal(
+    classifyYouTubeFailure(fragmentedMedia403, 'cookie_provider'),
+    'cookie_session_stale_or_challenged'
+  );
+  assert.equal(
+    classifyYouTubeFailure(fragmentedMedia403, 'public_provider'),
+    'unknown_youtube_extractor_failure'
+  );
   assert.equal(
     classifyYouTubeFailure('ERROR: LOGIN_REQUIRED private members-only age-restricted', 'public_provider'),
     'account_required_content'
@@ -101,6 +112,8 @@ function main() {
 
   const browserPoToken = 'x'.repeat(100);
   assert.equal(isYouTubeMedia403('ERROR: unable to download video data: HTTP Error 403: Forbidden'), true);
+  assert.equal(isYouTubeMedia403(fragmentedMedia403), true);
+  assert.equal(isYouTubeMedia403('ERROR: fragment 844 not found, unable to continue'), false);
   assert.equal(isYouTubeMedia403('ERROR: [youtube] The page needs to be reloaded.'), false);
   assert.equal(isValidBrowserPoToken(browserPoToken), true);
   assert.equal(isValidBrowserPoToken('too-short'), false);

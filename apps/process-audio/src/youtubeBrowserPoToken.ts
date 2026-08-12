@@ -1,6 +1,10 @@
 /** Guards for the authenticated-browser PO-token recovery path. */
 export function isYouTubeMedia403(message: string): boolean {
-  return /unable to download video data:\s*http error 403/i.test(message);
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('http error 403') &&
+    (lower.includes('unable to download video data') || /fragment \d+ not found/.test(lower))
+  );
 }
 
 export function isValidBrowserPoToken(value: unknown): value is string {
