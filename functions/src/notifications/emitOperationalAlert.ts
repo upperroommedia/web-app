@@ -8,6 +8,7 @@ import { OperationalAlertPayload } from './notificationTypes';
 import { queueEmail } from './queueEmail';
 import { SOUNDCLOUD_ADVANCED_PATH, SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 import { captureFunctionsExceptionAndFlush } from '../sentry';
+import { isExpectedOperationalError } from '../expectedOperationalError';
 
 const OPERATIONAL_ALERT_EMITTED = Symbol.for('urm.operationalAlertEmitted');
 
@@ -119,6 +120,15 @@ const buildAlertMessageHtml = (payload: OperationalAlertPayload): string =>
   });
 
 export const emitOperationalAlert = async (input: EmitOperationalAlertInput): Promise<void> => {
+  if (isExpectedOperationalError(input.error)) {
+    logger.info('expected operational error suppressed', {
+      alertCode: input.alertCode,
+      summary: input.summary,
+      context: input.context ?? {},
+    });
+    return;
+  }
+
   const payload = buildAlertPayload(input, Date.now());
   markOperationalAlertEmitted(input.error);
   try {

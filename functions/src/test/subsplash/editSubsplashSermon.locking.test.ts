@@ -5,6 +5,7 @@ import { withIdempotency } from '../../locks/withIdempotency';
 import { withSubsplashLocks } from '../../locks/withSubsplashLocks';
 import editSubsplashSermon from '../../editSubsplashSermon';
 import { authenticateSubsplash } from '../../subsplashUtils';
+import * as sentryModule from '../../sentry';
 
 jest.mock('../../subsplashUtils', () => ({
   authenticateSubsplash: jest.fn().mockResolvedValue('fake-token'),
@@ -59,7 +60,9 @@ const buildValidPayload = () => ({
 
 describe('editSubsplashSermon lock contract', () => {
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
+    jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
     process.env.SUBSPLASH_EMAIL = 'test@example.com';
     process.env.SUBSPLASH_PASSWORD = 'test-password';
     mockAxios.mockResolvedValue({ data: { id: 'media-item-123' } } as never);
@@ -139,6 +142,7 @@ describe('editSubsplashSermon lock contract', () => {
         retry_after_ms: 250,
       },
     });
+    expect(sentryModule.captureFunctionsExceptionAndFlush).not.toHaveBeenCalled();
   });
 
   it('omits blank subtitle while preserving clearable summary fields when metadata is removed', async () => {

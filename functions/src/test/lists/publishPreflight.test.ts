@@ -4,11 +4,13 @@ import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTy
 import { subsplashMock, type AddToListHandler, type TestRequest } from '../addToList/mocks';
 import addToList from '../../addToList';
 import { clearFirestore, createListDocument, createSermonDocument } from '../addToList/firestoreHelpers';
+import * as sentryModule from '../../sentry';
 
 const addToListHandler = addToList as unknown as AddToListHandler;
 
 describe('publish strict preflight', () => {
   beforeEach(async () => {
+    jest.restoreAllMocks();
     await clearFirestore();
     subsplashMock.reset();
   });
@@ -336,6 +338,7 @@ describe('publish strict preflight', () => {
   });
 
   it('blocks publish when the current Subsplash chain has malformed continuation rows', async () => {
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
     const rootSubsplashListId = 'publish-blocked-invalid-continuation-root';
     const overflowSubsplashListId = 'publish-blocked-invalid-continuation-overflow';
     const straySubsplashListId = 'publish-blocked-invalid-continuation-stray';
@@ -424,8 +427,12 @@ describe('publish strict preflight', () => {
         listId: rootSubsplashListId,
         status: 'error',
         errorCode: 'failed-precondition',
+        errorDetails: expect.objectContaining({
+          code: 'PUBLISHED_LIST_DRIFT_BLOCKED',
+        }),
       }),
     ]);
+    expect(sentrySpy).not.toHaveBeenCalled();
     expect(subsplashMock.getHistory()).toEqual([]);
     expect(subsplashMock.getListRows(rootSubsplashListId).map((row) => row.id)).toEqual([
       'row-1',

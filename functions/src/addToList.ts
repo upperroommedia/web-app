@@ -28,7 +28,10 @@ import {
   syncRootMembershipPlacements,
   syncOverflowChainMetadata,
 } from './helpers/listOverflowChain';
-import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
+import {
+  ensureCanPerformStrictPublishedMutation,
+  isPublishedListDriftBlockedError,
+} from './helpers/publishedListDrift';
 import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
 import { getConfiguredMaxListSize } from './helpers/listCapacity';
 import { canReconstructRemoteRow, getRemoteRowResourceId, getRemoteRowTitle } from './helpers/remoteChainItems';
@@ -1719,18 +1722,26 @@ const addToList = onCall(
             mediaItemId: mediaItem.id,
             errorPayload,
           });
-          await captureFunctionsExceptionAndFlush(result.reason, {
-            tags: {
-              functionName: 'addtolist',
-              failureMode: 'handled-item-error',
+          if (isPublishedListDriftBlockedError(result.reason)) {
+            listDebugWarn('addToList.callable.runMutation.expectedDriftGuard', {
               listId: destinationListIds[index],
-            },
-            extra: {
-              destinationListIds,
               mediaItemId: mediaItem.id,
               errorPayload,
-            },
-          });
+            });
+          } else {
+            await captureFunctionsExceptionAndFlush(result.reason, {
+              tags: {
+                functionName: 'addtolist',
+                failureMode: 'handled-item-error',
+                listId: destinationListIds[index],
+              },
+              extra: {
+                destinationListIds,
+                mediaItemId: mediaItem.id,
+                errorPayload,
+              },
+            });
+          }
           return {
             listId: destinationListIds[index],
             status: 'error',

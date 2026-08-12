@@ -1,8 +1,8 @@
 import { AxiosError, isAxiosError } from 'axios';
 import { CallableRequest, HttpsError } from 'firebase-functions/v2/https';
-import { SUBSPLASH_LOCK_BUSY_CODE } from './locks/lockTypes';
 import { emitOperationalAlert, hasOperationalAlertBeenEmitted } from './notifications/emitOperationalAlert';
 import { captureFunctionsExceptionAndFlush } from './sentry';
+import { isExpectedOperationalError } from './expectedOperationalError';
 
 type TriggeringUserContext = {
   uid: string;
@@ -25,21 +25,6 @@ type RetryAfterDetails = {
 };
 
 const getAxiosStatus = (error: AxiosError): number | undefined => error.response?.status;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const hasDetailsCode = (error: unknown, code: string): boolean => {
-  if (!isRecord(error) || !isRecord(error.details)) {
-    return false;
-  }
-
-  return error.details.code === code;
-};
-
-const isExpectedOperationalError = (error: HttpsError): boolean => {
-  return error.code === 'aborted' && hasDetailsCode(error, SUBSPLASH_LOCK_BUSY_CODE);
-};
 
 const parseRetryAfter = (value: unknown): RetryAfterDetails => {
   if (typeof value === 'number' && Number.isFinite(value)) {

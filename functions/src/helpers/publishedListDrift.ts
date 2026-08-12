@@ -165,6 +165,16 @@ const OVERFLOW_PUBLISH_BLOCKING_ISSUE_CODES = new Set<PublishedListDriftIssue['c
 
 type StrictPublishedMutationAction = 'reorder' | 'overflow-publish' | 'publish' | 'remove';
 
+export const PUBLISHED_LIST_DRIFT_BLOCKED_CODE = 'PUBLISHED_LIST_DRIFT_BLOCKED';
+
+export const isPublishedListDriftBlockedError = (error: unknown): error is HttpsError =>
+  error instanceof HttpsError &&
+  error.code === 'failed-precondition' &&
+  typeof error.details === 'object' &&
+  error.details !== null &&
+  !Array.isArray(error.details) &&
+  (error.details as Record<string, unknown>).code === PUBLISHED_LIST_DRIFT_BLOCKED_CODE;
+
 const canProceedWithPublishedMutation = (
   issues: PublishedListDriftIssue[],
   action: StrictPublishedMutationAction
@@ -617,6 +627,7 @@ export const ensureCanPerformStrictPublishedMutation = async (
         : 'publish into this list'
     } because the published Firebase and Subsplash state differ.`,
     {
+      code: PUBLISHED_LIST_DRIFT_BLOCKED_CODE,
       rootListId: driftState.rootListId,
       action,
       issues: driftState.issues,
