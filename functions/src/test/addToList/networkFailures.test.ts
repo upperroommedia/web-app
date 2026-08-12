@@ -43,6 +43,7 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     jest.clearAllMocks();
     // Mock logger.error for tests that check it
     jest.spyOn(logger, 'error').mockImplementation(() => {});
+    jest.spyOn(logger, 'warn').mockImplementation(() => {});
   });
 
   it('should handle network failure when fetching list rows', async () => {
@@ -827,5 +828,166 @@ describe('addToList - Network Failure Robustness (Real Firestore Emulator)', () 
     expect(loggerErrorMentionsList(listId2)).toBe(true);
     expect(loggerErrorMentionsList(listId3)).toBe(true);
     expect(loggerErrorMentionsList(listId1)).toBe(false);
+  });
+
+  it('refreshes and retries a list step when the destructive-mutation preflight sees a stale row ID', async () => {
+    const listId = 'stale-preflight-root';
+    const overflowListId = 'stale-preflight-overflow';
+    subsplashMock.createList(listId, 'Stale Preflight Root', 3, 200);
+    subsplashMock.createList(overflowListId, 'More Stale Preflight Root', 0, 200);
+    subsplashMock.listRows.set(listId, [
+      {
+        id: 'stale-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'stale-item' },
+        },
+      },
+      {
+        id: 'kept-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'kept-item' },
+        },
+      },
+      {
+        id: 'overflow-link-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 3,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: listId },
+          list: { id: overflowListId },
+        },
+      },
+    ]);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Stale Preflight Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      moreSermonsRef: overflowListId,
+      count: 3,
+    });
+    await createListDocument({
+      subsplashId: overflowListId,
+      title: 'More Stale Preflight Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 0,
+    });
+
+    subsplashMock.failNextPatchesWithUnknownRow(listId, 'stale-row');
+
+    const result = await addToListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem: { id: 'new-item', type: 'media-item' },
+        maxListSize: 3,
+      },
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('success');
+    const rootResourceIds = subsplashMock.getListRows(listId).map((row) =>
+      row._embedded['media-item']?.id ?? row._embedded.list?.id
+    );
+    expect(rootResourceIds).toEqual(expect.arrayContaining(['new-item', 'kept-item']));
+    expect(rootResourceIds.filter((resourceId) => resourceId === 'new-item')).toHaveLength(1);
+    expect(rootResourceIds).not.toContain('stale-item');
+    expect(subsplashMock.getListRows(overflowListId)).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[list-debug] addToList.processListStep.staleSnapshotRetry',
+      expect.objectContaining({
+        listId,
+        itemId: 'new-item',
+        attempt: 1,
+        maxAttempts: 2,
+      })
+    );
+  });
+
+  it('does not replay a stale-row failure after the single fresh-state retry', async () => {
+    const listId = 'persistent-stale-preflight-root';
+    const overflowListId = 'persistent-stale-preflight-overflow';
+    subsplashMock.createList(listId, 'Persistent Stale Root', 3, 200);
+    subsplashMock.createList(overflowListId, 'More Persistent Stale Root', 0, 200);
+    subsplashMock.listRows.set(listId, [
+      {
+        id: 'stale-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 1,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'stale-item' },
+        },
+      },
+      {
+        id: 'kept-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 2,
+        type: 'media-item',
+        _embedded: {
+          'source-list': { id: listId },
+          'media-item': { id: 'kept-item' },
+        },
+      },
+      {
+        id: 'overflow-link-row',
+        app_key: '9XTSHD',
+        method: 'static',
+        position: 3,
+        type: 'list',
+        _embedded: {
+          'source-list': { id: listId },
+          list: { id: overflowListId },
+        },
+      },
+    ]);
+
+    await createListDocument({
+      subsplashId: listId,
+      title: 'Persistent Stale Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      moreSermonsRef: overflowListId,
+      count: 3,
+    });
+    await createListDocument({
+      subsplashId: overflowListId,
+      title: 'More Persistent Stale Root',
+      overflowBehavior: OverflowBehavior.CREATENEWLIST,
+      count: 0,
+    });
+
+    subsplashMock.failNextPatchesWithUnknownRow(listId, 'stale-row', 2);
+
+    const result = await addToListHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        destinationListIds: [listId],
+        mediaItem: { id: 'new-item', type: 'media-item' },
+        maxListSize: 3,
+      },
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('error');
+    expect(subsplashMock.getListRows(listId).some((row) => row._embedded['media-item']?.id === 'new-item')).toBe(false);
+    const retryWarnings = (logger.warn as jest.Mock).mock.calls.filter(
+      ([message]) => message === '[list-debug] addToList.processListStep.staleSnapshotRetry'
+    );
+    expect(retryWarnings).toHaveLength(1);
   });
 });

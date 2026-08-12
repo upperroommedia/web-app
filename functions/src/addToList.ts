@@ -449,7 +449,15 @@ const ensureListIsPatchableBeforeDestructiveMutation = async (
     return;
   }
 
-  await patchListRows(listId, currentRows, token);
+  try {
+    await patchListRows(listId, currentRows, token);
+  } catch (error) {
+    if (isSubsplashUnknownListRowError(error)) {
+      throw new StaleListSnapshotPreflightError(listId, error);
+    }
+
+    throw error;
+  }
 };
 
 const ensureExistingRowCountDoesNotExceedConfiguredMax = ({
@@ -553,6 +561,41 @@ const isSubsplashMaxRowExceededError = (error: unknown): boolean => {
 
   return typeof maybeError.message === 'string' && maybeError.message.includes('max number of list rows exceeded');
 };
+
+const getSubsplashUpstreamErrorDetails = (error: unknown): string[] => {
+  if (!error || typeof error !== 'object') {
+    return [];
+  }
+
+  const details = (error as {
+    details?: {
+      upstream?: {
+        errors?: Array<{ detail?: unknown }>;
+      };
+    };
+  }).details?.upstream?.errors;
+
+  if (!Array.isArray(details)) {
+    return [];
+  }
+
+  return details
+    .map((entry) => entry?.detail)
+    .filter((detail): detail is string => typeof detail === 'string');
+};
+
+const isSubsplashUnknownListRowError = (error: unknown): boolean =>
+  getSubsplashUpstreamErrorDetails(error).some((detail) => /unknown list row:/i.test(detail));
+
+class StaleListSnapshotPreflightError extends Error {
+  constructor(
+    readonly listId: string,
+    readonly originalError: unknown
+  ) {
+    super(`Subsplash returned a stale row snapshot for list ${listId}.`);
+    this.name = 'StaleListSnapshotPreflightError';
+  }
+}
 
 const applyRemoveOldestMutation = async ({
   listId,
@@ -773,7 +816,7 @@ const ensureImmediateOverflowListLinkInFirestore = async ({
 
 // Helper to handle a single list processing step recursively
 // Returns listItemId if item was added, undefined if item already existed
-async function processListStep(
+async function processListStepOnce(
   listId: string,
   itemToAdd: SubsplashMediaItem,
   token: string,
@@ -1465,6 +1508,50 @@ async function processListStep(
     });
   }
   return { listItemId, actualPlacement };
+}
+
+async function processListStep(
+  listId: string,
+  itemToAdd: SubsplashMediaItem,
+  token: string,
+  maxListSize: number = getConfiguredMaxListSize(),
+  shouldSyncChainMetadata: boolean = true,
+  shouldSearchLogicalChain: boolean = true,
+  shouldEnforceStrictPreflight: boolean = true
+): ReturnType<typeof processListStepOnce> {
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await processListStepOnce(
+        listId,
+        itemToAdd,
+        token,
+        maxListSize,
+        shouldSyncChainMetadata,
+        shouldSearchLogicalChain,
+        shouldEnforceStrictPreflight
+      );
+    } catch (error) {
+      if (!(error instanceof StaleListSnapshotPreflightError)) {
+        throw error;
+      }
+
+      if (attempt >= maxAttempts) {
+        throw error.originalError;
+      }
+
+      listDebugWarn('addToList.processListStep.staleSnapshotRetry', {
+        listId,
+        itemId: itemToAdd.id,
+        attempt,
+        maxAttempts,
+        error: getErrorPayload(error.originalError),
+      });
+    }
+  }
+
+  throw new HttpsError('internal', `Failed to process list ${listId} after refreshing stale state.`);
 }
 
 const recoverPlacementAfterFailedMutation = async ({

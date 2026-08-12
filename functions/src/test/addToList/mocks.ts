@@ -95,6 +95,7 @@ export class SubsplashMock {
   private fullCapacityPatchCreateFailures: Set<string> = new Set();
   private hiddenFullCapacityPatchCreateFailures: Set<string> = new Set();
   private missingMediaItemIds: Set<string> = new Set();
+  private unknownRowPatchFailures: Map<string, { rowId: string; remaining: number }> = new Map();
 
   constructor() {
     this.reset();
@@ -113,6 +114,7 @@ export class SubsplashMock {
     this.fullCapacityPatchCreateFailures.clear();
     this.hiddenFullCapacityPatchCreateFailures.clear();
     this.missingMediaItemIds.clear();
+    this.unknownRowPatchFailures.clear();
   }
 
   createList(id: string, title: string, count: number = 0, maxItemCount?: number, subtitle?: string): SubsplashList {
@@ -182,6 +184,13 @@ export class SubsplashMock {
     this.hiddenFullCapacityPatchCreateFailures.add(listId);
   }
 
+  failNextPatchesWithUnknownRow(listId: string, rowId: string, attempts: number = 1) {
+    this.unknownRowPatchFailures.set(listId, {
+      rowId,
+      remaining: Math.max(1, attempts),
+    });
+  }
+
   setPatchRetainsOmittedRows(value: boolean) {
     this.patchRetainsOmittedRows = value;
   }
@@ -217,6 +226,29 @@ export class SubsplashMock {
   patchList(id: string, payload: SubsplashPatchPayload) {
     if (!this.lists.has(id)) throw new Error(`List ${id} not found`);
     const list = this.lists.get(id)!;
+
+    const unknownRowFailure = this.unknownRowPatchFailures.get(id);
+    if (unknownRowFailure) {
+      const freshRows = (this.listRows.get(id) || []).filter((row) => row.id !== unknownRowFailure.rowId);
+      this.listRows.set(id, freshRows);
+      list.list_rows_count = freshRows.length;
+
+      if (unknownRowFailure.remaining <= 1) {
+        this.unknownRowPatchFailures.delete(id);
+      } else {
+        this.unknownRowPatchFailures.set(id, {
+          ...unknownRowFailure,
+          remaining: unknownRowFailure.remaining - 1,
+        });
+      }
+
+      const error = new Error(`Subsplash list row ${unknownRowFailure.rowId} is unknown.`);
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamStatus = 400;
+      (error as Error & { upstreamStatus?: number; upstreamData?: unknown }).upstreamData = {
+        errors: [{ code: 'bad_request', detail: `list row error - unknown list row: ${unknownRowFailure.rowId}` }],
+      };
+      throw error;
+    }
     
     // Validate: Subsplash rejects patches with more than maxListSize items
     const rowCount = payload._embedded['list-rows'].length;
