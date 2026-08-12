@@ -234,6 +234,54 @@ describe('editSermon remote edit reconciliation', () => {
     expect(runTransactionMock).toHaveBeenCalledTimes(1);
   });
 
+  it('clears a stale SoundCloud reference and completes the local edit when the remote track is missing', async () => {
+    const functions = createFunctionMap();
+    functions.editSoundCloudSermon.mockResolvedValue({ soundCloudTrackMissing: true });
+    const editSermon = (await import('../../pages/api/editSermon')).default;
+
+    const originalSermon = createEmptySermon('user-1');
+    originalSermon.id = 'sermon-1';
+    originalSermon.title = 'Original Title';
+    originalSermon.soundCloudTrackId = 'soundcloud:tracks:deleted';
+    originalSermon.soundCloudTrackUrl = 'https://soundcloud.test/deleted';
+    originalSermon.status.soundCloud = uploadStatus.UPLOADED;
+
+    const updatedSermon = {
+      ...originalSermon,
+      title: 'Updated Title',
+    };
+    const selectedList = buildList({ id: 'list-a', name: 'List A' });
+
+    getDocsMock
+      .mockResolvedValueOnce({ docs: [] })
+      .mockResolvedValueOnce({ docs: [buildListItemDoc('list-a')] });
+
+    await editSermon(updatedSermon, [selectedList], { originalSermon });
+
+    expect(functions.editSoundCloudSermon).toHaveBeenCalledWith(expect.objectContaining({
+      trackId: 'soundcloud:tracks:deleted',
+      title: 'Updated Title',
+    }));
+    const sermonPatch = writeBatchUpdateMock.mock.calls[0]?.[1];
+    expect(sermonPatch).toEqual(expect.objectContaining({
+      soundCloudTrackId: 'DELETE_FIELD',
+      soundCloudTrackUrl: 'DELETE_FIELD',
+      status: expect.objectContaining({
+        soundCloud: uploadStatus.NOT_UPLOADED,
+      }),
+    }));
+
+    const mirroredListItemWrite = getListItemWrite('list-a')?.[1];
+    expect(mirroredListItemWrite).toEqual(expect.objectContaining({
+      soundCloudTrackId: 'DELETE_FIELD',
+      soundCloudTrackUrl: 'DELETE_FIELD',
+      status: expect.objectContaining({
+        soundCloud: uploadStatus.NOT_UPLOADED,
+      }),
+    }));
+    expect(global.alert).not.toHaveBeenCalled();
+  });
+
   it('keeps edits local when the sermon is not published anywhere', async () => {
     const functions = createFunctionMap();
     const editSermon = (await import('../../pages/api/editSermon')).default;

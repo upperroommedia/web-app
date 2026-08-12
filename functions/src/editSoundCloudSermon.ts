@@ -1,5 +1,5 @@
 import handleError from './handleError';
-import { normalizeSoundCloudApiError, updateTrack } from './soundcloudClient';
+import { isSoundCloudTrackNotFoundError, normalizeSoundCloudApiError, updateTrack } from './soundcloudClient';
 import { runWithSoundCloudAccessToken, soundcloudSecretsWithRuntimeAlerts } from './soundcloudSecrets';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { UploadToSoundCloudInputType } from './uploadToSoundCloud';
@@ -17,6 +17,7 @@ export interface EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA
 
 export interface EditSoundCloudSermonReturnType {
   soundCloudTrackUrl?: string;
+  soundCloudTrackMissing?: boolean;
 }
 
 const editOnSoundCloud = onCall(
@@ -68,6 +69,15 @@ const editOnSoundCloud = onCall(
         ...(updateResult?.permalinkUrl ? { soundCloudTrackUrl: updateResult.permalinkUrl } : {}),
       };
     } catch (error) {
+      if (isSoundCloudTrackNotFoundError(error)) {
+        logger.warn('editSoundCloudSermon.trackMissing', {
+          trackId: data.trackId,
+        });
+        return {
+          soundCloudTrackMissing: true,
+        };
+      }
+
       if (error instanceof HttpsError) {
         await emitSoundCloudReconnectAlertIfNeeded({
           error,

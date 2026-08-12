@@ -7,4 +7,5 @@ export interface EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA
 
 export interface EditSoundCloudSermonReturnType {
   soundCloudTrackUrl?: string;
+  soundCloudTrackMissing?: boolean;
 }
