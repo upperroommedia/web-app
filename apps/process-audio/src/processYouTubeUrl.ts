@@ -30,6 +30,7 @@ import type {
   BrowserFallbackRequest,
   BrowserFallbackResolveAudioUrlResponse,
 } from '@upperroom/contracts/browserFallback';
+import { buildBrowserPoTokenExtractorArg, isValidBrowserPoToken, isYouTubeMedia403 } from './youtubeBrowserPoToken';
 
 interface ObservedOutboundIdentity {
   ipv4: string | null;
@@ -663,6 +664,65 @@ function getBrowserRefreshUrl(): string | undefined {
 function getBrowserRefreshControlDir(): string | undefined {
   const value = process.env.PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR?.trim();
   return value || undefined;
+}
+
+function getBrowserPoTokenControlDir(): string | undefined {
+  const value = process.env.PROCESS_AUDIO_BROWSER_POT_CONTROL_DIR?.trim();
+  return value || undefined;
+}
+
+function isBrowserPoTokenMedia403(message: string, mode: YouTubeExtractionMode, ctx?: LogContext): boolean {
+  return !!(
+    ctx &&
+    !ctx.youtubeBrowserPoTokenAttempted &&
+    mode === 'cookie_provider' &&
+    getLocalBrowserProfileDir() &&
+    getBrowserPoTokenControlDir() &&
+    isYouTubeMedia403(message)
+  );
+}
+
+function redactYouTubeCommandForLogs(command: string): string {
+  return command.replace(/(po_token=[^+\s;]+\+)[^\s;]+/g, '$1[redacted]');
+}
+
+async function requestBrowserPoToken(
+  videoId: string | undefined,
+  log: ReturnType<typeof createLoggerWithContext>,
+  ctx: LogContext
+): Promise<string> {
+  const controlDir = getBrowserPoTokenControlDir();
+  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId) || !controlDir) {
+    throw new Error('Authenticated browser PO token broker is not configured for this YouTube video.');
+  }
+
+  ctx.youtubeBrowserPoTokenAttempted = true;
+  const requestId = `pot-${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2, 10)}`;
+  const requestPath = path.join(controlDir, `${requestId}.pot.request.json`);
+  const resultPath = path.join(controlDir, `${requestId}.pot.result.json`);
+  log.warn('Requesting a session-bound YouTube PO token from authenticated Chrome', { videoId, requestId });
+
+  await writeFile(requestPath, JSON.stringify({ videoId, requestId, createdAt: new Date().toISOString() }));
+  const deadline = Date.now() + 30_000;
+  try {
+    while (Date.now() < deadline) {
+      try {
+        const result = JSON.parse(await readFile(resultPath, 'utf8')) as { ok?: boolean; poToken?: unknown; error?: string };
+        if (!result.ok) throw new Error(result.error || 'Authenticated browser PO token broker failed.');
+        if (!isValidBrowserPoToken(result.poToken)) {
+          throw new Error('Authenticated browser PO token broker returned an invalid token.');
+        }
+        log.info('Authenticated browser minted a session-bound YouTube PO token', { videoId, requestId });
+        return result.poToken;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+      }
+      await sleep(250);
+    }
+    throw new Error(`Timed out waiting for authenticated browser PO token result in ${controlDir}`);
+  } finally {
+    await Promise.all([unlink(requestPath).catch(() => undefined), unlink(resultPath).catch(() => undefined)]);
+  }
 }
 
 function getBrowserRefreshWaitMs(): number {
@@ -3361,7 +3421,7 @@ export const downloadYouTubeAudioToFile = async (
   ): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       const args = buildArgs(mode, config, extraCookieArgs);
-      const command = `${ytdlpPath} ${args.join(' ')}`;
+      const command = redactYouTubeCommandForLogs(`${ytdlpPath} ${args.join(' ')}`);
       const stallTimeoutMs = getYtdlpDownloadStallTimeoutMs();
       const stallPollIntervalMs = Math.min(getYtdlpDownloadStallPollIntervalMs(), stallTimeoutMs);
       log.info('Executing yt-dlp file download command', {
@@ -3737,6 +3797,26 @@ export const downloadYouTubeAudioToFile = async (
       return await execute(mode, config, extraCookieArgs);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (isBrowserPoTokenMedia403(message, mode, ctx)) {
+        try {
+          const poToken = await requestBrowserPoToken(getYouTubeVideoId(url), log, ctx as LogContext);
+          log.warn('Retrying yt-dlp file download with session-bound browser PO token', {
+            extractionMode: mode,
+            formatId: config.logFormatId,
+            attemptStrategy: config.attemptStrategy,
+          });
+          return await execute(mode, config, [
+            ...extraCookieArgs,
+            '--extractor-args',
+            buildBrowserPoTokenExtractorArg(poToken),
+          ]);
+        } catch (poTokenError) {
+          log.error('Session-bound browser PO token recovery failed', {
+            error: poTokenError instanceof Error ? poTokenError.message : String(poTokenError),
+            attemptStrategy: config.attemptStrategy,
+          });
+        }
+      }
       if (!shouldAttemptBrowserCookieRefresh(message, mode, ctx)) {
         throw error;
       }

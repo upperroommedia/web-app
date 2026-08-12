@@ -8,6 +8,11 @@ const {
   shouldUseExternalDownloaderForYouTubeDownload,
   annotateYouTubeFailure,
 } = require('../dist/youtubeExtractionPolicy');
+const {
+  buildBrowserPoTokenExtractorArg,
+  isValidBrowserPoToken,
+  isYouTubeMedia403,
+} = require('../dist/youtubeBrowserPoToken');
 
 function main() {
   assert.equal(
@@ -92,6 +97,14 @@ function main() {
   assert.equal(shouldUseExternalDownloaderForYouTubeDownload('public_provider'), true);
   assert.equal(shouldUseExternalDownloaderForYouTubeDownload('cookie_provider'), false);
   assert.equal(shouldUseExternalDownloaderForYouTubeDownload('browser_fallback'), false);
+
+  const browserPoToken = 'x'.repeat(100);
+  assert.equal(isYouTubeMedia403('ERROR: unable to download video data: HTTP Error 403: Forbidden'), true);
+  assert.equal(isYouTubeMedia403('ERROR: [youtube] The page needs to be reloaded.'), false);
+  assert.equal(isValidBrowserPoToken(browserPoToken), true);
+  assert.equal(isValidBrowserPoToken('too-short'), false);
+  assert.equal(buildBrowserPoTokenExtractorArg(browserPoToken), `youtube:po_token=mweb.gvs+${browserPoToken}`);
+  assert.throws(() => buildBrowserPoTokenExtractorArg('too-short'), /invalid token/i);
 
   const annotated = annotateYouTubeFailure(
     'ERROR: [youtube] The page needs to be reloaded.',

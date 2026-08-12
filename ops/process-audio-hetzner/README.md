@@ -382,6 +382,10 @@ Services started by the host auth stack:
 - `process-audio-browser-novnc.service`
 - `process-audio-browser-chrome.service`
 - `process-audio-browser-refresh.service`
+- `process-audio-browser-pot.service` mints a fresh, video-bound GVS PO token in
+  the authenticated Chrome session when cookie-backed yt-dlp receives a media 403.
+  It is deliberately file-brokered through the existing control volume; DevTools
+  remains loopback-only and is never exposed to containers or the public network.
 - `process-audio-browser-auth.target`
 
 The auth target is expected to be enabled under `multi-user.target` so the full stack comes back after reboot.
