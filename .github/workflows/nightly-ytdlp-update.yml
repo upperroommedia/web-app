@@ -25,20 +25,26 @@ jobs:
           fetch-depth: 0
 
       - id: version-check
-        name: Resolve latest stable yt-dlp and ffmpeg versions
+        name: Resolve latest stable media runtime versions
         run: |
           set -euo pipefail
           current_ytdlp_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG YT_DLP_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate YT_DLP_VERSION in Dockerfile'; print(match.group(1).strip())")"
           current_ffmpeg_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG FFMPEG_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate FFMPEG_VERSION in Dockerfile'; print(match.group(1).strip())")"
+          current_deno_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG DENO_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate DENO_VERSION in Dockerfile'; print(match.group(1).strip())")"
+          current_pot_provider_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate BGUTIL_YTDLP_POT_PROVIDER_VERSION in Dockerfile'; print(match.group(1).strip())")"
+          current_playwright_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/browser-fallback/Dockerfile').read_text(); match = re.search(r'^ARG PLAYWRIGHT_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate PLAYWRIGHT_VERSION in Dockerfile'; print(match.group(1).strip())")"
 
           latest_ytdlp_version="$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest yt-dlp release tag found'; print(tag.lstrip('v'))")"
           latest_ffmpeg_version="$(curl -fsSL https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest | python3 -c "import json, re, sys; data = json.load(sys.stdin); names = {asset.get('name', '') for asset in data.get('assets', [])}; versions = []; pattern = re.compile(r'^ffmpeg-n([0-9]+(?:\\.[0-9]+){1,2})-latest-linux64-gpl-\\1\\.tar\\.xz$'); [versions.append(match.group(1)) for name in names for match in [pattern.match(name)] if match and f'ffmpeg-n{match.group(1)}-latest-linuxarm64-gpl-{match.group(1)}.tar.xz' in names]; assert versions, 'No compatible BtbN ffmpeg release assets found'; print(sorted(set(versions), key=lambda s: [int(x) for x in s.split('.')])[-1])")"
+          latest_deno_version="$(curl -fsSL https://api.github.com/repos/denoland/deno/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest Deno release tag found'; print(tag.lstrip('v'))")"
+          latest_pot_provider_version="$(curl -fsSL https://pypi.org/pypi/bgutil-ytdlp-pot-provider/json | python3 -c "import json, sys; data = json.load(sys.stdin); version = (data.get('info', {}).get('version') or '').strip(); assert version, 'No latest bgutil PO-token provider version found'; print(version)")"
+          latest_playwright_version="$(curl -fsSL https://registry.npmjs.org/playwright/latest | python3 -c "import json, sys; data = json.load(sys.stdin); version = (data.get('version') or '').strip(); assert version, 'No latest Playwright version found'; print(version)")"
           for arch in linux64 linuxarm64; do
             curl -fsSI "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n${latest_ffmpeg_version}-latest-${arch}-gpl-${latest_ffmpeg_version}.tar.xz" >/dev/null
           done
 
           should_update=false
-          if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" ]]; then
+          if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" || "$current_deno_version" != "$latest_deno_version" || "$current_pot_provider_version" != "$latest_pot_provider_version" || "$current_playwright_version" != "$latest_playwright_version" ]]; then
             should_update=true
           fi
 
@@ -47,29 +53,78 @@ jobs:
             echo "latest_ytdlp_version=$latest_ytdlp_version"
             echo "current_ffmpeg_version=$current_ffmpeg_version"
             echo "latest_ffmpeg_version=$latest_ffmpeg_version"
+            echo "current_deno_version=$current_deno_version"
+            echo "latest_deno_version=$latest_deno_version"
+            echo "current_pot_provider_version=$current_pot_provider_version"
+            echo "latest_pot_provider_version=$latest_pot_provider_version"
+            echo "current_playwright_version=$current_playwright_version"
+            echo "latest_playwright_version=$latest_playwright_version"
             echo "should_update=$should_update"
           } >> "$GITHUB_OUTPUT"
 
       - name: Exit when media tools are already current
         if: steps.version-check.outputs.should_update != 'true'
-        run: echo "yt-dlp and ffmpeg are already current; no update needed."
+        run: echo "yt-dlp, ffmpeg, Deno, the PO-token provider, and Playwright are already current; no update needed."
 
-      - name: Bump pinned yt-dlp and ffmpeg versions
+      - name: Bump pinned media runtime versions
         if: steps.version-check.outputs.should_update == 'true'
         env:
           LATEST_YTDLP_VERSION: ${{ steps.version-check.outputs.latest_ytdlp_version }}
           LATEST_FFMPEG_VERSION: ${{ steps.version-check.outputs.latest_ffmpeg_version }}
+          LATEST_DENO_VERSION: ${{ steps.version-check.outputs.latest_deno_version }}
+          LATEST_POT_PROVIDER_VERSION: ${{ steps.version-check.outputs.latest_pot_provider_version }}
+          LATEST_PLAYWRIGHT_VERSION: ${{ steps.version-check.outputs.latest_playwright_version }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os, pathlib, re
-          path = pathlib.Path('apps/process-audio/Dockerfile')
-          text = path.read_text()
-          updated = re.sub(r'(^ARG YT_DLP_VERSION=).+$', rf"\g<1>{os.environ['LATEST_YTDLP_VERSION']}", text, flags=re.MULTILINE)
-          updated = re.sub(r'(^ARG FFMPEG_VERSION=).+$', rf"\g<1>{os.environ['LATEST_FFMPEG_VERSION']}", updated, flags=re.MULTILINE)
-          assert updated != text, 'Dockerfile did not change during media tool version bump'
-          path.write_text(updated)
+          import json, os, pathlib, re
+          dockerfiles = [
+              pathlib.Path('apps/process-audio/Dockerfile'),
+              pathlib.Path('apps/browser-fallback/Dockerfile'),
+              pathlib.Path('Dockerfile.browser-fallback-cloudflare'),
+          ]
+          changed = False
+          for path in dockerfiles:
+              text = path.read_text()
+              updated = re.sub(r'(^ARG YT_DLP_VERSION=).+$', rf"\g<1>{os.environ['LATEST_YTDLP_VERSION']}", text, flags=re.MULTILINE)
+              updated = re.sub(r'(^ARG DENO_VERSION=).+$', rf"\g<1>{os.environ['LATEST_DENO_VERSION']}", updated, flags=re.MULTILINE)
+              updated = re.sub(r'(^ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=).+$', rf"\g<1>{os.environ['LATEST_POT_PROVIDER_VERSION']}", updated, flags=re.MULTILINE)
+              updated = re.sub(r'(^ARG PLAYWRIGHT_VERSION=).+$', rf"\g<1>{os.environ['LATEST_PLAYWRIGHT_VERSION']}", updated, flags=re.MULTILINE)
+              if path == pathlib.Path('apps/process-audio/Dockerfile'):
+                  updated = re.sub(r'(^ARG FFMPEG_VERSION=).+$', rf"\g<1>{os.environ['LATEST_FFMPEG_VERSION']}", updated, flags=re.MULTILINE)
+              if updated != text:
+                  path.write_text(updated)
+                  changed = True
+
+          for path, section, package in [
+              (pathlib.Path('apps/browser-fallback/package.json'), 'dependencies', 'playwright'),
+              (pathlib.Path('apps/web/package.json'), 'devDependencies', '@playwright/test'),
+          ]:
+              data = json.loads(path.read_text())
+              expected = f"^{os.environ['LATEST_PLAYWRIGHT_VERSION']}"
+              if data[section][package] != expected:
+                  data[section][package] = expected
+                  path.write_text(json.dumps(data, indent=2) + '\n')
+                  changed = True
+
+          for path in [
+              pathlib.Path('apps/process-audio/compose.dev.yaml'),
+              pathlib.Path('apps/process-audio/compose.youtube-test.yaml'),
+              pathlib.Path('ops/process-audio-hetzner/compose.yaml'),
+          ]:
+              text = path.read_text()
+              updated = re.sub(
+                  r'(brainicism/bgutil-ytdlp-pot-provider:)[^\s]+',
+                  rf"\g<1>{os.environ['LATEST_POT_PROVIDER_VERSION']}",
+                  text,
+              )
+              if updated != text:
+                  path.write_text(updated)
+                  changed = True
+          assert changed, 'Pinned media runtime files did not change during version bump'
           PY
+          npm install --global pnpm@10.10.0
+          pnpm install --lockfile-only
 
       - name: Commit and open version bump PR
         if: steps.version-check.outputs.should_update == 'true'
@@ -77,18 +132,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LATEST_YTDLP_VERSION: ${{ steps.version-check.outputs.latest_ytdlp_version }}
           LATEST_FFMPEG_VERSION: ${{ steps.version-check.outputs.latest_ffmpeg_version }}
+          LATEST_DENO_VERSION: ${{ steps.version-check.outputs.latest_deno_version }}
+          LATEST_POT_PROVIDER_VERSION: ${{ steps.version-check.outputs.latest_pot_provider_version }}
+          LATEST_PLAYWRIGHT_VERSION: ${{ steps.version-check.outputs.latest_playwright_version }}
         run: |
           set -euo pipefail
           branch_name="automation/media-tool-update"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch_name"
-          git add apps/process-audio/Dockerfile
-          git commit -m "Bump media tools to yt-dlp ${LATEST_YTDLP_VERSION} and ffmpeg ${LATEST_FFMPEG_VERSION}"
+          git add apps/process-audio/Dockerfile apps/browser-fallback/Dockerfile Dockerfile.browser-fallback-cloudflare apps/process-audio/compose.dev.yaml apps/process-audio/compose.youtube-test.yaml ops/process-audio-hetzner/compose.yaml apps/browser-fallback/package.json apps/web/package.json pnpm-lock.yaml
+          git commit -m "Bump pinned media runtimes"
           git push --force-with-lease origin HEAD:"$branch_name"
 
-          title="Bump media tools to yt-dlp ${LATEST_YTDLP_VERSION} and ffmpeg ${LATEST_FFMPEG_VERSION}"
-          body=$'Automated media-tool version bump for the process-audio Hetzner worker.\n\nThis PR targets `staging` because the branch is protected and requires normal PR checks before deploy workflows can run.'
+          title="Bump pinned media runtimes"
+          printf -v body 'Automated media-runtime update for the process-audio Hetzner worker and browser fallbacks.\n\n- yt-dlp: %s\n- ffmpeg: %s\n- Deno: %s\n- bgutil PO-token provider: %s\n- Playwright: %s\n\nThis PR targets staging because the branch is protected and requires normal PR checks before deploy workflows can run.' "$LATEST_YTDLP_VERSION" "$LATEST_FFMPEG_VERSION" "$LATEST_DENO_VERSION" "$LATEST_POT_PROVIDER_VERSION" "$LATEST_PLAYWRIGHT_VERSION"
           existing_pr="$(gh pr list --base staging --head "$branch_name" --json number --jq '.[0].number // empty')"
           if [[ -n "$existing_pr" ]]; then
             gh pr edit "$existing_pr" --title "$title" --body "$body"
