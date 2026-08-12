@@ -16,6 +16,7 @@ set -euo pipefail
 REMOTE_DIR="$1"
 PROFILE_HOME="${REMOTE_DIR}/state/shared-browser-profile"
 PROFILE_DIR="${PROFILE_HOME}/.config/google-chrome"
+RUNTIME_HOME="/home/ytauth"
 REFRESH_CONTROL_DIR="${REMOTE_DIR}/state/browser-refresh-control"
 USER_NAME="ytauth"
 NOVNC_PROXY_BIN=""
@@ -23,7 +24,7 @@ NOVNC_PROXY_BIN=""
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates curl gnupg sqlite3 xvfb x11vnc openbox novnc websockify dbus-x11 xauth
+apt-get install -y ca-certificates curl gnupg sqlite3 xvfb x11vnc openbox novnc websockify dbus-x11 xauth python3-websocket
 
 install -d -m 0755 /etc/apt/keyrings
 if [[ ! -f /etc/apt/keyrings/google-chrome.gpg ]]; then
@@ -44,6 +45,9 @@ fi
 
 chmod 755 "$REMOTE_DIR" "${REMOTE_DIR}/state"
 install -d -o "$USER_NAME" -g "$USER_NAME" \
+  "$RUNTIME_HOME" \
+  "$RUNTIME_HOME/.config" \
+  "$RUNTIME_HOME/.cache" \
   "$PROFILE_HOME" \
   "$PROFILE_HOME/.config" \
   "$PROFILE_HOME/.config/google-chrome" \
@@ -67,10 +71,13 @@ fi
 cat >/usr/local/bin/process-audio-browser-auth-launch-chrome <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-export HOME="$PROFILE_HOME"
+# Chrome 136+ disables the remote debugging port when the supplied user data
+# directory is also the browser's default profile path. Keep runtime state in
+# a separate home while explicitly retaining the persistent auth profile.
+export HOME="$RUNTIME_HOME"
 export DISPLAY=:99
-export XDG_CONFIG_HOME="$PROFILE_HOME/.config"
-export XDG_CACHE_HOME="$PROFILE_HOME/.cache"
+export XDG_CONFIG_HOME="$RUNTIME_HOME/.config"
+export XDG_CACHE_HOME="$RUNTIME_HOME/.cache"
 exec /usr/bin/dbus-launch --exit-with-session \
   /usr/bin/google-chrome-stable \
     --no-first-run \
@@ -79,12 +86,111 @@ exec /usr/bin/dbus-launch --exit-with-session \
     --disable-crash-reporter \
     --remote-debugging-address=127.0.0.1 \
     --remote-debugging-port=9222 \
+    --remote-allow-origins=http://localhost \
     --user-data-dir="$PROFILE_DIR" \
     --disable-features=Translate,MediaRouter \
     --disable-dev-shm-usage \
     https://www.youtube.com/
 EOF
 chmod 0755 /usr/local/bin/process-audio-browser-auth-launch-chrome
+
+cat >/usr/local/bin/process-audio-browser-auth-mint-pot <<'PYTHON'
+#!/usr/bin/env python3
+"""Mint session-bound YouTube GVS PO tokens through the authenticated Chrome."""
+import asyncio
+import fcntl
+import json
+import os
+import re
+import time
+import urllib.parse
+import urllib.request
+import websocket
+
+CONTROL_DIR = "__REFRESH_CONTROL_DIR__"
+LOCK_PATH = os.path.join(CONTROL_DIR, ".pot.lock")
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def http_json(path, method="GET"):
+    request = urllib.request.Request("http://127.0.0.1:9222" + path, method=method)
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.load(response)
+
+
+def cdp(ws, message_id, method, params=None):
+    ws.send(json.dumps({"id": message_id, "method": method, "params": params or {}}))
+    while True:
+        response = json.loads(ws.recv())
+        if response.get("id") != message_id:
+            continue
+        if "error" in response:
+            raise RuntimeError(response["error"].get("message", "DevTools command failed"))
+        return response.get("result", {})
+
+
+def mint_token(video_id):
+    target = None
+    ws = None
+    try:
+        target = http_json("/json/new?" + urllib.parse.quote("https://www.youtube.com/watch?v=" + video_id, safe=""), "PUT")
+        ws = websocket.create_connection(target["webSocketDebuggerUrl"], timeout=20, origin="http://localhost")
+        cdp(ws, 1, "Page.enable")
+        time.sleep(6)
+        expression = """(async () => {
+          const clientFactory = window.top['havuokmhhs-0']?.bevasrs?.wpc;
+          if (!clientFactory) return null;
+          const client = await clientFactory();
+          return client.mws({ c: '%s', mc: false, me: false });
+        })()""" % video_id
+        result = cdp(ws, 2, "Runtime.evaluate", {"expression": expression, "awaitPromise": True, "returnByValue": True})
+        token = result.get("result", {}).get("value")
+        if not isinstance(token, str) or len(token) < 100:
+            raise RuntimeError("Chrome did not return a usable YouTube PO token")
+        return token
+    finally:
+        if ws:
+            ws.close()
+        try:
+            if target:
+                http_json("/json/close/" + target["id"], "PUT")
+        except Exception:
+            pass
+
+
+def process_request(request_path):
+    result_path = request_path.replace(".pot.request.json", ".pot.result.json")
+    try:
+        with open(request_path, encoding="utf-8") as request_file:
+            payload = json.load(request_file)
+        video_id = payload.get("videoId", "")
+        if not isinstance(video_id, str) or not VIDEO_ID_RE.fullmatch(video_id):
+            raise ValueError("Invalid YouTube video ID")
+        with open(LOCK_PATH, "a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            token = mint_token(video_id)
+        result = {"ok": True, "poToken": token, "videoId": video_id}
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc)}
+    with open(result_path, "w", encoding="utf-8") as result_file:
+        json.dump(result, result_file)
+    try:
+        os.remove(request_path)
+    except FileNotFoundError:
+        pass
+
+
+while True:
+    try:
+        request_names = sorted(name for name in os.listdir(CONTROL_DIR) if name.endswith(".pot.request.json"))
+        for request_name in request_names:
+            process_request(os.path.join(CONTROL_DIR, request_name))
+    except Exception:
+        pass
+    time.sleep(0.25)
+PYTHON
+sed -i "s|__REFRESH_CONTROL_DIR__|$REFRESH_CONTROL_DIR|g" /usr/local/bin/process-audio-browser-auth-mint-pot
+chmod 0755 /usr/local/bin/process-audio-browser-auth-mint-pot
 
 cat >/usr/local/bin/process-audio-browser-auth-refresh-watcher <<EOF
 #!/usr/bin/env python3
@@ -196,7 +302,7 @@ if __name__ == "__main__":
         request_files = sorted(
             file_name
             for file_name in os.listdir(REFRESH_CONTROL_DIR)
-            if file_name.endswith(".request.json")
+            if file_name.endswith(".request.json") and not file_name.endswith(".pot.request.json")
         )
         if not request_files:
             time.sleep(0.5)
@@ -230,7 +336,7 @@ PartOf=process-audio-browser-auth.target
 
 [Service]
 User=$USER_NAME
-Environment=HOME=$PROFILE_HOME
+Environment=HOME=$RUNTIME_HOME
 Environment=DISPLAY=:99
 ExecStart=/usr/bin/openbox
 Restart=on-failure
@@ -288,6 +394,23 @@ RestartSec=5
 WantedBy=process-audio-browser-auth.target
 EOF
 
+cat >/etc/systemd/system/process-audio-browser-pot.service <<EOF
+[Unit]
+Description=Process Audio authenticated browser PO token broker
+After=process-audio-browser-chrome.service
+Requires=process-audio-browser-chrome.service
+PartOf=process-audio-browser-auth.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/process-audio-browser-auth-mint-pot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=process-audio-browser-auth.target
+EOF
+
 cat >/etc/systemd/system/process-audio-browser-chrome.service <<EOF
 [Unit]
 Description=Process Audio browser auth Chrome
@@ -299,8 +422,8 @@ PartOf=process-audio-browser-auth.target
 User=$USER_NAME
 Environment=HOME=$PROFILE_HOME
 Environment=DISPLAY=:99
-Environment=XDG_CONFIG_HOME=$PROFILE_HOME/.config
-Environment=XDG_CACHE_HOME=$PROFILE_HOME/.cache
+Environment=XDG_CONFIG_HOME=$RUNTIME_HOME/.config
+Environment=XDG_CACHE_HOME=$RUNTIME_HOME/.cache
 ExecStart=/usr/local/bin/process-audio-browser-auth-launch-chrome
 Restart=always
 RestartSec=5
@@ -318,13 +441,14 @@ Wants=process-audio-browser-x11vnc.service
 Wants=process-audio-browser-novnc.service
 Wants=process-audio-browser-chrome.service
 Wants=process-audio-browser-refresh.service
+Wants=process-audio-browser-pot.service
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable process-audio-browser-xvfb.service process-audio-browser-openbox.service process-audio-browser-x11vnc.service process-audio-browser-novnc.service process-audio-browser-chrome.service process-audio-browser-refresh.service process-audio-browser-auth.target
+systemctl enable process-audio-browser-xvfb.service process-audio-browser-openbox.service process-audio-browser-x11vnc.service process-audio-browser-novnc.service process-audio-browser-chrome.service process-audio-browser-refresh.service process-audio-browser-pot.service process-audio-browser-auth.target
 systemctl restart process-audio-browser-auth.target
 
 echo "Host browser auth setup complete."
