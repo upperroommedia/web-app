@@ -75,7 +75,11 @@ export function classifyYouTubeFailure(message: string, mode: YouTubeExtractionM
   // yt-dlp can complete extraction with cookies and a PO token, then have YouTube
   // reject the subsequent authenticated media request. This is the production
   // signature emitted for an expired or challenged shared browser session.
-  if (mode === 'cookie_provider' && lower.includes('unable to download video data: http error 403')) {
+  if (
+    mode === 'cookie_provider' &&
+    lower.includes('http error 403') &&
+    (lower.includes('unable to download video data') || /fragment \d+ not found/.test(lower))
+  ) {
     return 'cookie_session_stale_or_challenged';
   }
 
