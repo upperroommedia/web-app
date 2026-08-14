@@ -237,7 +237,12 @@ export class SubsplashSeriesMock {
   /**
    * Assign/unassign a media item to/from a series
    */
-  patchMediaItemSeries(itemId: string, seriesId: string | null, position?: number): SubsplashSeriesMediaItem {
+  patchMediaItemSeries(
+    itemId: string,
+    seriesId: string | null,
+    position?: number,
+    subtitle?: string | null
+  ): SubsplashSeriesMediaItem {
     const item = this.mediaItems.get(itemId);
     if (!item) {
       throw new Error(`Media item ${itemId} not found`);
@@ -265,6 +270,9 @@ export class SubsplashSeriesMock {
     }
     if (position !== undefined) {
       item.position = position;
+    }
+    if (subtitle !== undefined) {
+      item.subtitle = subtitle;
     }
     item.updated_at = new Date().toISOString();
     this.mediaItems.set(itemId, item);
@@ -452,9 +460,20 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
         if (networkFailureInjector.shouldFail(failureKey)) {
           return Promise.reject(new Error(`Network error: Failed to get series items ${seriesId}`));
         }
-        const items = subsplashSeriesMock.getSeriesItems(seriesId);
+        const pageSize = Number(url.match(/page\[size\]=([0-9]+)/)?.[1] || 200);
+        const pageNumber = Number(url.match(/page\[number\]=([0-9]+)/)?.[1] || 1);
+        const start = (pageNumber - 1) * pageSize;
+        const items = subsplashSeriesMock.getSeriesItems(seriesId).slice(start, start + pageSize);
         return Promise.resolve({ data: { _embedded: { 'media-items': items } }, status: 200 });
       }
+    }
+
+    // GET /media/v1/media-items/{id} - Get one media item
+    const getItemMatch = url.match(/media\/v1\/media-items\/([a-zA-Z0-9-]+)$/);
+    if (method === 'GET' && getItemMatch) {
+      const item = subsplashSeriesMock.getMediaItem(getItemMatch[1]);
+      if (item) return Promise.resolve({ data: item, status: 200 });
+      return Promise.reject({ response: { status: 404, data: { error: 'Media item not found' } } });
     }
 
     // PATCH /media/v1/media-items/{id} - Assign/unassign series
@@ -474,7 +493,8 @@ const mockAxios = jest.fn((config: { method: string; url: string; data?: unknown
         const item = subsplashSeriesMock.patchMediaItemSeries(
           itemId,
           payload._embedded['media-series']?.id || null,
-          payload.position
+          payload.position,
+          payload.subtitle
         );
         return Promise.resolve({ data: item, status: 200 });
       } catch {

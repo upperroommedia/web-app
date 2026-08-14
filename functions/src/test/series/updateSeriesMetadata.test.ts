@@ -26,6 +26,14 @@ describe('updateSeriesMetadata', () => {
     });
     remoteSeries.published_at = new Date().toISOString();
     remoteSeries.status = 'published';
+    const firstPart = subsplashSeriesMock.createMediaItem('First Part', {
+      seriesId: remoteSeries.id,
+      position: 1,
+    });
+    const secondPart = subsplashSeriesMock.createMediaItem('Second Part', {
+      seriesId: remoteSeries.id,
+      position: 2,
+    });
 
     const firestoreId = await createSeriesDocument({
       subsplashId: remoteSeries.id,
@@ -73,6 +81,8 @@ describe('updateSeriesMetadata', () => {
     expect(updatedRemoteSeries?.subtitle).toBe('2 part series');
     expect(updatedRemoteSeries?.summary).toBe('Updated summary');
     expect(updatedRemoteSeries?._embedded?.images).toEqual([{ id: remoteImage.id, type: 'square' }]);
+    expect(subsplashSeriesMock.getMediaItem(firstPart.id)?.subtitle).toBe('Part 1 of Updated Series');
+    expect(subsplashSeriesMock.getMediaItem(secondPart.id)?.subtitle).toBe('Part 2 of Updated Series');
 
     const updatedFirestoreSeries = await getSeriesById(firestoreId);
     expect(updatedFirestoreSeries?.name).toBe('Updated Series');

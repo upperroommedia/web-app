@@ -79,6 +79,9 @@ describe('bulkAddToSeries - Basic Functionality', () => {
     expect(updatedB?.position).toBe(3);
     expect(updatedA?.position).toBe(2);
     expect(updatedExisting?.position).toBe(1);
+    expect(updatedB?.subtitle).toBe('Part 3 of Bulk Series');
+    expect(updatedA?.subtitle).toBe('Part 2 of Bulk Series');
+    expect(updatedExisting?.subtitle).toBe('Part 1 of Bulk Series');
   });
 });
 
@@ -230,10 +233,13 @@ describe('bulkAddToSeries - Lock and Idempotency Contract', () => {
     };
 
     const firstResult = await bulkAddToSeriesHandler(request);
+    expect(patchMediaSpy).toHaveBeenCalledTimes(5);
+    expect(patchReorderSpy).toHaveBeenCalledTimes(1);
+
     const secondResult = await bulkAddToSeriesHandler(request);
 
     expect(firstResult).toEqual(secondResult);
-    expect(patchMediaSpy).toHaveBeenCalledTimes(2);
+    expect(patchMediaSpy).toHaveBeenCalledTimes(5);
     expect(patchReorderSpy).toHaveBeenCalledTimes(1);
   });
 

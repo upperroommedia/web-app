@@ -11,7 +11,13 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import handleError from './handleError';
 import { authenticateSubsplash } from './subsplashUtils';
-import { getSeriesItems, patchMediaItemSeries, patchSeriesItemPositions } from './helpers/seriesHelpers';
+import {
+  getSeriesDetails,
+  getSeriesItems,
+  patchMediaItemSeries,
+  patchSeriesItemPositions,
+} from './helpers/seriesHelpers';
+import { syncSeriesItemSubtitles } from './helpers/seriesItemSubtitles';
 import { runWithConcurrency } from './utils/runWithConcurrency';
 import { withIdempotency } from './locks/withIdempotency';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
@@ -62,6 +68,7 @@ export interface BulkAddToSeriesOutputType {
 interface RemoteSeriesItem {
   id: string;
   position: number | null;
+  subtitle?: string | null;
 }
 
 const MAX_CONCURRENCY = 5;
@@ -124,6 +131,7 @@ const fetchRemoteSeriesMembership = async (
     remoteItems.set(item.id, {
       id: item.id,
       position: item.position ?? null,
+      subtitle: item.subtitle,
     });
   });
 
@@ -382,6 +390,26 @@ const bulkAddToSeries = onCall(
             }));
 
             await patchSeriesItemPositions(seriesSubsplashId.trim(), itemsToUpdate, token);
+            const remoteSeries = await getSeriesDetails(seriesSubsplashId.trim(), token);
+            const subtitleItems = Array.from(remoteMembershipAfterAdds.values()).map((item) => ({
+              ...item,
+              position: requestedPositions.get(item.id) ?? item.position,
+            }));
+            const alreadyLockedMediaItemIds = new Set(lockMediaItemIds);
+            const additionalSubtitleLockKeys = subtitleItems
+              .filter((item) => !alreadyLockedMediaItemIds.has(item.id))
+              .map((item) => `media-item:${item.id}`);
+            await withSubsplashLocks(
+              additionalSubtitleLockKeys,
+              () => syncSeriesItemSubtitles(
+                seriesSubsplashId.trim(),
+                remoteSeries.title,
+                subtitleItems,
+                token,
+                { maxConcurrency: concurrency }
+              ),
+              { operationKey: normalizedOperationKey }
+            );
 
             return {
               status: 'success',

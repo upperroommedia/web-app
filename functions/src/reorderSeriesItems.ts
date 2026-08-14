@@ -6,7 +6,11 @@ import { randomUUID } from 'node:crypto';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { authenticateSubsplash } from './subsplashUtils';
-import { getAllSeriesItemsAcrossStatuses, patchSeriesItemPositions } from './helpers/seriesHelpers';
+import {
+  getAllSeriesItemsAcrossStatuses,
+  getSeriesDetails,
+  patchSeriesItemPositions,
+} from './helpers/seriesHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { firestoreAdminSeriesConverter } from './firestoreDataConverter';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
@@ -15,6 +19,7 @@ import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { createSeriesRemoteMembershipHash } from './helpers/seriesRemoteState';
+import { syncSeriesItemSubtitles } from './helpers/seriesItemSubtitles';
 
 const firestoreDB = firebaseAdmin.firestore();
 
@@ -102,7 +107,10 @@ const reorderSeriesItems = onCall(
             const token = await authenticateSubsplash();
 
             // Subsplash is source-of-truth: fetch current membership before patching.
-            const remoteItems = await getAllSeriesItemsAcrossStatuses(subsplashSeriesId, token);
+            const [remoteItems, remoteSeries] = await Promise.all([
+              getAllSeriesItemsAcrossStatuses(subsplashSeriesId, token),
+              getSeriesDetails(subsplashSeriesId, token),
+            ]);
             const remoteMembershipHash = createSeriesRemoteMembershipHash(
               [...remoteItems]
                 .sort((left, right) => (right.position ?? Number.NEGATIVE_INFINITY) - (left.position ?? Number.NEGATIVE_INFINITY))
@@ -160,6 +168,20 @@ const reorderSeriesItems = onCall(
             });
 
             await patchSeriesItemPositions(subsplashSeriesId, itemsToUpdate, token);
+            await withSubsplashLocks(
+              remoteItems.map((item) => `media-item:${item.id}`),
+              () => syncSeriesItemSubtitles(
+                subsplashSeriesId,
+                remoteSeries.title,
+                remoteItems.map((item) => ({
+                  id: item.id,
+                  position: requestedPositions.get(item.id) ?? item.position ?? null,
+                  subtitle: item.subtitle,
+                })),
+                token
+              ),
+              { operationKey: normalizedOperationKey }
+            );
 
             logger.log(`Successfully reordered ${itemOrder.length} items in series ${subsplashSeriesId}`);
 

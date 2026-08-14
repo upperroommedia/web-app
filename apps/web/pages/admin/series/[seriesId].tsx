@@ -93,6 +93,7 @@ import { RemoveFromSeriesInputType, RemoveFromSeriesOutputType } from '@upperroo
 import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
 import { DeleteSeriesInputType, DeleteSeriesOutputType } from '@upperroom/contracts/deleteSeries';
 import type { BulkAddToSeriesInputType, BulkAddToSeriesOutputType } from '@upperroom/contracts/bulkAddToSeries';
+import { compactSeriesItemPositions } from '../../../utils/compactSeriesItemPositions';
 import type {
   GetSeriesRemoteStateOutputType,
   GetSeriesRemoteStateRemoteItem,
@@ -1402,6 +1403,8 @@ const SeriesDetailsPage = () => {
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         await removeFromSeriesFunction({
           mediaItemId,
+          firestoreSeriesId: seriesId,
+          seriesSubsplashId: series?.subsplashId,
           operationKey: createOperationKey('series-admin-unpublish-item', seriesItem.id),
         });
       }
@@ -1428,7 +1431,7 @@ const SeriesDetailsPage = () => {
       setUnpublishingItemId(null);
       setUnpublishTarget(null);
     }
-  }, [fetchSeriesData, seriesId]);
+  }, [fetchSeriesData, series?.subsplashId, seriesId]);
 
   // Custom modifier to restrict drag to container bounds
   const restrictToContainer: Modifier = ({ transform, draggingNodeRect, containerNodeRect: _containerNodeRect }) => {
@@ -1571,6 +1574,8 @@ const SeriesDetailsPage = () => {
         try {
           await removeFromSeriesCallable({
             mediaItemId,
+            firestoreSeriesId: seriesId,
+            seriesSubsplashId: series.subsplashId,
             operationKey: createOperationKey('series-admin-remove-item', removeTarget.id),
           });
         } catch (removeErr: unknown) {
@@ -1582,6 +1587,7 @@ const SeriesDetailsPage = () => {
 
       if (removeTarget.sermonId) {
         await deleteDoc(doc(firestore, `series/${seriesId}/seriesItems`, removeTarget.sermonId));
+        await compactSeriesItemPositions(seriesId);
 
         try {
           await updateDoc(doc(firestore, 'sermons', removeTarget.sermonId), {
@@ -1637,6 +1643,8 @@ const SeriesDetailsPage = () => {
           try {
             await removeFromSeriesCallable({
               mediaItemId,
+              firestoreSeriesId: seriesId,
+              seriesSubsplashId: series.subsplashId,
               operationKey: createOperationKey('series-admin-remove-item', target.displayId),
             });
           } catch (removeErr: unknown) {
@@ -1658,6 +1666,7 @@ const SeriesDetailsPage = () => {
         });
       });
       await batch.commit();
+      await compactSeriesItemPositions(seriesId);
 
       setSelectedSeriesItemIds(new Set());
       await fetchSeriesData();

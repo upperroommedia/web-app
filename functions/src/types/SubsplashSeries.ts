@@ -79,6 +79,7 @@ export interface PatchMediaItemSeriesPayload {
   id: string;
   app_key: string;
   position?: number;
+  subtitle?: string | null;
   _embedded: {
     'media-series': { id: string } | null;
     // Preserve existing embedded resources
@@ -94,6 +95,7 @@ export interface SubsplashSeriesMediaItem {
   id: string;
   app_key: string;
   title: string;
+  subtitle?: string | null;
   position: number | null;
   status: 'draft' | 'published' | 'scheduled';
   created_at: string;

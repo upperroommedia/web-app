@@ -14,7 +14,7 @@ const normalizeString = (value: unknown): string | undefined => {
 export type SubsplashMediaItemDetails = {
   id: string;
   title?: string;
-  subtitle?: string;
+  subtitle?: string | null;
   summary?: string;
   status?: string;
   date?: string;
