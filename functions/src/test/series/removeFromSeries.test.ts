@@ -38,6 +38,7 @@ describe('removeFromSeries - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: subsplashSeries.id,
       },
     };
 
@@ -58,6 +59,7 @@ describe('removeFromSeries - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: 'expected-series',
       },
     };
 
@@ -93,6 +95,7 @@ describe('removeFromSeries - Basic Functionality', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: item1.id,
+        seriesSubsplashId: subsplashSeries.id,
       },
     };
 
@@ -107,6 +110,70 @@ describe('removeFromSeries - Basic Functionality', () => {
     // Item2 should still be in the series
     const updatedItem2 = subsplashSeriesMock.getMediaItem(item2.id);
     expect(updatedItem2?._embedded?.['media-series']?.id).toBe(subsplashSeries.id);
+  });
+
+  it('clears the removed subtitle and compacts subtitles for the remaining parts', async () => {
+    const series = subsplashSeriesMock.createSeries('Sowing Seeds');
+    const first = subsplashSeriesMock.createMediaItem('First', {
+      seriesId: series.id,
+      position: 1,
+    });
+    const removed = subsplashSeriesMock.createMediaItem('Second', {
+      seriesId: series.id,
+      position: 2,
+    });
+    const third = subsplashSeriesMock.createMediaItem('Third', {
+      seriesId: series.id,
+      position: 3,
+    });
+    first.subtitle = 'Part 1 of Sowing Seeds';
+    removed.subtitle = 'Part 2 of Sowing Seeds';
+    third.subtitle = 'Part 3 of Sowing Seeds';
+
+    const result = await removeFromSeriesHandler({
+      auth: { token: { role: 'admin' } },
+      data: {
+        mediaItemId: removed.id,
+        seriesSubsplashId: series.id,
+      },
+    });
+
+    expect(result.status).toBe('success');
+    expect(subsplashSeriesMock.getMediaItem(removed.id)).toMatchObject({
+      subtitle: null,
+      _embedded: { 'media-series': null },
+    });
+    expect(subsplashSeriesMock.getMediaItem(first.id)).toMatchObject({
+      position: 1,
+      subtitle: 'Part 1 of Sowing Seeds',
+    });
+    expect(subsplashSeriesMock.getMediaItem(third.id)).toMatchObject({
+      position: 2,
+      subtitle: 'Part 2 of Sowing Seeds',
+    });
+  });
+
+  it('rejects a stale series id before unlinking or modifying another series', async () => {
+    const actualSeries = subsplashSeriesMock.createSeries('Actual Series');
+    const staleSeries = subsplashSeriesMock.createSeries('Stale Series');
+    const mediaItem = subsplashSeriesMock.createMediaItem('Part', {
+      seriesId: actualSeries.id,
+      position: 1,
+    });
+
+    await expect(
+      removeFromSeriesHandler({
+        auth: { token: { role: 'admin' } },
+        data: {
+          mediaItemId: mediaItem.id,
+          seriesSubsplashId: staleSeries.id,
+        },
+      })
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+
+    expect(subsplashSeriesMock.getMediaItem(mediaItem.id)?._embedded?.['media-series']?.id).toBe(
+      actualSeries.id
+    );
   });
 });
 
@@ -124,6 +191,7 @@ describe('removeFromSeries - Authentication', () => {
       auth: undefined,
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: 'expected-series',
       },
     };
 
@@ -137,6 +205,7 @@ describe('removeFromSeries - Authentication', () => {
       auth: { token: { role: 'viewer' } },
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: 'expected-series',
       },
     };
 
@@ -150,6 +219,7 @@ describe('removeFromSeries - Authentication', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: 'expected-series',
       },
     };
 
@@ -170,10 +240,20 @@ describe('removeFromSeries - Validation', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: '',
+        seriesSubsplashId: 'expected-series',
       },
     };
 
     await expect(removeFromSeriesHandler(request)).rejects.toThrow();
+  });
+
+  it('rejects untyped runtime requests without a series identity', async () => {
+    await expect(
+      removeFromSeriesHandler({
+        auth: { token: { role: 'admin' } },
+        data: { mediaItemId: 'media-item-1' },
+      } as unknown as TestRequest<RemoveFromSeriesInputType>)
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
   });
 });
 
@@ -197,6 +277,7 @@ describe('removeFromSeries - Error Handling', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: subsplashSeries.id,
       },
     };
 
@@ -208,6 +289,7 @@ describe('removeFromSeries - Error Handling', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: 'non-existent-item',
+        seriesSubsplashId: 'expected-series',
       },
     };
 
@@ -236,6 +318,7 @@ describe('removeFromSeries - Locking and Idempotency', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: subsplashSeries.id,
         operationKey: 'remove-op-replay-1',
       } as RemoveFromSeriesInputType,
     };
@@ -259,6 +342,7 @@ describe('removeFromSeries - Locking and Idempotency', () => {
       auth: { token: { role: 'admin' } },
       data: {
         mediaItemId: mediaItem.id,
+        seriesSubsplashId: subsplashSeries.id,
         operationKey: 'remove-op-busy-1',
       } as RemoveFromSeriesInputType,
     };

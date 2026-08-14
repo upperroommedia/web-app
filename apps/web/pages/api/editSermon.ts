@@ -57,6 +57,7 @@ import {
   assertSermonNotProcessing,
   isSermonProcessingConflict,
 } from '../../utils/sermonEditing';
+import { compactSeriesItemPositions } from '../../utils/compactSeriesItemPositions';
 
 interface EditSermonOptions {
   originalSermon?: Sermon;
@@ -293,6 +294,7 @@ const unpublishSeriesMembership = async (seriesId: string, sermonId: string, med
   const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
   const removeResult = await removeFromSeriesFunction({
     mediaItemId,
+    firestoreSeriesId: seriesId,
     operationKey: createSubsplashSeriesUnpublishIntentKey('edit-sermon-series-unpublish', sermonId, seriesId),
   });
 
@@ -354,6 +356,10 @@ const persistSeriesMembershipChange = async (
       });
     }
   });
+
+  if (previousSeriesId) {
+    await compactSeriesItemPositions(previousSeriesId);
+  }
 };
 
 const showMutationFailure = (error: unknown, sermonId: string): never => {
@@ -459,6 +465,10 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
       && previousSeriesId !== nextSeriesId
       && previousSeriesPublication.published
     );
+    const willBePublishedToSeries = Boolean(
+      nextSeriesId
+      && (publishSeries || (previousSeriesId === nextSeriesId && previousSeriesPublication.published))
+    );
     const metadataChanged = hasRemoteMetadataChanges(originalSermon, sermon);
 
     let activeSubsplashId = normalizeString(originalSermon.subsplashId);
@@ -530,7 +540,7 @@ const editSermon = async (sermon: Sermon, sermonList: List[], options?: EditSerm
         await editSubsplashSermon({
           subsplashId: activeSubsplashId,
           title: sermon.title,
-          subtitle: sermon.subtitle,
+          ...(willBePublishedToSeries ? {} : { subtitle: sermon.subtitle }),
           description: sermon.description,
           speakers: sermon.speakers,
           topics: sermon.topics,

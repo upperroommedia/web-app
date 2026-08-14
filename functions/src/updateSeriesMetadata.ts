@@ -6,9 +6,11 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import { firestoreAdminSeriesConverter } from './firestoreDataConverter';
 import {
+  getAllSeriesItemsAcrossStatuses,
   getSeriesSubtitleFromPublishedCount,
   patchSeriesMetadata,
 } from './helpers/seriesHelpers';
+import { syncSeriesItemSubtitles } from './helpers/seriesItemSubtitles';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
 import { repairMismatchedSubsplashImageRefs } from './helpers/subsplashImageRefs';
@@ -127,6 +129,17 @@ const updateSeriesMetadata = onCall(
                 images: toSubsplashSeriesImageRefs(repairedImagesToPersist),
               },
               token
+            );
+            const remoteItems = await getAllSeriesItemsAcrossStatuses(latestSubsplashId, token);
+            await withSubsplashLocks(
+              remoteItems.map((item) => `media-item:${item.id}`),
+              () => syncSeriesItemSubtitles(
+                latestSubsplashId,
+                syncedSubsplashSeries.title,
+                remoteItems,
+                token
+              ),
+              { operationKey: normalizedOperationKey }
             );
 
             const firestoreUpdate: Record<string, unknown> = {

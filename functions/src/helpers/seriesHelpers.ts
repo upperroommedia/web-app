@@ -180,15 +180,30 @@ export async function getSeriesItems(
   const status = options?.status || 'published';
   const pageSize = options?.pageSize || 200;
   
-  const config = createAxiosConfig(
-    `https://core.subsplash.com/media/v1/media-items?filter[app_key]=${APP_KEY}&filter[media_series]=${seriesId}&filter[status]=${status}&filter[unlisted]=include&page[size]=${pageSize}&sort=-position`,
-    token,
-    'GET'
-  );
-
   try {
-    const response = await withSubsplashRetry('getSeriesItems', () => axios(config));
-    return response.data._embedded?.['media-items'] || [];
+    const items: SubsplashSeriesMediaItem[] = [];
+    const seenItemIds = new Set<string>();
+    let pageNumber = 1;
+
+    while (true) {
+      const config = createAxiosConfig(
+        `https://core.subsplash.com/media/v1/media-items?filter[app_key]=${APP_KEY}&filter[media_series]=${seriesId}&filter[status]=${status}&filter[unlisted]=include&page[size]=${pageSize}&page[number]=${pageNumber}&sort=-position`,
+        token,
+        'GET'
+      );
+      const response = await withSubsplashRetry('getSeriesItems', () => axios(config));
+      const pageItems = (response.data._embedded?.['media-items'] || []) as SubsplashSeriesMediaItem[];
+      const newPageItems = pageItems.filter((item) => !seenItemIds.has(item.id));
+      newPageItems.forEach((item) => seenItemIds.add(item.id));
+      items.push(...newPageItems);
+      if (pageItems.length < pageSize) {
+        return items;
+      }
+      if (newPageItems.length === 0 || pageNumber >= 100) {
+        throw new Error(`Subsplash pagination did not advance for series ${seriesId}.`);
+      }
+      pageNumber += 1;
+    }
   } catch (error: unknown) {
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
@@ -235,6 +250,7 @@ export async function patchMediaItemSeries(
   token: string,
   options?: {
     position?: number;
+    subtitle?: string | null;
     audio?: { id: string };
     images?: Array<{ id: string; type: string }>;
   }
@@ -249,6 +265,7 @@ export async function patchMediaItemSeries(
     id: mediaItemId,
     app_key: APP_KEY,
     ...(options?.position !== undefined && { position: options.position }),
+    ...(options?.subtitle !== undefined && { subtitle: options.subtitle }),
     _embedded: embeddedPayload,
   };
 
@@ -298,12 +315,14 @@ export async function patchMediaItemSeries(
       seriesId &&
       mediaItemDiagnostics.found &&
       mediaItemDiagnostics.item._embedded?.['media-series']?.id === seriesId
+      && (options?.subtitle === undefined || mediaItemDiagnostics.item.subtitle === options.subtitle)
     ) {
       logger.warn('patchMediaItemSeries received an upstream error but the media item is already assigned to the target series', {
         mediaItemId,
         seriesId,
         requestSummary: {
           position: options?.position,
+          subtitle: options?.subtitle,
           hasAudio: Boolean(options?.audio),
           imageCount: options?.images?.length ?? 0,
         },
@@ -320,6 +339,7 @@ export async function patchMediaItemSeries(
         mediaItemId,
         seriesId,
         position: options?.position,
+        subtitle: options?.subtitle,
         hasAudio: Boolean(options?.audio),
         imageCount: options?.images?.length ?? 0,
       },
@@ -357,6 +377,7 @@ export async function unlinkMediaItemFromSeries(
 ): Promise<UnlinkMediaItemFromSeriesResult> {
   try {
     const patchedItem = await patchMediaItemSeries(mediaItemId, null, token, {
+      subtitle: null,
       audio: options?.audio,
       images: options?.images,
     });

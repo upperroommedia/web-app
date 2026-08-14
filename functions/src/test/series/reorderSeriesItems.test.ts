@@ -49,7 +49,7 @@ describe('reorderSeriesItems - Basic Functionality', () => {
 
     const firestoreId = await createSeriesDocument({
       subsplashId: subsplashSeries.id,
-      name: 'Test Series',
+      name: 'Stale Local Series Name',
       itemCount: 3,
     });
 
@@ -76,6 +76,15 @@ describe('reorderSeriesItems - Basic Functionality', () => {
     expect(items[0].id).toBe(item3.id);
     expect(items[1].id).toBe(item1.id);
     expect(items[2].id).toBe(item2.id);
+    expect(subsplashSeriesMock.getMediaItem(item3.id)).toMatchObject({
+      subtitle: 'Part 1 of Test Series',
+    });
+    expect(subsplashSeriesMock.getMediaItem(item1.id)).toMatchObject({
+      subtitle: 'Part 2 of Test Series',
+    });
+    expect(subsplashSeriesMock.getMediaItem(item2.id)).toMatchObject({
+      subtitle: 'Part 3 of Test Series',
+    });
   });
 
   it('should update only changed positions', async () => {

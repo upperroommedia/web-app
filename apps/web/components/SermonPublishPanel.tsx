@@ -1318,6 +1318,8 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         rollbackSeriesMembership: async (resolvedMediaItemId) => {
           const rollbackResult = await removeFromSeriesFunction({
             mediaItemId: resolvedMediaItemId,
+            firestoreSeriesId: series.id,
+            seriesSubsplashId,
             operationKey: createSubsplashSeriesRollbackIntentKey(
               'manage-publishing-series-rollback',
               sermon.id,
@@ -1403,6 +1405,8 @@ const SermonPublishPanel: FunctionComponent<SermonPublishPanelProps> = ({
         const removeFromSeriesFunction = createFunctionV2<RemoveFromSeriesInputType, RemoveFromSeriesOutputType>('removefromseries');
         await removeFromSeriesFunction({
           mediaItemId,
+          firestoreSeriesId: series.id,
+          seriesSubsplashId: series.subsplashId,
           operationKey: createSubsplashSeriesUnpublishIntentKey(
             'manage-publishing-series-unpublish',
             sermon.id,

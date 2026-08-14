@@ -29,6 +29,7 @@
     "analyze": "pnpm --dir apps/web run analyze",
     "configure:algolia:lists-sort": "node scripts/configure-algolia-list-sorting.mjs",
     "configure:algolia:speakers-sort": "node scripts/configure-algolia-speaker-sorting.mjs",
+    "backfill:series-item-subtitles": "./scripts/with-node22.sh pnpm exec ts-node --skip-project --compiler-options '{\"module\":\"commonjs\"}' scripts/backfill-series-item-subtitles.ts",
     "build": "./scripts/with-node22.sh pnpm exec turbo run build --continue",
     "build:all": "./scripts/with-node22.sh pnpm exec turbo run build:ci --continue",
     "build:ci": "./scripts/with-node22.sh pnpm exec turbo run build:ci --continue",

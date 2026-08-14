@@ -114,3 +114,30 @@ Before merging `staging` into `main`, confirm:
 3. Confirm the production backend uses `apps/web/apphosting.prod.yaml`.
 4. Confirm `main-selective-deploy` runs for backend changes.
 5. Confirm runtime requests point at `urm-app`, not `urm-app-staging`.
+
+## 7. Repair Subsplash series item subtitles
+
+Series sermons use their published Subsplash position for subtitles such as
+`Part 4 of Sowing Seeds`. The live add, reorder, remove, and rename workflows keep
+these values synchronized. Use the idempotent backfill after introducing the
+feature or to audit production drift later.
+
+Dry-run first:
+
+```bash
+BACKFILL_EMAIL="$(gcloud secrets versions access latest --secret=SUBSPLASH_EMAIL --project=urm-app)"
+BACKFILL_PASSWORD="$(gcloud secrets versions access latest --secret=SUBSPLASH_PASSWORD --project=urm-app)"
+SUBSPLASH_EMAIL="$BACKFILL_EMAIL" SUBSPLASH_PASSWORD="$BACKFILL_PASSWORD" \
+  FIREBASE_PROJECT_ID=urm-app NODE_ENV=production pnpm backfill:series-item-subtitles
+```
+
+Apply only after the dry-run reports the expected scope:
+
+```bash
+SUBSPLASH_EMAIL="$BACKFILL_EMAIL" SUBSPLASH_PASSWORD="$BACKFILL_PASSWORD" \
+  FIREBASE_PROJECT_ID=urm-app NODE_ENV=production pnpm backfill:series-item-subtitles --apply
+```
+
+Use `--series-id=<firestoreSeriesId>` to scope either mode to one series. Apply
+mode re-reads remote title, membership, positions, and subtitles while holding
+the same Subsplash locks as live publishing mutations.

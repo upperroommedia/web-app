@@ -22,6 +22,7 @@ const runTransactionMock = jest.fn();
 const transactionGetMock = jest.fn();
 const getDownloadURLMock = jest.fn();
 const refMock = jest.fn();
+const compactSeriesItemPositionsMock = jest.fn();
 
 jest.mock('../../firebase/firestore', () => ({
   __esModule: true,
@@ -48,6 +49,10 @@ jest.mock('../../firebase/firestore', () => ({
 jest.mock('../../utils/createFunction', () => ({
   __esModule: true,
   createFunctionV2: (...args: unknown[]) => createFunctionV2Mock(...args),
+}));
+
+jest.mock('../../utils/compactSeriesItemPositions', () => ({
+  compactSeriesItemPositions: (...args: unknown[]) => compactSeriesItemPositionsMock(...args),
 }));
 
 jest.mock('../../firebase/storage', () => ({
@@ -178,6 +183,7 @@ describe('editSermon remote edit reconciliation', () => {
     orderByMock.mockReset().mockImplementation((...args: unknown[]) => args);
     limitMock.mockReset().mockImplementation((...args: unknown[]) => args);
     createFunctionV2Mock.mockReset();
+    compactSeriesItemPositionsMock.mockReset().mockResolvedValue(undefined);
     transactionGetMock.mockReset().mockImplementation(async (ref: { path?: string }) => ({
       exists: () => true,
       data: () => {
@@ -210,8 +216,11 @@ describe('editSermon remote edit reconciliation', () => {
     originalSermon.description = 'Original Description';
     originalSermon.subsplashId = 'subsplash-1';
     originalSermon.soundCloudTrackId = 'soundcloud-1';
+    originalSermon.seriesId = 'series-a';
+    originalSermon.subtitle = 'Legacy Category Subtitle';
     originalSermon.status.subsplash = uploadStatus.UPLOADED;
     originalSermon.status.soundCloud = uploadStatus.UPLOADED;
+    originalSermon.status.audioStatus = sermonStatusType.ERROR;
 
     const updatedSermon = {
       ...originalSermon,
@@ -219,6 +228,15 @@ describe('editSermon remote edit reconciliation', () => {
       description: 'Updated Description',
     };
 
+    getDocMock
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => originalSermon,
+      })
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => ({ publishedToSubsplash: true, sermonSubsplashId: 'subsplash-1' }),
+      });
     getDocsMock
       .mockResolvedValueOnce({ docs: [] })
       .mockResolvedValueOnce({ docs: [] });
@@ -227,6 +245,9 @@ describe('editSermon remote edit reconciliation', () => {
 
     expect(functions.editSoundCloudSermon).toHaveBeenCalledTimes(1);
     expect(functions.editSubsplashSermon).toHaveBeenCalledTimes(1);
+    expect(functions.editSubsplashSermon).toHaveBeenCalledWith(
+      expect.not.objectContaining({ subtitle: expect.anything() })
+    );
     expect(functions.addtolist).not.toHaveBeenCalled();
     expect(functions.removefromlist).not.toHaveBeenCalled();
     expect(functions.addtoseries).not.toHaveBeenCalled();
@@ -565,6 +586,12 @@ describe('editSermon remote edit reconciliation', () => {
     await editSermon(updatedSermon, [], { originalSermon });
 
     expect(functions.removefromseries).toHaveBeenCalledTimes(1);
+    expect(functions.removefromseries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firestoreSeriesId: 'series-a',
+      })
+    );
+    expect(compactSeriesItemPositionsMock).toHaveBeenCalledWith('series-a');
     expect(functions.addtoseries).toHaveBeenCalledTimes(1);
     expect(functions.reorderseriesitems).toHaveBeenCalledTimes(1);
     expect(runTransactionMock).toHaveBeenCalledTimes(2);
