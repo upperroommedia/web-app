@@ -2,6 +2,7 @@
  
 import {
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   connectAuthEmulator,
   getAuth,
   indexedDBLocalPersistence,
@@ -19,6 +20,10 @@ const initializeBrowserAuth = (): Auth => {
       // Keep IndexedDB second so Firebase can migrate existing sessions into
       // localStorage without selecting the broken @firebase/auth 1.13.4 path.
       persistence: [browserLocalPersistence, indexedDBLocalPersistence],
+      // Firebase's Node entrypoint exports an unsupported resolver sentinel.
+      // Supplying it during SSR crashes Next's production build, while browser
+      // popup and redirect sign-in require the real browser resolver.
+      ...(typeof window !== 'undefined' ? { popupRedirectResolver: browserPopupRedirectResolver } : {}),
     });
   } catch (error) {
     // Next.js hot reload can re-evaluate this module while the Firebase app and
