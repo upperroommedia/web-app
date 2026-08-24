@@ -82,6 +82,8 @@ jobs:
       - name: Deploy production Hetzner worker
         env:
           PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
+          PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL }}
+          PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL }}
         run: ./scripts/deploy-process-audio-hetzner.sh production
 
       - name: Verify production health
@@ -90,6 +92,8 @@ jobs:
       - name: Run production yt-dlp smoke test
         env:
           PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
+          PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL }}
+          PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL }}
         run: bash scripts/verify-hetzner-ytdlp-smoke.sh production
 
       - name: Create production Sentry release for process-audio-hetzner

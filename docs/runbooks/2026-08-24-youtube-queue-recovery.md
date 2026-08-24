@@ -26,7 +26,7 @@ Baseline observed around 2026-08-24 05:14 UTC: all six Firestore sermon records 
 5. Promote the exact same image digest to production without rebuilding it. Stop if the production digest differs from the validated staging digest.
 6. Record the production release, commit SHA, image digest, deployment time, and operator.
 
-The current `scripts/deploy-process-audio-hetzner.sh staging` and `production` paths each run `docker compose build`. Running those two commands independently does **not** satisfy this incident gate, even from the same source SHA. Before acceptance can start, the deployment owner must implement an image-reference override or equivalent path that tags/pushes or otherwise transfers the staging-validated image by digest, deploys that digest in production, and reports the running digest in both environments. Until that executable path exists, this gate is blocked; do not fall back to independent rebuilds. Do not infer application image identity from the already-pinned provider image.
+`scripts/deploy-process-audio-hetzner.sh all` implements this gate as one locked promotion transaction. It hashes the prepared Docker context, builds the candidate only in staging, records and validates its immutable Docker image ID after staging canaries, then retags that exact image for production and starts it with `--no-build`. A standalone `production` deployment refuses an absent, unvalidated, or digest-mismatched candidate. Do not replace this path with independent staging and production rebuilds, and do not infer application image identity from the separately pinned provider image.
 
 ## Pre-deployment evidence
 

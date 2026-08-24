@@ -32,19 +32,27 @@ jobs:
           current_ffmpeg_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG FFMPEG_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate FFMPEG_VERSION in Dockerfile'; print(match.group(1).strip())")"
           current_deno_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG DENO_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate DENO_VERSION in Dockerfile'; print(match.group(1).strip())")"
           current_pot_provider_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate BGUTIL_YTDLP_POT_PROVIDER_VERSION in Dockerfile'; print(match.group(1).strip())")"
+          current_pot_provider_ref="$(python3 -c "import re, pathlib; text = pathlib.Path('ops/process-audio-hetzner/compose.yaml').read_text(); assert 'ytdlp-pot-provider-staging:' in text and 'ytdlp-pot-provider-production:' in text, 'Expected split staging/production provider services'; matches = re.findall(r'^\s+image:\s+docker\.io/brainicism/bgutil-ytdlp-pot-provider:([^@\s]+)@(sha256:[0-9a-f]{64})\s*$', text, re.MULTILINE); assert len(matches) == 2 and len(set(matches)) == 1, 'Expected both provider services to use one pinned version and OCI digest'; print('@'.join(matches[0]))")"
+          current_pot_provider_image_version="${current_pot_provider_ref%@*}"
+          current_pot_provider_digest="${current_pot_provider_ref#*@}"
           current_playwright_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/browser-fallback/Dockerfile').read_text(); match = re.search(r'^ARG PLAYWRIGHT_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate PLAYWRIGHT_VERSION in Dockerfile'; print(match.group(1).strip())")"
 
           latest_ytdlp_version="$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest yt-dlp release tag found'; print(tag.lstrip('v'))")"
           latest_ffmpeg_version="$(curl -fsSL https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest | python3 -c "import json, re, sys; data = json.load(sys.stdin); names = {asset.get('name', '') for asset in data.get('assets', [])}; versions = []; pattern = re.compile(r'^ffmpeg-n([0-9]+(?:\\.[0-9]+){1,2})-latest-linux64-gpl-\\1\\.tar\\.xz$'); [versions.append(match.group(1)) for name in names for match in [pattern.match(name)] if match and f'ffmpeg-n{match.group(1)}-latest-linuxarm64-gpl-{match.group(1)}.tar.xz' in names]; assert versions, 'No compatible BtbN ffmpeg release assets found'; print(sorted(set(versions), key=lambda s: [int(x) for x in s.split('.')])[-1])")"
           latest_deno_version="$(curl -fsSL https://api.github.com/repos/denoland/deno/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest Deno release tag found'; print(tag.lstrip('v'))")"
           latest_pot_provider_version="$(curl -fsSL https://pypi.org/pypi/bgutil-ytdlp-pot-provider/json | python3 -c "import json, sys; data = json.load(sys.stdin); version = (data.get('info', {}).get('version') or '').strip(); assert version, 'No latest bgutil PO-token provider version found'; print(version)")"
+          provider_registry_token="$(curl -fsSL --get 'https://auth.docker.io/token' --data-urlencode 'service=registry.docker.io' --data-urlencode 'scope=repository:brainicism/bgutil-ytdlp-pot-provider:pull' | python3 -c "import json, sys; token = json.load(sys.stdin).get('token', '').strip(); assert token, 'No Docker Hub registry token returned'; print(token)")"
+          latest_pot_provider_digest="$(curl -fsSI -H "Authorization: Bearer ${provider_registry_token}" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://registry-1.docker.io/v2/brainicism/bgutil-ytdlp-pot-provider/manifests/${latest_pot_provider_version}" | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }')"
+          [[ "$latest_pot_provider_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Could not resolve OCI digest for bgutil provider ${latest_pot_provider_version}" >&2; exit 1; }
+          expected_pot_provider_image="docker.io/brainicism/bgutil-ytdlp-pot-provider:${latest_pot_provider_version}@${latest_pot_provider_digest}"
+          pot_provider_refs_current="$(EXPECTED_POT_PROVIDER_IMAGE="$expected_pot_provider_image" python3 -c "import os, pathlib; expected = os.environ['EXPECTED_POT_PROVIDER_IMAGE']; files = {'apps/process-audio/compose.dev.yaml': 1, 'apps/process-audio/compose.youtube-test.yaml': 1, 'ops/process-audio-hetzner/compose.yaml': 2}; print('true' if all(pathlib.Path(path).read_text().count(f'image: {expected}') == count for path, count in files.items()) else 'false')")"
           latest_playwright_version="$(curl -fsSL https://registry.npmjs.org/playwright/latest | python3 -c "import json, sys; data = json.load(sys.stdin); version = (data.get('version') or '').strip(); assert version, 'No latest Playwright version found'; print(version)")"
           for arch in linux64 linuxarm64; do
             curl -fsSI "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n${latest_ffmpeg_version}-latest-${arch}-gpl-${latest_ffmpeg_version}.tar.xz" >/dev/null
           done
 
           should_update=false
-          if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" || "$current_deno_version" != "$latest_deno_version" || "$current_pot_provider_version" != "$latest_pot_provider_version" || "$current_playwright_version" != "$latest_playwright_version" ]]; then
+          if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" || "$current_deno_version" != "$latest_deno_version" || "$current_pot_provider_version" != "$latest_pot_provider_version" || "$current_pot_provider_image_version" != "$latest_pot_provider_version" || "$current_pot_provider_digest" != "$latest_pot_provider_digest" || "$pot_provider_refs_current" != "true" || "$current_playwright_version" != "$latest_playwright_version" ]]; then
             should_update=true
           fi
 
@@ -56,7 +64,11 @@ jobs:
             echo "current_deno_version=$current_deno_version"
             echo "latest_deno_version=$latest_deno_version"
             echo "current_pot_provider_version=$current_pot_provider_version"
+            echo "current_pot_provider_image_version=$current_pot_provider_image_version"
             echo "latest_pot_provider_version=$latest_pot_provider_version"
+            echo "current_pot_provider_digest=$current_pot_provider_digest"
+            echo "latest_pot_provider_digest=$latest_pot_provider_digest"
+            echo "pot_provider_refs_current=$pot_provider_refs_current"
             echo "current_playwright_version=$current_playwright_version"
             echo "latest_playwright_version=$latest_playwright_version"
             echo "should_update=$should_update"
@@ -73,6 +85,7 @@ jobs:
           LATEST_FFMPEG_VERSION: ${{ steps.version-check.outputs.latest_ffmpeg_version }}
           LATEST_DENO_VERSION: ${{ steps.version-check.outputs.latest_deno_version }}
           LATEST_POT_PROVIDER_VERSION: ${{ steps.version-check.outputs.latest_pot_provider_version }}
+          LATEST_POT_PROVIDER_DIGEST: ${{ steps.version-check.outputs.latest_pot_provider_digest }}
           LATEST_PLAYWRIGHT_VERSION: ${{ steps.version-check.outputs.latest_playwright_version }}
         run: |
           set -euo pipefail
@@ -107,6 +120,7 @@ jobs:
                   path.write_text(json.dumps(data, indent=2) + '\n')
                   changed = True
 
+          provider_image = f"docker.io/brainicism/bgutil-ytdlp-pot-provider:{os.environ['LATEST_POT_PROVIDER_VERSION']}@{os.environ['LATEST_POT_PROVIDER_DIGEST']}"
           for path in [
               pathlib.Path('apps/process-audio/compose.dev.yaml'),
               pathlib.Path('apps/process-audio/compose.youtube-test.yaml'),
@@ -114,10 +128,14 @@ jobs:
           ]:
               text = path.read_text()
               updated = re.sub(
-                  r'(brainicism/bgutil-ytdlp-pot-provider:)[^\s]+',
-                  rf"\g<1>{os.environ['LATEST_POT_PROVIDER_VERSION']}",
+                  r'docker\.io/brainicism/bgutil-ytdlp-pot-provider:[^\s]+',
+                  provider_image,
                   text,
               )
+              if path == pathlib.Path('ops/process-audio-hetzner/compose.yaml'):
+                  assert 'ytdlp-pot-provider-staging:' in updated, 'Missing staging provider service'
+                  assert 'ytdlp-pot-provider-production:' in updated, 'Missing production provider service'
+                  assert updated.count(f'image: {provider_image}') == 2, 'Expected both provider services to use the pinned image'
               if updated != text:
                   path.write_text(updated)
                   changed = True
@@ -134,6 +152,7 @@ jobs:
           LATEST_FFMPEG_VERSION: ${{ steps.version-check.outputs.latest_ffmpeg_version }}
           LATEST_DENO_VERSION: ${{ steps.version-check.outputs.latest_deno_version }}
           LATEST_POT_PROVIDER_VERSION: ${{ steps.version-check.outputs.latest_pot_provider_version }}
+          LATEST_POT_PROVIDER_DIGEST: ${{ steps.version-check.outputs.latest_pot_provider_digest }}
           LATEST_PLAYWRIGHT_VERSION: ${{ steps.version-check.outputs.latest_playwright_version }}
         run: |
           set -euo pipefail
@@ -146,7 +165,7 @@ jobs:
           git push --force-with-lease origin HEAD:"$branch_name"
 
           title="Bump pinned media runtimes"
-          printf -v body 'Automated media-runtime update for the process-audio Hetzner worker and browser fallbacks.\n\n- yt-dlp: %s\n- ffmpeg: %s\n- Deno: %s\n- bgutil PO-token provider: %s\n- Playwright: %s\n\nThis PR targets staging because the branch is protected and requires normal PR checks before deploy workflows can run.' "$LATEST_YTDLP_VERSION" "$LATEST_FFMPEG_VERSION" "$LATEST_DENO_VERSION" "$LATEST_POT_PROVIDER_VERSION" "$LATEST_PLAYWRIGHT_VERSION"
+          printf -v body 'Automated media-runtime update for the process-audio Hetzner worker and browser fallbacks.\n\n- yt-dlp: %s\n- ffmpeg: %s\n- Deno: %s\n- bgutil PO-token provider: %s@%s\n- Playwright: %s\n\nThis PR targets staging because the branch is protected and requires normal PR checks before deploy workflows can run.' "$LATEST_YTDLP_VERSION" "$LATEST_FFMPEG_VERSION" "$LATEST_DENO_VERSION" "$LATEST_POT_PROVIDER_VERSION" "$LATEST_POT_PROVIDER_DIGEST" "$LATEST_PLAYWRIGHT_VERSION"
           existing_pr="$(gh pr list --base staging --head "$branch_name" --json number --jq '.[0].number // empty')"
           if [[ -n "$existing_pr" ]]; then
             gh pr edit "$existing_pr" --title "$title" --body "$body"

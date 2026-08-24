@@ -11,7 +11,10 @@ import type {
   StoredYouTubeQueueState,
   YouTubeQueueProbeMode,
 } from '@upperroom/contracts/processAudioQueue';
-import { getProcessAudioTaskQueueNameForSource } from '@upperroom/contracts/processAudioQueue';
+import {
+  getProcessAudioTaskQueueNameForSource,
+  PROCESS_AUDIO_DEFERRED_DISPOSITIONS,
+} from '@upperroom/contracts/processAudioQueue';
 import { createLoggerWithContext } from './WinstonLogger';
 import type { LogContext } from './context';
 
@@ -38,13 +41,7 @@ const PROCESS_AUDIO_BASE_URLS = {
 const CLAIM_ACQUIRE_ATTEMPTS = 20;
 const CLAIM_ACQUIRE_DELAY_MS = 150;
 const PROCESS_AUDIO_TASK_TIMEOUT_SECONDS = 1800;
-const POST_LIVE_ARCHIVE_RETRY_DELAYS_SECONDS = [
-  30 * 60,
-  60 * 60,
-  2 * 60 * 60,
-  4 * 60 * 60,
-  6 * 60 * 60,
-];
+const POST_LIVE_ARCHIVE_RETRY_DELAYS_SECONDS = [30 * 60, 60 * 60, 2 * 60 * 60, 4 * 60 * 60, 6 * 60 * 60];
 const DEFAULT_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT = 12;
 const PROCESS_AUDIO_TASKS_LOCATION = process.env.PROCESS_AUDIO_TASKS_LOCATION?.trim() || 'us-central1';
 const CLOUD_TASKS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
@@ -79,8 +76,7 @@ export const getPostLiveArchiveRetryDelaySeconds = (retryCount: number): number 
 };
 
 const getPostLiveArchiveMaxRetryCount = (): number =>
-  parsePositiveIntegerEnv('YOUTUBE_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT') ??
-  DEFAULT_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT;
+  parsePositiveIntegerEnv('YOUTUBE_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT') ?? DEFAULT_POST_LIVE_ARCHIVE_MAX_RETRY_COUNT;
 
 const getProcessAudioProjectId = (): string => {
   return (
@@ -98,9 +94,7 @@ const getProcessAudioSourceType = (payload: AddIntroOutroInputType): ProcessAudi
 
 type ProcessAudioTaskQueueLike = Pick<TaskQueue<AddIntroOutroInputType>, 'delete'>;
 
-let processAudioTaskQueueFactory:
-  | ((queueName: ProcessAudioTaskQueueName) => ProcessAudioTaskQueueLike)
-  | null = null;
+let processAudioTaskQueueFactory: ((queueName: ProcessAudioTaskQueueName) => ProcessAudioTaskQueueLike) | null = null;
 let cloudTasksApiDepsForTesting: CloudTasksApiDeps | null = null;
 
 export function setProcessAudioTaskQueueFactoryForTesting(
@@ -161,15 +155,9 @@ const computeProcessAudioRequestVersion = (payload: AddIntroOutroInputType): str
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
 };
 
-const computeProcessAudioTaskId = (
-  sermonId: string,
-  requestVersion: string,
-  enqueueToken?: string | null
-): string => {
+const computeProcessAudioTaskId = (sermonId: string, requestVersion: string, enqueueToken?: string | null): string => {
   const sermonHash = createHash('sha256').update(sermonId).digest('hex').slice(0, 8);
-  const enqueueHash = enqueueToken
-    ? `-${createHash('sha256').update(enqueueToken).digest('hex').slice(0, 8)}`
-    : '';
+  const enqueueHash = enqueueToken ? `-${createHash('sha256').update(enqueueToken).digest('hex').slice(0, 8)}` : '';
   return `pa-${sermonHash}-${requestVersion}${enqueueHash}`;
 };
 
@@ -392,6 +380,9 @@ export async function enqueueTaskViaCloudTasksApi(
 
   if (!response.ok) {
     const responseBody = await response.text();
+    if (response.status === 409 && responseBody.toLowerCase().includes('already_exists')) {
+      return;
+    }
     throw new Error(
       `Failed to create Cloud Task ${taskId} in queue ${queueName}: HTTP ${response.status} ${
         response.statusText || ''
@@ -476,9 +467,7 @@ async function getQueueStateAndDeferredEntries(
   ]);
 
   const deferredEntries = sortDeferredEntries(
-    Object.values(
-    (deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {}
-    )
+    Object.values((deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {})
   );
   const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
   if (queueState.deferredYouTubeTaskCount !== deferredEntries.length) {
@@ -489,8 +478,61 @@ async function getQueueStateAndDeferredEntries(
   return { queueState, deferredEntries };
 }
 
-function isYouTubeQueuePaused(queueState: StoredYouTubeQueueState): boolean {
-  return queueState.blocked || queueState.probeStatus === 'probing' || queueState.probeStatus === 'waiting_for_auth_required_request';
+export async function getYouTubeQueueScopeDiagnostics(database: Database): Promise<{
+  guest: {
+    blocked: false;
+    blockerReason: null;
+    depth: 0;
+    oldestDeferredAt: null;
+  };
+  authenticated: {
+    blocked: boolean;
+    blockerReason: string | null;
+    depth: number;
+    oldestDeferredAt: string | null;
+  };
+  probe: {
+    status: StoredYouTubeQueueState['probeStatus'];
+    lastSucceededAt: string | null;
+    lastFailedAt: string | null;
+    lastFailureClass: string | null;
+  };
+}> {
+  const [queueStateSnapshot, deferredSnapshot] = await Promise.all([
+    database.ref(YOUTUBE_QUEUE_STATE_PATH).get(),
+    database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get(),
+  ]);
+  const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
+  const deferredEntries = sortDeferredEntries(
+    Object.values((deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {})
+  );
+
+  return {
+    guest: {
+      blocked: false,
+      blockerReason: null,
+      depth: 0,
+      oldestDeferredAt: null,
+    },
+    authenticated: {
+      blocked: queueState.blocked,
+      blockerReason:
+        queueState.blockerReason ??
+        (deferredEntries.length > 0 ? PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH : null),
+      depth: deferredEntries.length,
+      oldestDeferredAt: deferredEntries[0]?.deferredAt ?? null,
+    },
+    probe: {
+      status: queueState.probeStatus,
+      lastSucceededAt: queueState.probeLastSucceededAt,
+      lastFailedAt: queueState.probeLastFailedAt,
+      lastFailureClass: queueState.probeLastFailureClass,
+    },
+  };
+}
+
+function isYouTubeQueuePaused(_queueState: StoredYouTubeQueueState): boolean {
+  return false;
 }
 
 async function enqueueTask(payload: AddIntroOutroInputType, taskId: string, scheduledFor?: Date): Promise<void> {
@@ -517,7 +559,11 @@ async function enqueueDeferredRequestIgnoringPause(
     const state = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(entry.payload, entry.requestVersion, now);
-    const taskId = computeProcessAudioTaskId(entry.sermonId, entry.requestVersion, `${ownerId}:${now}`);
+    const taskId = computeProcessAudioTaskId(
+      entry.sermonId,
+      entry.requestVersion,
+      `deferred-attempt:${entry.attemptCount ?? 0}`
+    );
 
     await deleteExistingTask(queue, state.queuedTaskId);
     await enqueueTask(entry.payload, taskId);
@@ -737,7 +783,11 @@ export async function completeProcessAudioSuccess(args: {
 
     if (requestState.nextPayload && requestState.nextRequestVersion) {
       const nextPayload = requestState.nextPayload;
-      const nextTaskId = computeProcessAudioTaskId(nextPayload.id, requestState.nextRequestVersion, `${requestId}:${now}`);
+      const nextTaskId = computeProcessAudioTaskId(
+        nextPayload.id,
+        requestState.nextRequestVersion,
+        `${requestId}:${now}`
+      );
       const activeQueueState = parseYouTubeQueueState((await database.ref(YOUTUBE_QUEUE_STATE_PATH).get()).val());
       const nextSourceType = getProcessAudioSourceType(nextPayload);
       let queuedTaskId: string | null = nextTaskId;
@@ -760,7 +810,8 @@ export async function completeProcessAudioSuccess(args: {
         queuedAt = null;
         deferredAt = now;
         await database.ref(YOUTUBE_QUEUE_STATE_PATH).update({
-          deferredYouTubeTaskCount: activeQueueState.deferredYouTubeTaskCount + (existingDeferredSnapshot.exists() ? 0 : 1),
+          deferredYouTubeTaskCount:
+            activeQueueState.deferredYouTubeTaskCount + (existingDeferredSnapshot.exists() ? 0 : 1),
         });
       } else {
         await deleteExistingTask(queue, requestState.queuedTaskId);
@@ -888,7 +939,9 @@ export async function deferPostLiveArchiveYouTubeRequest(args: {
         (entry) => entry.sermonId !== sanitizedPayload.id
       )
     );
-    const latestPayload = sanitizeProcessAudioPayload(requestState.nextPayload ?? requestState.currentPayload ?? sanitizedPayload);
+    const latestPayload = sanitizeProcessAudioPayload(
+      requestState.nextPayload ?? requestState.currentPayload ?? sanitizedPayload
+    );
     const latestVersion =
       requestState.nextRequestVersion ??
       requestState.currentRequestVersion ??
@@ -924,19 +977,19 @@ export async function deferPostLiveArchiveYouTubeRequest(args: {
         await Promise.all([
           deferredRef.remove(),
           queueStateRef.set({
-          ...queueState,
-          blocked: false,
-          blockerReason: null,
-          blockedAt: null,
-          probeMode: nextProbe.probeMode,
-          probeStatus: 'probing',
-          probeTaskSermonId: nextProbe.sermonId,
-          probeRequestVersion: nextProbe.requestVersion,
-          probeStartedAt: now,
-          probeLastFailedAt: now,
-          probeLastFailureClass: failureClass,
-          probeLastFailureMessage: failureMessage.slice(0, 1000),
-          deferredYouTubeTaskCount: Math.max(0, remainingDeferredEntries.length - 1),
+            ...queueState,
+            blocked: false,
+            blockerReason: null,
+            blockedAt: null,
+            probeMode: nextProbe.probeMode,
+            probeStatus: 'probing',
+            probeTaskSermonId: nextProbe.sermonId,
+            probeRequestVersion: nextProbe.requestVersion,
+            probeStartedAt: now,
+            probeLastFailedAt: now,
+            probeLastFailureClass: failureClass,
+            probeLastFailureMessage: failureMessage.slice(0, 1000),
+            deferredYouTubeTaskCount: Math.max(0, remainingDeferredEntries.length - 1),
           } satisfies StoredYouTubeQueueState),
         ]);
       } catch (error) {
@@ -947,7 +1000,8 @@ export async function deferPostLiveArchiveYouTubeRequest(args: {
             probeStatus: 'waiting_for_auth_required_request',
             probeLastFailedAt: now,
             probeLastFailureClass: 'probe_advance_failed',
-            probeLastFailureMessage: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
+            probeLastFailureMessage:
+              error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
             deferredYouTubeTaskCount: remainingDeferredEntries.length,
           } satisfies StoredYouTubeQueueState),
         ]);
@@ -1109,13 +1163,63 @@ export async function cleanupDeletedSermonProcessAudioState(args: {
 export async function resumeDeferredYouTubeQueueOnStartup(args: {
   database: Database;
   ctx?: LogContext;
+  force?: boolean;
 }): Promise<{ resumed: boolean; deferredRemaining: number; nextProbeSermonId: string | null }> {
-  const { database, ctx } = args;
+  const { database, ctx, force = false } = args;
   const log = createLoggerWithContext(ctx);
   const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
-  const { queueState, deferredEntries } = await getQueueStateAndDeferredEntries(database);
+  const { queueState, deferredEntries: storedDeferredEntries } = await getQueueStateAndDeferredEntries(database);
+  const deferredEntries = [...storedDeferredEntries];
 
-  if (deferredEntries.length === 0) {
+  if (queueState.probeStatus === 'probing' && !force) {
+    const probeStartedAtMs = queueState.probeStartedAt ? Date.parse(queueState.probeStartedAt) : Number.NaN;
+    const probeStillWithinTaskRetryWindow =
+      Number.isFinite(probeStartedAtMs) && Date.now() - probeStartedAtMs < PROCESS_AUDIO_TASK_TIMEOUT_SECONDS * 1000;
+    if (probeStillWithinTaskRetryWindow) {
+      return {
+        resumed: false,
+        deferredRemaining: deferredEntries.length,
+        nextProbeSermonId: queueState.probeTaskSermonId,
+      };
+    }
+  }
+
+  const activeProbeAlreadyDeferred = deferredEntries.some((entry) => entry.sermonId === queueState.probeTaskSermonId);
+  if (queueState.probeTaskSermonId && !activeProbeAlreadyDeferred) {
+    const requestSnapshot = await database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${queueState.probeTaskSermonId}`).get();
+    const requestState = requestSnapshot.exists() ? (requestSnapshot.val() as StoredProcessAudioRequestState) : null;
+    if (requestState?.currentPayload && requestState.currentRequestVersion) {
+      deferredEntries.push({
+        sermonId: queueState.probeTaskSermonId,
+        payload: requestState.currentPayload,
+        requestVersion: requestState.currentRequestVersion,
+        deferredAt: queueState.probeStartedAt ?? requestState.queuedAt ?? requestState.updatedAt,
+        reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: 'authenticated_session',
+        probeMode: queueState.probeMode ?? 'cookie_provider',
+        blockerEpisodeId: queueState.blockerEpisodeId,
+        lastFailureClass: queueState.probeLastFailureClass,
+        lastFailureMessage: queueState.probeLastFailureMessage,
+        attemptCount: 0,
+      });
+    }
+  }
+
+  const migratedEntries = deferredEntries.map(
+    (entry) =>
+      ({
+        ...entry,
+        disposition: entry.disposition ?? PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: entry.dependencyScope ?? 'authenticated_session',
+        attemptCount: entry.attemptCount ?? 0,
+      } satisfies StoredDeferredYouTubeRequest)
+  );
+  await Promise.all(
+    migratedEntries.map((entry) => database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${entry.sermonId}`).set(entry))
+  );
+
+  if (migratedEntries.length === 0) {
     if (queueState.blocked || queueState.probeStatus !== 'idle' || queueState.deferredYouTubeTaskCount !== 0) {
       await queueStateRef.set(buildInitialYouTubeQueueState());
       log.info('Reset stale YouTube queue state on startup with no deferred entries remaining', {
@@ -1132,21 +1236,21 @@ export async function resumeDeferredYouTubeQueueOnStartup(args: {
     };
   }
 
-  const nextProbe = selectNextDeferredProbe(deferredEntries, queueState.probeMode);
+  const nextProbe = selectNextDeferredProbe(migratedEntries, queueState.probeMode);
   if (!nextProbe) {
     await queueStateRef.set({
       ...buildInitialYouTubeQueueState(),
       probeStatus: 'waiting_for_auth_required_request',
-      deferredYouTubeTaskCount: deferredEntries.length,
+      deferredYouTubeTaskCount: migratedEntries.length,
     } satisfies StoredYouTubeQueueState);
 
     log.info('Deferred YouTube queue still has items on startup but no probe candidate could be selected', {
-      deferredRemaining: deferredEntries.length,
+      deferredRemaining: migratedEntries.length,
     });
 
     return {
       resumed: false,
-      deferredRemaining: deferredEntries.length,
+      deferredRemaining: migratedEntries.length,
       nextProbeSermonId: null,
     };
   }
@@ -1163,72 +1267,88 @@ export async function resumeDeferredYouTubeQueueOnStartup(args: {
     probeTaskSermonId: nextProbe.sermonId,
     probeRequestVersion: nextProbe.requestVersion,
     probeStartedAt: now,
-    deferredYouTubeTaskCount: Math.max(0, deferredEntries.length - 1),
+    deferredYouTubeTaskCount: Math.max(0, migratedEntries.length - 1),
   } satisfies StoredYouTubeQueueState);
 
   log.info('Resumed deferred YouTube queue on startup', {
     nextProbeSermonId: nextProbe.sermonId,
     previousBlocked: queueState.blocked,
     previousProbeStatus: queueState.probeStatus,
-    deferredRemaining: Math.max(0, deferredEntries.length - 1),
+    deferredRemaining: Math.max(0, migratedEntries.length - 1),
   });
 
   return {
     resumed: true,
-    deferredRemaining: Math.max(0, deferredEntries.length - 1),
+    deferredRemaining: Math.max(0, migratedEntries.length - 1),
     nextProbeSermonId: nextProbe.sermonId,
   };
 }
 
-export async function deferStaleYouTubeRequest(args: {
+export async function deferYouTubeRequestForAuthentication(args: {
   database: Database;
   payload: AddIntroOutroInputType;
   requestId: string;
   failureClass: string;
   failureMessage: string;
   probeMode?: YouTubeQueueProbeMode;
-}): Promise<{ shouldAlert: boolean; blockerEpisodeId: string | null }> {
+}): Promise<void> {
   const { database, payload, requestId, failureClass, failureMessage, probeMode = 'cookie_provider' } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
-  const now = getNowIsoString();
-  let shouldAlert = false;
-  let blockerEpisodeId: string | null = null;
 
-  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `stale:${requestId}`, async () => {
+  await withProcessAudioQueueClaim(database, sanitizedPayload.id, `auth-wait:${requestId}`, async () => {
     const requestRef = database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${sanitizedPayload.id}`);
-    const [requestSnapshot, queueStateSnapshot, deferredSnapshot] = await Promise.all([
+    const deferredRef = database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`);
+    const queueStateRef = database.ref(YOUTUBE_QUEUE_STATE_PATH);
+    const [requestSnapshot, deferredEntrySnapshot, deferredSnapshot, queueStateSnapshot] = await Promise.all([
       requestRef.get(),
-      database.ref(YOUTUBE_QUEUE_STATE_PATH).get(),
+      deferredRef.get(),
       database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get(),
+      queueStateRef.get(),
     ]);
+    const now = getNowIsoString();
+    const existingDeferred = deferredEntrySnapshot.exists()
+      ? (deferredEntrySnapshot.val() as StoredDeferredYouTubeRequest)
+      : null;
     const requestState = requestSnapshot.exists()
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-      : buildProcessAudioRequestState(sanitizedPayload, computeProcessAudioRequestVersion(sanitizedPayload), now);
-    const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
-    const latestPayload = sanitizeProcessAudioPayload(requestState.nextPayload ?? requestState.currentPayload ?? sanitizedPayload);
+      : buildProcessAudioRequestState(
+          existingDeferred?.payload ?? sanitizedPayload,
+          existingDeferred?.requestVersion ?? computeProcessAudioRequestVersion(sanitizedPayload),
+          now
+        );
+    const latestPayload = sanitizeProcessAudioPayload(
+      requestState.nextPayload ?? requestState.currentPayload ?? existingDeferred?.payload ?? sanitizedPayload
+    );
     const latestVersion =
       requestState.nextRequestVersion ??
       requestState.currentRequestVersion ??
+      existingDeferred?.requestVersion ??
       computeProcessAudioRequestVersion(latestPayload);
+    const originalDeferredAt = existingDeferred?.deferredAt ?? now;
+    const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
     const deferredCount = countChildren(deferredSnapshot.val());
-
-    blockerEpisodeId = queueState.blockerEpisodeId || `${sanitizedPayload.id}:${Date.now()}`;
-    shouldAlert = !queueState.alertSentAt;
-    const existingDeferredForSermon = asRecord(deferredSnapshot.val())?.[sanitizedPayload.id];
+    const preserveOtherActiveProbe =
+      queueState.probeStatus === 'probing' && queueState.probeTaskSermonId !== sanitizedPayload.id;
 
     await Promise.all([
-      database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${sanitizedPayload.id}`).set({
+      deferredRef.set({
         sermonId: sanitizedPayload.id,
         payload: latestPayload,
         requestVersion: latestVersion,
-        deferredAt: now,
-        reason: failureClass,
+        deferredAt: originalDeferredAt,
+        reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: 'authenticated_session',
         probeMode,
-        blockerEpisodeId,
+        blockerEpisodeId: existingDeferred?.blockerEpisodeId ?? queueState.blockerEpisodeId,
         lastFailureClass: failureClass,
+        lastFailureMessage: failureMessage.slice(0, 1000),
+        attemptCount: (existingDeferred?.attemptCount ?? 0) + 1,
       } satisfies StoredDeferredYouTubeRequest),
       requestRef.set({
         ...requestState,
+        sermonId: sanitizedPayload.id,
+        sourceType: 'youtube',
         currentPayload: latestPayload,
         currentRequestVersion: latestVersion,
         queuedTaskId: null,
@@ -1240,30 +1360,37 @@ export async function deferStaleYouTubeRequest(args: {
         nextPayload: null,
         nextRequestVersion: null,
         nextUpdatedAt: null,
-        deferredAt: now,
+        deferredAt: originalDeferredAt,
         updatedAt: now,
       } satisfies StoredProcessAudioRequestState),
-      database.ref(YOUTUBE_QUEUE_STATE_PATH).set({
+      queueStateRef.set({
         ...queueState,
-        blocked: true,
-        blockerReason: failureClass,
-        blockedAt: now,
-        blockerEpisodeId,
-        probeMode,
-        probeStatus: 'blocked',
-        probeTaskSermonId: null,
-        probeRequestVersion: null,
-        probeStartedAt: null,
-        probeLastFailedAt: now,
-        probeLastFailureClass: failureClass,
-        probeLastFailureMessage: failureMessage.slice(0, 1000),
-        alertSentAt: queueState.alertSentAt ?? now,
-        deferredYouTubeTaskCount: deferredCount + (existingDeferredForSermon ? 0 : 1),
+        blocked: false,
+        blockerReason: null,
+        blockedAt: null,
+        probeStatus: preserveOtherActiveProbe ? queueState.probeStatus : 'waiting_for_auth_required_request',
+        probeTaskSermonId: preserveOtherActiveProbe ? queueState.probeTaskSermonId : null,
+        probeRequestVersion: preserveOtherActiveProbe ? queueState.probeRequestVersion : null,
+        probeStartedAt: preserveOtherActiveProbe ? queueState.probeStartedAt : null,
+        deferredYouTubeTaskCount: deferredCount + (existingDeferred ? 0 : 1),
       } satisfies StoredYouTubeQueueState),
     ]);
   });
+}
 
-  return { shouldAlert, blockerEpisodeId };
+export async function deferStaleYouTubeRequest(args: {
+  database: Database;
+  payload: AddIntroOutroInputType;
+  requestId: string;
+  failureClass: string;
+  failureMessage: string;
+  probeMode?: YouTubeQueueProbeMode;
+}): Promise<{ shouldAlert: boolean; blockerEpisodeId: string | null }> {
+  await deferYouTubeRequestForAuthentication(args);
+  return {
+    shouldAlert: true,
+    blockerEpisodeId: null,
+  };
 }
 
 export const extractCloudTaskId = (headerValue: string | string[] | undefined): string | null => {

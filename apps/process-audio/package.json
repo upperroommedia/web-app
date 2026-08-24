@@ -15,7 +15,10 @@
     "verify:youtube:browser-auth-health": "ts-node --project tsconfig.json scripts/verify-youtube-browser-auth-health.ts",
     "verify:youtube:loop": "bash scripts/test-youtube-loop.sh",
     "verify:youtube:policy": "node scripts/verify-youtube-policy.js",
-    "verify:alerts": "node scripts/verify-operational-alert-recipients.js"
+    "verify:alerts": "node scripts/verify-operational-alert-recipients.js",
+    "test:readiness": "ts-node --project tsconfig.json scripts/test-youtube-readiness.ts",
+    "test:queue": "ts-node --project tsconfig.json scripts/test-process-audio-queue-store.ts",
+    "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run verify:youtube:policy"
   },
   "engines": {
     "node": "22"
@@ -38,6 +41,7 @@
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "catalog:",
+    "ts-node": "^10.9.2",
     "typescript": "catalog:"
   }
 }

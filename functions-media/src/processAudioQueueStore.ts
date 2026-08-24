@@ -14,6 +14,7 @@ import {
   PROCESS_AUDIO_QUEUE_CLAIMS_PATH,
   PROCESS_AUDIO_REQUESTS_PATH,
   PROCESS_AUDIO_QUEUE_CLAIM_TTL_MS,
+  PROCESS_AUDIO_DEFERRED_DISPOSITIONS,
   sanitizeProcessAudioPayload,
   type ProcessAudioSourceType,
   type StoredDeferredYouTubeRequest,
@@ -110,7 +111,10 @@ const isTaskAlreadyExistsError = (error: unknown): boolean => {
   return normalized.includes('task') && normalized.includes('already exists');
 };
 
-async function deleteExistingTask(queue: TaskQueue<AddIntroOutroInputType>, taskId: string | null | undefined): Promise<void> {
+async function deleteExistingTask(
+  queue: TaskQueue<AddIntroOutroInputType>,
+  taskId: string | null | undefined
+): Promise<void> {
   if (!taskId) return;
 
   try {
@@ -186,7 +190,9 @@ async function getQueueStateAndDeferredCount(
 }
 
 const getProbeBlockerReason = (probeMode: YouTubeQueueProbeMode | null): string => {
-  return probeMode === 'browser_fallback' ? YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON : 'cookie_session_stale_or_challenged';
+  return probeMode === 'browser_fallback'
+    ? YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON
+    : 'cookie_session_stale_or_challenged';
 };
 
 export async function getYouTubeQueueSnapshot(
@@ -208,35 +214,40 @@ export async function recoverStaleYouTubeQueueProbe(
     return { recovered: false, queueState, deferredCount };
   }
 
-  const [lockSnapshot, requestSnapshot] = await Promise.all([
+  const [lockSnapshot, requestSnapshot, deferredEntrySnapshot] = await Promise.all([
     database.ref(`${PROCESS_AUDIO_LOCKS_PATH}/${queueState.probeTaskSermonId}`).get(),
     database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${queueState.probeTaskSermonId}`).get(),
+    database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${queueState.probeTaskSermonId}`).get(),
   ]);
   if (isProcessAudioLockActive(lockSnapshot.val())) {
     return { recovered: false, queueState, deferredCount };
   }
 
   const now = getNowIsoString();
+  const staleFailureClass = queueState.probeLastFailureClass ?? getProbeBlockerReason(queueState.probeMode);
+  const staleFailureMessage =
+    queueState.probeLastFailureMessage ?? 'Recovered a stale YouTube probe that was no longer making progress.';
+  const requestState = requestSnapshot.exists() ? (requestSnapshot.val() as StoredProcessAudioRequestState) : null;
+  const canRestoreDeferredProbe =
+    !deferredEntrySnapshot.exists() && !!requestState?.currentPayload && !!requestState.currentRequestVersion;
+  const restoredDeferredCount = deferredCount + (canRestoreDeferredProbe ? 1 : 0);
   const nextQueueState: StoredYouTubeQueueState = {
     ...queueState,
-    blocked: true,
-    blockerReason: getProbeBlockerReason(queueState.probeMode),
-    blockedAt: now,
-    probeStatus: 'blocked',
+    blocked: false,
+    blockerReason: null,
+    blockedAt: null,
+    probeStatus: 'waiting_for_auth_required_request',
     probeTaskSermonId: null,
     probeRequestVersion: null,
     probeStartedAt: null,
     probeLastFailedAt: now,
-    probeLastFailureClass: queueState.probeLastFailureClass ?? getProbeBlockerReason(queueState.probeMode),
-    probeLastFailureMessage:
-      queueState.probeLastFailureMessage ?? 'Recovered a stale YouTube probe that was no longer making progress.',
-    alertSentAt: queueState.alertSentAt ?? now,
-    deferredYouTubeTaskCount: deferredCount,
+    probeLastFailureClass: staleFailureClass,
+    probeLastFailureMessage: staleFailureMessage,
+    deferredYouTubeTaskCount: restoredDeferredCount,
   };
 
   const writes: Array<Promise<unknown>> = [database.ref(YOUTUBE_QUEUE_STATE_PATH).set(nextQueueState)];
-  if (requestSnapshot.exists()) {
-    const requestState = requestSnapshot.val() as StoredProcessAudioRequestState;
+  if (requestState) {
     writes.push(
       database.ref(`${PROCESS_AUDIO_REQUESTS_PATH}/${queueState.probeTaskSermonId}`).set({
         ...requestState,
@@ -246,13 +257,34 @@ export async function recoverStaleYouTubeQueueProbe(
       } satisfies StoredProcessAudioRequestState)
     );
   }
+  if (canRestoreDeferredProbe && requestState?.currentPayload && requestState.currentRequestVersion) {
+    writes.push(
+      database.ref(`${YOUTUBE_QUEUE_DEFERRED_PATH}/${queueState.probeTaskSermonId}`).set({
+        sermonId: queueState.probeTaskSermonId,
+        payload: requestState.currentPayload,
+        requestVersion: requestState.currentRequestVersion,
+        deferredAt: queueState.probeStartedAt,
+        reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: 'authenticated_session',
+        probeMode: queueState.probeMode ?? 'cookie_provider',
+        blockerEpisodeId: queueState.blockerEpisodeId,
+        lastFailureClass: staleFailureClass,
+        lastFailureMessage: staleFailureMessage,
+        attemptCount: 0,
+      } satisfies StoredDeferredYouTubeRequest)
+    );
+  }
 
   await Promise.all(writes);
-  return { recovered: true, queueState: nextQueueState, deferredCount };
+  return { recovered: true, queueState: nextQueueState, deferredCount: restoredDeferredCount };
 }
 
-export function isYouTubeQueuePaused(queueState: StoredYouTubeQueueState): boolean {
-  return queueState.blocked || queueState.probeStatus === 'probing' || queueState.probeStatus === 'waiting_for_auth_required_request';
+export function isYouTubeQueuePaused(_queueState: StoredYouTubeQueueState): boolean {
+  // Legacy queue-wide blockers caused one auth/provider failure to stop every
+  // YouTube request. Deferred auth recovery is now scoped to each item, so
+  // guest-capable requests always remain eligible for dispatch.
+  return false;
 }
 
 export function buildYouTubeCookieStatus(
@@ -362,8 +394,8 @@ export async function queueOrReplaceProcessAudioRequest(args: {
         currentState.currentRequestVersion === requestVersion && !currentState.nextPayload
           ? null
           : currentState.nextRequestVersion === requestVersion && currentState.nextPayload
-            ? currentState.nextPayload
-            : sanitizedPayload;
+          ? currentState.nextPayload
+          : sanitizedPayload;
       await requestRef.set({
         ...currentState,
         sermonId: sanitizedPayload.id,
@@ -451,7 +483,9 @@ export async function beginYouTubeQueueProbe(args: {
   const { database, targetUri, ownerId, probeMode } = args;
   const queue = getFunctions().taskQueue<AddIntroOutroInputType>(getProcessAudioTaskQueueNameForSource('youtube'));
   const deferredSnapshot = await database.ref(YOUTUBE_QUEUE_DEFERRED_PATH).get();
-  const deferredEntries = Object.values((deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {});
+  const deferredEntries = Object.values(
+    (deferredSnapshot.val() as Record<string, StoredDeferredYouTubeRequest> | null) ?? {}
+  );
   const probeCandidate = deferredEntries
     .filter((entry) => entry.probeMode === probeMode)
     .sort((left, right) => Date.parse(left.deferredAt) - Date.parse(right.deferredAt))[0];
@@ -497,7 +531,11 @@ export async function beginYouTubeQueueProbe(args: {
       : buildProcessAudioRequestState(probeCandidate.payload, probeCandidate.requestVersion, getNowIsoString());
     const queueState = parseYouTubeQueueState(queueStateSnapshot.val());
     const now = getNowIsoString();
-    const taskId = computeProcessAudioTaskId(probeCandidate.sermonId, probeCandidate.requestVersion, `${ownerId}:${now}`);
+    const taskId = computeProcessAudioTaskId(
+      probeCandidate.sermonId,
+      probeCandidate.requestVersion,
+      `${ownerId}:${now}`
+    );
     const sanitizedPayload = sanitizeProcessAudioPayload(probeCandidate.payload);
     const nextQueueState = {
       blocked: false,

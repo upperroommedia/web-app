@@ -7,7 +7,10 @@ The current architecture is intentional:
 - normal file uploads are processed on Cloud Run
 - YouTube uploads are processed on a dedicated Hetzner VM
 - staging and production share the same Hetzner VM, but run in separate containers with separate Firebase env
-- both Hetzner containers share one host-native Chrome profile for `yt-dlp --cookies-from-browser`
+- public videos use cookie-free yt-dlp extraction first
+- both Hetzner containers retain one host-native Chrome profile for classified authenticated fallback
+
+Whenever Upper Room owns the original recording, direct file/object-storage ingestion is the preferred source. YouTube download is a compatibility path, not the canonical media store.
 
 ## High-Level Architecture
 
@@ -58,15 +61,19 @@ The VM hosts:
 - `process-audio-staging`
 - `process-audio-production`
 - `caddy`
-- `ytdlp-pot-provider`
+- `ytdlp-pot-provider-staging`
+- `ytdlp-pot-provider-production`
 - a host-native Chrome auth stack under the `ytauth` user
 - Sentry-enabled `process-audio` containers for both environments
 
 The worker images include pinned versions of:
 
-- `yt-dlp`
+- `yt-dlp` `2026.08.19`
+- `bgutil-ytdlp-pot-provider` `1.3.2`
 - `ffmpeg`
 - `aria2c`
+
+The provider plugin and the two environment-specific provider services use the same release. The provider server image is pinned by OCI digest in `compose.yaml`; staging and production do not share a provider container or provider network.
 
 ## Known-Good Livestream Fix
 
@@ -101,15 +108,20 @@ sequenceDiagram
   participant FM as functions-media
   participant Q as processaudioyoutubetask
   participant H as Hetzner process-audio
-  participant C as Host Chrome Profile
+  participant P as bgutil PO Provider
+  participant C as Host Chrome Fallback
   participant Y as YouTube
   participant F as Firebase
 
   UI->>FM: enqueue YouTube processing
   FM->>Q: create task
   Q->>H: POST /process-audio
-  H->>C: read shared browser cookies
-  H->>Y: yt-dlp metadata + media request
+  H->>P: request guest PO token
+  H->>Y: cookie-free yt-dlp metadata + media request
+  alt public path is challenged or account is required
+    H->>C: read authenticated fallback cookies
+    H->>Y: retry authenticated yt-dlp request
+  end
   Y-->>H: audio URL + headers
   H->>Y: ffmpeg fetch media
   H->>F: upload output + write sermon status
@@ -260,7 +272,23 @@ What the deploy script does:
 3. assembles a minimal Docker build context
 4. `rsync`s the stack to the VM
 5. preserves `state/`
-6. runs `docker compose up -d --build`
+6. starts and health-checks the environment-specific pinned PO-token provider
+7. preserves the running worker's exact image ID under a deployment-specific rollback tag
+8. hashes the complete prepared local Docker context after the repository's `.dockerignore` exclusions and uses that SHA-256 as the candidate identity
+9. builds that candidate once in staging while the current worker remains available
+10. records the candidate's immutable Docker image ID and marks it validated only after staging health and media canaries pass
+11. promotes that exact recorded image ID to production with `--no-build`; production refuses an absent, unvalidated, or digest-mismatched candidate
+12. waits for each replacement worker's `/healthz`
+13. requires both bounded media canaries to pass before the deploy command reports success
+14. automatically recreates and health-checks the previous worker image if replacement health, browser readiness, or either canary fails
+
+`all` is a sequential promotion transaction: staging is replaced and validated first, then production receives the same image ID. A standalone `production` deploy never builds; it must run from the same prepared source context as the successful staging deploy so it resolves the already-validated candidate under `state/deploy-candidates/<context-sha256>/`. This also works for an unpushed local branch because candidate identity comes from source content, not the Git branch or commit name.
+
+The deployment lock remains owned through worker health, browser readiness, staging validation, production promotion, and all canaries. A second deployment cannot enter between replacement and a possible rollback.
+
+Rollback only recreates the environment-specific worker container. It does not remove or rewrite provider containers, browser profiles, control directories, logs, or media-processing state. A failed deploy always exits nonzero even when rollback succeeds. If rollback itself fails, its deployment-specific metadata remains under `state/deploy-rollback/` for operator recovery; successful deployments remove their temporary rollback tag and metadata after all canaries pass.
+
+The deploy refuses to replace an environment that has no running worker image to preserve. Bootstrap deployments therefore require a separately reviewed initialization procedure; the normal rollout path never silently gives up rollback protection.
 
 Primary scripts:
 
@@ -346,11 +374,17 @@ ssh root@<hetzner-ip> "docker exec process-audio-hetzner-process-audio-staging-1
 Smoke tests:
 
 ```bash
+export PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL='https://www.youtube.com/watch?v=<owned-public-canary>'
+export PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL='https://www.youtube.com/watch?v=<owned-account-visible-canary>'
 bash scripts/verify-hetzner-ytdlp-smoke.sh staging
 bash scripts/verify-hetzner-ytdlp-smoke.sh production
 ```
 
-The smoke script now fails fast if the host browser auth stack is down or the refresh watcher handshake is broken. A passing `/healthz` is not enough; the shared Chrome profile, refresh control directory, and these systemd units must be active before `yt-dlp` verification is meaningful.
+Both canaries are required deployment inputs and must be stable, short, Upper Room-controlled videos. The public canary always attempts the cookie-free guest path first. A guest media download passes immediately; a recognized YouTube anti-bot, login-required, page-reload, or rate-limit response is the only allowed transition to authenticated fallback, which must then download valid media bytes. Any other guest error fails the deploy. The account-visible canary must succeed directly through the shared Chrome profile.
+
+Each successful media path downloads only the opening section (8 seconds by default), asserts yt-dlp `2026.08.19`, the `bgutil:http-1.3.2` plugin, the pinned provider image, the expected credential mode, and a decodable bounded artifact through `ffprobe`. Configure `PROCESS_AUDIO_HETZNER_SMOKE_SECTION_SECONDS` from 2 through 30 to change the bound.
+
+A passing `/healthz` is not sufficient. The smoke also requires the environment-specific provider to be healthy and the full browser auth stack, including `process-audio-browser-pot.service`, to be active. It intentionally does not refresh or mutate the browser session before testing it.
 
 Optional Sentry smoke from a live container:
 
@@ -420,7 +454,7 @@ In the remote desktop:
 Useful checks:
 
 ```bash
-ssh root@<hetzner-ip> "systemctl status process-audio-browser-{xvfb,openbox,x11vnc,novnc,chrome,refresh}.service --no-pager"
+ssh root@<hetzner-ip> "systemctl status process-audio-browser-{xvfb,openbox,x11vnc,novnc,chrome,refresh,pot}.service --no-pager"
 ssh root@<hetzner-ip> "ss -ltnp | egrep '3010|5900'"
 ```
 
@@ -458,14 +492,13 @@ Workflow:
 
 Behavior:
 
-1. checks the latest stable upstream `yt-dlp`
-2. checks the latest stable upstream `ffmpeg`
-3. compares both against the pinned Dockerfile versions
-4. updates the Dockerfile if either is newer
-5. commits and pushes the bump to `staging`
-6. deploys staging Hetzner
-7. runs a remote smoke test
-8. deploys production Hetzner only if staging passes
+1. checks the latest upstream media-runtime versions
+2. updates the pinned files on `automation/media-tool-update`
+3. opens or refreshes a pull request targeting `staging`
+4. relies on normal review and deployment workflows to validate staging
+5. requires a separate reviewed promotion to `main` before production deploys
+
+The updater does not automatically promote an artifact to production. A green updater run only means the update PR was created or refreshed; operators must not interpret it as proof that the new media bundle passed the byte-download canaries.
 
 Required GitHub secrets:
 
@@ -473,6 +506,11 @@ Required GitHub secrets:
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 - `HETZNER_PROCESS_AUDIO_SSH_TARGET`
 - `HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY`
+
+Required deployment-canary variables (pass them to the smoke-test workflow step):
+
+- `PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL`
+- `PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL`
 
 If the updater needs to be paused, disable the workflow in GitHub Actions rather than changing the VM by hand.
 
@@ -484,12 +522,14 @@ Important Hetzner defaults:
 - `YOUTUBE_BROWSER_FALLBACK_URL=`
 - `YOUTUBE_FINAL_BROWSER_FALLBACK_URL=`
 - `YOUTUBE_FORCE_IPV4=false`
-- `YTDLP_POT_PROVIDER_BASE_URL=http://ytdlp-pot-provider:4416`
+- `YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=false`
+- `YTDLP_POT_PROVIDER_BASE_URL=http://ytdlp-pot-provider-<environment>:4416`
 
 This is intentional:
 
 - Cloud Run stays simple for normal file uploads
-- Hetzner owns the `yt-dlp` + `ffmpeg` + shared browser-cookie YouTube path
+- Hetzner owns the guest-first `yt-dlp` + `ffmpeg` path
+- the shared browser session remains an authenticated fallback, not a prerequisite for public extraction
 
 ## Failure Handling
 

@@ -21,7 +21,15 @@ const logFile = process.env.FAKE_YTDLP_LOG_FILE;
 if (logFile) {
   fs.appendFileSync(
     logFile,
-    `${JSON.stringify({ args, hasCookies, isJson, isHealthcheck, isDirectUrl, isSectionDownload, hasFormatSelector })}\n`
+    `${JSON.stringify({
+      args,
+      hasCookies,
+      isJson,
+      isHealthcheck,
+      isDirectUrl,
+      isSectionDownload,
+      hasFormatSelector,
+    })}\n`
   );
 }
 
@@ -116,10 +124,7 @@ function buildPostLiveMuxedJson() {
         abr: 96,
         protocol: 'm3u8_native',
         url: 'https://example.com/post-live.m3u8',
-        fragments: [
-          { url: 'https://example.com/live-frag-1.ts' },
-          { url: 'https://example.com/live-frag-2.ts' },
-        ],
+        fragments: [{ url: 'https://example.com/live-frag-1.ts' }, { url: 'https://example.com/live-frag-2.ts' }],
       },
     ],
   };
@@ -132,20 +137,7 @@ function ensureLocalM4aFixture() {
   if (!fs.existsSync(fixturePath)) {
     const result = spawnSync(
       'ffmpeg',
-      [
-        '-y',
-        '-f',
-        'lavfi',
-        '-i',
-        'anullsrc=r=44100:cl=mono',
-        '-t',
-        '2',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        fixturePath,
-      ],
+      ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', '-c:a', 'aac', '-b:a', '128k', fixturePath],
       { stdio: 'ignore' }
     );
 
@@ -168,13 +160,16 @@ switch (scenario) {
     if (isSectionDownload) {
       succeedSectionDownload();
     }
+    if (outputTemplate) {
+      succeedSectionDownload();
+    }
     process.exit(0);
     break;
 
   case 'public_bot_cookie_stale':
     if (!hasCookies) {
       fail(
-        "WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing\nERROR: [youtube] testvideo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication."
+        'WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing\nERROR: [youtube] testvideo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.'
       );
     }
 
@@ -182,7 +177,7 @@ switch (scenario) {
       succeedJson(buildAudioJsonWithUrl(`file://${ensureLocalM4aFixture()}`));
     }
 
-    if (isHealthcheck || isJson || isDirectUrl || isSectionDownload) {
+    if (isHealthcheck || isJson || isDirectUrl || isSectionDownload || outputTemplate) {
       fail('ERROR: [youtube] testvideo: The page needs to be reloaded.');
     }
     process.exit(1);
@@ -200,6 +195,9 @@ switch (scenario) {
       succeedDirectUrl();
     }
     if (isSectionDownload) {
+      succeedSectionDownload();
+    }
+    if (outputTemplate) {
       succeedSectionDownload();
     }
     process.exit(0);
