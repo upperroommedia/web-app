@@ -33,11 +33,11 @@ The task queue used for YouTube-backed process-audio work.
 _Avoid_: Video queue
 
 **Deferred YouTube Request**:
-A YouTube request held while the YouTube queue is blocked or waiting for a probe.
+A Process Audio Request with a YouTube Source held while its YouTube Dependency Scope is blocked or waiting for a probe.
 _Avoid_: Paused job, delayed job
 
 **YouTube Queue State**:
-The shared state describing whether YouTube processing is blocked, probing, or healthy.
+The shared state describing whether each YouTube Dependency Scope is blocked, probing, or healthy.
 _Avoid_: Queue metadata, worker state
 
 **Probe Mode**:
@@ -63,3 +63,15 @@ _Avoid_: Environment, target
 **Operational Failure Class**:
 The classified reason a YouTube or process-audio operation failed and may need alerting.
 _Avoid_: Error type, failure reason
+
+**YouTube Dependency Scope**:
+The dependency whose recovery can make a Deferred YouTube Request runnable again. Contract values are `guest_provider` and `authenticated_session`.
+_Avoid_: Failure lane, queue partition
+
+**Authentication Waiting Disposition**:
+The retryable `WAITING_FOR_YOUTUBE_AUTH` disposition for a Deferred YouTube Request that needs recovery of the shared authenticated dependency used by the Cookie Provider and Browser Fallback. It is not a terminal sermon audio status.
+_Avoid_: Auth failure status, login error
+
+**YouTube Acquisition Evidence**:
+The recorded Public Provider and Cookie Provider authorities attempted for a Process Audio Request, their Operational Failure Classes, and whether authentication recovery is required. Browser Fallback evidence remains in Probe Mode and YouTube Queue State.
+_Avoid_: Download log, retry history
