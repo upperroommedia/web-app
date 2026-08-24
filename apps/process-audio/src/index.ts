@@ -47,6 +47,7 @@ import {
   buildYouTubeReadinessSnapshot,
   clampYouTubeMediaByteCanaryIntervalMs,
   createNonOverlappingAsyncTaskRunner,
+  createSerializedAsyncTaskRunner,
   getTerminalYouTubeAcquisitionFailureClass,
   isFreshSuccessfulYouTubeMediaByteCanary,
   isLoopbackRemoteAddress,
@@ -54,6 +55,7 @@ import {
   parseYtDlpPoTokenProviderDiscovery,
   shouldReplacePersistedYouTubeMediaByteCanary,
   validateYouTubeMediaByteCanaryReport,
+  validateYouTubeMediaByteCanaryRunRequest,
   YOUTUBE_MEDIA_BYTE_CANARIES_PATH,
   type YouTubeMediaByteCanaryDiagnostic,
   type YouTubeMediaByteCanaryReport,
@@ -289,6 +291,51 @@ async function reconcileFromFreshAuthenticatedCanary(
   });
 }
 
+const youtubeMediaByteCanaryExecution = createSerializedAsyncTaskRunner();
+
+async function executeYouTubeMediaByteCanary(
+  scope: YouTubeMediaByteCanaryReport['scope']
+): Promise<{ report: YouTubeMediaByteCanaryReport; committed: boolean }> {
+  return youtubeMediaByteCanaryExecution.run(async () => {
+    if (!youtubeProcessingEnabled || runtimeProfile !== 'hetzner' || !ytdlpPath) {
+      throw new Error('YouTube media-byte canaries are available only on the Hetzner YouTube worker.');
+    }
+    const operation = scope === 'guest' ? 'youtube-guest-media-canary' : 'youtube-auth-media-canary';
+    const report =
+      scope === 'guest'
+        ? await runGuestYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation))
+        : await runAuthenticatedYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, operation));
+    if (report.scope !== scope) {
+      throw new Error(`YouTube media-byte canary returned scope ${report.scope}; expected ${scope}.`);
+    }
+
+    const persisted = await persistYouTubeMediaByteCanaryReport(report);
+    if (persisted.committed && scope === 'authenticated') {
+      try {
+        await reconcileFromFreshAuthenticatedCanary(report, 'youtube-auth-canary-recovery');
+      } catch (error) {
+        logger.error('Authenticated media-byte canary succeeded but deferred queue reconciliation failed', {
+          checkedAt: report.checkedAt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    logger.info(
+      persisted.committed
+        ? 'Completed YouTube media-byte canary'
+        : 'Ignored out-of-order YouTube media-byte canary result',
+      {
+        scope,
+        checkedAt: report.checkedAt,
+        succeeded: report.succeeded,
+        bytesDownloaded: report.bytesDownloaded,
+        failureClass: report.failureClass,
+      }
+    );
+    return persisted;
+  });
+}
+
 function startYouTubeMediaByteCanaryScheduler(): void {
   if (
     !youtubeProcessingEnabled ||
@@ -305,34 +352,9 @@ function startYouTubeMediaByteCanaryScheduler(): void {
     return;
   }
 
-  const runAndPersistCanary = async (
-    scope: YouTubeMediaByteCanaryReport['scope'],
-    runCanary: () => Promise<YouTubeMediaByteCanaryReport>
-  ): Promise<void> => {
+  const runAndPersistCanary = async (scope: YouTubeMediaByteCanaryReport['scope']): Promise<void> => {
     try {
-      const report = await runCanary();
-      if (report.scope !== scope) {
-        throw new Error(`YouTube media-byte canary returned scope ${report.scope}; expected ${scope}.`);
-      }
-      const persisted = await persistYouTubeMediaByteCanaryReport(report);
-      if (!persisted.committed) {
-        logger.info('Ignored out-of-order YouTube media-byte canary result', {
-          scope,
-          checkedAt: report.checkedAt,
-          succeeded: report.succeeded,
-        });
-        return;
-      }
-      if (scope === 'authenticated') {
-        await reconcileFromFreshAuthenticatedCanary(report, 'youtube-auth-canary-recovery');
-      }
-      logger.info('Completed YouTube media-byte canary', {
-        scope,
-        checkedAt: report.checkedAt,
-        succeeded: report.succeeded,
-        bytesDownloaded: report.bytesDownloaded,
-        failureClass: report.failureClass,
-      });
+      await executeYouTubeMediaByteCanary(scope);
     } catch (error) {
       logger.error('YouTube media-byte canary execution failed', {
         scope,
@@ -345,18 +367,10 @@ function startYouTubeMediaByteCanaryScheduler(): void {
     // Keep these sequential so the two probes cannot compete for yt-dlp,
     // provider, browser-profile, or network resources on the worker.
     if (guestYouTubeCanaryUrl) {
-      await runAndPersistCanary('guest', () =>
-        runGuestYouTubeMediaByteCanary(ytdlpPath, realtimeDB, createContext(undefined, 'youtube-guest-media-canary'))
-      );
+      await runAndPersistCanary('guest');
     }
     if (authenticatedYouTubeCanaryUrl) {
-      await runAndPersistCanary('authenticated', () =>
-        runAuthenticatedYouTubeMediaByteCanary(
-          ytdlpPath,
-          realtimeDB,
-          createContext(undefined, 'youtube-auth-media-canary')
-        )
-      );
+      await runAndPersistCanary('authenticated');
     }
   });
 
@@ -582,7 +596,8 @@ if (isDevelopment) {
 logger.info('Initializing ffmpeg');
 getFFmpegPath(); // Initialize and verify ffmpeg is available
 
-void recoverOrphanedHetznerProcessAudioStateOnStartup()
+let startupRecoverySettled = false;
+const startupRecoveryPromise = recoverOrphanedHetznerProcessAudioStateOnStartup()
   .then(() => {
     logger.info('Service ready');
   })
@@ -593,9 +608,11 @@ void recoverOrphanedHetznerProcessAudioStateOnStartup()
     logger.info('Service ready');
   })
   .finally(() => {
+    startupRecoverySettled = true;
     startDeferredYouTubeAuthReconciler();
     startYouTubeMediaByteCanaryScheduler();
   });
+void startupRecoveryPromise;
 
 app.get('/', (req, res) => {
   const VERSION = '1.1.0';
@@ -649,6 +666,33 @@ app.get('/healthz', async (req, res) => {
     externalDownloaderVersion,
     concurrency: getProcessAudioConcurrencyConfig(),
   });
+});
+
+app.post('/internal/youtube-canary/run', async (req, res) => {
+  if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+    res.status(403).json({ error: 'This endpoint is available only from the local process-audio runtime.' });
+    return;
+  }
+
+  let scope: YouTubeMediaByteCanaryReport['scope'];
+  try {
+    scope = validateYouTubeMediaByteCanaryRunRequest(req.body).scope;
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    return;
+  }
+
+  try {
+    await startupRecoveryPromise;
+    const result = await executeYouTubeMediaByteCanary(scope);
+    res.status(200).json(result);
+  } catch (error) {
+    logger.error('Failed to execute requested YouTube media-byte canary', {
+      scope,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(500).json({ error: 'Failed to execute requested YouTube media-byte canary.' });
+  }
 });
 
 app.post('/internal/youtube-canary', async (req, res) => {
@@ -737,6 +781,20 @@ async function getYouTubeProviderDiagnostic(): Promise<YouTubeProviderDiagnostic
 }
 
 app.get('/readyz', async (req, res) => {
+  if (!startupRecoverySettled) {
+    res.status(503).json({
+      service: 'process-audio',
+      revision: process.env.K_REVISION || 'local',
+      checkedAt: new Date().toISOString(),
+      liveness: { ok: true },
+      serviceReadiness: {
+        ready: false,
+        reasonCodes: ['STARTUP_RECOVERY_IN_PROGRESS'],
+        degradedScopes: [],
+      },
+    });
+    return;
+  }
   try {
     const disabledQueue = {
       guest: { blocked: false as const, blockerReason: null, depth: 0 as const, oldestDeferredAt: null },

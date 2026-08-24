@@ -4,6 +4,7 @@ import {
   buildYouTubeReadinessSnapshot,
   clampYouTubeMediaByteCanaryIntervalMs,
   createNonOverlappingAsyncTaskRunner,
+  createSerializedAsyncTaskRunner,
   getTerminalYouTubeAcquisitionFailureClass,
   isLoopbackRemoteAddress,
   isFreshSuccessfulYouTubeMediaByteCanary,
@@ -11,6 +12,7 @@ import {
   parseYtDlpPoTokenProviderDiscovery,
   shouldReplacePersistedYouTubeMediaByteCanary,
   validateYouTubeMediaByteCanaryReport,
+  validateYouTubeMediaByteCanaryRunRequest,
   type BuildYouTubeReadinessSnapshotInput,
 } from '../src/youtubeReadiness';
 
@@ -752,6 +754,18 @@ assert.equal(clampYouTubeMediaByteCanaryIntervalMs(1), 60_000);
 assert.equal(clampYouTubeMediaByteCanaryIntervalMs(7 * 60 * 1000), 7 * 60 * 1000);
 assert.equal(clampYouTubeMediaByteCanaryIntervalMs(30 * 60 * 1000), 10 * 60 * 1000);
 
+assert.deepEqual(validateYouTubeMediaByteCanaryRunRequest({ scope: 'guest' }), { scope: 'guest' });
+assert.deepEqual(validateYouTubeMediaByteCanaryRunRequest({ scope: 'authenticated' }), { scope: 'authenticated' });
+for (const invalidRunRequest of [
+  null,
+  {},
+  { scope: 'unknown' },
+  { scope: 'guest', youtubeUrl: 'https://www.youtube.com/watch?v=secret' },
+  { scope: 'authenticated', cookies: 'credential-bearing-value' },
+]) {
+  assert.throws(() => validateYouTubeMediaByteCanaryRunRequest(invalidRunRequest));
+}
+
 void (async () => {
   let taskCallCount = 0;
   let releaseFirstRun: (() => void) | undefined;
@@ -774,6 +788,30 @@ void (async () => {
   assert.equal(taskRunner.isRunning(), false);
   assert.equal(await taskRunner.run(), true);
   assert.equal(taskCallCount, 2);
+
+  const serializedEvents: string[] = [];
+  let releaseSerializedFirst: (() => void) | undefined;
+  const serializedFirstBlocked = new Promise<void>((resolve) => {
+    releaseSerializedFirst = resolve;
+  });
+  const serializedRunner = createSerializedAsyncTaskRunner();
+  const serializedFirst = serializedRunner.run(async () => {
+    serializedEvents.push('first-start');
+    await serializedFirstBlocked;
+    serializedEvents.push('first-end');
+    return 'first-result';
+  });
+  const serializedSecond = serializedRunner.run(async () => {
+    serializedEvents.push('second');
+    return 'second-result';
+  });
+  await Promise.resolve();
+  assert.deepEqual(serializedEvents, ['first-start']);
+  releaseSerializedFirst?.();
+  assert.deepEqual(await Promise.all([serializedFirst, serializedSecond]), ['first-result', 'second-result']);
+  assert.deepEqual(serializedEvents, ['first-start', 'first-end', 'second']);
+  await assert.rejects(serializedRunner.run(async () => Promise.reject(new Error('expected task failure'))));
+  assert.equal(await serializedRunner.run(async () => 'recovered-after-failure'), 'recovered-after-failure');
 
   process.stdout.write('youtube readiness verification passed\n');
 })().catch((error) => {

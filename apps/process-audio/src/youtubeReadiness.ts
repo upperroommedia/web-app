@@ -54,6 +54,10 @@ export interface YouTubeMediaByteCanaryReport {
   failureClass: string | null;
 }
 
+export interface YouTubeMediaByteCanaryRunRequest {
+  scope: YouTubeMediaByteCanaryScope;
+}
+
 export interface YouTubeQueueDiagnostic {
   blocked: boolean;
   blockerReason: string | null;
@@ -132,6 +136,10 @@ export interface NonOverlappingAsyncTaskRunner {
   isRunning(): boolean;
 }
 
+export interface SerializedAsyncTaskRunner {
+  run<T>(task: () => Promise<T>): Promise<T>;
+}
+
 export const clampYouTubeMediaByteCanaryIntervalMs = (configuredIntervalMs: number): number =>
   Math.min(10 * 60 * 1000, Math.max(60_000, configuredIntervalMs));
 
@@ -157,6 +165,20 @@ export const createNonOverlappingAsyncTaskRunner = (task: () => Promise<void>): 
   };
 };
 
+export const createSerializedAsyncTaskRunner = (): SerializedAsyncTaskRunner => {
+  let tail: Promise<void> = Promise.resolve();
+  return {
+    run: <T>(task: () => Promise<T>): Promise<T> => {
+      const result = tail.then(task);
+      tail = result.then(
+        () => undefined,
+        () => undefined
+      );
+      return result;
+    },
+  };
+};
+
 const ageFromIsoTimestamp = (timestamp: string | null, checkedAtMs: number): number | null => {
   if (!timestamp || !Number.isFinite(Date.parse(timestamp))) return null;
   const ageMs = checkedAtMs - Date.parse(timestamp);
@@ -164,12 +186,31 @@ const ageFromIsoTimestamp = (timestamp: string | null, checkedAtMs: number): num
 };
 
 const CANARY_REPORT_KEYS = ['bytesDownloaded', 'checkedAt', 'failureClass', 'scope', 'succeeded'] as const;
+const CANARY_RUN_REQUEST_KEYS = ['scope'] as const;
 const FAILURE_CLASS_PATTERN = /^[a-z][a-z0-9_]{0,79}$/u;
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 const DEFAULT_CANARY_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+};
+
+export const validateYouTubeMediaByteCanaryRunRequest = (value: unknown): YouTubeMediaByteCanaryRunRequest => {
+  const record = asRecord(value);
+  if (!record) {
+    throw new Error('YouTube media-byte canary run request must be a JSON object.');
+  }
+  const keys = Object.keys(record).sort();
+  if (
+    keys.length !== CANARY_RUN_REQUEST_KEYS.length ||
+    keys.some((key, index) => key !== CANARY_RUN_REQUEST_KEYS[index])
+  ) {
+    throw new Error('YouTube media-byte canary run request must contain only: scope.');
+  }
+  if (record.scope !== 'guest' && record.scope !== 'authenticated') {
+    throw new Error('YouTube media-byte canary run scope must be guest or authenticated.');
+  }
+  return { scope: record.scope };
 };
 
 export const getTerminalYouTubeAcquisitionFailureClass = (evidence: unknown): 'account_required_content' | null => {

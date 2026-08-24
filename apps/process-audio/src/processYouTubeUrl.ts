@@ -1123,7 +1123,10 @@ async function triggerBrowserYoutubeRefresh(
           }
           break;
         } catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          // The host watcher writes a small JSON result file in place. A poll can
+          // observe that file between open(2) and the final write, so treat a
+          // transient partial JSON document the same as a not-yet-created result.
+          if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT' && !(error instanceof SyntaxError)) {
             throw error;
           }
         }
@@ -1970,6 +1973,7 @@ export async function runAuthenticatedYouTubeMediaByteCanary(
   const canaryUrl = getYouTubeMediaByteCanaryUrl('PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL');
   let cookieContext: YouTubeCookieContext | undefined;
   let workDir: string | undefined;
+  let lastFailureMode: YouTubeExtractionMode = 'cookie_provider';
 
   try {
     if (!canaryUrl) {
@@ -2063,11 +2067,12 @@ export async function runAuthenticatedYouTubeMediaByteCanary(
         };
       } catch (fallbackError) {
         lastError = fallbackError;
+        lastFailureMode = 'browser_fallback';
       }
     }
     throw lastError;
   } catch (error) {
-    return mediaByteCanaryFailure('authenticated', error, 'cookie_provider');
+    return mediaByteCanaryFailure('authenticated', error, lastFailureMode);
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
     if (cookieContext?.cookiesFilePath) await unlink(cookieContext.cookiesFilePath).catch(() => {});

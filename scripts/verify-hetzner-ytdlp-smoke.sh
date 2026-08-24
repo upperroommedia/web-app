@@ -2,22 +2,19 @@
 
 set -euo pipefail
 
-GUEST_RATE_LIMIT_PATTERN='http error 429'
-GUEST_FALLBACK_PATTERN="sign in to confirm (you're|you’re) not a bot|login_required|the page needs to be reloaded"
+GUEST_AUTH_RESOLVABLE_FAILURE_CLASSES='public_path_bot_blocked account_required_content'
 
 if [[ "${1:-}" == "--self-test-classifier" ]]; then
-  rate_limit_fixture='ERROR: HTTP Error 429: Too Many Requests'
-  login_fixture='ERROR: LOGIN_REQUIRED'
-  if printf '%s\n' "$rate_limit_fixture" | grep -Eiq "$GUEST_FALLBACK_PATTERN" \
-    || ! printf '%s\n' "$rate_limit_fixture" | grep -Eiq "$GUEST_RATE_LIMIT_PATTERN"; then
-    echo "Classifier self-test failed: HTTP 429 must fail without authenticated fallback" >&2
-    exit 1
-  fi
-  if ! printf '%s\n' "$login_fixture" | grep -Eiq "$GUEST_FALLBACK_PATTERN"; then
-    echo "Classifier self-test failed: LOGIN_REQUIRED must allow authenticated fallback" >&2
-    exit 1
-  fi
-  echo "YouTube smoke classifier self-test passed"
+  smoke_source="$(<"${BASH_SOURCE[0]}")"
+  legacy_cookie_flag='--cookies-from-'"browser"
+  legacy_runner='run_media_'"canary"
+  [[ " $GUEST_AUTH_RESOLVABLE_FAILURE_CLASSES " == *' public_path_bot_blocked '* ]]
+  [[ " $GUEST_AUTH_RESOLVABLE_FAILURE_CLASSES " == *' account_required_content '* ]]
+  [[ " $GUEST_AUTH_RESOLVABLE_FAILURE_CLASSES " != *' rate_limited '* ]]
+  [[ "$smoke_source" == *'/internal/youtube-canary/run'* ]]
+  [[ "$smoke_source" != *"$legacy_cookie_flag"* ]]
+  [[ "$smoke_source" != *"$legacy_runner"* ]]
+  echo "YouTube application-canary smoke contract self-test passed"
   exit 0
 fi
 
@@ -32,7 +29,6 @@ SSH_TARGET="${PROCESS_AUDIO_HETZNER_SSH_TARGET:-}"
 REMOTE_DIR="${PROCESS_AUDIO_HETZNER_REMOTE_DIR:-/opt/upperroom/process-audio-hetzner}"
 PUBLIC_SMOKE_URL="${PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL:-${PROCESS_AUDIO_HETZNER_SMOKE_YOUTUBE_URL:-}}"
 AUTH_SMOKE_URL="${PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL:-}"
-SMOKE_SECTION_SECONDS="${PROCESS_AUDIO_HETZNER_SMOKE_SECTION_SECONDS:-8}"
 MEDIA_RUNTIME_VERSION_FILE="$ROOT_DIR/ops/process-audio-hetzner/media-runtime-versions.env"
 
 [[ -f "$MEDIA_RUNTIME_VERSION_FILE" ]] || { echo "Missing media runtime version contract: $MEDIA_RUNTIME_VERSION_FILE" >&2; exit 65; }
@@ -72,11 +68,6 @@ fi
 if [[ -z "$AUTH_SMOKE_URL" ]]; then
   echo "PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL is required and must identify an owned, account-visible canary" >&2
   exit 67
-fi
-
-if ! [[ "$SMOKE_SECTION_SECONDS" =~ ^[0-9]+$ ]] || (( SMOKE_SECTION_SECONDS < 2 || SMOKE_SECTION_SECONDS > 30 )); then
-  echo "PROCESS_AUDIO_HETZNER_SMOKE_SECTION_SECONDS must be an integer from 2 through 30" >&2
-  exit 68
 fi
 
 for smoke_url in "$PUBLIC_SMOKE_URL" "$AUTH_SMOKE_URL"; do
@@ -145,30 +136,30 @@ HOST_EOF
 
 public_smoke_url_b64="$(printf '%s' "$PUBLIC_SMOKE_URL" | base64 | tr -d '\n')"
 auth_smoke_url_b64="$(printf '%s' "$AUTH_SMOKE_URL" | base64 | tr -d '\n')"
-guest_rate_limit_pattern_b64="$(printf '%s' "$GUEST_RATE_LIMIT_PATTERN" | base64 | tr -d '\n')"
-guest_fallback_pattern_b64="$(printf '%s' "$GUEST_FALLBACK_PATTERN" | base64 | tr -d '\n')"
+guest_auth_resolvable_classes_b64="$(printf '%s' "$GUEST_AUTH_RESOLVABLE_FAILURE_CLASSES" | base64 | tr -d '\n')"
 
 ssh "$SSH_TARGET" \
   "docker exec -i \
     -e PUBLIC_SMOKE_URL_B64='${public_smoke_url_b64}' \
     -e AUTH_SMOKE_URL_B64='${auth_smoke_url_b64}' \
-    -e SMOKE_SECTION_SECONDS='${SMOKE_SECTION_SECONDS}' \
     -e EXPECTED_YTDLP_VERSION='${EXPECTED_YTDLP_VERSION}' \
     -e EXPECTED_BGUTIL_VERSION='${EXPECTED_BGUTIL_VERSION}' \
-    -e GUEST_RATE_LIMIT_PATTERN_B64='${guest_rate_limit_pattern_b64}' \
-    -e GUEST_FALLBACK_PATTERN_B64='${guest_fallback_pattern_b64}' \
+    -e GUEST_AUTH_RESOLVABLE_CLASSES_B64='${guest_auth_resolvable_classes_b64}' \
     '${CONTAINER_NAME}' /bin/bash -s" <<'CONTAINER_EOF'
 set -euo pipefail
 
 public_smoke_url="$(printf '%s' "$PUBLIC_SMOKE_URL_B64" | base64 -d)"
 auth_smoke_url="$(printf '%s' "$AUTH_SMOKE_URL_B64" | base64 -d)"
-guest_rate_limit_pattern="$(printf '%s' "$GUEST_RATE_LIMIT_PATTERN_B64" | base64 -d)"
-guest_fallback_pattern="$(printf '%s' "$GUEST_FALLBACK_PATTERN_B64" | base64 -d)"
+guest_auth_resolvable_classes="$(printf '%s' "$GUEST_AUTH_RESOLVABLE_CLASSES_B64" | base64 -d)"
 provider_base_url="${YTDLP_POT_PROVIDER_BASE_URL:?YTDLP_POT_PROVIDER_BASE_URL is required}"
-browser_profile_dir="${PROCESS_AUDIO_BROWSER_PROFILE_DIR:?PROCESS_AUDIO_BROWSER_PROFILE_DIR is required for authenticated fallback smoke}"
-browser_name="${PROCESS_AUDIO_BROWSER_PROFILE_BROWSER:-chrome}"
-section_spec="*0-${SMOKE_SECTION_SECONDS}"
-max_duration_seconds=$((SMOKE_SECTION_SECONDS + 8))
+[[ "${PROCESS_AUDIO_YOUTUBE_GUEST_CANARY_URL:-}" == "$public_smoke_url" ]] || {
+  echo "Worker guest canary URL does not match the deployment input" >&2
+  exit 1
+}
+[[ "${PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL:-}" == "$auth_smoke_url" ]] || {
+  echo "Worker authenticated canary URL does not match the deployment input" >&2
+  exit 1
+}
 
 actual_ytdlp_version="$(yt-dlp --version)"
 [[ "$actual_ytdlp_version" == "$EXPECTED_YTDLP_VERSION" ]] || {
@@ -192,7 +183,7 @@ credential_path=/workspace/logs/firebase-service-account.json
   exit 1
 }
 
-provider_ping="$(curl -fsS "${provider_base_url}/ping")"
+provider_ping="$(curl -fsS --connect-timeout 5 --max-time 10 "${provider_base_url}/ping")"
 python3 - "$provider_ping" "$EXPECTED_BGUTIL_VERSION" <<'PY'
 import json
 import sys
@@ -202,194 +193,116 @@ if payload.get('version') != sys.argv[2]:
     raise SystemExit(f"provider /ping version mismatch: expected {sys.argv[2]}, got {payload.get('version')}")
 PY
 
-report_canary() {
+trigger_application_canary() {
   local scope="$1"
-  local succeeded="$2"
-  local bytes_downloaded="$3"
-  local failure_class="$4"
-  local checked_at
-  checked_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  python3 - "$scope" "$checked_at" "$succeeded" "$bytes_downloaded" "$failure_class" <<'PY' \
-    | curl -fsS -X POST \
-        -H 'content-type: application/json' \
-        --data-binary @- \
-        http://127.0.0.1:8080/internal/youtube-canary >/dev/null
+  local response
+  response="$(curl -fsS --connect-timeout 5 --max-time 360 -X POST \
+    -H 'content-type: application/json' \
+    --data-binary "{\"scope\":\"${scope}\"}" \
+    http://127.0.0.1:8080/internal/youtube-canary/run)"
+  python3 - "$response" "$scope" "$guest_auth_resolvable_classes" <<'PY'
+import datetime
 import json
 import sys
 
-scope, checked_at, succeeded, bytes_downloaded, failure_class = sys.argv[1:]
-json.dump({
-    'scope': scope,
-    'checkedAt': checked_at,
-    'succeeded': succeeded == 'true',
-    'bytesDownloaded': int(bytes_downloaded),
-    'failureClass': failure_class or None,
-}, sys.stdout, separators=(',', ':'))
+payload = json.loads(sys.argv[1])
+scope = sys.argv[2]
+allowed_guest_failures = set(sys.argv[3].split())
+if set(payload) != {'report', 'committed'} or payload.get('committed') is not True:
+    raise SystemExit(f'{scope} application canary was not transactionally committed')
+report = payload.get('report')
+if not isinstance(report, dict) or set(report) != {
+    'scope', 'checkedAt', 'succeeded', 'bytesDownloaded', 'failureClass'
+}:
+    raise SystemExit(f'{scope} application canary returned an invalid report')
+if report['scope'] != scope or not isinstance(report['succeeded'], bool):
+    raise SystemExit(f'{scope} application canary returned an invalid scope/status')
+if not isinstance(report['bytesDownloaded'], int) or isinstance(report['bytesDownloaded'], bool):
+    raise SystemExit(f'{scope} application canary returned invalid byte evidence')
+datetime.datetime.fromisoformat(report['checkedAt'].replace('Z', '+00:00'))
+if report['succeeded']:
+    if report['bytesDownloaded'] <= 0 or report['failureClass'] is not None:
+        raise SystemExit(f'{scope} application canary succeeded without valid media-byte evidence')
+elif scope == 'guest':
+    if report['bytesDownloaded'] != 0 or report['failureClass'] not in allowed_guest_failures:
+        raise SystemExit(
+            f"guest application canary failed with non-resolvable class {report['failureClass']!r}"
+        )
+else:
+    raise SystemExit(
+        f"authenticated application recovery canary failed: {report['failureClass']!r}"
+    )
+print(json.dumps(payload, separators=(',', ':')))
 PY
 }
 
-redact_log() {
-  sed -E 's/(po_token=[^+[:space:];]+\+)[^[:space:];]+/\1[redacted]/g' "$1" >&2
-}
+guest_trigger="$(trigger_application_canary guest)"
+echo "Application guest canary produced accepted media-byte evidence or a classified auth-resolvable restriction"
+authenticated_trigger="$(trigger_application_canary authenticated)"
+echo "Application authenticated canary completed the production recovery policy with media bytes"
 
-verify_media_artifact() {
-  local mode="$1"
-  local media_file="$2"
-  local probe_json="$3"
-  verified_media_bytes=0
-  [[ -s "$media_file" ]] || { echo "${mode} smoke produced no media bytes" >&2; return 1; }
-  ffprobe -v error -show_entries format=duration,size -of json "$media_file" > "$probe_json"
-  python3 - "$probe_json" "$mode" "$max_duration_seconds" <<'PY'
+readiness="$(curl -fsS --connect-timeout 5 --max-time 15 http://127.0.0.1:8080/readyz)"
+python3 - "$guest_trigger" "$authenticated_trigger" "$readiness" "$EXPECTED_BGUTIL_VERSION" "$guest_auth_resolvable_classes" <<'PY'
+import datetime
 import json
 import sys
 
-with open(sys.argv[1], encoding='utf-8') as handle:
-    result = json.load(handle)
-details = result.get('format') or {}
-duration = float(details.get('duration') or 0)
-size = int(details.get('size') or 0)
-maximum = float(sys.argv[3])
-if not 0 < duration <= maximum:
-    raise SystemExit(f'{sys.argv[2]} smoke duration out of bounds: {duration}s (max {maximum}s)')
-if size < 1024:
-    raise SystemExit(f'{sys.argv[2]} smoke artifact is unexpectedly small: {size} bytes')
-print(f'{sys.argv[2]} media canary passed: duration={duration:.3f}s size={size} bytes')
+guest_trigger = json.loads(sys.argv[1])['report']
+auth_trigger = json.loads(sys.argv[2])['report']
+readiness = json.loads(sys.argv[3])
+expected_provider_version = sys.argv[4]
+allowed_guest_failures = set(sys.argv[5].split())
+
+def parsed_time(value):
+    return datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+
+def core(report):
+    return {key: report.get(key) for key in (
+        'scope', 'checkedAt', 'succeeded', 'bytesDownloaded', 'failureClass'
+    )}
+
+def acceptable(scope, report):
+    if report.get('succeeded') is True:
+        return report.get('bytesDownloaded', 0) > 0 and report.get('failureClass') is None
+    return (
+        scope == 'guest'
+        and report.get('bytesDownloaded') == 0
+        and report.get('failureClass') in allowed_guest_failures
+    )
+
+def assert_monotonic(scope, triggered, persisted):
+    if persisted.get('scope') not in (None, scope):
+        raise SystemExit(f'{scope} readiness evidence has the wrong scope')
+    triggered_at = parsed_time(triggered['checkedAt'])
+    persisted_at = parsed_time(persisted['checkedAt'])
+    if persisted_at < triggered_at:
+        raise SystemExit(f'{scope} readiness evidence predates the triggered application canary')
+    if persisted_at == triggered_at:
+        persisted_core = core(persisted)
+        persisted_core['scope'] = scope
+        if persisted_core != triggered:
+            raise SystemExit(f'{scope} readiness evidence conflicts with its triggered report')
+    elif not acceptable(scope, persisted):
+        raise SystemExit(f'newer {scope} readiness evidence does not satisfy deployment acceptance')
+
+provider = readiness.get('provider') or {}
+if not (
+    provider.get('configured') is True
+    and provider.get('discovered') is True
+    and provider.get('reachable') is True
+    and provider.get('version') == expected_provider_version
+):
+    raise SystemExit(f'provider readiness contract failed: {provider!r}')
+if (readiness.get('serviceReadiness') or {}).get('ready') is not True:
+    raise SystemExit(f"service readiness failed: {(readiness.get('serviceReadiness') or {}).get('reasonCodes')!r}")
+capabilities = readiness.get('capabilities') or {}
+assert_monotonic('guest', guest_trigger, (capabilities.get('guest') or {}).get('mediaByteCanary') or {})
+assert_monotonic(
+    'authenticated',
+    auth_trigger,
+    (capabilities.get('authenticated') or {}).get('mediaByteCanary') or {},
+)
+print('Application canary reports are committed, monotonic, byte-valid, and readiness-gated')
 PY
-  verified_media_bytes="$(stat -c %s "$media_file")"
-}
-
-run_media_canary() {
-  local mode="$1"
-  local smoke_url="$2"
-  local temp_dir stderr_log stdout_log status media_file scope failure_class
-  if [[ "$mode" == "public_provider" ]]; then
-    scope=guest
-  else
-    scope=authenticated
-  fi
-  temp_dir="$(mktemp -d "/tmp/process-audio-${mode}-smoke.XXXXXX")"
-  stderr_log="${temp_dir}/yt-dlp.stderr.log"
-  stdout_log="${temp_dir}/yt-dlp.stdout.log"
-
-  echo "Running bounded YouTube media canary: attemptMode=${mode} sectionSeconds=${SMOKE_SECTION_SECONDS}"
-  set +e
-  if [[ "$mode" == "public_provider" ]]; then
-    timeout 180 yt-dlp -v \
-      --no-playlist \
-      --no-cache-dir \
-      --no-part \
-      --no-continue \
-      --no-js-runtimes --js-runtimes deno \
-      --download-sections "$section_spec" \
-      --force-keyframes-at-cuts \
-      -f 'ba[ext=m4a]/ba[ext=webm]/ba' \
-      -o "${temp_dir}/canary.%(ext)s" \
-      --extractor-args 'youtube:player_client=default,mweb,-web_creator' \
-      --extractor-args "youtubepot-bgutilhttp:base_url=${provider_base_url}" \
-      "$smoke_url" >"$stdout_log" 2>"$stderr_log"
-    status=$?
-  else
-    timeout 180 yt-dlp -v \
-      --no-playlist \
-      --no-cache-dir \
-      --no-part \
-      --no-continue \
-      --no-js-runtimes --js-runtimes deno \
-      --cookies-from-browser "${browser_name}:${browser_profile_dir}" \
-      --download-sections "$section_spec" \
-      --force-keyframes-at-cuts \
-      -f 'ba[ext=m4a]/ba[ext=webm]/ba' \
-      -o "${temp_dir}/canary.%(ext)s" \
-      --extractor-args 'youtube:player_client=default,mweb,-web_creator' \
-      --extractor-args "youtubepot-bgutilhttp:base_url=${provider_base_url}" \
-      "$smoke_url" >"$stdout_log" 2>"$stderr_log"
-    status=$?
-  fi
-  set -e
-
-  grep -F "PO Token Providers: bgutil:http-${EXPECTED_BGUTIL_VERSION}" "$stderr_log" >/dev/null || {
-    echo "${mode} smoke did not discover bgutil:http-${EXPECTED_BGUTIL_VERSION}" >&2
-    redact_log "$stderr_log"
-    report_canary "$scope" false 0 provider_unhealthy || true
-    rm -rf "$temp_dir"
-    return 1
-  }
-
-  if (( status != 0 )); then
-    if [[ "$mode" == "public_provider" ]] && grep -Eiq "$guest_rate_limit_pattern" "$stderr_log"; then
-      echo "public_provider was rate limited; authenticated fallback is not eligible" >&2
-      redact_log "$stderr_log"
-      report_canary guest false 0 rate_limited || true
-      rm -rf "$temp_dir"
-      return 1
-    fi
-    if [[ "$mode" == "public_provider" ]] && grep -Eiq "$guest_fallback_pattern" "$stderr_log"; then
-      if grep -Eiq "login_required" "$stderr_log"; then
-        failure_class=account_required_content
-      else
-        failure_class=public_path_bot_blocked
-      fi
-      echo "public_provider encountered a recognized guest restriction; authenticated fallback is eligible"
-      redact_log "$stderr_log"
-      report_canary guest false 0 "$failure_class" || {
-        rm -rf "$temp_dir"
-        return 1
-      }
-      rm -rf "$temp_dir"
-      return 10
-    fi
-    echo "${mode} yt-dlp media canary failed with exit code ${status}" >&2
-    redact_log "$stderr_log"
-    if [[ "$scope" == guest ]]; then failure_class=unclassified_error; else failure_class=authenticated_media_failed; fi
-    report_canary "$scope" false 0 "$failure_class" || true
-    rm -rf "$temp_dir"
-    return 1
-  fi
-
-  if [[ "$mode" == "public_provider" ]]; then
-    if grep -F -- '--cookies-from-browser' "$stderr_log" >/dev/null; then
-      echo "Public smoke unexpectedly used browser cookies" >&2
-      report_canary guest false 0 mode_contract_violation || true
-      rm -rf "$temp_dir"
-      return 1
-    fi
-  elif ! grep -F -- '--cookies-from-browser' "$stderr_log" >/dev/null; then
-    echo "Authenticated smoke did not use the configured browser profile" >&2
-    report_canary authenticated false 0 mode_contract_violation || true
-    rm -rf "$temp_dir"
-    return 1
-  fi
-
-  media_file="$(find "$temp_dir" -maxdepth 1 -type f ! -name '*.log' ! -name 'ffprobe.json' -print -quit)"
-  [[ -n "$media_file" ]] || {
-    echo "${mode} smoke did not create a media artifact" >&2
-    report_canary "$scope" false 0 invalid_media_artifact || true
-    rm -rf "$temp_dir"
-    return 1
-  }
-  if ! verify_media_artifact "$mode" "$media_file" "${temp_dir}/ffprobe.json"; then
-    report_canary "$scope" false 0 invalid_media_artifact || true
-    rm -rf "$temp_dir"
-    return 1
-  fi
-  report_canary "$scope" true "$verified_media_bytes" "" || {
-    rm -rf "$temp_dir"
-    return 1
-  }
-  rm -rf "$temp_dir"
-}
-
-if run_media_canary public_provider "$public_smoke_url"; then
-  echo "Public canary completed through the cookie-free guest path"
-else
-  public_status=$?
-  if (( public_status != 10 )); then
-    exit "$public_status"
-  fi
-  run_media_canary public_cookie_fallback "$public_smoke_url"
-  echo "Public canary completed through classified authenticated fallback"
-fi
-run_media_canary cookie_provider "$auth_smoke_url"
-curl -fsS http://127.0.0.1:8080/readyz >/dev/null
-echo "Hetzner yt-dlp public and authenticated media smoke tests passed"
+echo "Hetzner application guest and authenticated recovery canaries passed"
 CONTAINER_EOF

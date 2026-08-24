@@ -458,6 +458,16 @@ upload_remote_release() {
   local incoming_dir="${REMOTE_DIR}/state/deploy-incoming/${DEPLOYMENT_ID}"
   ssh "$SSH_TARGET" "mkdir -p '${incoming_dir}'"
   rsync -az --no-owner --no-group --delete "$WORK_DIR/" "${SSH_TARGET}:${incoming_dir}/"
+  ssh "$SSH_TARGET" "bash -s -- '${incoming_dir}'" <<'REMOTE_SECURE_INCOMING_EOF'
+set -euo pipefail
+incoming_dir="$1"
+for env_file in "${incoming_dir}"/env/*.env; do
+  [[ -e "$env_file" ]] || continue
+  chmod 600 "$env_file"
+  chown "$(id -u):$(id -g)" "$env_file"
+  [[ "$(stat -c %a "$env_file")" == 600 && "$(stat -c %u "$env_file")" == "$(id -u)" ]]
+done
+REMOTE_SECURE_INCOMING_EOF
 }
 
 activate_remote_release() {

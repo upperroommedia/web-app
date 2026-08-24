@@ -114,6 +114,29 @@ async function runCase(testCase) {
     delete process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR;
     delete process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER;
   }
+  let browserRefreshWatcher;
+  let browserRefreshAcknowledgements = 0;
+  const browserRefreshControlDir = path.join(artifactsDir, `${testCase.name}.browser-refresh-control`);
+  if (testCase.browserRefreshControl) {
+    fs.rmSync(browserRefreshControlDir, { recursive: true, force: true });
+    fs.mkdirSync(browserRefreshControlDir, { recursive: true });
+    process.env.PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR = browserRefreshControlDir;
+    process.env.PROCESS_AUDIO_BROWSER_REFRESH_WAIT_MS = '10';
+    browserRefreshWatcher = setInterval(() => {
+      for (const name of fs.readdirSync(browserRefreshControlDir).filter((value) => value.endsWith('.request.json'))) {
+        const requestPath = path.join(browserRefreshControlDir, name);
+        const resultPath = requestPath.replace(/\.request\.json$/, '.result.json');
+        if (fs.existsSync(resultPath)) continue;
+        const temporaryResultPath = `${resultPath}.tmp`;
+        fs.writeFileSync(temporaryResultPath, JSON.stringify({ ok: true, refreshedAt: new Date().toISOString() }));
+        fs.renameSync(temporaryResultPath, resultPath);
+        browserRefreshAcknowledgements += 1;
+      }
+    }, 10);
+  } else {
+    delete process.env.PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR;
+    delete process.env.PROCESS_AUDIO_BROWSER_REFRESH_WAIT_MS;
+  }
   const logFile = path.join(artifactsDir, `${testCase.name}.attempts.jsonl`);
   process.env.FAKE_YTDLP_LOG_FILE = logFile;
   fs.rmSync(logFile, { force: true });
@@ -171,6 +194,9 @@ async function runCase(testCase) {
     artifact.status = 'ok';
     artifact.result = result;
     artifact.youtubeSuccessfulAcquisitionAuthority = ctx.youtubeSuccessfulAcquisitionAuthority || null;
+    artifact.youtubeCookieRefreshAttempted = ctx.youtubeCookieRefreshAttempted || false;
+    artifact.youtubeCookieRefreshSucceeded = ctx.youtubeCookieRefreshSucceeded || false;
+    artifact.browserRefreshAcknowledgements = browserRefreshAcknowledgements;
     artifact.cookieMeta = realtimeDb._store['yt-dlp-cookies-meta'] || null;
     artifact.attempts = fs.existsSync(logFile)
       ? fs
@@ -192,6 +218,9 @@ async function runCase(testCase) {
     artifact.error = error instanceof Error ? error.message : String(error);
     artifact.youtubeAcquisitionEvidence = error?.youtubeAcquisitionEvidence || null;
     artifact.youtubeSuccessfulAcquisitionAuthority = ctx.youtubeSuccessfulAcquisitionAuthority || null;
+    artifact.youtubeCookieRefreshAttempted = ctx.youtubeCookieRefreshAttempted || false;
+    artifact.youtubeCookieRefreshSucceeded = ctx.youtubeCookieRefreshSucceeded || false;
+    artifact.browserRefreshAcknowledgements = browserRefreshAcknowledgements;
     artifact.cookieMeta = realtimeDb._store['yt-dlp-cookies-meta'] || null;
     artifact.attempts = fs.existsSync(logFile)
       ? fs
@@ -208,6 +237,7 @@ async function runCase(testCase) {
       testCase.assertError(artifact.error, artifact.cookieMeta, artifact);
     }
   } finally {
+    if (browserRefreshWatcher) clearInterval(browserRefreshWatcher);
     delete process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR;
     delete process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER;
     delete process.env.YTDLP_DOWNLOAD_STALL_TIMEOUT_MS;
@@ -215,7 +245,10 @@ async function runCase(testCase) {
     delete process.env.PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL;
     delete process.env.PROCESS_AUDIO_YOUTUBE_GUEST_CANARY_URL;
     delete process.env.PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_TIMEOUT_MS;
+    delete process.env.PROCESS_AUDIO_BROWSER_REFRESH_CONTROL_DIR;
+    delete process.env.PROCESS_AUDIO_BROWSER_REFRESH_WAIT_MS;
     delete process.env.FAKE_YTDLP_LOG_FILE;
+    fs.rmSync(browserRefreshControlDir, { recursive: true, force: true });
     const artifactPath = path.join(artifactsDir, `${testCase.name}.json`);
     fs.writeFileSync(artifactPath, JSON.stringify(artifact, null, 2));
   }
@@ -482,6 +515,55 @@ const cases = [
       );
       if (cookieAttempt < 0 || browserAttempt <= cookieAttempt) {
         throw new Error('authenticated-media-byte-canary-browser-fallback did not preserve cookie-browser order');
+      }
+    },
+  },
+  {
+    name: 'authenticated-media-byte-canary-refresh-then-browser-fallback',
+    kind: 'authCanary',
+    scenario: 'public_bot_cookie_stale',
+    browserFallback: true,
+    browserProfileCookies: true,
+    browserRefreshControl: true,
+    authCanaryUrl: 'https://www.youtube.com/watch?v=testvideo',
+    realtimeDb: {},
+    assert(result, _cookieMeta, artifact) {
+      if (
+        result.scope !== 'authenticated' ||
+        result.succeeded !== true ||
+        result.bytesDownloaded <= 0 ||
+        result.failureClass !== null
+      ) {
+        throw new Error(
+          `authenticated-media-byte-canary-refresh-then-browser-fallback returned an invalid report: ${JSON.stringify(
+            result
+          )}`
+        );
+      }
+      if (
+        artifact.youtubeCookieRefreshAttempted !== true ||
+        artifact.youtubeCookieRefreshSucceeded !== true ||
+        artifact.browserRefreshAcknowledgements !== 1
+      ) {
+        throw new Error(
+          'authenticated-media-byte-canary-refresh-then-browser-fallback did not complete the host refresh handshake'
+        );
+      }
+      const attempts = artifact.attempts || [];
+      const cookieAttempts = attempts
+        .map((attempt, index) => ({ attempt, index }))
+        .filter(({ attempt }) => attempt.hasCookies && attempt.isSectionDownload);
+      const browserAttempt = attempts.findIndex(
+        (attempt) => attempt.isJson && attempt.hasCookies && !attempt.hasExtractorArgs
+      );
+      if (
+        cookieAttempts.length !== 2 ||
+        cookieAttempts[0].index >= cookieAttempts[1].index ||
+        browserAttempt <= cookieAttempts[1].index
+      ) {
+        throw new Error(
+          'authenticated-media-byte-canary-refresh-then-browser-fallback did not preserve cookie-refresh-cookie-browser order'
+        );
       }
     },
   },

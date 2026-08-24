@@ -15,6 +15,20 @@ ROLLBACK_ROOT="$REMOTE_DIR/state/deploy-rollback/$DEPLOYMENT_ID"
 SNAPSHOT_ROOT="$ROLLBACK_ROOT/config-before"
 mkdir -p "$MOCK_BIN" "$MOCK_DOCKER_STATE/services" "$SNAPSHOT_ROOT/env" "$SNAPSHOT_ROOT/context" "$REMOTE_DIR/env" "$REMOTE_DIR/context" "$REMOTE_DIR/.deploy-lock"
 
+python3 - "$DEPLOY_SCRIPT" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1]).read_text()
+browser_function = source.split('ensure_browser_auth_stack() {', 1)[1].split('\nstaging_hostname=', 1)[0]
+env_function = source.split('write_env_file() {', 1)[1].split('\ncase "$TARGET_ENV"', 1)[0]
+upload_function = source.split('upload_remote_release() {', 1)[1].split('\nactivate_remote_release() {', 1)[0]
+assert 'env_file_name' not in browser_function, 'ensure_browser_auth_stack references write_env_file local state'
+assert 'chmod 600 "$WORK_DIR/env/$env_file_name"' in env_function, 'generated env is not secured immediately'
+assert '--no-owner --no-group' in upload_function, 'rsync may preserve an unsafe local owner'
+assert 'REMOTE_SECURE_INCOMING_EOF' in upload_function, 'incoming env is not explicitly secured before activation'
+PY
+
 extract_rollback_program() {
   awk '
     /<<.REMOTE_ROLLBACK_EOF./ { copying = 1; next }
@@ -24,6 +38,25 @@ extract_rollback_program() {
 }
 extract_rollback_program >"$TEST_DIR/rollback-program.sh"
 [[ -s "$TEST_DIR/rollback-program.sh" ]] || { echo "Could not extract remote rollback program" >&2; exit 1; }
+
+awk '
+  /<<.REMOTE_SECURE_INCOMING_EOF./ { copying = 1; next }
+  copying && /^REMOTE_SECURE_INCOMING_EOF$/ { exit }
+  copying { print }
+' "$DEPLOY_SCRIPT" >"$TEST_DIR/secure-incoming-program.sh"
+mkdir -p "$TEST_DIR/incoming/env"
+printf 'sensitive-value\n' >"$TEST_DIR/incoming/env/process-audio-staging.env"
+chmod 644 "$TEST_DIR/incoming/env/process-audio-staging.env"
+cat >"$MOCK_BIN/stat" <<'MOCK_STAT_EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == -c && "${2:-}" == %a ]]; then exec /usr/bin/stat -f %Lp "$3"; fi
+if [[ "${1:-}" == -c && "${2:-}" == %u ]]; then exec /usr/bin/stat -f %u "$3"; fi
+exec /usr/bin/stat "$@"
+MOCK_STAT_EOF
+chmod +x "$MOCK_BIN/stat"
+PATH="$MOCK_BIN:$PATH" bash "$TEST_DIR/secure-incoming-program.sh" "$TEST_DIR/incoming"
+[[ "$(stat -f %Lp "$TEST_DIR/incoming/env/process-audio-staging.env" 2>/dev/null || stat -c %a "$TEST_DIR/incoming/env/process-audio-staging.env")" == 600 ]]
+[[ "$(stat -f %u "$TEST_DIR/incoming/env/process-audio-staging.env" 2>/dev/null || stat -c %u "$TEST_DIR/incoming/env/process-audio-staging.env")" == "$(id -u)" ]]
 
 for relative_path in compose.yaml .env Caddyfile README.md media-runtime-versions.env; do
   printf 'previous-%s\n' "$relative_path" >"$SNAPSHOT_ROOT/$relative_path"
