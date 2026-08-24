@@ -28,14 +28,46 @@ jobs:
         name: Resolve latest stable media runtime versions
         run: |
           set -euo pipefail
-          current_ytdlp_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG YT_DLP_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate YT_DLP_VERSION in Dockerfile'; print(match.group(1).strip())")"
-          current_ffmpeg_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG FFMPEG_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate FFMPEG_VERSION in Dockerfile'; print(match.group(1).strip())")"
-          current_deno_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG DENO_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate DENO_VERSION in Dockerfile'; print(match.group(1).strip())")"
-          current_pot_provider_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/process-audio/Dockerfile').read_text(); match = re.search(r'^ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate BGUTIL_YTDLP_POT_PROVIDER_VERSION in Dockerfile'; print(match.group(1).strip())")"
-          current_pot_provider_ref="$(python3 -c "import re, pathlib; text = pathlib.Path('ops/process-audio-hetzner/compose.yaml').read_text(); assert 'ytdlp-pot-provider-staging:' in text and 'ytdlp-pot-provider-production:' in text, 'Expected split staging/production provider services'; matches = re.findall(r'^\s+image:\s+docker\.io/brainicism/bgutil-ytdlp-pot-provider:([^@\s]+)@(sha256:[0-9a-f]{64})\s*$', text, re.MULTILINE); assert len(matches) == 2 and len(set(matches)) == 1, 'Expected both provider services to use one pinned version and OCI digest'; print('@'.join(matches[0]))")"
-          current_pot_provider_image_version="${current_pot_provider_ref%@*}"
-          current_pot_provider_digest="${current_pot_provider_ref#*@}"
+          set -a
+          source ops/process-audio-hetzner/media-runtime-versions.env
+          set +a
+          current_ytdlp_version="$PROCESS_AUDIO_YTDLP_VERSION"
+          current_ffmpeg_version="$PROCESS_AUDIO_FFMPEG_VERSION"
+          current_deno_version="$PROCESS_AUDIO_DENO_VERSION"
+          current_pot_provider_version="$PROCESS_AUDIO_BGUTIL_VERSION"
+          current_pot_provider_image_version="$(python3 -c "import os, re; image = os.environ['PROCESS_AUDIO_BGUTIL_IMAGE']; match = re.fullmatch(r'docker\.io/brainicism/bgutil-ytdlp-pot-provider:([^@]+)@(sha256:[0-9a-f]{64})', image); assert match, 'Invalid provider image in media runtime version contract'; print(match.group(1))")"
+          current_pot_provider_digest="${PROCESS_AUDIO_BGUTIL_IMAGE##*@}"
           current_playwright_version="$(python3 -c "import re, pathlib; text = pathlib.Path('apps/browser-fallback/Dockerfile').read_text(); match = re.search(r'^ARG PLAYWRIGHT_VERSION=(.+)$', text, re.MULTILINE); assert match, 'Could not locate PLAYWRIGHT_VERSION in Dockerfile'; print(match.group(1).strip())")"
+          process_runtime_contract_current="$(python3 - <<'PY'
+          import os, pathlib, re
+          common_expected = {
+              'YT_DLP_VERSION': os.environ['PROCESS_AUDIO_YTDLP_VERSION'],
+              'DENO_VERSION': os.environ['PROCESS_AUDIO_DENO_VERSION'],
+              'BGUTIL_YTDLP_POT_PROVIDER_VERSION': os.environ['PROCESS_AUDIO_BGUTIL_VERSION'],
+          }
+          dockerfile_paths = [
+              pathlib.Path('apps/process-audio/Dockerfile'),
+              pathlib.Path('apps/browser-fallback/Dockerfile'),
+              pathlib.Path('Dockerfile.browser-fallback-cloudflare'),
+          ]
+          dockerfile_matches = all(
+              re.search(rf'^ARG {name}={re.escape(value)}$', path.read_text(), re.MULTILINE)
+              for path in dockerfile_paths
+              for name, value in common_expected.items()
+          )
+          process_dockerfile = dockerfile_paths[0].read_text()
+          dockerfile_matches = dockerfile_matches and bool(re.search(
+              rf'^ARG FFMPEG_VERSION={re.escape(os.environ["PROCESS_AUDIO_FFMPEG_VERSION"])}$',
+              process_dockerfile,
+              re.MULTILINE,
+          ))
+          compose = pathlib.Path('ops/process-audio-hetzner/compose.yaml').read_text()
+          compose_matches = compose.count('image: ${PROCESS_AUDIO_BGUTIL_IMAGE:?PROCESS_AUDIO_BGUTIL_IMAGE is required}') == 2
+          smoke = pathlib.Path('scripts/verify-hetzner-ytdlp-smoke.sh').read_text()
+          smoke_matches = 'media-runtime-versions.env' in smoke and 'EXPECTED_YTDLP_VERSION="${PROCESS_AUDIO_YTDLP_VERSION:' in smoke
+          print('true' if dockerfile_matches and compose_matches and smoke_matches else 'false')
+          PY
+          )"
 
           latest_ytdlp_version="$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | python3 -c "import json, sys; data = json.load(sys.stdin); tag = (data.get('tag_name') or '').strip(); assert tag, 'No latest yt-dlp release tag found'; print(tag.lstrip('v'))")"
           latest_ffmpeg_version="$(curl -fsSL https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest | python3 -c "import json, re, sys; data = json.load(sys.stdin); names = {asset.get('name', '') for asset in data.get('assets', [])}; versions = []; pattern = re.compile(r'^ffmpeg-n([0-9]+(?:\\.[0-9]+){1,2})-latest-linux64-gpl-\\1\\.tar\\.xz$'); [versions.append(match.group(1)) for name in names for match in [pattern.match(name)] if match and f'ffmpeg-n{match.group(1)}-latest-linuxarm64-gpl-{match.group(1)}.tar.xz' in names]; assert versions, 'No compatible BtbN ffmpeg release assets found'; print(sorted(set(versions), key=lambda s: [int(x) for x in s.split('.')])[-1])")"
@@ -45,14 +77,14 @@ jobs:
           latest_pot_provider_digest="$(curl -fsSI -H "Authorization: Bearer ${provider_registry_token}" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://registry-1.docker.io/v2/brainicism/bgutil-ytdlp-pot-provider/manifests/${latest_pot_provider_version}" | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }')"
           [[ "$latest_pot_provider_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Could not resolve OCI digest for bgutil provider ${latest_pot_provider_version}" >&2; exit 1; }
           expected_pot_provider_image="docker.io/brainicism/bgutil-ytdlp-pot-provider:${latest_pot_provider_version}@${latest_pot_provider_digest}"
-          pot_provider_refs_current="$(EXPECTED_POT_PROVIDER_IMAGE="$expected_pot_provider_image" python3 -c "import os, pathlib; expected = os.environ['EXPECTED_POT_PROVIDER_IMAGE']; files = {'apps/process-audio/compose.dev.yaml': 1, 'apps/process-audio/compose.youtube-test.yaml': 1, 'ops/process-audio-hetzner/compose.yaml': 2}; print('true' if all(pathlib.Path(path).read_text().count(f'image: {expected}') == count for path, count in files.items()) else 'false')")"
+          pot_provider_refs_current="$(EXPECTED_POT_PROVIDER_IMAGE="$expected_pot_provider_image" python3 -c "import os, pathlib; expected = os.environ['EXPECTED_POT_PROVIDER_IMAGE']; files = {'apps/process-audio/compose.dev.yaml': 1, 'apps/process-audio/compose.youtube-test.yaml': 1}; print('true' if all(pathlib.Path(path).read_text().count(f'image: {expected}') == count for path, count in files.items()) else 'false')")"
           latest_playwright_version="$(curl -fsSL https://registry.npmjs.org/playwright/latest | python3 -c "import json, sys; data = json.load(sys.stdin); version = (data.get('version') or '').strip(); assert version, 'No latest Playwright version found'; print(version)")"
           for arch in linux64 linuxarm64; do
             curl -fsSI "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n${latest_ffmpeg_version}-latest-${arch}-gpl-${latest_ffmpeg_version}.tar.xz" >/dev/null
           done
 
           should_update=false
-          if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" || "$current_deno_version" != "$latest_deno_version" || "$current_pot_provider_version" != "$latest_pot_provider_version" || "$current_pot_provider_image_version" != "$latest_pot_provider_version" || "$current_pot_provider_digest" != "$latest_pot_provider_digest" || "$pot_provider_refs_current" != "true" || "$current_playwright_version" != "$latest_playwright_version" ]]; then
+          if [[ "$current_ytdlp_version" != "$latest_ytdlp_version" || "$current_ffmpeg_version" != "$latest_ffmpeg_version" || "$current_deno_version" != "$latest_deno_version" || "$current_pot_provider_version" != "$latest_pot_provider_version" || "$current_pot_provider_image_version" != "$latest_pot_provider_version" || "$current_pot_provider_digest" != "$latest_pot_provider_digest" || "$pot_provider_refs_current" != "true" || "$process_runtime_contract_current" != "true" || "$current_playwright_version" != "$latest_playwright_version" ]]; then
             should_update=true
           fi
 
@@ -69,6 +101,7 @@ jobs:
             echo "current_pot_provider_digest=$current_pot_provider_digest"
             echo "latest_pot_provider_digest=$latest_pot_provider_digest"
             echo "pot_provider_refs_current=$pot_provider_refs_current"
+            echo "process_runtime_contract_current=$process_runtime_contract_current"
             echo "current_playwright_version=$current_playwright_version"
             echo "latest_playwright_version=$latest_playwright_version"
             echo "should_update=$should_update"
@@ -91,12 +124,23 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json, os, pathlib, re
+          version_contract_path = pathlib.Path('ops/process-audio-hetzner/media-runtime-versions.env')
+          version_contract = (
+              '# Process-audio media runtime release contract.\n'
+              '# Keep this file shell-compatible: deploy, smoke, Compose, and the nightly updater consume it.\n'
+              f"PROCESS_AUDIO_YTDLP_VERSION={os.environ['LATEST_YTDLP_VERSION']}\n"
+              f"PROCESS_AUDIO_FFMPEG_VERSION={os.environ['LATEST_FFMPEG_VERSION']}\n"
+              f"PROCESS_AUDIO_DENO_VERSION={os.environ['LATEST_DENO_VERSION']}\n"
+              f"PROCESS_AUDIO_BGUTIL_VERSION={os.environ['LATEST_POT_PROVIDER_VERSION']}\n"
+              f"PROCESS_AUDIO_BGUTIL_IMAGE=docker.io/brainicism/bgutil-ytdlp-pot-provider:{os.environ['LATEST_POT_PROVIDER_VERSION']}@{os.environ['LATEST_POT_PROVIDER_DIGEST']}\n"
+          )
+          changed = version_contract_path.read_text() != version_contract
+          version_contract_path.write_text(version_contract)
           dockerfiles = [
               pathlib.Path('apps/process-audio/Dockerfile'),
               pathlib.Path('apps/browser-fallback/Dockerfile'),
               pathlib.Path('Dockerfile.browser-fallback-cloudflare'),
           ]
-          changed = False
           for path in dockerfiles:
               text = path.read_text()
               updated = re.sub(r'(^ARG YT_DLP_VERSION=).+$', rf"\g<1>{os.environ['LATEST_YTDLP_VERSION']}", text, flags=re.MULTILINE)
@@ -124,7 +168,6 @@ jobs:
           for path in [
               pathlib.Path('apps/process-audio/compose.dev.yaml'),
               pathlib.Path('apps/process-audio/compose.youtube-test.yaml'),
-              pathlib.Path('ops/process-audio-hetzner/compose.yaml'),
           ]:
               text = path.read_text()
               updated = re.sub(
@@ -132,13 +175,11 @@ jobs:
                   provider_image,
                   text,
               )
-              if path == pathlib.Path('ops/process-audio-hetzner/compose.yaml'):
-                  assert 'ytdlp-pot-provider-staging:' in updated, 'Missing staging provider service'
-                  assert 'ytdlp-pot-provider-production:' in updated, 'Missing production provider service'
-                  assert updated.count(f'image: {provider_image}') == 2, 'Expected both provider services to use the pinned image'
               if updated != text:
                   path.write_text(updated)
                   changed = True
+          ops_compose = pathlib.Path('ops/process-audio-hetzner/compose.yaml').read_text()
+          assert ops_compose.count('image: ${PROCESS_AUDIO_BGUTIL_IMAGE:?PROCESS_AUDIO_BGUTIL_IMAGE is required}') == 2, 'Hetzner Compose must consume the shared provider image contract'
           assert changed, 'Pinned media runtime files did not change during version bump'
           PY
           npm install --global pnpm@10.10.0
@@ -160,7 +201,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch_name"
-          git add apps/process-audio/Dockerfile apps/browser-fallback/Dockerfile Dockerfile.browser-fallback-cloudflare apps/process-audio/compose.dev.yaml apps/process-audio/compose.youtube-test.yaml ops/process-audio-hetzner/compose.yaml apps/browser-fallback/package.json apps/web/package.json pnpm-lock.yaml
+          git add ops/process-audio-hetzner/media-runtime-versions.env apps/process-audio/Dockerfile apps/browser-fallback/Dockerfile Dockerfile.browser-fallback-cloudflare apps/process-audio/compose.dev.yaml apps/process-audio/compose.youtube-test.yaml ops/process-audio-hetzner/compose.yaml apps/browser-fallback/package.json apps/web/package.json pnpm-lock.yaml
           git commit -m "Bump pinned media runtimes"
           git push --force-with-lease origin HEAD:"$branch_name"
 

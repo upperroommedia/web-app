@@ -167,13 +167,29 @@ switch (scenario) {
     break;
 
   case 'public_bot_cookie_stale':
+  case 'public_bot_cookie_and_browser_stale':
+  case 'public_bot_cookie_browser_account_required':
+  case 'public_account_cookie_stale_browser_ok':
     if (!hasCookies) {
+      if (scenario === 'public_account_cookie_stale_browser_ok') {
+        fail('ERROR: [youtube] testvideo: This video is private.');
+      }
       fail(
         'WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing\nERROR: [youtube] testvideo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.'
       );
     }
 
-    if (isJson && isHealthcheck && !hasExtractorArgs) {
+    if (scenario === 'public_bot_cookie_browser_account_required' && isJson && isHealthcheck && !hasExtractorArgs) {
+      fail('ERROR: [youtube] testvideo: This video is private.');
+    }
+
+    if (
+      scenario !== 'public_bot_cookie_and_browser_stale' &&
+      scenario !== 'public_bot_cookie_browser_account_required' &&
+      isJson &&
+      isHealthcheck &&
+      !hasExtractorArgs
+    ) {
       succeedJson(buildAudioJsonWithUrl(`file://${ensureLocalM4aFixture()}`));
     }
 
@@ -234,6 +250,14 @@ switch (scenario) {
       succeedDirectUrl();
     }
     stallAfterPartialDownload();
+    break;
+
+  case 'authenticated_canary_stall':
+    if (isSectionDownload) {
+      stallAfterPartialDownload();
+      break;
+    }
+    fail('ERROR: canary stall scenario requires a section download');
     break;
 
   default:

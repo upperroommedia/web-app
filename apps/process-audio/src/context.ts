@@ -1,9 +1,12 @@
 import { randomUUID } from 'crypto';
 
+export type YouTubeSuccessfulAcquisitionAuthority = 'public_provider' | 'cookie_provider' | 'browser_fallback';
+
 export interface LogContext {
   requestId: string;
   sermonId?: string;
   operation?: string;
+  youtubeSuccessfulAcquisitionAuthority?: YouTubeSuccessfulAcquisitionAuthority;
   [key: string]: string | number | boolean | undefined;
 }
 

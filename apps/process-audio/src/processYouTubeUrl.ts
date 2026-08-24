@@ -10,7 +10,7 @@ import { access, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'fs/promi
 import { Database } from 'firebase-admin/database';
 import { GoogleAuth } from 'google-auth-library';
 import { createLoggerWithContext } from './WinstonLogger';
-import { LogContext } from './context';
+import { LogContext, YouTubeSuccessfulAcquisitionAuthority } from './context';
 import { ensureSafeTempPath, getFFmpegPath } from './utils';
 import dns from 'node:dns/promises';
 import firebaseAdmin from './firebaseAdmin';
@@ -30,6 +30,7 @@ import type {
   BrowserFallbackRequest,
   BrowserFallbackResolveAudioUrlResponse,
 } from '@upperroom/contracts/browserFallback';
+import type { YouTubeMediaByteCanaryReport } from './youtubeReadiness';
 import { isValidBrowserPoToken, isYouTubeMedia403, mergeBrowserPoTokenExtractorArg } from './youtubeBrowserPoToken';
 
 interface ObservedOutboundIdentity {
@@ -192,9 +193,11 @@ interface YouTubeAccessDecision {
 }
 
 export interface YouTubeAcquisitionEvidence {
-  attemptedModes: Array<'public_provider' | 'cookie_provider'>;
+  attemptedModes: YouTubeExtractionMode[];
   guestFailureClass?: string;
   authenticatedFailureClass?: string;
+  browserFallbackFailureClass?: string;
+  terminalFailureClass?: 'account_required_content';
   requiresAuthenticationRecovery: boolean;
 }
 
@@ -209,6 +212,26 @@ function attachYouTubeAcquisitionEvidence(
   const acquisitionError = (error instanceof Error ? error : new Error(String(error))) as YouTubeAcquisitionError;
   acquisitionError.youtubeAcquisitionEvidence = evidence;
   return acquisitionError;
+}
+
+async function recordSuccessfulYouTubeAcquisition(
+  filePath: string,
+  authority: YouTubeSuccessfulAcquisitionAuthority,
+  ctx?: LogContext
+): Promise<string> {
+  const safeFilePath = ensureSafeTempPath(filePath);
+  const fileStats = await stat(safeFilePath);
+  if (!fileStats.isFile() || fileStats.size <= 0) {
+    throw buildAnnotatedYouTubeError(
+      `YouTube ${authority} acquisition did not produce a nonempty media file.`,
+      authority
+    );
+  }
+
+  if (ctx) {
+    ctx.youtubeSuccessfulAcquisitionAuthority = authority;
+  }
+  return safeFilePath;
 }
 
 export const YTDLP_HTTP_USER_AGENT =
@@ -477,7 +500,7 @@ function shouldUseCookiesForPublicVideos(): boolean {
     return value === '1' || value === 'true' || value === 'yes';
   }
 
-  return Boolean(getLocalBrowserProfileDir());
+  return false;
 }
 
 function getYtDlpExternalDownloader(): string | undefined {
@@ -1159,6 +1182,13 @@ function shouldUseBrowserFallbackForPublicFailure(message: string): boolean {
   return shouldEscalateToBrowserFallback(analyzeYouTubeFailure(message, 'public_provider'), isBrowserFallbackEnabled());
 }
 
+function shouldUseBrowserFallbackForGuestFailure(message: string, failureClass: YouTubeFailureClass): boolean {
+  return (
+    shouldUseBrowserFallbackForPublicFailure(message) ||
+    (failureClass === 'account_required_content' && isBrowserFallbackEnabled())
+  );
+}
+
 async function runCommandWithCapture(
   command: string,
   args: string[],
@@ -1309,6 +1339,8 @@ function cleanupCookiesFile(cookiesFilePath: string | undefined, cleaned: { done
 const COOKIE_SAFE_YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,-web_creator';
 const POT_ENABLED_YOUTUBE_EXTRACTOR_ARGS = 'youtube:player_client=default,mweb,-web_creator';
 const DEFAULT_YOUTUBE_COOKIE_VALIDATION_URL = 'https://www.youtube.com/watch?v=BaW_jenozKc';
+const AUTHENTICATED_MEDIA_BYTE_CANARY_DURATION_SECONDS = 3;
+const AUTHENTICATED_MEDIA_BYTE_CANARY_TIMEOUT_MS = 45_000;
 const DEFAULT_YTDLP_DOWNLOAD_STALL_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_YTDLP_DOWNLOAD_STALL_POLL_INTERVAL_MS = 15 * 1000;
 
@@ -1337,6 +1369,12 @@ function getYtdlpDownloadStallPollIntervalMs(): number {
     process.env.YTDLP_DOWNLOAD_STALL_POLL_INTERVAL_MS,
     DEFAULT_YTDLP_DOWNLOAD_STALL_POLL_INTERVAL_MS
   );
+}
+
+function getAuthenticatedMediaByteCanaryTimeoutMs(): number {
+  const configured = Number.parseInt(process.env.PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_TIMEOUT_MS || '', 10);
+  if (!Number.isFinite(configured) || configured <= 0) return AUTHENTICATED_MEDIA_BYTE_CANARY_TIMEOUT_MS;
+  return Math.min(Math.max(configured, 100), AUTHENTICATED_MEDIA_BYTE_CANARY_TIMEOUT_MS);
 }
 
 function shouldDisableInnertubeForPoTokenProvider(): boolean {
@@ -1743,6 +1781,296 @@ export async function validateConfiguredYouTubeCookies(
     };
   } finally {
     cleanupCookiesFile(cookieContext.cookiesFilePath, { done: false });
+  }
+}
+
+function getYouTubeMediaByteCanaryUrl(envName: string): YouTubeUrl | null {
+  const configuredUrl = process.env[envName]?.trim();
+  if (!configuredUrl) return null;
+
+  try {
+    const parsed = new URL(configuredUrl);
+    const hostname = parsed.hostname.toLowerCase();
+    const isYouTubeHost = hostname === 'youtu.be' || hostname === 'youtube.com' || hostname.endsWith('.youtube.com');
+    if (parsed.protocol !== 'https:' || !isYouTubeHost) return null;
+    return configuredUrl as YouTubeUrl;
+  } catch {
+    return null;
+  }
+}
+
+async function runBoundedMediaByteCanaryCommand(
+  ytdlpPath: string,
+  args: string[],
+  mode: 'public_provider' | 'cookie_provider'
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(ytdlpPath, args);
+    let stderr = '';
+    let timedOut = false;
+    let settled = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGTERM');
+      forceKillTimer = setTimeout(() => proc.kill('SIGKILL'), 2_000);
+    }, getAuthenticatedMediaByteCanaryTimeoutMs());
+
+    const settle = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (error) reject(error);
+      else resolve();
+    };
+
+    proc.stderr?.on('data', (data) => {
+      if (stderr.length < 50_000) stderr += data.toString();
+    });
+    proc.stdout?.resume();
+    proc.on('error', (error) => settle(new Error(`YouTube media-byte canary spawn failed: ${error.message}`)));
+    proc.on('close', (code, signal) => {
+      if (timedOut) {
+        const timeoutError = new Error('YouTube media-byte canary timed out.') as Error & {
+          canaryFailureClass?: string;
+        };
+        timeoutError.canaryFailureClass =
+          mode === 'public_provider' ? 'guest_media_canary_timeout' : 'authenticated_media_canary_timeout';
+        settle(timeoutError);
+        return;
+      }
+      if (code === 0) {
+        settle();
+        return;
+      }
+      settle(
+        buildAnnotatedYouTubeError(
+          `YouTube media-byte canary exited with code ${code}${
+            signal ? ` (signal: ${signal})` : ''
+          }. stderr: ${stderr.trim()}`,
+          mode
+        )
+      );
+    });
+  });
+}
+
+function buildMediaByteCanaryArgs(
+  outputBase: string,
+  canaryUrl: YouTubeUrl,
+  mode: 'public_provider' | 'cookie_provider',
+  log: ReturnType<typeof createLoggerWithContext>,
+  cookieArgs: string[] = []
+): string[] {
+  const args = [
+    '--ignore-config',
+    '-f',
+    getPreferredDirectAudioFormatSelector(),
+    '--no-playlist',
+    '--download-sections',
+    '*0:00-0:03',
+    '--force-keyframes-at-cuts',
+    '-o',
+    `${outputBase}.%(ext)s`,
+    '--no-part',
+    '--no-continue',
+    '-x',
+  ];
+  applyPreferredIpFamilyArgs(args);
+  args.push(...cookieArgs, '--no-js-runtimes', '--js-runtimes', getPreferredYtDlpJsRuntime());
+  applyYouTubeExtractorArgs(args, mode, log);
+  args.push(canaryUrl);
+  return args;
+}
+
+async function measureMediaByteCanaryOutput(outputBase: string): Promise<number> {
+  const safeBase = ensureSafeTempPath(outputBase);
+  const dir = path.dirname(safeBase);
+  const prefix = path.basename(safeBase);
+  let bytes = 0;
+  for (const name of fs.readdirSync(dir).filter((value) => value.startsWith(prefix) && !value.endsWith('.part'))) {
+    const outputStats = await stat(ensureSafeTempPath(path.join(dir, name)));
+    if (outputStats.isFile()) bytes += outputStats.size;
+  }
+  if (bytes <= 0) throw new Error('YouTube media-byte canary completed without producing media bytes.');
+  return bytes;
+}
+
+function mediaByteCanaryFailure(
+  scope: 'guest' | 'authenticated',
+  error: unknown,
+  mode: YouTubeExtractionMode
+): YouTubeMediaByteCanaryReport {
+  const message = error instanceof Error ? error.message : String(error);
+  const reported = (error as Error & { canaryFailureClass?: string }).canaryFailureClass;
+  const classified = classifyYouTubeFailure(message, mode);
+  const failureClass =
+    reported ||
+    (message.includes('without producing media bytes')
+      ? `${scope}_media_canary_no_bytes`
+      : classified === 'unknown_youtube_extractor_failure'
+      ? `${scope}_media_canary_failed`
+      : classified);
+  return { scope, checkedAt: new Date().toISOString(), succeeded: false, bytesDownloaded: 0, failureClass };
+}
+
+export async function runGuestYouTubeMediaByteCanary(
+  ytdlpPath: string,
+  realtimeDB: Database,
+  ctx?: LogContext
+): Promise<YouTubeMediaByteCanaryReport> {
+  void realtimeDB;
+  const log = createLoggerWithContext(ctx);
+  const canaryUrl = getYouTubeMediaByteCanaryUrl('PROCESS_AUDIO_YOUTUBE_GUEST_CANARY_URL');
+  let workDir: string | undefined;
+  try {
+    if (!canaryUrl) {
+      return {
+        scope: 'guest',
+        checkedAt: new Date().toISOString(),
+        succeeded: false,
+        bytesDownloaded: 0,
+        failureClass: 'guest_canary_url_unconfigured',
+      };
+    }
+    if (process.env.NODE_ENV !== 'development' && !getPoTokenProviderBaseUrl()) {
+      throw new Error('YTDLP_POT_PROVIDER_BASE_URL is required for the guest media-byte canary.');
+    }
+    workDir = await mkdtemp(path.join(os.tmpdir(), 'youtube-guest-byte-canary-'));
+    const outputBase = ensureSafeTempPath(path.join(workDir, 'guest-provider'));
+    await runBoundedMediaByteCanaryCommand(
+      ytdlpPath,
+      buildMediaByteCanaryArgs(outputBase, canaryUrl, 'public_provider', log),
+      'public_provider'
+    );
+    const bytesDownloaded = await measureMediaByteCanaryOutput(outputBase);
+    return {
+      scope: 'guest',
+      checkedAt: new Date().toISOString(),
+      succeeded: true,
+      bytesDownloaded,
+      failureClass: null,
+    };
+  } catch (error) {
+    return mediaByteCanaryFailure('guest', error, 'public_provider');
+  } finally {
+    if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+export async function runAuthenticatedYouTubeMediaByteCanary(
+  ytdlpPath: string,
+  realtimeDB: Database,
+  ctx?: LogContext
+): Promise<YouTubeMediaByteCanaryReport> {
+  const log = createLoggerWithContext(ctx);
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  const canaryUrl = getYouTubeMediaByteCanaryUrl('PROCESS_AUDIO_YOUTUBE_AUTH_CANARY_URL');
+  let cookieContext: YouTubeCookieContext | undefined;
+  let workDir: string | undefined;
+
+  try {
+    if (!canaryUrl) {
+      return {
+        scope: 'authenticated',
+        checkedAt: new Date().toISOString(),
+        succeeded: false,
+        bytesDownloaded: 0,
+        failureClass: 'auth_canary_url_unconfigured',
+      };
+    }
+
+    if (!isDevelopment && !getPoTokenProviderBaseUrl()) {
+      throw new Error('YTDLP_POT_PROVIDER_BASE_URL is required for the authenticated media-byte canary.');
+    }
+    cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
+    workDir = await mkdtemp(path.join(os.tmpdir(), 'youtube-auth-byte-canary-'));
+    let lastError: unknown = Object.assign(new Error('No authenticated session configured.'), {
+      canaryFailureClass: 'cookie_session_unavailable',
+    });
+    const runCookieAttempt = async (name: string): Promise<number> => {
+      const outputBase = ensureSafeTempPath(path.join(workDir as string, name));
+      await runBoundedMediaByteCanaryCommand(
+        ytdlpPath,
+        buildMediaByteCanaryArgs(outputBase, canaryUrl, 'cookie_provider', log, cookieContext?.args || []),
+        'cookie_provider'
+      );
+      return await measureMediaByteCanaryOutput(outputBase);
+    };
+    if (cookieContext.hasCookies) {
+      try {
+        const bytesDownloaded = await runCookieAttempt('cookie-provider');
+        return {
+          scope: 'authenticated',
+          checkedAt: new Date().toISOString(),
+          succeeded: true,
+          bytesDownloaded,
+          failureClass: null,
+        };
+      } catch (cookieError) {
+        lastError = cookieError;
+        const cookieMessage = cookieError instanceof Error ? cookieError.message : String(cookieError);
+        if (shouldAttemptBrowserCookieRefresh(cookieMessage, 'cookie_provider', ctx)) {
+          try {
+            await triggerBrowserYoutubeRefresh(log, ctx as LogContext);
+            const bytesDownloaded = await runCookieAttempt('cookie-provider-refreshed');
+            return {
+              scope: 'authenticated',
+              checkedAt: new Date().toISOString(),
+              succeeded: true,
+              bytesDownloaded,
+              failureClass: null,
+            };
+          } catch (refreshError) {
+            lastError = refreshError;
+          }
+        }
+      }
+    }
+    if (isBrowserFallbackEnabled()) {
+      try {
+        const outputBase = ensureSafeTempPath(path.join(workDir, 'browser-fallback'));
+        const fallback = await invokeBrowserFallbackDownloadSection(
+          ytdlpPath,
+          canaryUrl,
+          outputBase,
+          realtimeDB,
+          0,
+          AUTHENTICATED_MEDIA_BYTE_CANARY_DURATION_SECONDS,
+          {
+            action: 'download_section',
+            youtubeUrl: canaryUrl,
+            startTime: 0,
+            duration: AUTHENTICATED_MEDIA_BYTE_CANARY_DURATION_SECONDS,
+            requestContext: ctx,
+          },
+          log
+        );
+        const filePath =
+          fallback.localFilePath || (await downloadBrowserFallbackSection(outputBase, fallback.response));
+        const outputStats = await stat(ensureSafeTempPath(filePath));
+        if (!outputStats.isFile() || outputStats.size <= 0) {
+          throw new Error('Authenticated Browser Fallback canary completed without producing media bytes.');
+        }
+        return {
+          scope: 'authenticated',
+          checkedAt: new Date().toISOString(),
+          succeeded: true,
+          bytesDownloaded: outputStats.size,
+          failureClass: null,
+        };
+      } catch (fallbackError) {
+        lastError = fallbackError;
+      }
+    }
+    throw lastError;
+  } catch (error) {
+    return mediaByteCanaryFailure('authenticated', error, 'cookie_provider');
+  } finally {
+    if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    if (cookieContext?.cookiesFilePath) await unlink(cookieContext.cookiesFilePath).catch(() => {});
   }
 }
 
@@ -3587,7 +3915,10 @@ export const downloadYouTubeAudioToFile = async (
         }
         if (code === 0) {
           try {
-            resolveWithValue(resolveDownloadedFilePath());
+            const downloadedFilePath = resolveDownloadedFilePath();
+            void recordSuccessfulYouTubeAcquisition(downloadedFilePath, mode, ctx).then(resolveWithValue, (error) =>
+              rejectWithError(error instanceof Error ? error : new Error(String(error)))
+            );
           } catch (error) {
             rejectWithError(error instanceof Error ? error : new Error(String(error)));
           }
@@ -4000,9 +4331,10 @@ export const downloadYouTubeAudioToFile = async (
       cookieContext = await loadYouTubeCookieContext(realtimeDB, isDevelopment, log);
       if (!cookieContext.hasCookies) {
         throw attachYouTubeAcquisitionEvidence(guestError, {
-          attemptedModes: ['public_provider'],
+          attemptedModes: ['public_provider', 'cookie_provider'],
           guestFailureClass,
-          requiresAuthenticationRecovery: false,
+          authenticatedFailureClass: 'cookie_session_unavailable',
+          requiresAuthenticationRecovery: true,
         });
       }
 
@@ -4020,6 +4352,79 @@ export const downloadYouTubeAudioToFile = async (
         const requiresAuthenticationRecovery =
           authenticatedFailureClass === 'cookie_session_stale_or_challenged' ||
           authenticatedFailureClass === 'account_required_content';
+
+        if (shouldUseBrowserFallbackForGuestFailure(guestMessage, guestFailureClass)) {
+          try {
+            const fallback = await invokeBrowserFallbackDownloadSection(
+              ytdlpPath,
+              url,
+              outputFilePath,
+              realtimeDB,
+              0,
+              undefined,
+              {
+                action: 'download_section',
+                youtubeUrl: url,
+                startTime: 0,
+                requestContext: ctx,
+              },
+              log
+            );
+            const fallbackFilePath =
+              fallback.localFilePath || (await downloadBrowserFallbackSection(outputFilePath, fallback.response));
+            const verifiedFallbackFilePath = await recordSuccessfulYouTubeAcquisition(
+              fallbackFilePath,
+              'browser_fallback',
+              ctx
+            );
+            logSelectedYouTubeServingPath(log, {
+              youtubeUrl: url,
+              outputType: 'download_file',
+              selectedMode: 'browser_fallback',
+              endpointKind: fallback.endpointKind,
+              fallbackUrl: fallback.fallbackUrl,
+              browserFallbackInvocationKind: fallback.invocationKind,
+              credentialSource: fallback.response.resolution?.credentialSource || 'unknown',
+              browserFallbackStrategy: fallback.response.resolution?.strategy || 'unknown',
+              browserFallbackServiceRole: fallback.response.resolution?.serviceRole || null,
+              decisionReason: 'file_download_browser_fallback_after_cookie_failure',
+              guestFailureClass,
+              authenticatedFailureClass,
+            });
+            return verifiedFallbackFilePath;
+          } catch (browserFallbackError) {
+            const browserFallbackMessage =
+              browserFallbackError instanceof Error ? browserFallbackError.message : String(browserFallbackError);
+            const classifiedBrowserFallbackFailure = classifyYouTubeFailure(browserFallbackMessage, 'browser_fallback');
+            const browserFallbackFailureClass =
+              classifiedBrowserFallbackFailure === 'account_required_content'
+                ? 'account_required_content'
+                : 'browser_fallback_failed';
+            const browserFallbackDetails = (
+              browserFallbackError as Error & { browserFallbackError?: Partial<BrowserFallbackErrorResponse> }
+            ).browserFallbackError;
+            const browserSessionRequiresRecovery =
+              browserFallbackDetails?.code === 'auth_required' ||
+              browserFallbackDetails?.code === 'session_unhealthy' ||
+              /profile is not authenticated|session (?:is )?(?:missing|stale|challenged)/i.test(browserFallbackMessage);
+            const terminalFailureClass =
+              browserFallbackFailureClass === 'account_required_content' &&
+              browserFallbackDetails?.sessionState === 'authenticated' &&
+              !browserSessionRequiresRecovery
+                ? 'account_required_content'
+                : undefined;
+            throw attachYouTubeAcquisitionEvidence(browserFallbackError, {
+              attemptedModes: ['public_provider', 'cookie_provider', 'browser_fallback'],
+              guestFailureClass,
+              authenticatedFailureClass,
+              browserFallbackFailureClass,
+              terminalFailureClass,
+              requiresAuthenticationRecovery: terminalFailureClass
+                ? false
+                : requiresAuthenticationRecovery || browserSessionRequiresRecovery,
+            });
+          }
+        }
 
         throw attachYouTubeAcquisitionEvidence(authenticatedError, {
           attemptedModes: ['public_provider', 'cookie_provider'],

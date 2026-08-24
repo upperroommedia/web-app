@@ -89,13 +89,6 @@ jobs:
       - name: Verify staging health
         run: bash scripts/wait-for-process-audio-health.sh https://yt-worker-staging.upperroommedia.org/healthz
 
-      - name: Run staging yt-dlp smoke test
-        env:
-          PROCESS_AUDIO_HETZNER_SSH_TARGET: ${{ secrets.HETZNER_PROCESS_AUDIO_SSH_TARGET }}
-          PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_PUBLIC_SMOKE_YOUTUBE_URL }}
-          PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL: ${{ vars.PROCESS_AUDIO_HETZNER_AUTH_SMOKE_YOUTUBE_URL }}
-        run: bash scripts/verify-hetzner-ytdlp-smoke.sh staging
-
       - name: Create staging Sentry release for process-audio-hetzner
         if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         uses: getsentry/action-release@v3

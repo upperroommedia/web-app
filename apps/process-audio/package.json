@@ -18,7 +18,7 @@
     "verify:alerts": "node scripts/verify-operational-alert-recipients.js",
     "test:readiness": "ts-node --project tsconfig.json scripts/test-youtube-readiness.ts",
     "test:queue": "ts-node --project tsconfig.json scripts/test-process-audio-queue-store.ts",
-    "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run verify:youtube:policy"
+    "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop"
   },
   "engines": {
     "node": "22"

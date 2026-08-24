@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 
-import { buildYouTubeReadinessSnapshot, type BuildYouTubeReadinessSnapshotInput } from '../src/youtubeReadiness';
+import {
+  buildYouTubeReadinessSnapshot,
+  clampYouTubeMediaByteCanaryIntervalMs,
+  createNonOverlappingAsyncTaskRunner,
+  getTerminalYouTubeAcquisitionFailureClass,
+  isLoopbackRemoteAddress,
+  isFreshSuccessfulYouTubeMediaByteCanary,
+  parsePersistedYouTubeMediaByteCanary,
+  parseYtDlpPoTokenProviderDiscovery,
+  shouldReplacePersistedYouTubeMediaByteCanary,
+  validateYouTubeMediaByteCanaryReport,
+  type BuildYouTubeReadinessSnapshotInput,
+} from '../src/youtubeReadiness';
 
 const NOW_MS = Date.parse('2026-08-24T12:00:00.000Z');
 
@@ -182,6 +194,174 @@ const guestCanaryFailedSnapshot = buildYouTubeReadinessSnapshot({
 });
 
 assert.deepEqual(guestCanaryFailedSnapshot.capabilities.guest.reasonCodes, ['YOUTUBE_GUEST_MEDIA_CANARY_FAILED']);
+
+const guestRestrictionWithHealthyAuthSnapshot = buildYouTubeReadinessSnapshot({
+  ...baseInput,
+  guest: {
+    ...baseInput.guest,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:58:00.000Z',
+      succeeded: false,
+      bytesDownloaded: 0,
+      failureClass: 'public_path_bot_blocked',
+    },
+  },
+  authenticatedSession: {
+    ...baseInput.authenticatedSession,
+    healthy: true,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:59:00.000Z',
+      succeeded: true,
+      bytesDownloaded: 8192,
+      failureClass: null,
+    },
+    queue: {
+      blocked: false,
+      blockerReason: null,
+      depth: 0,
+      oldestDeferredAt: null,
+    },
+  },
+});
+
+assert.equal(guestRestrictionWithHealthyAuthSnapshot.capabilities.guest.ready, false);
+assert.deepEqual(guestRestrictionWithHealthyAuthSnapshot.serviceReadiness, {
+  ready: true,
+  reasonCodes: ['YOUTUBE_GUEST_MEDIA_CANARY_FAILED'],
+  degradedScopes: ['youtube_guest'],
+});
+assert.equal(guestRestrictionWithHealthyAuthSnapshot.capabilities.authenticated.waitingForYouTubeAuthEligible, false);
+
+const guestRestrictionWithStaleAuthSnapshot = buildYouTubeReadinessSnapshot({
+  ...baseInput,
+  guest: {
+    ...baseInput.guest,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:58:00.000Z',
+      succeeded: false,
+      bytesDownloaded: 0,
+      failureClass: 'public_path_bot_blocked',
+    },
+  },
+  authenticatedSession: {
+    ...baseInput.authenticatedSession,
+    healthy: true,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:30:00.000Z',
+      succeeded: true,
+      bytesDownloaded: 8192,
+      failureClass: null,
+    },
+    queue: {
+      blocked: false,
+      blockerReason: null,
+      depth: 0,
+      oldestDeferredAt: null,
+    },
+  },
+});
+
+assert.equal(guestRestrictionWithStaleAuthSnapshot.serviceReadiness.ready, false);
+
+const guestRestrictionWithBlockedAuthQueueSnapshot = buildYouTubeReadinessSnapshot({
+  ...baseInput,
+  guest: {
+    ...baseInput.guest,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:58:00.000Z',
+      succeeded: false,
+      bytesDownloaded: 0,
+      failureClass: 'public_path_bot_blocked',
+    },
+  },
+  authenticatedSession: {
+    ...baseInput.authenticatedSession,
+    healthy: true,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:59:00.000Z',
+      succeeded: true,
+      bytesDownloaded: 8192,
+      failureClass: null,
+    },
+    queue: {
+      blocked: true,
+      blockerReason: 'authenticated_session',
+      depth: 1,
+      oldestDeferredAt: '2026-08-24T11:59:00.000Z',
+    },
+  },
+});
+
+assert.equal(guestRestrictionWithBlockedAuthQueueSnapshot.serviceReadiness.ready, false);
+
+const guestRestrictionWithDrainingAuthBacklogSnapshot = buildYouTubeReadinessSnapshot({
+  ...baseInput,
+  guest: {
+    ...baseInput.guest,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:58:00.000Z',
+      succeeded: false,
+      bytesDownloaded: 0,
+      failureClass: 'public_path_bot_blocked',
+    },
+  },
+  authenticatedSession: {
+    ...baseInput.authenticatedSession,
+    healthy: true,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T11:59:00.000Z',
+      succeeded: true,
+      bytesDownloaded: 8192,
+      failureClass: null,
+    },
+    queue: {
+      blocked: false,
+      blockerReason: null,
+      depth: 1,
+      oldestDeferredAt: '2026-08-24T05:00:00.000Z',
+    },
+  },
+});
+assert.equal(guestRestrictionWithDrainingAuthBacklogSnapshot.serviceReadiness.ready, true);
+assert.deepEqual(guestRestrictionWithDrainingAuthBacklogSnapshot.serviceReadiness.degradedScopes, [
+  'youtube_guest',
+  'youtube_authenticated',
+]);
+
+const guestRestrictionWithoutConfiguredAuthSnapshot = buildYouTubeReadinessSnapshot({
+  ...guestRestrictionWithDrainingAuthBacklogSnapshot,
+  checkedAtMs: NOW_MS,
+  youtubeProcessingEnabled: true,
+  provider: baseInput.provider,
+  guest: {
+    mediaByteCanary: guestRestrictionWithDrainingAuthBacklogSnapshot.capabilities.guest.mediaByteCanary,
+    queue: guestRestrictionWithDrainingAuthBacklogSnapshot.capabilities.guest.queue,
+  },
+  authenticatedSession: {
+    configured: false,
+    healthy: true,
+    lastCheckedAt: '2026-08-24T11:59:00.000Z',
+    mediaByteCanary: guestRestrictionWithDrainingAuthBacklogSnapshot.capabilities.authenticated.mediaByteCanary,
+    queue: guestRestrictionWithDrainingAuthBacklogSnapshot.capabilities.authenticated.queue,
+  },
+  limits: baseInput.limits,
+});
+assert.equal(guestRestrictionWithoutConfiguredAuthSnapshot.serviceReadiness.ready, false);
+
+const futureGuestCanarySnapshot = buildYouTubeReadinessSnapshot({
+  ...baseInput,
+  guest: {
+    ...baseInput.guest,
+    mediaByteCanary: {
+      checkedAt: '2026-08-24T12:10:00.000Z',
+      succeeded: true,
+      bytesDownloaded: 8192,
+      failureClass: null,
+    },
+  },
+});
+assert.deepEqual(futureGuestCanarySnapshot.capabilities.guest.reasonCodes, ['YOUTUBE_GUEST_MEDIA_CANARY_STALE']);
+assert.equal(futureGuestCanarySnapshot.serviceReadiness.ready, false);
 
 const guestCanaryInvalidSnapshot = buildYouTubeReadinessSnapshot({
   ...baseInput,
@@ -381,4 +561,222 @@ assert.deepEqual(queueAgeUnknownSnapshot.capabilities.authenticated.reasonCodes,
   'YOUTUBE_AUTH_QUEUE_OLDEST_AGE_UNKNOWN',
 ]);
 
-process.stdout.write('youtube readiness verification passed\n');
+assert.deepEqual(
+  validateYouTubeMediaByteCanaryReport(
+    {
+      scope: 'guest',
+      checkedAt: '2026-08-24T11:58:00.000Z',
+      succeeded: false,
+      bytesDownloaded: 0,
+      failureClass: 'public_path_bot_blocked',
+    },
+    { checkedAtMs: NOW_MS }
+  ),
+  {
+    scope: 'guest',
+    checkedAt: '2026-08-24T11:58:00.000Z',
+    succeeded: false,
+    bytesDownloaded: 0,
+    failureClass: 'public_path_bot_blocked',
+  }
+);
+
+assert.deepEqual(
+  validateYouTubeMediaByteCanaryReport(
+    {
+      scope: 'authenticated',
+      checkedAt: '2026-08-24T11:59:00.000Z',
+      succeeded: true,
+      bytesDownloaded: 16384,
+      failureClass: null,
+    },
+    { checkedAtMs: NOW_MS }
+  ),
+  {
+    scope: 'authenticated',
+    checkedAt: '2026-08-24T11:59:00.000Z',
+    succeeded: true,
+    bytesDownloaded: 16384,
+    failureClass: null,
+  }
+);
+
+for (const invalidReport of [
+  {
+    scope: 'authenticated',
+    checkedAt: '2026-08-24T11:59:00.000Z',
+    succeeded: true,
+    bytesDownloaded: 16384,
+    failureClass: null,
+    cookies: 'secret',
+  },
+  {
+    scope: 'guest',
+    checkedAt: 'not-a-date',
+    succeeded: false,
+    bytesDownloaded: 0,
+    failureClass: 'public_path_bot_blocked',
+  },
+  {
+    scope: 'guest',
+    checkedAt: '2026-08-24T11:58:00.000Z',
+    succeeded: true,
+    bytesDownloaded: 0,
+    failureClass: null,
+  },
+  {
+    scope: 'authenticated',
+    checkedAt: '2026-08-24T11:59:00.000Z',
+    succeeded: false,
+    bytesDownloaded: 0,
+    failureClass: null,
+  },
+]) {
+  assert.throws(() => validateYouTubeMediaByteCanaryReport(invalidReport, { checkedAtMs: NOW_MS }));
+}
+
+assert.throws(() =>
+  validateYouTubeMediaByteCanaryReport(
+    {
+      scope: 'authenticated',
+      checkedAt: '2026-08-24T12:10:00.000Z',
+      succeeded: true,
+      bytesDownloaded: 16384,
+      failureClass: null,
+    },
+    { checkedAtMs: NOW_MS, maxFutureSkewMs: 60_000 }
+  )
+);
+
+assert.deepEqual(
+  parsePersistedYouTubeMediaByteCanary({
+    checkedAt: '2026-08-24T11:59:00.000Z',
+    succeeded: true,
+    bytesDownloaded: 16384,
+  }),
+  {
+    checkedAt: '2026-08-24T11:59:00.000Z',
+    succeeded: true,
+    bytesDownloaded: 16384,
+    failureClass: null,
+  }
+);
+assert.deepEqual(parsePersistedYouTubeMediaByteCanary({ succeeded: true }), {
+  checkedAt: null,
+  succeeded: null,
+  bytesDownloaded: null,
+  failureClass: null,
+});
+
+const successfulAuthReport = validateYouTubeMediaByteCanaryReport(
+  {
+    scope: 'authenticated',
+    checkedAt: '2026-08-24T11:59:00.000Z',
+    succeeded: true,
+    bytesDownloaded: 16384,
+    failureClass: null,
+  },
+  { checkedAtMs: NOW_MS }
+);
+assert.equal(isFreshSuccessfulYouTubeMediaByteCanary(successfulAuthReport, NOW_MS, 15 * 60 * 1000), true);
+assert.equal(
+  isFreshSuccessfulYouTubeMediaByteCanary(successfulAuthReport, NOW_MS + 16 * 60 * 1000, 15 * 60 * 1000),
+  false
+);
+const successfulGuestReport = validateYouTubeMediaByteCanaryReport(
+  {
+    scope: 'guest',
+    checkedAt: '2026-08-24T11:50:00.000Z',
+    succeeded: true,
+    bytesDownloaded: 8192,
+    failureClass: null,
+  },
+  { checkedAtMs: NOW_MS }
+);
+assert.equal(isFreshSuccessfulYouTubeMediaByteCanary(successfulGuestReport, NOW_MS, 15 * 60 * 1000), true);
+assert.equal(
+  isFreshSuccessfulYouTubeMediaByteCanary(successfulGuestReport, NOW_MS + 6 * 60 * 1000, 15 * 60 * 1000),
+  false
+);
+assert.equal(
+  shouldReplacePersistedYouTubeMediaByteCanary(
+    {
+      checkedAt: '2026-08-24T11:59:30.000Z',
+      succeeded: false,
+      bytesDownloaded: 0,
+      failureClass: 'account_required_content',
+    },
+    successfulAuthReport
+  ),
+  false
+);
+assert.equal(shouldReplacePersistedYouTubeMediaByteCanary(null, successfulAuthReport), true);
+
+assert.equal(isLoopbackRemoteAddress('127.0.0.1'), true);
+assert.equal(isLoopbackRemoteAddress('127.42.0.8'), true);
+assert.equal(isLoopbackRemoteAddress('::1'), true);
+assert.equal(isLoopbackRemoteAddress('::ffff:127.0.0.1'), true);
+assert.equal(isLoopbackRemoteAddress('10.0.0.8'), false);
+assert.equal(isLoopbackRemoteAddress(undefined), false);
+
+assert.deepEqual(
+  parseYtDlpPoTokenProviderDiscovery(
+    '[debug] PO Token Providers: bgutil:http-1.3.2 (external)\n[debug] Extractor Plugins: 1850'
+  ),
+  { discovered: true, version: '1.3.2' }
+);
+assert.deepEqual(parseYtDlpPoTokenProviderDiscovery('[debug] PO Token Providers: none'), {
+  discovered: false,
+  version: null,
+});
+
+assert.equal(
+  getTerminalYouTubeAcquisitionFailureClass({
+    attemptedModes: ['public_provider', 'cookie_provider', 'browser_fallback'],
+    browserFallbackFailureClass: 'account_required_content',
+    terminalFailureClass: 'account_required_content',
+    requiresAuthenticationRecovery: false,
+  }),
+  'account_required_content'
+);
+assert.equal(
+  getTerminalYouTubeAcquisitionFailureClass({
+    attemptedModes: ['public_provider', 'cookie_provider'],
+    authenticatedFailureClass: 'account_required_content',
+    requiresAuthenticationRecovery: true,
+  }),
+  null
+);
+
+assert.equal(clampYouTubeMediaByteCanaryIntervalMs(1), 60_000);
+assert.equal(clampYouTubeMediaByteCanaryIntervalMs(7 * 60 * 1000), 7 * 60 * 1000);
+assert.equal(clampYouTubeMediaByteCanaryIntervalMs(30 * 60 * 1000), 10 * 60 * 1000);
+
+void (async () => {
+  let taskCallCount = 0;
+  let releaseFirstRun: (() => void) | undefined;
+  const firstRunBlocked = new Promise<void>((resolve) => {
+    releaseFirstRun = resolve;
+  });
+  const taskRunner = createNonOverlappingAsyncTaskRunner(async () => {
+    taskCallCount += 1;
+    if (taskCallCount === 1) await firstRunBlocked;
+  });
+
+  const firstRun = taskRunner.run();
+  await Promise.resolve();
+  assert.equal(taskRunner.isRunning(), true);
+  assert.equal(await taskRunner.run(), false);
+  assert.equal(taskCallCount, 1);
+
+  releaseFirstRun?.();
+  assert.equal(await firstRun, true);
+  assert.equal(taskRunner.isRunning(), false);
+  assert.equal(await taskRunner.run(), true);
+  assert.equal(taskCallCount, 2);
+
+  process.stdout.write('youtube readiness verification passed\n');
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
