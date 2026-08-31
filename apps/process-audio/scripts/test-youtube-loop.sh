@@ -5,7 +5,11 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 COMPOSE_FILES="-f compose.yaml -f compose.youtube-test.yaml"
+set -a
+. ../../ops/process-audio-hetzner/media-runtime-versions.env
+set +a
 
+pnpm build
 pnpm --dir ../browser-fallback build
 PROCESS_AUDIO_HOST_PORT="${PROCESS_AUDIO_HOST_PORT:-18080}"
 export PROCESS_AUDIO_HOST_PORT
@@ -23,5 +27,5 @@ until docker compose $COMPOSE_FILES exec -T browser-fallback curl -fsS http://12
   sleep 1
 done
 
-docker compose $COMPOSE_FILES up -d server
-docker compose $COMPOSE_FILES exec -T server sh -lc 'pnpm build && node scripts/verify-youtube-local-loop.js'
+docker compose $COMPOSE_FILES up -d --build server
+docker compose $COMPOSE_FILES exec -T server node scripts/verify-youtube-local-loop.js

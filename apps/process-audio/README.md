@@ -16,7 +16,9 @@ The YouTube path now follows a strict access order:
 3. `browser_fallback`
    Final authority when the direct extractor path is challenged.
 
-This is intentional. Cloud Run is no longer part of the YouTube extraction path. File-backed audio stays on Cloud Run, while YouTube extraction stays on Hetzner.
+This is intentional. Cloud Run is no longer part of the YouTube extraction path. File-backed audio stays on Cloud Run, while YouTube extraction stays on Hetzner. The shared Chrome profile is an authenticated fallback, not the default credential source for public videos.
+
+For Upper Room-owned media, the original recording or an object-storage upload is the preferred source. YouTube extraction is a compatibility path for cases where the original is not yet available; it should not become the canonical copy of owned audio.
 
 ## What Changed
 
@@ -62,7 +64,7 @@ YouTube extraction, Hetzner profile only:
 - `YOUTUBE_BROWSER_FALLBACK_TIMEOUT_MS`
 - `BROWSER_FALLBACK_SHARED_SECRET` optional shared secret for non-Google fallback hosts
 - `BROWSER_FALLBACK_AUTH_MODE=auto|id_token|shared_secret|none`
-- `YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=true` on Hetzner
+- `YTDLP_USE_COOKIES_FOR_PUBLIC_VIDEOS=false` on Hetzner; cookies remain available only as classified fallback
 - `YTDLP_CONCURRENT_FRAGMENTS=1`
 - `YTDLP_M3U8_FFMPEG_DOWNLOADER_ARGS`
 - `YTDLP_COOKIE_HEALTHCHECK_ENABLED=true`
@@ -262,8 +264,15 @@ Use the operator guide for the current workflow:
 Current rule:
 
 - keep the shared host Chrome profile signed in
-- let `yt-dlp --cookies-from-browser` read that profile directly
+- attempt public videos through the cookie-free provider first
+- let `yt-dlp --cookies-from-browser` read the profile only for authenticated fallback
 - do not rotate YouTube cookies through RTDB for the Hetzner workers
+
+### Why `yt-dlp-getpot-wpc` is not installed
+
+WPC `1.1.2` was evaluated for the authenticated fallback but does not match this runtime's session contract. The released plugin exposes only `browser_path`, hard-codes a visible new browser, does not expose a user-data directory or an attach-to-existing-debugger option, and marks existing-browser support as a TODO. Its launch path also clears all cookies before navigating to YouTube. See the pinned upstream [configuration](https://github.com/coletdjnz/yt-dlp-getpot-wpc/blob/c75bca75ae94b07908ce62303eafeeb45bcbcec1/yt_dlp_plugins/extractor/getpot_wpc.py#L144-L159) and [browser lifecycle](https://github.com/coletdjnz/yt-dlp-getpot-wpc/blob/c75bca75ae94b07908ce62303eafeeb45bcbcec1/yt_dlp_plugins/extractor/getpot_wpc.py#L88-L101).
+
+The process-audio container has no local Chrome/display, while the authenticated host profile is mounted read-only and already owned by the running host Chrome. Stock WPC therefore cannot reuse that session safely or be exercised by the authenticated canary. Installing it would add an untested provider, so the maintained bgutil provider plus the existing cookie/browser-token fallback remains in place. Reconsider WPC only when an upstream release supports attaching to the existing browser without clearing or copying its cookies, or when it is deployed with an isolated writable profile and its own end-to-end canary.
 
 ## Verifying the Production Setup
 

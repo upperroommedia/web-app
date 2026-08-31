@@ -15,7 +15,11 @@
     "verify:youtube:browser-auth-health": "ts-node --project tsconfig.json scripts/verify-youtube-browser-auth-health.ts",
     "verify:youtube:loop": "bash scripts/test-youtube-loop.sh",
     "verify:youtube:policy": "node scripts/verify-youtube-policy.js",
-    "verify:alerts": "node scripts/verify-operational-alert-recipients.js"
+    "verify:alerts": "node scripts/verify-operational-alert-recipients.js",
+    "test:readiness": "ts-node --project tsconfig.json scripts/test-youtube-readiness.ts",
+    "test:queue": "ts-node --project tsconfig.json scripts/test-process-audio-queue-store.ts",
+    "test:request-context": "ts-node --project tsconfig.json scripts/test-process-audio-request-context.ts",
+    "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop"
   },
   "engines": {
     "node": "22"
@@ -23,21 +27,23 @@
   "author": "Google LLC",
   "license": "Apache-2.0",
   "dependencies": {
-    "@upperroom/contracts": "workspace:*",
-    "@upperroom/shared": "workspace:*",
     "@google-cloud/logging-winston": "^6.0.1",
     "@google-cloud/storage": "catalog:",
     "@sentry/node": "^10.70.0",
-    "google-auth-library": "^9.15.1",
+    "@upperroom/contracts": "workspace:*",
+    "@upperroom/shared": "workspace:*",
     "axios": "catalog:",
     "express": "^4.18.2",
+    "express-rate-limit": "8.3.0",
     "firebase-admin": "catalog:",
+    "google-auth-library": "^9.15.1",
     "uuid": "catalog:",
     "winston": "^3.18.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "catalog:",
+    "ts-node": "^10.9.2",
     "typescript": "catalog:"
   }
 }

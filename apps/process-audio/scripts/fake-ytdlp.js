@@ -21,7 +21,15 @@ const logFile = process.env.FAKE_YTDLP_LOG_FILE;
 if (logFile) {
   fs.appendFileSync(
     logFile,
-    `${JSON.stringify({ args, hasCookies, isJson, isHealthcheck, isDirectUrl, isSectionDownload, hasFormatSelector })}\n`
+    `${JSON.stringify({
+      args,
+      hasCookies,
+      isJson,
+      isHealthcheck,
+      isDirectUrl,
+      isSectionDownload,
+      hasFormatSelector,
+    })}\n`
   );
 }
 
@@ -116,10 +124,7 @@ function buildPostLiveMuxedJson() {
         abr: 96,
         protocol: 'm3u8_native',
         url: 'https://example.com/post-live.m3u8',
-        fragments: [
-          { url: 'https://example.com/live-frag-1.ts' },
-          { url: 'https://example.com/live-frag-2.ts' },
-        ],
+        fragments: [{ url: 'https://example.com/live-frag-1.ts' }, { url: 'https://example.com/live-frag-2.ts' }],
       },
     ],
   };
@@ -132,20 +137,7 @@ function ensureLocalM4aFixture() {
   if (!fs.existsSync(fixturePath)) {
     const result = spawnSync(
       'ffmpeg',
-      [
-        '-y',
-        '-f',
-        'lavfi',
-        '-i',
-        'anullsrc=r=44100:cl=mono',
-        '-t',
-        '2',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        fixturePath,
-      ],
+      ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', '-c:a', 'aac', '-b:a', '128k', fixturePath],
       { stdio: 'ignore' }
     );
 
@@ -168,21 +160,40 @@ switch (scenario) {
     if (isSectionDownload) {
       succeedSectionDownload();
     }
+    if (outputTemplate) {
+      succeedSectionDownload();
+    }
     process.exit(0);
     break;
 
   case 'public_bot_cookie_stale':
+  case 'public_bot_cookie_and_browser_stale':
+  case 'public_bot_cookie_browser_account_required':
+  case 'public_account_cookie_stale_browser_ok':
     if (!hasCookies) {
+      if (scenario === 'public_account_cookie_stale_browser_ok') {
+        fail('ERROR: [youtube] testvideo: This video is private.');
+      }
       fail(
-        "WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing\nERROR: [youtube] testvideo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication."
+        'WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing\nERROR: [youtube] testvideo: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.'
       );
     }
 
-    if (isJson && isHealthcheck && !hasExtractorArgs) {
+    if (scenario === 'public_bot_cookie_browser_account_required' && isJson && isHealthcheck && !hasExtractorArgs) {
+      fail('ERROR: [youtube] testvideo: This video is private.');
+    }
+
+    if (
+      scenario !== 'public_bot_cookie_and_browser_stale' &&
+      scenario !== 'public_bot_cookie_browser_account_required' &&
+      isJson &&
+      isHealthcheck &&
+      !hasExtractorArgs
+    ) {
       succeedJson(buildAudioJsonWithUrl(`file://${ensureLocalM4aFixture()}`));
     }
 
-    if (isHealthcheck || isJson || isDirectUrl || isSectionDownload) {
+    if (isHealthcheck || isJson || isDirectUrl || isSectionDownload || outputTemplate) {
       fail('ERROR: [youtube] testvideo: The page needs to be reloaded.');
     }
     process.exit(1);
@@ -200,6 +211,9 @@ switch (scenario) {
       succeedDirectUrl();
     }
     if (isSectionDownload) {
+      succeedSectionDownload();
+    }
+    if (outputTemplate) {
       succeedSectionDownload();
     }
     process.exit(0);
@@ -236,6 +250,14 @@ switch (scenario) {
       succeedDirectUrl();
     }
     stallAfterPartialDownload();
+    break;
+
+  case 'authenticated_canary_stall':
+    if (isSectionDownload) {
+      stallAfterPartialDownload();
+      break;
+    }
+    fail('ERROR: canary stall scenario requires a section download');
     break;
 
   default:

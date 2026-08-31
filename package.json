@@ -34,7 +34,7 @@
     "build:all": "./scripts/with-node22.sh pnpm exec turbo run build:ci --continue",
     "build:ci": "./scripts/with-node22.sh pnpm exec turbo run build:ci --continue",
     "test": "turbo run test:ci --continue",
-    "test:ci": "pnpm --dir apps/web run test:ci",
+    "test:ci": "pnpm --dir apps/process-audio run test:ci && pnpm --dir apps/web run test:ci",
     "test:frontend:unit": "pnpm --dir apps/web run test:frontend:unit",
     "start": "pnpm --dir apps/web run start",
     "lint": "turbo run lint:ci --continue",

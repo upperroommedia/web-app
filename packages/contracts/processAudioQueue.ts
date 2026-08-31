@@ -15,6 +15,70 @@ export const YOUTUBE_BROWSER_FALLBACK_STATE_PATH = `${PROCESS_AUDIO_QUEUES_PATH}
 export const YOUTUBE_BROWSER_FALLBACK_LEASE_PATH = `${YOUTUBE_BROWSER_FALLBACK_STATE_PATH}/profileLease`;
 export const YOUTUBE_BROWSER_FALLBACK_BLOCKER_REASON = 'browser_fallback_unavailable';
 
+export const PROCESS_AUDIO_DEFERRED_DISPOSITIONS = {
+  WAITING_FOR_YOUTUBE_AUTH: 'WAITING_FOR_YOUTUBE_AUTH',
+} as const;
+
+export type ProcessAudioDeferredDisposition =
+  (typeof PROCESS_AUDIO_DEFERRED_DISPOSITIONS)[keyof typeof PROCESS_AUDIO_DEFERRED_DISPOSITIONS];
+export type ProcessAudioDependencyScope = 'authenticated_session' | 'guest_provider';
+export type YouTubeSuccessfulAcquisitionAuthority = 'public_provider' | 'cookie_provider' | 'browser_fallback';
+
+export interface YouTubeAcquisitionEvidence {
+  attemptedModes: Array<'public_provider' | 'cookie_provider' | 'browser_fallback'>;
+  guestFailureClass?: string;
+  authenticatedFailureClass?: string;
+  browserFallbackFailureClass?: string;
+  terminalFailureClass?: 'account_required_content';
+  requiresAuthenticationRecovery: boolean;
+}
+
+export type YouTubeFailureDisposition =
+  | {
+      action: 'defer';
+      code: ProcessAudioDeferredDisposition;
+      dependencyScope: 'authenticated_session';
+      retryable: true;
+    }
+  | {
+      action: 'task_retry';
+      retryable: true;
+    }
+  | {
+      action: 'post_live_retry';
+      retryable: true;
+    }
+  | {
+      action: 'terminal';
+      code: 'account_required_content';
+      retryable: false;
+    };
+
+export const getYouTubeFailureDisposition = (evidence: YouTubeAcquisitionEvidence): YouTubeFailureDisposition => {
+  if (evidence.terminalFailureClass === 'account_required_content') {
+    return {
+      action: 'terminal',
+      code: evidence.terminalFailureClass,
+      retryable: false,
+    };
+  }
+
+  if (evidence.requiresAuthenticationRecovery) {
+    return {
+      action: 'defer',
+      code: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+      dependencyScope: 'authenticated_session',
+      retryable: true,
+    };
+  }
+
+  if (evidence.guestFailureClass === 'post_live_archive_not_ready') {
+    return { action: 'post_live_retry', retryable: true };
+  }
+
+  return { action: 'task_retry', retryable: true };
+};
+
 export type ProcessAudioSourceType = 'youtube' | 'storage';
 export type ProcessAudioTaskQueueName =
   | typeof PROCESS_AUDIO_FILE_TASK_QUEUE_NAME
@@ -28,6 +92,8 @@ export type YouTubeQueueProbeStatus =
   | 'waiting_for_auth_required_request'
   | 'probe_succeeded'
   | 'probe_failed';
+
+export type YouTubeDeferredDrainOutcome = 'not_attempted' | 'succeeded' | 'partial_failure';
 
 export interface NormalizedProcessAudioRequest {
   sermonId: string;
@@ -60,6 +126,11 @@ export interface StoredProcessAudioRequestState {
   transientRetryCount?: number;
   transientRetryNextRunAt?: string | null;
   transientRetryLastFailureMessage?: string | null;
+  authenticatedDeferralAttemptCount?: number;
+  lastSuccessfulYouTubeAcquisitionAuthority?: YouTubeSuccessfulAcquisitionAuthority | null;
+  lastSuccessfulYouTubeAcquisitionRequestVersion?: string | null;
+  lastCompletedRequestVersion?: string | null;
+  lastCompletedAt?: string | null;
   updatedAt: string;
 }
 
@@ -72,7 +143,28 @@ export interface StoredDeferredYouTubeRequest {
   probeMode: YouTubeQueueProbeMode;
   blockerEpisodeId: string | null;
   lastFailureClass: string | null;
+  disposition: ProcessAudioDeferredDisposition;
+  dependencyScope: ProcessAudioDependencyScope;
+  lastFailureMessage?: string | null;
+  attemptCount?: number;
+  dispatchGeneration?: number;
 }
+
+export type LegacyStoredDeferredYouTubeRequest = Omit<
+  StoredDeferredYouTubeRequest,
+  'disposition' | 'dependencyScope'
+> & {
+  disposition?: ProcessAudioDeferredDisposition;
+  dependencyScope?: ProcessAudioDependencyScope;
+};
+
+export const normalizeStoredDeferredYouTubeRequest = (
+  entry: LegacyStoredDeferredYouTubeRequest
+): StoredDeferredYouTubeRequest => ({
+  ...entry,
+  disposition: entry.disposition ?? PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+  dependencyScope: entry.dependencyScope ?? 'authenticated_session',
+});
 
 export interface StoredYouTubeQueueState {
   blocked: boolean;
@@ -84,19 +176,29 @@ export interface StoredYouTubeQueueState {
   probeTaskSermonId: string | null;
   probeRequestVersion: string | null;
   probeStartedAt: string | null;
+  probeDispatchReservationId?: string | null;
   probeLastSucceededAt: string | null;
   probeLastFailedAt: string | null;
   probeLastFailureClass: string | null;
   probeLastFailureMessage: string | null;
   alertSentAt: string | null;
+  alertReservationId?: string | null;
   deferredYouTubeTaskCount: number;
+  lastAttemptedAuthRecoveryGeneration?: string | null;
+  lastDrainAttemptedAt?: string | null;
+  lastSuccessfulDrainAt?: string | null;
+  lastDrainOutcome?: YouTubeDeferredDrainOutcome;
+  lastDrainAttemptedCount?: number;
+  lastDrainSucceededCount?: number;
 }
 
 export const getProcessAudioSourceType = (payload: AddIntroOutroInputType): ProcessAudioSourceType => {
   return 'youtubeUrl' in payload ? 'youtube' : 'storage';
 };
 
-export const getProcessAudioTaskQueueNameForSource = (sourceType: ProcessAudioSourceType): ProcessAudioTaskQueueName => {
+export const getProcessAudioTaskQueueNameForSource = (
+  sourceType: ProcessAudioSourceType
+): ProcessAudioTaskQueueName => {
   return sourceType === 'youtube' ? PROCESS_AUDIO_YOUTUBE_TASK_QUEUE_NAME : PROCESS_AUDIO_FILE_TASK_QUEUE_NAME;
 };
 
@@ -161,9 +263,7 @@ export const computeProcessAudioTaskId = (
   enqueueToken?: string | null
 ): string => {
   const sermonHash = createHash('sha256').update(sermonId).digest('hex').slice(0, 8);
-  const enqueueHash = enqueueToken
-    ? `-${createHash('sha256').update(enqueueToken).digest('hex').slice(0, 8)}`
-    : '';
+  const enqueueHash = enqueueToken ? `-${createHash('sha256').update(enqueueToken).digest('hex').slice(0, 8)}` : '';
   return `pa-${sermonHash}-${requestVersion}${enqueueHash}`;
 };
 
@@ -177,12 +277,18 @@ export const buildInitialYouTubeQueueState = (): StoredYouTubeQueueState => ({
   probeTaskSermonId: null,
   probeRequestVersion: null,
   probeStartedAt: null,
+  probeDispatchReservationId: null,
   probeLastSucceededAt: null,
   probeLastFailedAt: null,
   probeLastFailureClass: null,
   probeLastFailureMessage: null,
   alertSentAt: null,
   deferredYouTubeTaskCount: 0,
+  lastDrainAttemptedAt: null,
+  lastSuccessfulDrainAt: null,
+  lastDrainOutcome: 'not_attempted',
+  lastDrainAttemptedCount: 0,
+  lastDrainSucceededCount: 0,
 });
 
 export const isProcessAudioLockActive = (value: unknown, now: number = Date.now()): boolean => {

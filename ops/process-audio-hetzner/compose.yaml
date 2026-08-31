@@ -1,71 +1,125 @@
 name: process-audio-hetzner
 
 services:
-  ytdlp-pot-provider:
-    image: docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1
+  ytdlp-pot-provider-staging:
+    image: ${PROCESS_AUDIO_BGUTIL_IMAGE:?PROCESS_AUDIO_BGUTIL_IMAGE is required}
     restart: unless-stopped
     expose:
-      - "4416"
+      - '4416'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4416/ping').then(async response=>{const body=await response.json();process.exit(response.ok&&body.version==='${PROCESS_AUDIO_BGUTIL_VERSION:?PROCESS_AUDIO_BGUTIL_VERSION is required}'?0:1)}).catch(()=>process.exit(1));setTimeout(()=>process.exit(1),3000)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - pot-provider-staging
+
+  ytdlp-pot-provider-production:
+    image: ${PROCESS_AUDIO_BGUTIL_IMAGE:?PROCESS_AUDIO_BGUTIL_IMAGE is required}
+    restart: unless-stopped
+    expose:
+      - '4416'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4416/ping').then(async response=>{const body=await response.json();process.exit(response.ok&&body.version==='${PROCESS_AUDIO_BGUTIL_VERSION:?PROCESS_AUDIO_BGUTIL_VERSION is required}'?0:1)}).catch(()=>process.exit(1));setTimeout(()=>process.exit(1),3000)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - pot-provider-production
 
   process-audio-staging:
+    image: upperroom/process-audio-staging:current
     build:
       context: ./context
       dockerfile: apps/process-audio/Dockerfile
       args:
         PROCESS_AUDIO_RUNTIME_PROFILE: hetzner
+        YT_DLP_VERSION: ${PROCESS_AUDIO_YTDLP_VERSION:?PROCESS_AUDIO_YTDLP_VERSION is required}
+        FFMPEG_VERSION: ${PROCESS_AUDIO_FFMPEG_VERSION:?PROCESS_AUDIO_FFMPEG_VERSION is required}
+        BGUTIL_YTDLP_POT_PROVIDER_VERSION: ${PROCESS_AUDIO_BGUTIL_VERSION:?PROCESS_AUDIO_BGUTIL_VERSION is required}
+        DENO_VERSION: ${PROCESS_AUDIO_DENO_VERSION:?PROCESS_AUDIO_DENO_VERSION is required}
     command:
       - /bin/sh
       - -lc
       - |
         credential_path=/workspace/logs/firebase-service-account.json
-        printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_path"
+        credential_temp_path="$${credential_path}.tmp.$$$$"
+        (umask 077 && printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_temp_path")
+        chmod 600 "$$credential_temp_path"
+        mv -f "$$credential_temp_path" "$$credential_path"
         export GOOGLE_APPLICATION_CREDENTIALS="$$credential_path"
         cd /workspace/apps/process-audio
         exec node ./dist/index.js
     env_file:
       - ./env/process-audio-staging.env
     depends_on:
-      - ytdlp-pot-provider
+      ytdlp-pot-provider-staging:
+        condition: service_healthy
     volumes:
       - ./state/staging/tmp:/tmp
       - ./state/staging/logs:/workspace/logs
       - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
       - ./state/browser-refresh-control:/workspace/browser-refresh-control
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
+    networks:
+      - default
+      - pot-provider-staging
     restart: unless-stopped
     expose:
-      - "8080"
+      - '8080'
 
   process-audio-production:
+    image: upperroom/process-audio-production:current
     build:
       context: ./context
       dockerfile: apps/process-audio/Dockerfile
       args:
         PROCESS_AUDIO_RUNTIME_PROFILE: hetzner
+        YT_DLP_VERSION: ${PROCESS_AUDIO_YTDLP_VERSION:?PROCESS_AUDIO_YTDLP_VERSION is required}
+        FFMPEG_VERSION: ${PROCESS_AUDIO_FFMPEG_VERSION:?PROCESS_AUDIO_FFMPEG_VERSION is required}
+        BGUTIL_YTDLP_POT_PROVIDER_VERSION: ${PROCESS_AUDIO_BGUTIL_VERSION:?PROCESS_AUDIO_BGUTIL_VERSION is required}
+        DENO_VERSION: ${PROCESS_AUDIO_DENO_VERSION:?PROCESS_AUDIO_DENO_VERSION is required}
     command:
       - /bin/sh
       - -lc
       - |
         credential_path=/workspace/logs/firebase-service-account.json
-        printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_path"
+        credential_temp_path="$${credential_path}.tmp.$$$$"
+        (umask 077 && printf '%s' "$$FIREBASE_SERVICE_ACCOUNT_JSON" | base64 -d > "$$credential_temp_path")
+        chmod 600 "$$credential_temp_path"
+        mv -f "$$credential_temp_path" "$$credential_path"
         export GOOGLE_APPLICATION_CREDENTIALS="$$credential_path"
         cd /workspace/apps/process-audio
         exec node ./dist/index.js
     env_file:
       - ./env/process-audio-production.env
     depends_on:
-      - ytdlp-pot-provider
+      ytdlp-pot-provider-production:
+        condition: service_healthy
     volumes:
       - ./state/production/tmp:/tmp
       - ./state/production/logs:/workspace/logs
       - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
       - ./state/browser-refresh-control:/workspace/browser-refresh-control
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
+    networks:
+      - default
+      - pot-provider-production
     restart: unless-stopped
     expose:
-      - "8080"
+      - '8080'
 
   caddy:
     image: caddy:2.10.0
@@ -76,10 +130,14 @@ services:
       PROCESS_AUDIO_STAGING_HOSTNAME: ${PROCESS_AUDIO_STAGING_HOSTNAME}
       PROCESS_AUDIO_PRODUCTION_HOSTNAME: ${PROCESS_AUDIO_PRODUCTION_HOSTNAME}
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./state/caddy/data:/data
       - ./state/caddy/config:/config
     restart: unless-stopped
+
+networks:
+  pot-provider-staging: {}
+  pot-provider-production: {}

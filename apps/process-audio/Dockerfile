@@ -3,10 +3,10 @@
 ARG NODE_VERSION=22
 ARG PNPM_VERSION=10.10.0
 ARG PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
-ARG YT_DLP_VERSION=2026.07.04
+ARG YT_DLP_VERSION=2026.08.19
 ARG FFMPEG_VERSION=8.1
 ARG FFMPEG_BUILD_BASE_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest
-ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
+ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.2
 ARG DENO_VERSION=2.9.5
 ARG DEBIAN_MIRROR=https://mirrors.edge.kernel.org/debian
 ARG DEBIAN_SECURITY_MIRROR=https://security.debian.org/debian-security
@@ -106,6 +106,8 @@ RUN if [ "${PROCESS_AUDIO_RUNTIME_PROFILE}" = "hetzner" ]; then \
       && python3 -m pip install --break-system-packages --no-cache-dir \
           "yt-dlp[default]==${YT_DLP_VERSION}" \
           "bgutil-ytdlp-pot-provider==${BGUTIL_YTDLP_POT_PROVIDER_VERSION}" \
+      && test "$(yt-dlp --version)" = "${YT_DLP_VERSION}" \
+      && python3 -c "from importlib.metadata import version; actual = version('bgutil-ytdlp-pot-provider'); expected = '${BGUTIL_YTDLP_POT_PROVIDER_VERSION}'; assert actual == expected, f'expected bgutil {expected}, got {actual}'" \
       && echo "yt-dlp version: $(yt-dlp --version)" \
       && echo "aria2 version: $(aria2c --version | head -n 1)" \
       && python3 -m pip show bgutil-ytdlp-pot-provider; \
