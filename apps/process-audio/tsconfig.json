@@ -12,17 +12,14 @@
     "sourceMap": true,
     "inlineSources": true,
     "sourceRoot": "/",
+    "rootDir": "./src",
     "outDir": "./dist",
     "skipLibCheck": true,
     "noImplicitAny": false,
     "esModuleInterop": true,
     "declaration": true,
     "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@upperroom/contracts/*": ["../../packages/contracts/*"],
-      "@upperroom/shared/*": ["../../packages/shared/*"]
-    }
+    "baseUrl": "."
   },
   "include": ["src/**/*"],
   "exclude": ["*.test.ts"],
