@@ -7,7 +7,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node ./dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build-process-audio.js",
     "build:ci": "pnpm run build",
     "dev": "just dev",
     "verify:youtube:routing": "NODE_ENV=development node scripts/verify-youtube-routing.js",
@@ -17,7 +17,7 @@
     "verify:youtube:policy": "node scripts/verify-youtube-policy.js",
     "verify:alerts": "node scripts/verify-operational-alert-recipients.js",
     "test:readiness": "ts-node --project tsconfig.json scripts/test-youtube-readiness.ts",
-    "test:queue": "ts-node --project tsconfig.json scripts/test-process-audio-queue-store.ts",
+    "test:queue": "ts-node -r tsconfig-paths/register --project tsconfig.test.json scripts/test-process-audio-queue-store.ts",
     "test:request-context": "ts-node --project tsconfig.json scripts/test-process-audio-request-context.ts",
     "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop"
   },
@@ -44,6 +44,7 @@
     "@types/express": "^5.0.3",
     "@types/node": "catalog:",
     "ts-node": "^10.9.2",
+    "tsconfig-paths": "^3.15.0",
     "typescript": "catalog:"
   }
 }

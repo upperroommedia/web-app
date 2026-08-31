@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "paths": {
+      "@upperroom/contracts/*": ["../../packages/contracts/*"],
+      "@upperroom/shared/*": ["../../packages/shared/*"]
+    }
+  },
+  "include": ["src/**/*", "scripts/**/*.ts"]
+}

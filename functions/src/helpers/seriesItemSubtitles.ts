@@ -32,7 +32,10 @@ export function planSeriesItemSubtitleUpdates(
 ): SeriesItemSubtitleUpdate[] {
   return items.flatMap((item) => {
     if (!Number.isInteger(item.position) || (item.position ?? 0) < 1) {
-      throw new Error(`Series media item ${item.id} does not have a usable positive position.`);
+      // Subsplash legitimately leaves draft and scheduled series members
+      // unpositioned. Their subtitle can be synchronized after publishing gives
+      // them a position; they must not abort updates for positioned members.
+      return [];
     }
 
     const position = item.position as number;
@@ -55,10 +58,20 @@ export async function syncSeriesItemSubtitles(
 ): Promise<SyncSeriesItemSubtitlesResult> {
   const updates = planSeriesItemSubtitleUpdates(seriesTitle, items);
   const maxConcurrency = Math.max(1, Math.min(options?.maxConcurrency ?? 4, 5));
+  const unpositionedItemCount = items.filter(
+    (item) => !Number.isInteger(item.position) || (item.position ?? 0) < 1
+  ).length;
 
   await runWithConcurrency(updates, maxConcurrency, async (update) => {
     await patchMediaItemSeries(update.id, seriesId, token, { subtitle: update.subtitle });
   });
+
+  if (unpositionedItemCount > 0) {
+    logger.warn('Deferred Subsplash series item subtitle synchronization until positions are available', {
+      seriesId,
+      unpositionedItemCount,
+    });
+  }
 
   logger.log('Synchronized Subsplash series item subtitles', {
     seriesId,
