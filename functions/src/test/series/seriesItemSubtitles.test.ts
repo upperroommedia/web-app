@@ -32,9 +32,15 @@ describe('series item subtitles', () => {
     ).toEqual([]);
   });
 
-  it('fails closed when Subsplash returns an item without a usable position', () => {
-    expect(() =>
-      planSeriesItemSubtitleUpdates('Sowing Seeds', [{ id: 'missing-position', position: null, subtitle: null }])
-    ).toThrow('missing-position');
+  it('defers unpositioned items while still planning updates for positioned items', () => {
+    expect(
+      planSeriesItemSubtitleUpdates('Sowing Seeds', [
+        { id: 'draft-item', position: null, subtitle: null },
+        { id: 'invalid-item', position: 0, subtitle: null },
+        { id: 'published-item', position: 2, subtitle: null },
+      ])
+    ).toEqual([
+      { id: 'published-item', position: 2, subtitle: 'Part 2 of Sowing Seeds' },
+    ]);
   });
 });

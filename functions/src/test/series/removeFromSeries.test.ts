@@ -169,7 +169,10 @@ describe('removeFromSeries - Basic Functionality', () => {
           seriesSubsplashId: staleSeries.id,
         },
       })
-    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    ).rejects.toMatchObject({
+      code: 'failed-precondition',
+      details: { code: 'SUBSPLASH_SERIES_OWNERSHIP_MISMATCH' },
+    });
 
     expect(subsplashSeriesMock.getMediaItem(mediaItem.id)?._embedded?.['media-series']?.id).toBe(
       actualSeries.id

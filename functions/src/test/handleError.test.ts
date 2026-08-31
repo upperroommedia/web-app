@@ -1,6 +1,7 @@
 import { AxiosError } from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 import handleError from '../handleError';
+import { SUBSPLASH_SERIES_OWNERSHIP_MISMATCH_CODE } from '../expectedOperationalError';
 import * as emitOperationalAlertModule from '../notifications/emitOperationalAlert';
 import * as sentryModule from '../sentry';
 
@@ -216,6 +217,20 @@ describe('handleError', () => {
       locked_keys: ['series:series-123'],
       wait_ms: 10000,
       retry_after_ms: 1000,
+    });
+
+    const normalized = handleError(error);
+
+    expect(normalized).toBe(error);
+    expect(sentrySpy).not.toHaveBeenCalled();
+    expect(emitSpy).not.toHaveBeenCalled();
+  });
+
+  it('treats stale Subsplash series ownership as an expected conflict', () => {
+    const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
+    const error = new HttpsError('failed-precondition', 'The media item belongs to another series.', {
+      code: SUBSPLASH_SERIES_OWNERSHIP_MISMATCH_CODE,
     });
 
     const normalized = handleError(error);
