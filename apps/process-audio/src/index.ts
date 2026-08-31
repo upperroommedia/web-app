@@ -6,6 +6,7 @@ import {
   sentryTracesSampleRate,
 } from './instrument';
 import express, { Request } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { spawnSync } from 'node:child_process';
 import * as Sentry from '@sentry/node';
 import { executeWithTimeout, getAudioSource, getFFmpegPath, logMemoryUsage, validateAddIntroOutroData } from './utils';
@@ -64,6 +65,20 @@ import {
 
 const app = express();
 app.use(express.json());
+const internalCanaryRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many internal YouTube canary requests.' },
+});
+const processAudioRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 600,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many process-audio requests.' },
+});
 const localBrowserProfileDir = process.env.PROCESS_AUDIO_BROWSER_PROFILE_DIR?.trim() || '';
 const localBrowserProfileBrowser = process.env.PROCESS_AUDIO_BROWSER_PROFILE_BROWSER?.trim() || 'chromium';
 const runtimeProfile = process.env.PROCESS_AUDIO_RUNTIME_PROFILE?.trim().toLowerCase() || 'hetzner';
@@ -668,7 +683,7 @@ app.get('/healthz', async (req, res) => {
   });
 });
 
-app.post('/internal/youtube-canary/run', async (req, res) => {
+app.post('/internal/youtube-canary/run', internalCanaryRateLimit, async (req, res) => {
   if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
     res.status(403).json({ error: 'This endpoint is available only from the local process-audio runtime.' });
     return;
@@ -695,7 +710,7 @@ app.post('/internal/youtube-canary/run', async (req, res) => {
   }
 });
 
-app.post('/internal/youtube-canary', async (req, res) => {
+app.post('/internal/youtube-canary', internalCanaryRateLimit, async (req, res) => {
   if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
     res.status(403).json({ error: 'This endpoint is available only from the local process-audio runtime.' });
     return;
@@ -885,7 +900,7 @@ app.get('/readyz', async (req, res) => {
   }
 });
 
-app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioInputType }>, res) => {
+app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}, { data: ProcessAudioInputType }>, res) => {
   const timeoutMillis = (TIMEOUT_SECONDS - 30) * 1000; // 30s less than timeoutSeconds
   const data = request.body?.data;
 
@@ -962,7 +977,7 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
 
   try {
     const cancelToken = new CancelToken();
-    await executeWithTimeout(
+    const processAudioResult = await executeWithTimeout(
       () =>
         processAudio(
           ytdlpPath ?? 'yt-dlp',
@@ -985,12 +1000,16 @@ app.post('/process-audio', async (request: Request<{}, {}, { data: ProcessAudioI
       cancelToken.cancel,
       timeoutMillis
     );
+    if (processAudioResult.youtubeSuccessfulAcquisitionAuthority) {
+      ctx.youtubeSuccessfulAcquisitionAuthority = processAudioResult.youtubeSuccessfulAcquisitionAuthority;
+    }
     await completeProcessAudioSuccess({
       database: realtimeDB,
       payload: data,
       requestId: ctx.requestId,
       taskId,
       ctx,
+      alreadyProcessed: processAudioResult.alreadyProcessed,
     });
     log.info('Request completed successfully');
     res.status(200).send();

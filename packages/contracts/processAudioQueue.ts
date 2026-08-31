@@ -22,6 +22,7 @@ export const PROCESS_AUDIO_DEFERRED_DISPOSITIONS = {
 export type ProcessAudioDeferredDisposition =
   (typeof PROCESS_AUDIO_DEFERRED_DISPOSITIONS)[keyof typeof PROCESS_AUDIO_DEFERRED_DISPOSITIONS];
 export type ProcessAudioDependencyScope = 'authenticated_session' | 'guest_provider';
+export type YouTubeSuccessfulAcquisitionAuthority = 'public_provider' | 'cookie_provider' | 'browser_fallback';
 
 export interface YouTubeAcquisitionEvidence {
   attemptedModes: Array<'public_provider' | 'cookie_provider' | 'browser_fallback'>;
@@ -126,6 +127,10 @@ export interface StoredProcessAudioRequestState {
   transientRetryNextRunAt?: string | null;
   transientRetryLastFailureMessage?: string | null;
   authenticatedDeferralAttemptCount?: number;
+  lastSuccessfulYouTubeAcquisitionAuthority?: YouTubeSuccessfulAcquisitionAuthority | null;
+  lastSuccessfulYouTubeAcquisitionRequestVersion?: string | null;
+  lastCompletedRequestVersion?: string | null;
+  lastCompletedAt?: string | null;
   updatedAt: string;
 }
 
@@ -171,6 +176,7 @@ export interface StoredYouTubeQueueState {
   probeTaskSermonId: string | null;
   probeRequestVersion: string | null;
   probeStartedAt: string | null;
+  probeDispatchReservationId?: string | null;
   probeLastSucceededAt: string | null;
   probeLastFailedAt: string | null;
   probeLastFailureClass: string | null;
@@ -271,6 +277,7 @@ export const buildInitialYouTubeQueueState = (): StoredYouTubeQueueState => ({
   probeTaskSermonId: null,
   probeRequestVersion: null,
   probeStartedAt: null,
+  probeDispatchReservationId: null,
   probeLastSucceededAt: null,
   probeLastFailedAt: null,
   probeLastFailureClass: null,

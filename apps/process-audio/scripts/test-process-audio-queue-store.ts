@@ -20,8 +20,10 @@ import {
   getYouTubeFailureDisposition,
 } from '../../../packages/contracts/processAudioQueue';
 import {
+  beginYouTubeQueueProbe,
   isYouTubeQueuePaused as isFunctionsYouTubeQueuePaused,
   recoverStaleYouTubeQueueProbe,
+  setYouTubeTaskQueueFactoryForTesting,
 } from '../../../functions-media/src/processAudioQueueStore';
 
 class MockSnapshot {
@@ -41,10 +43,16 @@ class MockRef {
     private readonly store: Record<string, unknown>,
     private readonly key: string,
     private readonly failSetOnceFor: Set<string>,
-    private readonly beforeTransactionOnceFor: Map<string, Array<(store: Record<string, unknown>) => void>>
+    private readonly beforeTransactionOnceFor: Map<string, Array<(store: Record<string, unknown>) => void>>,
+    private readonly beforeGetOnceFor: Map<string, Array<(store: Record<string, unknown>) => void>>,
+    private readonly coldTransactionOnceFor: Set<string>
   ) {}
 
   async get(): Promise<MockSnapshot> {
+    const hooks = this.beforeGetOnceFor.get(this.key);
+    const hook = hooks?.shift();
+    hook?.(this.store);
+
     if (Object.prototype.hasOwnProperty.call(this.store, this.key)) {
       return new MockSnapshot(this.store[this.key]);
     }
@@ -83,7 +91,19 @@ class MockRef {
     const hooks = this.beforeTransactionOnceFor.get(this.key);
     const hook = hooks?.shift();
     hook?.(this.store);
-    const next = updateFn(this.store[this.key]);
+    const serverCurrent = this.store[this.key];
+    if (this.coldTransactionOnceFor.delete(this.key)) {
+      const coldNext = updateFn(null);
+      if (typeof coldNext === 'undefined') {
+        return { committed: false, snapshot: new MockSnapshot(serverCurrent) };
+      }
+      if (serverCurrent === null || typeof serverCurrent === 'undefined') {
+        this.store[this.key] = coldNext;
+        return { committed: true, snapshot: new MockSnapshot(coldNext) };
+      }
+    }
+
+    const next = updateFn(serverCurrent);
     if (typeof next === 'undefined') {
       return { committed: false, snapshot: new MockSnapshot(this.store[this.key]) };
     }
@@ -95,15 +115,26 @@ class MockRef {
 function createMockDatabase(
   initialData: Record<string, unknown> = {},
   failSetOnceFor: string[] = [],
-  beforeTransactionOnceFor: Record<string, Array<(store: Record<string, unknown>) => void>> = {}
+  beforeTransactionOnceFor: Record<string, Array<(store: Record<string, unknown>) => void>> = {},
+  beforeGetOnceFor: Record<string, Array<(store: Record<string, unknown>) => void>> = {},
+  coldTransactionOnceFor: string[] = []
 ) {
   const store = { ...initialData };
   const pendingSetFailures = new Set(failSetOnceFor);
   const pendingTransactionHooks = new Map(Object.entries(beforeTransactionOnceFor));
+  const pendingGetHooks = new Map(Object.entries(beforeGetOnceFor));
+  const pendingColdTransactions = new Set(coldTransactionOnceFor);
   return {
     store,
     ref(key: string): MockRef {
-      return new MockRef(store, key, pendingSetFailures, pendingTransactionHooks);
+      return new MockRef(
+        store,
+        key,
+        pendingSetFailures,
+        pendingTransactionHooks,
+        pendingGetHooks,
+        pendingColdTransactions
+      );
     },
   };
 }
@@ -179,35 +210,41 @@ async function main(): Promise<void> {
     deleteOriginal: false,
     skipTranscode: false,
   } as const;
-  const legacyRecoveryStore = createMockDatabase({
-    'processAudioQueues/youtube/state': {
-      blocked: true,
-      blockerReason: 'cookie_session_stale_or_challenged',
-      probeMode: 'cookie_provider',
-      probeStatus: 'blocked',
-      deferredYouTubeTaskCount: 2,
+  const legacyRecoveryStore = createMockDatabase(
+    {
+      'processAudioQueues/youtube/state': {
+        blocked: true,
+        blockerReason: 'cookie_session_stale_or_challenged',
+        probeMode: 'cookie_provider',
+        probeStatus: 'blocked',
+        deferredYouTubeTaskCount: 2,
+      },
+      'processAudioQueues/youtube/deferred/sermon-123': {
+        sermonId: 'sermon-123',
+        payload: youtubePayload,
+        requestVersion: 'legacy-first-version',
+        deferredAt: '2026-08-23T22:07:10.842Z',
+        reason: 'cookie_session_stale_or_challenged',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: 'legacy-episode',
+        lastFailureClass: 'cookie_session_stale_or_challenged',
+      },
+      'processAudioQueues/youtube/deferred/legacy-second': {
+        sermonId: 'legacy-second',
+        payload: legacySecondPayload,
+        requestVersion: 'legacy-second-version',
+        deferredAt: '2026-08-23T23:00:00.000Z',
+        reason: 'cookie_session_stale_or_challenged',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: 'legacy-episode',
+        lastFailureClass: 'cookie_session_stale_or_challenged',
+      },
     },
-    'processAudioQueues/youtube/deferred/sermon-123': {
-      sermonId: 'sermon-123',
-      payload: youtubePayload,
-      requestVersion: 'legacy-first-version',
-      deferredAt: '2026-08-23T22:07:10.842Z',
-      reason: 'cookie_session_stale_or_challenged',
-      probeMode: 'cookie_provider',
-      blockerEpisodeId: 'legacy-episode',
-      lastFailureClass: 'cookie_session_stale_or_challenged',
-    },
-    'processAudioQueues/youtube/deferred/legacy-second': {
-      sermonId: 'legacy-second',
-      payload: legacySecondPayload,
-      requestVersion: 'legacy-second-version',
-      deferredAt: '2026-08-23T23:00:00.000Z',
-      reason: 'cookie_session_stale_or_challenged',
-      probeMode: 'cookie_provider',
-      blockerEpisodeId: 'legacy-episode',
-      lastFailureClass: 'cookie_session_stale_or_challenged',
-    },
-  });
+    [],
+    {},
+    {},
+    ['processAudioQueues/youtube/state']
+  );
   assert.deepEqual(await getYouTubeQueueScopeDiagnostics(legacyRecoveryStore as any), {
     guest: {
       blocked: false,
@@ -272,6 +309,148 @@ async function main(): Promise<void> {
   assert.equal(legacyDispatchCount, 1);
   assert.equal(unchangedGenerationRecovery.resumed, false);
   assert.equal(unchangedGenerationRecovery.nextProbeSermonId, null);
+  setCloudTasksApiDepsForTesting(null);
+  setProcessAudioTaskQueueFactoryForTesting(null);
+
+  const completedProbeStartedAt = new Date(Date.now() - 1_000).toISOString();
+  const completedProbeUpdatedAt = new Date().toISOString();
+  const liveCompletedProbeRecoveryStore = createMockDatabase({
+    'processAudioQueues/youtube/state': {
+      blocked: false,
+      probeMode: 'cookie_provider',
+      probeStatus: 'probing',
+      probeTaskSermonId: 'sermon-123',
+      probeRequestVersion: 'live-completed-version',
+      probeStartedAt: completedProbeStartedAt,
+      deferredYouTubeTaskCount: 1,
+      lastAttemptedAuthRecoveryGeneration: 'stale-auth-generation',
+    },
+    'processAudioQueues/youtube/deferred/legacy-second': {
+      sermonId: 'legacy-second',
+      payload: legacySecondPayload,
+      requestVersion: 'legacy-second-version',
+      deferredAt: '2026-08-23T23:00:00.000Z',
+      reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+      disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+      dependencyScope: 'authenticated_session',
+      probeMode: 'cookie_provider',
+      blockerEpisodeId: 'live-completed-episode',
+      lastFailureClass: 'cookie_session_stale_or_challenged',
+      attemptCount: 1,
+    },
+    'processAudioRequests/sermon-123': {
+      sermonId: 'sermon-123',
+      sourceType: 'youtube',
+      currentPayload: youtubePayload,
+      currentRequestVersion: 'live-completed-version',
+      nextPayload: null,
+      nextRequestVersion: null,
+      nextUpdatedAt: null,
+      updatedAt: completedProbeUpdatedAt,
+    },
+  });
+  let liveCompletedRecoveryDispatchCount = 0;
+  setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'live-completed-recovery-token' }),
+    fetchImpl: async () => {
+      liveCompletedRecoveryDispatchCount += 1;
+      return new Response('{}', { status: 200 });
+    },
+  });
+  const liveCompletedRecovery = await resumeDeferredYouTubeQueueOnStartup({
+    database: liveCompletedProbeRecoveryStore as any,
+    authenticatedRecoveryGeneration: 'fresh-auth-generation',
+  });
+  assert.equal(liveCompletedRecovery.resumed, true);
+  assert.equal(liveCompletedRecovery.nextProbeSermonId, 'legacy-second');
+  assert.equal(liveCompletedRecoveryDispatchCount, 1);
+  assert.equal(
+    liveCompletedProbeRecoveryStore.store['processAudioQueues/youtube/deferred/sermon-123'],
+    undefined,
+    'a legacy completed probe fingerprint must not be restored or reprocessed'
+  );
+  assert.equal(
+    (liveCompletedProbeRecoveryStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>)
+      .probeTaskSermonId,
+    'legacy-second'
+  );
+  setCloudTasksApiDepsForTesting(null);
+  setProcessAudioTaskQueueFactoryForTesting(null);
+
+  const completedProbeReservationRaceStore = createMockDatabase(
+    {
+      'processAudioQueues/youtube/state': {
+        blocked: false,
+        probeMode: 'cookie_provider',
+        probeStatus: 'probing',
+        probeTaskSermonId: 'sermon-123',
+        probeRequestVersion: 'live-completed-version',
+        probeStartedAt: completedProbeStartedAt,
+        deferredYouTubeTaskCount: 1,
+        lastAttemptedAuthRecoveryGeneration: 'stale-auth-generation',
+      },
+      'processAudioQueues/youtube/deferred/legacy-second': {
+        sermonId: 'legacy-second',
+        payload: legacySecondPayload,
+        requestVersion: 'legacy-second-version',
+        deferredAt: '2026-08-23T23:00:00.000Z',
+        reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: 'authenticated_session',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: 'live-completed-episode',
+        lastFailureClass: 'cookie_session_stale_or_challenged',
+        attemptCount: 1,
+      },
+      'processAudioRequests/sermon-123': {
+        sermonId: 'sermon-123',
+        sourceType: 'youtube',
+        currentPayload: youtubePayload,
+        currentRequestVersion: 'live-completed-version',
+        updatedAt: completedProbeUpdatedAt,
+      },
+    },
+    [],
+    {
+      'processAudioQueues/youtube/state': [
+        (store) => {
+          store['processAudioQueues/youtube/state'] = {
+            ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+            probeTaskSermonId: 'concurrent-owner',
+            probeRequestVersion: 'concurrent-version',
+            probeStartedAt: new Date().toISOString(),
+          };
+        },
+      ],
+    }
+  );
+  let completedProbeRaceDispatchCount = 0;
+  setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'completed-probe-race-token' }),
+    fetchImpl: async () => {
+      completedProbeRaceDispatchCount += 1;
+      return new Response('{}', { status: 200 });
+    },
+  });
+  const completedProbeRaceRecovery = await resumeDeferredYouTubeQueueOnStartup({
+    database: completedProbeReservationRaceStore as any,
+    authenticatedRecoveryGeneration: 'fresh-race-generation',
+  });
+  assert.equal(completedProbeRaceRecovery.resumed, false);
+  assert.equal(completedProbeRaceDispatchCount, 0, 'a lost probe reservation must not dispatch a Cloud Task');
+  assert.equal(
+    (completedProbeReservationRaceStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>)
+      .probeTaskSermonId,
+    'concurrent-owner',
+    'recovery must not overwrite a concurrently claimed probe'
+  );
+  assert.notEqual(
+    completedProbeReservationRaceStore.store['processAudioQueues/youtube/deferred/legacy-second'],
+    undefined,
+    'a lost recovery reservation must retain the durable deferred request'
+  );
   setCloudTasksApiDepsForTesting(null);
   setProcessAudioTaskQueueFactoryForTesting(null);
 
@@ -557,7 +736,8 @@ async function main(): Promise<void> {
   setProcessAudioTaskQueueFactoryForTesting(null);
 
   const buildProbeSuccessStore = (
-    beforeTransactionOnceFor: Record<string, Array<(store: Record<string, unknown>) => void>> = {}
+    beforeTransactionOnceFor: Record<string, Array<(store: Record<string, unknown>) => void>> = {},
+    beforeGetOnceFor: Record<string, Array<(store: Record<string, unknown>) => void>> = {}
   ) =>
     createMockDatabase(
       {
@@ -603,7 +783,8 @@ async function main(): Promise<void> {
         },
       },
       [],
-      beforeTransactionOnceFor
+      beforeTransactionOnceFor,
+      beforeGetOnceFor
     );
 
   setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
@@ -644,6 +825,12 @@ async function main(): Promise<void> {
   });
   assert.equal(authenticatedProbeStore.store['processAudioQueues/youtube/deferred/legacy-second'], undefined);
   assert.equal(probeDrainDispatchCount, 1);
+  const authenticatedProbeRequestState = authenticatedProbeStore.store['processAudioRequests/sermon-123'] as Record<
+    string,
+    unknown
+  >;
+  assert.equal(authenticatedProbeRequestState.lastSuccessfulYouTubeAcquisitionAuthority, 'cookie_provider');
+  assert.equal(authenticatedProbeRequestState.lastSuccessfulYouTubeAcquisitionRequestVersion, 'probe-version');
   const successfulDrainQueueState = authenticatedProbeStore.store['processAudioQueues/youtube/state'] as Record<
     string,
     unknown
@@ -656,6 +843,248 @@ async function main(): Promise<void> {
     successfulDrainQueueState.lastSuccessfulDrainAt,
     successfulDrainQueueState.lastDrainAttemptedAt,
     'a fully successful drain must persist its own completion timestamp'
+  );
+
+  let lostDrainOwnershipDispatchCount = 0;
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'lost-drain-token' }),
+    fetchImpl: async () => {
+      lostDrainOwnershipDispatchCount += 1;
+      return new Response('{}', { status: 200 });
+    },
+  });
+  const lostDrainOwnershipStore = buildProbeSuccessStore({
+    'processAudioQueueClaims/legacy-second': [
+      (store) => {
+        store['processAudioQueues/youtube/state'] = {
+          ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+          probeStatus: 'probing',
+          probeTaskSermonId: 'replacement-drain-owner',
+          probeRequestVersion: 'replacement-drain-version',
+          probeStartedAt: new Date().toISOString(),
+          probeDispatchReservationId: 'replacement-drain-reservation',
+        };
+      },
+    ],
+  });
+  await completeProcessAudioSuccess({
+    database: lostDrainOwnershipStore as any,
+    payload: youtubePayload,
+    requestId: 'lost-drain-owner-request',
+    taskId: 'probe-task',
+    ctx: { requestId: 'lost-drain-owner-request', youtubeSuccessfulAcquisitionAuthority: 'cookie_provider' },
+  });
+  assert.equal(
+    lostDrainOwnershipDispatchCount,
+    0,
+    'a successful probe must recheck drain ownership before each external task dispatch'
+  );
+  assert.notEqual(lostDrainOwnershipStore.store['processAudioQueues/youtube/deferred/legacy-second'], undefined);
+  assert.equal(
+    (lostDrainOwnershipStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>)
+      .probeTaskSermonId,
+    'replacement-drain-owner'
+  );
+
+  const tombstoneDrainOwnershipStore = buildProbeSuccessStore();
+  let tombstoneDrainRequestCount = 0;
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'tombstone-drain-token' }),
+    fetchImpl: async () => {
+      tombstoneDrainRequestCount += 1;
+      if (tombstoneDrainRequestCount === 1) {
+        return new Response('{"error":{"status":"ALREADY_EXISTS"}}', { status: 409 });
+      }
+      if (tombstoneDrainRequestCount === 2) {
+        tombstoneDrainOwnershipStore.store['processAudioQueues/youtube/state'] = {
+          ...(tombstoneDrainOwnershipStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+          probeStatus: 'probing',
+          probeTaskSermonId: 'replacement-after-tombstone',
+          probeRequestVersion: 'replacement-after-tombstone-version',
+          probeStartedAt: new Date().toISOString(),
+          probeDispatchReservationId: 'replacement-after-tombstone-reservation',
+        };
+        return new Response('{"error":{"status":"NOT_FOUND"}}', { status: 404 });
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+  await completeProcessAudioSuccess({
+    database: tombstoneDrainOwnershipStore as any,
+    payload: youtubePayload,
+    requestId: 'tombstone-drain-owner-request',
+    taskId: 'probe-task',
+    ctx: { requestId: 'tombstone-drain-owner-request', youtubeSuccessfulAcquisitionAuthority: 'cookie_provider' },
+  });
+  assert.equal(
+    tombstoneDrainRequestCount,
+    2,
+    'drain ownership must be rechecked before retrying a tombstoned Cloud Task generation'
+  );
+  assert.notEqual(
+    tombstoneDrainOwnershipStore.store['processAudioQueues/youtube/deferred/legacy-second'],
+    undefined
+  );
+
+  const persistedAuthorityRetryStore = buildProbeSuccessStore();
+  persistedAuthorityRetryStore.store['processAudioRequests/sermon-123'] = {
+    ...(persistedAuthorityRetryStore.store['processAudioRequests/sermon-123'] as Record<string, unknown>),
+    runningRequestId: null,
+    runningTaskId: null,
+    runningRequestVersion: null,
+    runningAt: null,
+    lastSuccessfulYouTubeAcquisitionAuthority: 'browser_fallback',
+    lastSuccessfulYouTubeAcquisitionRequestVersion: 'probe-version',
+  };
+  await completeProcessAudioSuccess({
+    database: persistedAuthorityRetryStore as any,
+    payload: youtubePayload,
+    requestId: 'already-processed-retry',
+    taskId: 'probe-task',
+    ctx: { requestId: 'already-processed-retry' },
+  });
+  assert.equal(
+    persistedAuthorityRetryStore.store['processAudioQueues/youtube/deferred/legacy-second'],
+    undefined,
+    'an idempotent PROCESSED retry must reuse matching durable authenticated acquisition evidence'
+  );
+  assert.equal(
+    (persistedAuthorityRetryStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>)
+      .lastDrainOutcome,
+    'succeeded'
+  );
+
+  const missingAuthorityRetryStore = buildProbeSuccessStore();
+  missingAuthorityRetryStore.store['processAudioRequests/sermon-123'] = {
+    ...(missingAuthorityRetryStore.store['processAudioRequests/sermon-123'] as Record<string, unknown>),
+    runningRequestId: null,
+    runningTaskId: null,
+    runningRequestVersion: null,
+    runningAt: null,
+  };
+  await completeProcessAudioSuccess({
+    database: missingAuthorityRetryStore as any,
+    payload: youtubePayload,
+    requestId: 'already-processed-missing-authority',
+    taskId: 'probe-task',
+    ctx: { requestId: 'already-processed-missing-authority' },
+  });
+  assert.equal(
+    (missingAuthorityRetryStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>).probeStatus,
+    'waiting_for_auth_required_request',
+    'a successful result without authenticated authority must release, not strand or certify, the probe'
+  );
+  assert.notEqual(missingAuthorityRetryStore.store['processAudioQueues/youtube/deferred/legacy-second'], undefined);
+
+  const alreadyProcessedAdvanceStore = buildProbeSuccessStore();
+  alreadyProcessedAdvanceStore.store['processAudioQueues/youtube/state'] = {
+    ...(alreadyProcessedAdvanceStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+    deferredYouTubeTaskCount: 2,
+  };
+  alreadyProcessedAdvanceStore.store['processAudioQueues/youtube/deferred/sermon-123'] = {
+    sermonId: 'sermon-123',
+    payload: youtubePayload,
+    requestVersion: 'probe-version',
+    deferredAt: '2026-08-23T22:00:00.000Z',
+    reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+    disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+    dependencyScope: 'authenticated_session',
+    probeMode: 'cookie_provider',
+    blockerEpisodeId: 'lingering-self-episode',
+    lastFailureClass: 'cookie_session_stale_or_challenged',
+    attemptCount: 1,
+  };
+  alreadyProcessedAdvanceStore.store['processAudioRequests/sermon-123'] = {
+    ...(alreadyProcessedAdvanceStore.store['processAudioRequests/sermon-123'] as Record<string, unknown>),
+    runningRequestId: null,
+    runningTaskId: null,
+    runningRequestVersion: null,
+    runningAt: null,
+  };
+  await completeProcessAudioSuccess({
+    database: alreadyProcessedAdvanceStore as any,
+    payload: youtubePayload,
+    requestId: 'live-stuck-processed-probe-recovery',
+    taskId: 'probe-task',
+    ctx: { requestId: 'live-stuck-processed-probe-recovery' },
+    alreadyProcessed: true,
+  });
+  const alreadyProcessedAdvanceQueueState = alreadyProcessedAdvanceStore.store[
+    'processAudioQueues/youtube/state'
+  ] as Record<string, unknown>;
+  assert.equal(alreadyProcessedAdvanceQueueState.probeStatus, 'probing');
+  assert.equal(alreadyProcessedAdvanceQueueState.probeTaskSermonId, 'legacy-second');
+  assert.equal(alreadyProcessedAdvanceQueueState.probeRequestVersion, 'legacy-second-version');
+  assert.equal(alreadyProcessedAdvanceQueueState.deferredYouTubeTaskCount, 0);
+  assert.equal(
+    alreadyProcessedAdvanceQueueState.probeLastSucceededAt ?? null,
+    null,
+    'an already-PROCESSED task without authority may advance recovery but must not certify auth'
+  );
+  assert.equal(
+    alreadyProcessedAdvanceStore.store['processAudioQueues/youtube/deferred/legacy-second'],
+    undefined,
+    'the advanced probe is removed only after its Cloud Task is durably adopted'
+  );
+  assert.equal(
+    alreadyProcessedAdvanceStore.store['processAudioQueues/youtube/deferred/sermon-123'],
+    undefined,
+    'an idempotent PROCESSED retry must remove, never redispatch, its own lingering deferred row'
+  );
+
+  let alreadyProcessedOwnershipRaceDispatchCount = 0;
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'already-processed-race-token' }),
+    fetchImpl: async () => {
+      alreadyProcessedOwnershipRaceDispatchCount += 1;
+      return new Response('{}', { status: 200 });
+    },
+  });
+  const alreadyProcessedOwnershipRaceStore = buildProbeSuccessStore(
+    {},
+    {
+      'processAudioQueues/youtube/state': [
+        () => undefined,
+        (store) => {
+          store['processAudioQueues/youtube/state'] = {
+            ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+            probeTaskSermonId: 'concurrent-owner',
+            probeRequestVersion: 'concurrent-version',
+            probeStartedAt: new Date().toISOString(),
+          };
+        },
+      ],
+    }
+  );
+  alreadyProcessedOwnershipRaceStore.store['processAudioRequests/sermon-123'] = {
+    ...(alreadyProcessedOwnershipRaceStore.store['processAudioRequests/sermon-123'] as Record<string, unknown>),
+    runningRequestId: null,
+    runningTaskId: null,
+    runningRequestVersion: null,
+    runningAt: null,
+  };
+  await completeProcessAudioSuccess({
+    database: alreadyProcessedOwnershipRaceStore as any,
+    payload: youtubePayload,
+    requestId: 'already-processed-ownership-race',
+    taskId: 'probe-task',
+    ctx: { requestId: 'already-processed-ownership-race' },
+    alreadyProcessed: true,
+  });
+  assert.equal(
+    alreadyProcessedOwnershipRaceDispatchCount,
+    0,
+    'an idempotent completion that lost probe ownership must not dispatch a replacement probe'
+  );
+  assert.equal(
+    (alreadyProcessedOwnershipRaceStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>)
+      .probeTaskSermonId,
+    'concurrent-owner'
+  );
+  assert.notEqual(
+    alreadyProcessedOwnershipRaceStore.store['processAudioQueues/youtube/deferred/legacy-second'],
+    undefined,
+    'a lost idempotent-completion reservation must retain the deferred request'
   );
 
   const concurrentCompletionEntry = {
@@ -823,6 +1252,315 @@ async function main(): Promise<void> {
     attemptCount: 0,
   });
 
+  const staleProbeAbaStore = createMockDatabase(
+    {
+      'processAudioQueues/youtube/state': {
+        blocked: false,
+        probeMode: 'cookie_provider',
+        probeStatus: 'probing',
+        probeTaskSermonId: 'stale-probe-sermon',
+        probeRequestVersion: 'stale-version',
+        probeStartedAt: '2026-08-23T00:00:00.000Z',
+        probeDispatchReservationId: 'original-dispatch',
+        deferredYouTubeTaskCount: 0,
+      },
+      'processAudioRequests/stale-probe-sermon': {
+        sermonId: 'stale-probe-sermon',
+        sourceType: 'youtube',
+        currentPayload: staleProbePayload,
+        currentRequestVersion: 'stale-version',
+        queuedTaskId: 'replacement-live-task',
+        queuedAt: '2026-08-23T00:00:00.000Z',
+        runningRequestId: null,
+        runningTaskId: null,
+        runningRequestVersion: null,
+        runningAt: null,
+        nextPayload: null,
+        nextRequestVersion: null,
+        nextUpdatedAt: null,
+        deferredAt: null,
+        updatedAt: '2026-08-23T00:00:00.000Z',
+      },
+    },
+    [],
+    {
+      'processAudioQueues/youtube/state': [
+        (store) => {
+          store['processAudioQueues/youtube/state'] = {
+            ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+            probeStartedAt: '2026-08-23T00:01:00.000Z',
+            probeDispatchReservationId: 'replacement-dispatch',
+          };
+        },
+      ],
+    }
+  );
+  const staleAbaRecovery = await recoverStaleYouTubeQueueProbe(staleProbeAbaStore as any);
+  assert.equal(staleAbaRecovery.recovered, false);
+  const staleAbaQueueState = staleProbeAbaStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>;
+  assert.equal(staleAbaQueueState.probeStatus, 'probing');
+  assert.equal(staleAbaQueueState.probeStartedAt, '2026-08-23T00:01:00.000Z');
+  assert.equal(staleAbaQueueState.probeDispatchReservationId, 'replacement-dispatch');
+  assert.equal(
+    (staleProbeAbaStore.store['processAudioRequests/stale-probe-sermon'] as Record<string, unknown>).queuedTaskId,
+    'replacement-live-task',
+    'stale recovery must not clear a same-version probe whose dispatch identity changed'
+  );
+  assert.equal(staleProbeAbaStore.store['processAudioQueues/youtube/deferred/stale-probe-sermon'], undefined);
+
+  const staleProbeNewGenerationStore = createMockDatabase({
+    'processAudioQueues/youtube/state': {
+      blocked: false,
+      probeMode: 'cookie_provider',
+      probeStatus: 'probing',
+      probeTaskSermonId: 'stale-probe-sermon',
+      probeRequestVersion: 'stale-version',
+      probeStartedAt: '2026-08-23T00:00:00.000Z',
+      probeDispatchReservationId: 'stale-generation-reservation',
+      deferredYouTubeTaskCount: 0,
+    },
+    'processAudioRequests/stale-probe-sermon': {
+      sermonId: 'stale-probe-sermon',
+      sourceType: 'youtube',
+      currentPayload: { ...staleProbePayload, duration: 121 },
+      currentRequestVersion: 'new-live-version',
+      queuedTaskId: 'new-live-task',
+      queuedAt: '2026-08-23T00:02:00.000Z',
+      runningRequestId: null,
+      runningTaskId: null,
+      runningRequestVersion: null,
+      runningAt: null,
+      nextPayload: null,
+      nextRequestVersion: null,
+      nextUpdatedAt: null,
+      deferredAt: null,
+      updatedAt: '2026-08-23T00:02:00.000Z',
+    },
+  });
+  const staleNewGenerationRecovery = await recoverStaleYouTubeQueueProbe(staleProbeNewGenerationStore as any);
+  assert.equal(staleNewGenerationRecovery.recovered, true);
+  assert.equal(
+    (staleProbeNewGenerationStore.store['processAudioRequests/stale-probe-sermon'] as Record<string, unknown>)
+      .queuedTaskId,
+    'new-live-task',
+    'stale probe recovery must not clear a newer request generation for the same sermon'
+  );
+  assert.equal(
+    staleProbeNewGenerationStore.store['processAudioQueues/youtube/deferred/stale-probe-sermon'],
+    undefined
+  );
+
+  let functionsProbeEnqueueCount = 0;
+  setYouTubeTaskQueueFactoryForTesting(
+    () =>
+      ({
+        async delete(): Promise<void> {},
+        async enqueue(): Promise<void> {
+          functionsProbeEnqueueCount += 1;
+        },
+      }) as any
+  );
+  const noCandidateActiveProbeStore = createMockDatabase({
+    'processAudioQueues/youtube/state': {
+      blocked: false,
+      probeMode: 'cookie_provider',
+      probeStatus: 'probing',
+      probeTaskSermonId: 'active-functions-probe',
+      probeRequestVersion: 'active-functions-version',
+      probeStartedAt: new Date().toISOString(),
+      probeDispatchReservationId: 'active-functions-reservation',
+      deferredYouTubeTaskCount: 0,
+    },
+  });
+  await beginYouTubeQueueProbe({
+    database: noCandidateActiveProbeStore as any,
+    targetUri: 'https://example.com/process-audio',
+    ownerId: 'functions-no-candidate',
+    probeMode: 'cookie_provider',
+  });
+  const noCandidateActiveState = noCandidateActiveProbeStore.store[
+    'processAudioQueues/youtube/state'
+  ] as Record<string, unknown>;
+  assert.equal(noCandidateActiveState.probeTaskSermonId, 'active-functions-probe');
+  assert.equal(noCandidateActiveState.probeDispatchReservationId, 'active-functions-reservation');
+
+  const noCandidateConcurrentDeferralStore = createMockDatabase(
+    {
+      'processAudioQueues/youtube/state': {
+        blocked: false,
+        probeMode: null,
+        probeStatus: 'idle',
+        probeTaskSermonId: null,
+        probeRequestVersion: null,
+        probeStartedAt: null,
+        probeDispatchReservationId: null,
+        deferredYouTubeTaskCount: 0,
+      },
+    },
+    [],
+    {},
+    {
+      'processAudioQueues/youtube/state': [
+        (store) => {
+          store['processAudioQueues/youtube/state'] = {
+            ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+            probeStatus: 'waiting_for_auth_required_request',
+            deferredYouTubeTaskCount: 1,
+          };
+          store['processAudioQueues/youtube/deferred/late-functions-deferral'] = {
+            sermonId: 'late-functions-deferral',
+            payload: { ...youtubePayload, id: 'late-functions-deferral' },
+            requestVersion: 'late-functions-version',
+            deferredAt: new Date().toISOString(),
+            reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+            disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+            dependencyScope: 'authenticated_session',
+            probeMode: 'cookie_provider',
+            blockerEpisodeId: 'late-functions-episode',
+            lastFailureClass: 'cookie_session_stale_or_challenged',
+            attemptCount: 1,
+          };
+        },
+      ],
+    }
+  );
+  await beginYouTubeQueueProbe({
+    database: noCandidateConcurrentDeferralStore as any,
+    targetUri: 'https://example.com/process-audio',
+    ownerId: 'functions-late-deferral',
+    probeMode: 'cookie_provider',
+  });
+  assert.equal(
+    (noCandidateConcurrentDeferralStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>)
+      .probeStatus,
+    'waiting_for_auth_required_request'
+  );
+  assert.notEqual(
+    noCandidateConcurrentDeferralStore.store['processAudioQueues/youtube/deferred/late-functions-deferral'],
+    undefined
+  );
+
+  const functionsProbeRaceStore = createMockDatabase(
+    {
+      'processAudioQueues/youtube/state': {
+        blocked: false,
+        probeMode: null,
+        probeStatus: 'waiting_for_auth_required_request',
+        probeTaskSermonId: null,
+        probeRequestVersion: null,
+        probeStartedAt: null,
+        probeDispatchReservationId: null,
+        deferredYouTubeTaskCount: 1,
+      },
+      'processAudioQueues/youtube/deferred/functions-candidate': {
+        sermonId: 'functions-candidate',
+        payload: { ...youtubePayload, id: 'functions-candidate' },
+        requestVersion: 'functions-candidate-version',
+        deferredAt: '2026-08-23T00:00:00.000Z',
+        reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: 'authenticated_session',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: 'functions-candidate-episode',
+        lastFailureClass: 'cookie_session_stale_or_challenged',
+        attemptCount: 1,
+      },
+    },
+    [],
+    {
+      'processAudioQueues/youtube/state': [
+        (store) => {
+          store['processAudioQueues/youtube/state'] = {
+            ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+            probeMode: 'browser_fallback',
+            probeStatus: 'probing',
+            probeTaskSermonId: 'replacement-functions-owner',
+            probeRequestVersion: 'replacement-functions-version',
+            probeStartedAt: new Date().toISOString(),
+            probeDispatchReservationId: 'replacement-functions-reservation',
+          };
+        },
+      ],
+    }
+  );
+  await beginYouTubeQueueProbe({
+    database: functionsProbeRaceStore as any,
+    targetUri: 'https://example.com/process-audio',
+    ownerId: 'functions-probe-race',
+    probeMode: 'cookie_provider',
+  });
+  assert.equal(functionsProbeEnqueueCount, 0, 'Functions recovery must reserve queue ownership before enqueueing');
+  const functionsProbeRaceState = functionsProbeRaceStore.store[
+    'processAudioQueues/youtube/state'
+  ] as Record<string, unknown>;
+  assert.equal(functionsProbeRaceState.probeTaskSermonId, 'replacement-functions-owner');
+  assert.equal(functionsProbeRaceState.probeDispatchReservationId, 'replacement-functions-reservation');
+  assert.notEqual(
+    functionsProbeRaceStore.store['processAudioQueues/youtube/deferred/functions-candidate'],
+    undefined
+  );
+
+  const functionsCandidateReplacementStore = createMockDatabase(
+    {
+      'processAudioQueues/youtube/state': {
+        blocked: false,
+        probeMode: null,
+        probeStatus: 'waiting_for_auth_required_request',
+        probeTaskSermonId: null,
+        probeRequestVersion: null,
+        probeStartedAt: null,
+        probeDispatchReservationId: null,
+        deferredYouTubeTaskCount: 1,
+      },
+      'processAudioQueues/youtube/deferred/functions-original': {
+        sermonId: 'functions-original',
+        payload: { ...youtubePayload, id: 'functions-original' },
+        requestVersion: 'functions-original-version',
+        deferredAt: '2026-08-23T00:00:00.000Z',
+        reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: 'authenticated_session',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: 'functions-original-episode',
+        lastFailureClass: 'cookie_session_stale_or_challenged',
+        attemptCount: 1,
+      },
+    },
+    [],
+    {
+      'processAudioQueueClaims/functions-original': [
+        (store) => {
+          delete store['processAudioQueues/youtube/deferred/functions-original'];
+          store['processAudioQueues/youtube/deferred/functions-replacement'] = {
+            sermonId: 'functions-replacement',
+            payload: { ...youtubePayload, id: 'functions-replacement' },
+            requestVersion: 'functions-replacement-version',
+            deferredAt: '2026-08-22T23:59:00.000Z',
+            reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+            disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+            dependencyScope: 'authenticated_session',
+            probeMode: 'cookie_provider',
+            blockerEpisodeId: 'functions-replacement-episode',
+            lastFailureClass: 'cookie_session_stale_or_challenged',
+            attemptCount: 1,
+          };
+        },
+      ],
+    }
+  );
+  await beginYouTubeQueueProbe({
+    database: functionsCandidateReplacementStore as any,
+    targetUri: 'https://example.com/process-audio',
+    ownerId: 'functions-candidate-replaced',
+    probeMode: 'cookie_provider',
+  });
+  assert.equal(functionsProbeEnqueueCount, 0);
+  assert.notEqual(
+    functionsCandidateReplacementStore.store['processAudioQueues/youtube/deferred/functions-replacement'],
+    undefined
+  );
+  setYouTubeTaskQueueFactoryForTesting(null);
+
   const deletedProbeStore = createMockDatabase(
     {
       'processAudioQueues/youtube/state': {
@@ -880,10 +1618,14 @@ async function main(): Promise<void> {
     },
     [],
     {
-      'processAudioQueues/youtube/state': [
+      'processAudioQueueClaims/deleted-next': [
         (store) => {
           store['processAudioQueues/youtube/state'] = {
             ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+            probeTaskSermonId: 'replacement-owner',
+            probeRequestVersion: 'replacement-owner-version',
+            probeStartedAt: '2026-08-23T00:02:00.000Z',
+            probeDispatchReservationId: 'replacement-owner-reservation',
             blockerEpisodeId: 'deleted-concurrent-episode',
             alertSentAt: '2026-08-23T00:02:00.000Z',
             alertReservationId: 'deleted-concurrent-reservation',
@@ -907,9 +1649,13 @@ async function main(): Promise<void> {
     }
   );
   setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
+  let deletedCleanupCreateCalls = 0;
   setCloudTasksApiDepsForTesting({
     authFactory: async () => ({ getAccessToken: async () => 'deleted-cleanup-token' }),
-    fetchImpl: async () => new Response('{}', { status: 200 }),
+    fetchImpl: async () => {
+      deletedCleanupCreateCalls += 1;
+      return new Response('{}', { status: 200 });
+    },
   });
   const deletedCleanupResult = await cleanupDeletedSermonProcessAudioState({
     database: deletedProbeStore as any,
@@ -917,9 +1663,13 @@ async function main(): Promise<void> {
     requestId: 'deleted-cleanup-request',
     taskId: 'deleted-active-task',
   });
-  assert.equal(deletedCleanupResult.advancedProbe, true);
+  assert.equal(deletedCleanupResult.advancedProbe, false);
+  assert.equal(deletedCleanupCreateCalls, 0, 'deleted cleanup must reserve ownership before creating a task');
   const deletedQueueState = deletedProbeStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>;
-  assert.equal(deletedQueueState.deferredYouTubeTaskCount, 1);
+  assert.equal(deletedQueueState.probeTaskSermonId, 'replacement-owner');
+  assert.equal(deletedQueueState.probeRequestVersion, 'replacement-owner-version');
+  assert.equal(deletedQueueState.probeDispatchReservationId, 'replacement-owner-reservation');
+  assert.equal(deletedQueueState.deferredYouTubeTaskCount, 3);
   assert.equal(deletedQueueState.blockerEpisodeId, 'deleted-concurrent-episode');
   assert.equal(deletedQueueState.alertSentAt, '2026-08-23T00:02:00.000Z');
   assert.equal(deletedQueueState.alertReservationId, 'deleted-concurrent-reservation');
@@ -1119,6 +1869,14 @@ async function main(): Promise<void> {
   assert.equal(
     request.url,
     'https://cloudtasks.googleapis.com/v2/projects/urm-app/locations/us-central1/queues/processaudioyoutubetask/tasks'
+  );
+  assert.equal(
+    request.taskName,
+    'projects/urm-app/locations/us-central1/queues/processaudioyoutubetask/tasks/pa-test-task'
+  );
+  assert.equal(
+    request.inspectionUrl,
+    'https://cloudtasks.googleapis.com/v2/projects/urm-app/locations/us-central1/queues/processaudioyoutubetask/tasks/pa-test-task'
   );
 
   const parsedBody = JSON.parse(request.init.body) as {
@@ -1501,6 +2259,91 @@ async function main(): Promise<void> {
 
   await runPostLiveDeferralCase({ taskDeleteThrows: false });
   await runPostLiveDeferralCase({ taskDeleteThrows: true });
+
+  const postLiveNoNextRaceStore = createMockDatabase(
+    {
+      'processAudioQueues/youtube/state': {
+        blocked: false,
+        probeMode: 'cookie_provider',
+        probeStatus: 'probing',
+        probeTaskSermonId: 'sermon-123',
+        probeRequestVersion: 'current-version',
+        probeStartedAt: '2026-05-10T19:00:00.000Z',
+        probeDispatchReservationId: 'current-post-live-reservation',
+        deferredYouTubeTaskCount: 1,
+      },
+      'processAudioQueues/youtube/deferred/sermon-123': {
+        sermonId: 'sermon-123',
+        payload: youtubePayload,
+        requestVersion: 'current-version',
+        deferredAt: '2026-05-10T19:00:00.000Z',
+        reason: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        disposition: PROCESS_AUDIO_DEFERRED_DISPOSITIONS.WAITING_FOR_YOUTUBE_AUTH,
+        dependencyScope: 'authenticated_session',
+        probeMode: 'cookie_provider',
+        blockerEpisodeId: 'post-live-no-next-episode',
+        lastFailureClass: 'cookie_session_stale_or_challenged',
+        attemptCount: 1,
+      },
+      'processAudioRequests/sermon-123': {
+        sermonId: 'sermon-123',
+        sourceType: 'youtube',
+        currentPayload: youtubePayload,
+        currentRequestVersion: 'current-version',
+        queuedTaskId: 'current-task',
+        queuedAt: '2026-05-10T19:00:00.000Z',
+        runningRequestId: 'post-live-no-next-request',
+        runningTaskId: 'current-task',
+        runningRequestVersion: 'current-version',
+        runningAt: '2026-05-10T19:01:00.000Z',
+        nextPayload: null,
+        nextRequestVersion: null,
+        nextUpdatedAt: null,
+        deferredAt: null,
+        transientRetryReason: null,
+        transientRetryCount: 0,
+        transientRetryNextRunAt: null,
+        transientRetryLastFailureMessage: null,
+        updatedAt: '2026-05-10T19:01:00.000Z',
+      },
+    },
+    [],
+    {
+      'processAudioQueues/youtube/state': [
+        (store) => {
+          store['processAudioQueues/youtube/state'] = {
+            ...(store['processAudioQueues/youtube/state'] as Record<string, unknown>),
+            probeMode: 'browser_fallback',
+            probeStatus: 'probing',
+            probeTaskSermonId: 'post-live-replacement-owner',
+            probeRequestVersion: 'post-live-replacement-version',
+            probeStartedAt: new Date().toISOString(),
+            probeDispatchReservationId: 'post-live-replacement-reservation',
+          };
+        },
+      ],
+    }
+  );
+  setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'post-live-no-next-token' }),
+    fetchImpl: async () => new Response('{}', { status: 200 }),
+  });
+  await deferPostLiveArchiveYouTubeRequest({
+    database: postLiveNoNextRaceStore as any,
+    payload: youtubePayload,
+    requestId: 'post-live-no-next-request',
+    taskId: 'current-task',
+    failureClass: 'post_live_archive_not_ready',
+    failureMessage: 'This live event has ended.',
+  });
+  const postLiveNoNextRaceState = postLiveNoNextRaceStore.store[
+    'processAudioQueues/youtube/state'
+  ] as Record<string, unknown>;
+  assert.equal(postLiveNoNextRaceState.probeTaskSermonId, 'post-live-replacement-owner');
+  assert.equal(postLiveNoNextRaceState.probeDispatchReservationId, 'post-live-replacement-reservation');
+  setCloudTasksApiDepsForTesting(null);
+  setProcessAudioTaskQueueFactoryForTesting(null);
 }
 
 void main().catch((error) => {

@@ -88,6 +88,11 @@ export const isProcessAudioAlreadyRunningError = (error: unknown): error is Proc
   return error instanceof ProcessAudioAlreadyRunningError;
 };
 
+export interface ProcessAudioResult {
+  alreadyProcessed: boolean;
+  youtubeSuccessfulAcquisitionAuthority?: LogContext['youtubeSuccessfulAcquisitionAuthority'];
+}
+
 async function acquireProcessAudioLock(
   realtimeDB: Database,
   sermonId: string,
@@ -254,7 +259,7 @@ export const processAudio = async (
   outroUrl?: string,
   ctx?: LogContext,
   taskId?: string | null
-): Promise<void> => {
+): Promise<ProcessAudioResult> => {
   const fileName = audioSource.id;
   // Use provided context or create a new one with sermonId
   const contextWithSermonId = ctx ?? createContext(fileName, 'process-audio');
@@ -263,6 +268,10 @@ export const processAudio = async (
   const lockRequestId = contextWithSermonId.requestId;
   let lockAcquired = false;
   let stopLockHeartbeat: (() => void) | null = null;
+  const buildResult = (alreadyProcessed = false): ProcessAudioResult => ({
+    alreadyProcessed,
+    youtubeSuccessfulAcquisitionAuthority: contextWithSermonId.youtubeSuccessfulAcquisitionAuthority,
+  });
 
   return Sentry.startSpan(
     {
@@ -352,7 +361,7 @@ export const processAudio = async (
 
   if (existingStatus?.audioStatus === sermonStatusType.PROCESSED) {
     log.info('Sermon already processed, skipping (idempotent)', { documentPath, fileName });
-    return;
+    return buildResult(true);
   }
 
   try {
@@ -402,7 +411,7 @@ export const processAudio = async (
       ctx: contextWithSermonId,
     });
 
-    if (cancelToken.isCancellationRequested) return;
+    if (cancelToken.isCancellationRequested) return buildResult();
     await docRef.update({
       status: {
         ...(existingStatus ?? sermonStatus),
@@ -421,7 +430,7 @@ export const processAudio = async (
       audioFilesToMerge.OUTRO = outroUrl;
       customMetadata.outroUrl = outroUrl;
     }
-    if (cancelToken.isCancellationRequested) return;
+    if (cancelToken.isCancellationRequested) return buildResult();
 
     const trimMessage = skipTranscode
       ? 'Trimming'
@@ -492,6 +501,10 @@ export const processAudio = async (
       }
     );
 
+    if (trimCtx.youtubeSuccessfulAcquisitionAuthority) {
+      contextWithSermonId.youtubeSuccessfulAcquisitionAuthority = trimCtx.youtubeSuccessfulAcquisitionAuthority;
+    }
+
     log.info('Audio processing step completed', { step: trimMessage });
 
     // download processed audio for merging
@@ -560,7 +573,7 @@ export const processAudio = async (
       log.debug('No intro or outro, skipping merge');
     }
 
-    if (cancelToken.isCancellationRequested) return;
+    if (cancelToken.isCancellationRequested) return buildResult();
 
     log.info('Updating status to PROCESSED');
     await docRef.update({
@@ -571,7 +584,7 @@ export const processAudio = async (
       durationSeconds: durationSeconds,
     });
 
-    if (cancelToken.isCancellationRequested) return;
+    if (cancelToken.isCancellationRequested) return buildResult();
     await setProcessAudioProgress(realtimeDB.ref(`addIntroOutro/${fileName}`), 100, 'completed', 'Completed').catch((err) => {
       log.error('Failed to set final progress to 100%', {
         error: err instanceof Error ? err.message : String(err),
@@ -579,8 +592,9 @@ export const processAudio = async (
     });
 
     // delete original audio file
-    if (cancelToken.isCancellationRequested) return;
+    if (cancelToken.isCancellationRequested) return buildResult();
     log.info('Audio processing completed successfully');
+    return buildResult();
   } catch (error) {
     log.error('Audio processing failed', {
       error: error instanceof Error ? error.message : String(error),
