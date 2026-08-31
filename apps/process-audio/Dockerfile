@@ -62,7 +62,8 @@ COPY apps/process-audio ./apps/process-audio
 # being checked into git for Cloud Run images.
 RUN pnpm --dir packages/shared build \
     && pnpm --dir packages/contracts build \
-    && pnpm --dir apps/process-audio build
+    && pnpm --dir apps/process-audio build \
+    && test -f apps/process-audio/dist/index.js
 
 # ---------- Production stage ----------
 FROM node:${NODE_VERSION}-bookworm-slim AS production
