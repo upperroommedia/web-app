@@ -18,7 +18,11 @@
     "esModuleInterop": true,
     "declaration": true,
     "resolveJsonModule": true,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@upperroom/contracts/*": ["../../packages/contracts/*"],
+      "@upperroom/shared/*": ["../../packages/shared/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["*.test.ts"],

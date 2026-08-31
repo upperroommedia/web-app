@@ -20,6 +20,7 @@ import { withIdempotency } from './locks/withIdempotency';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getSubsplashMediaItemDetails } from './helpers/subsplashMediaItems';
+import { SUBSPLASH_SERIES_OWNERSHIP_MISMATCH_CODE } from './expectedOperationalError';
 import type {
   RemoveFromSeriesInputType,
   RemoveFromSeriesOutputType,
@@ -114,7 +115,8 @@ const removeFromSeries = onCall(
             ) {
               throw new HttpsError(
                 'failed-precondition',
-                `Media item ${normalizedMediaItemId} belongs to a different Subsplash series.`
+                `Media item ${normalizedMediaItemId} belongs to a different Subsplash series.`,
+                { code: SUBSPLASH_SERIES_OWNERSHIP_MISMATCH_CODE }
               );
             }
 

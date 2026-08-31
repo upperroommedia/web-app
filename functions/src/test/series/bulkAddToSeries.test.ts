@@ -83,6 +83,52 @@ describe('bulkAddToSeries - Basic Functionality', () => {
     expect(updatedA?.subtitle).toBe('Part 2 of Bulk Series');
     expect(updatedExisting?.subtitle).toBe('Part 1 of Bulk Series');
   });
+
+  it('defers subtitles for unpositioned non-published members after reordering published items', async () => {
+    const series = subsplashSeriesMock.createSeries('Mixed Status Series');
+    const firestoreSeriesId = await createSeriesDocument({
+      subsplashId: series.id,
+      name: 'Mixed Status Series',
+    });
+
+    const existing = subsplashSeriesMock.createMediaItem('Existing', {
+      seriesId: series.id,
+      position: 1,
+    });
+    const unpositionedDraft = subsplashSeriesMock.createMediaItem('Draft', {
+      seriesId: series.id,
+    });
+    unpositionedDraft.status = 'draft';
+    const addition = subsplashSeriesMock.createMediaItem('Addition');
+
+    const request: TestRequest<BulkAddToSeriesInputType> = {
+      auth: { token: { role: 'admin' } },
+      data: withConcurrencyEnvelope({
+        firestoreSeriesId,
+        seriesSubsplashId: series.id,
+        operationKey: 'bulk-add-with-unpositioned-draft',
+        expectedPublishedMembershipHash: toMembershipHash([existing.id, unpositionedDraft.id]),
+        adds: [{ mediaItemId: addition.id }],
+        publishedItemOrder: [addition.id, existing.id],
+      }),
+    };
+
+    await expect(bulkAddToSeriesHandler(request)).resolves.toMatchObject({
+      status: 'success',
+      reorderApplied: true,
+    });
+    expect(subsplashSeriesMock.getMediaItem(addition.id)).toMatchObject({
+      position: 2,
+      subtitle: 'Part 2 of Mixed Status Series',
+    });
+    expect(subsplashSeriesMock.getMediaItem(existing.id)).toMatchObject({
+      position: 1,
+      subtitle: 'Part 1 of Mixed Status Series',
+    });
+    expect(subsplashSeriesMock.getMediaItem(unpositionedDraft.id)).toMatchObject({
+      position: null,
+    });
+  });
 });
 
 describe('bulkAddToSeries - Rollback Behavior', () => {
