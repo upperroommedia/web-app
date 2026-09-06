@@ -22,7 +22,7 @@ services:
       - "${PROCESS_AUDIO_FILE_HOST_PORT:-8080}:8080"
 
   ytdlp-pot-provider:
-    image: docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    image: docker.io/brainicism/bgutil-ytdlp-pot-provider:1.3.2@sha256:9a96e6385ce1928da87dea07b1cab0413d2cf8c07a3b8a8bd419f53df2c3843c
     expose:
       - "4416"
 
