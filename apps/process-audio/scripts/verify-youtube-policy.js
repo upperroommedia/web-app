@@ -14,6 +14,7 @@ const {
   isYouTubeMedia403,
   mergeBrowserPoTokenExtractorArg,
 } = require('../dist/youtubeBrowserPoToken');
+const { shouldCaptureProcessAudioFailure } = require('../dist/processAudioFailureReporting');
 
 function main() {
   assert.equal(
@@ -109,6 +110,27 @@ function main() {
   assert.equal(shouldUseExternalDownloaderForYouTubeDownload('public_provider'), true);
   assert.equal(shouldUseExternalDownloaderForYouTubeDownload('cookie_provider'), false);
   assert.equal(shouldUseExternalDownloaderForYouTubeDownload('browser_fallback'), false);
+
+  assert.equal(
+    shouldCaptureProcessAudioFailure({ outcome: 'deferred', shouldAlert: true }),
+    true,
+    'the first alert-worthy deferral should retain one Sentry signal for the outage episode'
+  );
+  assert.equal(
+    shouldCaptureProcessAudioFailure({ outcome: 'deferred', shouldAlert: false }),
+    false,
+    'later jobs deferred by the same outage must not create duplicate Sentry events'
+  );
+  assert.equal(
+    shouldCaptureProcessAudioFailure({ outcome: 'post_live_retry' }),
+    false,
+    'a scheduled post-live retry is expected recovery work, not an application exception'
+  );
+  assert.equal(
+    shouldCaptureProcessAudioFailure({ outcome: 'unhandled' }),
+    true,
+    'terminal and unhandled failures must remain visible in Sentry'
+  );
 
   const browserPoToken = 'x'.repeat(100);
   assert.equal(isYouTubeMedia403('ERROR: unable to download video data: HTTP Error 403: Forbidden'), true);
