@@ -39,6 +39,7 @@ import {
 } from './processAudioQueueStore';
 import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
 import { getProcessAudioConcurrencyConfig } from './concurrency';
+import { shouldCaptureProcessAudioFailure } from './processAudioFailureReporting';
 import {
   getYouTubeFailureDisposition,
   type StoredProcessAudioRequestState,
@@ -1108,54 +1109,58 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
       ? toYouTubeAlertCode(youtubeFailureClass as YouTubeFailureClass)
       : null;
 
-    Sentry.withScope((scope) => {
-      scope.setTag('route', 'process-audio');
-      scope.setTag('runtimeHost', runtimeHost);
-      scope.setTag('runtimeEnv', runtimeEnv);
-      scope.setTag('audioSourceType', audioSource.type);
-      if (youtubeAcquisitionEvidence) {
-        scope.setTag('youtube.attempted_modes', youtubeAcquisitionEvidence.attemptedModes.join(','));
-        scope.setTag('youtube.requires_auth_recovery', youtubeAcquisitionEvidence.requiresAuthenticationRecovery);
-        scope.setTag('youtube.guest_failure_class', youtubeAcquisitionEvidence.guestFailureClass ?? 'none');
-        scope.setTag(
-          'youtube.authenticated_failure_class',
-          youtubeAcquisitionEvidence.authenticatedFailureClass ?? 'none'
-        );
-        scope.setTag(
-          'youtube.failure_disposition',
-          youtubeTerminalFailureClass ? 'terminal' : youtubeFailureDisposition?.action ?? 'none'
-        );
-        scope.setTag('youtube.terminal_failure_class', youtubeTerminalFailureClass ?? 'none');
-        scope.setTag(
-          'youtube.dependency_scope',
-          youtubeFailureDisposition?.action === 'defer' ? youtubeFailureDisposition.dependencyScope : 'none'
-        );
-      }
-      scope.setContext('processAudio', {
-        sermonId: data.id,
-        requestId: ctx.requestId,
-        taskId: taskId ?? null,
-        audioSource: audioSource.source,
-        youtubeProcessingEnabled,
-        browserFallbackConfigured,
-        browserFallbackEnabled,
-        ytDlpVersion: ytDlpVersion ?? null,
-        poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
-        youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
-        youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
-        browserFallbackError: browserFallbackError ?? null,
-      });
-
-      if (request.auth?.email) {
-        scope.setUser({
-          email: request.auth.email,
-          id: request.auth.sub,
-          username: request.auth.name,
+    const captureProcessAudioException = (): void => {
+      Sentry.withScope((scope) => {
+        scope.setTag('route', 'process-audio');
+        scope.setTag('runtimeHost', runtimeHost);
+        scope.setTag('runtimeEnv', runtimeEnv);
+        scope.setTag('audioSourceType', audioSource.type);
+        if (youtubeAcquisitionEvidence) {
+          scope.setTag('youtube.attempted_modes', youtubeAcquisitionEvidence.attemptedModes.join(','));
+          scope.setTag('youtube.requires_auth_recovery', youtubeAcquisitionEvidence.requiresAuthenticationRecovery);
+          scope.setTag('youtube.guest_failure_class', youtubeAcquisitionEvidence.guestFailureClass ?? 'none');
+          scope.setTag(
+            'youtube.authenticated_failure_class',
+            youtubeAcquisitionEvidence.authenticatedFailureClass ?? 'none'
+          );
+          scope.setTag(
+            'youtube.failure_disposition',
+            youtubeTerminalFailureClass ? 'terminal' : youtubeFailureDisposition?.action ?? 'none'
+          );
+          scope.setTag('youtube.terminal_failure_class', youtubeTerminalFailureClass ?? 'none');
+          scope.setTag(
+            'youtube.dependency_scope',
+            youtubeFailureDisposition?.action === 'defer' ? youtubeFailureDisposition.dependencyScope : 'none'
+          );
+        }
+        scope.setContext('processAudio', {
+          sermonId: data.id,
+          requestId: ctx.requestId,
+          taskId: taskId ?? null,
+          audioSource: audioSource.source,
+          youtubeProcessingEnabled,
+          browserFallbackConfigured,
+          browserFallbackEnabled,
+          ytDlpVersion: ytDlpVersion ?? null,
+          poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+          youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
+          youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
+          browserFallbackError: browserFallbackError ?? null,
+          cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
+          cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
         });
-      }
 
-      Sentry.captureException(e);
-    });
+        if (request.auth?.email) {
+          scope.setUser({
+            email: request.auth.email,
+            id: request.auth.sub,
+            username: request.auth.name,
+          });
+        }
+
+        Sentry.captureException(e);
+      });
+    };
 
     log.error('Request failed', {
       error: message,
@@ -1277,6 +1282,15 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
           log.error('Failed to update document status after authenticated YouTube defer', { error: updateError });
         }
 
+        if (
+          shouldCaptureProcessAudioFailure({
+            outcome: 'deferred',
+            shouldAlert: shouldEmitOperationalAlert,
+          })
+        ) {
+          captureProcessAudioException();
+        }
+
         if (shouldEmitOperationalAlert) {
           try {
             await emitOperationalAlertEmail({
@@ -1365,6 +1379,10 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
       : terminalYouTubeFailureMessage
       ? 'process-audio exhausted bounded authenticated YouTube recovery for an account or entitlement failure.'
       : alertSummary;
+
+    if (shouldCaptureProcessAudioFailure({ outcome: 'unhandled' })) {
+      captureProcessAudioException();
+    }
 
     try {
       await completeProcessAudioFailure({
