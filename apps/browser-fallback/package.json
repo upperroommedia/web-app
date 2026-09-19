@@ -20,7 +20,7 @@
     "@google-cloud/storage": "catalog:",
     "express": "^4.18.2",
     "firebase-admin": "catalog:",
-    "playwright": "^1.62.1",
+    "playwright": "^1.63.0",
     "uuid": "catalog:"
   },
   "devDependencies": {
