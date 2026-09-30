@@ -1,5 +1,8 @@
 import admin from 'firebase-admin';
 
+// Usage: node scripts/backfillBibleBookMetadata.mjs [--apply]
+// Requires Application Default Credentials with Firestore write access to urm-app.
+// The default mode only prints the proposed changes.
 const projectId = process.env.FIREBASE_PROJECT_ID || 'urm-app';
 const applyChanges = process.argv.includes('--apply');
 
