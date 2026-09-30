@@ -30,6 +30,8 @@ const additionalBooks = [
   { id: '939ac376-9a6d-476f-9578-47b8dcdd3b50', name: 'Obadiah' },
   { id: '23e4ff1e-2e0c-4014-8e8d-ef3230e2c277', name: 'Nahum' },
   { id: '408f3416-df99-452b-b871-c86be67a413d', name: 'Zephaniah' },
+  { id: '816ca7ad-31a2-45ec-8337-856311c8a346', name: '1 Chronicles', createIfMissing: true },
+  { id: 'd7767379-dac2-44d8-9bdd-75e4aa37e4ea', name: '2 Chronicles', createIfMissing: true },
 ];
 
 const normalizeName = (value) => value.trim().replace(/\s+/g, ' ');
@@ -72,7 +74,35 @@ try {
   for (const book of additionalBooks) {
     const ref = collection.doc(book.id);
     const doc = await ref.get();
-    if (!doc.exists) throw new Error(`Expected existing Subsplash/Firestore list ${book.name} (${book.id}).`);
+    if (!doc.exists) {
+      if (!book.createIfMissing) {
+        throw new Error(`Expected existing Subsplash/Firestore list ${book.name} (${book.id}).`);
+      }
+      const now = Date.now();
+      updates.set(ref.path, {
+        ref,
+        data: {
+          id: book.id,
+          subsplashId: book.id,
+          name: book.name,
+          count: 0,
+          logicalCount: 0,
+          hasOverflowPages: false,
+          isRootList: true,
+          isMoreSermonsList: false,
+          rootListId: book.id,
+          overflowDepth: 0,
+          overflowBehavior: 'CREATENEWLIST',
+          type: 'series',
+          createdAtMillis: now,
+          updatedAtMillis: now,
+          images: [],
+          listTagAndPosition: { listTag: 'bible-chapter', position: positions.get(book.name) },
+        },
+        removeFromBibleBookBundle: false,
+      });
+      continue;
+    }
     if (doc.get('id') !== book.id || doc.get('subsplashId') !== book.id) {
       throw new Error(`List ID mismatch for ${book.name} (${book.id}); refusing to update.`);
     }
