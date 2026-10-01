@@ -50,10 +50,8 @@ const uploadImageToSubsplash = async (
     type: imageType,
   };
   const config = createAxiosConfig('https://core.subsplash.com/files/v1/images', bearerToken, 'POST', requestData);
-  logger.log('config', config);
   // contains s3 presigned url
   const subsplashResponse = (await axios(config)).data;
-  logger.log('subsplashResponse', subsplashResponse);
   if (!subsplashResponse.id) {
     throw new Error('No id was returned from subsplash');
   }

@@ -1,10 +1,12 @@
 // Utils file for subsplash functions
 
 import { randomUUID } from 'node:crypto';
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig, isAxiosError } from 'axios';
 import { logger } from 'firebase-functions/v2';
+import { HttpsError } from 'firebase-functions/v2/https';
 import FormData from 'form-data';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
 
 const AUTH_CACHE_ROOT_PATH = 'subsplashAuthSession';
 const AUTH_REFRESH_LOCK_PATH = `${AUTH_CACHE_ROOT_PATH}/refreshLock`;
@@ -14,6 +16,10 @@ const AUTH_LOCK_LEASE_MS = 10_000;
 const AUTH_LOCK_WAIT_TIMEOUT_MS = 10_000;
 const AUTH_LOCK_POLL_INTERVAL_MS = 200;
 const DEFAULT_ACCESS_TOKEN_TTL_MS = 5 * 60 * 1000;
+const MAX_EDGE_BLOCK_RETRIES = 3;
+const SUBSPLASH_API_ORIGIN = 'https://core.subsplash.com';
+
+type EdgeRetryRequestConfig = AxiosRequestConfig & { skipSubsplashEdgeRetry?: boolean };
 
 type SubsplashAuthCacheRecord = {
   accessToken: string;
@@ -32,6 +38,45 @@ let inFlightAuthentication: Promise<string> | null = null;
 
 const sleep = async (durationMs: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, durationMs));
+
+axios.interceptors.response.use(undefined, async (error: unknown) => {
+  const edgeBlock = getHtmlEdgeBlock(error);
+  if (!edgeBlock || !isAxiosError(error)) {
+    throw error;
+  }
+
+  const config = error.config as EdgeRetryRequestConfig | undefined;
+  if (
+    !config?.url?.startsWith(`${SUBSPLASH_API_ORIGIN}/`) ||
+    config.url.endsWith('/accounts/v1/oauth/token') ||
+    config.skipSubsplashEdgeRetry ||
+    config.data instanceof FormData
+  ) {
+    throw error;
+  }
+
+  let blockedRequestId = edgeBlock.requestId;
+  for (let retry = 1; retry <= MAX_EDGE_BLOCK_RETRIES; retry += 1) {
+    logger.warn('Subsplash API request was blocked by its edge network; retrying', {
+      retry,
+      requestId: blockedRequestId,
+    });
+    await sleep(300 * (2 ** (retry - 1)));
+    try {
+      const retryConfig: EdgeRetryRequestConfig = { ...config, skipSubsplashEdgeRetry: true };
+      return await axios(retryConfig);
+    } catch (retryError) {
+      const retryBlock = getHtmlEdgeBlock(retryError);
+      if (!retryBlock) throw retryError;
+      blockedRequestId = retryBlock.requestId;
+    }
+  }
+
+  logger.error('Subsplash API request remained blocked by its edge network', {
+    requestId: blockedRequestId,
+  });
+  throw new HttpsError('unavailable', 'Subsplash is temporarily blocking requests from our server. Please retry shortly.');
+});
 
 const getDatabaseRef = (path: string) => firebaseAdmin.database().ref(path);
 
@@ -179,7 +224,30 @@ const fetchFreshAccessToken = async (): Promise<SubsplashAuthCacheRecord> => {
     data: formData,
   };
 
-  const response = await axios(config);
+  let response;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      response = await axios(config);
+      break;
+    } catch (error) {
+      const edgeBlock = getHtmlEdgeBlock(error);
+      if (!edgeBlock) {
+        throw error;
+      }
+
+      logger.warn('Subsplash token request was blocked by its edge network', {
+        attempt: attempt + 1,
+        requestId: edgeBlock.requestId,
+      });
+      if (attempt >= MAX_EDGE_BLOCK_RETRIES) {
+        throw new HttpsError(
+          'unavailable',
+          'Subsplash is temporarily blocking requests from our server. Please retry shortly.'
+        );
+      }
+      await sleep(300 * (2 ** attempt));
+    }
+  }
   const accessToken = response.data?.access_token;
   if (typeof accessToken !== 'string' || !accessToken.trim()) {
     throw new Error('Subsplash token response was missing access_token.');

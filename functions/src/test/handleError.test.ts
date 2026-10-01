@@ -182,6 +182,19 @@ describe('handleError', () => {
     );
   });
 
+  it('does not expose Axios request headers when no response was received', () => {
+    jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
+    jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);
+    const error = new AxiosError('Network failure', 'ERR_NETWORK', {
+      headers: { Authorization: 'Bearer private-token' },
+    } as never);
+
+    const normalized = handleError(error);
+
+    expect(normalized.details).toEqual({ message: 'Network failure' });
+    expect(JSON.stringify(normalized.details)).not.toContain('private-token');
+  });
+
   it('can suppress reporting for caller-classified transient upstream failures', () => {
     const emitSpy = jest.spyOn(emitOperationalAlertModule, 'emitOperationalAlert').mockResolvedValue(undefined);
     const sentrySpy = jest.spyOn(sentryModule, 'captureFunctionsExceptionAndFlush').mockResolvedValue(undefined);

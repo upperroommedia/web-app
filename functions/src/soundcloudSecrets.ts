@@ -16,6 +16,7 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { runtimeAlertRecipientsSecret } from './notifications/notificationSecrets';
 import { functionsSentryDsnSecret } from './sentry';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
+import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
 
 const SOUND_CLOUD_TOKEN_URL = 'https://secure.soundcloud.com/oauth/token';
 const SOUND_CLOUD_AUTH_STATE_COLLECTION = '_integrationAuth';
@@ -27,6 +28,7 @@ const ACCESS_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const REFRESH_LEASE_MS = 60 * 1000;
 const REFRESH_WAIT_MS = 750;
 const MAX_REFRESH_WAIT_ATTEMPTS = 10;
+const MAX_EDGE_BLOCK_RETRIES = 3;
 
 export type SoundCloudAuthState = {
   accessToken?: string;
@@ -293,12 +295,29 @@ const postSoundCloudTokenGrant = async (
   invalidGrantMessage: string
 ): Promise<Required<RefreshGrantResponse>> => {
   try {
-    const response = await axios.post<RefreshGrantResponse>(SOUND_CLOUD_TOKEN_URL, payload.toString(), {
-      headers: {
-        Accept: 'application/json; charset=utf-8',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
+    const response = await (async () => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await axios.post<RefreshGrantResponse>(SOUND_CLOUD_TOKEN_URL, payload.toString(), {
+            headers: {
+              Accept: 'application/json; charset=utf-8',
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+          });
+        } catch (error) {
+          const edgeBlock = getHtmlEdgeBlock(error);
+          if (!edgeBlock || attempt >= MAX_EDGE_BLOCK_RETRIES) {
+            throw error;
+          }
+
+          logger.warn('SoundCloud token request was blocked by its edge network; retrying', {
+            attempt: attempt + 1,
+            requestId: edgeBlock.requestId,
+          });
+          await sleep(300 * (2 ** attempt));
+        }
+      }
+    })();
 
     const accessToken = readConfiguredValue(response.data?.access_token);
     const refreshToken = readConfiguredValue(response.data?.refresh_token);
@@ -317,6 +336,20 @@ const postSoundCloudTokenGrant = async (
     if (isAxiosError(error)) {
       const soundCloudError = error.response?.data;
       const status = error.response?.status;
+
+      const edgeBlock = getHtmlEdgeBlock(error);
+      if (edgeBlock) {
+        logger.error('SoundCloud token request was blocked by its edge network', {
+          status,
+          soundCloudRequestId: edgeBlock.requestId,
+          soundCloudEdgePop: error.response?.headers?.['x-amz-cf-pop'],
+        });
+        throw new HttpsError(
+          'unavailable',
+          'SoundCloud is temporarily blocking the connection from our server. Please try again later. If this continues, contact support.'
+        );
+      }
+
       logger.error('SoundCloud token exchange failed', { status, soundCloudError });
 
       if (status === 400 || status === 401) {

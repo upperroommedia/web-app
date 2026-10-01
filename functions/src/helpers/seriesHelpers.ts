@@ -16,6 +16,7 @@ import {
 import {
   getSubsplashMediaItemDiagnostics,
 } from './subsplashMediaItems';
+import { getHtmlEdgeBlock } from './upstreamHttpErrors';
 
 const APP_KEY = '9XTSHD';
 const MAX_RETRY_ATTEMPTS = 3;
@@ -53,8 +54,8 @@ const getRetryAfterDelayMs = (error: unknown): number | undefined => {
   return undefined;
 };
 
-const shouldRetryRequest = (status?: number): boolean => (
-  status === 429 || status === 408 || status === 502 || status === 503 || status === 504
+const shouldRetryRequest = (error: unknown, status?: number): boolean => (
+  Boolean(getHtmlEdgeBlock(error)) || status === 429 || status === 408 || status === 502 || status === 503 || status === 504
 );
 
 const withSubsplashRetry = async <T>(operationName: string, requestFn: () => Promise<T>): Promise<T> => {
@@ -65,7 +66,7 @@ const withSubsplashRetry = async <T>(operationName: string, requestFn: () => Pro
       return await requestFn();
     } catch (error) {
       const status = getAxiosStatusCode(error);
-      if (!shouldRetryRequest(status) || attempt >= MAX_RETRY_ATTEMPTS) {
+      if (!shouldRetryRequest(error, status) || attempt >= MAX_RETRY_ATTEMPTS) {
         throw error;
       }
 
@@ -76,6 +77,7 @@ const withSubsplashRetry = async <T>(operationName: string, requestFn: () => Pro
       logger.warn(`Subsplash ${operationName} received retryable status ${status}; retrying`, {
         operationName,
         status,
+        edgeRequestId: getHtmlEdgeBlock(error)?.requestId,
         attempt: attempt + 1,
         maxAttempts: MAX_RETRY_ATTEMPTS + 1,
         delayMs,
@@ -85,6 +87,16 @@ const withSubsplashRetry = async <T>(operationName: string, requestFn: () => Pro
       attempt += 1;
     }
   }
+};
+
+const throwIfSubsplashEdgeBlocked = (error: unknown): void => {
+  const edgeBlock = getHtmlEdgeBlock(error);
+  if (!edgeBlock) return;
+
+  logger.error('Subsplash series request was blocked by its edge network', {
+    requestId: edgeBlock.requestId,
+  });
+  throw new HttpsError('unavailable', 'Subsplash is temporarily blocking requests from our server. Please retry shortly.');
 };
 
 export interface DerivedSeriesMetadata {
@@ -139,6 +151,7 @@ export async function createSubsplashSeries(
     const response = await withSubsplashRetry('createSeries', () => axios(config));
     return response.data;
   } catch (error: unknown) {
+    throwIfSubsplashEdgeBlocked(error);
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
       : error;
@@ -161,6 +174,7 @@ export async function getSeriesDetails(seriesId: string, token: string): Promise
     const response = await withSubsplashRetry('getSeriesDetails', () => axios(config));
     return response.data;
   } catch (error: unknown) {
+    throwIfSubsplashEdgeBlocked(error);
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
       : error;
@@ -205,6 +219,7 @@ export async function getSeriesItems(
       pageNumber += 1;
     }
   } catch (error: unknown) {
+    throwIfSubsplashEdgeBlocked(error);
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
       : error;
@@ -281,6 +296,7 @@ export async function patchMediaItemSeries(
     logger.log(`Successfully ${seriesId ? 'assigned' : 'unassigned'} media item ${mediaItemId} ${seriesId ? `to series ${seriesId}` : 'from series'}`);
     return response.data;
   } catch (error: unknown) {
+    throwIfSubsplashEdgeBlocked(error);
     const axiosStatus = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { status?: number } }).response?.status
       : undefined;
@@ -431,6 +447,7 @@ export async function patchSeriesItemPositions(
     await withSubsplashRetry('patchSeriesItemPositions', () => axios(config));
     logger.log(`Successfully updated positions for ${items.length} items in series ${seriesId}`);
   } catch (error: unknown) {
+    throwIfSubsplashEdgeBlocked(error);
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
       : error;
@@ -453,6 +470,7 @@ export async function deleteSubsplashSeries(seriesId: string, token: string): Pr
     await withSubsplashRetry('deleteSubsplashSeries', () => axios(config));
     logger.log(`Successfully deleted series ${seriesId}`);
   } catch (error: unknown) {
+    throwIfSubsplashEdgeBlocked(error);
     // Check if it's a 404 - series already deleted
     const axiosError = error as { response?: { status?: number } };
     if (axiosError.response?.status === 404) {
@@ -507,6 +525,7 @@ export async function patchSeriesMetadata(
     logger.log(`Successfully updated metadata for series ${seriesId}`);
     return response.data;
   } catch (error: unknown) {
+    throwIfSubsplashEdgeBlocked(error);
     const errorMessage = error && typeof error === 'object' && 'response' in error
       ? (error as { response?: { data?: unknown } }).response?.data
       : error;

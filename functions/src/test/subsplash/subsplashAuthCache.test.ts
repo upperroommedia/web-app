@@ -9,6 +9,10 @@ import {
 jest.mock('axios');
 
 const mockAxios = axios as jest.MockedFunction<typeof axios>;
+const edgeRetryHandler = (axios.interceptors.response.use as jest.Mock).mock.calls
+  .find(([onFulfilled, onRejected]) => onFulfilled === undefined && typeof onRejected === 'function')?.[1] as
+  | ((error: unknown) => Promise<unknown>)
+  | undefined;
 
 describe('subsplash auth cache', () => {
   afterEach(async () => {
@@ -104,5 +108,51 @@ describe('subsplash auth cache', () => {
     expect(cachedSnapshot.val()).toMatchObject({
       accessToken: 'fresh-token',
     });
+  });
+
+  it('retries an HTML edge block during token refresh', async () => {
+    mockAxios.mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 403'), {
+      response: {
+        status: 403,
+        data: '<html><title>403 Forbidden</title></html>',
+        headers: { 'request-id': 'edge-request-1' },
+      },
+    }));
+    mockAxios.mockResolvedValueOnce({ data: { access_token: 'fresh-token', expires_in: 300 } } as never);
+
+    await expect(authenticateSubsplash()).resolves.toBe('fresh-token');
+    expect(mockAxios).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a JSON permission error', async () => {
+    const error = Object.assign(new Error('Request failed with status code 403'), {
+      response: { status: 403, data: { error: 'forbidden' } },
+    });
+    mockAxios.mockRejectedValue(error);
+
+    await expect(authenticateSubsplash()).rejects.toBe(error);
+    expect(mockAxios).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a blocked Subsplash API request without retrying other hosts', async () => {
+    expect(edgeRetryHandler).toBeDefined();
+    (axios.isAxiosError as unknown as jest.Mock).mockReturnValue(true);
+    mockAxios.mockResolvedValue({ data: { id: 'media-item-1' } } as never);
+    const blockedRequest = Object.assign(new Error('Request failed with status code 403'), {
+      isAxiosError: true,
+      config: { url: 'https://core.subsplash.com/media/v1/media-items/media-item-1', method: 'get' },
+      response: { status: 403, data: '<html><title>403 Forbidden</title></html>' },
+    });
+
+    await expect(edgeRetryHandler!(blockedRequest)).resolves.toMatchObject({ data: { id: 'media-item-1' } });
+    expect(mockAxios).toHaveBeenCalledWith(expect.objectContaining({ skipSubsplashEdgeRetry: true }));
+
+    const otherHostBlock = Object.assign(new Error('Request failed with status code 403'), {
+      isAxiosError: true,
+      config: { url: 'https://example.com/resource', method: 'get' },
+      response: { status: 403, data: '<html><title>403 Forbidden</title></html>' },
+    });
+    await expect(edgeRetryHandler!(otherHostBlock)).rejects.toBe(otherHostBlock);
+    expect(mockAxios).toHaveBeenCalledTimes(1);
   });
 });

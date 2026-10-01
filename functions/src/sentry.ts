@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/node';
+import { isAxiosError } from 'axios';
 import { defineSecret } from 'firebase-functions/params';
 import { sentryBuildGitSha } from './sentryBuildInfo';
 
@@ -59,7 +60,7 @@ export const initFunctionsSentry = (): void => {
     environment: getFunctionsEnvironment(),
     release: getFunctionsRelease(),
     tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, process.env.NODE_ENV === 'development' ? 1 : 0.1),
-    includeLocalVariables: true,
+    includeLocalVariables: false,
     sendDefaultPii: false,
     initialScope: {
       tags: {
@@ -99,7 +100,10 @@ const captureWithContext = (error: unknown, context?: FunctionsSentryContext): s
         scope.setExtra(key, value);
       });
     }
-    return Sentry.captureException(error instanceof Error ? error : new Error(JSON.stringify(error)));
+    const reportableError = isAxiosError(error)
+      ? Object.assign(new Error(error.message), { name: error.name, stack: error.stack })
+      : error instanceof Error ? error : new Error(JSON.stringify(error));
+    return Sentry.captureException(reportableError);
   });
 };
 
