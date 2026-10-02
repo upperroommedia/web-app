@@ -125,6 +125,38 @@
       ]
     },
     {
+      "collectionGroup": "sermons",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "searchPending",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "editedAtMillis",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sermons",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "searchPending",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploaderId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "editedAtMillis",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "series",
       "queryScope": "COLLECTION",
       "fields": [
