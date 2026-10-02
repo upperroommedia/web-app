@@ -24,6 +24,18 @@ describe('Subsplash API edge retry', () => {
       'https://core.subsplash.com.evil.example/media/v1/media-items',
       'https://yt-worker.upperroommedia.org'
     )).toBeNull();
+    expect(getProviderRelayUrl(
+      'https://api.soundcloud.com/tracks',
+      'https://yt-worker.upperroommedia.org'
+    )).toBe('https://yt-worker.upperroommedia.org/internal/provider-relay/soundcloud/tracks');
+    expect(getProviderRelayUrl(
+      'https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A42',
+      'https://yt-worker.upperroommedia.org'
+    )).toBe('https://yt-worker.upperroommedia.org/internal/provider-relay/soundcloud/tracks/soundcloud%3Atracks%3A42');
+    expect(getProviderRelayUrl(
+      'https://api.soundcloud.com/users',
+      'https://yt-worker.upperroommedia.org'
+    )).toBeNull();
   });
 
   it('retries a provider block through the configured relay', async () => {

@@ -177,7 +177,7 @@ const mergeCallableDataWithMetadata = <T, M extends object>(
 export const createFunctionV2 = <T = unknown, R = unknown, M extends object = CallableMutationMetadata>(
   name: string
 ): ((data: T, options?: CallableCallOptions<M>) => Promise<R>) => {
-  const callable = httpsCallable<T, R>(functions, name);
+  const callable = httpsCallable<T, R>(functions, name, name === 'uploadtosoundcloud' ? { timeout: 600_000 } : undefined);
   return async (data: T, options?: CallableCallOptions<M>) => {
     const payload = mergeCallableDataWithMetadata(data, options);
     return Sentry.startSpan({ name: `firebase.callable.${name}`, op: 'firebase.callable' }, async () => {

@@ -25,6 +25,13 @@ export const getProviderRelayUrl = (originalUrl: string, relayOrigin: string): s
   if (upstream.origin === 'https://secure.soundcloud.com' && upstream.pathname === '/oauth/token') {
     return `${relayOrigin}/internal/provider-relay/soundcloud-token`;
   }
+  if (
+    upstream.origin === 'https://api.soundcloud.com' &&
+    !upstream.search &&
+    (upstream.pathname === '/tracks' || /^\/tracks\/[^/]+$/.test(upstream.pathname))
+  ) {
+    return `${relayOrigin}/internal/provider-relay/soundcloud${upstream.pathname}`;
+  }
   if (upstream.origin === 'https://core.subsplash.com') {
     return `${relayOrigin}/internal/provider-relay/subsplash${upstream.pathname}${upstream.search}`;
   }

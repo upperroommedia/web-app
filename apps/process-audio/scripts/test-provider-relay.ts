@@ -6,7 +6,13 @@ import { createProviderRelayRouter } from '../src/providerRelay';
 const main = async (): Promise<void> => {
   const forwarded: Array<{ url: string; method: string; headers: Headers; body: string }> = [];
   const fakeFetch: typeof fetch = async (input, init) => {
-    const body = init?.body ? Buffer.from(init.body as Uint8Array).toString('utf8') : '';
+    const chunks: Buffer[] = [];
+    if (init?.body && Symbol.asyncIterator in Object(init.body)) {
+      for await (const chunk of init.body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
+    } else if (init?.body) {
+      chunks.push(Buffer.from(init.body as Uint8Array));
+    }
+    const body = Buffer.concat(chunks).toString('utf8');
     forwarded.push({
       url: String(input),
       method: init?.method || '',
@@ -79,6 +85,46 @@ const main = async (): Promise<void> => {
     assert.equal(forwarded[1].headers.get('authorization'), 'Bearer provider-token');
     assert.equal(forwarded[1].headers.get('x-provider-relay-token'), null);
     assert.deepEqual(JSON.parse(forwarded[1].body), { title: 'Updated' });
+
+    const audioBody = Buffer.alloc(3 * 1024 * 1024, 0x61);
+    const upload = await fetch(`${base}/soundcloud/tracks`, {
+      method: 'POST',
+      headers: {
+        'x-provider-relay-token': 'shared-test-token',
+        authorization: 'OAuth access-token',
+        'content-type': 'multipart/form-data; boundary=test',
+      },
+      body: audioBody,
+    });
+    assert.equal(upload.status, 200);
+    assert.equal(forwarded[2].url, 'https://api.soundcloud.com/tracks');
+    assert.equal(forwarded[2].body.length, audioBody.length);
+    assert.equal(forwarded[2].headers.get('content-length'), String(audioBody.length));
+    assert.equal(forwarded[2].headers.get('authorization'), 'OAuth access-token');
+    assert.equal(forwarded[2].headers.get('x-provider-relay-token'), null);
+
+    const trackUpdate = await fetch(`${base}/soundcloud/tracks/soundcloud%3Atracks%3A42`, {
+      method: 'PUT',
+      headers: { 'x-provider-relay-token': 'shared-test-token', 'content-type': 'application/json' },
+      body: '{"track":{"title":"Updated"}}',
+    });
+    assert.equal(trackUpdate.status, 200);
+    assert.equal(forwarded[3].url, 'https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A42');
+
+    const trackDelete = await fetch(`${base}/soundcloud/tracks/soundcloud%3Atracks%3A42`, {
+      method: 'DELETE',
+      headers: { 'x-provider-relay-token': 'shared-test-token' },
+    });
+    assert.equal(trackDelete.status, 200);
+    assert.equal(forwarded[4].url, 'https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A42');
+    assert.equal(forwarded[4].method, 'DELETE');
+
+    const forbiddenTrackSubpath = await fetch(`${base}/soundcloud/tracks/42/comments`, {
+      method: 'POST',
+      headers: { 'x-provider-relay-token': 'shared-test-token' },
+    });
+    assert.equal(forbiddenTrackSubpath.status, 404);
+    assert.equal(forwarded.length, 5);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

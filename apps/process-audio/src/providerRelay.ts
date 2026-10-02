@@ -1,8 +1,11 @@
 import { timingSafeEqual } from 'node:crypto';
+import { Transform } from 'node:stream';
 import express, { type Router } from 'express';
 
 const RELAY_PREFIX = '/internal/provider-relay';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_SOUND_CLOUD_TRACK_BYTES = 4 * 1024 * 1024 * 1024;
+const SOUND_CLOUD_TRACK_TIMEOUT_MS = 8 * 60 * 1000;
 const FORWARDED_REQUEST_HEADERS = [
   'accept',
   'authorization',
@@ -41,6 +44,19 @@ const getUpstreamUrl = (requestUrl: string, method: string): URL | null => {
       : null;
   }
 
+  const soundCloudTracksPrefix = `${RELAY_PREFIX}/soundcloud/tracks`;
+  if (!parsed.search && parsed.pathname === soundCloudTracksPrefix && method === 'POST') {
+    return new URL('https://api.soundcloud.com/tracks');
+  }
+  if (
+    !parsed.search &&
+    parsed.pathname.startsWith(`${soundCloudTracksPrefix}/`) &&
+    /^\/[^/]+$/.test(parsed.pathname.slice(soundCloudTracksPrefix.length)) &&
+    ['PUT', 'DELETE'].includes(method)
+  ) {
+    return new URL(`https://api.soundcloud.com/tracks${parsed.pathname.slice(soundCloudTracksPrefix.length)}`);
+  }
+
   const subsplashPrefix = `${RELAY_PREFIX}/subsplash`;
   if (!parsed.pathname.startsWith(`${subsplashPrefix}/`)) return null;
   const path = parsed.pathname.slice(subsplashPrefix.length);
@@ -66,7 +82,15 @@ export const createProviderRelayRouter = (
     next();
   });
 
-  router.use(express.raw({ type: () => true, limit: MAX_BODY_BYTES }));
+  const parseSmallBody = express.raw({ type: () => true, limit: MAX_BODY_BYTES });
+  router.use((request, response, next) => {
+    const upstreamUrl = getUpstreamUrl(request.originalUrl, request.method);
+    if (upstreamUrl?.origin === 'https://api.soundcloud.com' && ['POST', 'PUT'].includes(request.method)) {
+      next();
+      return;
+    }
+    parseSmallBody(request, response, next);
+  });
 
   router.all('*', async (request, response) => {
     if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {
@@ -86,14 +110,49 @@ export const createProviderRelayRouter = (
       if (value) headers.set(name, value);
     }
 
+    const streamedTrackBody = upstreamUrl.origin === 'https://api.soundcloud.com' && ['POST', 'PUT'].includes(request.method);
+    const declaredLength = request.header('content-length');
+    if (streamedTrackBody && declaredLength && Number(declaredLength) > MAX_SOUND_CLOUD_TRACK_BYTES) {
+      response.status(413).json({ error: 'SoundCloud track request exceeded the relay limit.' });
+      return;
+    }
+
+    let bodyStream: Transform | undefined;
+    let requestTooLarge = false;
+    const aborted = new AbortController();
+    const abortUpstream = () => aborted.abort();
+    if (streamedTrackBody) {
+      if (declaredLength) headers.set('content-length', declaredLength);
+      let receivedBytes = 0;
+      bodyStream = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          receivedBytes += chunk.length;
+          if (receivedBytes > MAX_SOUND_CLOUD_TRACK_BYTES) {
+            requestTooLarge = true;
+            callback(new Error('SoundCloud track request exceeded the relay limit.'));
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+      bodyStream.on('error', abortUpstream);
+      request.on('aborted', abortUpstream);
+      request.pipe(bodyStream);
+    }
+
     try {
-      const upstream = await fetchUpstream(upstreamUrl, {
+      const options: RequestInit & { duplex?: 'half' } = {
         method: request.method,
         headers,
-        body: request.method === 'GET' ? undefined : new Uint8Array(request.body || Buffer.alloc(0)),
+        body: streamedTrackBody ? bodyStream as unknown as RequestInit['body'] :
+          request.method === 'GET' ? undefined : new Uint8Array(request.body || Buffer.alloc(0)),
         redirect: 'manual',
-        signal: AbortSignal.timeout(20_000),
-      });
+        signal: streamedTrackBody
+          ? AbortSignal.any([AbortSignal.timeout(SOUND_CLOUD_TRACK_TIMEOUT_MS), aborted.signal])
+          : AbortSignal.timeout(20_000),
+      };
+      if (streamedTrackBody) options.duplex = 'half';
+      const upstream = await fetchUpstream(upstreamUrl, options);
 
       const body = Buffer.from(await upstream.arrayBuffer());
       if (body.length > MAX_BODY_BYTES) {
@@ -107,7 +166,13 @@ export const createProviderRelayRouter = (
       }
       response.status(upstream.status).send(body);
     } catch {
-      response.status(502).json({ error: 'Provider relay could not reach the upstream service.' });
+      bodyStream?.destroy();
+      response.status(requestTooLarge ? 413 : 502).json({
+        error: requestTooLarge ? 'SoundCloud track request exceeded the relay limit.' :
+          'Provider relay could not reach the upstream service.',
+      });
+    } finally {
+      request.removeListener('aborted', abortUpstream);
     }
   });
 
