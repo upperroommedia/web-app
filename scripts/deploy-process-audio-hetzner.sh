@@ -8,6 +8,11 @@ if [[ $# -lt 1 ]]; then
 fi
 
 TARGET_ENV="$1"
+SMOKE_PROFILE="${PROCESS_AUDIO_HETZNER_SMOKE_PROFILE:-youtube}"
+case "$SMOKE_PROFILE" in
+  youtube|soundcloud) ;;
+  *) echo "Unsupported process-audio smoke profile: $SMOKE_PROFILE" >&2; exit 64 ;;
+esac
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_TARGET="${PROCESS_AUDIO_HETZNER_SSH_TARGET:-}"
 REMOTE_DIR="${PROCESS_AUDIO_HETZNER_REMOTE_DIR:-/opt/upperroom/process-audio-hetzner}"
@@ -542,7 +547,7 @@ REMOTE_ACTIVATE_EOF
 
 deploy_remote_worker() {
   local deploy_env="$1"
-  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${deploy_env}' '${DEPLOYMENT_ID}' '${CANDIDATE_ID}' '${RELEASE_SHA}'" <<'REMOTE_DEPLOY_EOF'
+  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${deploy_env}' '${DEPLOYMENT_ID}' '${CANDIDATE_ID}' '${RELEASE_SHA}' '${SMOKE_PROFILE}'" <<'REMOTE_DEPLOY_EOF'
 set -euo pipefail
 
 remote_dir="$1"
@@ -550,6 +555,7 @@ deploy_env="$2"
 deployment_id="$3"
 candidate_id="$4"
 release_sha="$5"
+smoke_profile="$6"
 lock_dir="${remote_dir}/.deploy-lock"
 lock_owner_file="${lock_dir}/deployment-id"
 rollback_root="${remote_dir}/state/deploy-rollback/${deployment_id}"
@@ -661,6 +667,11 @@ else
     echo "Production promotion refused: candidate ${candidate_id} has not passed staging validation" >&2
     exit 1
   fi
+  if [[ ! -f "${candidate_dir}/validated-smoke-profile" ]] ||
+    [[ "$(cat "${candidate_dir}/validated-smoke-profile")" != "$smoke_profile" ]]; then
+    echo "Production promotion refused: candidate ${candidate_id} was not validated with ${smoke_profile} smoke" >&2
+    exit 1
+  fi
   candidate_image_id="$(cat "${candidate_dir}/image-id")"
   resolved_candidate_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_tag" 2>/dev/null || true)"
   if [[ -z "$resolved_candidate_image_id" || "$resolved_candidate_image_id" != "$candidate_image_id" ]]; then
@@ -686,12 +697,13 @@ REMOTE_DEPLOY_EOF
 }
 
 mark_staging_candidate_validated() {
-  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${DEPLOYMENT_ID}' '${CANDIDATE_ID}'" <<'REMOTE_VALIDATE_EOF'
+  ssh "$SSH_TARGET" "bash -s -- '${REMOTE_DIR}' '${DEPLOYMENT_ID}' '${CANDIDATE_ID}' '${SMOKE_PROFILE}'" <<'REMOTE_VALIDATE_EOF'
 set -euo pipefail
 
 remote_dir="$1"
 deployment_id="$2"
 candidate_id="$3"
+smoke_profile="$4"
 lock_owner_file="${remote_dir}/.deploy-lock/deployment-id"
 lock_dir="${remote_dir}/.deploy-lock"
 candidate_dir="${remote_dir}/state/deploy-candidates/${candidate_id}"
@@ -715,10 +727,48 @@ if [[ "$resolved_candidate_image_id" != "$candidate_image_id" || "$staging_image
 fi
 
 printf '%s\n' "$deployment_id" >"${candidate_dir}/validated-by-deployment"
+printf '%s\n' "$smoke_profile" >"${candidate_dir}/validated-smoke-profile"
 date -u +%Y-%m-%dT%H:%M:%SZ >"${candidate_dir}/validated-at"
 : >"${candidate_dir}/validated"
 echo "Recorded staging validation for ${candidate_tag} at image ID ${candidate_image_id}"
 REMOTE_VALIDATE_EOF
+}
+
+verify_soundcloud_relay_smoke() {
+  local deploy_env="$1" project host token response_file response_status
+  if [[ "$deploy_env" == staging ]]; then
+    project=urm-app-staging
+    host="$staging_hostname"
+  else
+    project=urm-app
+    host="$production_hostname"
+  fi
+  token="$(gcloud secrets versions access latest --secret=PROVIDER_EGRESS_RELAY_TOKEN --project="$project")"
+  [[ -n "$token" ]] || { echo "Provider relay token unavailable for $deploy_env" >&2; return 1; }
+  response_file="$(mktemp)"
+  response_status="$(curl -sS --connect-timeout 10 --max-time 60 -o "$response_file" -w '%{http_code}' \
+    -X POST "https://${host}/internal/provider-relay/soundcloud/tracks" \
+    -H "x-provider-relay-token: ${token}" \
+    -H 'Authorization: OAuth invalid-soundcloud-smoke-token' \
+    -F 'track[asset_data]=@/dev/null;filename=smoke.wav;type=audio/wav')"
+  if [[ "$response_status" != 401 ]] ||
+    grep -Fxq '{"error":"Unauthorized."}' "$response_file" ||
+    ! grep -qi 'invalid\|unauthorized\|access token' "$response_file"; then
+    echo "SoundCloud relay smoke failed in $deploy_env (HTTP $response_status)" >&2
+    rm -f "$response_file"
+    return 1
+  fi
+  rm -f "$response_file"
+  echo "SoundCloud relay reached the provider in $deploy_env and rejected the synthetic token (HTTP 401)"
+}
+
+verify_deployment_smoke() {
+  local deploy_env="$1"
+  if [[ "$SMOKE_PROFILE" == soundcloud ]]; then
+    verify_soundcloud_relay_smoke "$deploy_env"
+  else
+    bash "$ROOT_DIR/scripts/verify-hetzner-ytdlp-smoke.sh" "$deploy_env"
+  fi
 }
 
 rollback_remote_workers() {
@@ -1063,22 +1113,22 @@ set +e
     staging)
       deploy_remote_worker staging
       ensure_browser_auth_stack
-      bash "$ROOT_DIR/scripts/verify-hetzner-ytdlp-smoke.sh" staging
+      verify_deployment_smoke staging
       mark_staging_candidate_validated
       ;;
     production)
       deploy_remote_worker production
       ensure_browser_auth_stack
-      bash "$ROOT_DIR/scripts/verify-hetzner-ytdlp-smoke.sh" production
+      verify_deployment_smoke production
       ;;
     all)
       deploy_remote_worker staging
       ensure_browser_auth_stack
-      bash "$ROOT_DIR/scripts/verify-hetzner-ytdlp-smoke.sh" staging
+      verify_deployment_smoke staging
       mark_staging_candidate_validated
       deploy_remote_worker production
       ensure_browser_auth_stack
-      bash "$ROOT_DIR/scripts/verify-hetzner-ytdlp-smoke.sh" production
+      verify_deployment_smoke production
       ;;
   esac
 )
