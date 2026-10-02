@@ -1,8 +1,6 @@
 import { createSermon } from '../types/Sermon';
 import { sermonStatusType } from '../types/SermonTypes';
-import {
-  reconcileAdminSermonSearchResults,
-} from './sermonSearchResults';
+import { reconcileAdminSermonSearchResults } from './sermonSearchResults';
 
 describe('reconcileAdminSermonSearchResults', () => {
   it('keeps a pending sermon visible until Algolia results have settled', () => {
@@ -14,6 +12,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     const result = reconcileAdminSermonSearchResults({
       algoliaHits: [pendingSermon],
       pendingSermons: [pendingSermon],
+      pendingSermonsServerConfirmed: true,
       showPendingOverlay: true,
       hasSettledResults: false,
       liveSermonsById: { [pendingSermon.id]: pendingSermon },
@@ -38,6 +37,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     const result = reconcileAdminSermonSearchResults({
       algoliaHits: [deletedSermonHit],
       pendingSermons: [],
+      pendingSermonsServerConfirmed: true,
       showPendingOverlay: true,
       hasSettledResults: true,
       liveSermonsById: {},
@@ -49,6 +49,22 @@ describe('reconcileAdminSermonSearchResults', () => {
     expect(result.displayRows).toEqual([]);
   });
 
+  it('removes a pending overlay once Firestore confirms the sermon no longer exists', () => {
+    const deletedPendingSermon = createSermon({ id: 'deleted-pending', searchPending: true });
+
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [deletedPendingSermon],
+      pendingSermons: [deletedPendingSermon],
+      pendingSermonsServerConfirmed: true,
+      showPendingOverlay: true,
+      hasSettledResults: true,
+      liveSermonsById: {},
+      resolvedLiveSermonIds: new Set([deletedPendingSermon.id]),
+    });
+
+    expect(result.displayRows).toEqual([]);
+  });
+
   it('hides Algolia hits until Firestore has confirmed the visible ids from the server', () => {
     const unresolvedSermonHit = createSermon({
       id: 'unresolved-sermon',
@@ -57,6 +73,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     const result = reconcileAdminSermonSearchResults({
       algoliaHits: [unresolvedSermonHit],
       pendingSermons: [],
+      pendingSermonsServerConfirmed: true,
       showPendingOverlay: true,
       hasSettledResults: true,
       liveSermonsById: {},
@@ -68,23 +85,83 @@ describe('reconcileAdminSermonSearchResults', () => {
     expect(result.displayRows).toEqual([]);
   });
 
-  it('renders Firestore-backed rows immediately even before server confirmation arrives', () => {
+  it('does not label a completed sermon as processing from an unverified cached snapshot', () => {
     const cachedSermon = createSermon({
       id: 'cached-sermon',
+      status: {
+        ...createSermon().status,
+        audioStatus: sermonStatusType.PROCESSING,
+      },
     });
 
     const result = reconcileAdminSermonSearchResults({
       algoliaHits: [cachedSermon],
       pendingSermons: [],
+      pendingSermonsServerConfirmed: true,
       showPendingOverlay: true,
       hasSettledResults: true,
       liveSermonsById: { [cachedSermon.id]: cachedSermon },
       resolvedLiveSermonIds: new Set(),
     });
 
-    expect(result.visibleAlgoliaHits.map((sermon) => sermon.id)).toEqual([cachedSermon.id]);
+    expect(result.visibleAlgoliaHits).toHaveLength(0);
     expect(result.confirmedVisibleHitIds.size).toBe(0);
-    expect(result.displayRows.map((row) => row.sermon.id)).toEqual([cachedSermon.id]);
+    expect(result.displayRows).toEqual([]);
+  });
+
+  it('does not show an unverified cached pending overlay as an active upload', () => {
+    const cachedPendingSermon = createSermon({
+      id: 'cached-pending',
+      searchPending: true,
+      status: {
+        ...createSermon().status,
+        audioStatus: sermonStatusType.PROCESSING,
+      },
+    });
+
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [],
+      pendingSermons: [cachedPendingSermon],
+      pendingSermonsServerConfirmed: false,
+      showPendingOverlay: true,
+      hasSettledResults: true,
+      liveSermonsById: {},
+      resolvedLiveSermonIds: new Set(),
+    });
+
+    expect(result.displayRows).toEqual([]);
+  });
+
+  it('uses a server-confirmed processed sermon over an older processing overlay', () => {
+    const cachedProcessingSermon = createSermon({
+      id: 'sermon-finished',
+      editedAtMillis: 200,
+      searchPending: true,
+      status: {
+        ...createSermon().status,
+        audioStatus: sermonStatusType.PROCESSING,
+      },
+    });
+    const liveProcessedSermon = createSermon({
+      id: 'sermon-finished',
+      editedAtMillis: 100,
+      status: {
+        ...createSermon().status,
+        audioStatus: sermonStatusType.PROCESSED,
+      },
+    });
+
+    const result = reconcileAdminSermonSearchResults({
+      algoliaHits: [cachedProcessingSermon],
+      pendingSermons: [cachedProcessingSermon],
+      pendingSermonsServerConfirmed: true,
+      showPendingOverlay: true,
+      hasSettledResults: true,
+      liveSermonsById: { [liveProcessedSermon.id]: liveProcessedSermon },
+      resolvedLiveSermonIds: new Set([liveProcessedSermon.id]),
+    });
+
+    expect(result.displayRows).toEqual([{ sermon: liveProcessedSermon, enableProcessingProgress: false }]);
   });
 
   it('builds a single stable row list with pending sermons first and indexed sermons after', () => {
@@ -103,6 +180,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     const result = reconcileAdminSermonSearchResults({
       algoliaHits: [pendingSermon, indexedSermon],
       pendingSermons: [pendingSermon],
+      pendingSermonsServerConfirmed: true,
       showPendingOverlay: true,
       hasSettledResults: true,
       liveSermonsById: {
@@ -132,6 +210,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     const result = reconcileAdminSermonSearchResults({
       algoliaHits: [staleAlgoliaHit],
       pendingSermons: [pendingSermon],
+      pendingSermonsServerConfirmed: true,
       showPendingOverlay: true,
       hasSettledResults: true,
       liveSermonsById: { [pendingSermon.id]: pendingSermon },
@@ -139,7 +218,8 @@ describe('reconcileAdminSermonSearchResults', () => {
     });
 
     expect(result.displayRows.map((row) => row.sermon.id)).toEqual([pendingSermon.id]);
-    expect(result.visibleAlgoliaHits.map((sermon) => sermon.id)).toEqual([pendingSermon.id]);
+    expect(result.visiblePendingSermons.map((sermon) => sermon.id)).toEqual([pendingSermon.id]);
+    expect(result.visibleAlgoliaHits).toHaveLength(0);
   });
 
   it('does not duplicate a processing sermon once Algolia has the current version', () => {
@@ -156,6 +236,7 @@ describe('reconcileAdminSermonSearchResults', () => {
     const result = reconcileAdminSermonSearchResults({
       algoliaHits: [processingSermon],
       pendingSermons: [processingSermon],
+      pendingSermonsServerConfirmed: true,
       showPendingOverlay: true,
       hasSettledResults: true,
       liveSermonsById: { [processingSermon.id]: processingSermon },

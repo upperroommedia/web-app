@@ -21,7 +21,7 @@ import firestore, {
 } from '../firebase/firestore';
 import { sermonConverter } from '../types/Sermon';
 import { Sermon } from '../types/SermonTypes';
-import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { useCollection } from 'react-firebase-hooks/firestore';
 import { normalizeAlgoliaSermonHit, type AlgoliaSermonHit } from '../utils/algolia/searchRecords';
 import {
   reconcileAdminSermonSearchResults,
@@ -46,44 +46,45 @@ const useDelayedTrue = (value: boolean, delayMs: number): boolean => {
   const [delayedValue, setDelayedValue] = useState(false);
 
   useEffect(() => {
-    if (!value) {
-      setDelayedValue(false);
-      return;
-    }
-
     const timeoutId = window.setTimeout(() => {
-      setDelayedValue(true);
-    }, delayMs);
+      setDelayedValue(value);
+    }, value ? delayMs : 0);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
   }, [delayMs, value]);
 
-  return delayedValue;
+  return value && delayedValue;
 };
 
 const useLiveVisibleSermons = (sermonIds: string[], viewer: { uid?: string; isAdmin: boolean }) => {
   const [state, setState] = useState<{
+    subscriptionKey: string;
     liveSermonsById: Record<string, Sermon>;
     resolvedIds: Set<string>;
+    verificationFailed: boolean;
   }>({
+    subscriptionKey: '',
     liveSermonsById: {},
     resolvedIds: new Set<string>(),
+    verificationFailed: false,
   });
   const sermonIdsKey = useMemo(() => sermonIds.join('\u0000'), [sermonIds]);
+  const viewerKey = viewer.isAdmin ? 'admin' : `uploader:${viewer.uid ?? UNAUTHENTICATED_UPLOADER_SENTINEL}`;
+  const subscriptionKey = `${viewerKey}\u0000${sermonIdsKey}`;
 
   useEffect(() => {
-    if (sermonIds.length === 0) {
-      setState({
-        liveSermonsById: {},
-        resolvedIds: new Set<string>(),
-      });
+    if (!sermonIdsKey) {
       return;
     }
 
+    const subscribedIds = sermonIdsKey.split('\u0000');
+    let active = true;
     const chunkSnapshots = new Map<number, { ids: string[]; records: Record<string, Sermon>; resolved: boolean }>();
+    const failedChunkIds = new Set<number>();
     const updateState = () => {
+      if (!active) return;
       const nextLiveSermonsById: Record<string, Sermon> = {};
       const nextResolvedIds = new Set<string>();
 
@@ -95,22 +96,14 @@ const useLiveVisibleSermons = (sermonIds: string[], viewer: { uid?: string; isAd
       });
 
       setState({
+        subscriptionKey,
         liveSermonsById: nextLiveSermonsById,
         resolvedIds: nextResolvedIds,
+        verificationFailed: failedChunkIds.size > 0,
       });
     };
 
-    setState((currentState) => {
-      const visibleIdSet = new Set(sermonIds);
-      return {
-        liveSermonsById: Object.fromEntries(
-          Object.entries(currentState.liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
-        ),
-        resolvedIds: new Set([...currentState.resolvedIds].filter((sermonId) => visibleIdSet.has(sermonId))),
-      };
-    });
-
-    const unsubscribeCallbacks = chunkIds(sermonIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
+    const unsubscribeCallbacks = chunkIds(subscribedIds, FIRESTORE_IN_QUERY_LIMIT).map((idChunk, chunkIndex) => {
       const queryConstraints = [
         where(documentId(), 'in', idChunk),
         ...(viewer.isAdmin ? [] : [where('uploaderId', '==', viewer.uid ?? UNAUTHENTICATED_UPLOADER_SENTINEL)]),
@@ -137,31 +130,34 @@ const useLiveVisibleSermons = (sermonIds: string[], viewer: { uid?: string; isAd
         },
         (error) => {
           console.error('Failed to hydrate visible sermon hits from Firestore', error);
+          failedChunkIds.add(chunkIndex);
+          chunkSnapshots.delete(chunkIndex);
+          updateState();
         }
       );
     });
 
     return () => {
+      active = false;
       unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe());
     };
-  }, [sermonIdsKey, viewer.isAdmin, viewer.uid]);
+  }, [sermonIdsKey, subscriptionKey, viewer.isAdmin, viewer.uid]);
 
   return useMemo(() => {
-    if (sermonIds.length === 0) {
+    if (!sermonIdsKey || state.subscriptionKey !== subscriptionKey) {
       return {
         liveSermonsById: {},
         resolvedIds: new Set<string>(),
+        verificationFailed: false,
       };
     }
 
-    const visibleIdSet = new Set(sermonIds);
     return {
-      liveSermonsById: Object.fromEntries(
-        Object.entries(state.liveSermonsById).filter(([sermonId]) => visibleIdSet.has(sermonId))
-      ),
-      resolvedIds: new Set([...state.resolvedIds].filter((sermonId) => visibleIdSet.has(sermonId))),
+      liveSermonsById: state.liveSermonsById,
+      resolvedIds: state.resolvedIds,
+      verificationFailed: state.verificationFailed,
     };
-  }, [state, sermonIds]);
+  }, [state, sermonIdsKey, subscriptionKey]);
 };
 
 interface SearchResultSermonListProps extends BoxProps {
@@ -193,7 +189,17 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
     },
     [isAdmin, userUid]
   );
-  const [pendingSermons] = useCollectionData(pendingSermonsQuery);
+  const [pendingSermonsSnapshot, , pendingSermonsError] = useCollection(pendingSermonsQuery, {
+    snapshotListenOptions: { includeMetadataChanges: true },
+  });
+  // A cached searchPending query can contain uploads that finished while this page was away.
+  const pendingSermonsServerConfirmed = Boolean(
+    pendingSermonsSnapshot && !pendingSermonsSnapshot.metadata.fromCache && !pendingSermonsError
+  );
+  const pendingSermons = useMemo(
+    () => pendingSermonsSnapshot?.docs.map((document) => document.data()) ?? [],
+    [pendingSermonsSnapshot]
+  );
   const hiddenSermonIdSet = useMemo(() => new Set(hiddenSermonIds), [hiddenSermonIds]);
 
   const normalizedHits = useMemo(
@@ -208,25 +214,23 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const hasActiveRefinements = Object.values(refinementList).some((values) => values.length > 0);
   const currentPage = typeof indexUiState.page === 'number' ? indexUiState.page : 0;
   const showPendingOverlay = !indexUiState.query && !hasActiveRefinements && currentPage === 0;
-  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds } = useLiveVisibleSermons(visibleHitIds, {
+  const { liveSermonsById, resolvedIds: resolvedLiveSermonIds, verificationFailed } = useLiveVisibleSermons(visibleHitIds, {
     uid: userUid,
     isAdmin,
   });
   const unresolvedVisibleHitIds = useMemo(
     () =>
-      visibleHitIds.filter((sermonId) => !liveSermonsById[sermonId] && !resolvedLiveSermonIds.has(sermonId)),
-    [liveSermonsById, resolvedLiveSermonIds, visibleHitIds]
-  );
-  const unresolvedVisibleHitCount = unresolvedVisibleHitIds.length;
-  const hasUnresolvedVisibleHits = useMemo(
-    () => visibleHitIds.some((sermonId) => !resolvedLiveSermonIds.has(sermonId)),
+      visibleHitIds.filter((sermonId) => !resolvedLiveSermonIds.has(sermonId)),
     [resolvedLiveSermonIds, visibleHitIds]
   );
+  const unresolvedVisibleHitCount = unresolvedVisibleHitIds.length;
+  const hasUnresolvedVisibleHits = unresolvedVisibleHitCount > 0;
   const { visiblePendingSermons, visibleAlgoliaHits, displayRows } = useMemo(
     () =>
       reconcileAdminSermonSearchResults({
         algoliaHits: normalizedHits,
         pendingSermons: (pendingSermons ?? []).filter((sermon) => !hiddenSermonIdSet.has(sermon.id)),
+        pendingSermonsServerConfirmed,
         showPendingOverlay,
         hasSettledResults,
         liveSermonsById,
@@ -238,6 +242,7 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
       liveSermonsById,
       normalizedHits,
       pendingSermons,
+      pendingSermonsServerConfirmed,
       resolvedLiveSermonIds,
       showPendingOverlay,
     ]
@@ -248,7 +253,7 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
   const isLoadingState = status === 'stalled' && !hasVisibleHits && !hasVisiblePending && unresolvedVisibleHitCount === 0;
   const shouldRenderHits = hasVisibleHits || hasSettledResults || hasVisiblePending;
   const shouldShowHydrationSkeletons = useDelayedTrue(
-    shouldRenderHits && unresolvedVisibleHitCount > 0,
+    shouldRenderHits && unresolvedVisibleHitCount > 0 && !verificationFailed,
     HYDRATION_SKELETON_DELAY_MS
   );
   const shouldShowEmptyState =
@@ -273,6 +278,16 @@ const SearchResultSermonList = ({ hiddenSermonIds = [], ...props }: SearchResult
             <Box fontWeight="bold" display="inline">
               Error: Algolia search errored please try again later
             </Box>
+          </Typography>
+        )}
+        {pendingSermonsError && (
+          <Typography color="error.main" sx={{ px: { xs: 0.5, sm: 1 } }}>
+            Pending uploads could not be refreshed. Reload this page to retry.
+          </Typography>
+        )}
+        {verificationFailed && (
+          <Typography color="error.main" sx={{ px: { xs: 0.5, sm: 1 } }}>
+            Sermon upload status could not be verified. Reload this page to retry.
           </Typography>
         )}
         {isLoadingState &&
