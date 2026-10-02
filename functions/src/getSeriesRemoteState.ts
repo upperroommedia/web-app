@@ -1,4 +1,5 @@
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
+import { logger } from 'firebase-functions/v2';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { authenticateSubsplash } from './subsplashUtils';
@@ -29,6 +30,7 @@ const getSeriesRemoteState = onCall(
     }
 
     try {
+      const startedAt = Date.now();
       const seriesDoc = await firestoreDB
         .collection('series')
         .doc(firestoreSeriesId)
@@ -48,8 +50,18 @@ const getSeriesRemoteState = onCall(
         );
       }
 
+      const seriesReadyAt = Date.now();
       const token = await authenticateSubsplash();
-      return loadSeriesRemoteState(firestoreSeriesId, subsplashSeriesId, token);
+      const authenticatedAt = Date.now();
+      const remoteState = await loadSeriesRemoteState(firestoreSeriesId, subsplashSeriesId, token);
+      logger.info('getseriesremotestate timing', {
+        seriesReadMs: seriesReadyAt - startedAt,
+        authMs: authenticatedAt - seriesReadyAt,
+        remoteStateMs: Date.now() - authenticatedAt,
+        totalMs: Date.now() - startedAt,
+        remoteItemCount: remoteState.remoteItems.length,
+      });
+      return remoteState;
     } catch (error) {
       throw handleError(error);
     }

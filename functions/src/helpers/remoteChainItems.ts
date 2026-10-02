@@ -185,7 +185,10 @@ export const loadRemoteChainItems = async (
   remoteNodes: RemoteNodeRows[];
 }> => {
   const chainState = existingChainState ?? (await getOverflowChainState(rootListId));
-  const remoteNodes = await Promise.all(
+  // Remote rows and the root projection only meet when building the logical
+  // items below. Fetch them together so Subsplash latency does not hold up the
+  // independent Firestore read.
+  const remoteNodesPromise = Promise.all(
     chainState.nodes.map(async (node) => {
       const subsplashListId = normalizeString(node.subsplashId);
       if (!subsplashListId) {
@@ -200,8 +203,8 @@ export const loadRemoteChainItems = async (
       };
     })
   );
-
-  const sermonsBySubsplashId = await getTrackedRootListItemsBySubsplashId(chainState.rootListId);
+  const trackedRootItemsPromise = getTrackedRootListItemsBySubsplashId(chainState.rootListId);
+  const [remoteNodes, sermonsBySubsplashId] = await Promise.all([remoteNodesPromise, trackedRootItemsPromise]);
 
   let logicalPosition = 1;
   const remoteItems = remoteNodes.flatMap<GetListOverflowChainRemoteItem>((node, nodeIndex) => {

@@ -315,6 +315,7 @@ interface SortableItemProps {
   isPublishing: boolean;
   isUnpublishing: boolean;
   actionsDisabled: boolean;
+  reorderDisabled: boolean;
   canPublish: boolean;
   publishBlockedReason?: string;
 }
@@ -330,6 +331,7 @@ const SortableItem = memo(({
   isPublishing,
   isUnpublishing,
   actionsDisabled,
+  reorderDisabled,
   canPublish,
   publishBlockedReason,
 }: SortableItemProps) => {
@@ -341,7 +343,7 @@ const SortableItem = memo(({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.displayId });
+  } = useSortable({ id: item.displayId, disabled: reorderDisabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -885,6 +887,8 @@ const SeriesDetailsPage = () => {
   const [series, setSeries] = useState<Series | null>(null);
   const [items, setItems] = useState<SeriesDisplayItem[]>([]);
   const [remoteSeriesState, setRemoteSeriesState] = useState<GetSeriesRemoteStateOutputType | null>(null);
+  const [remoteLoadStatus, setRemoteLoadStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [remoteLoadError, setRemoteLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editPopup, setEditPopup] = useState(false);
@@ -895,6 +899,7 @@ const SeriesDetailsPage = () => {
 
   // Store original item order for revert functionality
   const originalItemsRef = useRef<SeriesDisplayItem[]>([]);
+  const seriesLoadIdRef = useRef(0);
 
   // Ref for the sortable container to restrict drag bounds
   const containerRef = useRef<HTMLDivElement>(null);
@@ -914,6 +919,8 @@ const SeriesDetailsPage = () => {
   const [addItemNotice, setAddItemNotice] = useState<InlineNotice>(null);
 
   const isAdmin = user?.isAdmin() ?? false;
+  const remoteActionsReady = !series?.subsplashId ||
+    (remoteLoadStatus === 'ready' && remoteSeriesState !== null);
 
   const fetchRemoteSeriesState = useCallback(async (): Promise<GetSeriesRemoteStateOutputType> => {
     if (!seriesId) {
@@ -932,8 +939,12 @@ const SeriesDetailsPage = () => {
   const fetchSeriesData = useCallback(async () => {
     if (!seriesId) return;
 
+    const loadId = ++seriesLoadIdRef.current;
     setLoading(true);
     setError(null);
+    setRemoteSeriesState(null);
+    setRemoteLoadStatus('idle');
+    setRemoteLoadError(null);
 
     try {
       // Fetch series
@@ -952,6 +963,16 @@ const SeriesDetailsPage = () => {
         setLoading(false);
         return;
       }
+
+      // The remote snapshot can be slow on a cold function. Start it as soon as
+      // the local series has passed its ownership check, alongside local reads.
+      const remoteStatePromise = seriesData.subsplashId
+        ? fetchRemoteSeriesState().then(
+          (state) => ({ state, error: null as unknown }),
+          (remoteError: unknown) => ({ state: null, error: remoteError })
+        )
+        : null;
+      setRemoteLoadStatus(remoteStatePromise ? 'loading' : 'ready');
 
       // Fetch series items
       const itemsQuery = query(
@@ -988,37 +1009,60 @@ const SeriesDetailsPage = () => {
         })
       );
 
-      let nextRemoteSeriesState: GetSeriesRemoteStateOutputType | null = null;
-      if (seriesData.subsplashId) {
-        try {
-          nextRemoteSeriesState = await fetchRemoteSeriesState();
-        } catch (remoteError) {
-          console.error('Error fetching remote series state:', remoteError);
-        }
-      }
-
+      if (loadId !== seriesLoadIdRef.current) return;
       setSeries(seriesData);
-      setRemoteSeriesState(nextRemoteSeriesState);
-
-      const mergedItems = buildSeriesDisplayItems(itemsWithSermons, nextRemoteSeriesState);
-      setItems(mergedItems);
+      const localDisplayItems = buildSeriesDisplayItems(itemsWithSermons, null);
+      setItems(localDisplayItems);
       setSelectedSeriesItemIds((previousSelected) => {
-        const validIds = new Set(mergedItems.map((item) => item.displayId));
+        const validIds = new Set(localDisplayItems.map((item) => item.displayId));
         return new Set(Array.from(previousSelected).filter((itemId) => validIds.has(itemId)));
       });
-      // Store original order for revert functionality
-      originalItemsRef.current = cloneSeriesDisplayItems(mergedItems);
+      originalItemsRef.current = cloneSeriesDisplayItems(localDisplayItems);
+      setLoading(false);
+
+      // Local data is now visible. Reconcile remote-only items and ordering
+      // once the fresh Subsplash snapshot arrives; an older request cannot
+      // replace a subsequent local refresh or a different series.
+      if (remoteStatePromise) {
+        void remoteStatePromise.then(({ state, error: remoteError }) => {
+          if (loadId !== seriesLoadIdRef.current) return;
+          if (remoteError || !state) {
+            console.error('Error fetching remote series state:', remoteError);
+            setRemoteLoadError(getErrorMessage(remoteError, 'Failed to load Subsplash series state.'));
+            setRemoteLoadStatus('error');
+            return;
+          }
+
+          const mergedItems = buildSeriesDisplayItems(itemsWithSermons, state);
+          setItems(mergedItems);
+          setSelectedSeriesItemIds((previousSelected) => {
+            const validIds = new Set(mergedItems.map((item) => item.displayId));
+            return new Set(Array.from(previousSelected).filter((itemId) => validIds.has(itemId)));
+          });
+          originalItemsRef.current = cloneSeriesDisplayItems(mergedItems);
+          setRemoteSeriesState(state);
+          setRemoteLoadStatus('ready');
+        });
+      }
     } catch (err: unknown) {
+      if (loadId !== seriesLoadIdRef.current) return;
       console.error('Error fetching series:', err);
       setError(getErrorMessage(err, 'Failed to fetch series'));
+      setLoading(false);
     }
-
-    setLoading(false);
   }, [fetchRemoteSeriesState, seriesId, user?.uid, isAdmin]);
 
   useEffect(() => {
-    fetchSeriesData();
+    void fetchSeriesData();
+    return () => { seriesLoadIdRef.current += 1; };
   }, [fetchSeriesData]);
+
+  const retryRemoteSeriesState = useCallback(async () => {
+    if (!series?.subsplashId || remoteLoadStatus === 'loading') return;
+    // Retry both sides so a fresh Subsplash snapshot is never combined with
+    // Firestore membership captured before another editor's changes.
+    await fetchSeriesData();
+  }, [fetchSeriesData, remoteLoadStatus, series?.subsplashId]);
 
   // Fetch available sermons for adding to series
   const fetchAvailableSermons = useCallback(async () => {
@@ -1302,6 +1346,11 @@ const SeriesDetailsPage = () => {
       return { ok: false };
     }
 
+    if (series?.subsplashId && !remoteActionsReady) {
+      setPageNotice({ severity: 'warning', message: 'Wait for the Subsplash series check before publishing.' });
+      return { ok: false };
+    }
+
     if (!canPublishSermonToSeries(seriesItem.sermon)) {
       if (!options?.suppressAlert) {
         setPageNotice({
@@ -1390,12 +1439,15 @@ const SeriesDetailsPage = () => {
     getPublishedRemoteOrderWithAdditions,
     items,
     remoteSeriesState,
+    remoteActionsReady,
+    series?.subsplashId,
     seriesId,
     syncSeriesItemPublishedState,
     uploadSermonToSubsplash,
   ]);
 
   const unpublishItemFromSeries = useCallback(async (seriesItem: SeriesDisplayItem) => {
+    if (!remoteActionsReady) return;
     setUnpublishingItemId(seriesItem.id);
     try {
       const mediaItemId = seriesItem.remoteMediaItemId || seriesItem.sermonSubsplashId || seriesItem.sermon?.subsplashId;
@@ -1431,7 +1483,7 @@ const SeriesDetailsPage = () => {
       setUnpublishingItemId(null);
       setUnpublishTarget(null);
     }
-  }, [fetchSeriesData, series?.subsplashId, seriesId]);
+  }, [fetchSeriesData, remoteActionsReady, series?.subsplashId, seriesId]);
 
   // Custom modifier to restrict drag to container bounds
   const restrictToContainer: Modifier = ({ transform, draggingNodeRect, containerNodeRect: _containerNodeRect }) => {
@@ -1469,6 +1521,7 @@ const SeriesDetailsPage = () => {
 
   // Handle drag end to reorder items
   const handleDragEnd = useCallback((event: DragEndEvent) => {
+    if (!remoteActionsReady) return;
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
@@ -1482,7 +1535,7 @@ const SeriesDetailsPage = () => {
         }));
       });
     }
-  }, []);
+  }, [remoteActionsReady]);
 
   // Revert to original order
   const revertOrder = () => {
@@ -1492,12 +1545,19 @@ const SeriesDetailsPage = () => {
   // Save order changes
   const saveOrderChanges = useCallback(async () => {
     if (!series || !hasOrderChanges) return;
+    if (series.subsplashId && !remoteActionsReady) {
+      setPageNotice({ severity: 'warning', message: 'Wait for the Subsplash series check before saving order.' });
+      return;
+    }
 
     setIsSaving(true);
     const previousItems = cloneSeriesDisplayItems(originalItemsRef.current);
     try {
       // If series is published to Subsplash, use the reorder function
-      if (series.subsplashId && remoteSeriesState) {
+      if (series.subsplashId) {
+        if (!remoteSeriesState) {
+          throw new Error('Subsplash series state is unavailable. Retry the remote check before saving order.');
+        }
         const reorderFunction = createFunctionV2<ReorderSeriesItemsInputType, ReorderSeriesItemsOutputType>(
           'reorderseriesitems'
         );
@@ -1559,10 +1619,10 @@ const SeriesDetailsPage = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [fetchSeriesData, getRemoteDisplayItems, hasOrderChanges, items, remoteSeriesState, series, seriesId]);
+  }, [fetchSeriesData, getRemoteDisplayItems, hasOrderChanges, items, remoteActionsReady, remoteSeriesState, series, seriesId]);
 
   const executeRemoveItem = async () => {
-    if (!removeTarget || isRemovingItem) {
+    if (!removeTarget || isRemovingItem || !remoteActionsReady) {
       return;
     }
 
@@ -1630,7 +1690,7 @@ const SeriesDetailsPage = () => {
   );
 
   const removeSeriesItems = useCallback(async (targets: SeriesDisplayItem[]) => {
-    if (targets.length === 0) {
+    if (targets.length === 0 || !remoteActionsReady) {
       return;
     }
 
@@ -1685,7 +1745,7 @@ const SeriesDetailsPage = () => {
     } finally {
       setIsRemovingItem(false);
     }
-  }, [fetchSeriesData, series?.subsplashId, seriesId]);
+  }, [fetchSeriesData, remoteActionsReady, series?.subsplashId, seriesId]);
 
   const handleToggleSelected = useCallback((displayId: string, checked: boolean) => {
     setSelectedSeriesItemIds((previousSelected) => {
@@ -1705,6 +1765,7 @@ const SeriesDetailsPage = () => {
 
   // Add item to series
   const addItemToSeries = useCallback(async (sermon: Sermon): Promise<boolean> => {
+    if (!remoteActionsReady) return false;
     try {
       if (items.some((item) => item.sermonId === sermon.id)) {
         return false;
@@ -1837,10 +1898,10 @@ const SeriesDetailsPage = () => {
       alert(`Error adding item: ${getErrorMessage(err, 'Unknown error')}`);
       return false;
     }
-  }, [fetchSeriesData, isAdmin, isSermonPublishedToSubsplash, items, publishItemToSeries, router, seriesId, user?.uid]);
+  }, [fetchSeriesData, isAdmin, isSermonPublishedToSubsplash, items, publishItemToSeries, remoteActionsReady, router, seriesId, user?.uid]);
 
   const addSelectedSermons = useCallback(async () => {
-    if (isAddingSelectedSermons) {
+    if (isAddingSelectedSermons || !remoteActionsReady) {
       return;
     }
 
@@ -2200,6 +2261,8 @@ const SeriesDetailsPage = () => {
     isAdmin,
     items,
     router,
+    remoteActionsReady,
+    remoteSeriesState,
     selectedSermonIds,
     seriesId,
     fetchSeriesData,
@@ -2210,7 +2273,7 @@ const SeriesDetailsPage = () => {
 
   // Delete series
   const handleDeleteSeries = async () => {
-    if (!series) return;
+    if (!series || !remoteActionsReady) return;
 
     setIsDeleting(true);
     try {
@@ -2291,7 +2354,7 @@ const SeriesDetailsPage = () => {
   const allVisibleSermonsSelected = filteredAddableSermons.length > 0 &&
     filteredAddableSermons.every((sermon) => selectedSermonIds.has(sermon.id));
   const someVisibleSermonsSelected = filteredAddableSermons.some((sermon) => selectedSermonIds.has(sermon.id));
-  const listActionsDisabled = isSaving || isAddingSelectedSermons || isRemovingItem;
+  const listActionsDisabled = isSaving || isAddingSelectedSermons || isRemovingItem || !remoteActionsReady;
 
   return (
     <>
@@ -2391,6 +2454,7 @@ const SeriesDetailsPage = () => {
               variant="outlined"
               startIcon={<EditIcon />}
               onClick={() => setEditPopup(true)}
+              disabled={!remoteActionsReady}
               size="medium"
               fullWidth
             >
@@ -2401,6 +2465,7 @@ const SeriesDetailsPage = () => {
               color="error"
               startIcon={<DeleteIcon />}
               onClick={() => setDeletePopup(true)}
+              disabled={!remoteActionsReady}
               size="medium"
               fullWidth
             >
@@ -2556,6 +2621,30 @@ const SeriesDetailsPage = () => {
           </CardContent>
         </Card>
 
+        {series.subsplashId && remoteLoadStatus === 'loading' && (
+          <Alert severity="info" icon={<CircularProgress size={18} />} sx={{ mb: 3 }}>
+            Showing local series items while checking Subsplash. Remote-only items and publishing controls will be available when the check finishes.
+          </Alert>
+        )}
+        {series.subsplashId && remoteLoadStatus === 'error' && (
+          <Alert
+            severity="error"
+            sx={{ mb: 3 }}
+            action={<Button color="inherit" size="small" onClick={() => void retryRemoteSeriesState()}>Retry</Button>}
+          >
+            Subsplash series state could not be loaded. Local items are visible, but remote-only items and publishing controls are unavailable. {remoteLoadError}
+          </Alert>
+        )}
+        {series.subsplashId && remoteLoadStatus === 'ready' && !remoteSeriesState && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 3 }}
+            action={<Button color="inherit" size="small" onClick={() => void retryRemoteSeriesState()}>Refresh</Button>}
+          >
+            Subsplash series state needs a fresh check before publishing controls can be used.
+          </Alert>
+        )}
+
         {/* Items Section Header */}
         <Box
           sx={{
@@ -2592,7 +2681,7 @@ const SeriesDetailsPage = () => {
                         setSelectedSeriesItemIds(new Set());
                       }
                     }}
-                    disabled={isRemovingItem}
+                    disabled={listActionsDisabled}
                   />
                 )}
                 label={`${selectedSeriesItemIds.size} selected`}
@@ -2605,7 +2694,7 @@ const SeriesDetailsPage = () => {
                   color="inherit"
                   startIcon={<UndoIcon />}
                   onClick={revertOrder}
-                  disabled={isSaving}
+                  disabled={listActionsDisabled}
                 >
                   Revert
                 </Button>
@@ -2614,7 +2703,7 @@ const SeriesDetailsPage = () => {
                   color="primary"
                   startIcon={isSaving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
                   onClick={saveOrderChanges}
-                  disabled={isSaving}
+                  disabled={listActionsDisabled}
                 >
                   Save Order
                 </Button>
@@ -2626,7 +2715,7 @@ const SeriesDetailsPage = () => {
                 color="error"
                 startIcon={isRemovingItem ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />}
                 onClick={() => setRemoveTarget(bulkRemoveTargets[0] || null)}
-                disabled={isRemovingItem}
+                disabled={listActionsDisabled}
               >
                 Remove Selected
               </Button>
@@ -2641,6 +2730,7 @@ const SeriesDetailsPage = () => {
                 setAddItemNotice(null);
                 setAddItemPopup(true);
               }}
+              disabled={listActionsDisabled}
             >
               Add Item
             </Button>
@@ -2654,7 +2744,13 @@ const SeriesDetailsPage = () => {
         ) : null}
 
         {/* Items List */}
-        {items.length === 0 ? (
+        {items.length === 0 && !remoteActionsReady ? (
+          <Card sx={{ textAlign: 'center', py: 5, px: 3 }}>
+            <Typography color="text.secondary">
+              Local items are empty. Subsplash items will appear after the remote check succeeds.
+            </Typography>
+          </Card>
+        ) : items.length === 0 ? (
           <Card
             sx={{
               textAlign: 'center',
@@ -2682,6 +2778,7 @@ const SeriesDetailsPage = () => {
                 setAddItemNotice(null);
                 setAddItemPopup(true);
               }}
+              disabled={listActionsDisabled}
             >
               Add Your First Item
             </Button>
@@ -2711,6 +2808,7 @@ const SeriesDetailsPage = () => {
                       isPublishing={publishingItemId === item.id}
                       isUnpublishing={unpublishingItemId === item.id}
                       actionsDisabled={listActionsDisabled}
+                      reorderDisabled={listActionsDisabled || !item.canReorder}
                       canPublish={!item.isSubsplashOnlyPlaceholder && canPublishSermonToSeries(item.sermon)}
                       publishBlockedReason={SERIES_PUBLISH_BLOCKED_MESSAGE}
                     />
@@ -2771,7 +2869,7 @@ const SeriesDetailsPage = () => {
               void executeRemoveItem();
             }}
             startIcon={isRemovingItem ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon fontSize="small" />}
-            disabled={isRemovingItem}
+            disabled={listActionsDisabled}
           >
             Remove
           </Button>
@@ -2804,7 +2902,7 @@ const SeriesDetailsPage = () => {
               }
             }}
             startIcon={unpublishingItemId ? <CircularProgress size={16} color="inherit" /> : <CloudOffIcon fontSize="small" />}
-            disabled={!!unpublishingItemId}
+            disabled={!!unpublishingItemId || !remoteActionsReady}
           >
             Unpublish
           </Button>
