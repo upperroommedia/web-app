@@ -23,7 +23,9 @@ The global Vidstack player still contributes to initial JavaScript. Its context 
 
 ## Verification and remaining limit
 
-The local production build succeeded and identified all browser pages as static. `next start` returned the new public CDN policy for `/`, `/login`, `/admin/sermons`, and a sermon detail page, while `/api/editSermon` did not receive it. Browser inspection of the local build showed no image proxy requests for the auth logo. After production rollout, check a page with two sequential requests for a CDN miss followed by a hit and `Age`, then check that a first browser visit still completes auth and displays the intended page.
+The local production build succeeded and identified all browser pages as static. `next start` returned the new public CDN policy for `/`, `/login`, `/admin/sermons`, and a sermon detail page, while `/api/editSermon` did not receive it. Browser inspection of the local build showed no image proxy requests for the auth logo.
+
+The first production rollout succeeded. A fresh `/` request filled the CDN in 5.28 seconds, and the next request was a CDN hit in 77 ms. `/login` and `/admin/sermons` also switched from misses to hits; the logo switched from a miss to a hit. A fresh anonymous headless browser visit reached `/login` with no page errors and no image proxy requests, and transferred about 808 KB of JavaScript in 39 scripts. A request with a `token` cookie also reached a CDN hit on its second attempt. Authenticated browser behavior was not inspected because the desktop session was locked.
 
 An edge's first request after its cache expires can still start a zero-instance service. Eliminating that last cold request without a warm instance would require serving the static shell from a static hosting origin, with API routes kept on a serverless backend.
 
