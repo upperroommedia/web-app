@@ -54,7 +54,7 @@ describe('createFunction helpers', () => {
       )
     ).resolves.toEqual({ ok: true });
 
-    expect(httpsCallableMock).toHaveBeenCalledWith({ app: 'functions-instance' }, 'setyoutubecookies');
+    expect(httpsCallableMock).toHaveBeenCalledWith({ app: 'functions-instance' }, 'setyoutubecookies', undefined);
     expect(httpsCallableFromURLMock).not.toHaveBeenCalled();
     expect(callable).toHaveBeenCalledWith({
       id: 'cookie-upload',
@@ -90,6 +90,11 @@ describe('createFunction helpers', () => {
 
     await expect(invoke({ id: 'sermon-123' })).rejects.toBe(error);
 
+    expect(httpsCallableMock).toHaveBeenCalledWith(
+      { app: 'functions-instance' },
+      'uploadtosoundcloud',
+      { timeout: 600_000 }
+    );
     expect(startSpanMock).toHaveBeenCalled();
     expect(captureExceptionMock).toHaveBeenCalledWith(error);
   });
