@@ -746,14 +746,12 @@ verify_soundcloud_relay_smoke() {
   token="$(gcloud secrets versions access latest --secret=PROVIDER_EGRESS_RELAY_TOKEN --project="$project")"
   [[ -n "$token" ]] || { echo "Provider relay token unavailable for $deploy_env" >&2; return 1; }
   response_file="$(mktemp)"
-  response_status="$(curl -sS --connect-timeout 10 --max-time 60 -o "$response_file" -w '%{http_code}' \
+  response_status="$(curl -sS --connect-timeout 10 --max-time 60 -o "$response_file" -w '%{http_code} %{content_type}' \
     -X POST "https://${host}/internal/provider-relay/soundcloud/tracks" \
     -H "x-provider-relay-token: ${token}" \
     -H 'Authorization: OAuth invalid-soundcloud-smoke-token' \
     -F 'track[asset_data]=@/dev/null;filename=smoke.wav;type=audio/wav')"
-  if [[ "$response_status" != 401 ]] ||
-    grep -Fxq '{"error":"Unauthorized."}' "$response_file" ||
-    ! grep -qi 'invalid\|unauthorized\|access token' "$response_file"; then
+  if [[ ! "$response_status" =~ ^401[[:space:]]text/plain ]]; then
     echo "SoundCloud relay smoke failed in $deploy_env (HTTP $response_status)" >&2
     rm -f "$response_file"
     return 1
