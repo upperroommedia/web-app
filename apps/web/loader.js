@@ -27,6 +27,17 @@ export default function firebaseAppHostingImageLoader({ src, width, quality }) {
     return src;
   }
 
+  // Files in public/ are already served as static assets. Sending them through
+  // App Hosting's image processor adds a separate cold request for tiny assets
+  // such as the site logo, and can even make the response larger.
+  if (
+    src.startsWith("/") &&
+    !src.startsWith("//") &&
+    /\.(?:avif|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(src)
+  ) {
+    return src;
+  }
+
   const normalizedSrc = normalizeFirebaseStorageUrl(src);
   const operations = [
     {

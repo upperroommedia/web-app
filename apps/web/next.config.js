@@ -122,6 +122,29 @@ const sentryRelease = resolveSentryRelease();
 const sentryDsn = readFirstDefinedEnv('NEXT_PUBLIC_SENTRY_DSN', 'SENTRY_DSN');
 const imageProcessingFunctionUrl = readFirstDefinedEnv('IMAGE_PROCESSING_FUNCTION_URL');
 
+// Browser pages are prerendered auth-neutral shells. Firebase App Hosting's CDN
+// needs an explicit freshness lifetime to serve them without waking Cloud Run.
+// Keep API routes and the image-processing rewrite out of this list.
+const staticPagePaths = [
+  '/',
+  '/login',
+  '/profile',
+  '/admin/advanced',
+  '/admin/lists',
+  '/admin/lists/:listId',
+  '/admin/series',
+  '/admin/series/:seriesId',
+  '/admin/sermons',
+  '/admin/sermons/:sermonId',
+  '/admin/sermons/:sermonId/edit',
+  '/admin/speakers',
+  '/admin/speakers/:speakerId',
+  '/admin/topics',
+  '/admin/users',
+];
+const staticPageCacheControl = 'public, max-age=0, s-maxage=3600, stale-while-revalidate=300';
+const publicImagePaths = ['/URM_icon.png', '/user.png'];
+
 if (sentryRelease) {
   process.env.NEXT_PUBLIC_SENTRY_RELEASE = process.env.NEXT_PUBLIC_SENTRY_RELEASE || sentryRelease;
   process.env.SENTRY_RELEASE = process.env.SENTRY_RELEASE || sentryRelease;
@@ -179,6 +202,14 @@ const nextConfig = {
   },
   async headers() {
     return [
+      ...staticPagePaths.map((source) => ({
+        source,
+        headers: [{ key: 'Cache-Control', value: staticPageCacheControl }],
+      })),
+      ...publicImagePaths.map((source) => ({
+        source,
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=3600, s-maxage=86400' }],
+      })),
       {
         source: '/:path*',
         headers: [

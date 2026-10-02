@@ -44,7 +44,6 @@ const UserContext = createContext<Context | null>(null);
 
 export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User>();
-  const [artificalLoading, setArtificalLoading] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
   const authHydratedRef = useRef(false);
 
@@ -65,8 +64,8 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
         nookies.set(null, 'token', '', { path: '/' });
       } else {
         try {
-          const token = await user.getIdToken();
-          const role = (await user.getIdTokenResult()).claims.role as UserRoleType;
+          const tokenResult = await user.getIdTokenResult();
+          const role = tokenResult.claims.role as UserRoleType;
           Sentry.setUser({
             id: user.uid,
             email: user.email ?? undefined,
@@ -90,7 +89,7 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
             canPublish: () => canUserRolePublish(role),
           });
           nookies.destroy(null, 'token');
-          nookies.set(null, 'token', token, { path: '/' });
+          nookies.set(null, 'token', tokenResult.token, { path: '/' });
           // router.reload();
         } catch (e) {
           setUser(undefined);
@@ -105,13 +104,8 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    const timer = setTimeout(() => {
-      setArtificalLoading(false);
-    }, 500);
-
     return () => {
       unsubscribe();
-      clearTimeout(timer);
     };
   }, []);
 
@@ -184,7 +178,7 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  if (loading || artificalLoading) {
+  if (loading) {
     return (
       <Stack
         sx={{

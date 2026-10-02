@@ -1,14 +1,23 @@
-import React, { Dispatch, SetStateAction, useEffect, useRef } from 'react';
+import { type Dispatch, type SetStateAction, useEffect, useRef } from 'react';
 import useAuth from '../../context/user/UserContext';
 import Router from 'next/router';
 import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import RequestRoleChange from '../RequestUploadPrivalige';
-import Uploader from './UploaderComponent';
-import { SermonURL } from '../EditSermonForm';
-import { Sermon } from '../../types/SermonTypes';
-import { List } from '../../types/List';
+import dynamic from 'next/dynamic';
+import type { SermonURL } from '../EditSermonForm';
+import type { Sermon } from '../../types/SermonTypes';
+import type { List } from '../../types/List';
+
+const Uploader = dynamic(() => import('./UploaderComponent'), {
+  ssr: false,
+  loading: () => (
+    <Stack sx={{ justifyContent: 'center', alignItems: 'center', margin: 8 }}>
+      <CircularProgress />
+    </Stack>
+  ),
+});
 
 export interface VerifiedUserUploaderProps {
   existingSermon?: Sermon;
