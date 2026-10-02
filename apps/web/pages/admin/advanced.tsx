@@ -508,7 +508,7 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
                   Last connected: {formatTimestamp(status?.connectedAtMillis)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Access token expires: {formatTimestamp(status?.accessTokenExpiresAtMillis)}
+                  Access token expires: {formatTimestamp(status?.accessTokenExpiresAtMillis)} (automatically renewed)
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Connected by: {status?.connectedByEmail ?? 'Not recorded'}

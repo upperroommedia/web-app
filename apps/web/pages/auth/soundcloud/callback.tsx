@@ -20,6 +20,8 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
   const router = useRouter();
   const [statusText, setStatusText] = useState('Finalizing SoundCloud authorization...');
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   const callbackState = useMemo(() => {
     if (!router.isReady || typeof window === 'undefined') {
@@ -69,6 +71,8 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
 
     const run = async () => {
       try {
+        setErrorText(null);
+        setCanRetry(false);
         const exchangeAuthCode = createFunctionV2<
           ExchangeSoundCloudAuthCodeInput,
           ExchangeSoundCloudAuthCodeReturnType
@@ -94,6 +98,8 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
         const message =
           error instanceof Error ? error.message : 'SoundCloud authorization could not be completed.';
         setErrorText(message);
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
+        setCanRetry(code === 'functions/unavailable' || code === 'unavailable');
       }
     };
 
@@ -102,7 +108,7 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
     return () => {
       isCancelled = true;
     };
-  }, [callbackState, router]);
+  }, [callbackState, router, retryAttempt]);
 
   const resolvedErrorText = errorText ?? (callbackState.ready && 'validationError' in callbackState ? callbackState.validationError : null);
 
@@ -122,9 +128,16 @@ const SoundCloudCallbackPage: NextPage & { PageLayout?: React.ComponentType<{ ch
               </Stack>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                You can return to Advanced settings and start the connection flow again.
+                {canRetry
+                  ? 'The provider connection is temporarily unavailable. You can retry this authorization.'
+                  : 'You can return to Advanced settings and start the connection flow again.'}
               </Typography>
             )}
+            {resolvedErrorText && canRetry ? (
+              <Button variant="contained" onClick={() => setRetryAttempt((attempt) => attempt + 1)}>
+                Retry connection
+              </Button>
+            ) : null}
             {resolvedErrorText ? (
               <Button
                 variant="contained"

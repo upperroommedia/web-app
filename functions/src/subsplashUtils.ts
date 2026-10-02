@@ -7,19 +7,23 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import FormData from 'form-data';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
+import './providerRelay';
 
 const AUTH_CACHE_ROOT_PATH = 'subsplashAuthSession';
 const AUTH_REFRESH_LOCK_PATH = `${AUTH_CACHE_ROOT_PATH}/refreshLock`;
 const AUTH_CACHE_PATH = `${AUTH_CACHE_ROOT_PATH}/cache`;
 const AUTH_EXPIRY_SKEW_MS = 30_000;
-const AUTH_LOCK_LEASE_MS = 10_000;
-const AUTH_LOCK_WAIT_TIMEOUT_MS = 10_000;
+const AUTH_LOCK_LEASE_MS = 40_000;
+const AUTH_LOCK_WAIT_TIMEOUT_MS = 40_000;
 const AUTH_LOCK_POLL_INTERVAL_MS = 200;
 const DEFAULT_ACCESS_TOKEN_TTL_MS = 5 * 60 * 1000;
 const MAX_EDGE_BLOCK_RETRIES = 3;
 const SUBSPLASH_API_ORIGIN = 'https://core.subsplash.com';
 
-type EdgeRetryRequestConfig = AxiosRequestConfig & { skipSubsplashEdgeRetry?: boolean };
+type EdgeRetryRequestConfig = AxiosRequestConfig & {
+  skipSubsplashEdgeRetry?: boolean;
+  providerRelayOriginalUrl?: string;
+};
 
 type SubsplashAuthCacheRecord = {
   accessToken: string;
@@ -47,8 +51,8 @@ axios.interceptors.response.use(undefined, async (error: unknown) => {
 
   const config = error.config as EdgeRetryRequestConfig | undefined;
   if (
-    !config?.url?.startsWith(`${SUBSPLASH_API_ORIGIN}/`) ||
-    config.url.endsWith('/accounts/v1/oauth/token') ||
+    !(config?.providerRelayOriginalUrl || config?.url)?.trim().startsWith(`${SUBSPLASH_API_ORIGIN}/`) ||
+    (config.providerRelayOriginalUrl || config.url || '').endsWith('/accounts/v1/oauth/token') ||
     config.skipSubsplashEdgeRetry ||
     config.data instanceof FormData
   ) {
@@ -207,37 +211,41 @@ const releaseAuthRefreshLock = async (ownerToken: string): Promise<void> => {
 };
 
 const fetchFreshAccessToken = async (): Promise<SubsplashAuthCacheRecord> => {
-  const formData = new FormData();
   if (!process.env.SUBSPLASH_EMAIL || !process.env.SUBSPLASH_PASSWORD) {
     throw new Error('Missing SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD in environment.');
   }
-  formData.append('grant_type', 'password');
-  formData.append('scope', 'app:9XTSHD');
-  formData.append('email', process.env.SUBSPLASH_EMAIL);
-  formData.append('password', process.env.SUBSPLASH_PASSWORD);
-  const config: AxiosRequestConfig = {
-    method: 'post',
-    url: 'https://core.subsplash.com/accounts/v1/oauth/token',
-    headers: {
-      ...formData.getHeaders(),
-    },
-    data: formData,
-  };
 
   let response;
   for (let attempt = 0; ; attempt += 1) {
+    // A multipart stream is single-use. A fresh boundary and body are required for every retry.
+    const formData = new FormData();
+    formData.append('grant_type', 'password');
+    formData.append('scope', 'app:9XTSHD');
+    formData.append('email', process.env.SUBSPLASH_EMAIL);
+    formData.append('password', process.env.SUBSPLASH_PASSWORD);
+    const config: AxiosRequestConfig = {
+      method: 'post',
+      url: 'https://core.subsplash.com/accounts/v1/oauth/token',
+      headers: { ...formData.getHeaders() },
+      data: formData,
+      timeout: 8_000,
+    };
+
     try {
       response = await axios(config);
       break;
     } catch (error) {
       const edgeBlock = getHtmlEdgeBlock(error);
-      if (!edgeBlock) {
+      const transportFailure = isAxiosError(error) && !error.response &&
+        ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNABORTED'].includes(error.code || '');
+      if (!edgeBlock && !transportFailure) {
         throw error;
       }
 
-      logger.warn('Subsplash token request was blocked by its edge network', {
+      logger.warn('Subsplash token request failed transiently', {
         attempt: attempt + 1,
-        requestId: edgeBlock.requestId,
+        requestId: edgeBlock?.requestId,
+        failure: edgeBlock ? 'edge-block' : 'transport',
       });
       if (attempt >= MAX_EDGE_BLOCK_RETRIES) {
         throw new HttpsError(

@@ -355,6 +355,7 @@ Secrets read during deploy:
 - `PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON`
 - `RUNTIME_ALERT_RECIPIENTS`
 - `PROCESS_AUDIO_SENTRY_DSN`
+- `PROVIDER_EGRESS_RELAY_TOKEN` (shared with Firebase Functions; authenticates the narrow SoundCloud and Subsplash relay)
 
 Sentry env injected by deploy:
 

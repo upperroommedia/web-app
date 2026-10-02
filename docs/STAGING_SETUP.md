@@ -67,6 +67,7 @@ firebase functions:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
 firebase functions:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_ID --project urm-app-staging
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app-staging
+firebase functions:secrets:set PROVIDER_EGRESS_RELAY_TOKEN --project urm-app-staging
 firebase functions:secrets:set FUNCTIONS_SENTRY_DSN --project urm-app-staging
 ```
 
@@ -76,6 +77,7 @@ Notes:
 - `SUBSPLASH_EMAIL` and `SUBSPLASH_PASSWORD` are consumed by Subsplash publish/sync functions and related triggers.
 - `ALGOLIA_SEARCH_API_KEY` is consumed by `generateSecuredApiKey`.
 - `SOUNDCLOUD_CLIENT_ID` and `SOUNDCLOUD_CLIENT_SECRET` are consumed by the SoundCloud OAuth bootstrap and automatic token refresh flow.
+- `PROVIDER_EGRESS_RELAY_TOKEN` authenticates Firebase Functions requests to the Hetzner provider relay and is also injected into the matching Hetzner environment.
 - `WEB_APP_SENTRY_DSN` is consumed by App Hosting via [apps/web/apphosting.yaml](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/apphosting.yaml).
 - `FUNCTIONS_SENTRY_DSN` is consumed by [functions/src/sentry.ts](/Users/yasaad/Projects/upper-room-media/web-app/functions/src/sentry.ts) and must be present before deploying any split codebase with Sentry enabled.
 - App Hosting secrets in `apphosting.yaml` do not automatically flow into Cloud Functions.

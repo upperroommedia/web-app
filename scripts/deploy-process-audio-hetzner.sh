@@ -202,7 +202,7 @@ DEPLOYMENT_ID="${RELEASE_SHA:0:12}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 write_env_file() {
   local env_name="$1"
-  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64 sentry_dsn
+  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64 sentry_dsn provider_relay_token
 
   if [[ "$env_name" == "staging" ]]; then
     project_id="urm-app-staging"
@@ -220,6 +220,7 @@ write_env_file() {
 
   runtime_alert_recipients="$(gcloud secrets versions access latest --secret=RUNTIME_ALERT_RECIPIENTS --project "$project_id")"
   sentry_dsn="$(gcloud secrets versions access latest --secret=PROCESS_AUDIO_SENTRY_DSN --project "$project_id")"
+  provider_relay_token="$(gcloud secrets versions access latest --secret=PROVIDER_EGRESS_RELAY_TOKEN --project "$project_id")"
   service_account_json_b64="$(
     gcloud secrets versions access latest --secret=PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON --project "$project_id" \
     | python3 -c 'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())'
@@ -242,6 +243,7 @@ SENTRY_RELEASE=process-audio-hetzner@${env_name}-${RELEASE_SHA}
 SENTRY_TRACES_SAMPLE_RATE=0.1
 SENTRY_ENABLE_LOGS=true
 SENTRY_LOG_LEVELS=info,warn,error
+PROVIDER_EGRESS_RELAY_TOKEN=${provider_relay_token}
 PROCESS_AUDIO_RUNTIME_HOST=hetzner
 PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
 PROCESS_AUDIO_RUNTIME_ENV=${env_name}

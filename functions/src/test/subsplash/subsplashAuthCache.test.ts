@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import {
   authenticateSubsplash,
@@ -122,6 +122,9 @@ describe('subsplash auth cache', () => {
 
     await expect(authenticateSubsplash()).resolves.toBe('fresh-token');
     expect(mockAxios).toHaveBeenCalledTimes(2);
+    const firstRequest = mockAxios.mock.calls[0][0] as AxiosRequestConfig;
+    const secondRequest = mockAxios.mock.calls[1][0] as AxiosRequestConfig;
+    expect(firstRequest.data).not.toBe(secondRequest.data);
   });
 
   it('does not retry a JSON permission error', async () => {

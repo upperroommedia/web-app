@@ -19,7 +19,8 @@
     "test:readiness": "ts-node --project tsconfig.json scripts/test-youtube-readiness.ts",
     "test:queue": "ts-node -r tsconfig-paths/register --project tsconfig.test.json scripts/test-process-audio-queue-store.ts",
     "test:request-context": "ts-node --project tsconfig.json scripts/test-process-audio-request-context.ts",
-    "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop"
+    "test:provider-relay": "ts-node --project tsconfig.json scripts/test-provider-relay.ts",
+    "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run test:provider-relay && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop"
   },
   "engines": {
     "node": "22"

@@ -17,6 +17,7 @@ import { runtimeAlertRecipientsSecret } from './notifications/notificationSecret
 import { functionsSentryDsnSecret } from './sentry';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
 import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
+import { providerEgressRelayTokenSecret } from './providerRelay';
 
 const SOUND_CLOUD_TOKEN_URL = 'https://secure.soundcloud.com/oauth/token';
 const SOUND_CLOUD_AUTH_STATE_COLLECTION = '_integrationAuth';
@@ -25,9 +26,9 @@ const SOUND_CLOUD_PENDING_AUTH_COLLECTION = 'pendingOAuthSessions';
 const SOUND_CLOUD_CALLBACK_PATH = '/auth/soundcloud/callback';
 const PENDING_SOUND_CLOUD_AUTH_TTL_MS = 15 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
-const REFRESH_LEASE_MS = 60 * 1000;
+const REFRESH_LEASE_MS = 45 * 1000;
 const REFRESH_WAIT_MS = 750;
-const MAX_REFRESH_WAIT_ATTEMPTS = 10;
+const MAX_REFRESH_WAIT_ATTEMPTS = 60;
 const MAX_EDGE_BLOCK_RETRIES = 3;
 
 export type SoundCloudAuthState = {
@@ -187,7 +188,17 @@ const readAuthState = async (): Promise<SoundCloudAuthState | null> => {
   return snapshot.data() as SoundCloudAuthState;
 };
 
-const consumePendingSoundCloudAuthorizationSession = async (
+const deletePendingSoundCloudAuthorizationSession = async (adminUid: string, state: string): Promise<void> => {
+  const pendingSessionRef = soundcloudPendingAuthSessionRef(adminUid);
+  await firebaseAdmin.firestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(pendingSessionRef);
+    if (snapshot.exists && snapshot.data()?.state === state) {
+      transaction.delete(pendingSessionRef);
+    }
+  });
+};
+
+const readPendingSoundCloudAuthorizationSession = async (
   adminUid: string,
   state: string
 ): Promise<PendingSoundCloudAuthorizationSession> => {
@@ -211,7 +222,6 @@ const consumePendingSoundCloudAuthorizationSession = async (
   );
 
   if (!hasRequiredFields) {
-    await pendingSessionRef.delete();
     throw new HttpsError(
       'failed-precondition',
       'The SoundCloud login session was invalid. Start the flow again from Admin > Advanced.'
@@ -221,7 +231,7 @@ const consumePendingSoundCloudAuthorizationSession = async (
   const validatedPendingSession = pendingSession as PendingSoundCloudAuthorizationSession;
 
   if (validatedPendingSession.expiresAtMillis <= currentTimeMillis) {
-    await pendingSessionRef.delete();
+    await deletePendingSoundCloudAuthorizationSession(adminUid, state);
     throw new HttpsError(
       'failed-precondition',
       'The SoundCloud login session expired. Start the flow again from Admin > Advanced.'
@@ -229,57 +239,13 @@ const consumePendingSoundCloudAuthorizationSession = async (
   }
 
   if (validatedPendingSession.state !== state) {
-    await pendingSessionRef.delete();
     throw new HttpsError(
       'failed-precondition',
       'The SoundCloud OAuth state did not match the original request. Start the flow again from Admin > Advanced.'
     );
   }
 
-  return firebaseAdmin.firestore().runTransaction(async (transaction) => {
-    const currentSnapshot = await transaction.get(pendingSessionRef);
-    if (!currentSnapshot.exists) {
-      throw new HttpsError(
-        'failed-precondition',
-        'The SoundCloud login session was not found. Start the flow again from Admin > Advanced.'
-      );
-    }
-
-    const currentPendingSession = currentSnapshot.data() as PendingSoundCloudAuthorizationSession | undefined;
-    const hasCurrentRequiredFields = Boolean(
-      currentPendingSession?.state &&
-        currentPendingSession.codeVerifier &&
-        currentPendingSession.redirectUri &&
-        typeof currentPendingSession.createdAtMillis === 'number' &&
-        typeof currentPendingSession.expiresAtMillis === 'number'
-    );
-
-    if (!hasCurrentRequiredFields) {
-      throw new HttpsError(
-        'failed-precondition',
-        'The SoundCloud login session expired. Start the flow again from Admin > Advanced.'
-      );
-    }
-
-    const validatedCurrentPendingSession = currentPendingSession as PendingSoundCloudAuthorizationSession;
-
-    if (validatedCurrentPendingSession.expiresAtMillis <= currentTimeMillis) {
-      throw new HttpsError(
-        'failed-precondition',
-        'The SoundCloud login session expired. Start the flow again from Admin > Advanced.'
-      );
-    }
-
-    if (validatedCurrentPendingSession.state !== state) {
-      throw new HttpsError(
-        'failed-precondition',
-        'The SoundCloud OAuth state did not match the original request. Start the flow again from Admin > Advanced.'
-      );
-    }
-
-    transaction.delete(pendingSessionRef);
-    return validatedCurrentPendingSession;
-  });
+  return validatedPendingSession;
 };
 
 const createTokenPayload = (pairs: Record<string, string>): URLSearchParams => {
@@ -299,6 +265,7 @@ const postSoundCloudTokenGrant = async (
       for (let attempt = 0; ; attempt += 1) {
         try {
           return await axios.post<RefreshGrantResponse>(SOUND_CLOUD_TOKEN_URL, payload.toString(), {
+            timeout: 8_000,
             headers: {
               Accept: 'application/json; charset=utf-8',
               'Content-Type': 'application/x-www-form-urlencoded',
@@ -464,7 +431,7 @@ export const exchangeSoundCloudAuthorizationCode = async (
     throw new HttpsError('permission-denied', 'Only admins can connect SoundCloud.');
   }
 
-  const pendingSession = await consumePendingSoundCloudAuthorizationSession(connectedByUid, state);
+  const pendingSession = await readPendingSoundCloudAuthorizationSession(connectedByUid, state);
   const payload = createTokenPayload({
     grant_type: 'authorization_code',
     client_id: clientId,
@@ -479,11 +446,13 @@ export const exchangeSoundCloudAuthorizationCode = async (
     'SoundCloud authorization failed. Start the connection flow again from Admin > Advanced and approve access.'
   );
 
-  return writeTokenState(tokens, {
+  const result = await writeTokenState(tokens, {
     connectedAtMillis: nowMillis(),
     connectedByUid,
     connectedByEmail: readConfiguredValue(input.connectedByEmail ?? undefined) ?? undefined,
   });
+  await deletePendingSoundCloudAuthorizationSession(connectedByUid, state);
+  return result;
 };
 
 export const getSoundCloudAuthStatus = async (): Promise<SoundCloudAuthStatus> => {
@@ -528,21 +497,22 @@ const refreshSoundCloudTokens = async (refreshToken: string): Promise<Required<R
   );
 };
 
-const clearRefreshLease = async (): Promise<void> => {
-  await soundcloudAuthStateRef.set(
-    {
+const clearRefreshLease = async (leaseOwner: string): Promise<void> => {
+  await firebaseAdmin.firestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(soundcloudAuthStateRef);
+    if (snapshot.data()?.refreshLeaseOwner !== leaseOwner) return;
+    transaction.set(soundcloudAuthStateRef, {
       refreshLeaseOwner: FieldValue.delete(),
       refreshLeaseExpiresAtMillis: FieldValue.delete(),
-    },
-    { merge: true }
-  );
+    }, { merge: true });
+  });
 };
 
 const acquireRefreshLease = async (
   forceRefresh: boolean
 ): Promise<
   | { kind: 'token'; accessToken: string }
-  | { kind: 'refresh'; refreshToken: string }
+  | { kind: 'refresh'; refreshToken: string; leaseOwner: string }
   | { kind: 'wait' }
 > => {
   const clientId = getConfiguredClientId();
@@ -589,6 +559,7 @@ const acquireRefreshLease = async (
     return {
       kind: 'refresh' as const,
       refreshToken: activeRefreshToken,
+      leaseOwner,
     };
   });
 };
@@ -608,15 +579,26 @@ const resolveSoundCloudAccessToken = async (forceRefresh: boolean): Promise<stri
 
     try {
       const refreshedTokens = await refreshSoundCloudTokens(resolution.refreshToken);
-      const existingState = await readAuthState();
-      await writeTokenState(refreshedTokens, {
-        connectedAtMillis: existingState?.connectedAtMillis,
-        connectedByUid: existingState?.connectedByUid,
-        connectedByEmail: existingState?.connectedByEmail,
+      return await firebaseAdmin.firestore().runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(soundcloudAuthStateRef);
+        const state = snapshot.data() as SoundCloudAuthState | undefined;
+        if (state?.refreshLeaseOwner !== resolution.leaseOwner || state.refreshToken !== resolution.refreshToken) {
+          if (isAccessTokenFresh(state ?? null, nowMillis())) return state!.accessToken!;
+          throw new HttpsError('unavailable', 'SoundCloud authorization changed during token refresh. Please retry.');
+        }
+        const updatedAtMillis = nowMillis();
+        transaction.set(soundcloudAuthStateRef, {
+          accessToken: refreshedTokens.access_token,
+          refreshToken: refreshedTokens.refresh_token,
+          accessTokenExpiresAtMillis: updatedAtMillis + refreshedTokens.expires_in * 1000,
+          updatedAtMillis,
+          refreshLeaseOwner: FieldValue.delete(),
+          refreshLeaseExpiresAtMillis: FieldValue.delete(),
+        }, { merge: true });
+        return refreshedTokens.access_token;
       });
-      return refreshedTokens.access_token;
     } catch (error) {
-      await clearRefreshLease();
+      await clearRefreshLease(resolution.leaseOwner);
       throw error;
     }
   }
@@ -656,8 +638,9 @@ export const runWithSoundCloudAccessToken = async <T>(operation: (accessToken: s
 export const soundcloudSecretsWithRuntimeAlerts = [
   soundcloudClientIdSecret,
   soundcloudClientSecretSecret,
+  providerEgressRelayTokenSecret,
   runtimeAlertRecipientsSecret,
   functionsSentryDsnSecret,
 ];
 
-export const soundcloudOAuthSecrets = [soundcloudClientIdSecret, soundcloudClientSecretSecret];
+export const soundcloudOAuthSecrets = [soundcloudClientIdSecret, soundcloudClientSecretSecret, providerEgressRelayTokenSecret];

@@ -6,6 +6,7 @@ import {
   sentryTracesSampleRate,
 } from './instrument';
 import express, { Request } from 'express';
+import { createProviderRelayRouter } from './providerRelay';
 import { rateLimit } from 'express-rate-limit';
 import { spawnSync } from 'node:child_process';
 import * as Sentry from '@sentry/node';
@@ -65,6 +66,7 @@ import {
 } from './youtubeReadiness';
 
 const app = express();
+app.use('/internal/provider-relay', createProviderRelayRouter(process.env.PROVIDER_EGRESS_RELAY_TOKEN));
 app.use(express.json());
 const internalCanaryRateLimit = rateLimit({
   windowMs: 60_000,
@@ -661,6 +663,7 @@ app.get('/healthz', async (req, res) => {
     sentryLogsEnabled,
     sentryLogLevels,
     sentryTracesSampleRate,
+    providerRelayEnabled: Boolean(process.env.PROVIDER_EGRESS_RELAY_TOKEN),
     browserFallbackConfigured,
     browserFallbackEnabled,
     inProcessBrowserFallbackConfigured,

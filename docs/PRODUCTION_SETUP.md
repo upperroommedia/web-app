@@ -73,6 +73,7 @@ firebase functions:secrets:set SUBSPLASH_PASSWORD --project urm-app
 firebase functions:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_ID --project urm-app
 firebase functions:secrets:set SOUNDCLOUD_CLIENT_SECRET --project urm-app
+firebase functions:secrets:set PROVIDER_EGRESS_RELAY_TOKEN --project urm-app
 firebase functions:secrets:set FUNCTIONS_SENTRY_DSN --project urm-app
 ```
 

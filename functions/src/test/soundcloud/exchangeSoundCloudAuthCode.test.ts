@@ -178,6 +178,82 @@ describe('exchangeSoundCloudAuthCode', () => {
     expect(postSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a pending session when the provider edge blocks code exchange', async () => {
+    const session = await soundcloudSecretsModule.createSoundCloudAuthorizationSession({
+      adminUid: 'admin-1',
+      redirectUri: TEST_REDIRECT_URI,
+    });
+    const state = new URL(session.authorizeUrl).searchParams.get('state');
+    if (!state) throw new Error('Expected OAuth state');
+
+    jest.spyOn(axios, 'post').mockRejectedValue(Object.assign(new Error('Request failed with status code 403'), {
+      isAxiosError: true,
+      response: {
+        status: 403,
+        data: '<!DOCTYPE HTML><html>Request blocked</html>',
+        headers: { 'x-amz-cf-id': 'edge-request' },
+      },
+    }));
+
+    await expect(soundcloudSecretsModule.exchangeSoundCloudAuthorizationCode({
+      code: 'soundcloud-code',
+      state,
+      connectedByUid: 'admin-1',
+    })).rejects.toMatchObject({ code: 'unavailable' });
+    expect((await pendingAuthSessionRef('admin-1').get()).exists).toBe(true);
+  });
+
+  it('stores every rotated refresh token so the connection survives access-token expiry', async () => {
+    await soundCloudAuthStateRef.set({
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token-1',
+      accessTokenExpiresAtMillis: Date.now() - 1,
+    });
+    const postSpy = jest.spyOn(axios, 'post')
+      .mockResolvedValueOnce({
+        data: { access_token: 'access-token-2', refresh_token: 'refresh-token-2', expires_in: 3600 },
+      } as never)
+      .mockResolvedValueOnce({
+        data: { access_token: 'access-token-3', refresh_token: 'refresh-token-3', expires_in: 3600 },
+      } as never);
+
+    await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).resolves.toBe('access-token-2');
+    expect((await soundCloudAuthStateRef.get()).data()?.refreshToken).toBe('refresh-token-2');
+
+    await soundCloudAuthStateRef.set({ accessTokenExpiresAtMillis: Date.now() - 1 }, { merge: true });
+    await expect(soundcloudSecretsModule.getSoundCloudAccessToken()).resolves.toBe('access-token-3');
+    expect((await soundCloudAuthStateRef.get()).data()?.refreshToken).toBe('refresh-token-3');
+    expect(new URLSearchParams(postSpy.mock.calls[0][1] as string).get('refresh_token')).toBe('refresh-token-1');
+    expect(new URLSearchParams(postSpy.mock.calls[1][1] as string).get('refresh_token')).toBe('refresh-token-2');
+  });
+
+  it('shares one single-use refresh token exchange across concurrent callers', async () => {
+    await soundCloudAuthStateRef.set({
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token-1',
+      accessTokenExpiresAtMillis: Date.now() - 1,
+    });
+    let finishExchange!: (value: unknown) => void;
+    const pendingExchange = new Promise((resolve) => { finishExchange = resolve; });
+    const postSpy = jest.spyOn(axios, 'post').mockImplementation(() => pendingExchange as never);
+
+    const first = soundcloudSecretsModule.getSoundCloudAccessToken();
+    for (let attempt = 0; postSpy.mock.calls.length === 0 && attempt < 30; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    const second = soundcloudSecretsModule.getSoundCloudAccessToken();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(postSpy).toHaveBeenCalledTimes(1);
+
+    finishExchange({
+      data: { access_token: 'access-token-2', refresh_token: 'refresh-token-2', expires_in: 3600 },
+    });
+    await expect(first).resolves.toBe('access-token-2');
+    await expect(second).resolves.toBe('access-token-2');
+    expect(postSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('fails when the pending session is missing', async () => {
     await expect(
       soundcloudSecretsModule.exchangeSoundCloudAuthorizationCode({
@@ -191,7 +267,7 @@ describe('exchangeSoundCloudAuthCode', () => {
     });
   });
 
-  it('fails and clears the pending session when the state mismatches', async () => {
+  it('does not clear a newer pending session when the state mismatches', async () => {
     await soundcloudSecretsModule.createSoundCloudAuthorizationSession({
       adminUid: 'admin-1',
       redirectUri: TEST_REDIRECT_URI,
@@ -210,7 +286,7 @@ describe('exchangeSoundCloudAuthCode', () => {
     });
 
     const pendingSession = await pendingAuthSessionRef('admin-1').get();
-    expect(pendingSession.exists).toBe(false);
+    expect(pendingSession.exists).toBe(true);
   });
 
   it('fails and clears the pending session when it has expired', async () => {
