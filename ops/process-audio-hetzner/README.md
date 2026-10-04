@@ -651,6 +651,11 @@ firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-pr
 firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-staging --project urm-app-staging
 ```
 
+The service account stored in `PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON` also
+needs `roles/firebaseauth.viewer` in its Firebase project. This grants the read
+access required for revocation checks, current admin roles, and recipient lookup;
+no Auth write permission is required by the recovery feature.
+
 On an authenticated YouTube recovery failure, existing episode reservations limit
 email duplication. Recovery emails go to all active Firebase Auth users whose
 current custom claim is `role: admin`, with a direct recovery-page link. Other
