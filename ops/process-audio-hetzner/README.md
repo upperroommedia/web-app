@@ -627,7 +627,12 @@ login details clear after five minutes. Credentials are fetched only on request
 from an uncached endpoint that checks revoked tokens and the current active admin
 role. They are never included in initial HTML or public configuration, and the
 credential panel and generated codes are blocked from Sentry session replay. Desktop sessions
-last 15 minutes; reopen the desktop to reconnect. Browsers that block embedded
+last 15 minutes; reopen the desktop to reconnect. While sermons are waiting for
+authentication, the worker runs a real audio download check every minute and
+resumes the durable queue after success, without restarting the service or keeping
+the admin page open. **Check recovery status** requests an immediate check through
+a revocation-checked, admin-only endpoint. Concurrent checks coalesce and are
+limited to one per minute; routine checks retain their ten-minute interval. Browsers that block embedded
 cookies can use the page's **Open in a new tab** button.
 
 The worker validates a revocation-checked Firebase ID token submitted in a POST

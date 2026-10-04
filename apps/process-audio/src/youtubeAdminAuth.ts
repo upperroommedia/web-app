@@ -23,6 +23,7 @@ export function installYouTubeAdminDesktop(
     desktopOrigin: string;
     socketPath: string;
     audit: (event: string, uid: string) => void;
+    recover?: () => void;
   }
 ) {
   const sessions = new Map<string, Session>();
@@ -59,6 +60,30 @@ export function installYouTubeAdminDesktop(
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', `frame-ancestors 'self' ${adminOrigin}`);
     next();
+  });
+  router.post('/recover', rateLimit({ windowMs: 60_000, limit: 20 }), async (req, res) => {
+    const token = req.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
+    if (!token) {
+      res.status(401).json({ error: 'Sign in to continue.' });
+      return;
+    }
+    try {
+      const claims = await auth.verifyIdToken(token, true);
+      const user = await auth.getUser(claims.uid);
+      if (user.disabled || user.customClaims?.role !== 'admin') {
+        res.status(403).json({ error: 'Admin access required.' });
+        return;
+      }
+      if (!options.recover) {
+        res.status(503).json({ error: 'Recovery is unavailable.' });
+        return;
+      }
+      options.recover();
+      options.audit('YouTube recovery check requested', claims.uid);
+      res.status(202).json({ checking: true });
+    } catch {
+      res.status(401).json({ error: 'Your session expired. Sign in again.' });
+    }
   });
   router.post(
     '/session',

@@ -49,6 +49,22 @@ export default async function youtubeAuth(req: NextApiRequest, res: NextApiRespo
     console.info('Admin accessed Google login details', { uid: adminUid });
     return res.status(200).json({ email, password });
   }
+  if (req.body?.action === 'recover') {
+    try {
+      const response = await fetch(`${desktopOrigin}/youtube-auth/recover`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bearer}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok)
+        return res
+          .status(response.status === 401 || response.status === 403 ? response.status : 502)
+          .json({ error: 'Could not start the YouTube recovery check. Please try again.' });
+      return res.status(202).json({ checking: true });
+    } catch {
+      return res.status(502).json({ error: 'Could not start the YouTube recovery check. Please try again.' });
+    }
+  }
   if (req.body?.action === 'status') {
     try {
       const response = await fetch(`${desktopOrigin}/readyz`, { signal: AbortSignal.timeout(10_000) });

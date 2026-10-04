@@ -101,3 +101,19 @@ it('reveals credentials only after checking the current active admin and never l
   delete process.env.YOUTUBE_LOGIN_PASSWORD;
   expect((await invoke('POST', 'credentials', 'Bearer valid')).status).toBe(503);
 });
+
+it('requests a recovery check with the verified admin token and handles an unavailable worker', async () => {
+  const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(new Response('{"checking":true}', { status: 202 }));
+  const result = await invoke('POST', 'recover', 'Bearer valid');
+  expect(result.status).toBe(202);
+  expect(fetchMock).toHaveBeenCalledWith(
+    'https://yt-worker.upperroommedia.org/youtube-auth/recover',
+    expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer valid' } })
+  );
+  fetchMock.mockResolvedValue(new Response('{}', { status: 503 }));
+  expect((await invoke('POST', 'recover', 'Bearer valid')).status).toBe(502);
+  fetchMock.mockClear();
+  getUser.mockResolvedValue({ disabled: false, customClaims: { role: 'publisher' } });
+  expect((await invoke('POST', 'recover', 'Bearer valid')).status).toBe(403);
+  expect(fetchMock).not.toHaveBeenCalled();
+});

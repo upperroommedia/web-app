@@ -21,6 +21,7 @@ import firebaseAdmin from './firebaseAdmin';
 import logger, { createLoggerWithContext, sentryLogLevels } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
+import { createYouTubeAuthRecovery, recoverDeferredYouTubeAfterCanary } from './youtubeAuthRecovery';
 import { installYouTubeAdminDesktop } from './youtubeAdminAuth';
 import {
   getYouTubeBrowserAuthHealth,
@@ -302,12 +303,16 @@ async function reconcileFromFreshAuthenticatedCanary(
   report: YouTubeMediaByteCanaryReport,
   operation: string
 ): Promise<void> {
-  if (report.scope !== 'authenticated' || !isAuthenticatedCanaryEligibleForRecovery(report)) return;
-  await resumeDeferredYouTubeQueueOnStartup({
-    database: realtimeDB,
-    ctx: createContext(undefined, operation),
-    authenticatedRecoveryGeneration: report.checkedAt,
-  });
+  await recoverDeferredYouTubeAfterCanary(
+    report,
+    (generation) =>
+      resumeDeferredYouTubeQueueOnStartup({
+        database: realtimeDB,
+        ctx: createContext(undefined, operation),
+        authenticatedRecoveryGeneration: generation,
+      }),
+    youtubeMediaByteCanaryMaxAgeMs
+  );
 }
 
 const youtubeMediaByteCanaryExecution = createSerializedAsyncTaskRunner();
@@ -355,6 +360,14 @@ async function executeYouTubeMediaByteCanary(
   });
 }
 
+const youtubeAuthRecovery = createYouTubeAuthRecovery({
+  hasPending: async () => {
+    const queue = await getYouTubeQueueScopeDiagnostics(realtimeDB);
+    return queue.authenticated.depth > 0 || queue.authenticated.blocked;
+  },
+  verifyAndResume: () => executeYouTubeMediaByteCanary('authenticated'),
+});
+
 function startYouTubeMediaByteCanaryScheduler(): void {
   if (
     !youtubeProcessingEnabled ||
@@ -382,28 +395,38 @@ function startYouTubeMediaByteCanaryScheduler(): void {
     }
   };
 
+  let nextRoutineCycleAtMs = 0;
   const cycle = createNonOverlappingAsyncTaskRunner(async () => {
-    // Keep these sequential so the two probes cannot compete for yt-dlp,
-    // provider, browser-profile, or network resources on the worker.
+    // Prioritize waiting sermons. The shared runner coalesces manual and timer requests.
+    if (authenticatedYouTubeCanaryUrl) {
+      await youtubeAuthRecovery.run();
+    }
+    if (Date.now() < nextRoutineCycleAtMs) return;
+    nextRoutineCycleAtMs = Date.now() + youtubeMediaByteCanaryIntervalMs;
     if (guestYouTubeCanaryUrl) {
       await runAndPersistCanary('guest');
     }
     if (authenticatedYouTubeCanaryUrl) {
-      await runAndPersistCanary('authenticated');
+      await youtubeAuthRecovery.run(true);
     }
   });
 
   const runCycle = async (): Promise<void> => {
-    if (!(await cycle.run())) {
-      logger.warn('Skipping overlapping YouTube media-byte canary cycle');
+    try {
+      if (!(await cycle.run())) logger.warn('Skipping overlapping YouTube media-byte canary cycle');
+    } catch (error) {
+      logger.error('YouTube recovery scheduler cycle failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
   void runCycle();
-  const interval = setInterval(() => void runCycle(), youtubeMediaByteCanaryIntervalMs);
+  const interval = setInterval(() => void runCycle(), 60_000);
   interval.unref?.();
   logger.info('Started YouTube media-byte canary scheduler', {
     intervalMs: youtubeMediaByteCanaryIntervalMs,
+    pendingAuthCheckIntervalMs: 60_000,
     guestCanaryUrlConfigured: !!guestYouTubeCanaryUrl,
     authCanaryUrlConfigured: !!authenticatedYouTubeCanaryUrl,
   });
@@ -1464,14 +1487,27 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
   }
 });
 
-const attachYouTubeDesktop = youtubeProcessingEnabled && process.env.PROCESS_AUDIO_NOVNC_SOCKET && process.env.ADMIN_BASE_URL && process.env.PROCESS_AUDIO_PUBLIC_ORIGIN
-  ? installYouTubeAdminDesktop(app, firebaseAdmin.auth(), {
-      adminOrigin: process.env.ADMIN_BASE_URL,
-      desktopOrigin: process.env.PROCESS_AUDIO_PUBLIC_ORIGIN,
-      socketPath: process.env.PROCESS_AUDIO_NOVNC_SOCKET,
-      audit: (event, uid) => logger.info(event, { uid }),
-    })
-  : null;
+const attachYouTubeDesktop =
+  youtubeProcessingEnabled &&
+  process.env.PROCESS_AUDIO_NOVNC_SOCKET &&
+  process.env.ADMIN_BASE_URL &&
+  process.env.PROCESS_AUDIO_PUBLIC_ORIGIN
+    ? installYouTubeAdminDesktop(app, firebaseAdmin.auth(), {
+        adminOrigin: process.env.ADMIN_BASE_URL,
+        desktopOrigin: process.env.PROCESS_AUDIO_PUBLIC_ORIGIN,
+        socketPath: process.env.PROCESS_AUDIO_NOVNC_SOCKET,
+        audit: (event, uid) => logger.info(event, { uid }),
+        recover: () => {
+          void startupRecoveryPromise
+            .then(() => youtubeAuthRecovery.run(true))
+            .catch((error) => {
+              logger.error('Admin YouTube recovery check failed', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+        },
+      })
+    : null;
 Sentry.setupExpressErrorHandler(app);
 
 const port = parseInt(process.env.PORT ?? '') || 8080;

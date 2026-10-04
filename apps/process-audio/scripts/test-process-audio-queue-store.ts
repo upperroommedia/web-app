@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createYouTubeAuthRecovery, recoverDeferredYouTubeAfterCanary } from '../src/youtubeAuthRecovery';
 import {
   buildCloudTasksCreateTaskRequest,
   CloudTaskNameTombstonedError,
@@ -476,6 +477,58 @@ async function main(): Promise<void> {
       },
     });
 
+  // Login recovery uses the same durable queue without restarting the worker.
+  const loginRecoveryStore = buildSingleDeferredRecoveryStore();
+  let loginDispatches = 0;
+  let downloadSucceeded = false;
+  let checks = 0;
+  let checkAt = Date.now();
+  setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
+  setCloudTasksApiDepsForTesting({
+    authFactory: async () => ({ getAccessToken: async () => 'login-recovery-test-token' }),
+    fetchImpl: async () => {
+      loginDispatches++;
+      return new Response('{}', { status: 200 });
+    },
+  });
+  const recovery = createYouTubeAuthRecovery({
+    now: () => checkAt,
+    hasPending: async () => (await getYouTubeQueueScopeDiagnostics(loginRecoveryStore as any)).authenticated.depth > 0,
+    verifyAndResume: async () => {
+      checks++;
+      await recoverDeferredYouTubeAfterCanary(
+        {
+          scope: 'authenticated',
+          checkedAt: new Date(checkAt).toISOString(),
+          succeeded: downloadSucceeded,
+          bytesDownloaded: downloadSucceeded ? 1024 : 0,
+          failureClass: downloadSucceeded ? null : 'cookie_session_unavailable',
+        },
+        (generation) =>
+          resumeDeferredYouTubeQueueOnStartup({
+            database: loginRecoveryStore as any,
+            authenticatedRecoveryGeneration: generation,
+          }),
+        900_000,
+        checkAt
+      );
+    },
+  });
+  await recovery.run();
+  assert.equal(loginDispatches, 0, 'failed download verification must keep the sermon deferred');
+  assert(loginRecoveryStore.store['processAudioQueues/youtube/deferred/sermon-123']);
+  downloadSucceeded = true; // Admin finishes the browser login; no worker restart.
+  checkAt += 60_000;
+  await Promise.all([recovery.run(), recovery.run(true), recovery.run()]);
+  assert.equal(checks, 2, 'manual and automatic checks must coalesce');
+  assert.equal(loginDispatches, 1, 'successful login verification must dispatch the waiting sermon');
+  assert.equal(loginRecoveryStore.store['processAudioQueues/youtube/deferred/sermon-123'], undefined);
+  checkAt += 60_000;
+  await recovery.run(true);
+  assert.equal(loginDispatches, 1, 'an active sermon probe must never be duplicated');
+  setCloudTasksApiDepsForTesting(null);
+  setProcessAudioTaskQueueFactoryForTesting(null);
+
   const tombstoneRecoveryStore = buildSingleDeferredRecoveryStore();
   let tombstoneRecoveryRequestCount = 0;
   setProcessAudioTaskQueueFactoryForTesting(() => ({ async delete(): Promise<void> {} }));
@@ -881,8 +934,7 @@ async function main(): Promise<void> {
   );
   assert.notEqual(lostDrainOwnershipStore.store['processAudioQueues/youtube/deferred/legacy-second'], undefined);
   assert.equal(
-    (lostDrainOwnershipStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>)
-      .probeTaskSermonId,
+    (lostDrainOwnershipStore.store['processAudioQueues/youtube/state'] as Record<string, unknown>).probeTaskSermonId,
     'replacement-drain-owner'
   );
 
@@ -921,10 +973,7 @@ async function main(): Promise<void> {
     2,
     'drain ownership must be rechecked before retrying a tombstoned Cloud Task generation'
   );
-  assert.notEqual(
-    tombstoneDrainOwnershipStore.store['processAudioQueues/youtube/deferred/legacy-second'],
-    undefined
-  );
+  assert.notEqual(tombstoneDrainOwnershipStore.store['processAudioQueues/youtube/deferred/legacy-second'], undefined);
 
   const persistedAuthorityRetryStore = buildProbeSuccessStore();
   persistedAuthorityRetryStore.store['processAudioRequests/sermon-123'] = {
@@ -1345,10 +1394,7 @@ async function main(): Promise<void> {
     'new-live-task',
     'stale probe recovery must not clear a newer request generation for the same sermon'
   );
-  assert.equal(
-    staleProbeNewGenerationStore.store['processAudioQueues/youtube/deferred/stale-probe-sermon'],
-    undefined
-  );
+  assert.equal(staleProbeNewGenerationStore.store['processAudioQueues/youtube/deferred/stale-probe-sermon'], undefined);
 
   let functionsProbeEnqueueCount = 0;
   setYouTubeTaskQueueFactoryForTesting(
@@ -1358,7 +1404,7 @@ async function main(): Promise<void> {
         async enqueue(): Promise<void> {
           functionsProbeEnqueueCount += 1;
         },
-      }) as any
+      } as any)
   );
   const noCandidateActiveProbeStore = createMockDatabase({
     'processAudioQueues/youtube/state': {
@@ -1378,9 +1424,10 @@ async function main(): Promise<void> {
     ownerId: 'functions-no-candidate',
     probeMode: 'cookie_provider',
   });
-  const noCandidateActiveState = noCandidateActiveProbeStore.store[
-    'processAudioQueues/youtube/state'
-  ] as Record<string, unknown>;
+  const noCandidateActiveState = noCandidateActiveProbeStore.store['processAudioQueues/youtube/state'] as Record<
+    string,
+    unknown
+  >;
   assert.equal(noCandidateActiveState.probeTaskSermonId, 'active-functions-probe');
   assert.equal(noCandidateActiveState.probeDispatchReservationId, 'active-functions-reservation');
 
@@ -1490,15 +1537,13 @@ async function main(): Promise<void> {
     probeMode: 'cookie_provider',
   });
   assert.equal(functionsProbeEnqueueCount, 0, 'Functions recovery must reserve queue ownership before enqueueing');
-  const functionsProbeRaceState = functionsProbeRaceStore.store[
-    'processAudioQueues/youtube/state'
-  ] as Record<string, unknown>;
+  const functionsProbeRaceState = functionsProbeRaceStore.store['processAudioQueues/youtube/state'] as Record<
+    string,
+    unknown
+  >;
   assert.equal(functionsProbeRaceState.probeTaskSermonId, 'replacement-functions-owner');
   assert.equal(functionsProbeRaceState.probeDispatchReservationId, 'replacement-functions-reservation');
-  assert.notEqual(
-    functionsProbeRaceStore.store['processAudioQueues/youtube/deferred/functions-candidate'],
-    undefined
-  );
+  assert.notEqual(functionsProbeRaceStore.store['processAudioQueues/youtube/deferred/functions-candidate'], undefined);
 
   const functionsCandidateReplacementStore = createMockDatabase(
     {
@@ -2337,9 +2382,10 @@ async function main(): Promise<void> {
     failureClass: 'post_live_archive_not_ready',
     failureMessage: 'This live event has ended.',
   });
-  const postLiveNoNextRaceState = postLiveNoNextRaceStore.store[
-    'processAudioQueues/youtube/state'
-  ] as Record<string, unknown>;
+  const postLiveNoNextRaceState = postLiveNoNextRaceStore.store['processAudioQueues/youtube/state'] as Record<
+    string,
+    unknown
+  >;
   assert.equal(postLiveNoNextRaceState.probeTaskSermonId, 'post-live-replacement-owner');
   assert.equal(postLiveNoNextRaceState.probeDispatchReservationId, 'post-live-replacement-reservation');
   setCloudTasksApiDepsForTesting(null);

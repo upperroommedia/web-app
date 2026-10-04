@@ -27,6 +27,7 @@ const YouTubeAuthPage = () => {
   const [config, setConfig] = useState<Config | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checkingRecovery, setCheckingRecovery] = useState(false);
   const [connected, setConnected] = useState(false);
   const [code, setCode] = useState<Code | null>(null);
   const [remaining, setRemaining] = useState(0);
@@ -57,6 +58,19 @@ const YouTubeAuthPage = () => {
     [user]
   );
 
+  const requestRecovery = async () => {
+    setCheckingRecovery(true);
+    setError(null);
+    try {
+      await api('recover');
+      await checkStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start recovery.');
+    } finally {
+      setCheckingRecovery(false);
+    }
+  };
+
   const checkStatus = useCallback(async () => {
     try {
       setStatus((await api('status')).authenticated);
@@ -83,7 +97,7 @@ const YouTubeAuthPage = () => {
     void checkStatus();
     const timer = setInterval(() => {
       void checkStatus();
-    }, 30_000);
+    }, 15_000);
     return () => {
       active = false;
       clearInterval(timer);
@@ -210,7 +224,7 @@ const YouTubeAuthPage = () => {
         <Alert severity={status?.ready ? 'success' : 'info'}>
           {status?.ready
             ? 'YouTube authentication is verified. Waiting audio jobs can resume automatically.'
-            : 'After signing in, keep this page open while the server verifies that it can download audio. Verification can take up to 10 minutes.'}
+            : 'After signing in, keep this page open while the server verifies that it can download audio. Waiting jobs trigger a download check every minute, even after you close this page. Click Check recovery status to request a check now.'}
           {status ? ` Waiting jobs: ${status.queue.depth}.` : ''}
           {status?.mediaByteCanary.checkedAt
             ? ` Last audio check: ${new Date(status.mediaByteCanary.checkedAt).toLocaleString()}.`
@@ -238,8 +252,8 @@ const YouTubeAuthPage = () => {
                   Confirm the account avatar appears on YouTube and a video plays. Leave Chrome open and signed in.
                 </li>
                 <li>
-                  Click Check recovery status. The server checks audio access periodically and resumes waiting jobs once
-                  the authenticated download check succeeds.
+                  Click Check recovery status to check audio access now. The server also checks automatically every
+                  minute while sermons are waiting and resumes jobs once the authenticated download check succeeds.
                 </li>
               </Box>
               <Stack spacing={1.5} className="sentry-block">
@@ -326,11 +340,12 @@ const YouTubeAuthPage = () => {
                   Open in a new tab
                 </Button>
                 <Button
+                  disabled={checkingRecovery}
                   onClick={() => {
-                    void checkStatus();
+                    void requestRecovery();
                   }}
                 >
-                  Check recovery status
+                  {checkingRecovery ? 'Requesting recovery check…' : 'Check recovery status'}
                 </Button>
               </Stack>
             </Stack>

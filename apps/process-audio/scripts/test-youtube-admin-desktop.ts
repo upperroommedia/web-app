@@ -12,6 +12,7 @@ async function run() {
   let revoked = false;
   let tokensValidAfterTime: string | undefined;
   let requests = 0;
+  let recoveries = 0;
   const audit: string[] = [];
   const backend = createServer((req, res) => {
     requests++;
@@ -42,6 +43,9 @@ async function run() {
       adminOrigin: 'https://admin.example',
       desktopOrigin: 'https://worker.example',
       socketPath,
+      recover: () => {
+        recoveries++;
+      },
       audit: (event, uid) => audit.push(`${event}:${uid}`),
     }
   );
@@ -142,6 +146,27 @@ async function run() {
     } finally {
       Date.now = originalNow;
     }
+    const recover = (token?: string) =>
+      fetch(`${base}/youtube-auth/recover`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    assert.equal((await recover()).status, 401);
+    assert.equal((await recover('bad-token')).status, 401);
+    role = 'user';
+    assert.equal((await recover('admin-token')).status, 403);
+    role = 'admin';
+    disabled = true;
+    assert.equal((await recover('admin-token')).status, 403);
+    disabled = false;
+    revoked = true;
+    assert.equal((await recover('admin-token')).status, 401);
+    revoked = false;
+    assert.equal(recoveries, 0);
+    const recoveryResponse = await recover('admin-token');
+    assert.equal(recoveryResponse.status, 202);
+    assert.deepEqual(await recoveryResponse.json(), { checking: true });
+    assert.equal(recoveries, 1);
     console.log('YouTube admin desktop: HTTP/WS proxy, access control, CSRF, revocation and expiry passed');
   } finally {
     server.closeAllConnections();

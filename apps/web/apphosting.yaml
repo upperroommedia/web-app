@@ -87,11 +87,3 @@ env:
     availability:
       - RUNTIME
 
-  - variable: YOUTUBE_LOGIN_EMAIL
-    secret: YOUTUBE_LOGIN_EMAIL
-    availability:
-      - RUNTIME
-  - variable: YOUTUBE_LOGIN_PASSWORD
-    secret: YOUTUBE_LOGIN_PASSWORD
-    availability:
-      - RUNTIME
