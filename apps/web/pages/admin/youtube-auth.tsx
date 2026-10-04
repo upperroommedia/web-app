@@ -9,6 +9,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import AppLayout from '../../layout/AppLayout';
 import useAuth from '../../context/user/UserContext';
+import { getYouTubeAdminToken } from '../../utils/youtubeAdminToken';
 
 type Config = { sessionUrl: string; codeConfigured: boolean };
 type Code = { code: string; expiresAtMs: number; serverTimeMs: number };
@@ -36,7 +37,10 @@ const YouTubeAuthPage = () => {
       if (!user) throw new Error('Sign in to continue.');
       const response = await fetch('/api/admin/youtube-auth', {
         method: action ? 'POST' : 'GET',
-        headers: { Authorization: `Bearer ${await user.getIdToken()}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${await getYouTubeAdminToken(user.uid)}`,
+          'Content-Type': 'application/json',
+        },
         ...(action ? { body: JSON.stringify({ action }) } : {}),
         cache: 'no-store',
       });
@@ -105,7 +109,7 @@ const YouTubeAuthPage = () => {
     setBusy(true);
     setError(null);
     try {
-      const token = await user.getIdToken(true);
+      const token = await getYouTubeAdminToken(user.uid, true);
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = config.sessionUrl;
