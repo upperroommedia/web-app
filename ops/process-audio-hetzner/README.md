@@ -621,7 +621,12 @@ Important invariants:
 
 Admins can restore the persistent Google session at `/admin/youtube-auth`, linked
 from Advanced settings. The page includes the shared remote Chrome desktop,
-Google authenticator code generation, and login instructions. Desktop sessions
+Google authenticator code generation, and login instructions. Admins can reveal
+and copy the shared account email and password; the password starts masked and
+login details clear after five minutes. Credentials are fetched only on request
+from an uncached endpoint that checks revoked tokens and the current active admin
+role. They are never included in initial HTML or public configuration, and the
+credential panel and generated codes are blocked from Sentry session replay. Desktop sessions
 last 15 minutes; reopen the desktop to reconnect. Browsers that block embedded
 cookies can use the page's **Open in a new tab** button.
 
@@ -644,11 +649,17 @@ ssh root@<hetzner-ip> 'systemctl status process-audio-browser-desktop-bridge.ser
 The worker needs `ADMIN_BASE_URL`, `PROCESS_AUDIO_PUBLIC_ORIGIN`, and
 `PROCESS_AUDIO_NOVNC_SOCKET`; the deployment script supplies them. Web App Hosting
 needs the runtime secret `TWO_FACTOR_GOOGLE_LOGIN`, using the same Base32 secret
-as `subsplash-auth/getVerificationCode.ts --google`, and grants for the web backend:
+as `subsplash-auth/getVerificationCode.ts --google`. Store the Google account
+email and password in separate runtime-only secrets `YOUTUBE_LOGIN_EMAIL` and
+`YOUTUBE_LOGIN_PASSWORD`, then grant all three secrets to the web backends:
 
 ```bash
 firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-prod --project urm-app
 firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-staging --project urm-app-staging
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_EMAIL --backend web-prod --project urm-app
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_PASSWORD --backend web-prod --project urm-app
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_EMAIL --backend web-staging --project urm-app-staging
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_PASSWORD --backend web-staging --project urm-app-staging
 ```
 
 The service account stored in `PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON` also

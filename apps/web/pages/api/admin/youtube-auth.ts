@@ -6,6 +6,7 @@ import { generateGoogleTotp } from '../../../utils/googleTotp';
 export default async function youtubeAuth(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store, private');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed.' });
@@ -32,7 +33,21 @@ export default async function youtubeAuth(req: NextApiRequest, res: NextApiRespo
     return res.status(200).json({
       sessionUrl: `${desktopOrigin}/youtube-auth/session`,
       codeConfigured: Boolean(process.env.TWO_FACTOR_GOOGLE_LOGIN),
+      credentialsConfigured: Boolean(process.env.YOUTUBE_LOGIN_EMAIL && process.env.YOUTUBE_LOGIN_PASSWORD),
     });
+  }
+  if (req.body?.action === 'credentials') {
+    const email = process.env.YOUTUBE_LOGIN_EMAIL;
+    const password = process.env.YOUTUBE_LOGIN_PASSWORD;
+    if (!email || !password) {
+      return res
+        .status(503)
+        .json({ error: 'Google login details have not been configured. Contact the system administrator.' });
+    }
+    // Record access without recording credentials or the request token.
+    // eslint-disable-next-line no-console
+    console.info('Admin accessed Google login details', { uid: adminUid });
+    return res.status(200).json({ email, password });
   }
   if (req.body?.action === 'status') {
     try {

@@ -6,12 +6,14 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import AppLayout from '../../layout/AppLayout';
 import useAuth from '../../context/user/UserContext';
 import { getYouTubeAdminToken } from '../../utils/youtubeAdminToken';
 
-type Config = { sessionUrl: string; codeConfigured: boolean };
+type Config = { sessionUrl: string; codeConfigured: boolean; credentialsConfigured: boolean };
+type Credentials = { email: string; password: string };
 type Code = { code: string; expiresAtMs: number; serverTimeMs: number };
 type AuthStatus = {
   ready: boolean;
@@ -30,6 +32,10 @@ const YouTubeAuthPage = () => {
   const [remaining, setRemaining] = useState(0);
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [copied, setCopied] = useState(false);
+  const [credentialsRequested, setCredentialsRequested] = useState(false);
+  const [credentials, setCredentials] = useState<Credentials | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [copiedCredential, setCopiedCredential] = useState<'email' | 'password' | null>(null);
   const isAdmin = user?.isAdmin() ?? false;
 
   const api = useCallback(
@@ -83,6 +89,39 @@ const YouTubeAuthPage = () => {
       clearInterval(timer);
     };
   }, [api, checkStatus, isAdmin]);
+
+  useEffect(() => {
+    setCredentials(null);
+    setShowPassword(false);
+    setCopiedCredential(null);
+    if (!isAdmin || !credentialsRequested) return;
+    let active = true;
+    void api('credentials')
+      .then((result: Credentials) => {
+        if (active) setCredentials(result);
+      })
+      .catch((err) => {
+        if (active) {
+          setError(err.message);
+          setCredentialsRequested(false);
+        }
+      });
+    const timer = setTimeout(() => setCredentialsRequested(false), 5 * 60_000);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [api, isAdmin, credentialsRequested]);
+
+  const copyCredential = async (field: 'email' | 'password') => {
+    if (!isAdmin || !credentials) return;
+    try {
+      await navigator.clipboard.writeText(credentials[field]);
+      setCopiedCredential(field);
+    } catch {
+      setError('Could not copy the login detail. Select and copy it manually.');
+    }
+  };
 
   useEffect(() => {
     if (!code) return;
@@ -188,7 +227,8 @@ const YouTubeAuthPage = () => {
                 </li>
                 <li>
                   In the remote Chrome window, go to youtube.com and click Sign in. Use the shared Upper Room Media
-                  Google account and its password from your team&apos;s credential store.
+                  Google account. Click Show login details below, then copy the email and password into the remote
+                  browser.
                 </li>
                 <li>
                   If Google asks for verification, choose Try another way, then the Authenticator code option. Click
@@ -202,6 +242,66 @@ const YouTubeAuthPage = () => {
                   the authenticated download check succeeds.
                 </li>
               </Box>
+              <Stack spacing={1.5} className="sentry-block">
+                <Typography variant="subtitle1">Shared Google account</Typography>
+                {config && !config.credentialsConfigured && (
+                  <Alert severity="warning">
+                    Google login details have not been configured. Contact the system administrator.
+                  </Alert>
+                )}
+                <Box>
+                  <Button
+                    variant="outlined"
+                    disabled={!config?.credentialsConfigured}
+                    onClick={() => setCredentialsRequested((value) => !value)}
+                  >
+                    {credentialsRequested ? 'Hide login details' : 'Show login details'}
+                  </Button>
+                </Box>
+                {credentialsRequested && !credentials && <Typography>Loading login details…</Typography>}
+                {credentialsRequested && credentials && (
+                  <>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center">
+                      <TextField
+                        label="Google email"
+                        value={credentials.email}
+                        fullWidth
+                        slotProps={{ input: { readOnly: true } }}
+                      />
+                      <Button
+                        onClick={() => {
+                          void copyCredential('email');
+                        }}
+                      >
+                        {copiedCredential === 'email' ? 'Copied' : 'Copy email'}
+                      </Button>
+                    </Stack>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center">
+                      <TextField
+                        label="Google password"
+                        value={credentials.password}
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="off"
+                        fullWidth
+                        slotProps={{ input: { readOnly: true } }}
+                      />
+                      <Button onClick={() => setShowPassword((value) => !value)}>
+                        {showPassword ? 'Hide password' : 'Show password'}
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          void copyCredential('password');
+                        }}
+                      >
+                        {copiedCredential === 'password' ? 'Copied' : 'Copy password'}
+                      </Button>
+                    </Stack>
+                    <Typography variant="body2" color="text.secondary">
+                      Login details are available only to admins and hide automatically after five minutes.
+                    </Typography>
+                  </>
+                )}
+              </Stack>
               <Typography variant="body2" color="text.secondary">
                 Desktop access expires after 15 minutes. Reopen it to continue. If the embedded browser stays blank or
                 asks you to reconnect, use Open in a new tab. Closing this page leaves the server&apos;s Google session
@@ -260,7 +360,7 @@ const YouTubeAuthPage = () => {
                 </Button>
               </Box>
               {code && remaining > 0 && (
-                <Stack direction="row" spacing={2} alignItems="center">
+                <Stack direction="row" spacing={2} alignItems="center" className="sentry-block">
                   <Typography variant="h4" component="span" sx={{ fontFamily: 'monospace', letterSpacing: 4 }}>
                     {code.code}
                   </Typography>
