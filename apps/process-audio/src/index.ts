@@ -21,6 +21,7 @@ import firebaseAdmin from './firebaseAdmin';
 import logger, { createLoggerWithContext, sentryLogLevels } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
+import { installYouTubeAdminDesktop } from './youtubeAdminAuth';
 import {
   getYouTubeBrowserAuthHealth,
   runAuthenticatedYouTubeMediaByteCanary,
@@ -1298,6 +1299,7 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
           try {
             await emitOperationalAlertEmail({
               alertCode: browserFallbackUnavailable ? 'browser_fallback_failed' : alertCode,
+              youtubeAuthRecovery: true,
               summary:
                 'process-audio deferred one YouTube request while the authenticated session recovers; guest-capable requests remain active.',
               error: e,
@@ -1462,9 +1464,19 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
   }
 });
 
+const attachYouTubeDesktop = youtubeProcessingEnabled && process.env.PROCESS_AUDIO_NOVNC_SOCKET && process.env.ADMIN_BASE_URL && process.env.PROCESS_AUDIO_PUBLIC_ORIGIN
+  ? installYouTubeAdminDesktop(app, firebaseAdmin.auth(), {
+      adminOrigin: process.env.ADMIN_BASE_URL,
+      desktopOrigin: process.env.PROCESS_AUDIO_PUBLIC_ORIGIN,
+      socketPath: process.env.PROCESS_AUDIO_NOVNC_SOCKET,
+      audit: (event, uid) => logger.info(event, { uid }),
+    })
+  : null;
 Sentry.setupExpressErrorHandler(app);
 
 const port = parseInt(process.env.PORT ?? '') || 8080;
-app.listen(port, () => {
+const server = app.listen(port, () => {
   logger.info('Service started', { port });
 });
+
+attachYouTubeDesktop?.(server);

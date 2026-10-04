@@ -461,6 +461,16 @@ const AdvancedAdminPage: NextPage & { PageLayout?: React.ComponentType<{ childre
 
         {notice ? <Alert severity={notice.severity}>{notice.text}</Alert> : null}
 
+        {isAdmin ? (
+          <Card variant="outlined"><CardContent>
+            <Stack spacing={1.5}>
+              <Typography variant="h6" fontWeight={700}>YouTube login recovery</Typography>
+              <Typography variant="body2">Restore the shared YouTube session on Hetzner using the remote browser and Google verification codes.</Typography>
+              <Box><Button variant="contained" href="/admin/youtube-auth">Restore YouTube access</Button></Box>
+            </Stack>
+          </CardContent></Card>
+        ) : null}
+
         <Card variant="outlined">
           <CardContent>
             <Stack spacing={2.5}>

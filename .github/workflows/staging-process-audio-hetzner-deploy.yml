@@ -16,6 +16,7 @@ on:
       - '.npmrc'
       - 'ops/process-audio-hetzner/**'
       - 'scripts/deploy-process-audio-hetzner.sh'
+      - 'scripts/setup-process-audio-hetzner-desktop-bridge.sh'
       - 'scripts/prepare-process-audio-hetzner-context.sh'
       - 'scripts/verify-hetzner-ytdlp-smoke.sh'
       - 'scripts/wait-for-process-audio-health.sh'

@@ -616,3 +616,47 @@ Important invariants:
 - do not let deploys wipe `state/`
 - staging and production may share one VM, but they must keep separate Firebase env and separate app containers
 - the shared Chrome profile is one profile on the host, not one profile per container
+
+### Admin panel login recovery
+
+Admins can restore the persistent Google session at `/admin/youtube-auth`, linked
+from Advanced settings. The page includes the shared remote Chrome desktop,
+Google authenticator code generation, and login instructions. Desktop sessions
+last 15 minutes; reopen the desktop to reconnect. Browsers that block embedded
+cookies can use the page's **Open in a new tab** button.
+
+The worker validates a revocation-checked Firebase ID token submitted in a POST
+body, then checks the current Auth user's admin role. Its temporary desktop cookie
+is HttpOnly, Secure, SameSite=None and Partitioned. The proxy authenticates all
+noVNC assets and WebSocket upgrades; it rechecks active WebSocket access every
+30 seconds and disconnects at expiry. Tokens are never placed in URLs. Staging
+and production use their respective Firebase projects and admin origins.
+
+`setup-process-audio-hetzner-desktop-bridge.sh`, called by the deployment script,
+installs a private Unix socket bridge to the existing `127.0.0.1:3010` noVNC
+service. The socket is accessible only to UID 1000 and mounted read-only into the
+workers. VNC, noVNC, and Chrome DevTools stay bound to loopback. Verify:
+
+```bash
+ssh root@<hetzner-ip> 'systemctl status process-audio-browser-desktop-bridge.service --no-pager'
+```
+
+The worker needs `ADMIN_BASE_URL`, `PROCESS_AUDIO_PUBLIC_ORIGIN`, and
+`PROCESS_AUDIO_NOVNC_SOCKET`; the deployment script supplies them. Web App Hosting
+needs the runtime secret `TWO_FACTOR_GOOGLE_LOGIN`, using the same Base32 secret
+as `subsplash-auth/getVerificationCode.ts --google`, and grants for the web backend:
+
+```bash
+firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-prod --project urm-app
+firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-staging --project urm-app-staging
+```
+
+On an authenticated YouTube recovery failure, existing episode reservations limit
+email duplication. Recovery emails go to all active Firebase Auth users whose
+current custom claim is `role: admin`, with a direct recovery-page link. Other
+runtime alerts keep their configured recipients. Admin lookup or email queue
+failures propagate so the caller can release its reservation and retry later.
+
+Signing in does not immediately declare the session healthy: the existing periodic
+authenticated media download check must pass before waiting jobs resume. The
+page refreshes this status every 30 seconds. Leave Chrome open and signed in.

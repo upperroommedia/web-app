@@ -81,3 +81,8 @@ env:
       - RUNTIME
   - variable: ALGOLIA_SEARCH_API_KEY
     secret: ALGOLIA_SEARCH_API_KEY
+
+  - variable: TWO_FACTOR_GOOGLE_LOGIN
+    secret: TWO_FACTOR_GOOGLE_LOGIN
+    availability:
+      - RUNTIME

@@ -20,7 +20,8 @@
     "test:queue": "ts-node -r tsconfig-paths/register --project tsconfig.test.json scripts/test-process-audio-queue-store.ts",
     "test:request-context": "ts-node --project tsconfig.json scripts/test-process-audio-request-context.ts",
     "test:provider-relay": "ts-node --project tsconfig.json scripts/test-provider-relay.ts",
-    "test:ci": "pnpm run build && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run test:provider-relay && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop"
+    "test:ci": "pnpm run build && pnpm run test:youtube-admin && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run test:provider-relay && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop",
+    "test:youtube-admin": "ts-node --project tsconfig.json scripts/test-youtube-admin-desktop.ts && node scripts/test-youtube-auth-alerts.js"
   },
   "engines": {
     "node": "22"

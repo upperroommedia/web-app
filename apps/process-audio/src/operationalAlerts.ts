@@ -18,6 +18,7 @@ type RuntimeAlertInput = {
   error: unknown;
   context?: Record<string, unknown>;
   sermonId?: string;
+  youtubeAuthRecovery?: boolean;
 };
 
 const getRuntimeAlertRecipients = (): string[] => {
@@ -164,8 +165,23 @@ const formatUser = (user: AlertUserDetails | null | undefined): string | null =>
   return user.uid;
 };
 
+// Auth is the source of truth for current admins, including disabled-account filtering.
+export const getYouTubeAuthAlertRecipients = async (): Promise<string[]> => {
+  const emails = new Set<string>();
+  let pageToken: string | undefined;
+  do {
+    const page = await firebaseAdmin.auth().listUsers(1000, pageToken);
+    for (const user of page.users) {
+      if (!user.disabled && user.customClaims?.role === 'admin' && user.email) emails.add(user.email.trim().toLowerCase());
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+  if (!emails.size) throw new Error('No active admin email addresses found for YouTube recovery.');
+  return [...emails];
+};
+
 export const emitOperationalAlertEmail = async (input: RuntimeAlertInput): Promise<void> => {
-  const recipients = getRuntimeAlertRecipients();
+  const recipients = input.youtubeAuthRecovery ? await getYouTubeAuthAlertRecipients() : getRuntimeAlertRecipients();
   if (recipients.length === 0) {
     logger.warn('Skipping operational alert email because no recipients are configured', {
       alertCode: input.alertCode,
@@ -173,6 +189,10 @@ export const emitOperationalAlertEmail = async (input: RuntimeAlertInput): Promi
     return;
   }
 
+  if (input.youtubeAuthRecovery && !process.env.ADMIN_BASE_URL) throw new Error('ADMIN_BASE_URL is required for YouTube recovery alerts.');
+  const recoveryUrl = input.youtubeAuthRecovery
+    ? `${process.env.ADMIN_BASE_URL!.replace(/\/+$/, '')}/admin/youtube-auth`
+    : null;
   const occurredAtMs = Date.now();
   const errorPayload = getErrorPayload(input.error);
   const { sermon, uploader, approver } = await resolveSermonContext(input.sermonId);
@@ -195,12 +215,14 @@ export const emitOperationalAlertEmail = async (input: RuntimeAlertInput): Promi
     '',
     `Summary: ${input.summary}`,
     ...details.map(({ label, value }) => `${label}: ${value}`),
+    ...(recoveryUrl ? [`Restore YouTube access: ${recoveryUrl}`, 'Sign in to the admin panel, open the remote browser, and follow the Google login instructions. Waiting jobs resume after verified audio access.'] : []),
   ].join('\n');
 
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
       <h2 style="margin:0 0 16px;">Process-audio runtime alert</h2>
       <p style="margin:0 0 16px;">${escapeHtml(input.summary)}</p>
+      ${recoveryUrl ? `<p><a href="${escapeHtml(recoveryUrl)}">Restore YouTube access</a></p><p>Open the remote browser and follow the Google login instructions. Waiting jobs resume after verified audio access.</p>` : ''}
       <table style="border-collapse:collapse;">${buildDetailRows(details)}</table>
     </div>
   `;

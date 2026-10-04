@@ -207,7 +207,7 @@ DEPLOYMENT_ID="${RELEASE_SHA:0:12}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 write_env_file() {
   local env_name="$1"
-  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64 sentry_dsn provider_relay_token
+  local project_id firebase_project_id bucket database_url env_file_name runtime_alert_recipients service_account_json_b64 sentry_dsn admin_base_url public_origin provider_relay_token
 
   if [[ "$env_name" == "staging" ]]; then
     project_id="urm-app-staging"
@@ -223,6 +223,9 @@ write_env_file() {
     env_file_name="process-audio-production.env"
   fi
 
+  admin_base_url="$(gcloud secrets versions access latest --secret=ADMIN_BASE_URL --project "$project_id")"
+  public_origin="https://${production_hostname}"
+  if [[ "$env_name" == "staging" ]]; then public_origin="https://${staging_hostname}"; fi
   runtime_alert_recipients="$(gcloud secrets versions access latest --secret=RUNTIME_ALERT_RECIPIENTS --project "$project_id")"
   sentry_dsn="$(gcloud secrets versions access latest --secret=PROCESS_AUDIO_SENTRY_DSN --project "$project_id")"
   provider_relay_token="$(gcloud secrets versions access latest --secret=PROVIDER_EGRESS_RELAY_TOKEN --project "$project_id")"
@@ -242,6 +245,9 @@ FIREBASE_STORAGE_BUCKET=${bucket}
 FIREBASE_DATABASE_URL=${database_url}
 FIREBASE_SERVICE_ACCOUNT_JSON=${service_account_json_b64}
 RUNTIME_ALERT_RECIPIENTS=${runtime_alert_recipients}
+ADMIN_BASE_URL=${admin_base_url}
+PROCESS_AUDIO_PUBLIC_ORIGIN=${public_origin}
+PROCESS_AUDIO_NOVNC_SOCKET=/workspace/browser-desktop/novnc.sock
 SENTRY_DSN=${sentry_dsn}
 SENTRY_ENVIRONMENT=${env_name}
 SENTRY_RELEASE=process-audio-hetzner@${env_name}-${RELEASE_SHA}
@@ -290,6 +296,8 @@ PROCESS_AUDIO_YOUTUBE_MEDIA_CANARY_MAX_AGE_MS=900000
 EOF
   chmod 600 "$WORK_DIR/env/$env_file_name"
 }
+
+"$ROOT_DIR/scripts/setup-process-audio-hetzner-desktop-bridge.sh"
 
 case "$TARGET_ENV" in
   staging)
