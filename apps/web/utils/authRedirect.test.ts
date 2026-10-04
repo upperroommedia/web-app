@@ -103,3 +103,8 @@ describe('shouldPreferFirebaseRedirectAuth', () => {
     ).toBe(true);
   });
 });
+
+// Admin recovery emails must return to the recovery view after app sign-in.
+it('preserves the YouTube recovery destination after sign-in', () => {
+  expect(resolveAuthCallbackDestination('/admin/youtube-auth', undefined)).toBe('/admin/youtube-auth');
+});
