@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
 import functions, { httpsCallable } from '../firebase/functions';
 import { SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE } from '@upperroom/contracts/addToList';
+import { parseLockBusyDetails } from './callableConcurrency';
 
 const getErrorCode = (error: unknown): string | null => {
   if (typeof error !== 'object' || error === null) {
@@ -40,6 +41,7 @@ const getErrorDetailsCode = (error: unknown): string | null => {
 
 const RETRYABLE_READ_CALLABLES = new Set(['generatesecuredapikey', 'getusersbyids']);
 const CALLABLE_RETRY_DELAYS_MS = [250, 1_000] as const;
+const MAX_AMBIGUOUS_MUTATION_WAIT_MS = 10_000;
 
 export const isRetryableCallableTransportError = (error: unknown): boolean => {
   const errorCode = getErrorCode(error);
@@ -67,15 +69,35 @@ const invokeCallableWithRetry = async <T, R>(
   payload: T,
   canRetry: boolean
 ): Promise<R> => {
-  for (let attempt = 0; ; attempt += 1) {
+  let transportRetryCount = 0;
+  let encounteredAmbiguousTransportFailure = false;
+  let contentionDeadlineMs: number | null = null;
+
+  while (true) {
     try {
       return (await callable(payload)).data;
     } catch (error) {
-      const retryDelayMs = CALLABLE_RETRY_DELAYS_MS[attempt];
-      if (!canRetry || typeof retryDelayMs === 'undefined' || !isRetryableCallableTransportError(error)) {
-        throw error;
+      const lockBusyDetails = parseLockBusyDetails(error);
+      if (canRetry && encounteredAmbiguousTransportFailure && lockBusyDetails) {
+        contentionDeadlineMs ??=
+          Date.now() + Math.min(Math.max(0, lockBusyDetails.wait_ms), MAX_AMBIGUOUS_MUTATION_WAIT_MS);
+        const remainingWaitMs = contentionDeadlineMs - Date.now();
+        if (remainingWaitMs > 0) {
+          const retryDelayMs = Math.min(Math.max(1, lockBusyDetails.retry_after_ms), remainingWaitMs);
+          await waitForRetry(retryDelayMs);
+          continue;
+        }
       }
-      await waitForRetry(retryDelayMs);
+
+      const retryDelayMs = CALLABLE_RETRY_DELAYS_MS[transportRetryCount];
+      if (canRetry && typeof retryDelayMs !== 'undefined' && isRetryableCallableTransportError(error)) {
+        transportRetryCount += 1;
+        encounteredAmbiguousTransportFailure = true;
+        await waitForRetry(retryDelayMs);
+        continue;
+      }
+
+      throw error;
     }
   }
 };
@@ -86,32 +108,15 @@ export const isExpectedCallableClientError = (name: string, error: unknown): boo
   const detailsCode = getErrorDetailsCode(error);
 
   return (
-    (
-      name === 'bulkaddtoseries' &&
+    (name === 'bulkaddtoseries' &&
       errorCode === 'functions/failed-precondition' &&
-      errorMessage === 'Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.'
-    ) ||
-    (
-      errorCode === 'functions/aborted' &&
-      detailsCode === 'SUBSPLASH_LOCK_BUSY'
-    ) ||
-    (
-      name === 'getusersbyids' &&
-      errorCode === 'functions/deadline-exceeded'
-    ) ||
-    (
-      name === 'generatesecuredapikey' &&
-      errorCode === 'functions/unauthenticated'
-    ) ||
-    (
-      (name === 'uploadtosoundcloud' || name === 'uploadToSubsplash') &&
-      errorCode === 'functions/unavailable'
-    ) ||
-    (
-      name === 'addtolist' &&
-      errorCode === 'functions/not-found' &&
-      detailsCode === SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE
-    )
+      errorMessage ===
+        'Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.') ||
+    (errorCode === 'functions/aborted' && detailsCode === 'SUBSPLASH_LOCK_BUSY') ||
+    (name === 'getusersbyids' && errorCode === 'functions/deadline-exceeded') ||
+    (name === 'generatesecuredapikey' && errorCode === 'functions/unauthenticated') ||
+    ((name === 'uploadtosoundcloud' || name === 'uploadToSubsplash') && errorCode === 'functions/unavailable') ||
+    (name === 'addtolist' && errorCode === 'functions/not-found' && detailsCode === SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE)
   );
 };
 
@@ -160,10 +165,7 @@ const isObjectRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
-const mergeCallableDataWithMetadata = <T, M extends object>(
-  data: T,
-  options?: CallableCallOptions<M>
-): T => {
+const mergeCallableDataWithMetadata = <T, M extends object>(data: T, options?: CallableCallOptions<M>): T => {
   if (!options?.metadata || !isObjectRecord(options.metadata) || !isObjectRecord(data)) {
     return data;
   }
@@ -177,7 +179,11 @@ const mergeCallableDataWithMetadata = <T, M extends object>(
 export const createFunctionV2 = <T = unknown, R = unknown, M extends object = CallableMutationMetadata>(
   name: string
 ): ((data: T, options?: CallableCallOptions<M>) => Promise<R>) => {
-  const callable = httpsCallable<T, R>(functions, name, name === 'uploadtosoundcloud' ? { timeout: 600_000 } : undefined);
+  const callable = httpsCallable<T, R>(
+    functions,
+    name,
+    name === 'uploadtosoundcloud' ? { timeout: 600_000 } : undefined
+  );
   return async (data: T, options?: CallableCallOptions<M>) => {
     const payload = mergeCallableDataWithMetadata(data, options);
     return Sentry.startSpan({ name: `firebase.callable.${name}`, op: 'firebase.callable' }, async () => {

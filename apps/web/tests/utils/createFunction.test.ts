@@ -15,10 +15,9 @@ jest.mock('../../firebase/functions', () => ({
 jest.mock('@sentry/nextjs', () => ({
   __esModule: true,
   startSpan: (options: unknown, callback: () => Promise<unknown>) => startSpanMock(options, callback),
-  withScope: (callback: (scope: {
-    setTag: (key: string, value: string) => void;
-    setLevel: (level: string) => void;
-  }) => void) =>
+  withScope: (
+    callback: (scope: { setTag: (key: string, value: string) => void; setLevel: (level: string) => void }) => void
+  ) =>
     callback({
       setTag: jest.fn(),
       setLevel: jest.fn(),
@@ -90,11 +89,9 @@ describe('createFunction helpers', () => {
 
     await expect(invoke({ id: 'sermon-123' })).rejects.toBe(error);
 
-    expect(httpsCallableMock).toHaveBeenCalledWith(
-      { app: 'functions-instance' },
-      'uploadtosoundcloud',
-      { timeout: 600_000 }
-    );
+    expect(httpsCallableMock).toHaveBeenCalledWith({ app: 'functions-instance' }, 'uploadtosoundcloud', {
+      timeout: 600_000,
+    });
     expect(startSpanMock).toHaveBeenCalled();
     expect(captureExceptionMock).toHaveBeenCalledWith(error);
   });
@@ -107,10 +104,7 @@ describe('createFunction helpers', () => {
       return 0 as unknown as NodeJS.Timeout;
     });
     const transportError = Object.assign(new Error('internal'), { code: 'functions/internal' });
-    const callable = jest
-      .fn()
-      .mockRejectedValueOnce(transportError)
-      .mockResolvedValueOnce({ data: 'secured-key' });
+    const callable = jest.fn().mockRejectedValueOnce(transportError).mockResolvedValueOnce({ data: 'secured-key' });
     httpsCallableMock.mockReturnValue(callable);
 
     const { createFunction } = await import('../../utils/createFunction');
@@ -140,12 +134,9 @@ describe('createFunction helpers', () => {
     const { createFunctionV2 } = await import('../../utils/createFunction');
     const invoke = createFunctionV2<{ id: string; operationKey?: string }, { ok: boolean }>('removefromlist');
 
-    await expect(
-      invoke(
-        { id: 'sermon-123' },
-        { metadata: { operationKey: 'remove-sermon-123' } }
-      )
-    ).resolves.toEqual({ ok: true });
+    await expect(invoke({ id: 'sermon-123' }, { metadata: { operationKey: 'remove-sermon-123' } })).resolves.toEqual({
+      ok: true,
+    });
     expect(callable).toHaveBeenCalledTimes(2);
     expect(callable).toHaveBeenNthCalledWith(1, {
       id: 'sermon-123',
@@ -155,6 +146,49 @@ describe('createFunction helpers', () => {
       id: 'sermon-123',
       operationKey: 'remove-sermon-123',
     });
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('waits for the original mutation when an ambiguous retry finds its operation in progress', async () => {
+    jest.spyOn(globalThis, 'setTimeout').mockImplementation((callback: TimerHandler) => {
+      if (typeof callback === 'function') {
+        callback();
+      }
+      return 0 as unknown as NodeJS.Timeout;
+    });
+    const transportError = Object.assign(new Error('deadline exceeded'), {
+      code: 'functions/deadline-exceeded',
+    });
+    const lockBusyError = Object.assign(new Error('Operation is already in progress.'), {
+      code: 'functions/aborted',
+      details: {
+        code: 'SUBSPLASH_LOCK_BUSY',
+        locked_keys: ['operation:synthetic-reorder-key'],
+        wait_ms: 10_000,
+        retry_after_ms: 1_000,
+      },
+    });
+    const callable = jest
+      .fn()
+      .mockRejectedValueOnce(transportError)
+      .mockRejectedValueOnce(lockBusyError)
+      .mockResolvedValueOnce({ data: { status: 'success' } });
+    httpsCallableMock.mockReturnValue(callable);
+
+    const { createFunctionV2 } = await import('../../utils/createFunction');
+    const invoke = createFunctionV2<{ firestoreSeriesId: string; operationKey: string }, { status: 'success' }>(
+      'reorderseriesitems'
+    );
+    const payload = {
+      firestoreSeriesId: 'series-123',
+      operationKey: 'synthetic-reorder-key',
+    };
+
+    await expect(invoke(payload)).resolves.toEqual({ status: 'success' });
+    expect(callable).toHaveBeenCalledTimes(3);
+    expect(callable).toHaveBeenNthCalledWith(1, payload);
+    expect(callable).toHaveBeenNthCalledWith(2, payload);
+    expect(callable).toHaveBeenNthCalledWith(3, payload);
     expect(captureExceptionMock).not.toHaveBeenCalled();
   });
 
@@ -169,9 +203,9 @@ describe('createFunction helpers', () => {
     const { createFunctionV2 } = await import('../../utils/createFunction');
     const invoke = createFunctionV2<{ id: string; operationKey?: string }, { ok: boolean }>('addtolist');
 
-    await expect(
-      invoke({ id: 'sermon-123' }, { metadata: { operationKey: 'add-sermon-123' } })
-    ).rejects.toBe(serverError);
+    await expect(invoke({ id: 'sermon-123' }, { metadata: { operationKey: 'add-sermon-123' } })).rejects.toBe(
+      serverError
+    );
     expect(callable).toHaveBeenCalledTimes(1);
     expect(captureExceptionMock).toHaveBeenCalledWith(serverError);
   });
