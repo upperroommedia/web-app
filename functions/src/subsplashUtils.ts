@@ -43,7 +43,7 @@ let inFlightAuthentication: Promise<string> | null = null;
 const sleep = async (durationMs: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, durationMs));
 
-axios.interceptors.response.use(undefined, async (error: unknown) => {
+axios.interceptors?.response?.use(undefined, async (error: unknown) => {
   const edgeBlock = getHtmlEdgeBlock(error);
   if (!edgeBlock || !isAxiosError(error)) {
     throw error;

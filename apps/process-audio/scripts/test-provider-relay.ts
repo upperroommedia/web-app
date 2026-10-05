@@ -19,6 +19,17 @@ const main = async (): Promise<void> => {
       headers: new Headers(init?.headers),
       body,
     });
+    const url = String(input);
+    if (url === 'https://secure.soundcloud.com/oauth/token' && body.includes('large_response')) {
+      return new Response(Buffer.alloc(3 * 1024 * 1024, 0x61), { status: 200 });
+    }
+    if (url.includes('/builder/v1/list-rows')) {
+      const responseBytes = url.includes('oversized') ? 17 * 1024 * 1024 : 3 * 1024 * 1024;
+      return new Response(Buffer.alloc(responseBytes, 0x61), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     return new Response(JSON.stringify({ accepted: true }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -125,8 +136,27 @@ const main = async (): Promise<void> => {
     });
     assert.equal(forbiddenTrackSubpath.status, 404);
     assert.equal(forwarded.length, 5);
+
+    const oversizedDefaultResponse = await fetch(`${base}/soundcloud-token`, {
+      method: 'POST',
+      headers: { 'x-provider-relay-token': 'shared-test-token' },
+      body: 'large_response=true',
+    });
+    assert.equal(oversizedDefaultResponse.status, 502);
+
+    const fullSubsplashList = await fetch(`${base}/subsplash/builder/v1/list-rows?filter[source_list]=full`, {
+      headers: { 'x-provider-relay-token': 'shared-test-token' },
+    });
+    assert.equal(fullSubsplashList.status, 200);
+    assert.equal((await fullSubsplashList.arrayBuffer()).byteLength, 3 * 1024 * 1024);
+
+    const oversizedSubsplashList = await fetch(`${base}/subsplash/builder/v1/list-rows?filter[source_list]=oversized`, {
+      headers: { 'x-provider-relay-token': 'shared-test-token' },
+    });
+    assert.equal(oversizedSubsplashList.status, 502);
+    assert.deepEqual(await oversizedSubsplashList.json(), { error: 'Provider response exceeded the relay limit.' });
   } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 };
 

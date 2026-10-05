@@ -4,6 +4,7 @@ import express, { type Router } from 'express';
 
 const RELAY_PREFIX = '/internal/provider-relay';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_SUBSPLASH_RESPONSE_BYTES = 16 * 1024 * 1024;
 const MAX_SOUND_CLOUD_TRACK_BYTES = 4 * 1024 * 1024 * 1024;
 const SOUND_CLOUD_TRACK_TIMEOUT_MS = 8 * 60 * 1000;
 const FORWARDED_REQUEST_HEADERS = [
@@ -21,13 +22,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   'x-amz-cf-id',
   'x-amz-cf-pop',
 ] as const;
-const SUBSPLASH_PATH_PREFIXES = [
-  '/builder/v1/',
-  '/files/v1/',
-  '/media/v1/',
-  '/tags/v1/',
-  '/transcoder/v1/',
-];
+const SUBSPLASH_PATH_PREFIXES = ['/builder/v1/', '/files/v1/', '/media/v1/', '/tags/v1/', '/transcoder/v1/'];
 
 const isAuthorized = (provided: string | undefined, expected: string): boolean => {
   if (!provided || !expected) return false;
@@ -39,9 +34,7 @@ const isAuthorized = (provided: string | undefined, expected: string): boolean =
 const getUpstreamUrl = (requestUrl: string, method: string): URL | null => {
   const parsed = new URL(requestUrl, 'https://relay.invalid');
   if (parsed.pathname === `${RELAY_PREFIX}/soundcloud-token`) {
-    return method === 'POST' && !parsed.search
-      ? new URL('https://secure.soundcloud.com/oauth/token')
-      : null;
+    return method === 'POST' && !parsed.search ? new URL('https://secure.soundcloud.com/oauth/token') : null;
   }
 
   const soundCloudTracksPrefix = `${RELAY_PREFIX}/soundcloud/tracks`;
@@ -60,8 +53,37 @@ const getUpstreamUrl = (requestUrl: string, method: string): URL | null => {
   const subsplashPrefix = `${RELAY_PREFIX}/subsplash`;
   if (!parsed.pathname.startsWith(`${subsplashPrefix}/`)) return null;
   const path = parsed.pathname.slice(subsplashPrefix.length);
-  if (path !== '/accounts/v1/oauth/token' && !SUBSPLASH_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) return null;
+  if (path !== '/accounts/v1/oauth/token' && !SUBSPLASH_PATH_PREFIXES.some((prefix) => path.startsWith(prefix)))
+    return null;
   return new URL(`${path}${parsed.search}`, 'https://core.subsplash.com');
+};
+
+const getResponseBodyLimit = (upstreamUrl: URL): number =>
+  upstreamUrl.origin === 'https://core.subsplash.com' ? MAX_SUBSPLASH_RESPONSE_BYTES : MAX_BODY_BYTES;
+
+const readBoundedResponseBody = async (upstream: Response, maxBytes: number): Promise<Buffer | null> => {
+  const declaredLength = Number(upstream.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await upstream.body?.cancel().catch(() => undefined);
+    return null;
+  }
+
+  if (!upstream.body) return Buffer.alloc(0);
+
+  const reader = upstream.body.getReader();
+  const chunks: Buffer[] = [];
+  let receivedBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    receivedBytes += value.byteLength;
+    if (receivedBytes > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks, receivedBytes);
 };
 
 export const createProviderRelayRouter = (
@@ -110,7 +132,8 @@ export const createProviderRelayRouter = (
       if (value) headers.set(name, value);
     }
 
-    const streamedTrackBody = upstreamUrl.origin === 'https://api.soundcloud.com' && ['POST', 'PUT'].includes(request.method);
+    const streamedTrackBody =
+      upstreamUrl.origin === 'https://api.soundcloud.com' && ['POST', 'PUT'].includes(request.method);
     const declaredLength = request.header('content-length');
     if (streamedTrackBody && declaredLength && Number(declaredLength) > MAX_SOUND_CLOUD_TRACK_BYTES) {
       response.status(413).json({ error: 'SoundCloud track request exceeded the relay limit.' });
@@ -144,8 +167,11 @@ export const createProviderRelayRouter = (
       const options: RequestInit & { duplex?: 'half' } = {
         method: request.method,
         headers,
-        body: streamedTrackBody ? bodyStream as unknown as RequestInit['body'] :
-          request.method === 'GET' ? undefined : new Uint8Array(request.body || Buffer.alloc(0)),
+        body: streamedTrackBody
+          ? (bodyStream as unknown as RequestInit['body'])
+          : request.method === 'GET'
+          ? undefined
+          : new Uint8Array(request.body || Buffer.alloc(0)),
         redirect: 'manual',
         signal: streamedTrackBody
           ? AbortSignal.any([AbortSignal.timeout(SOUND_CLOUD_TRACK_TIMEOUT_MS), aborted.signal])
@@ -154,8 +180,8 @@ export const createProviderRelayRouter = (
       if (streamedTrackBody) options.duplex = 'half';
       const upstream = await fetchUpstream(upstreamUrl, options);
 
-      const body = Buffer.from(await upstream.arrayBuffer());
-      if (body.length > MAX_BODY_BYTES) {
+      const body = await readBoundedResponseBody(upstream, getResponseBodyLimit(upstreamUrl));
+      if (!body) {
         response.status(502).json({ error: 'Provider response exceeded the relay limit.' });
         return;
       }
@@ -168,8 +194,9 @@ export const createProviderRelayRouter = (
     } catch {
       bodyStream?.destroy();
       response.status(requestTooLarge ? 413 : 502).json({
-        error: requestTooLarge ? 'SoundCloud track request exceeded the relay limit.' :
-          'Provider relay could not reach the upstream service.',
+        error: requestTooLarge
+          ? 'SoundCloud track request exceeded the relay limit.'
+          : 'Provider relay could not reach the upstream service.',
       });
     } finally {
       request.removeListener('aborted', abortUpstream);
@@ -178,7 +205,9 @@ export const createProviderRelayRouter = (
 
   router.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
     const status = typeof error === 'object' && error !== null && 'status' in error && error.status === 413 ? 413 : 400;
-    response.status(status).json({ error: status === 413 ? 'Provider request exceeded the relay limit.' : 'Invalid provider request.' });
+    response
+      .status(status)
+      .json({ error: status === 413 ? 'Provider request exceeded the relay limit.' : 'Invalid provider request.' });
   });
 
   return router;
