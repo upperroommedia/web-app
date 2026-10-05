@@ -38,18 +38,20 @@ export const getProviderRelayUrl = (originalUrl: string, relayOrigin: string): s
   return null;
 };
 
-axios.interceptors.request.use((request) => {
-  const config = request as ProviderRelayRequestConfig;
-  const sharedToken = process.env.PROVIDER_EGRESS_RELAY_TOKEN?.trim();
-  const relayOrigin = getRelayOrigin();
-  if (!sharedToken || !relayOrigin || !config.url || config.providerRelayOriginalUrl) return config;
+if (axios.interceptors?.request) {
+  axios.interceptors.request.use((request) => {
+    const config = request as ProviderRelayRequestConfig;
+    const sharedToken = process.env.PROVIDER_EGRESS_RELAY_TOKEN?.trim();
+    const relayOrigin = getRelayOrigin();
+    if (!sharedToken || !relayOrigin || !config.url || config.providerRelayOriginalUrl) return config;
 
-  const relayUrl = getProviderRelayUrl(config.url, relayOrigin);
-  if (!relayUrl) return config;
+    const relayUrl = getProviderRelayUrl(config.url, relayOrigin);
+    if (!relayUrl) return config;
 
-  config.providerRelayOriginalUrl = config.url;
-  config.url = relayUrl;
-  config.headers.set('x-provider-relay-token', sharedToken);
-  config.maxRedirects = 0;
-  return config;
-});
+    config.providerRelayOriginalUrl = config.url;
+    config.url = relayUrl;
+    config.headers.set('x-provider-relay-token', sharedToken);
+    config.maxRedirects = 0;
+    return config;
+  });
+}
