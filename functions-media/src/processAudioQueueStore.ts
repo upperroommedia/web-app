@@ -45,6 +45,11 @@ type QueueMutationResult =
       action: 'running_replaced';
       requestVersion: string;
       sourceType: ProcessAudioSourceType;
+    }
+  | {
+      action: 'unchanged';
+      requestVersion: string;
+      sourceType: ProcessAudioSourceType;
     };
 
 const CLAIM_ACQUIRE_ATTEMPTS = 20;
@@ -123,9 +128,7 @@ const matchesObservedYouTubeProbe = (current: StoredYouTubeQueueState, observed:
 
 let youtubeTaskQueueFactoryForTesting: (() => TaskQueue<AddIntroOutroInputType>) | null = null;
 
-export function setYouTubeTaskQueueFactoryForTesting(
-  factory: (() => TaskQueue<AddIntroOutroInputType>) | null
-): void {
+export function setYouTubeTaskQueueFactoryForTesting(factory: (() => TaskQueue<AddIntroOutroInputType>) | null): void {
   youtubeTaskQueueFactoryForTesting = factory;
 }
 
@@ -329,9 +332,7 @@ export async function recoverStaleYouTubeQueueProbe(
       const staleFailureClass = queueState.probeLastFailureClass ?? getProbeBlockerReason(queueState.probeMode);
       const staleFailureMessage =
         queueState.probeLastFailureMessage ?? 'Recovered a stale YouTube probe that was no longer making progress.';
-      const requestState = requestSnapshot.exists()
-        ? (requestSnapshot.val() as StoredProcessAudioRequestState)
-        : null;
+      const requestState = requestSnapshot.exists() ? (requestSnapshot.val() as StoredProcessAudioRequestState) : null;
       const requestMatchesProbe = requestState?.currentRequestVersion === queueState.probeRequestVersion;
       const canRestoreDeferredProbe =
         requestMatchesProbe &&
@@ -346,8 +347,7 @@ export async function recoverStaleYouTubeQueueProbe(
           currentQueueState.probeTaskSermonId !== queueState.probeTaskSermonId ||
           currentQueueState.probeRequestVersion !== queueState.probeRequestVersion ||
           currentQueueState.probeStartedAt !== queueState.probeStartedAt ||
-          (currentQueueState.probeDispatchReservationId ?? null) !==
-            (queueState.probeDispatchReservationId ?? null)
+          (currentQueueState.probeDispatchReservationId ?? null) !== (queueState.probeDispatchReservationId ?? null)
         ) {
           return undefined;
         }
@@ -515,8 +515,9 @@ export async function queueOrReplaceProcessAudioRequest(args: {
   payload: AddIntroOutroInputType;
   targetUri: string;
   ownerId: string;
+  onlyIfMissing?: boolean;
 }): Promise<QueueMutationResult> {
-  const { database, payload, targetUri, ownerId } = args;
+  const { database, payload, targetUri, ownerId, onlyIfMissing = false } = args;
   const sanitizedPayload = sanitizeProcessAudioPayload(payload);
   const requestVersion = computeProcessAudioRequestVersion(sanitizedPayload);
   const sourceType = getProcessAudioSourceType(sanitizedPayload);
@@ -532,6 +533,15 @@ export async function queueOrReplaceProcessAudioRequest(args: {
       ? (requestSnapshot.val() as StoredProcessAudioRequestState)
       : buildProcessAudioRequestState(sanitizedPayload, requestVersion, now);
     const lockActive = isProcessAudioLockActive(lockSnapshot.val());
+
+    const requestVersionAlreadyHandled =
+      requestSnapshot.exists() &&
+      (currentState.currentRequestVersion === requestVersion ||
+        currentState.nextRequestVersion === requestVersion ||
+        currentState.lastCompletedRequestVersion === requestVersion);
+    if (onlyIfMissing && requestVersionAlreadyHandled) {
+      return { action: 'unchanged', requestVersion, sourceType };
+    }
 
     if (lockActive) {
       const nextPayload =
