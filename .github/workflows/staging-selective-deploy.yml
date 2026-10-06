@@ -419,7 +419,7 @@ jobs:
 
       - name: Deploy functions:media
         if: needs.detect-changes.outputs.deploy_functions_media == 'true'
-        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive
+        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --only functions:media --non-interactive --force
 
       - name: Deploy functions:image
         if: needs.detect-changes.outputs.deploy_functions_image == 'true'
