@@ -6,6 +6,7 @@ import addintrooutrotaskgenerator from './addIntroOutroTaskGenerator';
 import getyoutubecookiestatus from './getYouTubeCookieStatus';
 import { processaudiofiletask, processaudioyoutubetask } from './processAudioTask';
 import setyoutubecookies from './setYouTubeCookies';
+import sermonAudioCreateTrigger from './sermonAudioCreateTrigger';
 
 initFunctionsSentry();
 
@@ -18,3 +19,4 @@ exports.processaudiofiletask = processaudiofiletask;
 exports.processaudioyoutubetask = processaudioyoutubetask;
 exports.getyoutubecookiestatus = getyoutubecookiestatus;
 exports.setyoutubecookies = setyoutubecookies;
+exports.sermonaudiocreatetrigger = sermonAudioCreateTrigger;
