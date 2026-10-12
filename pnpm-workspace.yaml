@@ -69,3 +69,5 @@ allowBuilds:
   unrs-resolver: true
   esbuild: true
   workerd: true
+  # Firebase CLI installs this optional native regex dependency on Linux.
+  re2: true
