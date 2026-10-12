@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout staging branch
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7.0.1
         with:
           ref: staging
           fetch-depth: 0
@@ -107,6 +107,17 @@ jobs:
             echo "should_update=$should_update"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Set up Node.js from the repository engines
+        if: steps.version-check.outputs.should_update == 'true'
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+
+      - name: Set up pnpm from the repository packageManager
+        if: steps.version-check.outputs.should_update == 'true'
+        uses: pnpm/action-setup@v6.1.0
+
       - name: Exit when media tools are already current
         if: steps.version-check.outputs.should_update != 'true'
         run: echo "yt-dlp, ffmpeg, Deno, the PO-token provider, and Playwright are already current; no update needed."
@@ -182,7 +193,6 @@ jobs:
           assert ops_compose.count('image: ${PROCESS_AUDIO_BGUTIL_IMAGE:?PROCESS_AUDIO_BGUTIL_IMAGE is required}') == 2, 'Hetzner Compose must consume the shared provider image contract'
           assert changed, 'Pinned media runtime files did not change during version bump'
           PY
-          npm install --global pnpm@10.10.0
           pnpm install --lockfile-only
 
       - name: Commit and open version bump PR

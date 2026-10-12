@@ -68,7 +68,6 @@ const editSubpslashList = onCall(
         'PATCH',
         requestData
       );
-      logger.log('config', config);
       const response = await axios(config);
 
       if (data.title?.trim()) {

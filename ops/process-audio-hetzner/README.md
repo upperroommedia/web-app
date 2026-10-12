@@ -355,6 +355,7 @@ Secrets read during deploy:
 - `PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON`
 - `RUNTIME_ALERT_RECIPIENTS`
 - `PROCESS_AUDIO_SENTRY_DSN`
+- `PROVIDER_EGRESS_RELAY_TOKEN` (shared with Firebase Functions; authenticates the narrow SoundCloud and Subsplash relay). SoundCloud track uploads and artwork updates stream through the relay so audio is not buffered in worker memory.
 
 Sentry env injected by deploy:
 
@@ -615,3 +616,68 @@ Important invariants:
 - do not let deploys wipe `state/`
 - staging and production may share one VM, but they must keep separate Firebase env and separate app containers
 - the shared Chrome profile is one profile on the host, not one profile per container
+
+### Admin panel login recovery
+
+Admins can restore the persistent Google session at `/admin/youtube-auth`, linked
+from Advanced settings. The page includes the shared remote Chrome desktop,
+Google authenticator code generation, and login instructions. Admins can reveal
+and copy the shared account email and password; the password starts masked and
+login details clear after five minutes. Credentials are fetched only on request
+from an uncached endpoint that checks revoked tokens and the current active admin
+role. They are never included in initial HTML or public configuration, and the
+credential panel and generated codes are blocked from Sentry session replay. Desktop sessions
+last 15 minutes; reopen the desktop to reconnect. While sermons are waiting for
+authentication, the worker runs a real audio download check every minute and
+resumes the durable queue after success, without restarting the service or keeping
+the admin page open. **Check recovery status** requests an immediate check through
+a revocation-checked, admin-only endpoint. Concurrent checks coalesce and are
+limited to one per minute; routine checks retain their ten-minute interval. Browsers that block embedded
+cookies can use the page's **Open in a new tab** button.
+
+The worker validates a revocation-checked Firebase ID token submitted in a POST
+body, then checks the current Auth user's admin role. Its temporary desktop cookie
+is HttpOnly, Secure, SameSite=None and Partitioned. The proxy authenticates all
+noVNC assets and WebSocket upgrades; it rechecks active WebSocket access every
+30 seconds and disconnects at expiry. Tokens are never placed in URLs. Staging
+and production use their respective Firebase projects and admin origins.
+
+`setup-process-audio-hetzner-desktop-bridge.sh`, called by the deployment script,
+installs a private Unix socket bridge to the existing `127.0.0.1:3010` noVNC
+service. The socket is accessible only to UID 1000 and mounted read-only into the
+workers. VNC, noVNC, and Chrome DevTools stay bound to loopback. Verify:
+
+```bash
+ssh root@<hetzner-ip> 'systemctl status process-audio-browser-desktop-bridge.service --no-pager'
+```
+
+The worker needs `ADMIN_BASE_URL`, `PROCESS_AUDIO_PUBLIC_ORIGIN`, and
+`PROCESS_AUDIO_NOVNC_SOCKET`; the deployment script supplies them. Web App Hosting
+needs the runtime secret `TWO_FACTOR_GOOGLE_LOGIN`, using the same Base32 secret
+as `subsplash-auth/getVerificationCode.ts --google`. Store the Google account
+email and password in separate runtime-only secrets `YOUTUBE_LOGIN_EMAIL` and
+`YOUTUBE_LOGIN_PASSWORD`, then grant all three secrets to the web backends:
+
+```bash
+firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-prod --project urm-app
+firebase apphosting:secrets:grantaccess TWO_FACTOR_GOOGLE_LOGIN --backend web-staging --project urm-app-staging
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_EMAIL --backend web-prod --project urm-app
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_PASSWORD --backend web-prod --project urm-app
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_EMAIL --backend web-staging --project urm-app-staging
+firebase apphosting:secrets:grantaccess YOUTUBE_LOGIN_PASSWORD --backend web-staging --project urm-app-staging
+```
+
+The service account stored in `PROCESS_AUDIO_FIREBASE_SERVICE_ACCOUNT_JSON` also
+needs `roles/firebaseauth.viewer` in its Firebase project. This grants the read
+access required for revocation checks, current admin roles, and recipient lookup;
+no Auth write permission is required by the recovery feature.
+
+On an authenticated YouTube recovery failure, existing episode reservations limit
+email duplication. Recovery emails go to all active Firebase Auth users whose
+current custom claim is `role: admin`, with a direct recovery-page link. Other
+runtime alerts keep their configured recipients. Admin lookup or email queue
+failures propagate so the caller can release its reservation and retry later.
+
+Signing in does not immediately declare the session healthy: the existing periodic
+authenticated media download check must pass before waiting jobs resume. The
+page refreshes this status every 30 seconds. Leave Chrome open and signed in.

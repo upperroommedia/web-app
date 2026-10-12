@@ -4,6 +4,7 @@ import {
   deleteTrack,
   inferMultipartFilename,
   isSoundCloudTrackNotFoundError,
+  normalizeSoundCloudApiError,
   updateTrack,
   uploadTrack,
 } from '../../soundcloudClient';
@@ -129,6 +130,12 @@ describe('soundcloudClient', () => {
 
     expect(isSoundCloudTrackNotFoundError(notFoundError)).toBe(true);
     expect(isSoundCloudTrackNotFoundError({ response: { status: 404 } })).toBe(false);
+  });
+
+  it('reports an HTML edge block as temporary rather than a permission failure', () => {
+    expect(() => normalizeSoundCloudApiError({
+      response: { status: 403, data: '<html><title>403 Forbidden</title></html>' },
+    })).toThrow('SoundCloud temporarily blocked the track request from our server. Please retry shortly.');
   });
 
   it('streams remote artwork instead of buffering it before upload', async () => {

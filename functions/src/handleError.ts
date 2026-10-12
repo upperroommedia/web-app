@@ -69,7 +69,7 @@ const toHttpsError = (error: unknown): HttpsError => {
     const axiosError = error as AxiosError;
     const status = getAxiosStatus(axiosError);
     const retryAfter = parseRetryAfter(axiosError.response?.headers?.['retry-after']);
-    const upstream = error.response?.data || axiosError.toJSON();
+    const upstream = error.response?.data || { message: axiosError.message };
 
     if (status === 429) {
       return new HttpsError('resource-exhausted', axiosError.message, {

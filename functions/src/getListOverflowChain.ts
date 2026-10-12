@@ -31,15 +31,32 @@ const getlistoverflowchain = onCall(
     }
 
     try {
+      const startedAt = Date.now();
       const chainState = await getOverflowChainState(request.data?.listId ?? '');
+      const chainReadyAt = Date.now();
       const rootSubsplashId = chainState.nodes.find((node) => node.isRoot)?.subsplashId?.trim();
 
       if (!rootSubsplashId) {
+        logger.info('getlistoverflowchain timing', {
+          chainMs: chainReadyAt - startedAt,
+          totalMs: Date.now() - startedAt,
+          nodeCount: chainState.nodes.length,
+          remoteItemCount: 0,
+        });
         return chainState;
       }
 
       const token = await authenticateSubsplash();
+      const authenticatedAt = Date.now();
       const { remoteItems } = await loadRemoteChainItems(chainState.rootListId, token, chainState);
+      logger.info('getlistoverflowchain timing', {
+        chainMs: chainReadyAt - startedAt,
+        authMs: authenticatedAt - chainReadyAt,
+        remoteItemsMs: Date.now() - authenticatedAt,
+        totalMs: Date.now() - startedAt,
+        nodeCount: chainState.nodes.length,
+        remoteItemCount: remoteItems.length,
+      });
 
       return {
         ...chainState,

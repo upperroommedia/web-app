@@ -24,7 +24,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
 
   if (!user) {
-    router.push('/login?callbackurl=admin');
+    router.push(`/login?callbackurl=${encodeURIComponent(router.asPath)}`);
     return (
       <Stack
         sx={{

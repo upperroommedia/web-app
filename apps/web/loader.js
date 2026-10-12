@@ -4,7 +4,8 @@ function normalizeFirebaseStorageUrl(src) {
   try {
     const url = new URL(src);
 
-    if (url.hostname !== "firebasestorage.googleapis.com") {
+    // Download tokens authorize private objects and must survive image processing.
+    if (url.hostname !== "firebasestorage.googleapis.com" || url.searchParams.has("token")) {
       return src;
     }
 
@@ -24,6 +25,17 @@ function normalizeFirebaseStorageUrl(src) {
 
 export default function firebaseAppHostingImageLoader({ src, width, quality }) {
   if (process.env.NODE_ENV === "development") {
+    return src;
+  }
+
+  // Files in public/ are already served as static assets. Sending them through
+  // App Hosting's image processor adds a separate cold request for tiny assets
+  // such as the site logo, and can even make the response larger.
+  if (
+    src.startsWith("/") &&
+    !src.startsWith("//") &&
+    /\.(?:avif|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(src)
+  ) {
     return src;
   }
 

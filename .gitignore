@@ -66,3 +66,15 @@ packages/**/*.js.map
 # Firebase extension local secrets/config
 /extensions/*.env
 /extensions/*.secret.local
+
+# Generated isolated function deploy manifests
+firebase.kits.json
+firebase.legacy.json
+firebase.dev.json
+
+# Reviewed kit configuration contains secret resource references, never secret values
+!/function-kits/**/config-*/.env.urm-app
+!/function-kits/**/config-*/.env.urm-app-staging
+
+# Local pnpm download cache
+/.pnpm-store/

@@ -1,0 +1,7 @@
+node_modules/
+lib/
+coverage/
+*.tgz
+.env*
+!config-*/.env.urm-app
+!config-*/.env.urm-app-staging

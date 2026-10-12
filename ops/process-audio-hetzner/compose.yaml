@@ -70,6 +70,7 @@ services:
       - ./state/staging/logs:/workspace/logs
       - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
       - ./state/browser-refresh-control:/workspace/browser-refresh-control
+      - ./state/browser-desktop:/workspace/browser-desktop:ro
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     networks:
@@ -112,6 +113,7 @@ services:
       - ./state/production/logs:/workspace/logs
       - ./state/shared-browser-profile:/workspace/shared-browser-profile:ro
       - ./state/browser-refresh-control:/workspace/browser-refresh-control
+      - ./state/browser-desktop:/workspace/browser-desktop:ro
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     networks:

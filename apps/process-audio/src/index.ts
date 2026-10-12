@@ -6,6 +6,7 @@ import {
   sentryTracesSampleRate,
 } from './instrument';
 import express, { Request } from 'express';
+import { createProviderRelayRouter } from './providerRelay';
 import { rateLimit } from 'express-rate-limit';
 import { spawnSync } from 'node:child_process';
 import * as Sentry from '@sentry/node';
@@ -20,6 +21,8 @@ import firebaseAdmin from './firebaseAdmin';
 import logger, { createLoggerWithContext, sentryLogLevels } from './WinstonLogger';
 import { createContext } from './context';
 import { emitOperationalAlertEmail } from './operationalAlerts';
+import { createYouTubeAuthRecovery, recoverDeferredYouTubeAfterCanary } from './youtubeAuthRecovery';
+import { installYouTubeAdminDesktop } from './youtubeAdminAuth';
 import {
   getYouTubeBrowserAuthHealth,
   runAuthenticatedYouTubeMediaByteCanary,
@@ -39,6 +42,7 @@ import {
 } from './processAudioQueueStore';
 import type { BrowserFallbackErrorResponse } from '@upperroom/contracts/browserFallback';
 import { getProcessAudioConcurrencyConfig } from './concurrency';
+import { shouldCaptureProcessAudioFailure } from './processAudioFailureReporting';
 import {
   getYouTubeFailureDisposition,
   type StoredProcessAudioRequestState,
@@ -64,6 +68,7 @@ import {
 } from './youtubeReadiness';
 
 const app = express();
+app.use('/internal/provider-relay', createProviderRelayRouter(process.env.PROVIDER_EGRESS_RELAY_TOKEN));
 app.use(express.json());
 const internalCanaryRateLimit = rateLimit({
   windowMs: 60_000,
@@ -298,12 +303,16 @@ async function reconcileFromFreshAuthenticatedCanary(
   report: YouTubeMediaByteCanaryReport,
   operation: string
 ): Promise<void> {
-  if (report.scope !== 'authenticated' || !isAuthenticatedCanaryEligibleForRecovery(report)) return;
-  await resumeDeferredYouTubeQueueOnStartup({
-    database: realtimeDB,
-    ctx: createContext(undefined, operation),
-    authenticatedRecoveryGeneration: report.checkedAt,
-  });
+  await recoverDeferredYouTubeAfterCanary(
+    report,
+    (generation) =>
+      resumeDeferredYouTubeQueueOnStartup({
+        database: realtimeDB,
+        ctx: createContext(undefined, operation),
+        authenticatedRecoveryGeneration: generation,
+      }),
+    youtubeMediaByteCanaryMaxAgeMs
+  );
 }
 
 const youtubeMediaByteCanaryExecution = createSerializedAsyncTaskRunner();
@@ -351,6 +360,14 @@ async function executeYouTubeMediaByteCanary(
   });
 }
 
+const youtubeAuthRecovery = createYouTubeAuthRecovery({
+  hasPending: async () => {
+    const queue = await getYouTubeQueueScopeDiagnostics(realtimeDB);
+    return queue.authenticated.depth > 0 || queue.authenticated.blocked;
+  },
+  verifyAndResume: () => executeYouTubeMediaByteCanary('authenticated'),
+});
+
 function startYouTubeMediaByteCanaryScheduler(): void {
   if (
     !youtubeProcessingEnabled ||
@@ -378,28 +395,38 @@ function startYouTubeMediaByteCanaryScheduler(): void {
     }
   };
 
+  let nextRoutineCycleAtMs = 0;
   const cycle = createNonOverlappingAsyncTaskRunner(async () => {
-    // Keep these sequential so the two probes cannot compete for yt-dlp,
-    // provider, browser-profile, or network resources on the worker.
+    // Prioritize waiting sermons. The shared runner coalesces manual and timer requests.
+    if (authenticatedYouTubeCanaryUrl) {
+      await youtubeAuthRecovery.run();
+    }
+    if (Date.now() < nextRoutineCycleAtMs) return;
+    nextRoutineCycleAtMs = Date.now() + youtubeMediaByteCanaryIntervalMs;
     if (guestYouTubeCanaryUrl) {
       await runAndPersistCanary('guest');
     }
     if (authenticatedYouTubeCanaryUrl) {
-      await runAndPersistCanary('authenticated');
+      await youtubeAuthRecovery.run(true);
     }
   });
 
   const runCycle = async (): Promise<void> => {
-    if (!(await cycle.run())) {
-      logger.warn('Skipping overlapping YouTube media-byte canary cycle');
+    try {
+      if (!(await cycle.run())) logger.warn('Skipping overlapping YouTube media-byte canary cycle');
+    } catch (error) {
+      logger.error('YouTube recovery scheduler cycle failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
   void runCycle();
-  const interval = setInterval(() => void runCycle(), youtubeMediaByteCanaryIntervalMs);
+  const interval = setInterval(() => void runCycle(), 60_000);
   interval.unref?.();
   logger.info('Started YouTube media-byte canary scheduler', {
     intervalMs: youtubeMediaByteCanaryIntervalMs,
+    pendingAuthCheckIntervalMs: 60_000,
     guestCanaryUrlConfigured: !!guestYouTubeCanaryUrl,
     authCanaryUrlConfigured: !!authenticatedYouTubeCanaryUrl,
   });
@@ -660,6 +687,7 @@ app.get('/healthz', async (req, res) => {
     sentryLogsEnabled,
     sentryLogLevels,
     sentryTracesSampleRate,
+    providerRelayEnabled: Boolean(process.env.PROVIDER_EGRESS_RELAY_TOKEN),
     browserFallbackConfigured,
     browserFallbackEnabled,
     inProcessBrowserFallbackConfigured,
@@ -1108,54 +1136,58 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
       ? toYouTubeAlertCode(youtubeFailureClass as YouTubeFailureClass)
       : null;
 
-    Sentry.withScope((scope) => {
-      scope.setTag('route', 'process-audio');
-      scope.setTag('runtimeHost', runtimeHost);
-      scope.setTag('runtimeEnv', runtimeEnv);
-      scope.setTag('audioSourceType', audioSource.type);
-      if (youtubeAcquisitionEvidence) {
-        scope.setTag('youtube.attempted_modes', youtubeAcquisitionEvidence.attemptedModes.join(','));
-        scope.setTag('youtube.requires_auth_recovery', youtubeAcquisitionEvidence.requiresAuthenticationRecovery);
-        scope.setTag('youtube.guest_failure_class', youtubeAcquisitionEvidence.guestFailureClass ?? 'none');
-        scope.setTag(
-          'youtube.authenticated_failure_class',
-          youtubeAcquisitionEvidence.authenticatedFailureClass ?? 'none'
-        );
-        scope.setTag(
-          'youtube.failure_disposition',
-          youtubeTerminalFailureClass ? 'terminal' : youtubeFailureDisposition?.action ?? 'none'
-        );
-        scope.setTag('youtube.terminal_failure_class', youtubeTerminalFailureClass ?? 'none');
-        scope.setTag(
-          'youtube.dependency_scope',
-          youtubeFailureDisposition?.action === 'defer' ? youtubeFailureDisposition.dependencyScope : 'none'
-        );
-      }
-      scope.setContext('processAudio', {
-        sermonId: data.id,
-        requestId: ctx.requestId,
-        taskId: taskId ?? null,
-        audioSource: audioSource.source,
-        youtubeProcessingEnabled,
-        browserFallbackConfigured,
-        browserFallbackEnabled,
-        ytDlpVersion: ytDlpVersion ?? null,
-        poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
-        youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
-        youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
-        browserFallbackError: browserFallbackError ?? null,
-      });
-
-      if (request.auth?.email) {
-        scope.setUser({
-          email: request.auth.email,
-          id: request.auth.sub,
-          username: request.auth.name,
+    const captureProcessAudioException = (): void => {
+      Sentry.withScope((scope) => {
+        scope.setTag('route', 'process-audio');
+        scope.setTag('runtimeHost', runtimeHost);
+        scope.setTag('runtimeEnv', runtimeEnv);
+        scope.setTag('audioSourceType', audioSource.type);
+        if (youtubeAcquisitionEvidence) {
+          scope.setTag('youtube.attempted_modes', youtubeAcquisitionEvidence.attemptedModes.join(','));
+          scope.setTag('youtube.requires_auth_recovery', youtubeAcquisitionEvidence.requiresAuthenticationRecovery);
+          scope.setTag('youtube.guest_failure_class', youtubeAcquisitionEvidence.guestFailureClass ?? 'none');
+          scope.setTag(
+            'youtube.authenticated_failure_class',
+            youtubeAcquisitionEvidence.authenticatedFailureClass ?? 'none'
+          );
+          scope.setTag(
+            'youtube.failure_disposition',
+            youtubeTerminalFailureClass ? 'terminal' : youtubeFailureDisposition?.action ?? 'none'
+          );
+          scope.setTag('youtube.terminal_failure_class', youtubeTerminalFailureClass ?? 'none');
+          scope.setTag(
+            'youtube.dependency_scope',
+            youtubeFailureDisposition?.action === 'defer' ? youtubeFailureDisposition.dependencyScope : 'none'
+          );
+        }
+        scope.setContext('processAudio', {
+          sermonId: data.id,
+          requestId: ctx.requestId,
+          taskId: taskId ?? null,
+          audioSource: audioSource.source,
+          youtubeProcessingEnabled,
+          browserFallbackConfigured,
+          browserFallbackEnabled,
+          ytDlpVersion: ytDlpVersion ?? null,
+          poTokenProviderConfigured: youtubeProcessingEnabled && !!process.env.YTDLP_POT_PROVIDER_BASE_URL,
+          youtubeAcquisitionEvidence: youtubeAcquisitionEvidence ?? null,
+          youtubeFailureDisposition: youtubeFailureDispositionContext ?? null,
+          browserFallbackError: browserFallbackError ?? null,
+          cookieRefreshAttempted: ctx.youtubeCookieRefreshAttempted ?? false,
+          cookieRefreshSucceeded: ctx.youtubeCookieRefreshSucceeded ?? false,
         });
-      }
 
-      Sentry.captureException(e);
-    });
+        if (request.auth?.email) {
+          scope.setUser({
+            email: request.auth.email,
+            id: request.auth.sub,
+            username: request.auth.name,
+          });
+        }
+
+        Sentry.captureException(e);
+      });
+    };
 
     log.error('Request failed', {
       error: message,
@@ -1277,10 +1309,20 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
           log.error('Failed to update document status after authenticated YouTube defer', { error: updateError });
         }
 
+        if (
+          shouldCaptureProcessAudioFailure({
+            outcome: 'deferred',
+            shouldAlert: shouldEmitOperationalAlert,
+          })
+        ) {
+          captureProcessAudioException();
+        }
+
         if (shouldEmitOperationalAlert) {
           try {
             await emitOperationalAlertEmail({
               alertCode: browserFallbackUnavailable ? 'browser_fallback_failed' : alertCode,
+              youtubeAuthRecovery: true,
               summary:
                 'process-audio deferred one YouTube request while the authenticated session recovers; guest-capable requests remain active.',
               error: e,
@@ -1366,6 +1408,10 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
       ? 'process-audio exhausted bounded authenticated YouTube recovery for an account or entitlement failure.'
       : alertSummary;
 
+    if (shouldCaptureProcessAudioFailure({ outcome: 'unhandled' })) {
+      captureProcessAudioException();
+    }
+
     try {
       await completeProcessAudioFailure({
         database: realtimeDB,
@@ -1441,9 +1487,32 @@ app.post('/process-audio', processAudioRateLimit, async (request: Request<{}, {}
   }
 });
 
+const attachYouTubeDesktop =
+  youtubeProcessingEnabled &&
+  process.env.PROCESS_AUDIO_NOVNC_SOCKET &&
+  process.env.ADMIN_BASE_URL &&
+  process.env.PROCESS_AUDIO_PUBLIC_ORIGIN
+    ? installYouTubeAdminDesktop(app, firebaseAdmin.auth(), {
+        adminOrigin: process.env.ADMIN_BASE_URL,
+        desktopOrigin: process.env.PROCESS_AUDIO_PUBLIC_ORIGIN,
+        socketPath: process.env.PROCESS_AUDIO_NOVNC_SOCKET,
+        audit: (event, uid) => logger.info(event, { uid }),
+        recover: () => {
+          void startupRecoveryPromise
+            .then(() => youtubeAuthRecovery.run(true))
+            .catch((error) => {
+              logger.error('Admin YouTube recovery check failed', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+        },
+      })
+    : null;
 Sentry.setupExpressErrorHandler(app);
 
 const port = parseInt(process.env.PORT ?? '') || 8080;
-app.listen(port, () => {
+const server = app.listen(port, () => {
   logger.info('Service started', { port });
 });
+
+attachYouTubeDesktop?.(server);

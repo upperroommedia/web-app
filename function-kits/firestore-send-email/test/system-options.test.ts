@@ -1,0 +1,10 @@
+import {migratedOptions} from '../src/system-options';
+test('preserves exported region, memory and resource/network options', () => {
+  expect(migratedOptions({FUNCTION_DEFAULT_REGION: 'europe-west1', EXT_MIGRATED_SYSTEM_MEMORY: '512MiB', EXT_MIGRATED_SYSTEM_MININSTANCES: '1', EXT_MIGRATED_SYSTEM_MAXINSTANCES: '8', EXT_MIGRATED_SYSTEM_TIMEOUTSECONDS: '240', EXT_MIGRATED_SYSTEM_VPCCONNECTOR: 'projects/test/locations/europe-west1/connectors/mail', EXT_MIGRATED_SYSTEM_VPCCONNECTOREGRESSSETTINGS: 'ALL_TRAFFIC', EXT_MIGRATED_SYSTEM_INGRESSSETTINGS: 'ALLOW_INTERNAL_ONLY', EXT_MIGRATED_SYSTEM_CPU: '0.5', EXT_MIGRATED_SYSTEM_LABELS: '{"team":"media"}', EXT_MIGRATED_SYSTEM_SERVICEACCOUNTEMAIL: 'mail@test.iam.gserviceaccount.com'})).toEqual({region: 'europe-west1', memory: '512MiB', minInstances: 1, maxInstances: 8, timeoutSeconds: 240, vpcConnector: 'projects/test/locations/europe-west1/connectors/mail', vpcConnectorEgressSettings: 'ALL_TRAFFIC', ingressSettings: 'ALLOW_INTERNAL_ONLY', cpu: 0.5, concurrency: 1, labels: {team: 'media'}, serviceAccount: 'mail@test.iam.gserviceaccount.com'});
+});
+test('ignores exported unspecified network enum', () => {expect(migratedOptions({EXT_MIGRATED_SYSTEM_VPCCONNECTOREGRESSSETTINGS: 'VPC_CONNECTOR_EGRESS_SETTINGS_UNSPECIFIED'})).toEqual({});});
+test('rejects invalid numeric system options', () => {expect(() => migratedOptions({EXT_MIGRATED_SYSTEM_TIMEOUTSECONDS: 'oops'})).toThrow('Invalid migrated system setting');});
+
+test('preserves exported positive integer concurrency', () => {expect(migratedOptions({EXT_MIGRATED_SYSTEM_CONCURRENCY: '40'})).toEqual({concurrency: 40});});
+test('fractional CPU overrides exported concurrency to one', () => {expect(migratedOptions({EXT_MIGRATED_SYSTEM_CPU: '0.5', EXT_MIGRATED_SYSTEM_CONCURRENCY: '40'})).toEqual({cpu: 0.5, concurrency: 1});});
+test.each(['0', '-1', '1.5', 'oops'])('rejects invalid exported concurrency %s', value => {expect(() => migratedOptions({EXT_MIGRATED_SYSTEM_CONCURRENCY: value})).toThrow('Invalid migrated system setting');});

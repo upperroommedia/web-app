@@ -2,7 +2,7 @@
 import * as os from 'os';
 import sharp from 'sharp';
 import * as path from 'path';
-import * as fs from 'fs';
+import { mkdtemp, rm } from 'fs/promises';
 import { logger } from 'firebase-functions';
 import { resizeType, supportedContentTypes } from '@upperroom/shared/types/Image';
 import { Bucket } from '@google-cloud/storage';
@@ -92,18 +92,20 @@ export const modifyImage = async ({
   let modifiedFileName;
 
   if (supportedExtensions.includes(fileExtension.toLowerCase())) {
-    modifiedFileName = `${fileNameWithoutExtension}_${size}${modifiedExtensionName}`;
+    modifiedFileName = `${fileNameWithoutExtension}_${size.sizeType}${modifiedExtensionName}`;
   } else {
     // Fixes https://github.com/firebase/extensions/issues/476
-    modifiedFileName = `${fileNameWithoutExtension}${fileExtension}_${size}`;
+    modifiedFileName = `${fileNameWithoutExtension}${fileExtension}_${size.sizeType}`;
   }
 
   // Path where modified image will be uploaded to in Storage.
   const modifiedFilePath = path.normalize(path.join(fileDir, '/resized', modifiedFileName));
   let modifiedFile = '';
+  let temporaryDirectory = '';
 
   try {
-    modifiedFile = path.join(os.tmpdir(), modifiedFileName);
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'resized-image-'));
+    modifiedFile = path.join(temporaryDirectory, modifiedFileName);
 
     // filename\*=utf-8''  selects any string match the filename notation.
     // [^;\s]+ searches any following string until either a space or semi-colon.
@@ -136,24 +138,17 @@ export const modifyImage = async ({
       metadata.metadata.firebaseStorageDownloadTokens = uuid();
     }
 
-    // Generate a resized image buffer using Sharp.
-    logger.log(`Resizing image at path '${modifiedFile}' to size: ${size}`);
-    let modifiedImageBuffer = await sharp(originalFile, { failOnError: false })
+    // Resize and encode directly to disk in a single Sharp pipeline.
+    logger.log(`Resizing image at path '${modifiedFile}' to size: ${size.sizeType}`);
+    await sharp(originalFile, { failOn: 'none' })
       .rotate()
       .resize(size.width, size.height, {
         fit: 'inside',
         withoutEnlargement: true,
       })
-      .toBuffer();
+      .toFormat(format === 'jpg' ? 'jpeg' : format === 'tif' ? 'tiff' : format)
+      .toFile(modifiedFile);
     logger.log(`Resized image created at '${modifiedFile}'`);
-
-    // Generate a converted image type buffer using Sharp.
-    logger.log(`Converting image from type, ${fileExtension}, to type ${format}.`);
-    modifiedImageBuffer = await convertType(modifiedImageBuffer, format);
-    logger.log(`Converted image to ${format}`);
-
-    // Generate a image file using Sharp.
-    await sharp(modifiedImageBuffer).toFile(modifiedFile);
 
     // Uploading the modified image.
     logger.log(`Uploading resized image to '${modifiedFilePath}'`);
@@ -173,9 +168,9 @@ export const modifyImage = async ({
   } finally {
     try {
       // Make sure the local resized file is cleaned up to free up disk space.
-      if (modifiedFile) {
+      if (temporaryDirectory) {
         logger.log(`Deleting temporary resized file: '${modifiedFilePath}'`);
-        fs.unlinkSync(modifiedFile);
+        await rm(temporaryDirectory, { recursive: true, force: true });
         logger.log(`Deleted temporary resized file: '${modifiedFilePath}'`);
       }
     } catch (err) {

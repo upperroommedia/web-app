@@ -34,6 +34,54 @@ describe('shouldDropClientSentryEvent', () => {
     ).toBe(true);
   });
 
+  it('drops aborts raised while Firestore WebChannel intentionally closes a stream', () => {
+    expect(
+      shouldDropClientSentryEvent({
+        exception: {
+          values: [
+            {
+              type: 'AbortError',
+              value: 'signal is aborted without reason',
+              stacktrace: {
+                frames: [
+                  {
+                    filename: 'node_modules/node_modules/closure-net/firebase/webchannel_blob_es2018.js',
+                    module: 'closure-net/firebase/webchannel_blob_es2018',
+                    function: 'request.abort',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      })
+    ).toBe(true);
+  });
+
+  it('keeps matching abort messages that do not originate in Firestore WebChannel', () => {
+    expect(
+      shouldDropClientSentryEvent({
+        exception: {
+          values: [
+            {
+              type: 'AbortError',
+              value: 'signal is aborted without reason',
+              stacktrace: {
+                frames: [
+                  {
+                    filename: 'app/upload.ts',
+                    module: 'app/upload',
+                    function: 'uploadRecording',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      })
+    ).toBe(false);
+  });
+
   it('drops duckduckgo load-failed noise on admin sermons', () => {
     expect(
       shouldDropClientSentryEvent({

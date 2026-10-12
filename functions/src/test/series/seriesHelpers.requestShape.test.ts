@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { patchMediaItemSeries } from '../../helpers/seriesHelpers';
+import { getSeriesDetails, patchMediaItemSeries } from '../../helpers/seriesHelpers';
 import { createAxiosConfig } from '../../subsplashUtils';
 
 jest.mock('../../subsplashUtils', () => ({
@@ -97,5 +97,20 @@ describe('seriesHelpers patchMediaItemSeries request shape', () => {
       })
     );
     expect(mockAxios).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports repeated HTML edge blocks as unavailable instead of series not found', async () => {
+    mockAxios.mockRejectedValue({
+      response: {
+        status: 403,
+        data: '<html><title>403 Forbidden</title></html>',
+        headers: { 'request-id': 'edge-request-1' },
+      },
+    });
+
+    await expect(getSeriesDetails('series-1', 'fake-token')).rejects.toMatchObject({
+      code: 'unavailable',
+    });
+    expect(mockAxios).toHaveBeenCalledTimes(4);
   });
 });

@@ -14,6 +14,14 @@ export default defineConfig([
           patterns: ['@mui/*/*/*', '!@mui/material/test-utils/*'],
         },
       ],
+      // React Compiler is not enabled yet. Keep its incremental adoption
+      // diagnostics visible without blocking the existing Hooks checks.
+      // https://react.dev/reference/eslint-plugin-react-hooks
+      'react-hooks/preserve-manual-memoization': 'warn',
+      'react-hooks/purity': 'warn',
+      'react-hooks/refs': 'warn',
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/static-components': 'warn',
       'react/no-danger': 'off',
       'react/react-in-jsx-scope': 'off',
       'no-console': ['warn', { allow: ['warn', 'error'] }],

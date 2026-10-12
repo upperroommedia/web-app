@@ -341,7 +341,7 @@ describe('createSeries - Authentication', () => {
 
     const result = await createSeriesHandler(request);
     expect(result.status).toBe('success');
-    expect(result.subsplashId).toBe('');  // Not synced to Subsplash
+    expect(result.subsplashId).toBe(''); // Not synced to Subsplash
   });
 });
 
@@ -461,7 +461,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
     const result = await createSeriesHandler(request);
 
     expect(result.status).toBe('success');
-    
+
     const allSeries = await getAllSeries();
     expect(allSeries[0].subtitle).toBe('0 part series');
     expect(allSeries[0].summary).toBe('A local summary');
@@ -486,7 +486,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
     const result = await createSeriesHandler(request);
 
     expect(result.status).toBe('success');
-    
+
     const allSeries = await getAllSeries();
     expect(allSeries).toHaveLength(1);
     expect(allSeries[0].images).toHaveLength(2);
@@ -507,7 +507,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
     const result = await createSeriesHandler(request);
 
     expect(result.status).toBe('success');
-    
+
     const allSeries = await getAllSeries();
     expect(allSeries[0].images).toEqual([]);
   });
@@ -536,6 +536,36 @@ describe('createSeries - Locking and Idempotency', () => {
     const secondResult = await createSeriesHandler(request);
 
     expect(firstResult).toEqual(secondResult);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should create one remote series when concurrent callers use the same Firestore series', async () => {
+    const originalCreateSubsplashSeries = seriesHelpers.createSubsplashSeries;
+    const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries').mockImplementation(async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return originalCreateSubsplashSeries(...args);
+    });
+    const firestoreId = await createSeriesDocument({
+      name: 'Concurrent Create Series',
+      subsplashId: '',
+      status: 'draft',
+    });
+
+    const results = await Promise.all(
+      ['concurrent-create-1', 'concurrent-create-2', 'concurrent-create-3'].map((operationKey) =>
+        createSeriesHandler({
+          auth: { token: { role: 'admin' } },
+          data: {
+            title: 'Concurrent Create Series',
+            ownerId: TEST_USER_ID,
+            firestoreId,
+            operationKey,
+          },
+        })
+      )
+    );
+
+    expect(new Set(results.map((result) => result.subsplashId)).size).toBe(1);
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 

@@ -162,7 +162,12 @@ const uploadToSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts },
       });
     }
 
-    logger.error(error);
+    logger.error('uploadToSubsplash failed', {
+      operationKey,
+      lockKey,
+      status: isAxiosError(error) ? error.response?.status : undefined,
+      message: error instanceof Error ? error.message : String(error),
+    });
     await emitOperationalAlert({
       alertCode: 'PUBLISH_SUBSPLASH_UPLOAD_RUNTIME_FAILURE',
       summary: 'uploadToSubsplash callable failed during publish upload flow.',

@@ -3,7 +3,8 @@
 ## Prerequisites
 
 - Node `22` (see `.nvmrc`)
-- `pnpm`
+- pnpm `11.28.2` (the version pinned in `package.json`)
+- Firebase CLI `15.32.0` or newer for function kits; this repository pins `15.33.0`
 
 Use:
 
@@ -11,6 +12,8 @@ Use:
 nvm use 22
 pnpm install
 ```
+
+Use the pinned pnpm version for lockfile consistency. pnpm 10 → 11 configuration was migrated with the official CLI codemod; installation settings and overrides now live in `pnpm-workspace.yaml`. Node 22 remains the supported runtime for Firebase and the audio containers. The web app uses Next.js 16.4 and React 19.3. Major upgrades with incompatible transport changes remain deferred until their callers can be migrated and verified.
 
 The Next.js app now lives in `apps/web`. The repo root is the workspace orchestrator for local tooling, Firebase functions, and deployment metadata.
 
@@ -38,13 +41,26 @@ pnpm dev
 
 `pnpm dev` automatically runs `pnpm run dev:stop` first so stale local listeners do not leak into the next session.
 
-This starts three long-running processes with prefixed logs:
+This starts the frontend, Firebase emulators, function build watchers, and the local audio services:
 
 - `next dev` for the frontend in `apps/web`
 - `firebase emulators:start` for `auth,functions,firestore,database,storage,tasks`
 - Turbo-driven `build-watch` tasks for each Firebase functions codebase
+- Docker Compose audio services on ports 8080 and 8082
 
 The functions watch flow uses each codebase's own `tsc --watch` plus `tsc-alias --watch`, so changes under `functions/src`, `packages/shared`, and `packages/contracts` rebuild live output that the functions emulator can reload directly.
+
+The generated `firebase.dev.json` excludes remote extensions and function kits, so local writes do not reach production Algolia or SMTP.
+
+For local mail testing, build the email kit first:
+
+```bash
+npm --prefix function-kits/firestore-send-email ci
+npm --prefix function-kits/firestore-send-email run build
+pnpm dev:mail
+```
+
+The mail emulator configuration copies compiled runtime files into `.firebase/`, supplies a dummy local secret, and uses the local SMTP service on port 8132. It does not copy production configuration or managed secret references.
 
 After `pnpm dev` is ready, create the local admin user in a second terminal:
 
@@ -100,21 +116,43 @@ Run startup-load guard (checks that `core` does not load heavy/media/client-sdk 
 pnpm check:function-startup-loads
 ```
 
+## Firebase Function Kits
+
+Following [Firebase's extension migration guide](https://firebase.google.com/docs/extensions/users/migrate), search indexing, email delivery, and the image API are now maintained under `function-kits/`. The CLI migration was attempted first. Algolia and the image extension have no linked publisher kit, and the published email kit's 0.0.1 entrypoint was empty, so the repository carries licensed local forks of the upstream implementations. Existing instance configuration was exported through the CLI; tracked `FIREBASE_SECRET_REF_*` values refer to Secret Manager resources, never secret material.
+
+See the kit READMEs for provenance, migration options, operational limits, and focused tests:
+
+- [Algolia indexing](function-kits/firestore-algolia-search/README.md)
+- [Trigger Email](function-kits/firestore-send-email/README.md)
+- [Image Processing API](function-kits/image-processing-api/README.md)
+
+Kit dependencies are isolated npm packages with their own Linux-compatible lockfiles, outside the pnpm workspace. Generate a kit-only deployment configuration and install its dependencies before deploying:
+
+```bash
+node scripts/create-kit-deploy-config.mjs --install
+pnpm exec firebase deploy --project urm-app --config firebase.kits.json --only functions
+```
+
+For staging, add `--without-search` to configuration generation while its Algolia application is unavailable. For the original four function codebases, generate `firebase.legacy.json` with `node scripts/create-kit-deploy-config.mjs --legacy` and pass that configuration to targeted deployments. These generated configurations preserve project settings while preventing unrelated kit hooks from running during original-codebase deploys. CI serializes both kinds of function deployment.
+
+Predeploy builds each kit before upload. Compiled output supports Cloud Build's production-only dependency installation without an install-time TypeScript `prepare` hook. Keep each kit's npm lockfile alongside its source.
+
+Migration is complete only after replacement delivery/indexing and hosted image routing have been verified; see the [production](docs/PRODUCTION_SETUP.md) and [staging](docs/STAGING_SETUP.md) cutover instructions before removing remote extensions.
+
 ## Local Functions Test Examples
 
-Converter-focused test with Firestore emulator:
+Run emulator-backed functions tests through the dedicated test configuration, not the running development stack:
 
 ```bash
-cd functions
-pnpm exec firebase emulators:exec --only firestore --config ../firebase.test.json "pnpm exec jest src/test/firestoreDataConverter.test.ts --runInBand"
+pnpm --dir functions exec firebase emulators:exec \
+  --only auth,firestore,database,storage \
+  --config ../firebase.test.json \
+  "pnpm exec jest --watchman=false --runInBand --forceExit src/test/firestoreDataConverter.test.ts"
 ```
 
-Full functions tests that need auth + firestore:
+`firebase.test.json` defines separate test ports. Run one emulator test command at a time. The functions setup clears the local `SUBSPLASH_DEV_MAX_LIST_SIZE` override; tests requiring a smaller limit must set it explicitly.
 
-```bash
-cd functions
-pnpm exec firebase emulators:exec --only firestore,auth --config ../firebase.test.json "pnpm exec jest --forceExit"
-```
+Kit unit tests run independently with `npm test` from each kit source directory (`source/` for the image kit). The email tests mock outbound delivery; image tests use local HTTP inputs and real Sharp processing.
 
 ## Release Branch Contract
 
@@ -128,8 +166,8 @@ pnpm exec firebase emulators:exec --only firestore,auth --config ../firebase.tes
 - Deploys are path-filtered and target Firebase project `urm-app-staging`.
 - Firebase App Hosting is configured to build from `apps/web`.
 - Vercel should use `apps/web` as the project root in the Upper Room Media team account.
-- App Hosting rollouts are manually triggered by the workflow when app-related paths change.
-- Keep App Hosting automatic rollouts disabled for `web-staging` so staging pushes do not trigger duplicate App Hosting builds.
+- App Hosting automatic rollouts remain enabled for `web-staging` on the `staging` branch. Backend selective-deploy workflows do not trigger App Hosting rollouts.
+- Function-kit changes deploy in a separate job after the original function codebases; staging currently excludes Algolia kits.
 - Use `workflow_dispatch` with `force_full_redeploy=true` for a full staging redeploy.
 
 ## Required GitHub Secrets For Staging Deploys

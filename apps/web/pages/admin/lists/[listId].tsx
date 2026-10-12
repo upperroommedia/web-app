@@ -124,8 +124,14 @@ interface LoadListDetailsPageDependencies {
   getListPublishedDrift?: (input: GetListPublishedDriftInputType) => Promise<GetListPublishedDriftOutputType>;
   getListDoc: (rootListId: string) => Promise<List>;
   getRootItems: (rootListId: string) => Promise<LoadListDetailsPageItem[]>;
+  localRootLoad?: Promise<LocalRootLoadResult>;
   replaceRoute: (href: string) => Promise<unknown> | unknown;
 }
+
+type LocalRootLoadResult =
+  | { rootListId: string; list: List; items: LoadListDetailsPageItem[] }
+  | { error: unknown }
+  | null;
 
 interface LoadListDetailsPageResult {
   redirected?: boolean;
@@ -369,6 +375,20 @@ const normalizeListItemPositions = (items: ListPageItem[]): ListPageItem[] =>
     logicalPosition: index + 1,
   }));
 
+const buildPendingLocalListItems = (
+  list: List,
+  rootItems: LoadListDetailsPageItem[]
+): ListPageItem[] =>
+  normalizeListItemPositions(
+    rootItems.map((item, index) => ({
+      ...item,
+      logicalPosition: index + 1,
+      sourceListId: list.id,
+      sourceListName: list.name,
+      sourceDepth: 0,
+    }))
+  );
+
 type CanonicalListMembershipStatus = {
   uploadStatus?: listUploadStatus;
 };
@@ -607,7 +627,7 @@ export const subscribeToListDetailsLiveUpdates = ({
     reloadTimer = setTimeout(() => {
       reloadTimer = undefined;
       scheduleReload();
-    }, 0);
+    }, 200);
   };
 
   const handleError = (error: unknown) => {
@@ -686,6 +706,7 @@ export const loadListDetailsPageData = async ({
   getListOverflowChain,
   getListDoc,
   getRootItems,
+  localRootLoad,
   replaceRoute,
 }: LoadListDetailsPageDependencies): Promise<LoadListDetailsPageResult> => {
   const chainState = await getListOverflowChain({ listId });
@@ -697,10 +718,17 @@ export const loadListDetailsPageData = async ({
     };
   }
 
-  const [listData, rootItems] = await Promise.all([
-    getListDoc(chainState.rootListId),
-    getRootItems(chainState.rootListId),
-  ]);
+  const prefetchedRoot = await localRootLoad;
+  if (prefetchedRoot && 'error' in prefetchedRoot && chainState.rootListId === listId) {
+    throw prefetchedRoot.error;
+  }
+  const [listData, rootItems] =
+    prefetchedRoot && 'rootListId' in prefetchedRoot && prefetchedRoot.rootListId === chainState.rootListId
+      ? [prefetchedRoot.list, prefetchedRoot.items]
+      : await Promise.all([
+          getListDoc(chainState.rootListId),
+          getRootItems(chainState.rootListId),
+        ]);
 
   const displayItems = chainState.remoteItems && chainState.remoteItems.length > 0
     ? buildRemoteListPageItems({ remoteItems: chainState.remoteItems, rootItems })
@@ -743,7 +771,10 @@ const ListDetailsPage = () => {
   const router = useRouter();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const originalItemsRef = useRef<ListPageItem[]>([]);
+  const [originalItems, setOriginalItems] = useState<ListPageItem[]>([]);
+  const hasOrderChangesRef = useRef(false);
+  const isSavingRef = useRef(false);
+  const pendingReloadRef = useRef(false);
   const listId = typeof router.query.listId === 'string' ? router.query.listId : '';
   const [list, setList] = useState<List | null>(null);
   const [associatedSpeaker, setAssociatedSpeaker] = useState<ISpeaker | null>(null);
@@ -751,6 +782,9 @@ const ListDetailsPage = () => {
   const [chainView, setChainView] = useState<ListOverflowChainView<ListDetailItem> | null>(null);
   const [publishedDrift, setPublishedDrift] = useState<GetListPublishedDriftOutputType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isVerifyingRemote, setIsVerifyingRemote] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasPendingReload, setHasPendingReload] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [markingOverflowRowId, setMarkingOverflowRowId] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -767,7 +801,101 @@ const ListDetailsPage = () => {
     let cancelled = false;
 
     const loadListDetails = async () => {
+      pendingReloadRef.current = false;
+      setHasPendingReload(false);
       setIsLoading(true);
+      setIsVerifyingRemote(true);
+      setLoadError(null);
+      let remoteResolved = false;
+      let localPreviewAvailable = false;
+
+      const getListDoc = async (rootListId: string): Promise<List> => {
+        const rootListRef = doc(firestore, 'lists', rootListId).withConverter(listConverter);
+        const listSnapshot = await getDoc(rootListRef);
+
+        if (!listSnapshot.exists()) {
+          throw new Error('List not found.');
+        }
+
+        return listSnapshot.data();
+      };
+
+      const getRootItems = async (rootListId: string): Promise<LoadListDetailsPageItem[]> => {
+        const listItemsRef = collection(
+          firestore,
+          'lists',
+          rootListId,
+          'listItems'
+        ).withConverter(sermonConverter);
+        const [canonicalMembershipSnapshot, listItemsSnapshot] = await Promise.all([
+          getDocs(
+            query(collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter), where('id', '==', rootListId))
+          ),
+          getDocs(listItemsRef),
+        ]);
+        const canonicalMembershipBySermonId = new Map<string, CanonicalListMembershipStatus>();
+        canonicalMembershipSnapshot.docs.forEach((membershipDoc) => {
+          const sermonId = membershipDoc.ref.parent.parent?.id;
+          if (!sermonId) {
+            return;
+          }
+          canonicalMembershipBySermonId.set(sermonId, {
+            uploadStatus: membershipDoc.data().uploadStatus,
+          });
+        });
+
+        return mergeRootItemsWithCanonicalMemberships({
+          items: sortListOverflowChainSourceItems(
+            listItemsSnapshot.docs.map((itemDoc) => {
+              const data = itemDoc.data() as Partial<ListDetailItem>;
+              const derivedUploadStatus =
+                data.uploadStatus ??
+                (data.subsplashId
+                  ? ({ status: uploadStatus.UPLOADED } as listUploadStatus)
+                  : undefined);
+
+              return {
+                ...data,
+                id: itemDoc.id,
+                uploadStatus: derivedUploadStatus,
+              } as ListDetailItem;
+            })
+          ),
+          canonicalMembershipBySermonId,
+        });
+      };
+
+      // A self-identified root can show its canonical local projection while the
+      // full remote chain audit runs. The audit remains the authority for actions.
+      const localRootLoad: Promise<LocalRootLoadResult> = getListDoc(listId)
+        .then(async (localList) => {
+          const identifiesAsRoot = localList.rootListId === listId || localList.isRootList === true;
+          if (
+            !identifiesAsRoot ||
+            localList.isMoreSermonsList ||
+            (localList.rootListId && localList.rootListId !== listId)
+          ) {
+            return null;
+          }
+
+          return { rootListId: listId, list: localList, items: await getRootItems(listId) };
+        })
+        .catch((error: unknown) => ({ error }));
+
+      void localRootLoad.then((localResult) => {
+        if (cancelled || remoteResolved || !localResult || !('rootListId' in localResult)) {
+          return;
+        }
+
+        localPreviewAvailable = true;
+        const pendingItems = buildPendingLocalListItems(localResult.list, localResult.items);
+        setList(localResult.list);
+        setChainView(null);
+        setItems(pendingItems);
+        setPublishedDrift(null);
+        setOriginalItems(cloneListItems(pendingItems));
+        setIsLoading(false);
+      });
 
       try {
         const result = await loadListDetailsPageDataSingleFlight(
@@ -775,61 +903,14 @@ const ListDetailsPage = () => {
           {
             listId,
             getListOverflowChain: createGetListOverflowChain,
-            getListDoc: async (rootListId) => {
-              const rootListRef = doc(firestore, 'lists', rootListId).withConverter(listConverter);
-              const listSnapshot = await getDoc(rootListRef);
-
-              if (!listSnapshot.exists()) {
-                throw new Error('List not found.');
-              }
-
-              return listSnapshot.data();
-            },
-            getRootItems: async (rootListId) => {
-              const listItemsRef = collection(
-                firestore,
-                'lists',
-                rootListId,
-                'listItems'
-              ).withConverter(sermonConverter);
-              const canonicalMembershipSnapshot = await getDocs(
-                query(collectionGroup(firestore, 'sermonLists').withConverter(sermonListConverter), where('id', '==', rootListId))
-              );
-              const canonicalMembershipBySermonId = new Map<string, CanonicalListMembershipStatus>();
-              canonicalMembershipSnapshot.docs.forEach((membershipDoc) => {
-                const sermonId = membershipDoc.ref.parent.parent?.id;
-                if (!sermonId) {
-                  return;
-                }
-                canonicalMembershipBySermonId.set(sermonId, {
-                  uploadStatus: membershipDoc.data().uploadStatus,
-                });
-              });
-              const listItemsSnapshot = await getDocs(listItemsRef);
-
-              return mergeRootItemsWithCanonicalMemberships({
-                items: sortListOverflowChainSourceItems(
-                  listItemsSnapshot.docs.map((itemDoc) => {
-                    const data = itemDoc.data() as Partial<ListDetailItem>;
-                    const derivedUploadStatus =
-                      data.uploadStatus ??
-                      (data.subsplashId
-                        ? ({ status: uploadStatus.UPLOADED } as listUploadStatus)
-                        : undefined);
-
-                    return {
-                      ...data,
-                      id: itemDoc.id,
-                      uploadStatus: derivedUploadStatus,
-                    } as ListDetailItem;
-                  })
-                ),
-                canonicalMembershipBySermonId,
-              });
-            },
+            getListDoc,
+            getRootItems,
+            localRootLoad,
             replaceRoute: (href) => router.replace(href),
           }
         );
+
+        remoteResolved = true;
 
         if (cancelled) {
           return;
@@ -843,7 +924,8 @@ const ListDetailsPage = () => {
         setChainView(result.chainView ?? null);
         setItems(result.items ?? []);
         setPublishedDrift(result.publishedDrift ?? null);
-        originalItemsRef.current = cloneListItems(result.items ?? []);
+        setOriginalItems(cloneListItems(result.items ?? []));
+        setIsVerifyingRemote(false);
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load list details', error);
@@ -854,12 +936,14 @@ const ListDetailsPage = () => {
               listId,
             },
           });
-          alert(getErrorMessage(error, 'Failed to load list details.'));
-          setList(null);
+          setLoadError(getErrorMessage(error, 'Failed to load list details.'));
           setChainView(null);
-          setItems([]);
           setPublishedDrift(null);
-          originalItemsRef.current = [];
+          if (!localPreviewAvailable) {
+            setList(null);
+            setItems([]);
+            setOriginalItems([]);
+          }
         }
       } finally {
         if (!cancelled) {
@@ -883,7 +967,14 @@ const ListDetailsPage = () => {
 
     return subscribeToListDetailsLiveUpdates({
       rootListId,
-      scheduleReload: () => setReloadNonce((value) => value + 1),
+      scheduleReload: () => {
+        if (hasOrderChangesRef.current || isSavingRef.current) {
+          pendingReloadRef.current = true;
+          setHasPendingReload(true);
+          return;
+        }
+        setReloadNonce((value) => value + 1);
+      },
     });
   }, [chainView?.rootListId]);
 
@@ -1002,13 +1093,29 @@ const ListDetailsPage = () => {
   const modifiers = useMemo(() => [restrictToVerticalAxis, restrictToContainer], [restrictToContainer]);
 
   const hasOrderChanges =
-    items.length !== originalItemsRef.current.length ||
-    items.some((item, index) => item.id !== originalItemsRef.current[index]?.id);
+    items.length !== originalItems.length ||
+    items.some((item, index) => item.id !== originalItems[index]?.id);
+  // Only committed order state should affect external subscription callbacks.
+  useEffect(() => {
+    hasOrderChangesRef.current = hasOrderChanges;
+    isSavingRef.current = isSaving;
+  }, [hasOrderChanges, isSaving]);
+
+  useEffect(() => {
+    if (!pendingReloadRef.current || hasOrderChanges || isSaving) {
+      return;
+    }
+
+    pendingReloadRef.current = false;
+    setHasPendingReload(false);
+    setReloadNonce((value) => value + 1);
+  }, [hasOrderChanges, isSaving]);
 
   const syncedItemsCount = items.filter((item) => item.isTrackedInFirebase !== false).length;
   const localOnlyItemsCount = items.filter((item) => item.isSubsplashOnlyPlaceholder).length;
   const hasOverflowPages = (chainView?.nodes.length ?? 0) > 1;
-  const isReadOnlySurface = isStrictListActionLocked({ chainView, publishedDrift });
+  const isReadOnlySurface =
+    isVerifyingRemote || hasPendingReload || !chainView || isStrictListActionLocked({ chainView, publishedDrift });
   const publishedDriftIssueMessages = getPublishedDriftIssueMessages(publishedDrift);
   const publishedDriftWarningMessage = getPublishedDriftWarningMessage({
     publishedDrift,
@@ -1053,15 +1160,16 @@ const ListDetailsPage = () => {
   }, [isReadOnlySurface]);
 
   const revertOrder = useCallback(() => {
-    setItems(cloneListItems(originalItemsRef.current));
-  }, []);
+    setItems(cloneListItems(originalItems));
+  }, [originalItems]);
 
   const saveOrderChanges = useCallback(async () => {
     if (!list || !hasOrderChanges || isReadOnlySurface || chainView?.canSaveOrder === false) {
       return;
     }
 
-    const previousItems = cloneListItems(originalItemsRef.current);
+    const previousItems = cloneListItems(originalItems);
+    isSavingRef.current = true;
     setIsSaving(true);
 
     try {
@@ -1075,7 +1183,7 @@ const ListDetailsPage = () => {
       });
 
       setItems(cloneListItems(persistedItems));
-      originalItemsRef.current = cloneListItems(persistedItems);
+      setOriginalItems(cloneListItems(persistedItems));
     } catch (error) {
       console.error('Failed to save list order', error);
       setItems(previousItems);
@@ -1089,12 +1197,13 @@ const ListDetailsPage = () => {
       });
       alert(getErrorMessage(error, 'Failed to save list order. The view was reset to the last synced order.'));
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [chainView, hasOrderChanges, isReadOnlySurface, items, list, listId, publishedDrift]);
+  }, [chainView, hasOrderChanges, isReadOnlySurface, items, list, listId, originalItems, publishedDrift]);
 
   const markOverflowLink = useCallback(async (item: ListPageItem) => {
-    if (!chainView || !item.rowId) {
+    if (!chainView || !item.rowId || isReadOnlySurface) {
       return;
     }
 
@@ -1122,7 +1231,7 @@ const ListDetailsPage = () => {
     } finally {
       setMarkingOverflowRowId(null);
     }
-  }, [chainView, listId]);
+  }, [chainView, isReadOnlySurface, listId]);
 
   const handleOpenSermon = useCallback(
     (sermonId: string) => {
@@ -1184,9 +1293,31 @@ const ListDetailsPage = () => {
             <CircularProgress />
           </Box>
         ) : !list ? (
-          <Alert severity="error">This list could not be loaded.</Alert>
+          <Alert severity="error">
+            {loadError ?? 'This list could not be loaded.'}
+            <Button color="inherit" size="small" onClick={() => setReloadNonce((value) => value + 1)}>
+              Retry
+            </Button>
+          </Alert>
         ) : (
           <>
+            {loadError ? (
+              <Alert severity="error" sx={{ mb: 3 }}>
+                {loadError} The local list is shown for reference; reorder and overflow actions remain locked until verification succeeds.
+                <Button color="inherit" size="small" onClick={() => setReloadNonce((value) => value + 1)}>
+                  Retry verification
+                </Button>
+              </Alert>
+            ) : isVerifyingRemote ? (
+              <Alert severity="info" sx={{ mb: 3 }}>
+                Showing local list data while verifying the full Subsplash overflow chain. Reorder and overflow actions will unlock after verification.
+              </Alert>
+            ) : null}
+            {hasPendingReload ? (
+              <Alert severity="warning" sx={{ mb: 3 }}>
+                List updates are waiting. Revert your unsaved order changes to refresh the list safely.
+              </Alert>
+            ) : null}
             <Card
               sx={{
                 position: 'relative',
@@ -1506,7 +1637,7 @@ const ListDetailsPage = () => {
                   color="inherit"
                   startIcon={<UndoIcon />}
                   onClick={revertOrder}
-                  disabled={isSaving || isReadOnlySurface || !hasOrderChanges}
+                  disabled={isSaving || !hasOrderChanges}
                 >
                   Revert
                 </Button>
@@ -1557,6 +1688,7 @@ const ListDetailsPage = () => {
                         index={index}
                         dragDisabled={isReadOnlySurface || item.reconstructible === false}
                         overflowMarkDisabled={
+                          isReadOnlySurface ||
                           hasOrderChanges ||
                           Boolean(physicalListHasOverflowLink.get(renderedItems[index]?.sourceListId ?? ''))
                         }

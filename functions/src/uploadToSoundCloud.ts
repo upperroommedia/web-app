@@ -35,6 +35,7 @@ const uploadToSoundCloudCall = onCall(
   {
     // Production OOMs occurred at 258-272 MiB while streaming multipart uploads.
     memory: '512MiB',
+    timeoutSeconds: 540,
     secrets: soundcloudSecretsWithRuntimeAlerts,
   },
   async (request: CallableRequest<UploadToSoundCloudInputType>): Promise<UploadToSoundCloudReturnType> => {

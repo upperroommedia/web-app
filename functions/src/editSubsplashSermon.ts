@@ -112,14 +112,17 @@ const editSubsplashSermon = onCall(
               'PATCH',
               requestData
             );
-            logger.log('config', config);
             return (await axios(config)).data;
           },
           { operationKey }
         )
       );
     } catch (error) {
-      logger.error(error);
+      logger.error('editSubsplashSermon failed', {
+        operationKey,
+        subsplashId,
+        message: error instanceof Error ? error.message : String(error),
+      });
       await emitOperationalAlert({
         alertCode: 'PUBLISH_SUBSPLASH_EDIT_RUNTIME_FAILURE',
         summary: 'editSubsplashSermon callable failed during publish edit flow.',

@@ -42,11 +42,12 @@ const toSubsplashSeriesImageRefs = (
 export interface CreateSeriesInputType {
   title: string;
   summary?: string;
-  ownerId: string;              // User ID who owns the series
-  firestoreId?: string;         // Optional existing Firestore series ID to sync
-  skipSubsplash?: boolean;      // If true, only create in Firestore (for upload time)
+  ownerId: string; // User ID who owns the series
+  firestoreId?: string; // Optional existing Firestore series ID to sync
+  skipSubsplash?: boolean; // If true, only create in Firestore (for upload time)
   operationKey?: string;
-  images?: Array<{              // Optional images for the series
+  images?: Array<{
+    // Optional images for the series
     id: string;
     type: string;
     downloadLink: string;
@@ -92,20 +93,39 @@ const createSeries = onCall(
 
     try {
       return await withIdempotency(normalizedOperationKey, async () => {
-        const existingSeriesDoc = await seriesRef.get();
-        const existingSubsplashId = existingSeriesDoc.exists
-          ? (existingSeriesDoc.data()?.subsplashId as string | undefined)
-          : undefined;
-        const seriesLockKeys = existingSubsplashId ? [`series:${existingSubsplashId}`] : [];
-
         return withSubsplashLocks(
-          seriesLockKeys,
+          // The Firestore ID is the only stable identity before Subsplash has
+          // created the remote series. Locking on it prevents concurrent item
+          // publishes from each creating their own remote series.
+          [`series:${seriesRef.id}`],
           async () => {
+            // Re-read after acquiring the lock. A caller that waited for an
+            // earlier create must reuse its result instead of acting on the
+            // empty subsplashId observed before the wait.
+            const existingSeriesDoc = await seriesRef.get();
+            const existingSeriesData = existingSeriesDoc.data();
+            const existingSubsplashId =
+              typeof existingSeriesData?.subsplashId === 'string' ? existingSeriesData.subsplashId.trim() : '';
+
+            if (existingSubsplashId) {
+              logger.log(
+                `Series already exists in Subsplash: Firestore ID=${seriesRef.id}, Subsplash ID=${existingSubsplashId}`
+              );
+              return {
+                status: 'success',
+                firestoreId: seriesRef.id,
+                subsplashId: existingSubsplashId,
+                ...(typeof existingSeriesData?.slug === 'string' && existingSeriesData.slug
+                  ? { slug: existingSeriesData.slug }
+                  : {}),
+              };
+            }
+
             const existingSeriesImages = existingSeriesDoc.exists
-              ? (existingSeriesDoc.data()?.images as CreateSeriesInputType['images'] | undefined)
+              ? (existingSeriesData?.images as CreateSeriesInputType['images'] | undefined)
               : undefined;
             const inputImages = images?.filter((image) => Boolean(image?.id && image?.type)) || [];
-            const imagesToPersist = inputImages.length > 0 ? inputImages : (existingSeriesImages || []);
+            const imagesToPersist = inputImages.length > 0 ? inputImages : existingSeriesImages || [];
             const initialSubtitle = getSeriesSubtitleFromPublishedCount(0);
 
             // If skipSubsplash is true, only create in Firestore (for upload time)
@@ -118,7 +138,7 @@ const createSeries = onCall(
                 itemCount: 0,
                 publishedItemCount: 0,
                 status: 'draft',
-                subsplashId: '',  // Empty until published
+                subsplashId: '', // Empty until published
                 ownerId: ownerId.trim(),
                 updatedAt: FieldValue.serverTimestamp(),
               };
@@ -138,7 +158,7 @@ const createSeries = onCall(
               return {
                 status: 'success',
                 firestoreId: seriesRef.id,
-                subsplashId: '',  // Not yet created in Subsplash
+                subsplashId: '', // Not yet created in Subsplash
               };
             }
 
@@ -202,7 +222,9 @@ const createSeries = onCall(
             }
 
             await seriesRef.set(firestoreData, { merge: existingSeriesDoc.exists });
-            const repairedImageWrites = repairedImagesToPersist.filter((image) => image.subsplashId && image.subsplashId !== image.id);
+            const repairedImageWrites = repairedImagesToPersist.filter(
+              (image) => image.subsplashId && image.subsplashId !== image.id
+            );
             await Promise.all(
               repairedImageWrites.map((image) =>
                 firestoreDB.collection('images').doc(image.id).set(

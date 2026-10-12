@@ -16,6 +16,7 @@ on:
       - '.npmrc'
       - 'ops/process-audio-hetzner/**'
       - 'scripts/deploy-process-audio-hetzner.sh'
+      - 'scripts/setup-process-audio-hetzner-desktop-bridge.sh'
       - 'scripts/prepare-process-audio-hetzner-context.sh'
       - 'scripts/verify-hetzner-ytdlp-smoke.sh'
       - 'scripts/wait-for-process-audio-health.sh'
@@ -41,7 +42,7 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7.0.1
 
       - name: Validate required secrets
         env:
@@ -57,13 +58,13 @@ jobs:
           [[ -n "$SSH_KEY" ]] || { echo "::error::Missing HETZNER_PROCESS_AUDIO_SSH_PRIVATE_KEY"; exit 1; }
 
       - name: Authenticate to Google Cloud (OIDC)
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_STAGING || secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_STAGING || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3.0.1
         with:
           project_id: ${{ env.GCP_PROJECT }}
 
@@ -91,7 +92,7 @@ jobs:
 
       - name: Create staging Sentry release for process-audio-hetzner
         if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
-        uses: getsentry/action-release@v3
+        uses: getsentry/action-release@v3.7.1
         env:
           SENTRY_ORG: upper-room-media
         with:

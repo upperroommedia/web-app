@@ -30,6 +30,19 @@ const getRequestApiTarget = (event: Event): string => {
   return [url, exceptionValue, typeof message === 'string' ? message : ''].join(' ');
 };
 
+const hasWebChannelStackFrame = (event: Event): boolean =>
+  (event.exception?.values ?? []).some((exception) =>
+    exception.stacktrace?.frames?.some((frame) => {
+      const filename = typeof frame.filename === 'string' ? frame.filename : '';
+      const moduleName = typeof frame.module === 'string' ? frame.module : '';
+
+      return (
+        filename.includes('closure-net/firebase/webchannel_blob_es2018.js') ||
+        moduleName === 'closure-net/firebase/webchannel_blob_es2018'
+      );
+    })
+  );
+
 export const shouldDropClientSentryEvent = (event: Event): boolean => {
   const exceptionType = getExceptionType(event);
   const exceptionValue = getExceptionValue(event);
@@ -42,6 +55,14 @@ export const shouldDropClientSentryEvent = (event: Event): boolean => {
   }
 
   if (exceptionType === 'AbortError' && exceptionValue === 'Fetch is aborted') {
+    return true;
+  }
+
+  if (
+    exceptionType === 'AbortError' &&
+    exceptionValue === 'signal is aborted without reason' &&
+    hasWebChannelStackFrame(event)
+  ) {
     return true;
   }
 
@@ -63,10 +84,7 @@ export const shouldDropClientSentryEvent = (event: Event): boolean => {
   }
 
   const apiTarget = getRequestApiTarget(event);
-  if (
-    apiTarget.includes('/_fah/image/process') &&
-    exceptionValue.includes('_error.js called with falsy error')
-  ) {
+  if (apiTarget.includes('/_fah/image/process') && exceptionValue.includes('_error.js called with falsy error')) {
     return true;
   }
 

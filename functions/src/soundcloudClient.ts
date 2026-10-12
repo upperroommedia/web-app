@@ -10,6 +10,8 @@ import axios, { AxiosError, isAxiosError } from 'axios';
 import FormData from 'form-data';
 import { Bucket } from '@google-cloud/storage';
 import { createSoundCloudReconnectRequiredError } from './soundcloudAuthErrors';
+import { getHtmlEdgeBlock } from './helpers/upstreamHttpErrors';
+import { HttpsError } from 'firebase-functions/v2/https';
 import { basename, extname } from 'node:path';
 import { Readable } from 'node:stream';
 
@@ -44,6 +46,12 @@ export interface SoundCloudTrackResult {
 }
 
 export const normalizeSoundCloudApiError = (error: unknown): never => {
+  if (getHtmlEdgeBlock(error)) {
+    throw new HttpsError(
+      'unavailable',
+      'SoundCloud temporarily blocked the track request from our server. Please retry shortly.'
+    );
+  }
   if (isAxiosError(error) && error.response?.status === 401) {
     throw createSoundCloudReconnectRequiredError(
       'SoundCloud authorization is missing or expired. Reconnect SoundCloud from Admin > Advanced and try again.'
