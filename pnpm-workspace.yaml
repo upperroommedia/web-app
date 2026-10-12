@@ -71,4 +71,3 @@ allowBuilds:
   workerd: true
   # Firebase CLI installs this optional native regex dependency on Linux.
   re2: true
-  re2: true
