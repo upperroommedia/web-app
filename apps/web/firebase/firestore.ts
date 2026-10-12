@@ -1,9 +1,11 @@
 /* eslint-disable no-console */
- 
+
 import {
   type Firestore,
   connectFirestoreEmulator,
   getFirestore,
+  initializeFirestore,
+  type FirestoreSettings,
 } from 'firebase/firestore';
 import firebase, { isDevelopment } from './firebase';
 
@@ -17,7 +19,13 @@ const createBrowserFirestore = (): Firestore => {
     return globalThis.__URM_FIRESTORE__;
   }
 
-  globalThis.__URM_FIRESTORE__ = getFirestore(firebase);
+  // WebChannel fetch-stream cancellation can escape as an unhandled rejection.
+  // Use its XHR transport in browsers; server-side Firestore keeps its default.
+  // Firebase still consumes this option at runtime but omits it from public types.
+  const browserSettings: FirestoreSettings & { useFetchStreams: boolean } = {
+    useFetchStreams: false,
+  };
+  globalThis.__URM_FIRESTORE__ = initializeFirestore(firebase, browserSettings);
 
   return globalThis.__URM_FIRESTORE__;
 };
