@@ -3,12 +3,13 @@ import axios from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { ImageType } from '@upperroom/shared/types/Image';
 import { File, Bucket } from '@google-cloud/storage';
-import { Stream } from 'stream';
-import { existsSync, mkdirSync, unlinkSync } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
+import { readFile, rm } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { v4 } from 'uuid';
-import sizeOf from 'image-size';
+import { imageSize } from 'image-size';
 import { firestoreAdminImagesConverter } from '../firestoreDataConverter';
 import { Firestore } from 'firebase-admin/firestore';
 import { SubsplashImage } from '../types/Subsplash';
@@ -16,22 +17,18 @@ import { ensureFirebaseDownloadUrl } from '../storageDownloadUrl';
 import { extractStoragePathFromDownloadUrl } from '@upperroom/shared/shared/firebaseStorageUrls';
 
 const getImageDimensions = async (file: File): Promise<{ width: number; height: number }> => {
-  if (!existsSync(os.tmpdir())) {
-    mkdirSync(os.tmpdir());
-  }
   const tempFilePath = path.join(os.tmpdir(), v4());
-  await file.download({ destination: tempFilePath });
-  // Get Dimensions of the image
-  const { width, height } = sizeOf(tempFilePath);
-  // delete the temp file
-  unlinkSync(tempFilePath);
-  return { width: width || 0, height: height || 0 };
+  try {
+    await file.download({ destination: tempFilePath });
+    const { width, height } = imageSize(await readFile(tempFilePath));
+    return { width: width || 0, height: height || 0 };
+  } finally {
+    await rm(tempFilePath, { force: true });
+  }
 };
 
-const streamDataToStorage = async (stream: Stream, destinationFile: File): Promise<void> => {
-  return new Promise<void>((resolve) => {
-    stream.pipe(destinationFile.createWriteStream()).on('close', resolve);
-  });
+const streamDataToStorage = async (stream: Readable, destinationFile: File): Promise<void> => {
+  await pipeline(stream, destinationFile.createWriteStream());
 };
 
  
@@ -75,16 +72,16 @@ async function populateImages(
       const type = image.type as ImageType['type'];
       // fetch image from subsplash
       logger.log(`Fetching ${type} image ${imageId} for ${imageName}`);
-      const response = await axios({
-        method: 'GET',
-        url: `https://images.subsplash.com/image.jpg?id=${imageId}`,
-        responseType: 'stream',
-      });
       const destinationFilePath = `speaker-images/${imageId}-${type}.${contentType.split('/')[1]}`;
       const file = bucket.file(destinationFilePath);
       const shouldUploadImage = !imageIds.has(destinationFilePath);
       if (shouldUploadImage) {
         imageIds.add(destinationFilePath);
+        const response = await axios({
+          method: 'GET',
+          url: `https://images.subsplash.com/image.jpg?id=${imageId}`,
+          responseType: 'stream',
+        });
         // stream image to storage bucket
         logger.log(`Uploading ${type} ${contentType} ${width}x${height} image ${imageId} for ${imageName}`);
         await streamDataToStorage(response.data, file);

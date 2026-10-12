@@ -26,7 +26,8 @@ const imageOnDelete = onDocumentDeleted('images/{imageId}', async (event) => {
     }
     const bucket = firebaseAdmin.storage().bucket(imagesBucket);
     const file = bucket.file(storagePath);
-    await file.delete();
+    // Firestore events can be delivered more than once; missing files are already cleaned up.
+    await file.delete({ ignoreNotFound: true });
 
     logger.log(`Deleted storage file at ${storagePath} for image ${imageId}`);
   } catch (error) {

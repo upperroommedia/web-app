@@ -15,15 +15,15 @@
     "@google-cloud/functions-framework": "^3.2.0",
     "@google-cloud/storage": "7.19.0",
     "axios": "^1.19.0",
-    "buffer-image-size": "^0.6.4",
     "fast-average-color-node": "^3.1.0",
     "firebase-admin": "^13.7.0",
     "firebase-functions": "^7.1.1",
     "mkdirp": "^2.1.6",
-    "node-vibrant": "^4.0.3"
+    "node-vibrant": "^4.0.3",
+    "image-size": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "^18.19.7",
+    "@types/node": "catalog:",
     "typescript": "^5.9.3"
   }
 }

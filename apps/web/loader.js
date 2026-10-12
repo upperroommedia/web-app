@@ -4,7 +4,8 @@ function normalizeFirebaseStorageUrl(src) {
   try {
     const url = new URL(src);
 
-    if (url.hostname !== "firebasestorage.googleapis.com") {
+    // Download tokens authorize private objects and must survive image processing.
+    if (url.hostname !== "firebasestorage.googleapis.com" || url.searchParams.has("token")) {
       return src;
     }
 

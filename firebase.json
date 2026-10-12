@@ -51,6 +51,61 @@
         "firebase-debug.log",
         "firebase-debug.*.log"
       ]
+    },
+    {
+      "kit": "firestore-algolia-search",
+      "source": "function-kits/firestore-algolia-search",
+      "instances": {
+        "images-index": "function-kits/firestore-algolia-search/config-images-index",
+        "lists-index": "function-kits/firestore-algolia-search/config-lists-index",
+        "sermons-index": "function-kits/firestore-algolia-search/config-sermons-index",
+        "speakers-index": "function-kits/firestore-algolia-search/config-speakers-index",
+        "users-index": "function-kits/firestore-algolia-search/config-users-index"
+      },
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ],
+      "ignore": [
+        "node_modules",
+        ".git",
+        "test",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    },
+    {
+      "kit": "image-processing-api",
+      "source": "function-kits/image-processing-api/source",
+      "instances": {
+        "image-processing-api": "function-kits/image-processing-api/config-image-processing-api"
+      },
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ],
+      "ignore": [
+        "node_modules",
+        ".git",
+        "test",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    },
+    {
+      "kit": "firestore-send-email",
+      "source": "function-kits/firestore-send-email",
+      "instances": {
+        "firestore-send-email": "function-kits/firestore-send-email/config-firestore-send-email"
+      },
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ],
+      "ignore": [
+        "node_modules",
+        ".git",
+        "__tests__",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
     }
   ],
   "firestore": {
@@ -110,13 +165,5 @@
       "enabled": true
     },
     "singleProjectMode": true
-  },
-  "extensions": {
-    "images-index": "algolia/firestore-algolia-search@0.5.14",
-    "lists-index": "algolia/firestore-algolia-search@0.5.14",
-    "sermons-index": "algolia/firestore-algolia-search@0.5.14",
-    "speakers-index": "algolia/firestore-algolia-search@0.5.14",
-    "users-index": "algolia/firestore-algolia-search@0.5.14",
-    "firestore-send-email": "firebase/firestore-send-email@0.2.6"
   }
 }

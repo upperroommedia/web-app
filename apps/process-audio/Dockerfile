@@ -1,7 +1,7 @@
 # Use Node 22 across both runtime profiles. Hetzner still needs the yt-dlp JS runtime,
 # while Cloud Run only uses the storage-backed trim/transcode path.
 ARG NODE_VERSION=22
-ARG PNPM_VERSION=10.10.0
+ARG PNPM_VERSION=11.28.2
 ARG PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
 ARG YT_DLP_VERSION=2026.08.19
 ARG FFMPEG_VERSION=8.1
@@ -16,6 +16,7 @@ ARG TARGETARCH=amd64
 
 # ---------- Build stage ----------
 FROM node:${NODE_VERSION}-bookworm AS build
+ARG PNPM_VERSION
 ARG DEBIAN_MIRROR
 ARG DEBIAN_SECURITY_MIRROR
 ARG DEBIAN_UPDATES_MIRROR
@@ -40,7 +41,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::No-Cache=true -o Acqu
 RUN npm install -g pnpm@${PNPM_VERSION}
 
 # Copy workspace manifests first so dependency installation can be cached
-COPY .npmrc package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/process-audio/package.json apps/process-audio/package.json
@@ -138,7 +139,6 @@ RUN detected_arch="$(dpkg --print-architecture)" \
 
 # Copy the prepared workspace from the build stage
 COPY --from=build --chown=node:node /workspace/package.json ./package.json
-COPY --from=build --chown=node:node /workspace/.npmrc ./.npmrc
 COPY --from=build --chown=node:node /workspace/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY --from=build --chown=node:node /workspace/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=build --chown=node:node /workspace/node_modules ./node_modules

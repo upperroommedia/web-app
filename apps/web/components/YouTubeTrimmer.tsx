@@ -54,10 +54,9 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
   audioSourceError,
   setAudioSourceError,
 }) => {
-  const savedTrimStartRef = useRef(initialTrimStart);
-  const savedTrimEndRef = useRef(initialTrimDuration > 0 ? initialTrimStart + initialTrimDuration : undefined);
-  const savedTrimStart = savedTrimStartRef.current;
-  const savedTrimEnd = savedTrimEndRef.current;
+  // Keep the original trim bounds for initialization without reading refs during render.
+  const [savedTrimStart] = useState(initialTrimStart);
+  const [savedTrimEnd] = useState(initialTrimDuration > 0 ? initialTrimStart + initialTrimDuration : undefined);
   const [inputText, setInputText] = useState(initialUrl ?? '');
   const [hasUserTappedToLoad, setHasUserTappedToLoad] = useState(false);
   const [isMuted, setIsMuted] = useState(false);

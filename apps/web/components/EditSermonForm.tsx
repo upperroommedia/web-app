@@ -49,16 +49,24 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
       return;
     }
 
+    let cancelled = false;
     setSermonUrl({ url: undefined, status: 'loading' });
     getDownloadURL(ref(storage, `${UNPROCESSED_SERMONS_BUCKET}/${sermon.id}`))
       .then((url) => {
-        setSermonUrl({ url, status: 'success' });
+        if (!cancelled) {
+          setSermonUrl({ url, status: 'success' });
+        }
       })
       .catch((error) => {
+        if (cancelled) return;
         setSermonUrl({ url: undefined, status: 'error' });
         // eslint-disable-next-line no-console
         console.log(error);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [sermon.id, showAudioTrimmer]);
 
   return (

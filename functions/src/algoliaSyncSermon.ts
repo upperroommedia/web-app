@@ -1,4 +1,3 @@
-import { algoliasearch } from 'algoliasearch';
 import { logger } from 'firebase-functions/v2';
 
 type SermonAlgoliaRecord = {
@@ -24,7 +23,7 @@ const isNotFoundError = (error: unknown): boolean => {
   return status === 404;
 };
 
-const getAlgoliaClient = () => {
+const getAlgoliaClient = async () => {
   const appId = process.env.ALGOLIA_APP_ID?.trim() || process.env.NEXT_PUBLIC_ALGOLIA_APP_ID?.trim();
   const apiKey = process.env.ALGOLIA_SEARCH_API_KEY?.trim() || process.env.NEXT_PUBLIC_ALGOLIA_API_KEY?.trim();
 
@@ -32,6 +31,9 @@ const getAlgoliaClient = () => {
     return null;
   }
 
+  // Most core invocations do not synchronize search. Defer the SDK until needed
+  // so Auth, list operations, and other triggers avoid its cold-start cost.
+  const { algoliasearch } = await import('algoliasearch');
   return algoliasearch(appId, apiKey);
 };
 
@@ -42,7 +44,7 @@ export const waitForSermonToReachAlgolia = async ({
   sermonId: string;
   editedAtMillis: number;
 }): Promise<boolean> => {
-  const client = getAlgoliaClient();
+  const client = await getAlgoliaClient();
 
   if (!client) {
     logger.warn('Skipping Algolia sermon sync acknowledgement because Algolia credentials are unavailable.', {

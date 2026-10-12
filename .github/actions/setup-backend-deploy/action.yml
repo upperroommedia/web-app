@@ -11,6 +11,10 @@ inputs:
   service_account:
     description: Service account email used for OIDC auth
     required: true
+  run_install_scripts:
+    description: Whether to run workspace lifecycle scripts during dependency installation
+    required: false
+    default: 'true'
   materialize_catalog:
     description: Whether to materialize catalog dependencies for Firebase function deploys
     required: false
@@ -36,27 +40,35 @@ runs:
         fi
 
     - name: Authenticate to Google Cloud (OIDC)
-      uses: google-github-actions/auth@v2
+      uses: google-github-actions/auth@v3.0.0
       with:
         workload_identity_provider: ${{ inputs.workload_identity_provider }}
         service_account: ${{ inputs.service_account }}
 
     - name: Set up gcloud
-      uses: google-github-actions/setup-gcloud@v2
+      uses: google-github-actions/setup-gcloud@v3.0.1
       with:
         project_id: ${{ inputs.gcp_project }}
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7.1.0
       with:
-        node-version: 22
+        node-version-file: package.json
+        package-manager-cache: false
 
     - name: Set up pnpm
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@v6.1.0
 
     - name: Install dependencies
       shell: bash
-      run: pnpm install --frozen-lockfile
+      env:
+        RUN_INSTALL_SCRIPTS: ${{ inputs.run_install_scripts }}
+      run: |
+        if [[ "$RUN_INSTALL_SCRIPTS" == "true" ]]; then
+          pnpm install --frozen-lockfile
+        else
+          pnpm install --frozen-lockfile --ignore-scripts
+        fi
 
     - name: Materialize catalog dependencies for Firebase deploy
       if: ${{ inputs.materialize_catalog == 'true' }}

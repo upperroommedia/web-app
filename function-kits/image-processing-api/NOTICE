@@ -1,0 +1,11 @@
+Image Processing API function kit
+Contains source adapted from Invertase Firebase Extensions, image-processing-api.
+Copyright (c) 2016-present Invertase Limited.
+Upstream: https://github.com/invertase/firebase-extensions
+Commit: f3a121f68d23c429731b8c26859109d322874c09
+Source directory: extensions/image-processing-api/functions/src
+Licensed under Apache-2.0; license and source copyright notices are retained.
+Upper Room Media modifications: 2nd-gen function/configuration, request and image
+limits, safe HTTP fetching, Express 5 routing/error handling, output encoding,
+composite remote fetching, and tests. This is a local self-created function kit,
+not an official Invertase or Firebase replacement.

@@ -36,6 +36,12 @@ const client =
     ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
     : undefined;
 
+const InfinitScrollMessage = ({ message }: { message: string }) => (
+  <p style={{ flexBasis: '100%', textAlign: 'center' }}>
+    <b>{message}</b>
+  </p>
+);
+
 const ImageSelector = (props: {
   selectedSpeaker?: ISpeaker;
   selectedImageFromSpeakerDetails: ImageType;
@@ -65,9 +71,8 @@ const ImageSelector = (props: {
     );
     const querySnapshot = await getDocs(q);
     setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    querySnapshot.forEach((doc) => {
-      setImages((oldImages) => [...oldImages, doc.data() as ImageType]);
-    });
+    const nextImages = querySnapshot.docs.map((doc) => doc.data() as ImageType);
+    setImages((oldImages) => [...oldImages, ...nextImages]);
   };
 
   const searchImages = async (query: string, hitsPerPage: number, page: number) => {
@@ -179,14 +184,6 @@ const ImageSelector = (props: {
       alert(e);
       setImageUploading(false);
     }
-  };
-
-  const InfinitScrollMessage = ({ message }: { message: string }) => {
-    return (
-      <p style={{ flexBasis: '100%', textAlign: 'center' }}>
-        <b>{message}</b>
-      </p>
-    );
   };
 
   return (

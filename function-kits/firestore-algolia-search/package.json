@@ -1,0 +1,29 @@
+{
+  "name": "@upperroom/function-kit-firestore-algolia-search",
+  "version": "1.0.0",
+  "description": "Gen 2 migration of Algolia's Firestore search extension",
+  "license": "Apache-2.0",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test test/*.test.cjs"
+  },
+  "dependencies": {
+    "algoliasearch": "^5.56.0",
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/node": "^22.0.0"
+  }
+}

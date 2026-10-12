@@ -11,9 +11,9 @@
     "build-watch": "concurrently --kill-others-on-fail --names tsc,alias --prefix '[{name}]' --prefix-colors 'blue,magenta' \"tsc -w --preserveWatchOutput -p tsconfig.json\" \"tsc-alias -w -p tsconfig.json\""
   },
   "dependencies": {
-    "@sentry/node": "^10.70.0",
     "@google-cloud/functions-framework": "^3.2.0",
     "@google-cloud/storage": "7.19.0",
+    "@sentry/node": "^10.70.0",
     "algoliasearch": "^5.27.0",
     "axios": "^1.19.0",
     "firebase-admin": "^13.7.0",
@@ -22,15 +22,15 @@
     "google-auth-library": "^9.15.1",
     "headers": "^0.9.6",
     "https-proxy-agent": "^7.0.4",
-    "image-size": "^1.1.1",
+    "image-size": "catalog:",
     "lodash": "^4.17.23",
     "mkdirp": "^2.1.6",
     "node-fetch": "3.3.0",
     "p-limit": "^6.2.0",
-    "uuid": "^9.0.1"
+    "uuid": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "^18.19.7",
+    "@types/node": "catalog:",
     "typescript": "^5.9.3"
   }
 }
