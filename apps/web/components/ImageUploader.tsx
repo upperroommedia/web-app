@@ -164,12 +164,6 @@ const ImageUploader = (props: Props) => {
     };
   }, []);
 
-  useEffect(() => {
-    if (imgSrc) {
-      setBackgroundFillMode('auto');
-    }
-  }, [imgSrc]);
-
   const backgroundColorHex = backgroundFillMode === 'custom' ? customBackgroundColorHex : autoBackgroundColorHex;
   const canUseEyeDropper =
     typeof window !== 'undefined' && typeof (window as WindowWithEyeDropper).EyeDropper !== 'undefined';

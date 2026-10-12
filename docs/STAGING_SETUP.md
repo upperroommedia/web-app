@@ -47,6 +47,7 @@ firebase apphosting:secrets:set SUBSPLASH_EMAIL --project urm-app-staging
 firebase apphosting:secrets:set SUBSPLASH_PASSWORD --project urm-app-staging
 firebase apphosting:secrets:set ALGOLIA_SEARCH_API_KEY --project urm-app-staging
 firebase apphosting:secrets:set WEB_APP_SENTRY_DSN --project urm-app-staging
+firebase apphosting:secrets:set IMAGE_PROCESSING_FUNCTION_URL --project urm-app-staging
 ```
 
 If access is not auto-granted:
@@ -143,7 +144,7 @@ Create a Workload Identity Provider and service account with Firebase deploy per
 
 1. Open a PR from any feature branch into `staging` and confirm `staging-selective-deploy` passes.
 2. Merge into `staging` and confirm selective deploy executes.
-3. Confirm App Hosting rollout is triggered only when app-related files change.
+3. Confirm Firebase Console starts the automatic App Hosting rollout from `staging`; the selective backend workflow does not trigger an additional rollout.
 4. Confirm the staging App Hosting backend picks up `apps/web/apphosting.staging.yaml`.
 5. Open PR `staging -> main` and confirm `main-from-staging` passes.
 6. Open PR `feature -> main` and confirm `main-from-staging` fails.
@@ -151,3 +152,29 @@ Create a Workload Identity Provider and service account with Firebase deploy per
 ## 7. Vercel parity
 
 In the Upper Room Media team account, update the Vercel project root directory for this project to `apps/web` so Vercel and App Hosting build the same deploy unit.
+
+## 8. Function kits and temporary search exception
+
+See the [production migration procedure](PRODUCTION_SETUP.md#8-extension-to-function-kit-migration) and [Firebase's migration guide](https://firebase.google.com/docs/extensions/users/migrate). The replacement email and image kits have been deployed to staging. The email native trigger and completed-record probes were verified (HTTP 204), and the original email extension is retired. The staging image extension remains available for its existing hosted routing. The existing staging Algolia application no longer resolves in DNS, and the user chose to skip staging search while completing production migration. Its disappearance from the Algolia account has not been established from DNS failure alone.
+
+Staging CI therefore generates its kit deployment configuration with search excluded:
+
+```bash
+node scripts/create-kit-deploy-config.mjs --install --without-search
+pnpm exec firebase deploy --project urm-app-staging --config firebase.kits.json --only functions
+```
+
+Staging's original Algolia extensions remain installed. The attempted replacement `images-index` instance was removed and its backfill queue paused. Search is unavailable until an Algolia application and project-specific search/write credentials are restored. Do not reuse production indexes or production write-key bindings for staging.
+
+When staging search is restored:
+
+1. Create or recover a staging Algolia application and separate indexes.
+2. Update all five staging instance configurations and their Secret Manager write-key bindings, plus App Hosting/Functions `ALGOLIA_SEARCH_API_KEY` and the staging web application ID.
+3. Remove `--without-search` from the staging workflow after configuration is ready.
+4. Deploy the replacements, resume/recreate the managed backfill queues as needed, and verify indexing and real web search before retiring the original extensions.
+
+Email authentication was verified in both projects without sending real messages. Continue to use local/mocked delivery for package tests and avoid creating email queue messages merely to smoke-test deployment. Preserve the delivery lease and configured Firestore TTL.
+
+For the image API, set the project-specific `IMAGE_PROCESSING_FUNCTION_URL` App Hosting secret to the deployed staging kit handler and grant it to `web-staging`. The secret must be available at BUILD and RUNTIME; a new App Hosting rollout is required to update the compiled rewrite. Keep the original image extension until the hosted `/_fah/image/process` route has been verified against its replacement.
+
+The CLI version, isolated kit lockfiles, deployment separation, and dedicated-emulator testing requirements are shared with production. Default `pnpm dev` excludes extensions/kits; use `pnpm dev:mail` only after building the email kit as described in the root README.

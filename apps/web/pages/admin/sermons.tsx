@@ -79,7 +79,7 @@ const AdminSermons = () => {
     open: false,
     severity: 'info',
     message: '',
-    id: Date.now(),
+    id: 0,
   });
 
   const clearDeleteIntentPayload = useCallback(async () => {

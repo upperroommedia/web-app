@@ -1,9 +1,9 @@
 import { getAverageColor } from 'fast-average-color-node';
 import { Vibrant } from 'node-vibrant/node';
 import { logger } from 'firebase-functions';
-import sizeOf from 'buffer-image-size';
+import { imageSize } from 'image-size';
 import axios from 'axios';
-import fs from 'fs';
+import { readFile } from 'fs/promises';
 
 interface ImageMetadata {
   width: number;
@@ -28,7 +28,7 @@ const loadImageBuffer = async (source: string | Buffer): Promise<Buffer> => {
   }
 
   try {
-    return fs.readFileSync(source);
+    return await readFile(source);
   } catch (error) {
     logger.error('Error reading image file:', error);
     throw new Error('Failed to read image from file');
@@ -38,7 +38,7 @@ const loadImageBuffer = async (source: string | Buffer): Promise<Buffer> => {
 const computeMetadataForImage = async (source: string | Buffer, dimensionsOnly = false): Promise<ImageMetadata> => {
   let buffer: Buffer | undefined;
   buffer = await loadImageBuffer(source);
-  const { width, height } = sizeOf(buffer);
+  const { width, height } = imageSize(buffer);
   if (dimensionsOnly) {
     return { width, height, averageColorHex: '', vibrantColorHex: '' };
   }

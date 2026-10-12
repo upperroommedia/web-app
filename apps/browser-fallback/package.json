@@ -16,8 +16,8 @@
     "node": "22"
   },
   "dependencies": {
-    "@upperroom/contracts": "workspace:*",
     "@google-cloud/storage": "catalog:",
+    "@upperroom/contracts": "workspace:*",
     "express": "^4.18.2",
     "firebase-admin": "catalog:",
     "playwright": "^1.62.1",

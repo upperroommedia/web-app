@@ -156,14 +156,26 @@ const SermonDetailsPage = () => {
     }
   }, []);
 
-  const [sourceAudioUrl, setSourceAudioUrl] = useState<string | null>(null);
-
+  const [resolvedSourceAudio, setResolvedSourceAudio] = useState<{ sermonId: string; url: string } | null>(null);
+  const sourceSermonId = sermon?.id;
+  const sourceYouTubeUrl = sermon?.youtubeUrl;
+  const sourceAudioUrl = !sourceYouTubeUrl && resolvedSourceAudio && resolvedSourceAudio.sermonId === sourceSermonId
+    ? resolvedSourceAudio.url
+    : null;
   useEffect(() => {
-    if (!sermon || sermon.youtubeUrl) return;
-    getDownloadURL(ref(storage, `sermons/${sermon.id}`))
-      .then(setSourceAudioUrl)
-      .catch(() => setSourceAudioUrl(null));
-  }, [sermon?.id, sermon?.youtubeUrl]);
+    let cancelled = false;
+    if (!sourceSermonId || sourceYouTubeUrl) return;
+    getDownloadURL(ref(storage, `sermons/${sourceSermonId}`))
+      .then((url) => {
+        if (!cancelled) setResolvedSourceAudio({ sermonId: sourceSermonId, url });
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedSourceAudio(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceSermonId, sourceYouTubeUrl]);
 
   // Fetch series and uploader when relevant ids change (narrow deps to avoid refetch on every sermon snapshot)
   useEffect(() => {

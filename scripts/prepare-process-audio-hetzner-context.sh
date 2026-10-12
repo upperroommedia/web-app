@@ -13,15 +13,14 @@ OUTPUT_DIR="$1"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/apps" "$OUTPUT_DIR/packages"
 
-cp "$ROOT_DIR/.npmrc" "$OUTPUT_DIR/.npmrc"
 cp "$ROOT_DIR/package.json" "$OUTPUT_DIR/package.json"
 cp "$ROOT_DIR/pnpm-lock.yaml" "$OUTPUT_DIR/pnpm-lock.yaml"
 cp "$ROOT_DIR/pnpm-workspace.yaml" "$OUTPUT_DIR/pnpm-workspace.yaml"
 cp "$ROOT_DIR/turbo.json" "$OUTPUT_DIR/turbo.json"
 
-rsync -a --delete "$ROOT_DIR/apps/process-audio/" "$OUTPUT_DIR/apps/process-audio/"
-rsync -a --delete "$ROOT_DIR/packages/contracts/" "$OUTPUT_DIR/packages/contracts/"
-rsync -a --delete "$ROOT_DIR/packages/shared/" "$OUTPUT_DIR/packages/shared/"
+rsync -a --delete --exclude=node_modules --exclude=dist --exclude=.turbo --exclude=.next --exclude=coverage "$ROOT_DIR/apps/process-audio/" "$OUTPUT_DIR/apps/process-audio/"
+rsync -a --delete --exclude=node_modules --exclude=dist --exclude=.turbo --exclude=.next --exclude=coverage "$ROOT_DIR/packages/contracts/" "$OUTPUT_DIR/packages/contracts/"
+rsync -a --delete --exclude=node_modules --exclude=dist --exclude=.turbo --exclude=.next --exclude=coverage "$ROOT_DIR/packages/shared/" "$OUTPUT_DIR/packages/shared/"
 
 cat > "$OUTPUT_DIR/.dockerignore" <<'EOF'
 **/.git

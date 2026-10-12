@@ -51,11 +51,16 @@ const listOnUpdate = onDocumentUpdated('lists/{listId}', async (event) => {
       .where('id', '==', listId)
       .get();
     logger.log('Found ', sermonListSnapshot.size, ' sermon series to update');
-    const batch = firestore.batch();
-    sermonListSnapshot.docs.forEach((doc) => {
-      batch.update(doc.ref, { ...updatedList });
-    });
-    return batch.commit();
+    // A popular list can be linked to more sermons than one write batch supports.
+    // Await each batch so a failed commit cannot leave background writes running.
+    const batchSize = 450;
+    for (let offset = 0; offset < sermonListSnapshot.docs.length; offset += batchSize) {
+      const batch = firestore.batch();
+      for (const doc of sermonListSnapshot.docs.slice(offset, offset + batchSize)) {
+        batch.update(doc.ref, { ...updatedList });
+      }
+      await batch.commit();
+    }
   } catch (error) {
     throw handleError(error);
   }

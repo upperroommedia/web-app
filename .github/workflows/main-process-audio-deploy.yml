@@ -32,7 +32,8 @@ permissions:
 
 concurrency:
   group: main-process-audio-deploy
-  cancel-in-progress: true
+  # Let active deployments finish before another release mutates the same target.
+  cancel-in-progress: false
 
 env:
   GCP_PROJECT: urm-app
@@ -48,7 +49,7 @@ jobs:
       diff_head_sha: ${{ steps.detect.outputs.diff_head_sha }}
       diff_source: ${{ steps.detect.outputs.diff_source }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -77,7 +78,7 @@ jobs:
           last_deploy_success_sha=""
           last_deploy_success_run_id=""
           set +e
-          successful_runs_json="$(curl -fsSL \
+          successful_runs_json="$(curl -fsSL --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 90 \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${REPOSITORY}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&status=success&exclude_pull_requests=true&per_page=20" \
@@ -95,7 +96,7 @@ jobs:
               fi
 
               set +e
-              run_jobs_json="$(curl -fsSL \
+              run_jobs_json="$(curl -fsSL --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 90 \
                 -H "Authorization: Bearer $GITHUB_TOKEN" \
                 -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/${REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")"
@@ -222,7 +223,7 @@ jobs:
 
       - name: Checkout repository
         if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7.0.1
 
       - name: Validate GCP OIDC secrets
         if: needs.detect-changes.outputs.anything_to_run == 'true'
@@ -242,14 +243,14 @@ jobs:
 
       - name: Authenticate to Google Cloud (OIDC)
         if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER_PRODUCTION || secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_PRODUCTION || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up gcloud
         if: needs.detect-changes.outputs.anything_to_run == 'true'
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3.0.1
         with:
           project_id: ${{ env.GCP_PROJECT }}
 

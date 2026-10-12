@@ -1,16 +1,17 @@
 ARG NODE_VERSION=22
-ARG PNPM_VERSION=10.10.0
+ARG PNPM_VERSION=11.28.2
 ARG PLAYWRIGHT_VERSION=1.62.1
 ARG YT_DLP_VERSION=2026.07.04
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
 ARG DENO_VERSION=2.9.5
 
 FROM node:${NODE_VERSION}-bookworm AS build
+ARG PNPM_VERSION
 WORKDIR /workspace
 
 RUN npm install -g pnpm@${PNPM_VERSION}
 
-COPY .npmrc package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/browser-fallback/package.json apps/browser-fallback/package.json
 
@@ -51,7 +52,6 @@ RUN npm install -g playwright@${PLAYWRIGHT_VERSION} \
     && PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium
 
 COPY --from=build --chown=node:node /workspace/package.json ./package.json
-COPY --from=build --chown=node:node /workspace/.npmrc ./.npmrc
 COPY --from=build --chown=node:node /workspace/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY --from=build --chown=node:node /workspace/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
@@ -62,4 +62,4 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 WORKDIR /workspace/apps/browser-fallback
 USER node
 
-CMD ["pnpm", "start"]
+CMD ["node", "./dist/index.js"]

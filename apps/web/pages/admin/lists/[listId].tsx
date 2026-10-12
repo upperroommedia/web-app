@@ -771,7 +771,7 @@ const ListDetailsPage = () => {
   const router = useRouter();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const originalItemsRef = useRef<ListPageItem[]>([]);
+  const [originalItems, setOriginalItems] = useState<ListPageItem[]>([]);
   const hasOrderChangesRef = useRef(false);
   const isSavingRef = useRef(false);
   const pendingReloadRef = useRef(false);
@@ -893,7 +893,7 @@ const ListDetailsPage = () => {
         setChainView(null);
         setItems(pendingItems);
         setPublishedDrift(null);
-        originalItemsRef.current = cloneListItems(pendingItems);
+        setOriginalItems(cloneListItems(pendingItems));
         setIsLoading(false);
       });
 
@@ -924,7 +924,7 @@ const ListDetailsPage = () => {
         setChainView(result.chainView ?? null);
         setItems(result.items ?? []);
         setPublishedDrift(result.publishedDrift ?? null);
-        originalItemsRef.current = cloneListItems(result.items ?? []);
+        setOriginalItems(cloneListItems(result.items ?? []));
         setIsVerifyingRemote(false);
       } catch (error) {
         if (!cancelled) {
@@ -942,7 +942,7 @@ const ListDetailsPage = () => {
           if (!localPreviewAvailable) {
             setList(null);
             setItems([]);
-            originalItemsRef.current = [];
+            setOriginalItems([]);
           }
         }
       } finally {
@@ -1093,10 +1093,13 @@ const ListDetailsPage = () => {
   const modifiers = useMemo(() => [restrictToVerticalAxis, restrictToContainer], [restrictToContainer]);
 
   const hasOrderChanges =
-    items.length !== originalItemsRef.current.length ||
-    items.some((item, index) => item.id !== originalItemsRef.current[index]?.id);
-  hasOrderChangesRef.current = hasOrderChanges;
-  isSavingRef.current = isSaving;
+    items.length !== originalItems.length ||
+    items.some((item, index) => item.id !== originalItems[index]?.id);
+  // Only committed order state should affect external subscription callbacks.
+  useEffect(() => {
+    hasOrderChangesRef.current = hasOrderChanges;
+    isSavingRef.current = isSaving;
+  }, [hasOrderChanges, isSaving]);
 
   useEffect(() => {
     if (!pendingReloadRef.current || hasOrderChanges || isSaving) {
@@ -1157,15 +1160,15 @@ const ListDetailsPage = () => {
   }, [isReadOnlySurface]);
 
   const revertOrder = useCallback(() => {
-    setItems(cloneListItems(originalItemsRef.current));
-  }, []);
+    setItems(cloneListItems(originalItems));
+  }, [originalItems]);
 
   const saveOrderChanges = useCallback(async () => {
     if (!list || !hasOrderChanges || isReadOnlySurface || chainView?.canSaveOrder === false) {
       return;
     }
 
-    const previousItems = cloneListItems(originalItemsRef.current);
+    const previousItems = cloneListItems(originalItems);
     isSavingRef.current = true;
     setIsSaving(true);
 
@@ -1180,7 +1183,7 @@ const ListDetailsPage = () => {
       });
 
       setItems(cloneListItems(persistedItems));
-      originalItemsRef.current = cloneListItems(persistedItems);
+      setOriginalItems(cloneListItems(persistedItems));
     } catch (error) {
       console.error('Failed to save list order', error);
       setItems(previousItems);
@@ -1197,7 +1200,7 @@ const ListDetailsPage = () => {
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [chainView, hasOrderChanges, isReadOnlySurface, items, list, listId, publishedDrift]);
+  }, [chainView, hasOrderChanges, isReadOnlySurface, items, list, listId, originalItems, publishedDrift]);
 
   const markOverflowLink = useCallback(async (item: ListPageItem) => {
     if (!chainView || !item.rowId || isReadOnlySurface) {

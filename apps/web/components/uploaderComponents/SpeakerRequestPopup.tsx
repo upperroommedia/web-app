@@ -74,7 +74,7 @@ const SpeakerRequestPopup = ({ open, setOpen }: SpeakerRequestPopupProps) => {
 
     const extension = selectedFile.name.includes('.') ? selectedFile.name.split('.').pop() ?? 'jpg' : 'jpg';
     const safeSpeakerName = sanitizeFileSegment(normalizedSpeakerName || selectedFile.name.replace(/\.[^.]+$/, ''));
-    return `${safeSpeakerName || 'speaker-request'}-${Date.now()}.${extension}`;
+    return `${safeSpeakerName || 'speaker-request'}.${extension}`;
   }, [normalizedSpeakerName, selectedFile]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -92,7 +92,7 @@ const SpeakerRequestPopup = ({ open, setOpen }: SpeakerRequestPopupProps) => {
     setFeedback(null);
 
     try {
-      const storagePath = `speaker-request-images/${Date.now()}-${rawImageFileName}`;
+      const storagePath = `speaker-request-images/${crypto.randomUUID()}-${rawImageFileName}`;
       const storageRef = ref(storage, storagePath);
       await uploadBytes(storageRef, selectedFile, {
         contentType: selectedFile.type || 'application/octet-stream',

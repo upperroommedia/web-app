@@ -1,0 +1,36 @@
+{
+  "name": "@upperroom/function-kit-firestore-send-email",
+  "version": "1.0.0",
+  "description": "Gen 2 migration of Firebase Trigger Email, based on official 0.2.10 source",
+  "license": "Apache-2.0",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && jest --runInBand"
+  },
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2",
+    "handlebars": "^4.7.8",
+    "nodemailer": "^10.1.0",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^8.0.0",
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.11"
+  }
+}
