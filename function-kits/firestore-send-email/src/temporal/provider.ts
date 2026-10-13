@@ -8,6 +8,7 @@ import config from '../config';
 import { isSendGrid, setSmtpCredentials, parseTlsOptions } from '../helpers';
 import { AuthenticatonType } from '../types';
 import { SendGridTransport } from '../nodemailer-sendgrid';
+import { isPublicEmailAddress } from './public-address';
 import type { SendGridProviderClient } from '../nodemailer-sendgrid/types';
 
 export interface EmailEgressDescriptor {
@@ -16,8 +17,14 @@ export interface EmailEgressDescriptor {
   hostname: string;
   port: number;
   tls: 'implicit' | 'starttls';
-  addresses: string[];
-  oauthTokenEgress?: { hostname: 'accounts.google.com' | 'oauth2.googleapis.com'; port: 443; addresses: string[] };
+  dnsMode?: 'static' | 'public-ipv4';
+  addresses?: string[];
+  oauthTokenEgress?: {
+    hostname: 'accounts.google.com' | 'oauth2.googleapis.com';
+    port: 443;
+    dnsMode?: 'static' | 'public-ipv4';
+    addresses?: string[];
+  };
 }
 export interface EmailProviderDescription {
   provider: 'smtp' | 'sendgrid';
@@ -69,35 +76,64 @@ export function validateEmailEgressDescriptor(
     descriptor.tls !== actual.tls
   )
     throw new Error('EMAIL_EGRESS_DESCRIPTOR_PROVIDER_MISMATCH');
-  if (
-    !Array.isArray(descriptor.addresses) ||
-    !descriptor.addresses.length ||
-    descriptor.addresses.some((address) => typeof address !== 'string' || !isIP(address))
-  )
-    throw new Error('EMAIL_EGRESS_REQUIRES_LITERAL_IPS');
+  validateEndpointMode(descriptor);
   if (actual.authentication === 'oauth2') {
     const token = descriptor.oauthTokenEgress;
-    if (
-      !token ||
-      !['accounts.google.com', 'oauth2.googleapis.com'].includes(token.hostname) ||
-      token.port !== 443 ||
-      !Array.isArray(token.addresses) ||
-      !token.addresses.length ||
-      token.addresses.some((address) => !isIP(address))
-    )
+    if (!token || !['accounts.google.com', 'oauth2.googleapis.com'].includes(token.hostname) || token.port !== 443)
       throw new Error('EMAIL_OAUTH_REVIEWED_ENDPOINT_REQUIRED');
+    validateEndpointMode(token);
   } else if (descriptor.oauthTokenEgress) throw new Error('EMAIL_OAUTH_ENDPOINT_NOT_APPLICABLE');
   return descriptor;
 }
-export async function resolveReviewedEmailEndpoint(endpoint: {
+interface ReviewedEndpoint {
   hostname: string;
-  addresses: string[];
-}): Promise<{ address: string; family: number }> {
-  const answers = isIP(endpoint.hostname)
-    ? [{ address: endpoint.hostname, family: isIP(endpoint.hostname) }]
-    : await lookup(endpoint.hostname, { all: true });
-  if (!answers.length || answers.some((answer) => !endpoint.addresses.includes(answer.address)))
-    throw new Error('EMAIL_EGRESS_DNS_DRIFT');
+  dnsMode?: 'static' | 'public-ipv4';
+  addresses?: string[];
+}
+function validateEndpointMode(endpoint: ReviewedEndpoint): void {
+  if (endpoint.dnsMode === 'public-ipv4') {
+    if (endpoint.addresses !== undefined || typeof endpoint.hostname !== 'string' || isIP(endpoint.hostname))
+      throw new Error('EMAIL_PUBLIC_DNS_REQUIRES_HOSTNAME_WITHOUT_STATIC_IPS');
+  } else if (
+    (endpoint.dnsMode !== undefined && endpoint.dnsMode !== 'static') ||
+    !Array.isArray(endpoint.addresses) ||
+    !endpoint.addresses.length ||
+    endpoint.addresses.some((address) => typeof address !== 'string' || !isPublicEmailAddress(address))
+  )
+    throw new Error('EMAIL_EGRESS_REQUIRES_PUBLIC_LITERAL_IPS');
+}
+export async function resolveReviewedEmailEndpoint(
+  endpoint: ReviewedEndpoint
+): Promise<{ address: string; family: number }> {
+  validateEndpointMode(endpoint);
+  let timer: NodeJS.Timeout | undefined;
+  let answers: { address: string; family: number }[];
+  try {
+    answers = isIP(endpoint.hostname)
+      ? [{ address: endpoint.hostname, family: isIP(endpoint.hostname) }]
+      : await Promise.race([
+          lookup(endpoint.hostname, { all: true }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('EMAIL_EGRESS_DNS_TIMEOUT')), 10000);
+          }),
+        ]);
+  } catch {
+    throw new Error('EMAIL_EGRESS_DNS_UNAVAILABLE');
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (
+    !answers.length ||
+    answers.some((answer) => isIP(answer.address) !== answer.family || !isPublicEmailAddress(answer.address))
+  )
+    throw new Error('EMAIL_EGRESS_DNS_NONPUBLIC');
+  if (endpoint.dnsMode === 'public-ipv4') {
+    const selected = answers.find((answer) => answer.family === 4);
+    if (!selected) throw new Error('EMAIL_EGRESS_PUBLIC_IPV4_REQUIRED');
+    return selected;
+  }
+  const approved = endpoint.addresses ?? [];
+  if (answers.some((answer) => !approved.includes(answer.address))) throw new Error('EMAIL_EGRESS_DNS_DRIFT');
   return answers[0];
 }
 function configuredDescriptor(): EmailEgressDescriptor {
@@ -122,16 +158,15 @@ function strictTls(): Record<string, unknown> {
   if (options.secureProtocol || options.secureOptions) throw new Error('EMAIL_TLS_LEGACY_OVERRIDES_FORBIDDEN');
   return { ...options, rejectUnauthorized: true, minVersion: options.minVersion || 'TLSv1.2' };
 }
-async function sendGridRequest(
-  descriptor: EmailEgressDescriptor,
-  apiKey: string,
+async function reviewedHttpsRequest(
+  descriptor: ReviewedEndpoint,
   method: 'GET' | 'POST',
-  body?: unknown,
+  path: string,
+  headers: Record<string, string>,
+  payload?: string,
   beforeRequest?: () => Promise<void>
 ): Promise<{ statusCode: number; headers: Record<string, any>; body: unknown }> {
   const endpoint = await resolveReviewedEmailEndpoint(descriptor);
-  if (!apiKey || /[\r\n]/.test(apiKey)) throw new Error('EMAIL_SENDGRID_API_KEY_REQUIRED');
-  const payload = body === undefined ? undefined : JSON.stringify(body);
   if (beforeRequest) await beforeRequest();
   return new Promise((resolve, reject) => {
     const request = httpsRequest(
@@ -143,12 +178,12 @@ async function sendGridRequest(
         minVersion: 'TLSv1.2',
         agent: false,
         method,
-        path: method === 'GET' ? '/v3/scopes' : '/v3/mail/send',
+        path,
         timeout: 15000,
         headers: {
+          ...headers,
           Host: descriptor.hostname,
-          Authorization: `Bearer ${apiKey}`,
-          ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
         },
       },
       (response) => {
@@ -186,6 +221,59 @@ async function sendGridRequest(
     if (payload) request.write(payload);
     request.end();
   });
+}
+async function sendGridRequest(
+  descriptor: EmailEgressDescriptor,
+  apiKey: string,
+  method: 'GET' | 'POST',
+  body?: unknown,
+  beforeRequest?: () => Promise<void>
+) {
+  if (!apiKey || /[\r\n]/.test(apiKey)) throw new Error('EMAIL_SENDGRID_API_KEY_REQUIRED');
+  return reviewedHttpsRequest(
+    descriptor,
+    method,
+    method === 'GET' ? '/v3/scopes' : '/v3/mail/send',
+    { Authorization: `Bearer ${apiKey}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body === undefined ? undefined : JSON.stringify(body),
+    beforeRequest
+  );
+}
+async function refreshReviewedOAuthToken(
+  endpoint: NonNullable<EmailEgressDescriptor['oauthTokenEgress']>,
+  credentials: Record<string, any>
+): Promise<{ token: string; expires: number }> {
+  if (
+    ![credentials.clientId, credentials.clientSecret, credentials.refreshToken].every(
+      (value) => typeof value === 'string' && value.length
+    )
+  )
+    throw new Error('EMAIL_OAUTH_CREDENTIALS_REQUIRED');
+  const body = new URLSearchParams({
+    client_id: credentials.clientId,
+    client_secret: credentials.clientSecret,
+    refresh_token: credentials.refreshToken,
+    grant_type: 'refresh_token',
+  }).toString();
+  const response = await reviewedHttpsRequest(
+    endpoint,
+    'POST',
+    endpoint.hostname === 'accounts.google.com' ? '/o/oauth2/token' : '/token',
+    { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept-Encoding': 'identity' },
+    body
+  );
+  const result = response.body as { access_token?: unknown; expires_in?: unknown };
+  if (
+    !result ||
+    typeof result.access_token !== 'string' ||
+    !result.access_token ||
+    result.access_token.length > 16384 ||
+    !Number.isFinite(result.expires_in) ||
+    Number(result.expires_in) <= 0 ||
+    Number(result.expires_in) > 86400
+  )
+    throw new Error('EMAIL_OAUTH_TOKEN_RESPONSE_INVALID');
+  return { token: result.access_token, expires: Date.now() + Number(result.expires_in) * 1000 };
 }
 export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
   verify(): Promise<void>;
@@ -245,13 +333,25 @@ export function createEmailProviderRuntime(provided?: EmailEgressDescriptor): {
   let verified = false;
   async function boundTransport(): Promise<nodemailer.Transporter> {
     const endpoint = await resolveReviewedEmailEndpoint(descriptor);
-    if (descriptor.oauthTokenEgress) await resolveReviewedEmailEndpoint(descriptor.oauthTokenEgress);
-    const auth = descriptor.oauthTokenEgress
+    const tokenEndpoint = descriptor.oauthTokenEgress;
+    const auth = tokenEndpoint
       ? {
-          ...options.auth,
-          accessUrl: `https://${descriptor.oauthTokenEgress.hostname}${
-            descriptor.oauthTokenEgress.hostname === 'accounts.google.com' ? '/o/oauth2/token' : '/token'
-          }`,
+          type: 'OAuth2',
+          user: options.auth.user,
+          provisionCallback: (
+            user: string,
+            _renew: boolean,
+            callback: (error: Error | null, token?: string, expires?: number) => void
+          ) => {
+            if (user !== options.auth.user) {
+              callback(new Error('EMAIL_OAUTH_USER_MISMATCH'));
+              return;
+            }
+            refreshReviewedOAuthToken(tokenEndpoint, options.auth).then(
+              ({ token, expires }) => callback(null, token, expires),
+              () => callback(new Error('EMAIL_OAUTH_TOKEN_EXCHANGE_FAILED'))
+            );
+          },
         }
       : options.auth;
     const transport = nodemailer.createTransport({

@@ -3,10 +3,43 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isIP } from 'node:net';
+import { BlockList, isIP } from 'node:net';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const versions = JSON.parse(await readFile(resolve(root, 'ops/temporal/versions.json'), 'utf8'));
+export const emailPublicAddressRanges = JSON.parse(
+  await readFile(resolve(root, 'function-kits/firestore-send-email/src/temporal/public-address-ranges.json'), 'utf8')
+);
+const emailExcluded = new BlockList(),
+  emailGlobalV6 = new BlockList();
+for (const [cidrs, family] of [
+  [emailPublicAddressRanges.ipv4Excluded, 'ipv4'],
+  [emailPublicAddressRanges.ipv6Excluded, 'ipv6'],
+])
+  for (const cidr of cidrs) {
+    const [address, prefix] = cidr.split('/');
+    emailExcluded.addSubnet(address, Number(prefix), family);
+  }
+const [emailGlobalV6Address, emailGlobalV6Prefix] = emailPublicAddressRanges.ipv6Global.split('/');
+emailGlobalV6.addSubnet(emailGlobalV6Address, Number(emailGlobalV6Prefix), 'ipv6');
+function publicEmailAddress(ip) {
+  return isIP(ip) === 4
+    ? !emailExcluded.check(ip, 'ipv4')
+    : isIP(ip) === 6 && emailGlobalV6.check(ip, 'ipv6') && !emailExcluded.check(ip, 'ipv6');
+}
+function validEmailEndpointMode(endpoint) {
+  return endpoint.dnsMode === 'public-ipv4'
+    ? endpoint.addresses === undefined
+    : (endpoint.dnsMode === undefined || endpoint.dnsMode === 'static') &&
+        Array.isArray(endpoint.addresses) &&
+        endpoint.addresses.length > 0 &&
+        endpoint.addresses.every((ip) => typeof ip === 'string' && publicEmailAddress(ip));
+}
+function emailEndpointPeers(endpoint) {
+  return endpoint.dnsMode === 'public-ipv4'
+    ? [{ ipBlock: { cidr: '0.0.0.0/0', except: emailPublicAddressRanges.ipv4Excluded } }]
+    : endpoint.addresses.map((ip) => ({ ipBlock: { cidr: `${ip}/${isIP(ip) === 4 ? 32 : 128}` } }));
+}
 const expectedProjects = { staging: 'urm-app-staging', production: 'urm-app' };
 const dns = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/;
 const k8sName = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
@@ -539,20 +572,18 @@ export function validateConfig(config, peer) {
       /REQUIRED|PLACEHOLDER/.test(e.hostname) ||
       isIP(e.hostname) ||
       !['implicit', 'starttls'].includes(e.tls) ||
-      !Array.isArray(e.addresses) ||
-      !e.addresses.length ||
-      e.addresses.some((a) => !isIP(a) || ['0.0.0.0', '::'].includes(a))
+      !validEmailEndpointMode(e)
     )
-      throw new Error('Email requires explicit provider/TLS hostname and reviewed literal endpoint IPs');
+      throw new Error(
+        'Email requires explicit provider/TLS hostname and static public IPs or reviewed public-ipv4 DNS mode'
+      );
     if (
       e.oauthTokenEgress &&
       (!['accounts.google.com', 'oauth2.googleapis.com'].includes(e.oauthTokenEgress.hostname) ||
         e.oauthTokenEgress.port !== 443 ||
-        !Array.isArray(e.oauthTokenEgress.addresses) ||
-        !e.oauthTokenEgress.addresses.length ||
-        e.oauthTokenEgress.addresses.some((a) => !isIP(a)))
+        !validEmailEndpointMode(e.oauthTokenEgress))
     )
-      throw new Error('OAuth email token exchange requires reviewed Google HTTPS hostname and literal IPs');
+      throw new Error('OAuth email token exchange requires reviewed Google HTTPS hostname and explicit DNS/IP mode');
     if (e.provider === 'smtp' && ![465, 587].includes(e.port))
       throw new Error('SMTP allows only reviewed TLS465 or STARTTLS587');
     if (e.provider === 'smtp' && (e.port === 465) !== (e.tls === 'implicit'))
@@ -1082,7 +1113,7 @@ export function renderPlatform(c) {
         policyTypes: ['Egress'],
         egress: [
           {
-            to: c.emailEgress.addresses.map((ip) => ({ ipBlock: { cidr: `${ip}/${isIP(ip) === 4 ? 32 : 128}` } })),
+            to: emailEndpointPeers(c.emailEgress),
             ports: [{ port: c.emailEgress.port, protocol: 'TCP' }],
           },
         ],
@@ -1092,9 +1123,7 @@ export function renderPlatform(c) {
   if (c.emailEgress?.oauthTokenEgress) {
     const emailPolicy = network.items.find((p) => p.metadata.name === 'email-reviewed-provider');
     emailPolicy.spec.egress.push({
-      to: c.emailEgress.oauthTokenEgress.addresses.map((ip) => ({
-        ipBlock: { cidr: `${ip}/${isIP(ip) === 4 ? 32 : 128}` },
-      })),
+      to: emailEndpointPeers(c.emailEgress.oauthTokenEgress),
       ports: [{ port: 443, protocol: 'TCP' }],
     });
   }
@@ -1275,6 +1304,23 @@ export function renderPlatform(c) {
         ports: [{ port: 7233, protocol: 'TCP' }],
       });
     }
+  }
+  if (c.emailEgress?.dnsMode === 'public-ipv4' || c.emailEgress?.oauthTokenEgress?.dnsMode === 'public-ipv4') {
+    // NetworkPolicy permissions are additive: keep generic HTTPS from overriding
+    // the email role's public-only rule, while retaining DNS/ADC/Temporal ingress and egress.
+    const generic = network.items.find((policy) => policy.metadata.name === 'application-worker');
+    const emailBase = structuredClone(generic);
+    generic.spec.podSelector.matchExpressions = [{ key: 'urm.temporal/role', operator: 'NotIn', values: ['email'] }];
+    emailBase.metadata.name = 'email-public-base';
+    emailBase.spec.podSelector = {
+      matchLabels: { 'app.kubernetes.io/name': 'urm-temporal-worker', 'urm.temporal/role': 'email' },
+    };
+    emailBase.spec.egress = emailBase.spec.egress.map((rule) =>
+      rule.ports.some(({ port }) => port === 443)
+        ? { ...rule, to: emailEndpointPeers({ dnsMode: 'public-ipv4' }) }
+        : rule
+    );
+    network.items.push(emailBase);
   }
   return {
     ...(c.connectionMode === 'temporal-cloud' ? {} : { values }),

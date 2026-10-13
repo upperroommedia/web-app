@@ -56,7 +56,7 @@ const config = {
     hostname: 'smtp.example.org',
     port: 465,
     tls: 'implicit',
-    addresses: ['192.0.2.10'],
+    addresses: ['64.233.179.109'],
   },
   kubernetesApiEndpoints: [
     { cidr: '10.43.0.1/32', port: 443 },
@@ -304,7 +304,7 @@ test('SMTP ports are permitted only for the email role and exact reviewed endpoi
   const policy = network.items.find((p) => p.metadata.name === 'email-reviewed-provider');
   assert.equal(policy.spec.podSelector.matchLabels['urm.temporal/role'], 'email');
   assert.deepEqual(policy.spec.egress, [
-    { to: [{ ipBlock: { cidr: '192.0.2.10/32' } }], ports: [{ port: 465, protocol: 'TCP' }] },
+    { to: [{ ipBlock: { cidr: '64.233.179.109/32' } }], ports: [{ port: 465, protocol: 'TCP' }] },
   ]);
   const generic = network.items.find((p) => p.metadata.name === 'application-worker');
   assert.ok(!generic.spec.egress.some((e) => e.ports.some((p) => [465, 587].includes(p.port))));
@@ -1394,4 +1394,82 @@ test('Platform Job polling stops on terminal failure and never waits out the suc
     /bounded deadline/
   );
   assert.equal(elapsed, 2000);
+});
+
+test('Public DNS email IPv4 policy is explicit, role/port scoped and cannot be overridden by generic additive HTTPS', () => {
+  const c = vmConfig();
+  c.emailEgress = {
+    schemaVersion: 1,
+    provider: 'smtp',
+    hostname: 'smtp.gmail.com',
+    port: 465,
+    tls: 'implicit',
+    dnsMode: 'public-ipv4',
+  };
+  validateConfig(c, vmConfig('production'));
+  const { network, worker } = renderPlatform(c);
+  const generic = network.items.find((policy) => policy.metadata.name === 'application-worker');
+  assert.deepEqual(generic.spec.podSelector.matchExpressions, [
+    { key: 'urm.temporal/role', operator: 'NotIn', values: ['email'] },
+  ]);
+  const email = network.items.find((policy) => policy.metadata.name === 'email-reviewed-provider');
+  assert.equal(email.spec.podSelector.matchLabels['urm.temporal/role'], 'email');
+  assert.deepEqual(email.spec.egress[0].ports, [{ port: 465, protocol: 'TCP' }]);
+  const ipBlock = email.spec.egress[0].to[0].ipBlock;
+  assert.equal(ipBlock.cidr, '0.0.0.0/0');
+  for (const denied of [
+    '10.0.0.0/8',
+    '100.64.0.0/10',
+    '127.0.0.0/8',
+    '169.254.0.0/16',
+    '172.16.0.0/12',
+    '192.168.0.0/16',
+    '224.0.0.0/4',
+    '240.0.0.0/4',
+  ])
+    assert.ok(ipBlock.except.includes(denied));
+  const base = network.items.find((policy) => policy.metadata.name === 'email-public-base');
+  assert.equal(base.spec.podSelector.matchLabels['urm.temporal/role'], 'email');
+  assert.deepEqual(base.spec.egress.find((rule) => rule.ports.some(({ port }) => port === 443)).to, [{ ipBlock }]);
+  assert.ok(base.spec.egress.some((rule) => rule.ports.some(({ port }) => port === 7233)));
+  assert.ok(
+    base.spec.egress.some(
+      (rule) =>
+        rule.ports.some(({ port }) => port === 80) &&
+        rule.to.some(({ ipBlock }) => ipBlock?.cidr === '169.254.169.254/32')
+    )
+  );
+  assert.equal(
+    JSON.parse(
+      worker.items.find((item) => item.kind === 'ConfigMap' && item.metadata.name === 'temporal-email-egress').data[
+        'egress.json'
+      ]
+    ).dnsMode,
+    'public-ipv4'
+  );
+  for (const emailEgress of [
+    { ...c.emailEgress, addresses: ['64.233.179.109'] },
+    { ...c.emailEgress, dnsMode: 'guess' },
+    { ...c.emailEgress, dnsMode: 'static', addresses: ['169.254.169.254'] },
+    { ...c.emailEgress, port: 25 },
+  ])
+    assert.throws(() => validateConfig({ ...c, emailEgress }, vmConfig('production')));
+  c.emailEgress.oauthTokenEgress = { hostname: 'oauth2.googleapis.com', port: 443, dnsMode: 'public-ipv4' };
+  validateConfig(c, vmConfig('production'));
+  assert.deepEqual(
+    renderPlatform(c).network.items.find((policy) => policy.metadata.name === 'email-reviewed-provider').spec.egress[1],
+    { to: [{ ipBlock }], ports: [{ port: 443, protocol: 'TCP' }] }
+  );
+  assert.throws(() =>
+    validateConfig(
+      {
+        ...c,
+        emailEgress: {
+          ...c.emailEgress,
+          oauthTokenEgress: { hostname: 'metadata.google.internal', port: 443, dnsMode: 'public-ipv4' },
+        },
+      },
+      vmConfig('production')
+    )
+  );
 });

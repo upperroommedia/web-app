@@ -41,7 +41,7 @@
     "hostname": "REQUIRED_SMTP_HOSTNAME",
     "port": 465,
     "tls": "implicit",
-    "addresses": ["REQUIRED_REVIEWED_SMTP_IP"]
+    "dnsMode": "public-ipv4"
   },
   "imagePullSecrets": ["REQUIRED_REGISTRY_PULL_SECRET"],
   "connectionMode": "temporal-cloud",

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-const mockLookup = jest.fn(async (..._args: any[]) => [{ address: '203.0.113.10', family: 4 }]);
+const mockLookup = jest.fn(async (..._args: any[]) => [{ address: '64.233.179.109', family: 4 }]);
 const mockVerify = jest.fn(async () => true);
 const mockSend = jest.fn();
 const mockClose = jest.fn();
@@ -34,7 +34,16 @@ jest.mock('node:https', () => ({
       response.headers = {};
       onResponse(response);
       queueMicrotask(() => {
-        response.emit('data', Buffer.from(JSON.stringify({ scopes: mockScopes })));
+        response.emit(
+          'data',
+          Buffer.from(
+            JSON.stringify(
+              options.path === '/token' || options.path === '/o/oauth2/token'
+                ? { access_token: 'private-access', expires_in: 3600 }
+                : { scopes: mockScopes }
+            )
+          )
+        );
         response.emit('end');
       });
     };
@@ -57,6 +66,7 @@ import {
   validateEmailEgressDescriptor,
   verifyEmailTransportNoSend,
   createEmailProviderRuntime,
+  resolveReviewedEmailEndpoint,
 } from '../../src/temporal/provider';
 const descriptor: any = {
   schemaVersion: 1,
@@ -64,14 +74,14 @@ const descriptor: any = {
   hostname: 'smtp.example.org',
   port: 465,
   tls: 'implicit',
-  addresses: ['203.0.113.10'],
+  addresses: ['64.233.179.109'],
 };
 beforeEach(() => {
   mockConfig.smtpConnectionUri = 'smtps://user@smtp.example.org:465';
   mockConfig.authenticationType = 'UsernamePassword';
   mockConfig.testing = false;
   mockConfig.tls = '{}';
-  mockLookup.mockResolvedValue([{ address: '203.0.113.10', family: 4 }]);
+  mockLookup.mockResolvedValue([{ address: '64.233.179.109', family: 4 }]);
   mockScopes = ['mail.send'];
   mockHttpsOptions.length = 0;
   mockTransports.length = 0;
@@ -94,7 +104,7 @@ test('SMTP no-send canary binds actual auth and reviewed address with original T
     mailPermissionVerified: false,
   });
   const bound = mockTransports[mockTransports.length - 1];
-  expect(bound.host).toBe('203.0.113.10');
+  expect(bound.host).toBe('64.233.179.109');
   expect(bound.tls.servername).toBe('smtp.example.org');
   expect(bound.tls.rejectUnauthorized).toBe(true);
   expect(bound.tls.minVersion).toBe('TLSv1.2');
@@ -111,8 +121,8 @@ test('endpoint mismatch and DNS drift fail before verification', async () => {
     'PROVIDER_MISMATCH'
   );
   mockLookup.mockResolvedValue([
-    { address: '203.0.113.10', family: 4 },
-    { address: '198.51.100.20', family: 4 },
+    { address: '64.233.179.109', family: 4 },
+    { address: '142.251.183.109', family: 4 },
   ]);
   await expect(verifyEmailTransportNoSend(descriptor)).rejects.toThrow('EMAIL_EGRESS_DNS_DRIFT');
   expect(mockVerify).not.toHaveBeenCalled();
@@ -132,7 +142,7 @@ test('SendGrid canary authenticates GET scopes on pinned HTTPS without sending a
   expect(JSON.stringify(proof)).not.toContain('private-key');
   expect(mockHttpsOptions).toHaveLength(1);
   expect(mockHttpsOptions[0]).toMatchObject({
-    hostname: '203.0.113.10',
+    hostname: '64.233.179.109',
     servername: 'api.sendgrid.com',
     method: 'GET',
     path: '/v3/scopes',
@@ -147,11 +157,27 @@ test('OAuth requires reviewed canonical token endpoint and preserves strict SMTP
   expect(() => validateEmailEgressDescriptor(descriptor)).toThrow('OAUTH_REVIEWED_ENDPOINT_REQUIRED');
   const oauth: any = {
     ...descriptor,
-    oauthTokenEgress: { hostname: 'oauth2.googleapis.com', port: 443, addresses: ['203.0.113.10'] },
+    oauthTokenEgress: { hostname: 'oauth2.googleapis.com', port: 443, addresses: ['64.233.179.109'] },
   };
   await verifyEmailTransportNoSend(oauth);
-  expect(mockTransports[mockTransports.length - 1].auth.accessUrl).toBe('https://oauth2.googleapis.com/token');
-  expect(mockTransports[mockTransports.length - 1].auth.refreshToken).toBe('private-refresh');
+  const auth = mockTransports[mockTransports.length - 1].auth;
+  expect(auth.provisionCallback).toEqual(expect.any(Function));
+  await new Promise<void>((resolve, reject) =>
+    auth.provisionCallback('user', false, (error: Error, token: string) => {
+      if (error) reject(error);
+      else {
+        expect(token).toBe('private-access');
+        resolve();
+      }
+    })
+  );
+  expect(mockHttpsOptions[0]).toMatchObject({
+    hostname: '64.233.179.109',
+    servername: 'oauth2.googleapis.com',
+    path: '/token',
+    method: 'POST',
+    rejectUnauthorized: true,
+  });
   expect(mockTransports[mockTransports.length - 1].tls.servername).toBe('smtp.example.org');
 });
 test('SMTP send cannot happen before provider verification', async () => {
@@ -188,3 +214,154 @@ test('the final execution fence runs after endpoint binding and before SMTP tran
   ).rejects.toThrow('STALE_EXECUTION');
   expect(mockSend).not.toHaveBeenCalled();
 });
+
+const publicDescriptor: any = { ...descriptor, addresses: undefined, dnsMode: 'public-ipv4' };
+test('public IPv4 SMTP survives normal Google DNS rotation and public AAAA records without weakening TLS', async () => {
+  mockLookup.mockResolvedValueOnce([
+    { address: '142.251.183.109', family: 4 },
+    { address: '2607:f8b0:4001:c7d::6c', family: 6 },
+  ]);
+  const runtime = createEmailProviderRuntime(publicDescriptor);
+  await runtime.verify();
+  expect(mockTransports.at(-1)).toMatchObject({
+    host: '142.251.183.109',
+    port: 465,
+    secure: true,
+    tls: { servername: 'smtp.example.org', rejectUnauthorized: true, minVersion: 'TLSv1.2' },
+  });
+  mockLookup.mockResolvedValueOnce([{ address: '64.233.179.109', family: 4 }]);
+  await runtime.send({ to: 'recipient@example.org' });
+  expect(mockTransports.at(-1).host).toBe('64.233.179.109');
+  expect(mockSend).toHaveBeenCalledTimes(1);
+});
+test.each([
+  '0.0.0.0',
+  '0.1.2.3',
+  '10.0.0.1',
+  '100.64.0.1',
+  '100.127.255.254',
+  '127.0.0.1',
+  '169.254.169.254',
+  '172.31.255.255',
+  '192.0.0.9',
+  '192.0.2.1',
+  '192.31.196.1',
+  '192.52.193.1',
+  '192.88.99.1',
+  '192.168.1.1',
+  '192.175.48.1',
+  '198.18.0.1',
+  '198.51.100.1',
+  '203.0.113.1',
+  '224.0.0.1',
+  '239.255.255.255',
+  '240.0.0.1',
+  '255.255.255.255',
+  '::',
+  '::1',
+  '::ffff:127.0.0.1',
+  '::ffff:8.8.8.8',
+  '64:ff9b::a00:1',
+  'fc00::1',
+  'fe80::1',
+  'ff02::1',
+  '2001::1',
+  '2001:db8::1',
+  '2002:7f00:1::1',
+  '3fff::1',
+])('public DNS rejects mixed public and nonpublic address %s before auth or DATA', async (address) => {
+  mockLookup.mockResolvedValue([
+    { address: '142.251.183.109', family: 4 },
+    { address, family: address.includes(':') ? 6 : 4 },
+  ]);
+  await expect(verifyEmailTransportNoSend(publicDescriptor)).rejects.toThrow('EMAIL_EGRESS_DNS_NONPUBLIC');
+  expect(mockVerify).not.toHaveBeenCalled();
+  expect(mockSend).not.toHaveBeenCalled();
+  expect(mockHttpsOptions).toHaveLength(0);
+});
+test('public DNS rejects missing IPv4, malformed/family-mismatched answers, private static descriptors and conflicting old pins', async () => {
+  expect(() => validateEmailEgressDescriptor({ ...publicDescriptor, addresses: ['64.233.179.109'] })).toThrow(
+    'WITHOUT_STATIC_IPS'
+  );
+  expect(() => validateEmailEgressDescriptor({ ...descriptor, addresses: ['169.254.169.254'] })).toThrow(
+    'PUBLIC_LITERAL_IPS'
+  );
+  expect(() => validateEmailEgressDescriptor({ ...descriptor, dnsMode: 'arbitrary' })).toThrow('PUBLIC_LITERAL_IPS');
+  mockLookup.mockResolvedValue([{ address: '2607:f8b0:4001:c7d::6c', family: 6 }]);
+  await expect(resolveReviewedEmailEndpoint(publicDescriptor)).rejects.toThrow('PUBLIC_IPV4_REQUIRED');
+  mockLookup.mockResolvedValue([{ address: '142.251.183.109', family: 6 }]);
+  await expect(resolveReviewedEmailEndpoint(publicDescriptor)).rejects.toThrow('DNS_NONPUBLIC');
+  mockLookup.mockRejectedValueOnce(new Error('secret DNS raw detail'));
+  await expect(resolveReviewedEmailEndpoint(publicDescriptor)).rejects.toThrow('EMAIL_EGRESS_DNS_UNAVAILABLE');
+});
+test('SendGrid public DNS keeps literal IPv4, original HTTPS hostname and read-only scope check', async () => {
+  mockConfig.smtpConnectionUri = 'smtps://user@smtp.sendgrid.net:465';
+  mockLookup.mockResolvedValue([{ address: '142.251.183.109', family: 4 }]);
+  await verifyEmailTransportNoSend({
+    ...publicDescriptor,
+    provider: 'sendgrid',
+    hostname: 'api.sendgrid.com',
+    port: 443,
+  });
+  expect(mockHttpsOptions.at(-1)).toMatchObject({
+    hostname: '142.251.183.109',
+    servername: 'api.sendgrid.com',
+    method: 'GET',
+    path: '/v3/scopes',
+    headers: { Host: 'api.sendgrid.com' },
+    rejectUnauthorized: true,
+  });
+  expect(mockSend).not.toHaveBeenCalled();
+});
+test('OAuth public DNS binds token refresh to literal IPv4/SNI and rejects rebinding without transmitting credentials', async () => {
+  mockConfig.authenticationType = 'OAuth2';
+  const oauth: any = {
+    ...publicDescriptor,
+    oauthTokenEgress: { hostname: 'oauth2.googleapis.com', port: 443, dnsMode: 'public-ipv4' },
+  };
+  await verifyEmailTransportNoSend(oauth);
+  const auth = mockTransports.at(-1).auth;
+  const provision = () =>
+    new Promise((resolve, reject) =>
+      auth.provisionCallback('user', false, (error: Error, token: string) => (error ? reject(error) : resolve(token)))
+    );
+  mockLookup.mockResolvedValueOnce([{ address: '142.251.183.109', family: 4 }]);
+  expect(await provision()).toBe('private-access');
+  expect(mockHttpsOptions.at(-1)).toMatchObject({
+    hostname: '142.251.183.109',
+    servername: 'oauth2.googleapis.com',
+    method: 'POST',
+    path: '/token',
+    headers: { Host: 'oauth2.googleapis.com', 'Accept-Encoding': 'identity' },
+    rejectUnauthorized: true,
+    minVersion: 'TLSv1.2',
+  });
+  const requests = mockHttpsOptions.length;
+  mockLookup.mockResolvedValueOnce([
+    { address: '142.251.183.109', family: 4 },
+    { address: '169.254.169.254', family: 4 },
+  ]);
+  await expect(provision()).rejects.toThrow('EMAIL_OAUTH_TOKEN_EXCHANGE_FAILED');
+  expect(mockHttpsOptions).toHaveLength(requests);
+  expect(mockSend).not.toHaveBeenCalled();
+});
+
+test('DNS lookup has a bounded failure even when resolver never returns', async () => {
+  jest.useFakeTimers();
+  try {
+    mockLookup.mockImplementationOnce(() => new Promise(() => undefined));
+    const resolving = resolveReviewedEmailEndpoint(publicDescriptor);
+    const assertion = expect(resolving).rejects.toThrow('EMAIL_EGRESS_DNS_UNAVAILABLE');
+    await jest.advanceTimersByTimeAsync(10000);
+    await assertion;
+  } finally {
+    jest.useRealTimers();
+  }
+});
+test.each(['0x7f000001', '2130706433', '0177.0.0.1', '127.1', 'invalid-address'])(
+  'DNS malformed address %s cannot bypass native IP validation',
+  async (address) => {
+    mockLookup.mockResolvedValue([{ address, family: 4 }]);
+    await expect(resolveReviewedEmailEndpoint(publicDescriptor)).rejects.toThrow('EMAIL_EGRESS_DNS_NONPUBLIC');
+  }
+);
