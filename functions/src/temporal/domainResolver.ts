@@ -561,6 +561,9 @@ export function createDurableDomainResolver(deps: DomainResolutionDependencies) 
     if (criticalRepair) {
       if (!deps.prepareCriticalRepair) fail('failed-precondition', 'Certified repair planning is unavailable.');
       await deps.firestore.runTransaction(async (tx) => {
+        // Public revisions can advance while the initial review audit is saved.
+        // Reject that race as a stale command before deriving its source proof.
+        await authorizedFence(tx);
         const prepared = await deps.prepareCriticalRepair!(tx, { ref, expectedRevision: input.expectedRevision });
         if (
           prepared.certificateId !== input.resolution.certificateId ||

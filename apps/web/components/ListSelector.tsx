@@ -2,17 +2,19 @@ import TextField from '@mui/material/TextField';
 import ListItem from '@mui/material/ListItem';
 import Chip from '@mui/material/Chip';
 import Autocomplete from '@mui/material/Autocomplete';
-import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect, useMemo, memo } from 'react';
+import { FunctionComponent, Dispatch, SetStateAction, useState, useEffect, useMemo, useRef, memo } from 'react';
 import DOMPurify from 'dompurify';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import NewListPopup from './NewListPopup';
-import firestore, { query, collection, getDocs, where, limit, orderBy, startAfter, QueryConstraint, QueryDocumentSnapshot } from '../firebase/firestore';
 import AddIcon from '@mui/icons-material/Add';
-import { List, listConverter, ListType, ListWithHighlight } from '../types/List';
-import { algoliasearch } from 'algoliasearch';
-import { normalizeAlgoliaListHit, searchListsIndex, isDiscoverableRootList } from '../utils/algolia/searchRecords';
+import { List, ListType, ListWithHighlight } from '../types/List';
+import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
+import { createBrowserSearchClient } from '../utils/algolia/browserSearch';
+import { browseLists, type BrowsePage } from '../utils/algolia/browseRecords';
+import { normalizeAlgoliaListHit, searchListsIndex } from '../utils/algolia/searchRecords';
 
 interface ListSelectorProps {
   sermonList: List[];
@@ -21,14 +23,43 @@ interface ListSelectorProps {
   subtitle?: List;
 }
 
-const client =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
-    : undefined;
+const client = createBrowserSearchClient();
 
 const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorProps) => {
   const [newListPopup, setNewListPopup] = useState<boolean>(false);
   const [allListArray, setAllListArray] = useState<ListWithHighlight[]>([]);
+  const [browsePage, setBrowsePage] = useState<BrowsePage<List>>();
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState<string>();
+  const browseRevision = useRef(0);
+  const browseInFlight = useRef<number | undefined>(undefined);
+  const searchRevision = useRef(0);
+  const loadMoreLists = async (reset = false) => {
+    if (!reset && browseInFlight.current !== undefined) return;
+    const revision = reset ? ++browseRevision.current : browseRevision.current;
+    browseInFlight.current = revision;
+    if (reset) {
+      setAllListArray([]);
+      setBrowsePage(undefined);
+    }
+    setBrowseLoading(true);
+    setBrowseError(undefined);
+    try {
+      const page = await browseLists(props.listType, reset ? undefined : browsePage?.cursor);
+      if (revision !== browseRevision.current) return;
+      setBrowsePage(page);
+      setAllListArray((previous) => [
+        ...new Map([...(reset ? [] : previous), ...page.items].map((item) => [item.id, item])).values(),
+      ]);
+    } catch {
+      if (revision === browseRevision.current) setBrowseError('Unable to load lists. Please try again.');
+    } finally {
+      if (revision === browseRevision.current) {
+        browseInFlight.current = undefined;
+        setBrowseLoading(false);
+      }
+    }
+  };
 
   const updateSermonList = (listWithHighlight: ListWithHighlight[]) => {
     const listArray: List[] = listWithHighlight.map((s) => {
@@ -58,60 +89,20 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
   };
 
   useEffect(() => {
-    const fetchList = async () => {
-      const targetLimit = 5;
-      const batchSize = 5; // Fetch in batches to handle filtering efficiently
-      let allValidLists: List[] = [];
-      let lastDoc: QueryDocumentSnapshot<List> | null = null;
-      let hasMore = true;
-
-      // Fetch batches until we have enough valid results or run out of documents
-      while (allValidLists.length < targetLimit && hasMore) {
-        const queryConstraints: QueryConstraint[] = [
-          limit(batchSize),
-          orderBy('updatedAtMillis', 'desc')
-        ];
-        
-        if (props.listType) {
-          queryConstraints.push(where('type', '==', props.listType));
-        }
-        
-        // Use startAfter for pagination if we have a last document
-        if (lastDoc) {
-          queryConstraints.push(startAfter(lastDoc));
-        }
-
-        const listQuery = query(collection(firestore, 'lists'), ...queryConstraints).withConverter(listConverter);
-        const listQuerySnapshot = await getDocs(listQuery);
-        
-        if (listQuerySnapshot.empty) {
-          hasMore = false;
-          break;
-        }
-
-        const validLists = listQuerySnapshot.docs
-          .map((doc) => doc.data())
-          .filter(isDiscoverableRootList);
-
-        // Add to our collection, avoiding duplicates
-        const existingIds = new Set(allValidLists.map(l => l.id));
-        const newLists = validLists.filter(list => !existingIds.has(list.id));
-        allValidLists = [...allValidLists, ...newLists].slice(0, targetLimit);
-
-        // Update lastDoc for pagination
-        lastDoc = listQuerySnapshot.docs[listQuerySnapshot.docs.length - 1];
-        
-        // If we got fewer documents than batchSize, we've reached the end
-        if (listQuerySnapshot.docs.length < batchSize) {
-          hasMore = false;
-        }
-      }
-
-      setAllListArray(allValidLists.slice(0, targetLimit));
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active) return loadMoreLists(true);
+    });
+    return () => {
+      active = false;
+      // These refs invalidate async requests; they do not hold DOM nodes.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      browseRevision.current++;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      searchRevision.current++;
     };
-    fetchList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [props.listType]);
 
   const queryAlgolia = async (query: string): Promise<ListWithHighlight[]> => {
     if (client) {
@@ -197,27 +188,36 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
             });
           }}
           onInputChange={async (_, newInputValue) => {
-            setAllListArray(await queryAlgolia(newInputValue));
+            if (client) {
+              browseRevision.current++;
+              browseInFlight.current = undefined;
+              setBrowseLoading(false);
+              const revision = ++searchRevision.current;
+              const results = await queryAlgolia(newInputValue);
+              if (revision === searchRevision.current) setAllListArray(results);
+            }
           }}
           renderOption={(props, option: ListWithHighlight) => {
             const { key: _key, ...optionProps } = props;
             return (
-            <ListItem key={option.id} {...optionProps}>
-              <AvatarWithDefaultImage
-                defaultImageURL="/user.png"
-                altName={option.name}
-                width={30}
-                height={30}
-                image={option.images?.find((image) => image.type === 'square')}
-                borderRadius={5}
-                sx={{ marginRight: '15px' }}
-              />
-              {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
-                                  <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
-              ) : (
-                <div>{option.name}</div>
-              )}
-            </ListItem>
+              <ListItem key={option.id} {...optionProps}>
+                <AvatarWithDefaultImage
+                  defaultImageURL="/user.png"
+                  altName={option.name}
+                  width={30}
+                  height={30}
+                  image={option.images?.find((image) => image.type === 'square')}
+                  borderRadius={5}
+                  sx={{ marginRight: '15px' }}
+                />
+                {option._highlightResult && allListArray.find((s) => s.id === option?.id) === undefined ? (
+                  <div
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}
+                  ></div>
+                ) : (
+                  <div>{option.name}</div>
+                )}
+              </ListItem>
             );
           }}
           getOptionLabel={(option: ListWithHighlight) => option.name}
@@ -248,6 +248,15 @@ const ListSelector: FunctionComponent<ListSelectorProps> = (props: ListSelectorP
           </IconButton>
         )}
       </Box>
+      {!client && (
+        <Typography variant="caption">Search is unavailable. Filter the lists loaded below, or load more.</Typography>
+      )}
+      {browseError && <Typography color="error">{browseError}</Typography>}
+      {!client && (browsePage?.hasMore || browseError) && (
+        <Button disabled={browseLoading} onClick={() => void loadMoreLists()}>
+          {browseError ? 'Retry loading lists' : 'Load more lists'}
+        </Button>
+      )}
       <NewListPopup
         newListPopup={newListPopup}
         setNewListPopup={setNewListPopup}

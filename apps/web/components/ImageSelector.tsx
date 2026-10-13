@@ -22,21 +22,20 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
-import { algoliasearch, SearchResponse } from 'algoliasearch';
+import { SearchResponse } from 'algoliasearch';
+import { createBrowserSearchClient } from '../utils/algolia/browserSearch';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import InputAdornment from '@mui/material/InputAdornment';
 import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
 import { ingestDurableImage } from '../utils/durableImages';
 import { useDurableJob } from '../hooks/useDurableJobs';
 import JobStatusPanel from './jobs/JobStatusPanel';
 import { doc, getDoc } from '../firebase/firestore';
 import { reportHandledError } from '../utils/reportHandledError';
 
-const client =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
-    : undefined;
+const client = createBrowserSearchClient();
 
 const InfinitScrollMessage = ({ message }: { message: string }) => (
   <p style={{ flexBasis: '100%', textAlign: 'center' }}>
@@ -69,27 +68,39 @@ const ImageSelector = (props: {
   const { job: imageJob, stale: imageStale } = useDurableJob(imageJobId);
   const handledImageJob = useRef<string | undefined>(undefined);
 
-  const fetchMoreImages = async () => {
-    if (!lastImage || pageInFlight.current) return;
+  const imageBrowseRevision = useRef(0);
+  const [imageBrowseError, setImageBrowseError] = useState<string>();
+  const fetchImages = async (reset = false) => {
+    if (!reset && (!lastImage || pageInFlight.current)) return;
+    const revision = reset ? ++imageBrowseRevision.current : imageBrowseRevision.current;
+    if (reset) {
+      setImages([]);
+      setLastImage(undefined);
+    }
     pageInFlight.current = true;
+    setImageBrowseError(undefined);
     try {
       const q = query(
         collection(firestore, 'images'),
         limit(25),
         where('type', '==', props.selectedImageFromSpeakerDetails.type),
         orderBy('dateAddedMillis', 'desc'),
-        startAfter(lastImage)
+        ...(reset ? [] : [startAfter(lastImage!)])
       );
-      const querySnapshot = await getDocs(q);
-      setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
-      const nextImages = querySnapshot.docs.map((doc) => doc.data() as ImageType);
-      setImages((oldImages) =>
-        Array.from(new Map([...oldImages, ...nextImages].map((image) => [image.id, image])).values())
+      const snapshot = await getDocs(q);
+      if (revision !== imageBrowseRevision.current) return;
+      setLastImage(snapshot.size === 25 ? snapshot.docs.at(-1) : undefined);
+      const nextImages = snapshot.docs.map((doc) => doc.data() as ImageType);
+      setImages((previous) =>
+        Array.from(new Map([...(reset ? [] : previous), ...nextImages].map((image) => [image.id, image])).values())
       );
+    } catch {
+      if (revision === imageBrowseRevision.current) setImageBrowseError('Unable to load images. Please try again.');
     } finally {
-      pageInFlight.current = false;
+      if (revision === imageBrowseRevision.current) pageInFlight.current = false;
     }
   };
+  const fetchMoreImages = () => fetchImages();
 
   const searchImages = async (query: string, hitsPerPage: number, page: number) => {
     const images: AlgoliaImage[] = [];
@@ -115,24 +126,18 @@ const ImageSelector = (props: {
   };
 
   useEffect(() => {
-    const fetchImages = async () => {
-      const q = query(
-        collection(firestore, 'images'),
-        limit(25),
-        where('type', '==', props.selectedImageFromSpeakerDetails.type),
-        orderBy('dateAddedMillis', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
-      setImages(querySnapshot.docs.map((doc) => doc.data() as ImageType));
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active) return fetchImages(true);
+    });
+    return () => {
+      active = false;
+      // This generation invalidates pending reads, rather than referencing a DOM node.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      imageBrowseRevision.current++;
     };
-
-    const g = async () => {
-      await fetchImages();
-    };
-    g();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [props.selectedImageFromSpeakerDetails.type]);
 
   useEffect(() => {
     const focusTimer = window.setTimeout(() => {
@@ -188,12 +193,19 @@ const ImageSelector = (props: {
   return (
     <div>
       {uploadError && <Alert severity="error">{uploadError}</Alert>}
+      {imageBrowseError && (
+        <Alert severity="error" action={<Button onClick={() => void fetchImages(!lastImage)}>Retry</Button>}>
+          {imageBrowseError}
+        </Alert>
+      )}
       {imageJob && <JobStatusPanel job={imageJob} stale={imageStale} compact />}
       {imageUploading ? (
         <CircularProgress />
       ) : (
         <>
           <TextField
+            disabled={!client}
+            helperText={!client ? 'Search is unavailable. Browse images below.' : undefined}
             autoFocus
             inputRef={searchInputRef}
             value={imageSearchQuery}

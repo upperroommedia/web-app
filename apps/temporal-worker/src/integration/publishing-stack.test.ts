@@ -79,6 +79,25 @@ jest.mock('../../../../functions/src/temporal/publishing/firebaseDependencies', 
     },
   };
 });
+jest.mock('../runtime/private-compilation', () => {
+  const actual = jest.requireActual('../runtime/private-compilation');
+  return {
+    ...actual,
+    createCriticalRepairCompilationActivities: (...args: unknown[]) => {
+      const activities = actual.createCriticalRepairCompilationActivities(...args);
+      return {
+        ...activities,
+        compilePublishingCriticalRepairEvidence: async (...input: unknown[]) => {
+          const result = await activities.compilePublishingCriticalRepairEvidence(...input);
+          // Source compilation returning ready precedes its public capability refresh.
+          // Synchronize review with the completed control activity, not that earlier event.
+          mockCompletedCompilerResults.push(result.state);
+          return result;
+        },
+      };
+    },
+  };
+});
 jest.mock('../../../../functions/src/temporal/publishing/criticalRepairCompilation', () => {
   const actual = jest.requireActual('../../../../functions/src/temporal/publishing/criticalRepairCompilation');
   return {
@@ -211,6 +230,7 @@ async function mockTracePrivateSource<T>(operation: string, invoke: () => Promis
     throw error;
   }
 }
+const mockCompletedCompilerResults: string[] = [];
 const mockPrivateCompilerResults: Array<{ state: string; code?: string }> = [];
 const mockPrivateBindingSnapshots: Array<Record<string, unknown>> = [];
 async function capturePrivateBindings(jobId: string, stage: string) {
@@ -331,6 +351,7 @@ test.each([
   async ({ action, revokeAfterAck }) => {
     mockPrivateSourceFailures.length = 0;
     mockPrivateCompilerResults.length = 0;
+    mockCompletedCompilerResults.length = 0;
     mockPrivateBindingSnapshots.length = 0;
     mockDiagnosticStage = 'desired';
     const db = firebaseAdmin.firestore(),
@@ -781,7 +802,10 @@ test.each([
       if (revokeAfterAck) {
         const blocked = await awaitJob(
           jobId,
-          (job) => job.state === 'needs_attention' && job.attention?.resolutionKind === 'critical_repair'
+          (job) =>
+            job.state === 'needs_attention' &&
+            job.attention?.resolutionKind === 'critical_repair' &&
+            mockCompletedCompilerResults.includes('ready')
         );
         expect((await sermon.get()).get('title')).toBe('Old title');
         expect(blocked.actions).toEqual(['resolve']);

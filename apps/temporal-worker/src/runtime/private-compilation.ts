@@ -4,10 +4,11 @@ import {
   CRITICAL_REPAIR_SOURCE_CATALOGS,
 } from '../../../../functions/src/temporal/publishing/criticalRepairCatalog';
 import type { Firestore, Transaction, DocumentReference } from 'firebase-admin/firestore';
-import type { DurableJobRef } from '@upperroom/contracts/temporal';
+import type { DurableJob, DurableJobRef } from '@upperroom/contracts/temporal';
 import type { createDurableJobStore } from '@upperroom/orchestration/job-store';
 import { ACKNOWLEDGED_REPAIR_CANDIDATES } from '../../../../functions/src/temporal/publishing/acknowledgedRepairCandidate';
 import { compilePublishingCriticalRepairEvidence } from '../../../../functions/src/temporal/publishing/criticalRepairCompilation';
+import { preparePublishingCriticalRepair } from '../../../../functions/src/temporal/publishing/criticalRepair';
 type Store = Pick<ReturnType<typeof createDurableJobStore>, 'assertCurrentInTransaction' | 'loadJob' | 'project'>;
 const deny = (): never => {
   throw Object.assign(new Error('Private repair compilation scope is invalid'), { code: 'PERMISSION_CHANGED' });
@@ -92,8 +93,32 @@ export function createCriticalRepairCompilationActivities(
         throw error;
       }
       if (result.state === 'ready') {
-        const job = await store.loadJob(ref);
+        let job = await store.loadJob(ref);
         if (['needs_attention', 'reconciling', 'cancel_requested'].includes(job.state)) {
+          // Duplicate evidence notifications must not invalidate an administrator's
+          // unchanged review by advancing its public revision again. Compare the
+          // freshly derived source capability under the current SDK transaction.
+          if (job.attention?.resolutionKind === 'critical_repair' && job.attention.certificateId) {
+            const checked = await db.runTransaction(async (tx) => {
+              await store.assertCurrentInTransaction(tx, ref);
+              const current = await tx.get(db.doc(`durableJobs/${ref.jobId}`));
+              const fresh = current.data() as DurableJob;
+              if (
+                !['needs_attention', 'reconciling', 'cancel_requested'].includes(fresh.state) ||
+                fresh.attention?.resolutionKind !== 'critical_repair' ||
+                !fresh.attention.certificateId
+              )
+                return { job: fresh, unchanged: false };
+              const prepared = await preparePublishingCriticalRepair(tx, db, {
+                ref,
+                expectedRevision: fresh.revision,
+              });
+              return { job: fresh, unchanged: prepared.certificateId === fresh.attention.certificateId };
+            });
+            job = checked.job;
+            if (checked.unchanged || !['needs_attention', 'reconciling', 'cancel_requested'].includes(job.state))
+              return { state: 'ready' };
+          }
           try {
             await store.project(ref, {
               expectedRevision: job.revision,
@@ -104,6 +129,9 @@ export function createCriticalRepairCompilationActivities(
             });
           } catch (error) {
             if ((error as { code?: unknown })?.code !== 'STALE_REVISION') throw error;
+            // No capability was refreshed. Re-evaluate the fresh source/job on the
+            // next bounded control page rather than wait for another notification.
+            return { state: 'pending', progressed: true };
           }
         }
       }

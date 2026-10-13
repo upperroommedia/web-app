@@ -1007,6 +1007,28 @@ describe('certified critical repair approval', () => {
     expect(f.docs.has('durableJobCommands/critical')).toBe(true);
     expect(f.docs.has(`temporalPublishingCriticalRepairs/${f.certificateId}`)).toBe(true);
   });
+  test('revision advancement after the review audit aborts before source planning or grant writes', async () => {
+    const f = criticalFixture();
+    const transact = f.deps.firestore.runTransaction.bind(f.deps.firestore);
+    let advanced = false;
+    f.deps.firestore.runTransaction = (async (invoke: Parameters<typeof transact>[0]) => {
+      const result = await transact(invoke);
+      if (
+        !advanced &&
+        [...f.docs].some(
+          ([path, record]) => path.startsWith('durableJobResolutionRequests/') && record.state === 'verifying'
+        )
+      ) {
+        advanced = true;
+        f.docs.get('durableJobs/job1')!.revision = 6;
+      }
+      return result;
+    }) as typeof f.deps.firestore.runTransaction;
+    await expect(f.resolve(f.input)).rejects.toMatchObject({ code: 'aborted' });
+    expect(f.deps.prepareCriticalRepair).not.toHaveBeenCalled();
+    expect(f.docs.has('durableJobCriticalRepairGrants/job1')).toBe(false);
+    expect(f.docs.has(`temporalPublishingCriticalRepairs/${f.certificateId}`)).toBe(false);
+  });
   test('source-certified legacy retention requires explicit acknowledgement and pins only source IDs', async () => {
     const f = criticalFixture();
     const sourceId = 'e'.repeat(64);

@@ -9,6 +9,12 @@ import type {
 } from '@upperroom/contracts/generateAlgoliaSecureApiKey';
 import { isDevelopment } from '../../firebase/firebase';
 import { createMockAlgoliaSearchClient } from '../../utils/mockAlgoliaSearchClient';
+import {
+  browserAlgoliaAppId,
+  browserAlgoliaApiKey,
+  browserSearchUnavailableMessage,
+  externalSearchDisabled,
+} from '../../utils/algolia/browserSearch';
 
 type AlgoliaSearchContextValue = {
   appId: string | null;
@@ -49,17 +55,23 @@ const getCallableErrorCode = (error: unknown): string | null => {
 
 export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
-  const appId = process.env.NEXT_PUBLIC_ALGOLIA_APP_ID ?? null;
-  const adminApiKey = process.env.NEXT_PUBLIC_ALGOLIA_API_KEY ?? null;
+  const appId = browserAlgoliaAppId;
+  const adminApiKey = browserAlgoliaApiKey;
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(!isDevelopment && !appId ? browserSearchUnavailableMessage : null);
   const [sermonSearchRevision, setSermonSearchRevision] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
 
     const initSearchKey = async () => {
+      if (!isDevelopment && (!appId || externalSearchDisabled)) {
+        setApiKey(null);
+        setLoading(false);
+        setError(browserSearchUnavailableMessage);
+        return;
+      }
       if (!appId || !user) {
         setApiKey(null);
         setLoading(false);
@@ -70,7 +82,7 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
       if (user.isAdmin()) {
         setApiKey(adminApiKey);
         setLoading(false);
-        setError(null);
+        setError(adminApiKey ? null : browserSearchUnavailableMessage);
         return;
       }
 
@@ -85,10 +97,9 @@ export const AlgoliaSearchProvider = ({ children }: { children: React.ReactNode 
       setError(null);
 
       try {
-        const generateSecuredApiKey = createFunction<
-          GenerateSecuredApiKeyInputType,
-          GenerateSecuredApiKeyOutputType
-        >('generatesecuredapikey');
+        const generateSecuredApiKey = createFunction<GenerateSecuredApiKeyInputType, GenerateSecuredApiKeyOutputType>(
+          'generatesecuredapikey'
+        );
         let securedKey: GenerateSecuredApiKeyOutputType;
         try {
           securedKey = await generateSecuredApiKey({ userId: user.uid });

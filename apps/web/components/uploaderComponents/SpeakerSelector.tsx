@@ -9,7 +9,7 @@ import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import { List, ListType, listConverter } from '../../types/List';
 import DOMPurify from 'dompurify';
-import { algoliasearch, SearchClient, SearchResponse } from 'algoliasearch';
+import { SearchClient, SearchResponse } from 'algoliasearch';
 import { Sermon } from '../../types/SermonTypes';
 import { ImageType } from '../../types/Image';
 import { getErrorMessage, showError } from './utils';
@@ -19,6 +19,8 @@ import { isDiscoverableRootList } from '../../utils/algolia/searchRecords';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
+import { createBrowserSearchClient } from '../../utils/algolia/browserSearch';
+import { browseSpeakers, type BrowsePage } from '../../utils/algolia/browseRecords';
 
 interface AlgoliaSpeaker extends ISpeaker {
   nbHits?: number;
@@ -49,11 +51,13 @@ const client: SearchClient | undefined = isDevelopment
       userId: '',
       canSearchAllSermons: true,
     })
-  : process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
-    : undefined;
+  : createBrowserSearchClient();
 
-export const fetchSpeakerResults = async (query: string, hitsPerPage: number, page: number): Promise<AlgoliaSpeaker[]> => {
+export const fetchSpeakerResults = async (
+  query: string,
+  hitsPerPage: number,
+  page: number
+): Promise<AlgoliaSpeaker[]> => {
   if (client) {
     try {
       const response = await client.search<AlgoliaSpeaker>({
@@ -99,9 +103,37 @@ function SpeakerSelector({
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
+  const [browsePage, setBrowsePage] = useState<BrowsePage<ISpeaker>>();
+  const [browseError, setBrowseError] = useState<string>();
+  const browseInFlight = useRef(false);
+  const loadMoreSpeakers = async (reset = false) => {
+    if (!reset && browseInFlight.current) return;
+    browseInFlight.current = true;
+    const revision = ++latestSearchRequestRef.current;
+    setSearchLoading(true);
+    setBrowseError(undefined);
+    try {
+      const page = await browseSpeakers(reset ? undefined : browsePage?.cursor);
+      if (revision !== latestSearchRequestRef.current) return;
+      setBrowsePage(page);
+      setSpeakersArray((previous) => getSpeakersUnion(reset ? [] : previous, page.items));
+    } catch {
+      if (revision === latestSearchRequestRef.current) setBrowseError('Unable to load speakers. Please try again.');
+    } finally {
+      if (revision === latestSearchRequestRef.current) {
+        browseInFlight.current = false;
+        setSearchLoading(false);
+        setHasCompletedSearch(true);
+      }
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!client) {
+        await loadMoreSpeakers(true);
+        return;
+      }
       setSearchLoading(true);
       const requestId = ++latestSearchRequestRef.current;
       const speakerResults = await fetchSpeakerResults('', 20, 0);
@@ -112,7 +144,13 @@ function SpeakerSelector({
       setSearchLoading(false);
       setHasCompletedSearch(true);
     };
-    fetchData();
+    void fetchData();
+    return () => {
+      // This generation invalidates pending reads, rather than referencing a DOM node.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      latestSearchRequestRef.current++;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -198,6 +236,7 @@ function SpeakerSelector({
         }}
         onInputChange={(_, value) => {
           setSearchInput(value);
+          if (!client) return; // MUI filters the loaded browse pages locally.
           setHasCompletedSearch(false);
           if (timerRef.current) {
             clearTimeout(timerRef.current);
@@ -288,20 +327,20 @@ function SpeakerSelector({
           const { key: _key, ...optionProps } = props;
           return (
             <ListItem key={option.id} {...optionProps}>
-            <AvatarWithDefaultImage
-              defaultImageURL="/user.png"
-              altName={option.name}
-              width={30}
-              height={30}
-              image={option.images?.find((image) => image.type === 'square')}
-              borderRadius={5}
-              sx={{ marginRight: '15px' }}
-            />
-            {option._highlightResult && sermonSpeakers?.find((s) => s.id === option?.id) === undefined ? (
-              <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
-            ) : (
-              <div>{option.name}</div>
-            )}
+              <AvatarWithDefaultImage
+                defaultImageURL="/user.png"
+                altName={option.name}
+                width={30}
+                height={30}
+                image={option.images?.find((image) => image.type === 'square')}
+                borderRadius={5}
+                sx={{ marginRight: '15px' }}
+              />
+              {option._highlightResult && sermonSpeakers?.find((s) => s.id === option?.id) === undefined ? (
+                <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(option._highlightResult.name.value) }}></div>
+              ) : (
+                <div>{option.name}</div>
+              )}
             </ListItem>
           );
         }}
@@ -319,6 +358,17 @@ function SpeakerSelector({
           );
         }}
       />
+      {!client && (
+        <Typography variant="caption">
+          Search is unavailable. Filter the speakers loaded below, or load more.
+        </Typography>
+      )}
+      {browseError && <Typography color="error">{browseError}</Typography>}
+      {!client && (browsePage?.hasMore || browseError) && (
+        <Button disabled={searchLoading} onClick={() => void loadMoreSpeakers()}>
+          {browseError ? 'Retry loading speakers' : 'Load more speakers'}
+        </Button>
+      )}
     </>
   );
 }

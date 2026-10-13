@@ -1,4 +1,9 @@
 env:
+  - variable: NEXT_PUBLIC_ALGOLIA_SEARCH_ENABLED
+    value: 'false'
+    availability:
+      - BUILD
+      - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     value: urm-app-staging
     availability:
