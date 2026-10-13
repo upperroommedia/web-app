@@ -82,6 +82,17 @@ async function fixture(action, { firebase = manifest, sourceFiles = {} } = {}) {
         })
       );
     }
+    for (const entry of (Array.isArray(firebase.functions) ? firebase.functions : [firebase.functions]).filter(
+      (entry) => entry?.kit
+    )) {
+      await mkdir(join(root, entry.source), { recursive: true });
+      const pkg = { name: entry.kit, version: '1.0.0' };
+      await writeFile(join(root, entry.source, 'package.json'), JSON.stringify(pkg));
+      await writeFile(
+        join(root, entry.source, 'package-lock.json'),
+        JSON.stringify({ name: pkg.name, lockfileVersion: 3, packages: { '': pkg } })
+      );
+    }
     for (const [file, contents] of Object.entries(sourceFiles)) {
       await mkdir(dirname(join(root, file)), { recursive: true });
       await writeFile(join(root, file), contents);
@@ -290,4 +301,18 @@ test('Deployment source refuses absent, modified and stale npm locks even before
       }
       assert.throws(() => assertCheckoutSource(root, commit));
     });
+});
+
+test('kit deployment locks are immutable even when source/config metadata is otherwise clean', async () => {
+  for (const change of ['modified', 'missing', 'symlink']) {
+    await fixture(async (root, commit) => {
+      const file = join(root, 'function-kits/email/package-lock.json');
+      if (change === 'modified') await writeFile(file, '{}');
+      else {
+        await rm(file);
+        if (change === 'symlink') await symlink('../search/package-lock.json', file);
+      }
+      assert.throws(() => assertCheckoutSource(root, commit), /package-lock.json/);
+    });
+  }
 });

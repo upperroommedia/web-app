@@ -7,6 +7,7 @@ import {
   validateNpmDeploymentLock,
 } from './materialize-catalog-for-firebase.mjs';
 import { selectKitDeployConfig, selectLegacyDeployConfig } from './create-kit-deploy-config.mjs';
+import { deployedKitSources, validateKitNpmLock } from './kit-npm-lock-contract.mjs';
 import { firebaseEnvironmentSources, flagsForControl, upsertFunctionFlags } from './temporal-release-lib.mjs';
 
 export function assertCheckoutCommit(actual, claimed) {
@@ -47,6 +48,19 @@ export function assertCheckoutSource(root, commit, { project, control } = {}) {
       JSON.parse(pinned),
       original('pnpm-workspace.yaml')
     );
+  }
+  for (const source of deployedKitSources(input)) {
+    const file = `${source}/package-lock.json`,
+      path = resolve(root, file),
+      pinned = original(file);
+    if (
+      !existsSync(path) ||
+      !lstatSync(path).isFile() ||
+      lstatSync(path).isSymbolicLink() ||
+      readFileSync(path, 'utf8') !== pinned
+    )
+      throw new Error(`Deployment source differs from pinned commit: ${file}`);
+    validateKitNpmLock(JSON.parse(original(`${source}/package.json`)), JSON.parse(pinned));
   }
   const environmentFiles = project
     ? firebaseEnvironmentSources(input, project).map((source) => `${source}/.env.${project}`)

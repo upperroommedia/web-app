@@ -1660,7 +1660,7 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-core/package.json": {
-    "mtime": 1791915151.8545537,
+    "mtime": 1791923235.6901,
     "ast_hash": "d3ff8de16f9bca229184f6577e585802",
     "semantic_hash": ""
   },
@@ -1680,7 +1680,7 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-image/package.json": {
-    "mtime": 1791915198.3495142,
+    "mtime": 1791923235.6908627,
     "ast_hash": "017ec90265381822850fd38fa459bc6b",
     "semantic_hash": ""
   },
@@ -1700,7 +1700,7 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-integrations/package.json": {
-    "mtime": 1791915199.3225386,
+    "mtime": 1791923235.6912072,
     "ast_hash": "67085f7150921f28b0f5a7a056c5f3b5",
     "semantic_hash": ""
   },
@@ -1720,7 +1720,7 @@
     "semantic_hash": "d3ff41fc8c9813cb745272d91f15dffe"
   },
   "functions-media/package.json": {
-    "mtime": 1791915194.4197197,
+    "mtime": 1791923235.691603,
     "ast_hash": "b0e128087b0952334c8cd08b63be9248",
     "semantic_hash": ""
   },
@@ -2415,9 +2415,9 @@
     "semantic_hash": ""
   },
   "functions/src/sentryBuildInfo.ts": {
-    "mtime": 1791919054.296408,
-    "ast_hash": "c79b85ab2f140e33593c1014ec98c6af",
-    "semantic_hash": "c79b85ab2f140e33593c1014ec98c6af"
+    "mtime": 1791925632.4779122,
+    "ast_hash": "1708475eff857aec650178f0033f0f4b",
+    "semantic_hash": ""
   },
   "functions/src/setUserRole.ts": {
     "mtime": 1791914369.7007527,
@@ -6915,8 +6915,8 @@
     "semantic_hash": ""
   },
   "scripts/temporal-release.mjs": {
-    "mtime": 1791914370.448183,
-    "ast_hash": "b7857ad38c5f782689ca30e4144b876a",
+    "mtime": 1791927037.7377408,
+    "ast_hash": "63943ea2e6298e7954f4df0d7e8c9452",
     "semantic_hash": ""
   },
   "scripts/temporal-release.test.mjs": {
@@ -6990,8 +6990,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/temporal-application-validation.yml": {
-    "mtime": 1791919016.808302,
-    "ast_hash": "9df613f09c85e722baef7645e9517b08",
+    "mtime": 1791923959.9445872,
+    "ast_hash": "b8e1ac55a05958c273de87cd481daf90",
     "semantic_hash": ""
   },
   ".github/workflows/temporal-platform-deploy.yml": {
@@ -7085,8 +7085,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/OPERATIONS.md": {
-    "mtime": 1791919039.7796946,
-    "ast_hash": "5310bf4f75ec45969fcfc2400eeadcee",
+    "mtime": 1791927060.2773376,
+    "ast_hash": "ce6ea8892915ee8b2024ea109d6bfd89",
     "semantic_hash": ""
   },
   "docs/temporal/OPERATOR_REVIEW.md": {
@@ -7170,18 +7170,18 @@
     "semantic_hash": ""
   },
   "scripts/temporal-deploy-source.mjs": {
-    "mtime": 1791918839.047785,
-    "ast_hash": "17c1399d1bb1aef7ec81ce4fb0376834",
+    "mtime": 1791925097.7144473,
+    "ast_hash": "14d7e5f2d36c2e9d8eb5e9ae6991a8dd",
     "semantic_hash": ""
   },
   "scripts/temporal-deploy-source.test.mjs": {
-    "mtime": 1791918839.074555,
-    "ast_hash": "e2c4aa9edea2fb1cdbaa6457aff73f2d",
+    "mtime": 1791925140.468949,
+    "ast_hash": "cc18d1f90b7565408a0f1fad79f23824",
     "semantic_hash": ""
   },
   "scripts/tests/temporal-legacy-upload-drain.firestore.test.mjs": {
-    "mtime": 1791914370.4659014,
-    "ast_hash": "7c339c500d4317288a68358641ee48c6",
+    "mtime": 1791927038.857944,
+    "ast_hash": "2559cece1c6df7e3c8114a861266b819",
     "semantic_hash": ""
   },
   "ops/temporal/DEPLOY_GUARD.md": {
@@ -7250,13 +7250,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-recover-initial-compatibility.mjs": {
-    "mtime": 1791916084.5843234,
-    "ast_hash": "955f7b88acb051f69665bfb7e21ba4b9",
+    "mtime": 1791925261.2183955,
+    "ast_hash": "6a90a6859a88255cebf669f2b376faba",
     "semantic_hash": ""
   },
   "scripts/temporal-recover-initial-compatibility.test.mjs": {
-    "mtime": 1791916116.978762,
-    "ast_hash": "996ffe9cc7270727511db21bad1c3da7",
+    "mtime": 1791925262.391142,
+    "ast_hash": "17178f8dbbb22f73b4e0762c78ca14c9",
     "semantic_hash": ""
   },
   "scripts/tests/functions-isolated-startup.test.mjs": {
@@ -7272,6 +7272,46 @@
   "scripts/materialize-catalog-for-firebase.test.mjs": {
     "mtime": 1791918862.5715358,
     "ast_hash": "92abe1605bfa97ed03c2df5c103ee7b4",
+    "semantic_hash": ""
+  },
+  "scripts/kit-npm-lock-contract.mjs": {
+    "mtime": 1791925097.6384525,
+    "ast_hash": "69d0ad82596012140b8be5513b4d2665",
+    "semantic_hash": ""
+  },
+  "scripts/kit-npm-lock-contract.test.mjs": {
+    "mtime": 1791925097.6478755,
+    "ast_hash": "399e9cdbacc7e688628975477b7e730b",
+    "semantic_hash": ""
+  },
+  "scripts/kit-npm-locks.mjs": {
+    "mtime": 1791925339.5028927,
+    "ast_hash": "d2d0fcd2e0ba526e57fe68a6f12f3b3a",
+    "semantic_hash": ""
+  },
+  "scripts/tests/fixtures/functions-framework/package.json": {
+    "mtime": 1791925097.7030156,
+    "ast_hash": "cae43a2799fd0c5d469c63df384e3564",
+    "semantic_hash": ""
+  },
+  "scripts/tests/fixtures/image-kit-darwin-lock.json": {
+    "mtime": 1791925176.0791087,
+    "ast_hash": "f6bdfea6d7689c9245239ab3eb3f3044",
+    "semantic_hash": ""
+  },
+  "scripts/tests/kits-isolated-startup.test.mjs": {
+    "mtime": 1791925339.5032108,
+    "ast_hash": "a05d9613d00b17b7d2f241106bf63f02",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-compatibility-cutoff.mjs": {
+    "mtime": 1791927038.7528086,
+    "ast_hash": "7f892bd4a52700909fda04dbe517d9a6",
+    "semantic_hash": ""
+  },
+  "scripts/temporal-compatibility-cutoff.test.mjs": {
+    "mtime": 1791927061.0351336,
+    "ast_hash": "55faeedfe0a4d9da0ade59ea330ed9af",
     "semantic_hash": ""
   }
 }

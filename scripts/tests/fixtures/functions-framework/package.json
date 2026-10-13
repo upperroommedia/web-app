@@ -1,0 +1,11 @@
+{
+  "name": "urm-cloud-functions-framework-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "3.5.1"
+  }
+}
