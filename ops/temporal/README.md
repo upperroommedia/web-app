@@ -2,7 +2,7 @@
 
 ## Hosting comparison, checked 2026-10-12
 
-Temporal Cloud is the selected orchestration service. Production and staging namespaces are active in GCP `us-central1`, matching both Firebase App Hosting backends. Each namespace uses a single region with no disaster-recovery replica. The staging worker server has been provisioned; application worker deployment remains pending. Production worker infrastructure has not yet been provisioned.
+Temporal Cloud is the selected orchestration service. Production and staging namespaces are active in GCP `us-central1`, matching both Firebase App Hosting backends. Each namespace uses a single region with no disaster-recovery replica. The staging worker server and all five enabled worker roles are deployed. Original-run restart, zero-activity history replay, routing and live monitoring verification pass; application dispatch remains disabled pending application cutover. Production worker infrastructure has not yet been provisioned.
 
 [Temporal's current direct pricing](https://temporal.io/pricing) lists no base monthly fee, $50 per million actions, $0.042/GB-hour of active history, $0.00105/GB-hour of retained history and developer support at 10% of usage. Using 730 hours/month gives these illustrative estimates, before taxes, networking, HA add-ons or discounts:
 

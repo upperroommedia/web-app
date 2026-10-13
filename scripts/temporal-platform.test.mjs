@@ -1023,6 +1023,20 @@ test('Actual simple VM identity cannot borrow the other project, attached accoun
     { status: 'TERMINATED' },
     { zone: 'zones/us-east4-a' },
     { serviceAccounts: [{ email: 'default' }] },
+    { serviceAccounts: [{ email: c.gce.serviceAccount, scopes: 'https://www.googleapis.com/auth/cloud-platform' }] },
+    {
+      serviceAccounts: [
+        {
+          email: c.gce.serviceAccount,
+          scopes: ['https://evil.invalid/https://www.googleapis.com/auth/cloud-platform'],
+        },
+      ],
+    },
+    {
+      serviceAccounts: [
+        { email: c.gce.serviceAccount, scopes: ['https://www.googleapis.com/auth/cloud-platform.evil.invalid'] },
+      ],
+    },
     { networkInterfaces: [{ networkIP: '10.0.0.9' }] },
   ])
     assert.throws(() => validateGceInstance(c, { ...instance, ...overrides }));

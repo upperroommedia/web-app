@@ -12530,8 +12530,8 @@
     "semantic_hash": ""
   },
   "apps/web/utils/durableJobPanels.render.test.tsx": {
-    "mtime": 1791867910.8701153,
-    "ast_hash": "ec5cc6366af9195960344bd3fc80f7eb",
+    "mtime": 1791881220.0622327,
+    "ast_hash": "a50a51f6599237a3b72bcc3afd783967",
     "semantic_hash": ""
   },
   "apps/web/utils/durableJobPresentation.ts": {
@@ -17435,13 +17435,13 @@
     "semantic_hash": ""
   },
   "scripts/temporal-platform.mjs": {
-    "mtime": 1791879845.861834,
-    "ast_hash": "a21c8a1bba4eb8269becb7e7b392417d",
+    "mtime": 1791881220.062785,
+    "ast_hash": "28593515865d57fc486bd839e219bcbb",
     "semantic_hash": ""
   },
   "scripts/temporal-platform.test.mjs": {
-    "mtime": 1791879845.9200926,
-    "ast_hash": "14c0ebc6be7748491efe73827804c096",
+    "mtime": 1791881475.697891,
+    "ast_hash": "fb59cffdfb688dfe19d3a51c534596f1",
     "semantic_hash": ""
   },
   "scripts/temporal-reconcile-account-execution.mjs": {
@@ -17645,8 +17645,8 @@
     "semantic_hash": ""
   },
   "docs/temporal/OPERATIONS.md": {
-    "mtime": 1791875092.6554723,
-    "ast_hash": "1cc1f0c141086198a556a86da02e982b",
+    "mtime": 1791881474.562669,
+    "ast_hash": "48c73ec2c298c0680e831d09ea0a95bb",
     "semantic_hash": ""
   },
   "docs/temporal/OPERATOR_REVIEW.md": {
@@ -17685,13 +17685,13 @@
     "semantic_hash": ""
   },
   "ops/temporal/CLOUD.md": {
-    "mtime": 1791878028.8615897,
-    "ast_hash": "6f85f4eba268c881d5b07fcc2e6d0587",
+    "mtime": 1791881474.5631738,
+    "ast_hash": "42823f983a7e970751d065e5a39ebd04",
     "semantic_hash": ""
   },
   "ops/temporal/README.md": {
-    "mtime": 1791874712.670116,
-    "ast_hash": "e9eff81f6bd42130b03b02f8d45ec3e8",
+    "mtime": 1791881474.5619862,
+    "ast_hash": "8a6495046df9693833f6304502fe707e",
     "semantic_hash": ""
   },
   "ops/temporal/monitoring/alerts.yaml": {
@@ -17707,6 +17707,11 @@
   "scripts/check-temporal-history-runtime.mjs": {
     "mtime": 1791879820.627931,
     "ast_hash": "c967261cce50f591340c5aeedcb1893d",
+    "semantic_hash": ""
+  },
+  "ops/temporal/cloudbuild.worker.json": {
+    "mtime": 1791881475.8037097,
+    "ast_hash": "01e988b2be640558166c916f4571b619",
     "semantic_hash": ""
   }
 }

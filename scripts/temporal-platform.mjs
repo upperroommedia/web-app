@@ -275,7 +275,8 @@ export function validateGceInstance(c, instance) {
     !instance.machineType?.endsWith(`/${vm.machineType}`) ||
     instance.serviceAccounts?.length !== 1 ||
     instance.serviceAccounts[0].email !== vm.serviceAccount ||
-    !instance.serviceAccounts[0].scopes?.includes('https://www.googleapis.com/auth/cloud-platform') ||
+    !Array.isArray(instance.serviceAccounts[0].scopes) ||
+    !instance.serviceAccounts[0].scopes.some((scope) => scope === 'https://www.googleapis.com/auth/cloud-platform') ||
     instance.networkInterfaces?.[0]?.networkIP !== vm.privateIp
   )
     throw new Error(

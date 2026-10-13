@@ -98,7 +98,7 @@ const status = (current?: DurableJob) => ({ job: current, loading: false, stale:
 const buttonMarkup = (html: string, label: string) =>
   [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
     .map((match) => match[0])
-    .filter((markup) => markup.replace(/<[^>]*>/g, '') === label);
+    .filter((markup) => markup.includes(`>${label}<`));
 
 beforeEach(() => {
   jest.clearAllMocks();

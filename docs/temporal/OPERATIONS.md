@@ -4,7 +4,7 @@ The selected deployment is single-region Temporal Cloud with one worker VM per e
 
 ## Status and ownership
 
-The repository includes executable deployment, schema migration, backup, isolated recovery, certificate and worker release tooling. Infrastructure has **not** been purchased, provisioned, or cut over by these changes. Example descriptors intentionally fail validation. Provisioning waits for the infrastructure/budget decision; staging validation and an explicit production promotion follow.
+The repository includes executable deployment, schema migration, backup, isolated recovery, certificate and worker release tooling. The optional self-hosted infrastructure described below has not been provisioned. The selected Cloud staging workers are deployed and verified with application dispatch disabled; application cutover and human smoke testing remain separate. Example self-hosted descriptors intentionally fail validation.
 
 The optional self-hosted fallback topology uses two physically independent private clusters: staging and production each have at least three dedicated Kubernetes nodes, three independent PostgreSQL instances, and their own off-host backup identity/prefix. No components are added to the existing audio/Chrome VM. This separates CPU-intensive processing from the orchestration persistence layer and avoids turning a media-host restart into an application-wide outage.
 
