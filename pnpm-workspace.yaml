@@ -50,8 +50,9 @@ overrides:
   fast-xml-parser: 4.5.7
   preact: 10.28.4
   qs: 6.16.0
-  tar: 7.5.10
-  undici: 6.23.0
+  serialize-javascript: 7.1.2
+  tar: 7.5.22
+  undici: 6.29.0
 nodeLinker: hoisted
 # Keep CI/local module layout stable and leave dependency installation explicit.
 enableGlobalVirtualStore: false
