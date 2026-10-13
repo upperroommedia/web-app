@@ -45,6 +45,10 @@ jobs:
           sudo apt-get install --yes ffmpeg
       - name: Install locked workspace
         run: pnpm install --frozen-lockfile
+      - name: Build worker and split Firebase deployment sources
+        run: |
+          pnpm run build:temporal
+          pnpm run build-functions-codebases
       - name: Validate application regressions, admission, rules and SDK compatibility
         run: pnpm --dir functions test
       - name: Validate workflows, replay, cancellation and native media
@@ -63,10 +67,6 @@ jobs:
         run: |
           pnpm --dir function-kits/firestore-send-email test
           pnpm --dir function-kits/firestore-algolia-search test
-      - name: Build worker and split Firebase deployment sources
-        run: |
-          pnpm run build:temporal
-          pnpm run build-functions-codebases
       - name: Build the production web application
         env:
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-temporal-ci
