@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Tests for bulkAddToSeries Firebase function
  */
@@ -48,7 +49,7 @@ describe('bulkAddToSeries - Basic Functionality', () => {
     const addB = subsplashSeriesMock.createMediaItem('Add B');
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,
@@ -102,7 +103,7 @@ describe('bulkAddToSeries - Basic Functionality', () => {
     const addition = subsplashSeriesMock.createMediaItem('Addition');
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,
@@ -151,7 +152,7 @@ describe('bulkAddToSeries - Rollback Behavior', () => {
     networkFailureInjector.registerFailure(`patchMediaItem:${addB.id}`, () => true);
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,
@@ -188,7 +189,7 @@ describe('bulkAddToSeries - Rollback Behavior', () => {
     const addA = subsplashSeriesMock.createMediaItem('Add A');
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,
@@ -231,7 +232,7 @@ describe('bulkAddToSeries - Lock and Idempotency Contract', () => {
     });
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,
@@ -264,7 +265,7 @@ describe('bulkAddToSeries - Lock and Idempotency Contract', () => {
     const patchReorderSpy = jest.spyOn(seriesHelpers, 'patchSeriesItemPositions');
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,
@@ -303,7 +304,7 @@ describe('bulkAddToSeries - Lock and Idempotency Contract', () => {
     const patchReorderSpy = jest.spyOn(seriesHelpers, 'patchSeriesItemPositions');
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,
@@ -333,7 +334,7 @@ describe('bulkAddToSeries - Lock and Idempotency Contract', () => {
     });
 
     const request: TestRequest<BulkAddToSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: withConcurrencyEnvelope({
         firestoreSeriesId,
         seriesSubsplashId: series.id,

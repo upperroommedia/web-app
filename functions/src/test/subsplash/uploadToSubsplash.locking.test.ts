@@ -1,9 +1,18 @@
+jest.mock('../../temporal/legacyAdmissionLease', () => ({
+  withLegacyAdmissionLease: async (
+    _db: unknown,
+    _options: unknown,
+    run: (lease: { markEffectsStarted: () => Promise<void> }) => Promise<unknown>
+  ) => run({ markEffectsStarted: async () => undefined }),
+}));
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import axios from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { buildSubsplashLockBusyError } from '../../locks/contentionError';
-import { withIdempotency } from '../../locks/withIdempotency';
+import { executeProviderCreate } from '../../temporal/publishing/providerReceipts';
 import { withSubsplashLocks } from '../../locks/withSubsplashLocks';
-import uploadToSubsplash from '../../uploadToSubsplash';
+import uploadToSubsplash, { uploadToSubsplashDomain } from '../../uploadToSubsplash';
 import { authenticateSubsplash } from '../../subsplashUtils';
 
 jest.mock('../../subsplashUtils', () => ({
@@ -18,8 +27,12 @@ jest.mock('../../subsplashUtils', () => ({
 }));
 
 jest.mock('axios');
-jest.mock('../../locks/withIdempotency', () => ({
-  withIdempotency: jest.fn(async (_operationKey: string, run: () => Promise<unknown>) => run()),
+jest.mock('../../temporal/publishing/providerReceipts', () => ({
+  executeProviderCreate: jest.fn(async (options: { execute: () => Promise<unknown> }) => options.execute()),
+}));
+jest.mock('../../notifications/emitOperationalAlert', () => ({
+  emitOperationalAlert: jest.fn(),
+  hasOperationalAlertBeenEmitted: () => false,
 }));
 jest.mock('../../locks/withSubsplashLocks', () => ({
   withSubsplashLocks: jest.fn(async (_lockKeys: string[], run: () => Promise<unknown>) => run()),
@@ -30,20 +43,17 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+      typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler
     ),
   };
 });
 
-type UploadHandler = (request: {
-  auth?: { token?: { role?: string } };
-  data: Record<string, unknown>;
-}) => Promise<unknown>;
+type UploadHandler = (request: { auth?: AuthData; data: Record<string, unknown> }) => Promise<unknown>;
 
 const uploadHandler = uploadToSubsplash as unknown as UploadHandler;
 const mockAxios = axios as jest.MockedFunction<typeof axios>;
 const mockAuthenticateSubsplash = authenticateSubsplash as jest.MockedFunction<typeof authenticateSubsplash>;
-const mockWithIdempotency = withIdempotency as jest.MockedFunction<typeof withIdempotency>;
+const mockCreate = executeProviderCreate as unknown as jest.Mock;
 const mockWithSubsplashLocks = withSubsplashLocks as jest.MockedFunction<typeof withSubsplashLocks>;
 
 const buildValidPayload = () => ({
@@ -68,7 +78,7 @@ describe('uploadToSubsplash lock contract', () => {
     process.env.SUBSPLASH_PASSWORD = 'test-password';
     mockAxios.mockResolvedValue({ data: { id: 'media-item-1' } } as never);
     mockAuthenticateSubsplash.mockResolvedValue('fake-token');
-    mockWithIdempotency.mockImplementation(async (_operationKey, run) => run());
+    mockCreate.mockImplementation(async (options: { execute: () => Promise<unknown> }) => options.execute());
     mockWithSubsplashLocks.mockImplementation(async (_lockKeys, run) => run());
   });
 
@@ -79,19 +89,25 @@ describe('uploadToSubsplash lock contract', () => {
   it('requires a non-empty operation key', async () => {
     await expect(
       uploadHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: { ...buildValidPayload(), operationKey: '   ' },
       })
     ).rejects.toBeInstanceOf(HttpsError);
   });
 
-  it('wraps mutations with idempotency and media-item lock scope', async () => {
+  it('guards each provider creation step and retains the media-item lock scope', async () => {
     await uploadHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: buildValidPayload(),
     });
 
-    expect(mockWithIdempotency).toHaveBeenCalledWith('upload-op-1', expect.any(Function));
+    expect(mockCreate.mock.calls.map(([options]) => options.step)).toEqual([
+      'subsplash-audio',
+      'subsplash-transcode',
+      'subsplash-media-item',
+    ]);
+    for (const [options] of mockCreate.mock.calls) expect(options.operationKey).toBe('upload-op-1');
+    for (const [config] of mockAxios.mock.calls) expect(config).toMatchObject({ skipSubsplashEdgeRetry: true });
     expect(mockWithSubsplashLocks).toHaveBeenCalledWith(
       ['media-item:sermon-1'],
       expect.any(Function),
@@ -100,17 +116,19 @@ describe('uploadToSubsplash lock contract', () => {
   });
 
   it('replays terminal results when the same operation key is retried', async () => {
-    let cached: unknown;
-    mockWithIdempotency.mockImplementation(async (_operationKey, run) => {
-      if (cached) {
-        return cached as { id: string };
+    const results = new Map<string, unknown>();
+    mockCreate.mockImplementation(
+      async (options: { operationKey: string; step: string; execute: () => Promise<unknown> }) => {
+        const key = `${options.operationKey}:${options.step}`;
+        if (results.has(key)) return results.get(key);
+        const result = await options.execute();
+        results.set(key, result);
+        return result;
       }
-      cached = await run();
-      return cached as { id: string };
-    });
+    );
 
     const request = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: buildValidPayload(),
     };
     const first = await uploadHandler(request);
@@ -130,7 +148,7 @@ describe('uploadToSubsplash lock contract', () => {
 
     await expect(
       uploadHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: buildValidPayload(),
       })
     ).rejects.toMatchObject({
@@ -181,7 +199,7 @@ describe('uploadToSubsplash lock contract', () => {
     });
 
     await uploadHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         ...buildValidPayload(),
         images: [
@@ -203,5 +221,53 @@ describe('uploadToSubsplash lock contract', () => {
     const requestConfig = mediaItemCall?.[0] as unknown as { data: string };
     const requestData = JSON.parse(String(requestConfig.data));
     expect(requestData._embedded.images).toEqual([{ id: 'wide-repaired', type: 'wide' }]);
+  });
+  it('commits canonical media inside the lock so distinct publishing jobs reuse one provider allocation', async () => {
+    let canonicalId: string | undefined;
+    let held = false;
+    let tail = Promise.resolve();
+    const events: string[] = [];
+    mockWithSubsplashLocks.mockImplementation(async (_keys, run) => {
+      const previous = tail;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      tail = previous.then(() => gate);
+      await previous;
+      held = true;
+      try {
+        return await run();
+      } finally {
+        events.push('release');
+        held = false;
+        release();
+      }
+    });
+    const options = {
+      readExistingMedia: async () => {
+        expect(held).toBe(true);
+        events.push('read');
+        return canonicalId;
+      },
+      commitCreatedMedia: async (result: { id: string }) => {
+        expect(held).toBe(true);
+        events.push('commit');
+        canonicalId = result.id;
+      },
+    };
+    const [sermonResult, listResult] = await Promise.all([
+      uploadToSubsplashDomain({ ...buildValidPayload(), operationKey: 'sermon-publish-1' }, options),
+      uploadToSubsplashDomain({ ...buildValidPayload(), operationKey: 'list-publish-2' }, options),
+    ]);
+    expect(sermonResult).toEqual({ id: 'media-item-1' });
+    expect(listResult).toEqual(sermonResult);
+    expect(mockAxios).toHaveBeenCalledTimes(3);
+    expect(mockCreate.mock.calls.map(([input]) => input.step)).toEqual([
+      'subsplash-audio',
+      'subsplash-transcode',
+      'subsplash-media-item',
+    ]);
+    expect(events).toEqual(['read', 'commit', 'release', 'read', 'release']);
   });
 });

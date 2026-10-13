@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 const [, , outputArg] = process.argv;
@@ -48,4 +49,6 @@ const gitSha = resolveGitSha();
 const fileContents = `export const sentryBuildGitSha = ${gitSha ? `'${gitSha}'` : 'null'} as const;\n`;
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-fs.writeFileSync(outputPath, fileContents, 'utf8');
+const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
+fs.writeFileSync(temporaryPath, fileContents, 'utf8');
+fs.renameSync(temporaryPath, outputPath);

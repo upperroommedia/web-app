@@ -89,10 +89,10 @@ const EditSermonPage = () => {
       }
 
       const sermonData = sermonDoc.data();
-      
+
       // Check permissions
       const canEdit = (canPublish || user.canUpload()) && canEditSermonMetadata(sermonData);
-      
+
       if (!canEdit) {
         const isProcessingLocked = isSermonProcessingLocked(sermonData);
         const message = isProcessingLocked
@@ -114,9 +114,7 @@ const EditSermonPage = () => {
             },
           });
         }
-        setError(
-          message
-        );
+        setError(message);
         setLoading(false);
         return;
       }
@@ -141,9 +139,9 @@ const EditSermonPage = () => {
   // Fetch sermon audio URL for trimmer
   useEffect(() => {
     if (!sermon || !showAudioTrimmer) return;
-    
+
     setSermonUrl({ url: undefined, status: 'loading' });
-    getDownloadURL(ref(storage, `${UNPROCESSED_SERMONS_BUCKET}/${sermon.id}`))
+    getDownloadURL(ref(storage, sermon.audioArtifacts?.sourcePath || `${UNPROCESSED_SERMONS_BUCKET}/${sermon.id}`))
       .then((url) => {
         setSermonUrl({ url, status: 'success' });
       })
@@ -192,11 +190,7 @@ const EditSermonPage = () => {
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="error">{error || listsError?.message || 'Sermon not found'}</Alert>
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => router.push('/admin/sermons')}
-          sx={{ mt: 2 }}
-        >
+        <Button startIcon={<ArrowBackIcon />} onClick={() => router.push('/admin/sermons')} sx={{ mt: 2 }}>
           Back to Sermons
         </Button>
       </Box>
@@ -214,9 +208,7 @@ const EditSermonPage = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />}>
             <Link href="/admin/sermons" style={{ textDecoration: 'none' }}>
-              <Typography sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
-                Sermons
-              </Typography>
+              <Typography sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>Sermons</Typography>
             </Link>
             <Link href={`/admin/sermons/${sermonId}`} style={{ textDecoration: 'none' }}>
               <Typography sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
@@ -227,19 +219,15 @@ const EditSermonPage = () => {
               Edit
             </Typography>
           </Breadcrumbs>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={handleClose}
-          >
+          <Button variant="outlined" size="small" onClick={handleClose}>
             Cancel
           </Button>
         </Box>
 
         {/* Uploader Component with existing sermon - same props as EditSermonForm */}
-        <VerifiedUserUploaderComponent 
+        <VerifiedUserUploaderComponent
           existingSermon={sermon}
-          existingList={sermonLists as List[] || []}
+          existingList={(sermonLists as List[]) || []}
           existingSermonUrl={sermonUrl}
           setEditFormOpen={handleClose}
         />

@@ -15,11 +15,12 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && jest --runInBand"
+    "test": "npm run build && jest --runInBand",
+    "build:ci": "npm run build"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
-    "firebase-admin": "^14.2.0",
+    "firebase-admin": "^14.5.0",
     "firebase-functions": "^7.3.2",
     "handlebars": "^4.7.8",
     "nodemailer": "^10.1.0",
@@ -31,6 +32,6 @@
     "@types/nodemailer": "^8.0.0",
     "@types/jest": "^30.0.0",
     "jest": "^30.2.0",
-    "ts-jest": "^29.4.11"
+    "ts-jest": "^29.4.14"
   }
 }

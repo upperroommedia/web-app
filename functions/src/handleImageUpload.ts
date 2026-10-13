@@ -15,7 +15,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 // import { modifyImage, ResizedImageResult } from './resize-image';
 import fs from 'fs';
 import os from 'os';
-import { mkdirp } from 'mkdirp';
+import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import computeMetadataForImage from './computeMetadataForImage';
 import { firestoreAdminImagesConverter } from './firestoreDataConverter';
@@ -23,6 +23,10 @@ import { getFirebaseImagesBucket } from '@upperroom/shared/shared/firebaseProjec
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
 import { ensureFirebaseDownloadUrl } from './storageDownloadUrl';
 import handleError from './handleError';
+import { assertLegacyAdmissionAllowed } from './temporal/releaseControl';
+import { enqueueSystemImage } from './temporal/images/admission';
+import { assertProviderMutationTransportAllowed } from './temporal/publishing/providerTransportPolicy';
+import { createHash } from 'node:crypto';
 // import { resize } from 'imagemagick';
 
 // const adminImageConvertor = {
@@ -41,6 +45,7 @@ const uploadImageToSubsplash = async (
   contentType: string
 ): Promise<string> => {
   //add resized image references to firestore image data
+  assertProviderMutationTransportAllowed('subsplash');
   logger.log('Getting subsplash info for new image upload');
   const bearerToken = await authenticateSubsplash();
   const requestData = {
@@ -51,7 +56,7 @@ const uploadImageToSubsplash = async (
   };
   const config = createAxiosConfig('https://core.subsplash.com/files/v1/images', bearerToken, 'POST', requestData);
   // contains s3 presigned url
-  const subsplashResponse = (await axios(config)).data;
+  const subsplashResponse = (await axios({ ...config, maxRedirects: 0 })).data;
   if (!subsplashResponse.id) {
     throw new Error('No id was returned from subsplash');
   }
@@ -67,6 +72,7 @@ const uploadImageToSubsplash = async (
   const uploadConfig: AxiosRequestConfig = {
     url: uploadURL,
     method: 'PUT',
+    maxRedirects: 0,
     data: file,
     headers: {
       'Content-Type': contentType,
@@ -75,9 +81,8 @@ const uploadImageToSubsplash = async (
     },
   };
   // logger.log('Axios config', uploadConfig);
-  axios(uploadConfig)
-    .then((response) => logger.log(response.statusText))
-    .catch((err) => logger.log('Axios Error', err));
+  assertProviderMutationTransportAllowed('subsplash');
+  await axios({ ...uploadConfig, timeout: 120_000 });
 
   return id;
 };
@@ -87,6 +92,7 @@ const handleImageUpload = onObjectFinalized(
     bucket: getFirebaseImagesBucket(),
     timeoutSeconds: 300,
     memory: '1GiB',
+    retry: true,
     secrets: subsplashSecretsWithRuntimeAlerts,
   },
   async (storageEvent): Promise<void> => {
@@ -125,19 +131,40 @@ const handleImageUpload = onObjectFinalized(
     logger.log('ImageName', imageName);
     logger.log('Data', object);
 
+    if (process.env.TASK_ORCHESTRATOR_IMAGES === 'temporal') {
+      const projectId = firebaseAdmin.app().options.projectId ?? process.env.GCLOUD_PROJECT ?? '';
+      await enqueueSystemImage({
+        firestore: firebaseAdmin.firestore(),
+        projectId,
+        eventId: storageEvent.id,
+        intent: {
+          operation: 'ingest',
+          imageId: createHash('sha256').update(`${object.bucket}:${filePath}:${object.generation}`).digest('hex'),
+          source: {
+            bucket: object.bucket,
+            path: filePath,
+            generation: String(object.generation),
+            contentType: object.contentType,
+          },
+          name: imageName,
+          type: metadata.type as ImageSizeType,
+        },
+      });
+      return;
+    }
+
+    await assertLegacyAdmissionAllowed(firebaseAdmin.firestore(), 'images');
     let originalFile = '';
+    let temporaryDirectory = '';
     try {
-      originalFile = path.join(os.tmpdir(), filePath);
-      const tempLocalDir = path.dirname(originalFile);
+      temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'urm-image-'));
+      originalFile = path.join(temporaryDirectory, 'source');
       const bucket = firebaseAdmin.storage().bucket(object.bucket);
 
       // Create the temp directory where the storage file will be downloaded.
-      logger.log(`Creating temporary directory: '${tempLocalDir}'`);
-      await mkdirp(tempLocalDir);
-      logger.log(`Created temporary directory: '${tempLocalDir}'`);
 
       // Download file from bucket.
-      const remoteFile = bucket.file(filePath);
+      const remoteFile = bucket.file(filePath, { generation: object.generation });
       logger.log(`Downloading image file: '${filePath}'`);
       await remoteFile.download({ destination: originalFile });
       logger.log(`Downloaded image file: '${filePath}' to '${originalFile}'`);
@@ -174,13 +201,9 @@ const handleImageUpload = onObjectFinalized(
         summary: 'handleImageUpload failed while processing a finalized storage object.',
         context: { functionName: 'handleImageUpload', filePath },
       });
-      return logger.error(e);
+      throw new Error('Image ingestion failed; retry required');
     } finally {
-      if (originalFile) {
-        logger.log(`Deleting temporary original file: '${originalFile}'`);
-        fs.unlinkSync(originalFile);
-        logger.log(`Deleted temporary original file: '${originalFile}'`);
-      }
+      if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
       // Delete the original file
       // if (remoteFile) {
       //   try {

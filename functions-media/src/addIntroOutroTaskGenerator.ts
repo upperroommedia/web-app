@@ -11,10 +11,14 @@ import {
 } from './audioTaskPayload';
 import { getProcessAudioTargetUri } from './processAudioService';
 import { queueOrReplaceProcessAudioRequest } from './processAudioQueueStore';
-import { getProcessAudioTaskQueueNameForSource } from '@upperroom/contracts/processAudioQueue';
+import { computeProcessAudioRequestVersion, getProcessAudioTaskQueueNameForSource } from '@upperroom/contracts/processAudioQueue';
+import { withLegacyAdmissionLease } from '../../functions/src/temporal/legacyAdmissionLease';
 
 const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request: CallableRequest<AddIntroOutroInputType>): Promise<void> => {
   const data = request.data;
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to process audio.');
+  const role = String(request.auth.token.role ?? '');
+  if (!['admin', 'publisher', 'uploader'].includes(role)) throw new HttpsError('permission-denied', 'Upload permission is required.');
 
   if (!validateAddIntroOutroData(data)) {
     throw new HttpsError(
@@ -35,6 +39,23 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
   const bucket = firebaseAdmin.storage().bucket();
   const db = firebaseAdmin.firestore();
   const docRef = db.collection('sermons').doc(data.id);
+  const existing = await docRef.get();
+  if (!existing.exists) throw new HttpsError('not-found', 'Sermon no longer exists.');
+  if (role !== 'admin' && existing.get('uploaderId') !== request.auth.uid)
+    throw new HttpsError('permission-denied', 'You cannot process this sermon.');
+  if (process.env.TASK_ORCHESTRATOR_MEDIA === 'temporal') {
+    const { submitServerDurableJob } = await import('../../functions/src/temporal/bridge');
+    // The durable facade resolves sources and bumpers from canonical server-owned state.
+    await submitServerDurableJob({ kind: 'audio.process', entity: { type: 'sermon', id: data.id },
+      actorUid: request.auth.uid, requestId: `legacy-audio:${computeProcessAudioRequestVersion(data)}`,
+      payload: { startTime: data.startTime, duration: data.duration, ...(data.skipTranscode ? { skipTranscode: true } : {}) } });
+    return;
+  }
+  if (audioSource.type === 'StorageFilePath') {
+    const allowed = [`sermons/${data.id}`, `processed-sermons/${data.id}`, `intro-outro-sermons/${data.id}`,
+      existing.get('audioArtifacts.sourcePath'), existing.get('audioArtifacts.processedPath'), existing.get('audioArtifacts.finalPath')];
+    if (!allowed.includes(audioSource.source)) throw new HttpsError('permission-denied', 'Audio source does not belong to this sermon.');
+  }
   const targetUri = getProcessAudioTargetUri(sourceType);
 
   try {
@@ -47,13 +68,14 @@ const addintrooutrotaskgenerator = onCall({ invoker: 'public' }, async (request:
       }
     }
 
-    await docRef.update({ 'status.audioStatus': sermonStatusType.PENDING });
-
-    const queueResult = await queueOrReplaceProcessAudioRequest({
-      database: firebaseAdmin.database(),
-      payload: data,
-      targetUri,
-      ownerId: `enqueue:${data.id}:${Date.now()}`,
+    const projectId = firebaseAdmin.app().options.projectId;
+    if (!projectId) throw new HttpsError('failed-precondition', 'Firebase project is required.');
+    const queueResult = await withLegacyAdmissionLease(db, { projectId, domain: 'media', actorUid: request.auth.uid,
+      operation: 'addintrooutrotaskgenerator' }, async lease => {
+      await lease.markEffectsStarted();
+      await docRef.update({ 'status.audioStatus': sermonStatusType.PENDING });
+      return queueOrReplaceProcessAudioRequest({ database: firebaseAdmin.database(), payload: data, targetUri,
+        ownerId: `enqueue:${data.id}:${Date.now()}`, actorUid: request.auth!.uid });
     });
 
     logger.info('Updated process-audio queue state', {

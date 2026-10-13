@@ -51,7 +51,7 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
 
     let cancelled = false;
     setSermonUrl({ url: undefined, status: 'loading' });
-    getDownloadURL(ref(storage, `${UNPROCESSED_SERMONS_BUCKET}/${sermon.id}`))
+    getDownloadURL(ref(storage, sermon.audioArtifacts?.sourcePath || `${UNPROCESSED_SERMONS_BUCKET}/${sermon.id}`))
       .then((url) => {
         if (!cancelled) {
           setSermonUrl({ url, status: 'success' });
@@ -67,7 +67,7 @@ const EditSermonForm = ({ sermon, open, setOpen }: EditSermonFormInfo) => {
     return () => {
       cancelled = true;
     };
-  }, [sermon.id, showAudioTrimmer]);
+  }, [sermon.id, sermon.audioArtifacts?.sourcePath, showAudioTrimmer]);
 
   return (
     <Dialog open={open} onClose={() => setOpen(false)} aria-labelledby="confirm-dialog" maxWidth="lg">

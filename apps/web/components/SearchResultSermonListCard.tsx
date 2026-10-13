@@ -38,12 +38,10 @@ const SearchResultSermonListCard: FunctionComponent<SearchResultSermonListCardPr
   const sermonData = useMemo(() => sermonSnapshot?.data(), [sermonSnapshot]);
 
   if (error) {
-     
     console.error(error);
-    return <strong>Error: {JSON.stringify(error)}</strong>;
+    return <strong role="status">Unable to refresh this sermon. Check your connection and try again.</strong>;
   }
   if (!loading && !sermonSnapshot?.exists()) {
-     
     console.warn(`No Sermon Found for objectID: ${sermonId} - if this was recently deleted you can ignore`);
 
     return <></>;

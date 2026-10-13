@@ -1,3 +1,5 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { buildSubsplashLockBusyError } from '../../locks/contentionError';
 import { withIdempotency } from '../../locks/withIdempotency';
@@ -35,7 +37,7 @@ jest.mock('firebase-functions/v2/https', () => {
 });
 
 type BulkAddHandler = (request: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: BulkAddToSeriesInputType;
 }) => Promise<BulkAddToSeriesOutputType>;
 
@@ -86,7 +88,7 @@ describe('bulkAddToSeries lock/idempotency contract', () => {
 
   it('wraps bulk mutation flow with idempotency and deterministic lock scope', async () => {
     const request = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: makeInput(),
     };
 
@@ -110,7 +112,7 @@ describe('bulkAddToSeries lock/idempotency contract', () => {
 
     await expect(
       bulkAddHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: makeInput(),
       })
     ).rejects.toMatchObject({

@@ -1,5 +1,6 @@
 import { ImageType } from './Image';
 import { ISpeaker } from './Speaker';
+import type { DurableJobRef } from '@upperroom/contracts/temporal';
 
 export enum sermonStatusType {
   ERROR = 'ERROR',
@@ -32,6 +33,7 @@ export interface sermonStatus {
 }
 
 export interface Sermon {
+  activeDurableJobs?: Record<string, DurableJobRef | undefined>;
   id: string;
   title: string;
   description: string;
@@ -49,6 +51,18 @@ export interface Sermon {
   numberOfListsUploadedTo?: number;
   subsplashId?: string;
   subsplashUploadGeneration?: number;
+  soundCloudPublication?: { streamable: boolean; sharing?: 'public' | 'private' };
+  audioArtifacts?: {
+    jobId: string;
+    requestVersion: string;
+    revision: number;
+    sourcePath?: string;
+    sourceGeneration?: string;
+    sourceDurationSeconds?: number;
+    processedPath: string;
+    finalPath: string;
+    durationSeconds: number;
+  };
   audioSource?: 'gcp' | 'subsplash';
   subsplashAudioUrl?: string;
   soundCloudTrackId?: string;
@@ -58,7 +72,7 @@ export interface Sermon {
   createdAtMillis: number;
   editedAtMillis: number;
   youtubeUrl?: string;
-  seriesId?: string;  // Firestore series ID (not subsplashId) - sermon can only be in one series
+  seriesId?: string; // Firestore series ID (not subsplashId) - sermon can only be in one series
   searchPending?: boolean;
   searchIndexedAtMillis?: number;
   searchSyncError?: string;

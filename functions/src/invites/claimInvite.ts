@@ -1,3 +1,4 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
@@ -47,7 +48,8 @@ const parseClaimableInvite = (value: DocumentData | undefined): InviteDocument =
 };
 
 export const claimInviteHandler = async (
-  request: CallableRequest<ClaimInviteInputType>
+  request: CallableRequest<ClaimInviteInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<ClaimInviteOutputType> => {
   const claimantUid = request.auth?.uid;
   if (!claimantUid) {
@@ -110,10 +112,10 @@ export const claimInviteHandler = async (
 
       if (invite.claimStatus === InviteClaimStatus.COMPLETE) {
         const claimedByUid = typeof invite.claimedByUid === 'string' ? invite.claimedByUid : null;
-        const claimedByEmail = typeof invite.claimedByEmail === 'string' ? normalizeInviteEmail(invite.claimedByEmail) : null;
+        const claimedByEmail =
+          typeof invite.claimedByEmail === 'string' ? normalizeInviteEmail(invite.claimedByEmail) : null;
         const isClaimedByCurrentUser =
-          claimedByEmail === claimantEmail ||
-          (claimedByEmail === null && claimedByUid === claimantUid);
+          claimedByEmail === claimantEmail || (claimedByEmail === null && claimedByUid === claimantUid);
 
         if (!isClaimedByCurrentUser) {
           throw new InviteClaimError('Invite has already been claimed by a different account.');
@@ -127,9 +129,13 @@ export const claimInviteHandler = async (
         };
       }
 
-      if (invite.claimStatus === InviteClaimStatus.ROLE_PENDING || invite.claimStatus === InviteClaimStatus.ROLE_FAILED) {
+      if (
+        invite.claimStatus === InviteClaimStatus.ROLE_PENDING ||
+        invite.claimStatus === InviteClaimStatus.ROLE_FAILED
+      ) {
         const claimedByUid = typeof invite.claimedByUid === 'string' ? invite.claimedByUid : null;
-        const claimedByEmail = typeof invite.claimedByEmail === 'string' ? normalizeInviteEmail(invite.claimedByEmail) : null;
+        const claimedByEmail =
+          typeof invite.claimedByEmail === 'string' ? normalizeInviteEmail(invite.claimedByEmail) : null;
 
         if (claimedByUid !== claimantUid || claimedByEmail !== claimantEmail) {
           throw new InviteClaimError('Invite has already been claimed.');
@@ -137,6 +143,7 @@ export const claimInviteHandler = async (
       }
 
       if (invite.claimStatus === InviteClaimStatus.PENDING) {
+        await lease?.markEffectsStarted();
         transaction.update(inviteDoc.ref, {
           claimStatus: InviteClaimStatus.ROLE_PENDING,
           claimedByUid: claimantUid,
@@ -148,6 +155,7 @@ export const claimInviteHandler = async (
       }
 
       if (invite.claimStatus === InviteClaimStatus.ROLE_FAILED) {
+        await lease?.markEffectsStarted();
         transaction.update(inviteDoc.ref, {
           claimStatus: InviteClaimStatus.ROLE_PENDING,
           roleFailureAtMs: FieldValue.delete(),
@@ -260,6 +268,18 @@ export const claimInviteHandler = async (
   }
 };
 
-const claimInvite = onCall(claimInviteHandler);
+export const claimInviteHandlerSource = async (
+  request: Parameters<typeof claimInviteHandler>[0]
+): Promise<ClaimInviteOutputType> => {
+  if (!request.auth?.uid) return claimInviteHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth!.uid,
+    'invite.claim',
+    (lease) => claimInviteHandler(request, lease)
+  );
+};
+
+const claimInvite = onCall(claimInviteHandlerSource);
 
 export default claimInvite;

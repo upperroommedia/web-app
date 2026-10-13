@@ -78,3 +78,10 @@ firebase.dev.json
 
 # Local pnpm download cache
 /.pnpm-store/
+
+# Generated Temporal worker output and local browser artifacts
+/apps/temporal-worker/lib/
+/.playwright-cli/
+
+# Google Actions OIDC credentials are local auth artifacts, never source or image content.
+/gha-creds-*.json

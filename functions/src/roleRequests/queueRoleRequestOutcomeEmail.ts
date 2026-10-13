@@ -1,3 +1,4 @@
+import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import { logger } from 'firebase-functions/v2';
 import { buildProfessionalEmailHtml, formatEmailDateTime } from '../notifications/emailTemplates';
 import { getAdminBaseUrl } from '../notifications/notificationParams';
@@ -86,14 +87,24 @@ export const queueRoleRequestOutcomeEmail = async (input: {
   resolvedByUid: string;
   resolvedByEmail: string | null;
   resolvedAtMs: number;
+  idempotencyKey?: string;
+  /** Trusted server parent; never copied from a callable payload. */
+  temporalParentJobRef?: DurableJobRef;
 }): Promise<
   | { status: 'queued'; queueMailId: string; attemptedAtMs: number }
-  | { status: 'queue_failed'; attemptedAtMs: number; queueErrorMessage: string; warningCode: typeof ROLE_REQUEST_EMAIL_ENQUEUE_FAILED }
+  | {
+      status: 'queue_failed';
+      attemptedAtMs: number;
+      queueErrorMessage: string;
+      warningCode: typeof ROLE_REQUEST_EMAIL_ENQUEUE_FAILED;
+    }
 > => {
   const attemptedAtMs = Date.now();
   const appHomeUrl = resolveAppHomeUrl();
   try {
     const queueMailId = await queueEmail({
+      idempotencyKey: input.idempotencyKey,
+      temporalParentJobRef: input.temporalParentJobRef,
       to: [input.requesterEmail],
       source: 'role-request',
       alertType: input.status === ROLE_REQUEST_STATUS_ACCEPTED ? 'role-request-accepted' : 'role-request-denied',

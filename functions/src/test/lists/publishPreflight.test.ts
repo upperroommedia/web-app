@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
@@ -48,7 +49,7 @@ describe('publish strict preflight', () => {
     });
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootSubsplashListId],
         mediaItem: { id: 'media-2', type: 'media-item' },
@@ -172,7 +173,7 @@ describe('publish strict preflight', () => {
     subsplashMock.clearHistory();
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootSubsplashListId],
         mediaItem: { id: 'media-6', type: 'media-item' },
@@ -229,7 +230,7 @@ describe('publish strict preflight', () => {
     subsplashMock.clearHistory();
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootSubsplashListId],
         mediaItem: { id: 'media-6', type: 'media-item' },
@@ -313,7 +314,7 @@ describe('publish strict preflight', () => {
     subsplashMock.clearHistory();
 
     const result = await addToListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootSubsplashListId],
         mediaItem: { id: 'brand-new-media-item', type: 'media-item' },
@@ -413,7 +414,7 @@ describe('publish strict preflight', () => {
     subsplashMock.clearHistory();
 
     const result = await addToListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [rootSubsplashListId],
         mediaItem: { id: 'media-2', type: 'media-item' },
@@ -558,7 +559,7 @@ describe('publish strict preflight', () => {
 
     const publish = async (index: number) =>
       addToListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           destinationListIds: [rootSubsplashListId],
           mediaItem: { id: `media-${index}`, type: 'media-item' },

@@ -1,16 +1,9 @@
+import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import { logger } from 'firebase-functions/v2';
-import {
-  buildProfessionalEmailHtml,
-  formatEmailDateTime,
-} from '../notifications/emailTemplates';
+import { buildProfessionalEmailHtml, formatEmailDateTime } from '../notifications/emailTemplates';
 import { getAdminBaseUrl } from '../notifications/notificationParams';
 import { queueEmail } from '../notifications/queueEmail';
-import {
-  INVITE_EMAIL_ENQUEUE_FAILED,
-  InviteEmailState,
-  InviteEmailStatus,
-  InviteRoleType,
-} from './inviteTypes';
+import { INVITE_EMAIL_ENQUEUE_FAILED, InviteEmailState, InviteEmailStatus, InviteRoleType } from './inviteTypes';
 
 export const buildInviteClaimUrl = (token: string): string => {
   const baseUrl = getAdminBaseUrl().replace(/\/+$/, '');
@@ -75,16 +68,23 @@ export const queueInviteEmail = async ({
   invitedRole,
   inviteUrl,
   expiresAtMs,
+  idempotencyKey,
+  temporalParentJobRef,
 }: {
   inviteId: string;
   invitedEmail: string;
   invitedRole: InviteRoleType;
   inviteUrl: string;
   expiresAtMs: number;
+  idempotencyKey?: string;
+  /** Trusted server parent; never copied from a callable payload. */
+  temporalParentJobRef?: DurableJobRef;
 }): Promise<InviteEmailState> => {
   const attemptedAtMs = Date.now();
   try {
     const queueMailId = await queueEmail({
+      idempotencyKey,
+      temporalParentJobRef,
       to: [invitedEmail],
       source: 'role-request',
       alertType: 'invite-issued',

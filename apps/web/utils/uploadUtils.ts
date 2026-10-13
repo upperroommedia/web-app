@@ -29,3 +29,17 @@ export async function getIntroAndOutro(sermon: Sermon): Promise<{ introRef: stri
 
   return { introRef, outroRef };
 }
+
+/** Prefer the immutable result of the current server-owned audio generation. */
+export function getSermonFinalAudioPath(
+  sermon: Pick<Sermon, 'id'> & { audioArtifacts?: { finalPath?: string } }
+): string {
+  return sermon.audioArtifacts?.finalPath || `intro-outro-sermons/${sermon.id}`;
+}
+
+/** Original bytes are a separate artifact and must remain distinct from processed audio. */
+export function getSermonSourceAudioPath(
+  sermon: Pick<Sermon, 'id'> & { audioArtifacts?: { sourcePath?: string } }
+): string {
+  return sermon.audioArtifacts?.sourcePath || `sermons/${sermon.id}`;
+}

@@ -44,20 +44,118 @@
       "persistent": true
     },
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "lib/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "lib/**"
+      ]
     },
     "build:ci": {
-      "dependsOn": ["^build:ci"],
-      "outputs": [".next/**", "!.next/cache/**", "lib/**"]
+      "dependsOn": [
+        "^build:ci"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "lib/**"
+      ]
     },
     "lint:ci": {
-      "dependsOn": ["^lint:ci"],
+      "dependsOn": [
+        "^lint:ci"
+      ],
       "outputs": []
     },
     "test:ci": {
       "cache": false,
       "outputs": []
+    },
+    "@upperroom/shared#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "firebase/**/*.js",
+        "firebase/**/*.d.ts",
+        "types/**/*.js",
+        "types/**/*.d.ts",
+        "shared/**/*.js",
+        "shared/**/*.d.ts",
+        "context/**/*.js",
+        "context/**/*.d.ts",
+        "constants/**/*.js",
+        "constants/**/*.d.ts"
+      ]
+    },
+    "@upperroom/contracts#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "*.js",
+        "*.d.ts"
+      ]
+    },
+    "@upperroom/process-audio#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "@upperroom/shared#build:ci": {
+      "dependsOn": [
+        "^build:ci"
+      ],
+      "outputs": [
+        "firebase/**/*.js",
+        "firebase/**/*.d.ts",
+        "types/**/*.js",
+        "types/**/*.d.ts",
+        "shared/**/*.js",
+        "shared/**/*.d.ts",
+        "context/**/*.js",
+        "context/**/*.d.ts",
+        "constants/**/*.js",
+        "constants/**/*.d.ts"
+      ]
+    },
+    "@upperroom/contracts#build:ci": {
+      "dependsOn": [
+        "^build:ci"
+      ],
+      "outputs": [
+        "*.js",
+        "*.d.ts"
+      ]
+    },
+    "@upperroom/process-audio#build:ci": {
+      "dependsOn": [
+        "^build:ci"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "@upperroom/browser-fallback#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "@upperroom/browser-fallback#build:ci": {
+      "dependsOn": [
+        "^build:ci"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     }
   }
 }

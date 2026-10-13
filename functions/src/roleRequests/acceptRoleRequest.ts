@@ -1,3 +1,4 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { adminBaseUrlSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
@@ -18,7 +19,8 @@ const isAdmin = (request: CallableRequest<unknown>): boolean =>
   request.auth?.token.role === 'admin' && typeof request.auth.uid === 'string';
 
 export const acceptRoleRequestHandler = async (
-  request: CallableRequest<AcceptRoleRequestInputType>
+  request: CallableRequest<AcceptRoleRequestInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<AcceptRoleRequestOutputType> => {
   if (!isAdmin(request)) {
     return { status: 'error', error: 'Not Authorized' };
@@ -54,6 +56,7 @@ export const acceptRoleRequestHandler = async (
       role: roleRequest.requestedRole,
     };
 
+    await lease?.markEffectsStarted();
     await auth.setCustomUserClaims(user.uid, mergedClaims);
     await auth.revokeRefreshTokens(user.uid);
 
@@ -130,6 +133,18 @@ export const acceptRoleRequestHandler = async (
   }
 };
 
-const acceptrolerequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, acceptRoleRequestHandler);
+export const acceptRoleRequestHandlerSource = async (
+  request: Parameters<typeof acceptRoleRequestHandler>[0]
+): Promise<AcceptRoleRequestOutputType> => {
+  if (!(request.auth?.uid && request.auth.token.role === 'admin')) return acceptRoleRequestHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth!.uid,
+    'role.accept',
+    (lease) => acceptRoleRequestHandler(request, lease)
+  );
+};
+
+const acceptrolerequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, acceptRoleRequestHandlerSource);
 
 export default acceptrolerequest;

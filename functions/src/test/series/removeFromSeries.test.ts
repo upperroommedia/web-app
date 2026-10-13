@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Tests for removeFromSeries Firebase function
  * TDD approach: Tests written first
@@ -35,7 +36,7 @@ describe('removeFromSeries - Basic Functionality', () => {
     });
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: mediaItem.id,
         seriesSubsplashId: subsplashSeries.id,
@@ -56,7 +57,7 @@ describe('removeFromSeries - Basic Functionality', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Unassigned Item');
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: mediaItem.id,
         seriesSubsplashId: 'expected-series',
@@ -92,7 +93,7 @@ describe('removeFromSeries - Basic Functionality', () => {
 
     // Remove only item1
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: item1.id,
         seriesSubsplashId: subsplashSeries.id,
@@ -131,7 +132,7 @@ describe('removeFromSeries - Basic Functionality', () => {
     third.subtitle = 'Part 3 of Sowing Seeds';
 
     const result = await removeFromSeriesHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: removed.id,
         seriesSubsplashId: series.id,
@@ -163,7 +164,7 @@ describe('removeFromSeries - Basic Functionality', () => {
 
     await expect(
       removeFromSeriesHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           mediaItemId: mediaItem.id,
           seriesSubsplashId: staleSeries.id,
@@ -205,7 +206,7 @@ describe('removeFromSeries - Authentication', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Item');
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'viewer' } },
+      auth: testCallableAuth('viewer'),
       data: {
         mediaItemId: mediaItem.id,
         seriesSubsplashId: 'expected-series',
@@ -219,7 +220,7 @@ describe('removeFromSeries - Authentication', () => {
     const mediaItem = subsplashSeriesMock.createMediaItem('Item');
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: mediaItem.id,
         seriesSubsplashId: 'expected-series',
@@ -240,7 +241,7 @@ describe('removeFromSeries - Validation', () => {
 
   it('should reject requests without mediaItemId', async () => {
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: '',
         seriesSubsplashId: 'expected-series',
@@ -253,7 +254,7 @@ describe('removeFromSeries - Validation', () => {
   it('rejects untyped runtime requests without a series identity', async () => {
     await expect(
       removeFromSeriesHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: { mediaItemId: 'media-item-1' },
       } as unknown as TestRequest<RemoveFromSeriesInputType>)
     ).rejects.toMatchObject({ code: 'invalid-argument' });
@@ -277,7 +278,7 @@ describe('removeFromSeries - Error Handling', () => {
     networkFailureInjector.registerFailure(`patchMediaItem:${mediaItem.id}`, () => true);
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: mediaItem.id,
         seriesSubsplashId: subsplashSeries.id,
@@ -289,7 +290,7 @@ describe('removeFromSeries - Error Handling', () => {
 
   it('should handle media item not found', async () => {
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: 'non-existent-item',
         seriesSubsplashId: 'expected-series',
@@ -318,7 +319,7 @@ describe('removeFromSeries - Locking and Idempotency', () => {
     const unlinkSpy = jest.spyOn(seriesHelpers, 'unlinkMediaItemFromSeries');
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: mediaItem.id,
         seriesSubsplashId: subsplashSeries.id,
@@ -342,7 +343,7 @@ describe('removeFromSeries - Locking and Idempotency', () => {
     await claimOperation('remove-op-busy-1');
 
     const request: TestRequest<RemoveFromSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         mediaItemId: mediaItem.id,
         seriesSubsplashId: subsplashSeries.id,

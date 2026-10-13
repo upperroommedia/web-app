@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Test to verify the transaction retry duplication bug
  * 
@@ -71,7 +72,7 @@ describe('addToList - Transaction Retry Duplication Bug', () => {
     // This will cause overflow and create a new overflow list
     const mediaItem = { id: 'new-item-trigger-overflow', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -152,12 +153,12 @@ describe('addToList - Transaction Retry Duplication Bug', () => {
     const item2 = { id: 'concurrent-overflow-item-2', type: 'media-item' as const };
 
     const request1: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item1, maxListSize: 10 }
     };
 
     const request2: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { destinationListIds: [listId], mediaItem: item2, maxListSize: 10 }
     };
 
@@ -235,7 +236,7 @@ describe('addToList - Transaction Retry Duplication Bug', () => {
     // items will accumulate in itemsToPropagateAfterCommit
     const mediaItem = { id: 'single-item-trigger-overflow', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -309,7 +310,7 @@ describe('addToList - Transaction Retry Duplication Bug', () => {
     });
 
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem: { id: 'replay-item', type: 'media-item' as const },

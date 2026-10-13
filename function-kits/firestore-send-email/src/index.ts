@@ -29,6 +29,10 @@ import * as nodemailer from "nodemailer";
 import { expr } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2/options";
 import { migratedOptions } from "./system-options";
+import { assertLegacyEmailRelease } from "./temporal/release";
+import { secureMailOptions } from "./temporal/secure-options";
+import { enqueueTemporalEmail } from "./temporal/ingress";
+import { getEmailExpireAt as getExpireAt, getEmailExpiryPolicy } from "./temporal/expiry";
 
 const systemOptions = migratedOptions();
 setGlobalOptions(systemOptions);
@@ -111,35 +115,10 @@ function validateFieldArray(field: string, array?: string[]) {
   }
 }
 
-function getExpireAt(startTime: Timestamp) {
-  const now = startTime.toDate();
-  const value = config.TTLExpireValue;
-  switch (config.TTLExpireType) {
-    case "hour":
-      now.setHours(now.getHours() + value);
-      break;
-    case "day":
-      now.setDate(now.getDate() + value);
-      break;
-    case "week":
-      now.setDate(now.getDate() + value * 7);
-      break;
-    case "month":
-      now.setMonth(now.getMonth() + value);
-      break;
-    case "year":
-      now.setFullYear(now.getFullYear() + value);
-      break;
-    default:
-      // Optionally handle unknown types
-      throw new Error(`Unknown TTLExpireType: ${config.TTLExpireType}`);
-  }
-  return Timestamp.fromDate(now);
-}
 
 async function deliver(ref: DocumentReference): Promise<void> {
-  // Fetch the Firestore document
-  const snapshot = await ref.get();
+  // Fetch and fence ownership before preparing any SMTP side effect.
+  const snapshot = await db.runTransaction(async tx => {await assertLegacyEmailRelease(tx, db); return tx.get(ref);});
   if (!snapshot.exists) {
     return;
   }
@@ -191,8 +170,22 @@ async function deliver(ref: DocumentReference): Promise<void> {
       ipPoolName: payload.sendGrid?.ipPoolName,
     };
 
+    // Template/UID preparation may wait on Firestore. Recheck the actual owner,
+    // delivery lease and document immediately before starting non-idempotent SMTP.
+    const stillOwns = await db.runTransaction(async tx => {
+      await assertLegacyEmailRelease(tx, db);
+      const current = await tx.get(ref);
+      const delivery = current.data()?.delivery as Delivery & {orchestrator?: string};
+      if (!current.exists || !delivery || delivery.state !== "PROCESSING" || delivery.orchestrator === "temporal" || delivery.leaseExpireTime?.toMillis() !== snapshot.data().delivery.leaseExpireTime?.toMillis()) return false;
+      if (!delivery.leaseExpireTime || delivery.leaseExpireTime.toMillis() < Date.now()) {
+        tx.update(ref, {"delivery.state": "ERROR", "delivery.error": "Lease expired before SMTP submission.", "delivery.endTime": FieldValue.serverTimestamp()});
+        return false;
+      }
+      return true;
+    });
+    if (!stillOwns) return;
     logs.info("Sending queued email", { documentPath: ref.path });
-    const result = (await transport.sendMail(mailOptions)) as any;
+    const result = (await transport.sendMail(secureMailOptions(mailOptions))) as any;
 
     const info: SendMailInfoLike = {
       messageId: result.messageId || null,
@@ -216,13 +209,11 @@ async function deliver(ref: DocumentReference): Promise<void> {
   }
 
   // Update the Firestore document transactionally to allow retries (#48)
-  return db.runTransaction((transaction) => {
-    // We could check state here is still PROCESSING, but we don't
-    // since the email sending will have been attempted regardless of what the
-    // delivery state was at that point, so we just update the state to reflect
-    // the result of the last attempt so as to not potentially cause duplicate sends.
+  return db.runTransaction(async transaction => {
+    const current = await transaction.get(ref);
+    const delivery = current.data()?.delivery as Delivery & {orchestrator?: string};
+    if (!current.exists || !delivery || delivery.orchestrator === "temporal" || delivery.state !== "PROCESSING" || delivery.leaseExpireTime?.toMillis() !== snapshot.data().delivery.leaseExpireTime?.toMillis()) return;
     transaction.update(ref, update);
-    return Promise.resolve();
   });
 }
 
@@ -238,6 +229,8 @@ async function processWrite(
   // changed while the transaction was inflight.
   if (change.after.exists) {
     const payloadAfter = change.after.data() as QueuePayload;
+    // Once admitted, the durable receipt owns delivery even during a flag rollback.
+    if ((payloadAfter.delivery as Delivery & {orchestrator?: string})?.orchestrator === "temporal") return;
     // The email has already been delivered, so we don't need to do anything.
     if (
       payloadAfter &&
@@ -265,7 +258,9 @@ async function processWrite(
         return false;
       }
 
+      await assertLegacyEmailRelease(transaction, db);
       const payload = snapshot.data() as QueuePayload;
+      if ((payload.delivery as Delivery & {orchestrator?: string})?.orchestrator === "temporal") return false;
 
       // We expect the payload to contain a message object describing the email
       // to be sent, or a template, or a SendGrid template.
@@ -374,6 +369,19 @@ export const processQueue = onDocumentWritten(
   },
   async (event) => {
     if (!event.data) return;
+    if (process.env.TASK_ORCHESTRATOR_EMAILS === "temporal") {
+      if (!event.data.after.exists) return;
+      const app = getApps()[0] ?? initializeApp();
+      const projectId = app.options.projectId || process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+      if (!projectId) throw new Error("Email orchestration project is missing");
+      await enqueueTemporalEmail(getFirestore(app, config.database), event.data.after.ref.path, projectId,
+        config.TTLExpireType && config.TTLExpireType !== "never" ? getExpireAt : undefined, getEmailExpiryPolicy());
+      return;
+    }
+    if (event.data.after.data()?.delivery?.orchestrator === "temporal") return;
+    const app = getApps()[0] ?? initializeApp();
+    const ownershipDb = getFirestore(app, config.database);
+    await ownershipDb.runTransaction(tx => assertLegacyEmailRelease(tx, ownershipDb));
     await initialize();
     logs.start();
 

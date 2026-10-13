@@ -1,10 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function releaseAllowsLegacy(domain) {
+      return !exists(/databases/$(database)/documents/_control/temporalRelease)
+        || (get(/databases/$(database)/documents/_control/temporalRelease).data.admission == 'open'
+          && domain in get(/databases/$(database)/documents/_control/temporalRelease).data.domains
+          && get(/databases/$(database)/documents/_control/temporalRelease).data.domains[domain].owner == 'legacy'
+          && get(/databases/$(database)/documents/_control/temporalRelease).data.domains[domain].admission == 'open');
+    }
+    match /_control/{document} { allow read, write: if false; }
+    match /legacyAdmissionLeases/{document} { allow read, write: if false; }
     function isAdmin() {
     	return request.auth != null && request.auth.token.role == 'admin';
     }
-    
+
     function canUpload() {
     	return request.auth != null && (request.auth.token.role == 'uploader' || request.auth.token.role == 'admin' || request.auth.token.role == 'publisher');
     }
@@ -22,8 +31,90 @@ service cloud.firestore {
     }
 
     function sermonClientUpdateAllowed() {
-      return !sermonIsProcessing();
+      return releaseAllowsLegacy('publishing') && releaseAllowsLegacy('media') && !sermonIsProcessing()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'uploaderId', 'activeDurableJobs', 'audioArtifacts'
+        ]);
     }
+
+
+    // Projections are server-authored; users may only observe their own jobs.
+    match /durableJobs/{jobId} {
+      allow read: if isAdmin() || (request.auth != null && resource.data.entity.type == 'sermon' && get(/databases/$(database)/documents/sermons/$(resource.data.entity.id)).data.uploaderId == request.auth.uid) || (request.auth != null && (resource.data.requestedBy == request.auth.uid || (resource.data.entity.type == 'user' && resource.data.entity.id == request.auth.uid)));
+      allow write: if false;
+    }
+    match /durableJobIntents/{document} { allow read, write: if false; }
+    match /durableJobOutbox/{document} { allow read, write: if false; }
+    match /durableJobCommands/{document} { allow read, write: if false; }
+    match /durableJobEntities/{document} { allow read, write: if false; }
+    match /durableAdmissionReceipts/{document} { allow read, write: if false; }
+    match /durableUploadSessions/{document} { allow read, write: if false; }
+    match /temporalMediaRequests/{document} { allow read, write: if false; }
+    match /temporalMediaState/{document} { allow read, write: if false; }
+    match /temporalMediaAdmissions/{document} { allow read, write: if false; }
+    match /temporalProviderReceipts/{document} { allow read, write: if false; }
+
+    match /durableActivityExecutions/{document=**} { allow read, write: if false; }
+    match /durableJobCancellationIntents/{document=**} { allow read, write: if false; }
+    match /durableJobCriticalSections/{document=**} { allow read, write: if false; }
+    match /temporalProviderUsage/{document=**} { allow read, write: if false; }
+    match /temporalPublishingProviderBindings/{document=**} { allow read, write: if false; }
+    match /temporalPublishingAllocations/{document=**} { allow read, write: if false; }
+    match /temporalProviderAcknowledgements/{document=**} { allow read, write: if false; }
+    match /temporalPublishingDeletionReceipts/{document=**} { allow read, write: if false; }
+    match /temporalPublishingEffectPlans/{document=**} { allow read, write: if false; }
+    match /temporalPublishingAcknowledgedProjections/{document=**} { allow read, write: if false; }
+    match /temporalPublishingUpdateCheckpoints/{document=**} { allow read, write: if false; }
+    match /temporalPublishingCreateReviewCheckpoints/{document=**} { allow read, write: if false; }
+    match /temporalPublishingListCreationState/{document=**} { allow read, write: if false; }
+    match /temporalPublishingSeriesCreationState/{document=**} { allow read, write: if false; }
+    match /temporalLegacySoundCloudRetentions/{document=**} { allow read, write: if false; }
+    match /temporalLegacySoundCloudRetentionCertificates/{document=**} { allow read, write: if false; }
+    match /temporalLegacySoundCloudRetentionObservations/{document=**} { allow read, write: if false; }
+    match /temporalSermonDeletionMirrorPlans/{document=**} { allow read, write: if false; }
+    match /temporalProviderDesiredDeletionPlans/{document=**} { allow read, write: if false; }
+    match /temporalSpeakerDeletionMirrorPlans/{document=**} { allow read, write: if false; }
+    match /durableJobCriticalRepairGrants/{document=**} { allow read, write: if false; }
+    match /temporalPublishingCriticalRepairs/{document=**} { allow read, write: if false; }
+    match /temporalPublishingCertifiedDeletionDispositions/{document=**} { allow read, write: if false; }
+    match /temporalPublishingCriticalDeletionAbsences/{document=**} { allow read, write: if false; }
+    match /temporalPublishingZeroEffectsStops/{document=**} { allow read, write: if false; }
+    match /temporalSermonDeletionPartialStops/{document=**} { allow read, write: if false; }
+    match /temporalPublishingCriticalRepairSourceCatalogs/{document=**} { allow read, write: if false; }
+    match /temporalPublishingCriticalRepairCatalogs/{document=**} { allow read, write: if false; }
+    match /temporalPublishingAcknowledgedProjectionProgress/{document=**} { allow read, write: if false; }
+    match /temporalPublishingAcknowledgedRepairCandidates/{document=**} { allow read, write: if false; }
+    match /temporalListDeletionMirrorPlans/{document=**} { allow read, write: if false; }
+    match /temporalListDeletionReady/{document=**} { allow read, write: if false; }
+    match /temporalSeriesDeletionMirrorPlans/{document=**} { allow read, write: if false; }
+    match /temporalProviderAcknowledgementReviews/{document=**} { allow read, write: if false; }
+    match /temporalProviderRetentions/{document=**} { allow read, write: if false; }
+    match /temporalProviderMutationSessions/{document=**} { allow read, write: if false; }
+    match /temporalProviderMutationLocks/{document=**} { allow read, write: if false; }
+    match /temporalProviderMutationFacts/{document=**} { allow read, write: if false; }
+    match /temporalImageResourceRetentions/{document=**} { allow read, write: if false; }
+    match /temporalImageAllocationAcknowledgements/{document=**} { allow read, write: if false; }
+    match /temporalImageCleanupAuthorizations/{document=**} { allow read, write: if false; }
+    match /durableJobStepExecutions/{document=**} { allow read, write: if false; }
+    match /durableEmailReceipts/{document=**} { allow read, write: if false; }
+    match /durableJobResolutionRequests/{document=**} { allow read, write: if false; }
+    match /legacyAdmissionLeaseReviews/{document=**} { allow read, write: if false; }
+    match /_durableAccountAssignments/{document=**} { allow read, write: if false; }
+    match /_durableBundleAttempts/{document=**} { allow read, write: if false; }
+    match /_durableBundlePointers/{document=**} { allow read, write: if false; }
+    match /temporalImageReceipts/{document=**} { allow read, write: if false; }
+    match /temporalImageResolutionAudits/{document=**} { allow read, write: if false; }
+    match /temporalMediaArtifacts/{document=**} { allow read, write: if false; }
+    match /temporalMediaCanonicalRefs/{document=**} { allow read, write: if false; }
+    match /temporalMediaJobArtifacts/{document=**} { allow read, write: if false; }
+    match /temporalMediaRecovery/{document=**} { allow read, write: if false; }
+    match /temporalMediaRetentionAudits/{document=**} { allow read, write: if false; }
+    match /temporalMediaDeletionEffects/{document=**} { allow read, write: if false; }
+    match /temporalMediaPublishingLeases/{document=**} { allow read, write: if false; }
+    match /temporalPublishingAudioDependencies/{document=**} { allow read, write: if false; }
+    match /temporalPublishingPublications/{document=**} { allow read, write: if false; }
+
+    match /_durableAccountClaimResources/{document=**} { allow read, write: if false; }
 
     match /users/{userId} {
       allow read, write: if isAuthorized();
@@ -31,61 +122,65 @@ service cloud.firestore {
 
     match /images/{document} {
       allow read: if isAuthorized();
-      allow write: if (canUpload());
+      allow write: if releaseAllowsLegacy('images') && (canUpload());
     }
-    
+
     match /lists/{document} {
       allow read: if isAuthorized();
-      allow write: if (canUpload());
+      allow write: if releaseAllowsLegacy('publishing') && (canUpload());
     }
-    
+
     match /speakers/{document} {
       allow read: if isAuthorized();
-      allow write: if (isAdmin());
+      allow write: if releaseAllowsLegacy('publishing') && (isAdmin());
     }
-    
+
     match /subtitles/{document} {
       allow read: if isAuthorized();
       allow write: if (isAdmin());
     }
-    
+
     match /topics/{document} {
       allow read: if isAuthorized();
       allow write: if (canUpload());
     }
-    
+
     match /transcriptions/{document} {
       allow read: if isAuthorized();
       allow write: if (canUpload());
     }
-    
+
     // Series permissions: only owner or admin can access
     match /series/{seriesId} {
       // Admins can read/write all series
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if releaseAllowsLegacy('publishing') && isAdmin();
       // Owners can read/write their own series
-      allow read, write: if canUpload() && resource.data.ownerId == request.auth.uid;
+      allow read: if canUpload() && resource.data.ownerId == request.auth.uid;
+      allow write: if releaseAllowsLegacy('publishing') && canUpload() && resource.data.ownerId == request.auth.uid;
       // Allow create if user can upload (they become the owner)
-      allow create: if canUpload() && request.resource.data.ownerId == request.auth.uid;
-      
+      allow create: if releaseAllowsLegacy('publishing') && canUpload() && request.resource.data.ownerId == request.auth.uid;
+
       // Series items subcollection - same ownership rules
       match /seriesItems/{itemId} {
-        allow read, write: if isAdmin();
-        allow read, write: if canUpload() && get(/databases/$(database)/documents/series/$(seriesId)).data.ownerId == request.auth.uid;
+        allow read: if isAdmin();
+      allow write: if releaseAllowsLegacy('publishing') && isAdmin();
+        allow read: if canUpload() && get(/databases/$(database)/documents/series/$(seriesId)).data.ownerId == request.auth.uid;
+        allow write: if releaseAllowsLegacy('publishing') && canUpload() && get(/databases/$(database)/documents/series/$(seriesId)).data.ownerId == request.auth.uid;
       }
     }
-    
-    
+
+
     // Sermon permissions: Admins have full access, uploaders/publishers can only access their own sermons
     match /sermons/{sermonId} {
       allow read: if isAdmin();
-      allow create: if isAdmin();
-      allow delete: if isAdmin();
+      allow create: if releaseAllowsLegacy('media') && isAdmin();
+      allow delete: if releaseAllowsLegacy('publishing') && releaseAllowsLegacy('media') && isAdmin();
       allow update: if isAdmin() && sermonClientUpdateAllowed();
       allow read: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid;
       allow update: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && sermonClientUpdateAllowed();
-      allow delete: if canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && (resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED');
-      allow create: if canUpload();
+      allow delete: if releaseAllowsLegacy('publishing') && releaseAllowsLegacy('media') && canUpload() && 'uploaderId' in resource.data && resource.data.uploaderId == request.auth.uid && (resource.data.status.soundCloud != 'UPLOADED' && resource.data.status.subsplash != 'UPLOADED');
+      allow create: if releaseAllowsLegacy('media') && canUpload() && request.resource.data.uploaderId == request.auth.uid;
     }
 
     // Bundle metadata - allow public read access for bundle timestamp checking
@@ -98,11 +193,11 @@ service cloud.firestore {
     // Collection Groups
     match /{path=**}/sermonLists/{sermonListId} {
       allow read: if isAuthorized();
-      allow write: if (canUpload());
+      allow write: if releaseAllowsLegacy('publishing') && (canUpload());
     }
     match /{path=**}/listItems/{listItemId} {
       allow read: if isAuthorized();
-      allow write: if (canUpload());
+      allow write: if releaseAllowsLegacy('publishing') && (canUpload());
     }
   }
 }

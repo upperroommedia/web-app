@@ -1,0 +1,31 @@
+{
+  "name": "@upperroom/orchestration",
+  "private": true,
+  "version": "0.1.0",
+  "main": "lib/job-store.js",
+  "exports": {
+    "./*": {
+      "types": "./lib/*.d.ts",
+      "default": "./lib/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "pnpm run build"
+  },
+  "dependencies": {
+    "@upperroom/contracts": "workspace:*",
+    "firebase-admin": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "lib/*"
+      ]
+    }
+  }
+}

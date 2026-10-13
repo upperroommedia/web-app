@@ -5,7 +5,7 @@
 import type { NextPage } from 'next';
 import useAuth from '../context/user/UserContext';
 import Button, { ButtonProps } from '@mui/material/Button';
-import Box from '@mui/system/Box';
+import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import UserAvatar from '../components/UserAvatar';
 import Head from 'next/head';
@@ -23,8 +23,14 @@ function MediumButton({ children, ...props }: ButtonProps) {
 }
 
 const Profile: NextPage & { PageLayout?: React.ComponentType<{ children: React.ReactNode }> } = () => {
-  const { user, logoutUser } = useAuth();
-  
+  const { user, logoutUser, loading } = useAuth();
+  if (loading)
+    return (
+      <Typography role="status" sx={{ p: 4 }}>
+        Loading account…
+      </Typography>
+    );
+
   if (!user) {
     return (
       <Stack
@@ -52,12 +58,7 @@ const Profile: NextPage & { PageLayout?: React.ComponentType<{ children: React.R
             Please log in to view your profile and access your account settings.
           </Typography>
           <Link href="/login?callbackUrl=profile" passHref>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<LoginIcon />}
-              sx={{ mt: 2 }}
-            >
+            <Button variant="contained" size="large" startIcon={<LoginIcon />} sx={{ mt: 2 }}>
               Log In
             </Button>
           </Link>
@@ -71,11 +72,7 @@ const Profile: NextPage & { PageLayout?: React.ComponentType<{ children: React.R
       <Head>
         <title>Profile | Upper Room Media</title>
         <meta property="og:title" content="Profile | Upper Room Media" key="title" />
-        <meta
-          name="description"
-          content="Your Upper Room Media profile and account settings."
-          key="description"
-        />
+        <meta name="description" content="Your Upper Room Media profile and account settings." key="description" />
       </Head>
       <Box display="flex" flexDirection="column" alignItems="center" gap="20px" py={4}>
         <Typography align="center" variant="h4" color="text.primary">

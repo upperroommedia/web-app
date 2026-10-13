@@ -130,10 +130,16 @@ const updateAllSpeakerTags = onCall(
     memory: '512MiB',
     maxInstances: 1,
   },
-  async (request: CallableRequest<UpdateAllSpeakerTagsInputType>): Promise<UpdateAllSpeakerTagsOutputType> => {
-    const requester = await assertAuthorizedScriptRunner(request);
-
-    try {
+  async (request: CallableRequest<UpdateAllSpeakerTagsInputType>): Promise<UpdateAllSpeakerTagsOutputType> =>{
+const requester = await assertAuthorizedScriptRunner(request);
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"updateAllSpeakerTags",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+try {
       const requesterEmail = requester.email;
       const dryRun = request.data?.dryRun === true;
       const speakersSnapshot = await firebaseAdmin
@@ -248,7 +254,8 @@ const updateAllSpeakerTags = onCall(
         context: { functionName: 'updateAllSpeakerTags' },
       });
     }
-  }
+});
+}
 );
 
 export default updateAllSpeakerTags;

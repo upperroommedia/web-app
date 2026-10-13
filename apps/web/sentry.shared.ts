@@ -3,11 +3,29 @@ const parseSampleRate = (rawValue: string | undefined, fallback: number): number
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+// v11 defaults collect request bodies and identities: explicitly keep application data private.
+export const webSentryDataCollection = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: { request: false, response: false },
+  httpBodies: [],
+  urlQueryParams: false,
+  genAI: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  queues: false,
+  graphQL: { document: false, variables: false },
+  stackFrameVariables: false,
+};
+
 export const webSentryConfig = {
+  dataCollection: webSentryDataCollection,
+  beforeSendLog: () => null,
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN?.trim() || undefined,
   enabled: Boolean(process.env.NEXT_PUBLIC_SENTRY_DSN?.trim()),
   environment:
-    process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT?.trim() || process.env.SENTRY_ENVIRONMENT?.trim() || process.env.NODE_ENV,
+    process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT?.trim() ||
+    process.env.SENTRY_ENVIRONMENT?.trim() ||
+    process.env.NODE_ENV,
   release: process.env.NEXT_PUBLIC_SENTRY_RELEASE?.trim() || process.env.SENTRY_RELEASE?.trim() || undefined,
   tracesSampleRate: parseSampleRate(
     process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE || process.env.SENTRY_TRACES_SAMPLE_RATE,

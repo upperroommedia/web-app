@@ -1,8 +1,13 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import editSubsplashList from '../../editSubsplashList';
 import { clearFirestore, createListDocument, getListBySubsplashId } from '../addToList/firestoreHelpers';
 
-const mockLists = new Map<string, { id: string; title: string; subtitle?: string; images?: Array<{ id: string; type: string }> }>();
+const mockLists = new Map<
+  string,
+  { id: string; title: string; subtitle?: string; images?: Array<{ id: string; type: string }> }
+>();
 const mockImages = new Map<string, { id: string; type: string; title?: string }>();
 
 jest.mock('../../subsplashUtils', () => ({
@@ -17,17 +22,23 @@ jest.mock('../../subsplashUtils', () => ({
 }));
 
 jest.mock('axios', () => {
-  return jest.fn((config: { method: string; url: string; data?: unknown }) => {
+  const axiosMock = jest.fn((config: { method: string; url: string; data?: unknown }) => {
     const method = config.method.toUpperCase();
     const listMatch = config.url.match(/builder\/v1\/lists\/([a-zA-Z0-9-]+)$/);
     const imageMatch = config.url.match(/files\/v1\/images\/([a-zA-Z0-9-]+)$/);
+
+    if (method === 'GET' && listMatch) {
+      const list = mockLists.get(listMatch[1]);
+      if (!list) return Promise.reject({ isAxiosError: true, response: { status: 404 } });
+      return Promise.resolve({ status: 200, data: { ...list, app_key: '9XTSHD' } });
+    }
 
     if (method === 'GET' && imageMatch) {
       const image = mockImages.get(imageMatch[1]);
       if (!image) {
         return Promise.reject({ response: { status: 404, data: { error: 'Image not found' } } });
       }
-      return Promise.resolve({ data: image });
+      return Promise.resolve({ data: image, status: 200 });
     }
 
     if (method === 'GET' && config.url.startsWith('https://example.com/')) {
@@ -43,6 +54,7 @@ jest.mock('axios', () => {
       const image = { id, type: payload.type, title: payload.title };
       mockImages.set(id, image);
       return Promise.resolve({
+        status: 201,
         data: {
           id,
           type: payload.type,
@@ -59,8 +71,16 @@ jest.mock('axios', () => {
       const listId = listMatch[1];
       const payload =
         typeof config.data === 'string'
-          ? (JSON.parse(config.data) as { title?: string; subtitle?: string; _embedded?: { images?: Array<{ id: string; type: string }> } })
-          : ((config.data ?? {}) as { title?: string; subtitle?: string; _embedded?: { images?: Array<{ id: string; type: string }> } });
+          ? (JSON.parse(config.data) as {
+              title?: string;
+              subtitle?: string;
+              _embedded?: { images?: Array<{ id: string; type: string }> };
+            })
+          : ((config.data ?? {}) as {
+              title?: string;
+              subtitle?: string;
+              _embedded?: { images?: Array<{ id: string; type: string }> };
+            });
 
       const existingList = mockLists.get(listId) ?? { id: listId, title: listId };
       const updatedList = {
@@ -70,10 +90,13 @@ jest.mock('axios', () => {
         ...(payload._embedded?.images ? { images: payload._embedded.images } : {}),
       };
       mockLists.set(listId, updatedList);
-      return Promise.resolve({ data: updatedList });
+      return Promise.resolve({ data: updatedList, status: 200 });
     }
 
     return Promise.reject(new Error(`Unhandled axios request: ${method} ${config.url}`));
+  });
+  return Object.assign(axiosMock, {
+    isAxiosError: (error: unknown) => !!(error as { isAxiosError?: boolean })?.isAxiosError,
   });
 });
 
@@ -90,13 +113,13 @@ jest.mock('firebase-functions/v2/https', () => {
   return {
     ...actual,
     onCall: jest.fn((optsOrHandler: unknown, maybeHandler?: unknown) =>
-      (typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler)
+      typeof optsOrHandler === 'function' ? optsOrHandler : maybeHandler
     ),
   };
 });
 
 type EditHandler = (request: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: {
     listId: string;
     title?: string;
@@ -175,7 +198,7 @@ describe('editSubsplashList overflow naming', () => {
     });
 
     await editHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listId: rootSubsplashId,
         title: 'Fresh Root Name',
@@ -221,12 +244,24 @@ describe('editSubsplashList overflow naming', () => {
     mockImages.set('wide-remote', { id: 'wide-remote', type: 'square', title: 'Wrong Wide' });
 
     await editHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listId: 'list-1',
         images: [
-          { id: 'local-square', subsplashId: 'square-remote', type: 'square', downloadLink: 'https://example.com/square.jpg', name: 'Square' },
-          { id: 'local-wide', subsplashId: 'wide-remote', type: 'wide', downloadLink: 'https://example.com/wide.jpg', name: 'Wide' },
+          {
+            id: 'local-square',
+            subsplashId: 'square-remote',
+            type: 'square',
+            downloadLink: 'https://example.com/square.jpg',
+            name: 'Square',
+          },
+          {
+            id: 'local-wide',
+            subsplashId: 'wide-remote',
+            type: 'wide',
+            downloadLink: 'https://example.com/wide.jpg',
+            name: 'Wide',
+          },
         ],
         operationKey: 'edit-list-images-1',
       },

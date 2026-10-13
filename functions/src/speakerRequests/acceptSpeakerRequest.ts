@@ -1,3 +1,4 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { adminBaseUrlSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
@@ -20,7 +21,8 @@ const isAdmin = (request: CallableRequest<unknown>): boolean =>
   request.auth?.token.role === 'admin' && typeof request.auth.uid === 'string';
 
 export const acceptSpeakerRequestHandler = async (
-  request: CallableRequest<AcceptSpeakerRequestInputType>
+  request: CallableRequest<AcceptSpeakerRequestInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<AcceptSpeakerRequestOutputType> => {
   if (!isAdmin(request)) {
     return { status: 'error', error: 'Not Authorized' };
@@ -51,6 +53,7 @@ export const acceptSpeakerRequestHandler = async (
   try {
     const speakerName = requireTrimmedSpeakerName(request.data?.speaker?.name);
     requireSquareImage(request.data?.speaker?.images);
+    await lease?.markEffectsStarted();
     const createSpeakerResult = await createSpeakerMutation({
       speaker: {
         name: speakerName,
@@ -142,6 +145,21 @@ export const acceptSpeakerRequestHandler = async (
   }
 };
 
-const acceptspeakerrequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, acceptSpeakerRequestHandler);
+export const acceptSpeakerRequestHandlerSource = async (
+  request: Parameters<typeof acceptSpeakerRequestHandler>[0]
+): Promise<AcceptSpeakerRequestOutputType> => {
+  if (!(request.auth?.uid && request.auth.token.role === 'admin')) return acceptSpeakerRequestHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth!.uid,
+    'speaker.accept',
+    (lease) => acceptSpeakerRequestHandler(request, lease)
+  );
+};
+
+const acceptspeakerrequest = onCall(
+  { secrets: adminBaseUrlSecretsWithRuntimeAlerts },
+  acceptSpeakerRequestHandlerSource
+);
 
 export default acceptspeakerrequest;

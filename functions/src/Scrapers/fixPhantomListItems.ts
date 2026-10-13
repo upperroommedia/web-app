@@ -11,6 +11,8 @@ import { subsplashSecretsWithRuntimeAlerts } from '../subsplashSecrets';
 import handleError from '../handleError';
 
 export const fixPhantomListItems = onRequest({ cors: true, secrets: subsplashSecretsWithRuntimeAlerts }, async (req, res) => {
+    const { guardLegacyPublishingHttpMutation } = await import('../temporal/publishing/legacyHttpGuard');
+    await guardLegacyPublishingHttpMutation(req, res, async () => {
     const db = firebaseAdmin.firestore();
 
     // Check if we should update Subsplash (default to false for safety)
@@ -222,5 +224,8 @@ export const fixPhantomListItems = onRequest({ cors: true, secrets: subsplashSec
             error: error instanceof Error ? error.message : String(error),
             message: 'Failed to complete phantom listItems cleanup'
         });
+        return { success: false };
     }
+    return { success: true };
+    });
 }); 

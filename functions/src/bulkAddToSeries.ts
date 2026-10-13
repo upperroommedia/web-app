@@ -1,3 +1,5 @@
+import {isDurablePublishingOperation} from './temporal/publishing/durableOperationContext';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 /**
  * Firebase callable function to add many media items to a series safely.
  * - Performs controlled concurrent add operations
@@ -177,266 +179,287 @@ const rollbackAddedItems = async (
   return { rolledBackMediaItemIds, rollbackFailures };
 };
 
-const bulkAddToSeries = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<BulkAddToSeriesInputType>): Promise<BulkAddToSeriesOutputType> => {
-    logger.log('bulkAddToSeries');
+export const bulkAddToSeriesDomain = async (
+  request: Pick<CallableRequest<BulkAddToSeriesInputType>, 'data' | 'auth'>
+): Promise<BulkAddToSeriesOutputType> => {
+  logger.log('bulkAddToSeries');
 
-    if (!canUserRolePublish(request.auth?.token.role)) {
-      throw new HttpsError(
-        'unauthenticated',
-        'The function must be called while authenticated with publish permissions.'
-      );
-    }
-
-    const {
-      firestoreSeriesId,
-      seriesSubsplashId,
-      operationKey,
-      expectedPublishedMembershipHash,
-      adds,
-      publishedItemOrder,
-      maxConcurrency,
-      rollbackOnFailure = true,
-    } = request.data;
-
-    if (!firestoreSeriesId || !firestoreSeriesId.trim()) {
-      throw new HttpsError('invalid-argument', 'firestoreSeriesId is required.');
-    }
-
-    if (!seriesSubsplashId || !seriesSubsplashId.trim()) {
-      throw new HttpsError('invalid-argument', 'seriesSubsplashId is required.');
-    }
-
-    const normalizedOperationKey = normalizeOperationKey(operationKey);
-    const normalizedExpectedMembershipHash = normalizeMembershipHash(expectedPublishedMembershipHash);
-
-    if (!Array.isArray(adds) || adds.length === 0) {
-      throw new HttpsError('invalid-argument', 'adds must contain at least one media item.');
-    }
-
-    if (!Array.isArray(publishedItemOrder) || publishedItemOrder.length === 0) {
-      throw new HttpsError('invalid-argument', 'publishedItemOrder must contain at least one media item.');
-    }
-
-    const uniqueAdds = Array.from(
-      new Map(
-        adds
-          .filter((entry) => entry?.mediaItemId && entry.mediaItemId.trim())
-          .map((entry) => [
-            entry.mediaItemId.trim(),
-            {
-              mediaItemId: entry.mediaItemId.trim(),
-              sermonId: entry.sermonId,
-            },
-          ])
-      ).values()
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
     );
+  }
 
-    if (uniqueAdds.length === 0) {
-      throw new HttpsError('invalid-argument', 'adds contains no valid media item IDs.');
-    }
-    if (uniqueAdds.length > MAX_BULK_ADDS) {
-      throw new HttpsError(
-        'invalid-argument',
-        `adds exceeds the maximum supported bulk size of ${MAX_BULK_ADDS} media items.`
-      );
-    }
+  const {
+    firestoreSeriesId,
+    seriesSubsplashId,
+    operationKey,
+    expectedPublishedMembershipHash,
+    adds,
+    publishedItemOrder,
+    maxConcurrency,
+    rollbackOnFailure = true,
+  } = request.data;
 
-    const uniquePublishedOrder = Array.from(
-      new Set(
-        publishedItemOrder
-          .map((mediaItemId) => mediaItemId?.trim())
-          .filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId))
-      )
+  if (!firestoreSeriesId || !firestoreSeriesId.trim()) {
+    throw new HttpsError('invalid-argument', 'firestoreSeriesId is required.');
+  }
+
+  if (!seriesSubsplashId || !seriesSubsplashId.trim()) {
+    throw new HttpsError('invalid-argument', 'seriesSubsplashId is required.');
+  }
+
+  const normalizedOperationKey = normalizeOperationKey(operationKey);
+  const normalizedExpectedMembershipHash = normalizeMembershipHash(expectedPublishedMembershipHash);
+
+  if (!Array.isArray(adds) || adds.length === 0) {
+    throw new HttpsError('invalid-argument', 'adds must contain at least one media item.');
+  }
+
+  if (!Array.isArray(publishedItemOrder) || publishedItemOrder.length === 0) {
+    throw new HttpsError('invalid-argument', 'publishedItemOrder must contain at least one media item.');
+  }
+
+  const uniqueAdds = Array.from(
+    new Map(
+      adds
+        .filter((entry) => entry?.mediaItemId && entry.mediaItemId.trim())
+        .map((entry) => [
+          entry.mediaItemId.trim(),
+          {
+            mediaItemId: entry.mediaItemId.trim(),
+            sermonId: entry.sermonId,
+          },
+        ])
+    ).values()
+  );
+
+  if (uniqueAdds.length === 0) {
+    throw new HttpsError('invalid-argument', 'adds contains no valid media item IDs.');
+  }
+  if (uniqueAdds.length > MAX_BULK_ADDS) {
+    throw new HttpsError(
+      'invalid-argument',
+      `adds exceeds the maximum supported bulk size of ${MAX_BULK_ADDS} media items.`
     );
+  }
 
-    if (uniquePublishedOrder.length === 0) {
-      throw new HttpsError('invalid-argument', 'publishedItemOrder contains no valid media item IDs.');
-    }
-    if (uniquePublishedOrder.length > MAX_PUBLISHED_ORDER_ITEMS) {
-      throw new HttpsError(
-        'invalid-argument',
-        `publishedItemOrder exceeds the maximum supported size of ${MAX_PUBLISHED_ORDER_ITEMS} media items.`
-      );
-    }
+  const uniquePublishedOrder = Array.from(
+    new Set(
+      publishedItemOrder
+        .map((mediaItemId) => mediaItemId?.trim())
+        .filter((mediaItemId): mediaItemId is string => Boolean(mediaItemId))
+    )
+  );
 
-    const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, maxConcurrency ?? DEFAULT_CONCURRENCY));
+  if (uniquePublishedOrder.length === 0) {
+    throw new HttpsError('invalid-argument', 'publishedItemOrder contains no valid media item IDs.');
+  }
+  if (uniquePublishedOrder.length > MAX_PUBLISHED_ORDER_ITEMS) {
+    throw new HttpsError(
+      'invalid-argument',
+      `publishedItemOrder exceeds the maximum supported size of ${MAX_PUBLISHED_ORDER_ITEMS} media items.`
+    );
+  }
 
-    try {
-      return await withIdempotency(normalizedOperationKey, async () => {
-        const lockMediaItemIds = Array.from(
-          new Set([
-            ...uniqueAdds.map((entry) => entry.mediaItemId),
-            ...uniquePublishedOrder,
-          ])
-        ).sort();
-        const lockKeys = [
-          `series:${seriesSubsplashId.trim()}`,
-          ...lockMediaItemIds.map((mediaItemId) => `media-item:${mediaItemId}`),
-        ];
+  const concurrency = isDurablePublishingOperation()?1:Math.max(1, Math.min(MAX_CONCURRENCY, maxConcurrency ?? DEFAULT_CONCURRENCY));
 
-        return withSubsplashLocks(
-          lockKeys,
-          async () => {
-            const token = await authenticateSubsplash();
-            const remoteMembershipBeforeAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
-            const remoteMembershipHash = createSeriesMediaItemMembershipHash(
-              Array.from(remoteMembershipBeforeAdds.keys()).map((id) => ({ id }))
+  try {
+    return await withIdempotency(normalizedOperationKey, async () => {
+      const lockMediaItemIds = Array.from(
+        new Set([
+          ...uniqueAdds.map((entry) => entry.mediaItemId),
+          ...uniquePublishedOrder,
+        ])
+      ).sort();
+      const lockKeys = [
+        `series:${seriesSubsplashId.trim()}`,
+        ...lockMediaItemIds.map((mediaItemId) => `media-item:${mediaItemId}`),
+      ];
+
+      return withSubsplashLocks(
+        lockKeys,
+        async () => {
+          const token = await authenticateSubsplash();
+          const remoteMembershipBeforeAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
+          const remoteMembershipHash = createSeriesMediaItemMembershipHash(
+            Array.from(remoteMembershipBeforeAdds.keys()).map((id) => ({ id }))
+          );
+          if (normalizedExpectedMembershipHash !== remoteMembershipHash) {
+            throw new HttpsError(
+              'failed-precondition',
+              'Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.',
+              {
+                expected_hash: normalizedExpectedMembershipHash,
+                actual_hash: remoteMembershipHash,
+              }
             );
-            if (normalizedExpectedMembershipHash !== remoteMembershipHash) {
-              throw new HttpsError(
-                'failed-precondition',
-                'Published membership changed in Subsplash. Refresh the series and retry with a fresh snapshot hash.',
-                {
-                  expected_hash: normalizedExpectedMembershipHash,
-                  actual_hash: remoteMembershipHash,
-                }
-              );
-            }
+          }
 
-            const existingMediaItemIds = new Set(remoteMembershipBeforeAdds.keys());
-            const results = await runWithConcurrency(uniqueAdds, concurrency, async (entry): Promise<BulkAddToSeriesResultItem> => {
-                try {
-                  const patchedItem = await patchMediaItemSeries(entry.mediaItemId, seriesSubsplashId.trim(), token);
-                  const confirmedSeriesId = patchedItem._embedded?.['media-series']?.id ?? null;
-                  if (confirmedSeriesId !== seriesSubsplashId.trim()) {
-                    return {
-                      mediaItemId: entry.mediaItemId,
-                      sermonId: entry.sermonId,
-                      status: 'error',
-                      error: `Subsplash did not confirm series assignment. Expected ${seriesSubsplashId}, got ${confirmedSeriesId ?? 'null'}.`,
-                    };
-                  }
-
-                  return {
-                    mediaItemId: entry.mediaItemId,
-                    sermonId: entry.sermonId,
-                    status: 'success',
-                    confirmedSeriesId,
-                    position: patchedItem.position ?? null,
-                    alreadyInSeries: existingMediaItemIds.has(entry.mediaItemId),
-                  };
-                } catch (error) {
+          const existingMediaItemIds = new Set(remoteMembershipBeforeAdds.keys());
+          const results = await runWithConcurrency(uniqueAdds, concurrency, async (entry): Promise<BulkAddToSeriesResultItem> => {
+              try {
+                const patchedItem = await patchMediaItemSeries(entry.mediaItemId, seriesSubsplashId.trim(), token);
+                const confirmedSeriesId = patchedItem._embedded?.['media-series']?.id ?? null;
+                if (confirmedSeriesId !== seriesSubsplashId.trim()) {
                   return {
                     mediaItemId: entry.mediaItemId,
                     sermonId: entry.sermonId,
                     status: 'error',
-                    error: getErrorMessage(error),
+                    error: `Subsplash did not confirm series assignment. Expected ${seriesSubsplashId}, got ${confirmedSeriesId ?? 'null'}.`,
                   };
                 }
-            });
 
-            const successfulAdds = results.filter((result) => result.status === 'success');
-            const failedAdds = results.filter((result) => result.status === 'error');
-            const rollbackEligibleMediaItemIds = new Set(
-              successfulAdds
-                .filter((result) => result.alreadyInSeries !== true)
-                .map((result) => result.mediaItemId)
-            );
+                return {
+                  mediaItemId: entry.mediaItemId,
+                  sermonId: entry.sermonId,
+                  status: 'success',
+                  confirmedSeriesId,
+                  position: patchedItem.position ?? null,
+                  alreadyInSeries: existingMediaItemIds.has(entry.mediaItemId),
+                };
+              } catch (error) {
+                return {
+                  mediaItemId: entry.mediaItemId,
+                  sermonId: entry.sermonId,
+                  status: 'error',
+                  error: getErrorMessage(error),
+                };
+              }
+          });
 
-            if (failedAdds.length > 0) {
-              const rollback = rollbackOnFailure
-                ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
-                : { rolledBackMediaItemIds: [], rollbackFailures: [] };
+          const successfulAdds = results.filter((result) => result.status === 'success');
+          const failedAdds = results.filter((result) => result.status === 'error');
+          const rollbackEligibleMediaItemIds = new Set(
+            successfulAdds
+              .filter((result) => result.alreadyInSeries !== true)
+              .map((result) => result.mediaItemId)
+          );
 
-              return {
-                status: successfulAdds.length > 0 ? 'partial' : 'error',
-                message: `Failed to add ${failedAdds.length} of ${results.length} item(s) to Subsplash series.`,
-                firestoreSeriesId,
-                seriesSubsplashId: seriesSubsplashId.trim(),
-                processed: results.length,
-                succeeded: successfulAdds.length,
-                failed: failedAdds.length,
-                reorderApplied: false,
-                results,
-                rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
-                rollbackFailures: rollback.rollbackFailures,
-              };
-            }
-
-            const remoteMembershipAfterAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
-            const missingOrderedIds = uniquePublishedOrder.filter((mediaItemId) => !remoteMembershipAfterAdds.has(mediaItemId));
-            if (missingOrderedIds.length > 0) {
-              const rollback = rollbackOnFailure
-                ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
-                : { rolledBackMediaItemIds: [], rollbackFailures: [] };
-
-              return {
-                status: 'error',
-                message: `Cannot reorder series because ${missingOrderedIds.length} ordered item(s) are missing in Subsplash membership.`,
-                firestoreSeriesId,
-                seriesSubsplashId: seriesSubsplashId.trim(),
-                processed: results.length,
-                succeeded: successfulAdds.length,
-                failed: 0,
-                reorderApplied: false,
-                results,
-                rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
-                rollbackFailures: rollback.rollbackFailures,
-              };
-            }
-
-            const requestedPositions = new Map(
-              uniquePublishedOrder.map((mediaItemId, index) => [
-                mediaItemId,
-                // Subsplash semantics: position 1 is the bottom item.
-                uniquePublishedOrder.length - index,
-              ])
-            );
-            const itemsToUpdate = Array.from(remoteMembershipAfterAdds.values()).map((item) => ({
-              id: item.id,
-              position: requestedPositions.get(item.id) ?? item.position,
-            }));
-
-            await patchSeriesItemPositions(seriesSubsplashId.trim(), itemsToUpdate, token);
-            const remoteSeries = await getSeriesDetails(seriesSubsplashId.trim(), token);
-            const subtitleItems = Array.from(remoteMembershipAfterAdds.values()).map((item) => ({
-              ...item,
-              position: requestedPositions.get(item.id) ?? item.position,
-            }));
-            const alreadyLockedMediaItemIds = new Set(lockMediaItemIds);
-            const additionalSubtitleLockKeys = subtitleItems
-              .filter((item) => !alreadyLockedMediaItemIds.has(item.id))
-              .map((item) => `media-item:${item.id}`);
-            await withSubsplashLocks(
-              additionalSubtitleLockKeys,
-              () => syncSeriesItemSubtitles(
-                seriesSubsplashId.trim(),
-                remoteSeries.title,
-                subtitleItems,
-                token,
-                { maxConcurrency: concurrency }
-              ),
-              { operationKey: normalizedOperationKey }
-            );
+          if (failedAdds.length > 0) {
+            const rollback = rollbackOnFailure && !isDurablePublishingOperation()
+              ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
+              : { rolledBackMediaItemIds: [], rollbackFailures: [] };
 
             return {
-              status: 'success',
-              message: `Added ${successfulAdds.length} item(s) and applied series reorder.`,
+              status: successfulAdds.length > 0 ? 'partial' : 'error',
+              message: `Failed to add ${failedAdds.length} of ${results.length} item(s) to Subsplash series.`,
+              firestoreSeriesId,
+              seriesSubsplashId: seriesSubsplashId.trim(),
+              processed: results.length,
+              succeeded: successfulAdds.length,
+              failed: failedAdds.length,
+              reorderApplied: false,
+              results,
+              rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
+              rollbackFailures: rollback.rollbackFailures,
+            };
+          }
+
+          const remoteMembershipAfterAdds = await fetchRemoteSeriesMembership(seriesSubsplashId, token);
+          const missingOrderedIds = uniquePublishedOrder.filter((mediaItemId) => !remoteMembershipAfterAdds.has(mediaItemId));
+          if (missingOrderedIds.length > 0) {
+            const rollback = rollbackOnFailure && !isDurablePublishingOperation()
+              ? await rollbackAddedItems(token, successfulAdds, rollbackEligibleMediaItemIds)
+              : { rolledBackMediaItemIds: [], rollbackFailures: [] };
+
+            return {
+              status: 'error',
+              message: `Cannot reorder series because ${missingOrderedIds.length} ordered item(s) are missing in Subsplash membership.`,
               firestoreSeriesId,
               seriesSubsplashId: seriesSubsplashId.trim(),
               processed: results.length,
               succeeded: successfulAdds.length,
               failed: 0,
-              reorderApplied: true,
+              reorderApplied: false,
               results,
-              rolledBackMediaItemIds: [],
-              rollbackFailures: [],
+              rolledBackMediaItemIds: rollback.rolledBackMediaItemIds,
+              rollbackFailures: rollback.rollbackFailures,
             };
-          },
-          {
-            operationKey: normalizedOperationKey,
           }
-        );
-      });
-    } catch (err) {
-      if (isExpectedMembershipConflict(err)) {
-        throw err;
-      }
-      throw handleError(err);
+
+          const requestedPositions = new Map(
+            uniquePublishedOrder.map((mediaItemId, index) => [
+              mediaItemId,
+              // Subsplash semantics: position 1 is the bottom item.
+              uniquePublishedOrder.length - index,
+            ])
+          );
+          const itemsToUpdate = Array.from(remoteMembershipAfterAdds.values()).map((item) => ({
+            id: item.id,
+            position: requestedPositions.get(item.id) ?? item.position,
+          }));
+
+          await patchSeriesItemPositions(seriesSubsplashId.trim(), itemsToUpdate, token);
+          const remoteSeries = await getSeriesDetails(seriesSubsplashId.trim(), token);
+          const subtitleItems = Array.from(remoteMembershipAfterAdds.values()).map((item) => ({
+            ...item,
+            position: requestedPositions.get(item.id) ?? item.position,
+          }));
+          const alreadyLockedMediaItemIds = new Set(lockMediaItemIds);
+          const additionalSubtitleLockKeys = subtitleItems
+            .filter((item) => !alreadyLockedMediaItemIds.has(item.id))
+            .map((item) => `media-item:${item.id}`);
+          await withSubsplashLocks(
+            additionalSubtitleLockKeys,
+            () => syncSeriesItemSubtitles(
+              seriesSubsplashId.trim(),
+              remoteSeries.title,
+              subtitleItems,
+              token,
+              { maxConcurrency: concurrency }
+            ),
+            { operationKey: normalizedOperationKey }
+          );
+
+          return {
+            status: 'success',
+            message: `Added ${successfulAdds.length} item(s) and applied series reorder.`,
+            firestoreSeriesId,
+            seriesSubsplashId: seriesSubsplashId.trim(),
+            processed: results.length,
+            succeeded: successfulAdds.length,
+            failed: 0,
+            reorderApplied: true,
+            results,
+            rolledBackMediaItemIds: [],
+            rollbackFailures: [],
+          };
+        },
+        {
+          operationKey: normalizedOperationKey,
+        }
+      );
+    });
+  } catch (err) {
+    if (isExpectedMembershipConflict(err)) {
+      throw err;
     }
+    throw handleError(err);
   }
+};
+
+const bulkAddToSeries = onCall(
+  { secrets: subsplashSecretsWithRuntimeAlerts },
+  async (request: Parameters<typeof bulkAddToSeriesDomain>[0]) =>{
+
+if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError(
+      'unauthenticated',
+      'The function must be called while authenticated with publish permissions.'
+    );
+  }
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"bulkAddToSeries",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+return bulkAddToSeriesDomain(request);
+});
+}
 );
 
 export default bulkAddToSeries;

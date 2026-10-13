@@ -34,22 +34,20 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import PendingIcon from '@mui/icons-material/Pending';
 
-import { useObject } from 'react-firebase-hooks/database';
 import { useDocument } from 'react-firebase-hooks/firestore';
-import database, { ref } from '../firebase/database';
 import firestore, { doc, getDoc } from '../firebase/firestore';
 import Tooltip from '@mui/material/Tooltip';
 import CircularProgress from '@mui/material/CircularProgress';
 import { DirectoryUser, User } from '../types/User';
 import { createFunctionV2 } from '../utils/createFunction';
-import { createIdleDestinationActivityState } from '../utils/sermonPublishActions';
-import type { DestinationActivityState } from '../utils/sermonPublishActions';
 import UserAvatar from './UserAvatar';
 import useAuth from '../context/user/UserContext';
 import LinearProgress from '@mui/material/LinearProgress';
 import { sermonConverter } from '../types/Sermon';
 import AvatarWithDefaultImage from './AvatarWithDefaultImage';
-import { parseProcessingProgress } from '../utils/processAudioProgress';
+import { useEntityJobSummary } from '../hooks/useDurableJobs';
+import { isDurableJobTerminal } from '@upperroom/contracts/temporal';
+import { jobStateLabel, stoppedRepairMessage } from '../utils/durableJobPresentation';
 
 const ManagePublishingPopup = dynamic(() => import('./ManagePublishingPopup'), { ssr: false });
 
@@ -201,7 +199,7 @@ const SermonListCard: FunctionComponent<Props> = ({
   minimal: _minimal,
   onRefresh,
   subscriptionOwnedByParent = false,
-  enableProcessingProgress = true,
+  enableProcessingProgress: _enableProcessingProgress = true,
   enableSeriesRealtime = true,
 }: Props) => {
   const router = useRouter();
@@ -215,18 +213,15 @@ const SermonListCard: FunctionComponent<Props> = ({
     () => (sermon.id ? doc(firestore, 'sermons', sermon.id).withConverter(sermonConverter) : null),
     [sermon.id]
   );
-  const [sermonSnapshot, _sermonLoading, _sermonError] = useDocument(
-    subscriptionOwnedByParent ? null : docRef,
-    { snapshotListenOptions: { includeMetadataChanges: false } }
-  );
+  const [sermonSnapshot, _sermonLoading, _sermonError] = useDocument(subscriptionOwnedByParent ? null : docRef, {
+    snapshotListenOptions: { includeMetadataChanges: false },
+  });
   const realTimeSermon = sermonSnapshot?.data();
-  const currentSermon = subscriptionOwnedByParent ? sermon : (realTimeSermon || sermon);
+  const currentSermon = subscriptionOwnedByParent ? sermon : realTimeSermon || sermon;
 
   const audioStatus = currentSermon.status.audioStatus;
   const canPublish = user?.canPublish() ?? false;
   const isProcessed = audioStatus === sermonStatusType.PROCESSED;
-  const isPending = audioStatus === sermonStatusType.PENDING;
-  const isProcessing = audioStatus === sermonStatusType.PROCESSING;
   const isError = audioStatus === sermonStatusType.ERROR;
   const isSoundCloudUploaded = currentSermon.status.soundCloud === uploadStatus.UPLOADED;
   const subsplashUploaded = currentSermon.numberOfListsUploadedTo ?? 0;
@@ -234,55 +229,51 @@ const SermonListCard: FunctionComponent<Props> = ({
   const isSubsplashPartial = subsplashUploaded > 0 && subsplashUploaded < subsplashTotal;
   const isSubsplashComplete = subsplashTotal > 0 && subsplashUploaded === subsplashTotal;
   const isCurrentlyPlaying = audioPlayerCurrentSermonId === currentSermon.id && playing;
-  const shouldSubscribeToProcessingProgress = enableProcessingProgress || isProcessing;
-  const processingProgressRef = useMemo(
-    () => (shouldSubscribeToProcessingProgress && isProcessing ? ref(database, `addIntroOutro/${currentSermon.id}`) : null),
-    [shouldSubscribeToProcessingProgress, isProcessing, currentSermon.id]
-  );
-
-  const [snapshot, _loading, _error] = useObject(processingProgressRef);
+  const jobEntity = useMemo(() => ({ type: 'sermon' as const, id: currentSermon.id }), [currentSermon.id]);
+  const { job: latestJob, stale: jobStateStale } = useEntityJobSummary(jobEntity, currentSermon.activeDurableJobs);
+  const activeJob = latestJob && !isDurableJobTerminal(latestJob.state) ? latestJob : undefined;
+  const processingJob =
+    activeJob && (activeJob.kind === 'audio.process' || activeJob.kind === 'upload.create') ? activeJob : undefined;
+  const isProcessing =
+    Boolean(processingJob && processingJob.state !== 'awaiting_source') ||
+    (!latestJob && audioStatus === sermonStatusType.PROCESSING);
+  const isPending =
+    processingJob?.state === 'awaiting_source' || (!latestJob && audioStatus === sermonStatusType.PENDING);
   const [uploader, setUploader] = useState<DirectoryUser | User>();
   const [uploaderLoading, setUploaderLoading] = useState(false);
   const [showUploaderTooltip, setShowUploaderTooltip] = useState(false);
   const [publishPopup, setPublishPopup] = useState(false);
-  const [publishTaskActivity, setPublishTaskActivity] = useState<DestinationActivityState>(() => createIdleDestinationActivityState());
   const [series, setSeries] = useState<Series | null>(null);
   const seriesItemRef = useMemo(
-    () => (
+    () =>
       enableSeriesRealtime && currentSermon.seriesId && currentSermon.id
         ? doc(firestore, `series/${currentSermon.seriesId}/seriesItems`, currentSermon.id)
-        : null
-    ),
+        : null,
     [currentSermon.seriesId, currentSermon.id, enableSeriesRealtime]
   );
   const [seriesItemSnapshot] = useDocument(seriesItemRef, {
-    snapshotListenOptions: { includeMetadataChanges: false }
+    snapshotListenOptions: { includeMetadataChanges: false },
   });
   const seriesPublishedToSubsplash = enableSeriesRealtime
     ? seriesItemSnapshot?.exists() && seriesItemSnapshot.data()?.publishedToSubsplash === true
     : currentSermon.seriesPublishedToSubsplash === true;
-  const persistedPublishTaskActivity = currentSermon.publishActivity ?? createIdleDestinationActivityState();
-
-  const effectivePublishTaskActivity = (
-    publishTaskActivity.listOperation !== 'idle'
-    || publishTaskActivity.seriesOperation !== 'idle'
-    || publishTaskActivity.soundCloudOperation !== 'idle'
-  ) ? publishTaskActivity : persistedPublishTaskActivity;
-  const publishTaskRunning = (
-    effectivePublishTaskActivity.listOperation !== 'idle'
-    || effectivePublishTaskActivity.seriesOperation !== 'idle'
-    || effectivePublishTaskActivity.soundCloudOperation !== 'idle'
-  );
-  const subsplashListsPublishing = effectivePublishTaskActivity.listOperation !== 'idle';
-  const soundCloudPublishing = effectivePublishTaskActivity.soundCloudOperation !== 'idle';
-  const seriesPublishing = effectivePublishTaskActivity.seriesOperation !== 'idle';
-  const listsUnpublishing = effectivePublishTaskActivity.listOperation === 'unpublish';
-  const soundCloudUnpublishing = effectivePublishTaskActivity.soundCloudOperation === 'unpublish';
-
+  const publishTaskRunning = Boolean(activeJob?.kind === 'sermon.publish' || activeJob?.kind === 'sermon.unpublish');
+  const subsplashListsPublishing =
+    publishTaskRunning &&
+    activeJob?.destinations?.some((result) => result.destination === 'subsplash' && result.state === 'running') ===
+      true;
+  const soundCloudPublishing =
+    publishTaskRunning &&
+    activeJob?.destinations?.some((result) => result.destination === 'soundcloud' && result.state === 'running') ===
+      true;
+  const seriesPublishing = subsplashListsPublishing;
+  const listsUnpublishing = activeJob?.kind === 'sermon.unpublish';
+  const soundCloudUnpublishing = listsUnpublishing;
   const uploaderName =
     currentSermon.uploaderDisplayName ||
     currentSermon.uploaderEmail ||
-    (`${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() || uploader?.displayName) ||
+    `${uploader?.firstName ?? ''} ${uploader?.lastName ?? ''}`.trim() ||
+    uploader?.displayName ||
     uploader?.email ||
     currentSermon.uploaderId ||
     'uploader';
@@ -434,16 +425,32 @@ const SermonListCard: FunctionComponent<Props> = ({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
   };
 
-  const processingProgressState = parseProcessingProgress(snapshot?.val());
-  const processingProgress = processingProgressState?.percent ?? 0;
-  const processingStageLabel = processingProgressState?.stageLabel ?? 'Processing';
-  const isQueuedForProcessing = processingProgressState?.stage === 'queued';
-  const isProcessingProgressIndeterminate = isQueuedForProcessing || !processingProgressState?.hasPercent;
+  const processingStep = activeJob?.steps.find(
+    (step) => step.state === 'running' || step.state === 'retrying' || step.state === 'waiting'
+  );
+  const measured = processingStep?.progress;
+  const processingProgress =
+    measured && measured.total > 0
+      ? Math.min(100, Math.max(0, (measured.completed / measured.total) * 100))
+      : undefined;
+  const processingStageLabel = jobStateStale
+    ? 'Reconnecting'
+    : processingJob?.state === 'needs_attention'
+    ? 'Needs attention'
+    : processingJob?.state === 'waiting_for_auth'
+    ? 'Reconnect provider'
+    : processingJob?.state === 'cancel_requested'
+    ? 'Cancellation requested'
+    : processingJob?.state === 'retrying'
+    ? 'Retrying'
+    : processingStep?.label || (activeJob?.state === 'queued' ? 'Queued' : 'Processing');
+  const isProcessingProgressIndeterminate = processingProgress === undefined;
   const imageSize = isDesktop ? 150 : isTablet ? 90 : 70;
   const sermonImage = currentSermon.images?.find((image) => image.type === 'square');
-  const seriesImage = series?.images?.find((img) => img.type === 'wide')
-    || series?.images?.find((img) => img.type === 'banner')
-    || series?.images?.find((img) => img.type === 'square');
+  const seriesImage =
+    series?.images?.find((img) => img.type === 'wide') ||
+    series?.images?.find((img) => img.type === 'banner') ||
+    series?.images?.find((img) => img.type === 'square');
 
   const renderUploaderAvatar = () => (
     <Tooltip
@@ -451,7 +458,13 @@ const SermonListCard: FunctionComponent<Props> = ({
       onOpen={() => setShowUploaderTooltip(true)}
       onClose={() => setShowUploaderTooltip(false)}
       placement="top"
-      title={uploader ? `Uploaded by: ${uploaderName}` : currentSermon.uploaderId ? `Uploader ID: ${currentSermon.uploaderId}` : 'No Uploader Found'}
+      title={
+        uploader
+          ? `Uploaded by: ${uploaderName}`
+          : currentSermon.uploaderId
+          ? `Uploader ID: ${currentSermon.uploaderId}`
+          : 'No Uploader Found'
+      }
     >
       <Box
         onClick={(e) => {
@@ -484,7 +497,11 @@ const SermonListCard: FunctionComponent<Props> = ({
           '&:hover': { bgcolor: theme.palette.primary.dark },
         }}
       >
-        {isCurrentlyPlaying ? <PauseIcon sx={{ fontSize: { xs: 12, md: 18 } }} /> : <PlayArrowIcon sx={{ fontSize: { xs: 12, md: 18 } }} />}
+        {isCurrentlyPlaying ? (
+          <PauseIcon sx={{ fontSize: { xs: 12, md: 18 } }} />
+        ) : (
+          <PlayArrowIcon sx={{ fontSize: { xs: 12, md: 18 } }} />
+        )}
       </IconButton>
     </Box>
   );
@@ -501,21 +518,37 @@ const SermonListCard: FunctionComponent<Props> = ({
     >
       <Chip
         icon={
-          subsplashListsPublishing
-            ? <CircularProgress size={13} color="inherit" />
-            : <CollectionsIcon sx={{ fontSize: 13 }} />
+          subsplashListsPublishing ? (
+            <CircularProgress size={13} color="inherit" />
+          ) : (
+            <CollectionsIcon sx={{ fontSize: 13 }} />
+          )
         }
-        label={subsplashListsPublishing ? (listsUnpublishing ? 'Unpublishing…' : 'Publishing…') : `${subsplashUploaded}/${subsplashTotal}`}
+        label={
+          subsplashListsPublishing
+            ? listsUnpublishing
+              ? 'Unpublishing…'
+              : 'Publishing…'
+            : `${subsplashUploaded}/${subsplashTotal}`
+        }
         size="small"
         variant={subsplashListsPublishing || isSubsplashComplete ? 'filled' : 'outlined'}
-        color={subsplashListsPublishing ? 'info' : isSubsplashComplete ? 'success' : isSubsplashPartial ? 'warning' : 'default'}
+        color={
+          subsplashListsPublishing
+            ? 'info'
+            : isSubsplashComplete
+            ? 'success'
+            : isSubsplashPartial
+            ? 'warning'
+            : 'default'
+        }
         onClick={handlePublishClick}
         sx={{
           height: { xs: 16, sm: 22 },
           cursor: 'pointer',
           '& .MuiChip-label': { fontSize: { xs: '0.52rem', sm: '0.65rem' }, px: { xs: 0.35, sm: 0.5 } },
           '& .MuiChip-icon': { fontSize: { xs: 10, sm: 13 }, ml: { xs: 0.35, sm: 0.5 }, mr: { xs: 0.25, sm: 0.5 } },
-          '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) }
+          '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) },
         }}
       />
     </Tooltip>
@@ -529,12 +562,14 @@ const SermonListCard: FunctionComponent<Props> = ({
             ? 'Unpublishing from SoundCloud…'
             : 'Publishing to SoundCloud…'
           : isSoundCloudUploaded
-            ? 'Published to SoundCloud'
-            : 'Not on SoundCloud'
+          ? 'Published to SoundCloud'
+          : 'Not on SoundCloud'
       }
     >
       <Chip
-        icon={soundCloudPublishing ? <CircularProgress size={13} color="inherit" /> : <CloudIcon sx={{ fontSize: 13 }} />}
+        icon={
+          soundCloudPublishing ? <CircularProgress size={13} color="inherit" /> : <CloudIcon sx={{ fontSize: 13 }} />
+        }
         label={soundCloudPublishing ? (soundCloudUnpublishing ? 'Unpublishing…' : 'Publishing…') : 'SC'}
         size="small"
         variant={isSoundCloudUploaded || soundCloudPublishing ? 'filled' : 'outlined'}
@@ -545,13 +580,13 @@ const SermonListCard: FunctionComponent<Props> = ({
           cursor: 'pointer',
           '& .MuiChip-label': { fontSize: { xs: '0.52rem', sm: '0.65rem' }, px: { xs: 0.35, sm: 0.5 } },
           '& .MuiChip-icon': { fontSize: { xs: 10, sm: 13 }, ml: { xs: 0.35, sm: 0.5 }, mr: { xs: 0.25, sm: 0.5 } },
-          '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) }
+          '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) },
         }}
       />
     </Tooltip>
   );
 
-  const renderSeriesTag = (compact: boolean) => (
+  const renderSeriesTag = (compact: boolean) =>
     series ? (
       <Link
         href={`/admin/series/${series.id}`}
@@ -595,11 +630,13 @@ const SermonListCard: FunctionComponent<Props> = ({
               : seriesPublishedToSubsplash
               ? alpha(theme.palette.success.main, 0.12)
               : alpha(theme.palette.warning.main, 0.16),
-            border: `1px solid ${seriesPublishing
-              ? alpha(theme.palette.info.main, 0.34)
-              : seriesPublishedToSubsplash
-              ? alpha(theme.palette.success.main, 0.35)
-              : alpha(theme.palette.warning.main, 0.4)}`,
+            border: `1px solid ${
+              seriesPublishing
+                ? alpha(theme.palette.info.main, 0.34)
+                : seriesPublishedToSubsplash
+                ? alpha(theme.palette.success.main, 0.35)
+                : alpha(theme.palette.warning.main, 0.4)
+            }`,
             '& .MuiChip-label': {
               fontSize: compact ? '0.48rem' : { sm: '0.58rem', md: '0.68rem' },
               pl: compact ? 0.2 : { sm: 0.35, md: 0.45 },
@@ -608,8 +645,8 @@ const SermonListCard: FunctionComponent<Props> = ({
               color: seriesPublishing
                 ? theme.palette.info.dark
                 : seriesPublishedToSubsplash
-                  ? theme.palette.success.dark
-                  : theme.palette.warning.dark,
+                ? theme.palette.success.dark
+                : theme.palette.warning.dark,
             },
             '& .MuiChip-avatar': {
               ml: 0,
@@ -627,19 +664,20 @@ const SermonListCard: FunctionComponent<Props> = ({
               borderColor: seriesPublishing
                 ? theme.palette.info.main
                 : seriesPublishedToSubsplash
-                  ? theme.palette.success.main
-                  : theme.palette.warning.main,
-            }
+                ? theme.palette.success.main
+                : theme.palette.warning.main,
+            },
           }}
         />
       </Link>
-    ) : null
-  );
+    ) : null;
 
-  const renderProcessingChip = () => (
+  const renderProcessingChip = () =>
     isProcessing ? (
       <Chip
-        label={`${processingStageLabel}${processingProgressState?.hasPercent && processingProgress > 0 ? ` ${processingProgress}%` : ''}`}
+        label={`${processingStageLabel}${
+          processingProgress !== undefined ? ` ${Math.round(processingProgress)}%` : ''
+        }`}
         size="small"
         color="warning"
         variant="outlined"
@@ -657,14 +695,13 @@ const SermonListCard: FunctionComponent<Props> = ({
           },
         }}
       />
-    ) : null
-  );
+    ) : null;
 
-  const renderPendingChip = () => (
+  const renderPendingChip = () =>
     isPending ? (
       <Chip
         icon={<PendingIcon />}
-        label="PENDING"
+        label={processingJob?.state === 'awaiting_source' ? 'Waiting for file' : 'Pending'}
         size="small"
         color="default"
         variant="outlined"
@@ -685,26 +722,18 @@ const SermonListCard: FunctionComponent<Props> = ({
           },
         }}
       />
-    ) : null
-  );
+    ) : null;
 
-  const renderErrorIndicator = () => (
+  const renderErrorIndicator = () =>
     isError ? (
       <Tooltip title={currentSermon.status.message || 'Error'}>
         <ErrorIcon sx={{ fontSize: 12, color: 'error.main' }} />
       </Tooltip>
-    ) : null
-  );
+    ) : null;
 
   // Desktop Actions Component (horizontal bottom row)
   const renderDesktopActions = () => (
-    <Stack
-      direction="row"
-      spacing={0.5}
-      alignItems="center"
-      justifyContent="space-between"
-      sx={{ mt: 0.5 }}
-    >
+    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="space-between" sx={{ mt: 0.5 }}>
       {isProcessed && canPublish && (
         <Stack direction="row" spacing={0.5} alignItems="center">
           {renderSoundCloudStatus()}
@@ -713,7 +742,10 @@ const SermonListCard: FunctionComponent<Props> = ({
             <Tooltip title="Retry processing">
               <IconButton
                 size="small"
-                onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRefresh();
+                }}
                 sx={{ width: 20, height: 20, color: 'error.main' }}
               >
                 <RefreshIcon sx={{ fontSize: 14 }} />
@@ -770,9 +802,7 @@ const SermonListCard: FunctionComponent<Props> = ({
             width: imageSize,
             height: imageSize,
             bgcolor: sermonImage?.averageColorHex || 'action.hover',
-            backgroundImage: sermonImage?.downloadLink
-              ? `url(${sermonImage.downloadLink})`
-              : 'url(/URM_icon.png)',
+            backgroundImage: sermonImage?.downloadLink ? `url(${sermonImage.downloadLink})` : 'url(/URM_icon.png)',
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
@@ -790,8 +820,25 @@ const SermonListCard: FunctionComponent<Props> = ({
           }}
         >
           {isMobile ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.45, flex: 1, minWidth: 0, justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 0.45,
+                flex: 1,
+                minWidth: 0,
+                justifyContent: 'space-between',
+              }}
+            >
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 0.5,
+                  minWidth: 0,
+                }}
+              >
                 <Typography
                   fontWeight={600}
                   noWrap
@@ -810,7 +857,9 @@ const SermonListCard: FunctionComponent<Props> = ({
                 {renderUploaderAvatar()}
               </Box>
 
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}>
+              <Box
+                sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}
+              >
                 <Typography
                   color="text.secondary"
                   noWrap
@@ -829,14 +878,24 @@ const SermonListCard: FunctionComponent<Props> = ({
                 {isProcessed ? renderSeriesTag(true) : null}
               </Box>
 
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}>
+              <Box
+                sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5, minWidth: 0 }}
+              >
                 <Stack direction="row" spacing={0.35} alignItems="center" sx={{ minWidth: 0, flexShrink: 0 }}>
                   {isProcessed ? renderPlayButton() : null}
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.55rem', whiteSpace: 'nowrap' }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: '0.55rem', whiteSpace: 'nowrap' }}
+                  >
                     {formatDate(currentSermon.dateMillis)}
                   </Typography>
                   {currentSermon.durationSeconds > 0 ? (
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.55rem', whiteSpace: 'nowrap' }}>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontSize: '0.55rem', whiteSpace: 'nowrap' }}
+                    >
                       • {formatDuration(currentSermon.durationSeconds)}
                     </Typography>
                   ) : null}
@@ -852,15 +911,35 @@ const SermonListCard: FunctionComponent<Props> = ({
                     {renderSoundCloudStatus()}
                     {renderSubsplashStatus()}
                   </Stack>
-                ) : <Box sx={{ width: 1, minWidth: 0 }} />}
+                ) : (
+                  <Box sx={{ width: 1, minWidth: 0 }} />
+                )}
               </Box>
             </Box>
           ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1, minHeight: 0, minWidth: 0, justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', minWidth: 0, overflow: 'hidden', width: '100%' }}>
-
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 0.5,
+                flex: 1,
+                minHeight: 0,
+                minWidth: 0,
+                justifyContent: 'space-between',
+              }}
+            >
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  width: '100%',
+                }}
+              >
                 <Stack gap={0.5} sx={{ flex: 1, minWidth: 0, width: 0, overflow: 'hidden' }}>
-
                   <Typography
                     fontWeight={600}
                     noWrap
@@ -916,8 +995,18 @@ const SermonListCard: FunctionComponent<Props> = ({
               )}
 
               <Box sx={{ display: 'flex', flexDirection: 'row', gap: { xs: 0.35, sm: 0.5 }, flexShrink: 0 }}>
-                <Stack direction="column" spacing={{ xs: 0.35, sm: 0.5 }} flex={1} sx={{ overflow: 'hidden', minWidth: 0 }}>
-                  <Stack direction="row" spacing={{ xs: 0.35, sm: 0.5 }} alignItems="center" sx={{ overflow: 'hidden', minWidth: 0 }}>
+                <Stack
+                  direction="column"
+                  spacing={{ xs: 0.35, sm: 0.5 }}
+                  flex={1}
+                  sx={{ overflow: 'hidden', minWidth: 0 }}
+                >
+                  <Stack
+                    direction="row"
+                    spacing={{ xs: 0.35, sm: 0.5 }}
+                    alignItems="center"
+                    sx={{ overflow: 'hidden', minWidth: 0 }}
+                  >
                     {isProcessed ? renderPlayButton() : null}
                     <Typography
                       variant="caption"
@@ -927,12 +1016,22 @@ const SermonListCard: FunctionComponent<Props> = ({
                       {formatDate(currentSermon.dateMillis)}
                     </Typography>
                     {currentSermon.durationSeconds > 0 && (
-                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' } }}>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ fontSize: { xs: '0.55rem', sm: '0.65rem' } }}
+                      >
                         • {formatDuration(currentSermon.durationSeconds)}
                       </Typography>
                     )}
                     {isProcessed && renderSeriesTag(false)}
-                    <Stack direction="row" spacing={{ xs: 0.35, sm: 0.5 }} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap', minWidth: 0 }}>
+                    <Stack
+                      direction="row"
+                      spacing={{ xs: 0.35, sm: 0.5 }}
+                      alignItems="center"
+                      useFlexGap
+                      sx={{ flexWrap: 'wrap', minWidth: 0 }}
+                    >
                       {renderPendingChip()}
                       {renderProcessingChip()}
                       {renderErrorIndicator()}
@@ -944,46 +1043,89 @@ const SermonListCard: FunctionComponent<Props> = ({
                 </Stack>
               </Box>
 
-              {isProcessing && processingProgressState && (
-                <LinearProgress
-                  variant={isProcessingProgressIndeterminate ? 'indeterminate' : 'determinate'}
-                  value={isProcessingProgressIndeterminate ? undefined : processingProgress}
-                  sx={{
-                    height: 2,
-                    borderRadius: 1,
-                    overflow: 'hidden',
-                    mt: 0.5,
-                    bgcolor: alpha(theme.palette.warning.main, 0.15),
-                    '& .MuiLinearProgress-bar': {
-                      bgcolor: 'warning.main',
-                      borderRadius: 0,
-                    }
-                  }}
+              {isProcessing &&
+                activeJob &&
+                !jobStateStale &&
+                ['running', 'queued', 'reconciling'].includes(activeJob.state) && (
+                  <LinearProgress
+                    variant={isProcessingProgressIndeterminate ? 'indeterminate' : 'determinate'}
+                    value={isProcessingProgressIndeterminate ? undefined : processingProgress}
+                    sx={{
+                      height: 2,
+                      borderRadius: 1,
+                      overflow: 'hidden',
+                      mt: 0.5,
+                      bgcolor: alpha(theme.palette.warning.main, 0.15),
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: 'warning.main',
+                        borderRadius: 0,
+                      },
+                    }}
+                  />
+                )}
+              {latestJob && !isProcessing && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={
+                    jobStateStale
+                      ? 'Reconnecting'
+                      : stoppedRepairMessage(latestJob)
+                      ? jobStateLabel(latestJob)
+                      : latestJob.state === 'needs_attention'
+                      ? 'Needs attention'
+                      : latestJob.state === 'retrying'
+                      ? 'Retrying'
+                      : latestJob.state === 'cancel_requested'
+                      ? 'Cancellation requested'
+                      : latestJob.state === 'reconciling'
+                      ? 'Checking destination'
+                      : latestJob.state === 'succeeded'
+                      ? 'Completed'
+                      : latestJob.state === 'failed'
+                      ? 'Failed'
+                      : latestJob.state === 'waiting_for_auth'
+                      ? 'Reconnect provider'
+                      : latestJob.state === 'cancelled'
+                      ? 'Cancelled'
+                      : latestJob.state === 'queued'
+                      ? 'Queued'
+                      : processingStep?.label || latestJob.state.replaceAll('_', ' ')
+                  }
+                  color={
+                    stoppedRepairMessage(latestJob)
+                      ? 'warning'
+                      : latestJob.state === 'needs_attention' || latestJob.state === 'failed'
+                      ? 'warning'
+                      : latestJob.state === 'succeeded'
+                      ? 'success'
+                      : 'info'
+                  }
+                  sx={{ mt: 0.5, alignSelf: 'flex-start' }}
                 />
               )}
-              {publishTaskRunning && (
-                <LinearProgress
-                  sx={{
-                    height: 2,
-                    borderRadius: 1,
-                    mt: 0.5,
-                    bgcolor: alpha(theme.palette.info.main, 0.12),
-                    '& .MuiLinearProgress-bar': { bgcolor: 'info.main' }
-                  }}
-                />
-              )}
+              {publishTaskRunning &&
+                !jobStateStale &&
+                ['running', 'queued', 'reconciling'].includes(activeJob?.state ?? '') && (
+                  <LinearProgress
+                    sx={{
+                      height: 2,
+                      borderRadius: 1,
+                      mt: 0.5,
+                      bgcolor: alpha(theme.palette.info.main, 0.12),
+                      '& .MuiLinearProgress-bar': { bgcolor: 'info.main' },
+                    }}
+                  />
+                )}
             </Box>
           )}
         </Box>
-
-
       </Card>
       <ManagePublishingPopup
         sermon={currentSermon}
         open={publishPopup}
         onClose={() => setPublishPopup(false)}
         onUpdate={onRefresh}
-        onBusyStateChange={setPublishTaskActivity}
       />
     </ErrorBoundary>
   );

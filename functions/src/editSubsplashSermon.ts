@@ -1,3 +1,5 @@
+import {assertSynchronousProviderMutationCompleted} from './temporal/publishing/providerMutationCompletion';
+import {runPublishingProviderMutation,markPublishingCritical,isDurablePublishingOperation} from './temporal/publishing/durableOperationContext';
 import { logger } from 'firebase-functions/v2';
 import { onCall, CallableRequest, HttpsError } from 'firebase-functions/v2/https';
 import axios from 'axios';
@@ -27,114 +29,134 @@ export interface EDIT_SUBSPLASH_SERMON_INCOMING_DATA
   subsplashId: string;
 }
 
-const editSubsplashSermon = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts },
-  async (request: CallableRequest<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>): Promise<unknown> => {
-    if (!canUserRolePublish(request.auth?.token.role)) {
-      throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
-    }
-    if (process.env.SUBSPLASH_EMAIL == undefined || process.env.SUBSPLASH_PASSWORD == undefined) {
-      throw new HttpsError('failed-precondition', 'SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD is not set.');
-    }
+export const editSubsplashSermonDomain = async (
+  request: Pick<CallableRequest<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>, 'data' | 'auth'>,
+  trustedOptions:{providerMutationOperation?:string;onPrepared?:(prepared:{requestData:string;images?:unknown[]})=>Promise<void>}={}
+): Promise<unknown> => {
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated with publish permissions.');
+  }
+  if (process.env.SUBSPLASH_EMAIL == undefined || process.env.SUBSPLASH_PASSWORD == undefined) {
+    throw new HttpsError('failed-precondition', 'SUBSPLASH_EMAIL or SUBSPLASH_PASSWORD is not set.');
+  }
 
-    const data = request.data;
-    if (!data || typeof data !== 'object') {
-      throw new HttpsError('invalid-argument', 'Request data is required.');
-    }
-    if (!data.operationKey || !data.operationKey.trim()) {
-      throw new HttpsError('invalid-argument', 'operationKey is required.');
-    }
-    if (!data.subsplashId || !data.subsplashId.trim()) {
-      throw new HttpsError('invalid-argument', 'subsplashId is required.');
-    }
-    const operationKey = data.operationKey.trim();
-    const subsplashId = data.subsplashId.trim();
-    logger.log('data', data);
-    try {
-      return await withIdempotency(operationKey, async () =>
-        withSubsplashLocks(
-          [`media-item:${subsplashId}`],
+  const data = request.data;
+  if (!data || typeof data !== 'object') {
+    throw new HttpsError('invalid-argument', 'Request data is required.');
+  }
+  if (!data.operationKey || !data.operationKey.trim()) {
+    throw new HttpsError('invalid-argument', 'operationKey is required.');
+  }
+  if (!data.subsplashId || !data.subsplashId.trim()) {
+    throw new HttpsError('invalid-argument', 'subsplashId is required.');
+  }
+  const operationKey = data.operationKey.trim();
+  const subsplashId = data.subsplashId.trim();
+  logger.info('editSubsplashSermon.start', { operationKey, subsplashId });
+  try {
+    return await withIdempotency(operationKey, async () =>
+      withSubsplashLocks(
+        [`media-item:${subsplashId}`],
 	          async () => {
 	            const bearerToken = await authenticateSubsplash();
-            // create media item with title
-            let tags: string[] = [];
-            if (Array.isArray(data.speakers)) {
-              if (data.speakers.length > 3) {
-                throw new Error('Too many speakers: Max 3 speakers allowed');
-              }
-              tags = tags.concat(data.speakers.map((speaker) => `speaker:${speaker.name}`));
+          // create media item with title
+          let tags: string[] = [];
+          if (Array.isArray(data.speakers)) {
+            if (data.speakers.length > 3) {
+              throw new Error('Too many speakers: Max 3 speakers allowed');
             }
-            if (Array.isArray(data.topics)) {
-              if (data.topics.length > 10) {
-                throw new Error('Too many topics: Max 10 topics allowed');
-              }
-              tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
+            tags = tags.concat(data.speakers.map((speaker) => `speaker:${speaker.name}`));
+          }
+          if (Array.isArray(data.topics)) {
+            if (data.topics.length > 10) {
+              throw new Error('Too many topics: Max 10 topics allowed');
             }
+            tags = tags.concat(data.topics.map((topic: string) => `topic:${topic}`));
+          }
 
-            const repairedImages = Array.isArray(data.images)
-              ? await repairMismatchedSubsplashImageRefs(data.images, bearerToken)
-              : undefined;
-            const validImages = Array.isArray(repairedImages)
-              ? repairedImages
-                  .map((image) => {
-                    const remoteImageId = image.subsplashId || image.id;
-                    if (!remoteImageId) {
-                      return undefined;
-                    }
+          const repairedImages = Array.isArray(data.images)
+            ? await repairMismatchedSubsplashImageRefs(data.images, bearerToken, data.operationKey)
+            : undefined;
+          const validImages = Array.isArray(repairedImages)
+            ? repairedImages
+                .map((image) => {
+                  const remoteImageId = image.subsplashId || image.id;
+                  if (!remoteImageId) {
+                    return undefined;
+                  }
 
-                    return {
-                      id: remoteImageId,
-                      type: image.type,
-                    };
-                  })
-                  .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined)
-              : undefined;
-            const normalizedSubtitle = normalizeOptionalText(data.subtitle);
+                  return {
+                    id: remoteImageId,
+                    type: image.type,
+                  };
+                })
+                .filter((image): image is { id: string; type: ImageType['type'] } => image !== undefined)
+            : undefined;
+          const normalizedSubtitle = normalizeOptionalText(data.subtitle);
 
-            // only send non null values to subsplash
-            const requestData = JSON.stringify({
-              app_key: '9XTSHD',
-              ...(Array.isArray(data.speakers) || Array.isArray(data.topics) ? { tags } : {}),
-              ...(typeof data.title === 'string' ? { title: data.title } : {}),
-              ...(normalizedSubtitle ? { subtitle: normalizedSubtitle } : {}),
-              ...(typeof data.description === 'string' ? { summary: data.description } : {}),
-              ...(data.date && { date: data.date }),
-              ...(validImages && {
-                _embedded: {
-                  images: validImages,
-                },
-              }),
-            });
-            logger.log('request data', requestData);
-            const config = createAxiosConfig(
-              `https://core.subsplash.com/media/v1/media-items/${subsplashId}`,
-              bearerToken,
-              'PATCH',
-              requestData
-            );
-            return (await axios(config)).data;
-          },
-          { operationKey }
-        )
-      );
-    } catch (error) {
-      logger.error('editSubsplashSermon failed', {
+          // only send non null values to subsplash
+          const requestData = JSON.stringify({
+            app_key: '9XTSHD',
+            ...(Array.isArray(data.speakers) || Array.isArray(data.topics) ? { tags } : {}),
+            ...(typeof data.title === 'string' ? { title: data.title } : {}),
+            ...(normalizedSubtitle ? { subtitle: normalizedSubtitle } : {}),
+            ...(typeof data.description === 'string' ? { summary: data.description } : {}),
+            ...(data.date && { date: data.date }),
+            ...(validImages && {
+              _embedded: {
+                images: validImages,
+              },
+            }),
+          });
+          await trustedOptions.onPrepared?.({requestData,images:repairedImages});
+          logger.debug('editSubsplashSermon.request', { operationKey, subsplashId });
+          const config = createAxiosConfig(
+            `https://core.subsplash.com/media/v1/media-items/${subsplashId}`,
+            bearerToken,
+            'PATCH',
+            requestData
+          );
+          if(isDurablePublishingOperation()&&!trustedOptions.providerMutationOperation)throw new Error('PROVIDER_MUTATION_PLAN_CONTEXT_REQUIRED');
+          await markPublishingCritical('PUBLISHING_METADATA_CRITICAL',{provider:'subsplash',resourceType:'media',resourceId:subsplashId,accountId:'app:9XTSHD',method:'PATCH'});
+          if(trustedOptions.providerMutationOperation)return runPublishingProviderMutation({operation:trustedOptions.providerMutationOperation,target:{provider:'subsplash',account:'app:9XTSHD',resourceType:'media',resourceId:subsplashId},step:'subsplash-metadata',method:'PATCH',payload:requestData,send:async()=>{const response=await axios({...config,maxRedirects:0,skipSubsplashEdgeRetry:true} as typeof config);assertSynchronousProviderMutationCompleted(response);return {completion:'acknowledged',result:{updated:true}};}});
+          return (await axios({...config,maxRedirects:0,skipSubsplashEdgeRetry:true} as typeof config)).data;
+        },
+        { operationKey }
+      )
+    );
+  } catch (error) {
+    logger.error('editSubsplashSermon failed', {
+      operationKey,
+      subsplashId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    await emitOperationalAlert({
+      alertCode: 'PUBLISH_SUBSPLASH_EDIT_RUNTIME_FAILURE',
+      summary: 'editSubsplashSermon callable failed during publish edit flow.',
+      error,
+      context: {
+        functionName: 'editSubsplashSermon',
         operationKey,
         subsplashId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      await emitOperationalAlert({
-        alertCode: 'PUBLISH_SUBSPLASH_EDIT_RUNTIME_FAILURE',
-        summary: 'editSubsplashSermon callable failed during publish edit flow.',
-        error,
-        context: {
-          functionName: 'editSubsplashSermon',
-          operationKey,
-          subsplashId,
-        },
-      });
-      throw handleError(error);
-    }
+      },
+    });
+    throw handleError(error);
+  }
+};
+
+const editSubsplashSermon = onCall(
+  { secrets: subsplashSecretsWithRuntimeAlerts },
+  async (request: CallableRequest<EDIT_SUBSPLASH_SERMON_INCOMING_DATA>) => {
+    if (!canUserRolePublish(request.auth?.token.role)) return editSubsplashSermonDomain(request);
+    if (!request.data || typeof request.data.operationKey !== 'string' || !request.data.operationKey.trim() || typeof request.data.subsplashId !== 'string' || !request.data.subsplashId.trim()) throw new HttpsError('invalid-argument', 'A valid publishing request is required.');
+    const { default: admin } = await import('@upperroom/shared/firebase/firebaseAdmin');
+    const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+    const projectId = admin.app().options.projectId ?? process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
+    if (!projectId) throw new HttpsError('failed-precondition', 'Firebase project is not configured.');
+    return withLegacyAdmissionLease(admin.firestore(), { domain: 'publishing', actorUid: request.auth!.uid, projectId, operation: 'editSubsplashSermon' }, async lease => {
+      await lease.markEffectsStarted();
+      return editSubsplashSermonDomain(request);
+    });
   }
 );
 

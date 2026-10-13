@@ -1,0 +1,102 @@
+name: Temporal application validation
+
+on:
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'functions*/**'
+      - 'function-kits/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'patches/**'
+      - '*rules*'
+      - '*index*'
+      - '*json'
+      - 'pnpm-*.yaml'
+      - '.github/workflows/temporal-application-validation.yml'
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: temporal-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  durable-application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install pinned package manager and native test tools
+        run: |
+          npm install --global pnpm@12.11.2
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+      - name: Install locked workspace
+        run: pnpm install --frozen-lockfile
+      - name: Build worker and split Firebase deployment sources
+        run: |
+          pnpm run build:temporal
+          pnpm run build-functions-codebases
+      - name: Validate application regressions, admission, rules and SDK compatibility
+        run: pnpm --dir functions test
+      - name: Validate workflows, replay, cancellation and native media
+        run: pnpm --dir apps/temporal-worker run test:ci
+      - name: Validate real upload and publishing admission, dispatch and crash recovery
+        run: pnpm run test:temporal:integration
+      - name: Validate media admission, dependencies and retention
+        run: pnpm run test:temporal:media
+      - name: Validate browser recovery and state projections
+        run: pnpm --dir apps/web run test:frontend:unit
+      - name: Validate release, bootstrap and migration contracts
+        run: pnpm run test:temporal:contracts
+      - name: Validate locally captured monitoring and OAuth transport
+        run: pnpm --dir apps/process-audio run test:sdk-upgrades
+      - name: Validate email and search kits
+        run: |
+          pnpm --dir function-kits/firestore-send-email test
+          pnpm --dir function-kits/firestore-algolia-search test
+      - name: Build the production web application
+        env:
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-temporal-ci
+          NEXT_PUBLIC_FIREBASE_API_KEY: synthetic-public-browser-test-key
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:123456789:web:synthetic
+        run: |
+          pnpm --dir apps/web build
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const pages = JSON.parse(readFileSync('apps/web/.next/server/pages-manifest.json', 'utf8'));
+          for (const route of ['/api/uploadFile', '/api/editSermon']) {
+            if (route in pages) throw new Error(`Browser helper exposed as HTTP route: ${route}`);
+          }
+          NODE
+      - name: Verify production cold navigation on desktop and mobile
+        run: |
+          pnpm --dir apps/web exec playwright install --with-deps chromium
+          cp -R apps/web/public apps/web/.next/standalone/apps/web/public
+          cp -R apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+          PORT=3002 HOSTNAME=127.0.0.1 node apps/web/.next/standalone/apps/web/server.js > /tmp/temporal-web-smoke.log 2>&1 &
+          temporal_web_smoke_pid=$!
+          trap 'kill "$temporal_web_smoke_pid" 2>/dev/null || true' EXIT
+          node --input-type=module <<'NODE'
+          const deadline = Date.now() + 30_000;
+          let ready = false;
+          while (Date.now() < deadline) {
+            try { ready = (await fetch('http://127.0.0.1:3002/login')).ok; } catch {}
+            if (ready) break;
+            await new Promise(resolve => setTimeout(resolve, 250));
+          }
+          if (!ready) throw new Error('Production web server did not become ready.');
+          NODE
+          PLAYWRIGHT_BASE_URL=http://127.0.0.1:3002 PLAYWRIGHT_PRODUCTION_SMOKE=1 pnpm --dir apps/web exec playwright test tests/production-cold-navigation.spec.ts --workers=1 --reporter=line

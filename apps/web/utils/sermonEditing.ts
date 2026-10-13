@@ -17,7 +17,9 @@ export function isSermonProcessingLocked(sermon?: Sermon | null): boolean {
 
 export class SermonProcessingConflictError extends Error {
   constructor() {
-    super('Audio processing started while this sermon was being edited. Wait for processing to finish, then try again.');
+    super(
+      'Audio processing started while this sermon was being edited. Wait for processing to finish, then try again.'
+    );
     this.name = 'SermonProcessingConflictError';
   }
 }
@@ -34,16 +36,10 @@ export function isSermonProcessingConflict(error: unknown): error is SermonProce
 
 export function isSermonPublishedExternally(sermon?: Sermon | null): boolean {
   if (!sermon) return false;
-  return (
-    sermon.status.soundCloud === uploadStatus.UPLOADED ||
-    sermon.status.subsplash === uploadStatus.UPLOADED
-  );
+  return sermon.status.soundCloud === uploadStatus.UPLOADED || sermon.status.subsplash === uploadStatus.UPLOADED;
 }
 
-export function isSermonPublishedAnywhere(
-  sermon?: Sermon | null,
-  publishedLists: PublishedListState[] = []
-): boolean {
+export function isSermonPublishedAnywhere(sermon?: Sermon | null, publishedLists: PublishedListState[] = []): boolean {
   if (!sermon) return false;
 
   if (isSermonPublishedExternally(sermon)) {
@@ -66,10 +62,26 @@ export function canEditSermonRecord(sermon?: Sermon | null): boolean {
   return canEditSermonMetadata(sermon);
 }
 
-export function canEditSermonAudio(sermon?: Sermon | null, publishedLists: PublishedListState[] = []): boolean {
+export function canEditSermonAudio(
+  sermon?: Sermon | null,
+  _publishedLists: PublishedListState[] = [],
+  sourceAvailable?: boolean
+): boolean {
   if (!sermon) return false;
   if (!canEditSermonMetadata(sermon)) return false;
-  if (isSermonPublishedAnywhere(sermon, publishedLists)) return false;
-  if (typeof sermon.trimDurationSeconds !== 'number' || sermon.trimDurationSeconds <= 0) return false;
-  return Boolean(sermon.youtubeUrl) || sermon.audioSource !== 'subsplash';
+  if (
+    typeof sermon.trimDurationSeconds !== 'number' ||
+    !Number.isFinite(sermon.trimDurationSeconds) ||
+    sermon.trimDurationSeconds <= 0
+  )
+    return false;
+  if (!Number.isFinite(sermon.sourceStartTime) || sermon.sourceStartTime < 0) return false;
+  if (sermon.youtubeUrl) return true;
+  if (sourceAvailable === false) return false;
+  return Boolean(sermon.audioArtifacts?.sourcePath) || sermon.audioSource !== 'subsplash';
+}
+
+/** Legacy publication flags may lag a confirmed track ID; either requires an explicit audio policy. */
+export function requiresSoundCloudAudioPolicy(sermon?: Sermon | null): boolean {
+  return Boolean(sermon?.soundCloudTrackId) || sermon?.status.soundCloud === uploadStatus.UPLOADED;
 }

@@ -1,3 +1,5 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import axios from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { buildSubsplashLockBusyError } from '../../locks/contentionError';
@@ -37,7 +39,7 @@ jest.mock('firebase-functions/v2/https', () => {
 });
 
 type EditHandler = (request: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: Record<string, unknown>;
 }) => Promise<unknown>;
 
@@ -78,7 +80,7 @@ describe('editSubsplashSermon lock contract', () => {
   it('requires a non-empty operation key', async () => {
     await expect(
       editHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: { ...buildValidPayload(), operationKey: '' },
       })
     ).rejects.toBeInstanceOf(HttpsError);
@@ -86,7 +88,7 @@ describe('editSubsplashSermon lock contract', () => {
 
   it('wraps edit mutations with idempotency and media-item lock scope', async () => {
     await editHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: buildValidPayload(),
     });
 
@@ -109,7 +111,7 @@ describe('editSubsplashSermon lock contract', () => {
     });
 
     const request = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: buildValidPayload(),
     };
 
@@ -130,7 +132,7 @@ describe('editSubsplashSermon lock contract', () => {
 
     await expect(
       editHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: buildValidPayload(),
       })
     ).rejects.toMatchObject({
@@ -147,7 +149,7 @@ describe('editSubsplashSermon lock contract', () => {
 
   it('omits blank subtitle while preserving clearable summary fields when metadata is removed', async () => {
     await editHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         ...buildValidPayload(),
         subtitle: '',
@@ -172,7 +174,7 @@ describe('editSubsplashSermon lock contract', () => {
 
   it('uses the remote image id when present and falls back to the local id otherwise', async () => {
     await editHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         ...buildValidPayload(),
         images: [
@@ -231,7 +233,7 @@ describe('editSubsplashSermon lock contract', () => {
     });
 
     await editHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         ...buildValidPayload(),
         images: [

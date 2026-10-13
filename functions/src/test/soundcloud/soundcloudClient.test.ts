@@ -7,6 +7,7 @@ import {
   normalizeSoundCloudApiError,
   updateTrack,
   uploadTrack,
+  prepareMultipartUpload,
 } from '../../soundcloudClient';
 import { Readable } from 'node:stream';
 
@@ -38,11 +39,10 @@ describe('soundcloudClient', () => {
 
   it('prefers the documented urn identifier in upload responses', async () => {
     const bucket = createBucket();
-    mockedAxios.post.mockResolvedValue({
-      data: {
-        urn: 'soundcloud:tracks:12345',
-        id: 12345,
-      },
+    let postedParts: unknown[] = [];
+    mockedAxios.post.mockImplementation(async (_url, form) => {
+      postedParts = [...(form as { _streams: unknown[] })._streams];
+      return { data: { urn: 'soundcloud:tracks:12345', id: 12345 } };
     });
 
     const trackResult = await uploadTrack('access-token', {
@@ -58,32 +58,23 @@ describe('soundcloudClient', () => {
     });
     expect(bucket.__file.getMetadata).toHaveBeenCalled();
     expect(bucket.__file.createReadStream).toHaveBeenCalled();
-    const multipartBody = mockedAxios.post.mock.calls[0]?.[1] as unknown as { _streams?: unknown[] };
     expect(
-      multipartBody._streams?.some(
-        (entry) =>
-          typeof entry === 'string' &&
-          entry.includes('filename="e9a3bcad-4764-4938-a33b-957459d20b8e.mp3"')
+      postedParts.some(
+        (entry) => typeof entry === 'string' && entry.includes('filename="e9a3bcad-4764-4938-a33b-957459d20b8e.mp3"')
       )
     ).toBe(true);
   });
 
   it('adds the known audio extension to extensionless production storage paths', () => {
-    expect(
-      inferMultipartFilename(
-        'intro-outro-sermons/e9a3bcad-4764-4938-a33b-957459d20b8e',
-        'audio.mp3'
-      )
-    ).toBe('e9a3bcad-4764-4938-a33b-957459d20b8e.mp3');
+    expect(inferMultipartFilename('intro-outro-sermons/e9a3bcad-4764-4938-a33b-957459d20b8e', 'audio.mp3')).toBe(
+      'e9a3bcad-4764-4938-a33b-957459d20b8e.mp3'
+    );
   });
 
   it('adds the known artwork extension to extensionless storage paths', () => {
-    expect(
-      inferMultipartFilename(
-        '/v0/b/urm-app.appspot.com/o/sermon-images/square-artwork-id',
-        'artwork.jpg'
-      )
-    ).toBe('square-artwork-id.jpg');
+    expect(inferMultipartFilename('/v0/b/urm-app.appspot.com/o/sermon-images/square-artwork-id', 'artwork.jpg')).toBe(
+      'square-artwork-id.jpg'
+    );
   });
 
   it('preserves a source filename that already declares its format', () => {
@@ -92,6 +83,7 @@ describe('soundcloudClient', () => {
 
   it('URL-encodes track identifiers for metadata updates', async () => {
     mockedAxios.put.mockResolvedValue({
+      status: 200,
       data: {
         permalink_url: 'https://soundcloud.com/upper-room-media/test-track',
       },
@@ -114,7 +106,7 @@ describe('soundcloudClient', () => {
   });
 
   it('URL-encodes track identifiers for deletes', async () => {
-    mockedAxios.delete.mockResolvedValue({ data: {} });
+    mockedAxios.delete.mockResolvedValue({ status: 204, data: {} });
 
     await deleteTrack('access-token', 'soundcloud:tracks:12345');
 
@@ -133,9 +125,11 @@ describe('soundcloudClient', () => {
   });
 
   it('reports an HTML edge block as temporary rather than a permission failure', () => {
-    expect(() => normalizeSoundCloudApiError({
-      response: { status: 403, data: '<html><title>403 Forbidden</title></html>' },
-    })).toThrow('SoundCloud temporarily blocked the track request from our server. Please retry shortly.');
+    expect(() =>
+      normalizeSoundCloudApiError({
+        response: { status: 403, data: '<html><title>403 Forbidden</title></html>' },
+      })
+    ).toThrow('SoundCloud temporarily blocked the track request from our server. Please retry shortly.');
   });
 
   it('streams remote artwork instead of buffering it before upload', async () => {
@@ -147,10 +141,10 @@ describe('soundcloudClient', () => {
         'content-length': '10',
       },
     } as never);
-    mockedAxios.post.mockResolvedValue({
-      data: {
-        urn: 'soundcloud:tracks:999',
-      },
+    let postedParts: unknown[] = [];
+    mockedAxios.post.mockImplementation(async (_url, form) => {
+      postedParts = [...(form as { _streams: unknown[] })._streams];
+      return { data: { urn: 'soundcloud:tracks:999' } };
     });
 
     const extensionlessArtworkUrl =
@@ -164,14 +158,12 @@ describe('soundcloudClient', () => {
       description: 'Description',
     });
 
-    expect(mockedAxios.get).toHaveBeenCalledWith(extensionlessArtworkUrl, {
-      responseType: 'stream',
-    });
-    const multipartBody = mockedAxios.post.mock.calls[0]?.[1] as unknown as { _streams?: unknown[] };
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      extensionlessArtworkUrl,
+      expect.objectContaining({ responseType: 'stream' })
+    );
     expect(
-      multipartBody._streams?.some(
-        (entry) => typeof entry === 'string' && entry.includes('filename="square-artwork-id.jpg"')
-      )
+      postedParts.some((entry) => typeof entry === 'string' && entry.includes('filename="square-artwork-id.jpg"'))
     ).toBe(true);
   });
 
@@ -179,6 +171,7 @@ describe('soundcloudClient', () => {
     const bucket = createBucket();
     bucket.__file.getMetadata.mockResolvedValueOnce([{ size: '10', contentType: 'image/jpeg' }]);
     mockedAxios.put.mockResolvedValue({
+      status: 200,
       data: {
         permalink_url: 'https://soundcloud.com/upper-room-media/test-track',
       },
@@ -191,5 +184,61 @@ describe('soundcloudClient', () => {
 
     expect(bucket.__file.getMetadata).toHaveBeenCalled();
     expect(bucket.__file.createReadStream).toHaveBeenCalled();
+  });
+  it('does not start a provider POST when safe source metadata preparation fails', async () => {
+    const bucket = createBucket();
+    bucket.__file.getMetadata.mockRejectedValueOnce(new Error('Storage unavailable'));
+    await expect(
+      prepareMultipartUpload({ bucket, audioStoragePath: 'audio.mp3', title: 'Track', tags: [], description: '' })
+    ).rejects.toThrow('Storage unavailable');
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(bucket.__file.createReadStream).not.toHaveBeenCalled();
+  });
+  it('destroys an allocated audio stream when artwork preparation fails', async () => {
+    const bucket = createBucket();
+    const stream = Readable.from(['audio']);
+    bucket.__file.createReadStream.mockReturnValue(stream);
+    mockedAxios.get.mockRejectedValueOnce(new Error('Artwork unavailable'));
+    await expect(
+      prepareMultipartUpload({
+        bucket,
+        audioStoragePath: 'audio.mp3',
+        imageSource: 'https://storage.example/image',
+        title: 'Track',
+        tags: [],
+        description: '',
+      })
+    ).rejects.toThrow('Artwork unavailable');
+    expect(stream.destroyed).toBe(true);
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+  });
+  it('closes prepared streams without posting when a durable receipt is replayed or lost', async () => {
+    const bucket = createBucket();
+    const stream = Readable.from(['audio']);
+    bucket.__file.createReadStream.mockReturnValue(stream);
+    const prepared = await prepareMultipartUpload({
+      bucket,
+      audioStoragePath: 'audio.mp3',
+      title: 'Track',
+      tags: [],
+      description: '',
+    });
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    prepared.dispose();
+    prepared.dispose();
+    expect(stream.destroyed).toBe(true);
+    await expect(prepared.post('token')).rejects.toThrow('only be posted once');
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+  });
+  it('closes source streams after a provider response is lost', async () => {
+    const bucket = createBucket();
+    const stream = Readable.from(['audio']);
+    bucket.__file.createReadStream.mockReturnValue(stream);
+    mockedAxios.post.mockRejectedValueOnce(new Error('Response lost'));
+    await expect(
+      uploadTrack('token', { bucket, audioStoragePath: 'audio.mp3', title: 'Track', tags: [], description: '' })
+    ).rejects.toThrow('Response lost');
+    expect(stream.destroyed).toBe(true);
+    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
   });
 });

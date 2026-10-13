@@ -18,8 +18,9 @@ function apply(update: any) {
   }
 }
 const mockDb = {
+  doc: (path: string) => ({path}),
   runTransaction: jest.fn(callback => {
-    const work = mockSerial.then(() => callback({get: () => mockRef.get(), update: (_ref: any, update: any) => apply(update)}));
+    const work = mockSerial.then(() => callback({get: (ref: any) => ref.path === "_control/temporalRelease" ? {exists: false} : mockRef.get(), update: (_ref: any, update: any) => apply(update)}));
     mockSerial = work.catch(() => {});
     return work;
   }),
@@ -87,5 +88,18 @@ test('expired processing lease becomes ERROR without sending again', async () =>
 test('deleted documents are ignored', async () => {
   mockExists = false;
   await execute(event());
+  expect(mockSend).not.toHaveBeenCalled();
+});
+test('legacy flag rollback cannot resend a Temporal-owned mail document', async () => {
+  mockPayload.delivery = {state: 'RETRY', orchestrator: 'temporal', attempts: 1};
+  await execute(event());
+  expect(mockSend).not.toHaveBeenCalled();
+  expect(mockPayload.delivery.state).toBe('RETRY');
+});
+test('stale legacy event cannot claim a document admitted to Temporal meanwhile', async () => {
+  mockPayload.delivery = {state: 'PENDING', attempts: 0};
+  const stale = event();
+  mockPayload.delivery.orchestrator = 'temporal';
+  await execute(stale);
   expect(mockSend).not.toHaveBeenCalled();
 });

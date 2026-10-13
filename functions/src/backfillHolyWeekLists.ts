@@ -127,10 +127,16 @@ const backfillHolyWeekLists = onCall(
     memory: '512MiB',
     maxInstances: 1,
   },
-  async (request: CallableRequest<BackfillHolyWeekListsInputType>): Promise<BackfillHolyWeekListsOutputType> => {
-    const requester = await assertAuthorizedScriptRunner(request);
-
-    try {
+  async (request: CallableRequest<BackfillHolyWeekListsInputType>): Promise<BackfillHolyWeekListsOutputType> =>{
+const requester = await assertAuthorizedScriptRunner(request);
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"backfillHolyWeekLists",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+try {
       const dryRun = request.data?.dryRun === true;
       const token = await authenticateSubsplash();
       const result = createEmptyResult();
@@ -291,7 +297,8 @@ const backfillHolyWeekLists = onCall(
         context: { functionName: 'backfillHolyWeekLists', sourceListId: HOLY_WEEK_SOURCE_LIST_ID },
       });
     }
-  }
+});
+}
 );
 
 export default backfillHolyWeekLists;

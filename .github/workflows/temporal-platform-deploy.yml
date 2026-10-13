@@ -1,0 +1,58 @@
+name: Temporal platform operation
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        required: true
+      operation:
+        type: choice
+        options:
+          [
+            preflight,
+            cert-manager,
+            certificates,
+            operators,
+            database,
+            schema-bootstrap,
+            server,
+            worker,
+            ramp,
+            promote,
+            retire,
+          ]
+        required: true
+      percentage:
+        type: string
+        description: Required only for ramp; new execution percentage
+        default: '10'
+permissions:
+  contents: read
+concurrency:
+  group: temporal-platform-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  operate:
+    # These runners and contexts must exist on the corresponding private network.
+    runs-on: ${{ fromJSON(format('["self-hosted","linux","temporal-infrastructure","{0}"]', inputs.environment)) }}
+    environment: temporal-${{ inputs.environment }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - name: Run reviewed platform operation
+        env:
+          PLATFORM_CONFIG: ${{ secrets.TEMPORAL_PLATFORM_CONFIG_JSON }}
+          PEER_CONFIG: ${{ secrets.TEMPORAL_PEER_PLATFORM_CONFIG_JSON }}
+          OPERATION: ${{ inputs.operation }}
+          PERCENTAGE: ${{ inputs.percentage }}
+        run: |
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          umask 077
+          printf '%s' "$PLATFORM_CONFIG" > "$work/config.json"
+          printf '%s' "$PEER_CONFIG" > "$work/peer.json"
+          node scripts/deploy-temporal-platform.mjs "$OPERATION" --config "$work/config.json" --peer "$work/peer.json" --percentage "$PERCENTAGE" --apply

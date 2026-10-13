@@ -1,3 +1,4 @@
+import type { DurableJobRef } from '@upperroom/contracts/temporal';
 import { logger } from 'firebase-functions/v2';
 import { buildProfessionalEmailHtml, formatEmailDateTime } from '../notifications/emailTemplates';
 import { getAdminBaseUrl } from '../notifications/notificationParams';
@@ -90,14 +91,24 @@ export const queueSpeakerRequestOutcomeEmail = async (input: {
   resolvedAtMs: number;
   message?: string;
   speakerId?: string;
+  idempotencyKey?: string;
+  /** Trusted server parent; never copied from a callable payload. */
+  temporalParentJobRef?: DurableJobRef;
 }): Promise<
   | { status: 'queued'; queueMailId: string; attemptedAtMs: number }
-  | { status: 'queue_failed'; attemptedAtMs: number; queueErrorMessage: string; warningCode: typeof SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED }
+  | {
+      status: 'queue_failed';
+      attemptedAtMs: number;
+      queueErrorMessage: string;
+      warningCode: typeof SPEAKER_REQUEST_EMAIL_ENQUEUE_FAILED;
+    }
 > => {
   const attemptedAtMs = Date.now();
   const uploadPageUrl = resolveUploadPageUrl();
   try {
     const queueMailId = await queueEmail({
+      idempotencyKey: input.idempotencyKey,
+      temporalParentJobRef: input.temporalParentJobRef,
       to: [input.requesterEmail],
       source: 'speaker-request',
       alertType:

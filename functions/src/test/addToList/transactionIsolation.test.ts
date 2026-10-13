@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Integration test for transaction isolation bug
  * This test uses the real Firestore emulator to verify transaction isolation behavior
@@ -69,7 +70,7 @@ describe('addToList - Transaction Isolation Bug (Real Firestore Emulator)', () =
     // Add one more item to trigger overflow
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,
@@ -162,7 +163,7 @@ describe('addToList - Transaction Isolation Bug (Real Firestore Emulator)', () =
 
     const mediaItem = { id: 'new-item', type: 'media-item' as const };
     const request: TestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         destinationListIds: [listId],
         mediaItem,

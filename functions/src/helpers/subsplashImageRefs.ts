@@ -1,5 +1,7 @@
 import axios, { AxiosRequestConfig } from 'axios';
+import { executeProviderCreate } from '../temporal/publishing/providerReceipts';
 import { logger } from 'firebase-functions/v2';
+import { HttpsError } from 'firebase-functions/v2/https';
 import { createAxiosConfig } from '../subsplashUtils';
 
 const APP_KEY = '9XTSHD';
@@ -15,6 +17,8 @@ export type SubsplashPublishImageRef = {
 type SubsplashImageResponse = {
   id: string;
   type?: string;
+  app_key?: string;
+  content_type?: string;
   _links?: {
     presigned_upload_url?: { href?: string };
   };
@@ -59,7 +63,8 @@ const fetchRemoteImageRecord = async (
 
 const uploadImageToSubsplash = async (
   image: Pick<SubsplashPublishImageRef, 'downloadLink' | 'name' | 'type'>,
-  bearerToken: string
+  bearerToken: string,
+  operationKey?: string
 ): Promise<string> => {
   if (!image.downloadLink) {
     throw new Error(`Cannot repair Subsplash image "${image.name || image.type}" without a downloadLink.`);
@@ -68,7 +73,6 @@ const uploadImageToSubsplash = async (
   logger.warn('repairing Subsplash image reference for type mismatch', {
     imageName: image.name,
     imageType: image.type,
-    downloadLink: image.downloadLink,
   });
 
   const sourceResponse = await axios<ArrayBuffer>({
@@ -90,8 +94,15 @@ const uploadImageToSubsplash = async (
     }
   );
 
-  const createResponse = await axios(createConfig);
-  const createdImage = createResponse.data as SubsplashImageResponse;
+  Object.assign(createConfig, { skipSubsplashEdgeRetry: true });
+  const create = async (): Promise<SubsplashImageResponse> => {
+    const result=(await axios(createConfig)).data as SubsplashImageResponse;
+    if(!result.id) throw new Error('Subsplash returned no image ID.');
+    return {id:result.id,...(result.type?{type:result.type}:{}),...(result.app_key?{app_key:result.app_key}:{}),...(result.content_type?{content_type:result.content_type}:{}),...(result._links?.presigned_upload_url?{_links:{presigned_upload_url:result._links.presigned_upload_url}}:{})};
+  };
+  const createdImage=operationKey
+    ? await executeProviderCreate({operationKey,step:'image-create',payload:{image,contentType},execute:create})
+    : await create();
   const remoteImageId = createdImage.id;
   const uploadUrl = createdImage._links?.presigned_upload_url?.href;
 
@@ -112,14 +123,29 @@ const uploadImageToSubsplash = async (
       'x-amz-acl': 'public-read',
     },
   };
-  await axios(uploadConfig);
+  try {
+    await axios(uploadConfig);
+  } catch(error) {
+    const status=axios.isAxiosError(error)?error.response?.status:undefined;
+    if(!operationKey || ![401,403,410].includes(status ?? 0)) throw error;
+    // A confirmed allocation is permanent; refresh only the upload capability on the same object.
+    const current=await fetchRemoteImageRecord(remoteImageId,bearerToken);
+    const freshUrl=current?._links?.presigned_upload_url?.href;
+    if(!current || current.id!==remoteImageId || current.app_key!==APP_KEY || current.type!==image.type || current.content_type!==contentType || !freshUrl || freshUrl===uploadUrl) {
+      throw new HttpsError('failed-precondition','The image upload capability expired. Restore the existing image before retrying.',{reason:'PROVIDER_UPLOAD_SLOT_UNAVAILABLE',provider:'subsplash',remoteId:remoteImageId});
+    }
+    try { await axios({...uploadConfig,url:freshUrl}); } catch {
+      throw new HttpsError('failed-precondition','The existing image upload capability could not be restored.',{reason:'PROVIDER_UPLOAD_SLOT_UNAVAILABLE',provider:'subsplash',remoteId:remoteImageId});
+    }
+  }
 
   return remoteImageId;
 };
 
 export const repairMismatchedSubsplashImageRefs = async (
   images: Array<SubsplashPublishImageRef | undefined>,
-  bearerToken: string
+  bearerToken: string,
+  operationKey?: string
 ): Promise<SubsplashPublishImageRef[]> => {
   const resolvedImages: SubsplashPublishImageRef[] = [];
 
@@ -157,7 +183,7 @@ export const repairMismatchedSubsplashImageRefs = async (
       continue;
     }
 
-    const repairedSubsplashId = await uploadImageToSubsplash(image, bearerToken);
+    const repairedSubsplashId = await uploadImageToSubsplash(image, bearerToken, operationKey ? `${operationKey}:image:${image.type}:${expectedRemoteId}` : undefined);
     resolvedImages.push({
       ...image,
       subsplashId: repairedSubsplashId,

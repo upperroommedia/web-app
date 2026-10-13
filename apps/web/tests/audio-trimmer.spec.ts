@@ -63,6 +63,8 @@ test.describe('Audio trimmer', () => {
     const trimEndInput = page.getByRole('textbox', { name: 'Trim End' });
     await expect(trimStartInput).toBeVisible({ timeout: 10000 });
     await expect(trimEndInput).toBeVisible({ timeout: 10000 });
+    await expect(trimStartInput).toBeEnabled();
+    await expect(trimEndInput).toBeEnabled();
 
     const playhead = page.getByTestId('audio-trim-playhead');
     const playheadBefore = parseFloat((await playhead.getAttribute('data-playhead-percent')) || '0');
@@ -94,7 +96,9 @@ test.describe('Audio trimmer', () => {
     });
 
     const playButton = page.getByRole('button', { name: 'Play' });
-    await playButton.click({ force: true });
+    await expect(playButton).toBeEnabled();
+    await playButton.click();
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
 
     const playhead = page.getByTestId('audio-trim-playhead');
     const playheadBefore = parseFloat((await playhead.getAttribute('data-playhead-percent')) || '0');
@@ -118,23 +122,28 @@ test.describe('Audio trimmer', () => {
     await fileInput.setInputFiles({
       name: 'sample.wav',
       mimeType: 'audio/wav',
-      buffer: createSilentWav(2.0),
+      buffer: createSilentWav(10.0),
     });
 
     const playButton = page.getByRole('button', { name: 'Play' });
-    await playButton.click({ force: true });
+    await expect(playButton).toBeEnabled();
+    await playButton.click();
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
 
     const timeline = page.getByTestId('audio-trim-timeline');
+    await timeline.scrollIntoViewIfNeeded();
     const box = await timeline.boundingBox();
     if (!box) throw new Error('Missing audio timeline');
     await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2);
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2, { steps: 8 });
     await page.mouse.up();
 
     const playhead = page.getByTestId('audio-trim-playhead');
     const playheadAfter = parseFloat((await playhead.getAttribute('data-playhead-percent')) || '0');
     expect(playheadAfter).toBeGreaterThan(10);
+    expect(playheadAfter).toBeGreaterThan(60);
+    expect(playheadAfter).toBeLessThan(90);
   });
 
   test('trim Start/End inputs visible and actionable on mobile viewport', async ({ page }) => {
@@ -151,13 +160,16 @@ test.describe('Audio trimmer', () => {
     await fileInput.setInputFiles({
       name: 'sample.wav',
       mimeType: 'audio/wav',
-      buffer: createSilentWav(),
+      buffer: createSilentWav(20),
     });
 
     const trimStartInput = page.getByRole('textbox', { name: 'Trim Start' });
     const trimEndInput = page.getByRole('textbox', { name: 'Trim End' });
     await expect(trimStartInput).toBeVisible({ timeout: 10000 });
     await expect(trimEndInput).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled();
+    await expect(trimEndInput).toHaveValue('00:00:20.0');
+    await expect(trimStartInput).toBeEnabled();
 
     const viewportSize = page.viewportSize();
     const startBox = await trimStartInput.boundingBox();
@@ -171,10 +183,20 @@ test.describe('Audio trimmer', () => {
       expect(endBox.x + endBox.width).toBeLessThanOrEqual(viewportSize.width);
     }
 
-    await trimStartInput.click({ force: true });
+    await trimStartInput.click();
     await page.keyboard.press('Control+A');
     await page.keyboard.type('0000100');
-    await expect(trimStartInput).toHaveValue(/00:00:10/);
+    await expect(trimStartInput).toHaveValue('00:00:10.0');
+    await trimEndInput.click();
+    await expect(trimStartInput).toHaveValue('00:00:10.0');
+
+    await trimStartInput.click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('0000250');
+    await expect(trimStartInput).toHaveAttribute('aria-invalid', 'true');
+    await trimEndInput.click();
+    await expect(trimStartInput).toHaveValue('00:00:19.9');
+    await expect(trimStartInput).toHaveAttribute('aria-invalid', 'false');
   });
 
   test('local upload waveform uses file data when object URL fetch fails', async ({ page }) => {

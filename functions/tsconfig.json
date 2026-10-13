@@ -17,6 +17,9 @@
       ],
       "@upperroom/shared/*": [
         "../packages/shared/*"
+      ],
+      "@upperroom/orchestration/*": [
+        "../packages/orchestration/src/*"
       ]
     },
     "types": [

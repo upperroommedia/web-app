@@ -55,10 +55,16 @@ const backfillSermonSubsplashStatus = onCall(
   },
   async (
     request: CallableRequest<BackfillSermonSubsplashStatusInputType>
-  ): Promise<BackfillSermonSubsplashStatusOutputType> => {
-    const requester = await assertAuthorizedScriptRunner(request);
-
-    try {
+  ): Promise<BackfillSermonSubsplashStatusOutputType> =>{
+const requester = await assertAuthorizedScriptRunner(request);
+if (!request.auth?.uid) {
+ const { HttpsError } = await import('firebase-functions/v2/https');
+ throw new HttpsError('unauthenticated', 'Authentication is required.');
+}
+const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+return withLegacyAdmissionLease(firebaseAdmin.firestore(), {domain:'publishing',actorUid:request.auth.uid,operation:"backfillSermonSubsplashStatus",projectId:firebaseAdmin.app().options.projectId || ''}, async lease => {
+ await lease.markEffectsStarted();
+try {
       const dryRun = request.data?.dryRun === true;
       const firestore = firebaseAdmin.firestore();
       const sermonsSnapshot = await firestore
@@ -128,7 +134,8 @@ const backfillSermonSubsplashStatus = onCall(
     } catch (error) {
       throw handleError(error);
     }
-  }
+});
+}
 );
 
 export default backfillSermonSubsplashStatus;

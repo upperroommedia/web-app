@@ -49,9 +49,21 @@ export interface Sermon {
   numberOfListsUploadedTo?: number;
   subsplashId?: string;
   audioSource?: 'gcp' | 'subsplash';
+  /** Immutable published media references; legacy sermons use the conventional storage paths. */
+  audioArtifacts?: {
+    jobId: string;
+    requestVersion: string;
+    revision: number;
+    sourcePath: string;
+    sourceDurationSeconds: number;
+    processedPath: string;
+    finalPath: string;
+    durationSeconds: number;
+  };
   subsplashAudioUrl?: string;
   soundCloudTrackId?: string;
   soundCloudTrackUrl?: string;
+  soundCloudPublication?: { streamable: boolean; sharing?: 'public' | 'private' };
   uploaderId?: string;
   approverId?: string;
   createdAtMillis: number;

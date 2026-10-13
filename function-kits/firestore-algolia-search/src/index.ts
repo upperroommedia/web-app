@@ -14,6 +14,7 @@ import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { extract, objectId } from './records';
 import { converge } from './sync';
 import { migratedRuntimeOptions } from './runtime-options';
+import { enqueueSearchIntent, temporalSearchEnabled, assertLegacySearchOwnership } from './temporal-outbox';
 
 const migratedOptions = migratedRuntimeOptions(process.env);
 
@@ -67,6 +68,7 @@ async function syncDocument(path: string, previous?: DocumentSnapshot): Promise<
   let lastObjectId: string | undefined;
   let pendingObjectId: string | undefined;
   await db.runTransaction(async transaction => {
+    await assertLegacySearchOwnership(db, transaction, true);
     const state = (await transaction.get(lock)).data();
     if (state?.leaseUntil > Date.now()) throw new Error(`Algolia sync already running for ${path}; retry required`);
     lastObjectId = state?.lastObjectId;
@@ -110,6 +112,13 @@ export const executeIndexOperation = onDocumentWritten({
   secrets: [apiKey], retry: true,
 }, async event => {
   if (!event.data) return;
+  if (temporalSearchEnabled()) {
+    const {db} = runtime();
+    await enqueueSearchIntent(db, {projectId: process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? '',
+      instanceId: process.env.FIREBASE_KIT_INSTANCE_ID ?? '', requestId: event.id, documentPath: event.data.after.ref.path,
+      ...(event.data.before.exists ? {previousObjectId: objectId(event.data.before, alternateId.value())} : {})});
+    return;
+  }
   await safeBoundary('live-index', () => syncDocument(event.data!.after.ref.path, event.data!.before));
 });
 
@@ -122,6 +131,12 @@ export const executeFullIndexOperation = onTaskDispatched<FullIndexData>({
 }, async request => safeBoundary('full-index', async () => {
   if (fullIndexing.value() !== 'true') {logger.info('Full Algolia indexing disabled'); return;}
   const {db} = runtime();
+  if (temporalSearchEnabled()) {
+    await enqueueSearchIntent(db, {projectId: process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? '',
+      instanceId: process.env.FIREBASE_KIT_INSTANCE_ID ?? '', requestId: request.id});
+    return;
+  }
+  await assertLegacySearchOwnership(db, undefined, true);
   const path = collectionPath.value();
   const group = /\{[^}]+\}/.test(path);
   let query = (group ? db.collectionGroup(path.split('/').at(-1)!) : db.collection(path)).orderBy(FieldPath.documentId()).limit(25);

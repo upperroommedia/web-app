@@ -1,7 +1,7 @@
 /**
  * Login Page - Standalone login screen without navbar/sidebar
  */
-import Box from '@mui/system/Box';
+import Box from '@mui/material/Box';
 import Login from '../components/Login';
 import Head from 'next/head';
 import Typography from '@mui/material/Typography';
@@ -52,7 +52,7 @@ export default function LoginPage() {
                   position: 'relative',
                 }}
               >
-                <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="48px" priority />
+                <Image unoptimized src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="48px" priority />
               </Avatar>
               <Box>
                 <Typography

@@ -1,0 +1,12 @@
+{
+  "environment": "staging",
+  "privateApiVip": "REQUIRED_PRIVATE_HA_API_VIP",
+  "privateInterface": "REQUIRED_PRIVATE_NETWORK_INTERFACE",
+  "podCidr": "10.42.0.0/16",
+  "serviceCidr": "10.43.0.0/16",
+  "nodes": [
+    { "name": "temporal-staging-1", "privateIp": "REQUIRED_PRIVATE_IP_1" },
+    { "name": "temporal-staging-2", "privateIp": "REQUIRED_PRIVATE_IP_2" },
+    { "name": "temporal-staging-3", "privateIp": "REQUIRED_PRIVATE_IP_3" }
+  ]
+}

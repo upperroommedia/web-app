@@ -7,11 +7,10 @@ Sentry.init({
   beforeSend(event) {
     return shouldDropClientSentryEvent(event) ? null : event;
   },
-  sendDefaultPii: false,
   integrations: [
     Sentry.replayIntegration({
-      maskAllText: false,
-      blockAllMedia: false,
+      maskAllText: true,
+      blockAllMedia: true,
     }),
   ],
   tracePropagationTargets: webTracePropagationTargets,

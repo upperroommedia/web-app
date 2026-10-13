@@ -1,0 +1,72 @@
+{
+  "environment": "production",
+  "context": "REQUIRED_PRODUCTION_SINGLE_VM_CONTEXT",
+  "clusterUid": "REQUIRED_KUBE_SYSTEM_UID",
+  "namespace": "temporal-production",
+  "temporalNamespace": "urm-app.qwejt",
+  "firebaseProjectId": "urm-app",
+  "applicationEgressCidrs": [],
+  "retention": "30d",
+  "workerImage": "REQUIRED_REGISTRY_IMAGE@sha256:DIGEST",
+  "workerBuildId": "REQUIRED_GIT_COMMIT",
+  "workerDeploymentName": "urm-worker-production",
+  "workerReplicas": 1,
+  "workerRoles": ["orchestration", "controls", "media", "email", "images", "search"],
+  "workerPort": 8080,
+  "media": {
+    "concurrency": 1,
+    "sourceLimitGiB": 20,
+    "outputLimitGiB": 20,
+    "workspaceGiB": 64,
+    "headroomGiB": 16,
+    "scratchStorage": "100Gi",
+    "storageClass": "temporal-media-local",
+    "retainedVersions": 2,
+    "storageBudget": "400Gi"
+  },
+  "kubernetesApiEndpoints": [
+    {
+      "cidr": "REQUIRED_PRIVATE_KUBERNETES_SERVICE_IP/32",
+      "port": 443
+    },
+    {
+      "cidr": "REQUIRED_PRIVATE_API_NODE_OR_VIP_IP/32",
+      "port": 6443
+    }
+  ],
+  "workerIdentityNodeNames": ["REQUIRED_ACTUAL_K3S_NODE_NAME"],
+  "emailEgress": {
+    "schemaVersion": 1,
+    "provider": "smtp",
+    "hostname": "REQUIRED_SMTP_HOSTNAME",
+    "port": 465,
+    "tls": "implicit",
+    "dnsMode": "public-ipv4"
+  },
+  "imagePullSecrets": ["REQUIRED_REGISTRY_PULL_SECRET"],
+  "connectionMode": "temporal-cloud",
+  "cloudAccountId": "qwejt",
+  "cloudProvider": "gcp",
+  "cloudRegion": "us-central1",
+  "cloudAddress": "urm-app.qwejt.tmprl.cloud:7233",
+  "cloudEvidence": "REQUIRED_PRIVATE_CLOUD_CONNECTION_AND_RECOVERY_PROOF",
+  "cloudReplicaRegions": [],
+  "workerHosting": "gce-k3s",
+  "gce": {
+    "instanceName": "urm-temporal-production",
+    "instanceId": "REQUIRED_ACTUAL_GCE_INSTANCE_ID",
+    "zone": "us-central1-a",
+    "machineType": "e2-standard-4",
+    "serviceAccount": "temporal-worker@urm-app.iam.gserviceaccount.com",
+    "privateIp": "REQUIRED_PRIVATE_VM_IP",
+    "mediaMount": "/var/lib/urm-temporal/media",
+    "mediaDiskGiB": 500,
+    "mediaRequiredCapacityGiB": 400,
+    "mediaFilesystemEvidence": "REQUIRED_PRIVATE_ACTUAL_MOUNT_REPORT"
+  },
+  "firebaseResources": {
+    "storageBucket": "urm-app.appspot.com",
+    "imagesBucket": "urm-app-images",
+    "databaseUrl": "https://urm-app-default-rtdb.firebaseio.com/"
+  }
+}

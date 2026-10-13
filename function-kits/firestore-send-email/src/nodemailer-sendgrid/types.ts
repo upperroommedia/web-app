@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
+export interface SendGridProviderClient {
+  setApiKey(apiKey: string): void;
+  send(data: unknown): Promise<[{statusCode: number; headers: Record<string, any>; body?: unknown}]>;
+}
 export interface SendGridTransportOptions {
+  client?: SendGridProviderClient;
   apiKey?: string;
   [key: string]: unknown;
 }

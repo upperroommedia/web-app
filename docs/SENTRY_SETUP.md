@@ -46,6 +46,8 @@ The workflows use the official `getsentry/action-release@v3` action with:
 
 `apps/web` uses `@sentry/nextjs` and `withSentryConfig(...)`.
 
+Browser monitoring initializes once in `apps/web/instrumentation-client.ts`, including masked Session Replay and router-transition tracing. Do not restore a separate `sentry.client.config.ts`: the webpack SDK injects that legacy entry in addition to Next.js's instrumentation entry, causing duplicate Replay initialization. The instrumentation entry also works with Turbopack.
+
 For event capture, only `WEB_APP_SENTRY_DSN` is required.
 
 For source map upload during App Hosting builds, also provide `SENTRY_AUTH_TOKEN` to the App Hosting build environment. Without it, browser stack traces will remain minified even if release tracking works.

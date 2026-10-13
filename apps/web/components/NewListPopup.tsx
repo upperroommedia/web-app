@@ -1,10 +1,13 @@
 import Button from '@mui/material/Button';
+import Alert from '@mui/material/Alert';
+import { submitDurableIntent, getPendingCreationId, forgetPendingCreationId } from '../utils/durableJobs';
+import { useEntityJobs } from '../hooks/useDurableJobs';
+import EntityJobHistory from './jobs/EntityJobHistory';
+import firestore, { doc, getDoc } from '../firebase/firestore';
+import { listConverter } from '../types/List';
 import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
-import firestore from '../firebase/firestore';
-import { doc, updateDoc } from 'firebase/firestore';
-import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
-import addNewList from '../utils/addNewList';
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import MenuItem from '@mui/material/MenuItem';
@@ -13,8 +16,6 @@ import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
 import PopUp from './PopUp';
 import CircularProgress from '@mui/material/CircularProgress';
-import { EditSubsplashListInputType, EditSubsplashListOutputType } from '@upperroom/contracts/editSubsplashList';
-import { createFunctionV2 } from '../utils/createFunction';
 import { createEmptyList, emptyList, List, ListType, OverflowBehavior } from '../types/List';
 
 // Custom utility function to compare arrays of ImageType objects
@@ -59,12 +60,47 @@ export const listTypeOptions: {
 };
 
 const NewListPopup = (props: NewListPopupProps) => {
+  const { setListArray, setSermonList } = props;
   const [newList, setNewList] = useState<List>(
     props.existingList ? props.existingList : createEmptyList(props.listType || ListType.SERIES)
   );
 
   const [submitting, setSubmitting] = useState(false);
   const [submitErrorMessage, setSubmitErrorMessage] = useState('');
+  const [trackedId, setTrackedId] = useState('');
+  const [admitted, setAdmitted] = useState(false);
+  const [admittedJobId, setAdmittedJobId] = useState('');
+  const { jobs } = useEntityJobs({ type: 'list', id: trackedId });
+  const completionHandled = useRef('');
+  const succeededJobId = jobs.find((job) => job.jobId === admittedJobId && job.state === 'succeeded')?.jobId;
+  useEffect(() => {
+    if (!trackedId || !succeededJobId || completionHandled.current === succeededJobId) return;
+    let disposed = false;
+    void getDoc(doc(firestore, 'lists', trackedId).withConverter(listConverter))
+      .then((snapshot) => {
+        if (disposed || !snapshot.exists()) return;
+        completionHandled.current = succeededJobId;
+        const confirmed = snapshot.data();
+        setListArray?.((current) =>
+          current.some((list) => list.id === confirmed.id)
+            ? current.map((list) => (list.id === confirmed.id ? confirmed : list))
+            : [confirmed, ...current]
+        );
+        setSermonList?.((current) =>
+          current.some((list) => list.id === confirmed.id)
+            ? current.map((list) => (list.id === confirmed.id ? confirmed : list))
+            : [confirmed, ...current]
+        );
+      })
+      .catch(() => {
+        if (!disposed)
+          setSubmitErrorMessage('The task completed, but the list could not be refreshed. Reload to view it.');
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [setListArray, setSermonList, succeededJobId, trackedId]);
+
   const overFlowBehaviorOptions: {
     [key in OverflowBehavior]: string;
   } = {
@@ -137,6 +173,7 @@ const NewListPopup = (props: NewListPopupProps) => {
       open={props.newListPopup}
       setOpen={props.setNewListPopup}
       onClose={() => {
+        setAdmitted(false);
         setUserHasTypedInList(false);
         setSubmitErrorMessage('');
         setNewList(emptyList);
@@ -149,70 +186,49 @@ const NewListPopup = (props: NewListPopupProps) => {
               areImageArraysEqual(props.existingList?.images, newList.images)) ||
             newList.name === '' ||
             newList.images.length === 0 ||
-            submitting
+            submitting ||
+            admitted
           }
           onClick={async () => {
             setSubmitting(true);
             setSubmitErrorMessage('');
             try {
-              if (props.existingList) {
-                if (newList.subsplashId) {
-                  // edit subsplash list
-                  const editSubsplashList = createFunctionV2<EditSubsplashListInputType, EditSubsplashListOutputType>(
-                    'editsubsplashlist'
-                  );
-
-                  await editSubsplashList({
-                    listId: newList.subsplashId,
-                    title: newList.name,
+              const kind = props.existingList ? 'list.update' : 'list.create';
+              const payload = {
+                input: {
+                  title: newList.name.trim(),
+                  images: newList.images,
+                  localList: {
+                    name: newList.name.trim(),
                     images: newList.images,
-                  });
-                }
-                const listRef = doc(firestore, 'lists', newList.id);
-                await updateDoc(listRef, {
-                  ...newList,
-                });
-                if (props.setListArray) {
-                  props.setListArray((oldListArray) =>
-                    oldListArray.map((s) => {
-                      if (s.id === newList.id) {
-                        return { ...newList };
-                      }
-                      return s;
-                    })
-                  );
-                }
-                props.setNewListPopup(false);
-                setUserHasTypedInList(false);
-              } else {
-                const newListId = await addNewList(newList);
-                const listToAdd: List = {
-                  ...newList,
-                  id: newListId,
-                };
-
-                props.setNewListPopup(false);
-                if (props.setListArray) {
-                  props.setListArray((previouslistArray) => [listToAdd, ...previouslistArray]);
-                }
-                if (props.setSermonList) {
-                  props.setSermonList((previousList) => [listToAdd, ...previousList]);
-                }
-                setNewList(emptyList);
-                setUserHasTypedInList(false);
-              }
+                    type: newList.type,
+                    overflowBehavior: newList.overflowBehavior,
+                  },
+                  ...(!props.existingList ? { skipSubsplash: true } : {}),
+                },
+              };
+              const entityId = props.existingList?.id || (await getPendingCreationId(kind, payload));
+              setTrackedId(entityId);
+              const receipt = await submitDurableIntent({ kind, entity: { type: 'list', id: entityId }, payload });
+              if (!props.existingList) await forgetPendingCreationId(kind, payload);
+              setAdmittedJobId(receipt.jobId);
+              setAdmitted(true);
             } catch (error) {
               console.error(error);
-              setSubmitErrorMessage(JSON.stringify(error));
+              setSubmitErrorMessage(error instanceof Error ? error.message : 'Unable to submit list changes.');
             }
             setSubmitting(false);
           }}
         >
-          {submitting ? <CircularProgress size={24} /> : 'Submit'}
+          {submitting ? <CircularProgress size={24} /> : admitted ? 'Request accepted' : 'Submit'}
         </Button>
       }
     >
       <Box display="flex" padding="10px" justifyContent="center" flexDirection="column" gap={1}>
+        {admitted && (
+          <Alert severity="info">Your request is saved. You may close this dialog while work continues.</Alert>
+        )}
+        {trackedId && <EntityJobHistory entity={{ type: 'list', id: trackedId }} />}
         <TextField
           value={newList.name}
           onChange={(e) => {

@@ -1,3 +1,5 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 const mockGetSoundCloudAuthStatus = jest.fn();
 
 jest.mock('../../soundcloudSecrets', () => ({
@@ -26,7 +28,7 @@ import getSoundCloudAuthStatus from '../../getSoundCloudAuthStatus';
 import type { GetSoundCloudAuthStatusReturnType } from '../../getSoundCloudAuthStatus';
 
 const handler = getSoundCloudAuthStatus as unknown as (req: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
 }) => Promise<GetSoundCloudAuthStatusReturnType>;
 
 describe('getSoundCloudAuthStatus', () => {
@@ -46,7 +48,7 @@ describe('getSoundCloudAuthStatus', () => {
   });
 
   it('returns auth status for admins', async () => {
-    await expect(handler({ auth: { token: { role: 'admin' } } })).resolves.toMatchObject({
+    await expect(handler({ auth: testCallableAuth('admin') })).resolves.toMatchObject({
       connected: true,
       tokenSource: 'firestore',
     });
@@ -54,7 +56,7 @@ describe('getSoundCloudAuthStatus', () => {
   });
 
   it('rejects non-admin callers', async () => {
-    await expect(handler({ auth: { token: { role: 'publisher' } } })).rejects.toMatchObject({
+    await expect(handler({ auth: testCallableAuth('publisher') })).rejects.toMatchObject({
       code: 'permission-denied',
     });
   });

@@ -1,3 +1,5 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import {
   mockIsSoundCloudTrackNotFoundError,
   mockNormalizeSoundCloudApiError,
@@ -7,7 +9,7 @@ import editSoundCloudSermon from '../../editSoundCloudSermon';
 import type { EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA, EditSoundCloudSermonReturnType } from '../../editSoundCloudSermon';
 
 const handler = editSoundCloudSermon as unknown as (req: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: EDIT_SOUNDCLOUD_SERMON_INCOMING_DATA;
 }) => Promise<EditSoundCloudSermonReturnType>;
 
@@ -26,7 +28,7 @@ describe('editSoundCloudSermon', () => {
 
   it('calls updateTrack when authenticated and data is valid', async () => {
     const result = await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         trackId: 'sc-456',
         title: 'Updated Title',
@@ -51,7 +53,7 @@ describe('editSoundCloudSermon', () => {
 
   it('passes imageSource through when provided', async () => {
     await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         trackId: 'sc-456',
         imageSource: 'https://storage.googleapis.com/urm-app-prod.firebasestorage.app/speaker-images/image-square.jpeg',
@@ -70,7 +72,7 @@ describe('editSoundCloudSermon', () => {
   it('throws permission-denied when role cannot publish', async () => {
     await expect(
       handler({
-        auth: { token: { role: 'user' } },
+        auth: testCallableAuth('user'),
         data: { trackId: 'sc-456', title: 'X' },
       })
     ).rejects.toMatchObject({ code: 'permission-denied' });
@@ -94,7 +96,7 @@ describe('editSoundCloudSermon', () => {
     });
 
     await handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { trackId: 'sc-456', title: 'X' },
     })
       .then(() => {
@@ -112,7 +114,7 @@ describe('editSoundCloudSermon', () => {
     mockIsSoundCloudTrackNotFoundError.mockImplementation((error: unknown) => error === notFoundError);
 
     await expect(handler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { trackId: 'soundcloud:tracks:deleted', title: 'Updated title' },
     })).resolves.toEqual({
       soundCloudTrackMissing: true,

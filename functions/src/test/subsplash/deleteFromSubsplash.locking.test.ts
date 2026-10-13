@@ -1,3 +1,5 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import axios, { AxiosError } from 'axios';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { buildSubsplashLockBusyError } from '../../locks/contentionError';
@@ -44,7 +46,7 @@ jest.mock('firebase-functions/v2/https', () => {
 });
 
 type DeleteHandler = (request: {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: Record<string, unknown>;
 }) => Promise<unknown>;
 
@@ -77,7 +79,7 @@ describe('deleteFromSubsplash lock contract', () => {
   it('requires a non-empty operation key', async () => {
     await expect(
       deleteHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: { ...buildValidPayload(), operationKey: '' },
       })
     ).rejects.toBeInstanceOf(HttpsError);
@@ -85,7 +87,7 @@ describe('deleteFromSubsplash lock contract', () => {
 
   it('wraps delete mutations with idempotency and media-item lock scope', async () => {
     await deleteHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: buildValidPayload(),
     });
 
@@ -108,7 +110,7 @@ describe('deleteFromSubsplash lock contract', () => {
     });
 
     const request = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: buildValidPayload(),
     };
     await deleteHandler(request);
@@ -127,7 +129,7 @@ describe('deleteFromSubsplash lock contract', () => {
 
     await expect(
       deleteHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: buildValidPayload(),
       })
     ).rejects.toMatchObject({
@@ -167,7 +169,7 @@ describe('deleteFromSubsplash lock contract', () => {
 
     await expect(
       deleteHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: buildValidPayload(),
       })
     ).resolves.toBeUndefined();

@@ -1,5 +1,5 @@
 import Typography from '@mui/material/Typography';
-import Box from '@mui/system/Box';
+import Box from '@mui/material/Box';
 import firestore, { collection, limit, orderBy, query, where } from '../firebase/firestore';
 import { useCollection } from 'react-firebase-hooks/firestore';
 import SermonsList from './SermonsList';
@@ -66,7 +66,6 @@ const AdminSermonsListWithUser: FunctionComponent<AdminSermonsListWithUserProps>
     snapshotListenOptions: { includeMetadataChanges: true },
   });
   if (error) {
-     
     console.error(error);
   }
   // const [searchQuery, setSearchQuery] = useState('');

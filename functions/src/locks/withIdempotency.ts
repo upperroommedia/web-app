@@ -6,6 +6,7 @@ import {
   getOperationResult,
   markOperationFailed,
 } from './idempotencyStore';
+import { isDurablePublishingOperation } from '../temporal/publishing/durableOperationContext';
 
 const assertOperationKey = (operationKey: string): string => {
   const normalizedKey = operationKey?.trim();
@@ -21,6 +22,11 @@ export const withIdempotency = async <T>(
   run: () => Promise<T>
 ): Promise<T> => {
   const normalizedKey = assertOperationKey(operationKey);
+  // Durable activities use provider-step receipts and fresh resource-state checks.
+  // Legacy whole-call in_progress markers cannot recover after process death, and
+  // cached partial results prevent corrected desired-state operations from resuming.
+  // Shared resource locks remain active inside run(); this context is worker-only.
+  if (isDurablePublishingOperation()) return run();
   const claim = await claimOperation(normalizedKey);
 
   if (claim.status === 'completed') {

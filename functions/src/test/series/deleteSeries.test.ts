@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Tests for deleteSeries Firebase function
  */
@@ -65,7 +66,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     });
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -104,7 +105,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     await seedLocalSeriesMembership(firestoreId, [item1.id, item2.id]);
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -149,7 +150,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     networkFailureInjector.registerFailure(`patchMediaItem:${item2.id}`, () => true);
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -182,7 +183,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     });
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -222,7 +223,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     });
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -241,7 +242,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     await seedLocalSeriesMembership(firestoreId, ['orphan-sermon-1']);
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -263,7 +264,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     await seedLocalSeriesMembership(firestoreId, ['local-sermon-1', 'local-sermon-2']);
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -290,7 +291,7 @@ describe('deleteSeries - Safe unlink then delete workflow', () => {
     await seedLocalSeriesMembership(firestoreId, sermonIds);
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -332,7 +333,7 @@ describe('deleteSeries - Authentication and validation', () => {
     });
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'viewer' } },
+      auth: testCallableAuth('viewer'),
       data: { firestoreId },
     };
 
@@ -341,7 +342,7 @@ describe('deleteSeries - Authentication and validation', () => {
 
   it('should reject requests without firestoreId', async () => {
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId: '' },
     };
 
@@ -350,7 +351,7 @@ describe('deleteSeries - Authentication and validation', () => {
 
   it('should treat missing firestore series as already deleted', async () => {
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId: 'missing-series-id' },
     };
 
@@ -384,7 +385,7 @@ describe('deleteSeries - Error handling', () => {
     networkFailureInjector.registerFailure(`deleteSeries:${subsplashSeries.id}`, () => true);
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: { firestoreId },
     };
 
@@ -413,14 +414,14 @@ describe('deleteSeries - Locking and Idempotency', () => {
     const deleteSpy = jest.spyOn(seriesHelpers, 'deleteSubsplashSeries');
 
     const requestA: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId,
         operationKey: 'delete-op-concurrent-1a',
       } as DeleteSeriesInputType,
     };
     const requestB: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId,
         operationKey: 'delete-op-concurrent-1b',
@@ -448,7 +449,7 @@ describe('deleteSeries - Locking and Idempotency', () => {
     await claimOperation('delete-op-busy-1');
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId,
         operationKey: 'delete-op-busy-1',
@@ -476,7 +477,7 @@ describe('deleteSeries - Locking and Idempotency', () => {
     const deleteSpy = jest.spyOn(seriesHelpers, 'deleteSubsplashSeries');
 
     const request: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId,
         operationKey: 'delete-op-replay-1',
@@ -505,7 +506,7 @@ describe('deleteSeries - Locking and Idempotency', () => {
     });
 
     const firstRequest: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId,
         operationKey: 'delete-op-fail-1',
@@ -517,7 +518,7 @@ describe('deleteSeries - Locking and Idempotency', () => {
     });
 
     const secondRequest: TestRequest<DeleteSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId,
         operationKey: 'delete-op-fail-2',

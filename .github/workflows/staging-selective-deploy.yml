@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       force_full_redeploy:
-        description: "Deploy all staging targets regardless of changed files"
+        description: 'Deploy all staging targets regardless of changed files'
         required: false
         default: false
         type: boolean
@@ -194,7 +194,7 @@ jobs:
             deploy_functions_integrations=true
           else
             # Configuration and deployment tooling can change any backend target.
-            if contains_path '^(firebase\.json|\.firebaserc|\.github/workflows/(main|staging)-selective-deploy\.yml|scripts/(firebase-deploy-with-quota-retry\.sh|materialize-catalog-for-firebase\.mjs|write-sentry-build-info\.mjs|create-kit-deploy-config\.mjs))$|^\.github/actions/setup-backend-deploy/'; then
+            if contains_path '^(firebase\.json|\.firebaserc|\.github/workflows/(main|staging)-selective-deploy\.yml|scripts/(temporal-deploy-guard\.mjs|temporal-function-env\.mjs|firebase-deploy-with-quota-retry\.sh|materialize-catalog-for-firebase\.mjs|write-sentry-build-info\.mjs|create-kit-deploy-config\.mjs))$|^\.github/actions/setup-backend-deploy/'; then
               deploy_function_kits=true
               deploy_firestore=true
               deploy_database=true
@@ -217,7 +217,7 @@ jobs:
               deploy_storage=true
             fi
 
-            if contains_path '^(apps/web/|packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc)'; then
+            if contains_path '^(apps/web/|packages/contracts/|packages/shared/|packages/orchestration/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json|\.npmrc)'; then
               deploy_web_app=true
             fi
 
@@ -248,7 +248,7 @@ jobs:
               deploy_functions_integrations=true
             fi
 
-            if contains_path '^(packages/contracts/|packages/shared/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
+            if contains_path '^(packages/contracts/|packages/shared/|packages/orchestration/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|turbo\.json)'; then
               deploy_functions_core=true
               deploy_functions_media=true
               deploy_functions_image=true
@@ -378,7 +378,7 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_STAGING || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Deploy Firestore rules and indexes
-        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" -- pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only firestore:rules,firestore:indexes --non-interactive
 
   deploy-database:
     runs-on: ubuntu-latest
@@ -395,7 +395,7 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_STAGING || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Deploy Realtime Database rules
-        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database:rtdb --non-interactive
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" -- pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only database:rtdb --non-interactive
 
   deploy-storage:
     runs-on: ubuntu-latest
@@ -412,10 +412,10 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL_STAGING || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Deploy Storage rules
-        run: pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage --non-interactive
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" -- pnpm exec firebase deploy --project "$FIREBASE_PROJECT" --only storage --non-interactive
 
       - name: Apply Storage bucket CORS
-        run: gcloud storage buckets update "gs://$STORAGE_BUCKET" --cors-file=config/storage-cors/staging.json
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" -- gcloud storage buckets update "gs://$STORAGE_BUCKET" --cors-file=config/storage-cors/staging.json
 
   deploy-functions:
     runs-on: ubuntu-latest
@@ -437,27 +437,31 @@ jobs:
 
       - name: Deploy functions:core
         if: needs.detect-changes.outputs.deploy_functions_core == 'true'
-        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:core --non-interactive
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" --materialize-function-env -- ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:core --non-interactive
 
       - name: Remove retired media function
         if: needs.detect-changes.outputs.deploy_functions_media == 'true'
         run: |
-          pnpm exec firebase functions:delete addintrooutrotaskhandler \
-            --project "$FIREBASE_PROJECT" \
-            --region us-central1 \
-            --force >/dev/null 2>&1 || true
+          node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" -- bash -c '
+            set -euo pipefail
+            gcloud functions list --project "$FIREBASE_PROJECT" --regions=us-central1 --format="value(name)" > /tmp/reviewed-function-names.txt
+            if rg -Fxq "projects/$FIREBASE_PROJECT/locations/us-central1/functions/addintrooutrotaskhandler" /tmp/reviewed-function-names.txt; then
+              pnpm exec firebase functions:delete addintrooutrotaskhandler \
+                --project "$FIREBASE_PROJECT" --region us-central1 --force
+            fi
+          '
 
       - name: Deploy functions:media
         if: needs.detect-changes.outputs.deploy_functions_media == 'true'
-        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:media --non-interactive --force
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" --materialize-function-env -- ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:media --non-interactive --force
 
       - name: Deploy functions:image
         if: needs.detect-changes.outputs.deploy_functions_image == 'true'
-        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:image --non-interactive
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" --materialize-function-env -- ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:image --non-interactive
 
       - name: Deploy functions:integrations
         if: needs.detect-changes.outputs.deploy_functions_integrations == 'true'
-        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:integrations --non-interactive
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" --materialize-function-env -- ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.legacy.json --only functions:integrations --non-interactive
 
   deploy-function-kits:
     runs-on: ubuntu-latest
@@ -481,7 +485,7 @@ jobs:
         run: node scripts/create-kit-deploy-config.mjs --install --without-search
 
       - name: Deploy function kits
-        run: ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.kits.json --only functions --non-interactive --force
+        run: node scripts/temporal-deploy-guard.mjs --project "$FIREBASE_PROJECT" --materialize-function-env -- ./scripts/firebase-deploy-with-quota-retry.sh deploy --project "$FIREBASE_PROJECT" --config firebase.kits.json --only functions --non-interactive --force
 
   track-functions-release:
     runs-on: ubuntu-latest

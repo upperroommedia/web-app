@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getSeriesDetails, patchMediaItemSeries } from '../../helpers/seriesHelpers';
+import { getSeriesDetails, patchMediaItemSeries, patchSeriesMetadata } from '../../helpers/seriesHelpers';
 import { createAxiosConfig } from '../../subsplashUtils';
 
 jest.mock('../../subsplashUtils', () => ({
@@ -20,7 +20,7 @@ const mockCreateAxiosConfig = createAxiosConfig as jest.MockedFunction<typeof cr
 describe('seriesHelpers patchMediaItemSeries request shape', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAxios.mockResolvedValue({ data: { id: 'media-item-1' } } as never);
+    mockAxios.mockResolvedValue({ status: 200, data: { id: 'media-item-1' } } as never);
   });
 
   it('includes app_key when assigning a media item to a series', async () => {
@@ -67,6 +67,7 @@ describe('seriesHelpers patchMediaItemSeries request shape', () => {
         },
       } as never)
       .mockResolvedValueOnce({
+        status: 200,
         data: {
           id: 'media-item-1',
           position: 3,
@@ -76,6 +77,7 @@ describe('seriesHelpers patchMediaItemSeries request shape', () => {
         },
       } as never)
       .mockResolvedValueOnce({
+        status: 200,
         data: {
           id: 'series-1',
           title: 'Series 1',
@@ -113,4 +115,18 @@ describe('seriesHelpers patchMediaItemSeries request shape', () => {
     });
     expect(mockAxios).toHaveBeenCalledTimes(4);
   });
+});
+
+
+it.each([202, undefined])('rejects an unverified media PATCH HTTP %p before accepting its body', async (status) => {
+  jest.clearAllMocks();
+  mockAxios.mockResolvedValue({ status, data: { id: 'media', _embedded: { 'media-series': { id: 'series' } } } } as never);
+  await expect(patchMediaItemSeries('media', 'series', 'token')).rejects.toThrow('PROVIDER_MUTATION_COMPLETION_UNCONFIRMED');
+  expect(mockAxios).toHaveBeenCalledTimes(1);
+});
+it.each([202, undefined])('rejects an unverified series metadata PATCH HTTP %p before accepting its body', async (status) => {
+  jest.clearAllMocks();
+  mockAxios.mockResolvedValue({ status, data: { id: 'series', title: 'Title' } } as never);
+  await expect(patchSeriesMetadata('series', { title: 'Title' }, 'token')).rejects.toThrow('PROVIDER_MUTATION_COMPLETION_UNCONFIRMED');
+  expect(mockAxios).toHaveBeenCalledTimes(1);
 });

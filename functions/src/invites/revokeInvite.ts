@@ -1,3 +1,5 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
+import { isDomainTemporalEnabled } from '../temporal/ownership';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import handleError from '../handleError';
@@ -18,7 +20,8 @@ const isAdmin = (request: CallableRequest<unknown>): boolean =>
   request.auth?.token.role === 'admin' && typeof request.auth.uid === 'string';
 
 export const revokeInviteHandler = async (
-  request: CallableRequest<RevokeInviteInputType>
+  request: CallableRequest<RevokeInviteInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<RevokeInviteOutputType> => {
   try {
     if (!isAdmin(request)) {
@@ -60,17 +63,42 @@ export const revokeInviteHandler = async (
     const revokedByEmail =
       typeof request.auth?.token.email === 'string' ? normalizeInviteEmail(request.auth.token.email) : null;
 
-    await inviteRef.update({
-      revokedAtMs,
-      revokedByUid: request.auth?.uid,
-      revokedByEmail,
+    const transactionResult = await firebaseAdmin.firestore().runTransaction(async (transaction) => {
+      const control = await import('../temporal/releaseControl');
+      if (isDomainTemporalEnabled('accounts'))
+        await control.assertAdmissionReleaseInTransaction(transaction, firebaseAdmin.firestore(), 'invite.create');
+      else
+        await control.assertLegacyAdmissionInTransaction(transaction, firebaseAdmin.firestore(), 'accounts', {
+          continuation: Boolean(lease),
+        });
+      const freshSnapshot = await transaction.get(inviteRef);
+      if (!freshSnapshot.exists) return { error: 'Invite not found.' };
+      const fresh = freshSnapshot.data() as InviteDocument & {
+        temporalJobId?: string;
+        temporalClaimsAppliedJobId?: string;
+      };
+      if (fresh.claimStatus === InviteClaimStatus.COMPLETE) return { error: 'Claimed invites cannot be revoked.' };
+      if (fresh.claimStatus === InviteClaimStatus.ROLE_PENDING || fresh.claimStatus === InviteClaimStatus.ROLE_FAILED) {
+        if (fresh.temporalClaimsAppliedJobId)
+          return { error: 'The invited role has already been applied. Change the user role instead.' };
+        const job = fresh.temporalJobId
+          ? await transaction.get(firebaseAdmin.firestore().collection('durableJobs').doc(fresh.temporalJobId))
+          : undefined;
+        if (!job || !['cancelled', 'failed', 'superseded'].includes(job.get('state')))
+          return { error: 'Invite claim is in progress. Wait for it to complete before changing access.' };
+      }
+      if (typeof fresh.revokedAtMs === 'number') return { revokedAtMs: fresh.revokedAtMs };
+      await lease?.markEffectsStarted();
+      transaction.update(inviteRef, { revokedAtMs, revokedByUid: request.auth?.uid, revokedByEmail });
+      return { revokedAtMs };
     });
+    if ('error' in transactionResult) return { status: 'error', error: transactionResult.error! };
 
     return {
       status: 'success',
       data: {
         inviteId,
-        revokedAtMs,
+        revokedAtMs: transactionResult.revokedAtMs,
         lifecycleStatus: InviteLifecycleStatus.REVOKED,
       },
     };
@@ -88,6 +116,18 @@ export const revokeInviteHandler = async (
   }
 };
 
-const revokeinvite = onCall(revokeInviteHandler);
+export const revokeInviteSource = async (
+  request: CallableRequest<RevokeInviteInputType>
+): Promise<RevokeInviteOutputType> => {
+  if (isDomainTemporalEnabled('accounts') || !request.auth?.uid || request.auth.token.role !== 'admin')
+    return revokeInviteHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth.uid,
+    'invite.revoke',
+    (lease) => revokeInviteHandler(request, lease)
+  );
+};
+const revokeinvite = onCall(revokeInviteSource);
 
 export default revokeinvite;

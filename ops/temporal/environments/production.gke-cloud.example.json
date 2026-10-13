@@ -1,0 +1,82 @@
+{
+  "environment": "production",
+  "context": "REQUIRED_GKE_PRODUCTION_CONTEXT",
+  "clusterUid": "REQUIRED_KUBE_SYSTEM_UID",
+  "namespace": "temporal-production",
+  "temporalNamespace": "urm-app.qwejt",
+  "firebaseProjectId": "urm-app",
+  "applicationEgressCidrs": [],
+  "retention": "30d",
+  "workerImage": "REQUIRED_REGISTRY_IMAGE@sha256:DIGEST",
+  "workerBuildId": "REQUIRED_GIT_COMMIT",
+  "workerDeploymentName": "urm-worker-production",
+  "workerReplicas": 2,
+  "workerRoles": ["orchestration", "controls", "media", "email", "images", "search"],
+  "workerPort": 8080,
+  "media": {
+    "concurrency": 2,
+    "sourceLimitGiB": 20,
+    "outputLimitGiB": 20,
+    "workspaceGiB": 64,
+    "headroomGiB": 16,
+    "scratchStorage": "160Gi",
+    "storageClass": "REQUIRED_QUOTA_ENFORCED_MEDIA_CSI_CLASS",
+    "retainedVersions": 2,
+    "storageBudget": "960Gi"
+  },
+  "kubernetesApiEndpoints": [
+    {
+      "cidr": "REQUIRED_PRIVATE_KUBERNETES_SERVICE_IP/32",
+      "port": 443
+    },
+    {
+      "cidr": "REQUIRED_PRIVATE_API_NODE_OR_VIP_IP/32",
+      "port": 443
+    }
+  ],
+  "workerIdentityNodeNames": ["REQUIRED_NODE_1", "REQUIRED_NODE_2", "REQUIRED_NODE_3"],
+  "emailEgress": {
+    "schemaVersion": 1,
+    "provider": "smtp",
+    "hostname": "REQUIRED_SMTP_HOSTNAME",
+    "port": 465,
+    "tls": "implicit",
+    "addresses": ["REQUIRED_REVIEWED_SMTP_IP"]
+  },
+  "imagePullSecrets": ["REQUIRED_REGISTRY_PULL_SECRET"],
+  "connectionMode": "temporal-cloud",
+  "cloudAccountId": "qwejt",
+  "cloudProvider": "gcp",
+  "cloudRegion": "us-central1",
+  "cloudAddress": "urm-app.qwejt.tmprl.cloud:7233",
+  "cloudEvidence": "REQUIRED_PRIVATE_CLOUD_CONNECTION_AND_RECOVERY_PROOF",
+  "cloudReplicaRegions": ["us-east4"],
+  "workerHosting": "gke",
+  "gke": {
+    "clusterName": "urm-temporal-production",
+    "location": "us-central1",
+    "workloadPool": "urm-app.svc.id.goog",
+    "dataplane": "ADVANCED_DATAPATH",
+    "firebaseAuthentication": "workload-identity",
+    "nodePoolName": "temporal-workers",
+    "nodeServiceAccount": "temporal-nodes@urm-app.iam.gserviceaccount.com",
+    "operatorServiceAccount": "temporal-operator@urm-app.iam.gserviceaccount.com",
+    "secretManagerRotationInterval": "120s",
+    "minNodes": 3,
+    "maxNodes": 6,
+    "nodeLocations": ["us-central1-a", "us-central1-b", "us-central1-c"],
+    "workerServiceAccounts": {
+      "orchestration": "temporal-orchestration@urm-app.iam.gserviceaccount.com",
+      "controls": "temporal-controls@urm-app.iam.gserviceaccount.com",
+      "media": "temporal-media@urm-app.iam.gserviceaccount.com",
+      "email": "temporal-email@urm-app.iam.gserviceaccount.com",
+      "images": "temporal-images@urm-app.iam.gserviceaccount.com",
+      "search": "temporal-search@urm-app.iam.gserviceaccount.com"
+    }
+  },
+  "firebaseResources": {
+    "storageBucket": "urm-app.appspot.com",
+    "imagesBucket": "urm-app-images",
+    "databaseUrl": "https://urm-app-default-rtdb.firebaseio.com/"
+  }
+}

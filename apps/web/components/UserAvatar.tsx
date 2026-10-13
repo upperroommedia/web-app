@@ -31,11 +31,7 @@ function useCurrentBreakpoint(): Breakpoint {
 }
 
 // Resolves MUI responsive values like {xs: 20, sm: 40} to a single number
-function resolveResponsiveValue(
-  value: unknown,
-  currentBreakpoint: Breakpoint,
-  defaultValue: number = 40
-): number {
+function resolveResponsiveValue(value: unknown, currentBreakpoint: Breakpoint, defaultValue: number = 40): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
     const parsed = parseFloat(value);
@@ -87,8 +83,7 @@ export default function UserAvatar({ user, children, sx, loading, fallbackLabel,
     .join('');
   const sxObj = sx as Record<string, unknown> | undefined;
   const size =
-    resolveResponsiveValue(sxObj?.width, currentBreakpoint) ||
-    resolveResponsiveValue(sxObj?.height, currentBreakpoint);
+    resolveResponsiveValue(sxObj?.width, currentBreakpoint) || resolveResponsiveValue(sxObj?.height, currentBreakpoint);
   const fontSize = Math.min(16, size * 0.4); // Scale font dynamically
   if (loading && !displayName) {
     return (
@@ -122,7 +117,7 @@ export default function UserAvatar({ user, children, sx, loading, fallbackLabel,
   }
   return (
     <Avatar sx={{ ...sx, bgcolor: 'white' }} {...props}>
-      <Image src={'/user.png'} alt={`Default User Image`} fill sizes="40px"></Image>
+      <Image src={'/user.png'} alt={`Default User Image`} unoptimized fill sizes="40px"></Image>
       {children}
     </Avatar>
   );

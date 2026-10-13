@@ -6,10 +6,20 @@ import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
 import Typography from '@mui/material/Typography';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { Dispatch, FunctionComponent, memo, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Dispatch,
+  FunctionComponent,
+  memo,
+  SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import styles from '../styles/AudioTrimmer.module.css';
 import YouTubeTrimmerControls from './YouTubeTrimmerControls';
-import { AudioSource } from '../pages/api/uploadFile';
+import { AudioSource } from '../utils/uploadFile';
 import { UploaderFieldError } from '../context/types';
 import { getErrorMessage, showError } from './uploaderComponents/utils';
 import useDebounce from '@/hooks/useDebounce';
@@ -146,9 +156,10 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
         handleDurationChange(snapshot.duration);
       }
 
-      const nextBufferedEnd = snapshot.bufferedEnd === 0 && snapshot.ready && snapshot.duration > 0
-        ? snapshot.duration
-        : snapshot.bufferedEnd;
+      const nextBufferedEnd =
+        snapshot.bufferedEnd === 0 && snapshot.ready && snapshot.duration > 0
+          ? snapshot.duration
+          : snapshot.bufferedEnd;
       setBufferedEnd(nextBufferedEnd);
 
       setPlayheadTime((prev) => (Math.abs(prev - snapshot.currentTime) > 0.05 ? snapshot.currentTime : prev));
@@ -200,14 +211,7 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
         adapterRef.current?.pause();
       }
     };
-  }, [
-    handleDurationChange,
-    setAudioSource,
-    setAudioSourceError,
-    setBufferedEnd,
-    setStoreIsLoading,
-    setStoreIsReady,
-  ]);
+  }, [handleDurationChange, setAudioSource, setAudioSourceError, setBufferedEnd, setStoreIsLoading, setStoreIsReady]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -294,16 +298,7 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
       setStoreIsReady(false);
       setStoreIsLoading(shouldLoad);
     }
-  }, [
-    debouncedInput,
-    reset,
-    setAudioSource,
-    setBufferedEnd,
-    setStoreIsLoading,
-    setStoreIsReady,
-    shouldLoad,
-    videoId,
-  ]);
+  }, [debouncedInput, reset, setAudioSource, setBufferedEnd, setStoreIsLoading, setStoreIsReady, shouldLoad, videoId]);
 
   // Load/cue video when valid and allowed to load.
   useEffect(() => {
@@ -567,11 +562,7 @@ const YouTubeTrimmer: FunctionComponent<YouTubeTrimmerProps> = ({
             }}
           />
 
-          <Box
-            className={styles.gestureLayer}
-            role="presentation"
-            onPointerUp={handlePlayerGesturePointerUp}
-          />
+          <Box className={styles.gestureLayer} role="presentation" onPointerUp={handlePlayerGesturePointerUp} />
 
           <Box className={styles.controlsRoot}>
             <Box className={styles.controlsSliderGroup}>

@@ -8,16 +8,17 @@ import '@vidstack/react/player/styles/default/theme.css';
 import Box from '@mui/material/Box';
 import React, { useEffect, useMemo } from 'react';
 import { AudioPlayerProvider } from '../context/audio/audioPlayerContext';
-import dynamic from 'next/dynamic';
 import { ThemeProvider as NextThemesProvider, useTheme } from 'next-themes';
 import { darkTheme, lightTheme } from '../styles/theme';
+import { appInter } from '../styles/fonts';
 import { AlgoliaSearchProvider } from '../context/search/AlgoliaSearchContext';
 import { installConsoleErrorCapture } from '../utils/reportHandledError';
+import { useHydratedTheme } from '../hooks/useHydratedTheme';
+import { browserAlgoliaAppId } from '../utils/algolia/browserSearch';
 
-// Dynamic import for MediaPlayerComponent to reduce initial bundle size
-const MediaPlayerComponent = dynamic(() => import('../components/MediaPlayerComponent'), {
-  ssr: false,
-});
+// The SSR-safe player context must preserve page children in initial HTML.
+// Its visible controls/provider remain lazy inside MediaPlayerComponent.
+import MediaPlayerComponent from '../components/MediaPlayerComponent';
 
 type ComponentWithPageLayout = AppProps & {
   Component: AppProps['Component'] & {
@@ -29,10 +30,12 @@ type ComponentWithPageLayout = AppProps & {
 function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'router'>) {
   const { resolvedTheme } = useTheme();
 
-  // Select theme based on next-themes
+  const displayTheme = useHydratedTheme(resolvedTheme);
+
+  // Apply the preferred theme after hydration without withholding page content.
   const muiTheme = useMemo(() => {
-    return resolvedTheme === 'light' ? lightTheme : darkTheme;
-  }, [resolvedTheme]);
+    return displayTheme === 'light' ? lightTheme : darkTheme;
+  }, [displayTheme]);
 
   return (
     <MuiThemeProvider theme={muiTheme}>
@@ -64,7 +67,7 @@ function AppContent({ Component, pageProps }: Omit<ComponentWithPageLayout, 'rou
 }
 
 function MyApp({ Component, pageProps }: ComponentWithPageLayout) {
-  const algoliaAppId = process.env.NEXT_PUBLIC_ALGOLIA_APP_ID;
+  const algoliaAppId = browserAlgoliaAppId;
 
   useEffect(() => {
     installConsoleErrorCapture();
@@ -91,13 +94,13 @@ Upper Room Media is a ministry of the Coptic Orthodox Church that brings to you 
           </>
         )}
       </Head>
+      <style jsx global>{`
+        :root {
+          --font-inter: ${appInter.style.fontFamily};
+        }
+      `}</style>
       <UserProvider>
-        <NextThemesProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
+        <NextThemesProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <AlgoliaSearchProvider>
             <AppContent Component={Component} pageProps={pageProps} />
           </AlgoliaSearchProvider>

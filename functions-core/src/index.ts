@@ -134,3 +134,8 @@ exports.getseriesremotestate = getseriesremotestate;
 exports.updateseriesmetadata = updateseriesmetadata;
 exports.reorderlistitems = reorderlistitems;
 exports.resolvelistpublisheddrift = resolvelistpublisheddrift;
+
+// Trusted durable admission is the only browser-to-Temporal boundary.
+export { submitDurableJob, commandDurableJob, getDurableJobReceipt } from '../../functions/src/temporal/admission';
+export { imageAcknowledgementCreated } from '../../functions/src/temporal/images/acknowledgementTrigger';
+export { providerAcknowledgementCreated } from '../../functions/src/temporal/publishing/orphanReviewTrigger';

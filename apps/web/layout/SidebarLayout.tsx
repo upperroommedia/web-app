@@ -25,6 +25,7 @@ import Avatar from '@mui/material/Avatar';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme as useMuiTheme, alpha } from '@mui/material/styles';
 import Tooltip from '@mui/material/Tooltip';
+import Badge from '@mui/material/Badge';
 import { useTheme } from 'next-themes';
 
 // Icons
@@ -40,9 +41,12 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
+import HistoryIcon from '@mui/icons-material/History';
 
 import useAuth from '../context/user/UserContext';
 import UserAvatar from '../components/UserAvatar';
+import { useVisibleJobs } from '../hooks/useDurableJobs';
+import { useHydratedTheme } from '../hooks/useHydratedTheme';
 
 const DRAWER_WIDTH = 260;
 
@@ -54,6 +58,7 @@ interface NavItem {
 
 // Navigation items for publishers/uploaders
 const publisherNavItems: NavItem[] = [
+  { label: 'Activity', path: '/admin/activity', icon: <HistoryIcon /> },
   { label: 'Sermons', path: '/admin/sermons', icon: <MicIcon /> },
   { label: 'Series', path: '/admin/series', icon: <CollectionsIcon /> },
 ];
@@ -99,12 +104,16 @@ const MainContentSlot = memo(function MainContentSlot({
 const SidebarLayout = ({ children }: SidebarLayoutProps) => {
   const muiTheme = useMuiTheme();
   const { theme: currentTheme, resolvedTheme, setTheme } = useTheme();
+  const displayTheme = useHydratedTheme(resolvedTheme);
   const router = useRouter();
   const { user, logoutUser } = useAuth();
   const sidebarCollapsed = useMediaQuery(muiTheme.breakpoints.down('lg'));
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = user?.isAdmin() ?? false;
+  const activity = useVisibleJobs(true);
+  const activeCount =
+    activity.stale || activity.error ? undefined : activity.jobs.length >= 100 ? '100+' : activity.jobs.length;
 
   const formattedRole = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase() : 'User';
 
@@ -201,7 +210,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
               position: 'relative',
             }}
           >
-            <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="32px" />
+            <Image unoptimized src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="32px" />
           </Avatar>
           <Box>
             <Typography
@@ -242,15 +251,24 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
             onClick={() => sidebarCollapsed && setMobileOpen(false)}
             sx={{
               background: isActivePath('/')
-                ? `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(muiTheme.palette.primary.light, 0.15)} 100%)`
-                : `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.1)} 0%, ${alpha(muiTheme.palette.primary.light, 0.05)} 100%)`,
+                ? `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(
+                    muiTheme.palette.primary.light,
+                    0.15
+                  )} 100%)`
+                : `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.1)} 0%, ${alpha(
+                    muiTheme.palette.primary.light,
+                    0.05
+                  )} 100%)`,
               border: '1px solid',
               borderColor: isActivePath('/') ? 'primary.main' : alpha(muiTheme.palette.primary.main, 0.2),
               borderRadius: 1.5,
               mx: 0.5,
               py: 0.75,
               '&:hover': {
-                background: `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(muiTheme.palette.primary.light, 0.15)} 100%)`,
+                background: `linear-gradient(135deg, ${alpha(muiTheme.palette.primary.main, 0.2)} 0%, ${alpha(
+                  muiTheme.palette.primary.light,
+                  0.15
+                )} 100%)`,
                 borderColor: 'primary.main',
               },
               '&.Mui-selected': {
@@ -297,7 +315,20 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
 
       {/* Publisher Nav Items (Sermons, Series) */}
       <List sx={{ py: 0, px: 0.5 }} dense>
-        {publisherNavItems.map(renderNavItem)}
+        {publisherNavItems.map((item) =>
+          renderNavItem(
+            item.path === '/admin/activity'
+              ? {
+                  ...item,
+                  icon: (
+                    <Badge badgeContent={activeCount} color="primary">
+                      <HistoryIcon />
+                    </Badge>
+                  ),
+                }
+              : item
+          )
+        )}
       </List>
 
       {/* Admin Only Section */}
@@ -344,7 +375,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
           <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
             Theme
           </Typography>
-          <Tooltip title={(resolvedTheme ?? currentTheme) === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+          <Tooltip title={displayTheme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
             <IconButton
               onClick={toggleTheme}
               size="small"
@@ -359,7 +390,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
                 },
               }}
             >
-              {(resolvedTheme ?? currentTheme) === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+              {displayTheme === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
         </Box>
@@ -443,7 +474,11 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
             >
               <MenuIcon />
             </IconButton>
-            <Link href="/admin/sermons" passHref style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', flex: 1 }}>
+            <Link
+              href="/admin/sermons"
+              passHref
+              style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', flex: 1 }}
+            >
               <Avatar
                 variant="square"
                 sx={{
@@ -453,7 +488,7 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
                   position: 'relative',
                 }}
               >
-                <Image src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="32px" />
+                <Image unoptimized src="/URM_icon.png" alt="Upper Room Media Logo" fill sizes="32px" />
               </Avatar>
               <Typography
                 variant="h6"
@@ -469,9 +504,9 @@ const SidebarLayout = ({ children }: SidebarLayoutProps) => {
               </Typography>
             </Link>
             {/* Mobile Theme Toggle */}
-            <Tooltip title={(resolvedTheme ?? currentTheme) === 'dark' ? 'Light Mode' : 'Dark Mode'}>
+            <Tooltip title={displayTheme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
               <IconButton onClick={toggleTheme} size="small" sx={{ color: 'text.primary' }}>
-                {(resolvedTheme ?? currentTheme) === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+                {displayTheme === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
               </IconButton>
             </Tooltip>
             <UserAvatar user={user} sx={{ width: 32, height: 32 }} />

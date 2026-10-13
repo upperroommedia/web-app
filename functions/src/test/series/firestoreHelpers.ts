@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 /**
  * Helper functions for setting up Firestore Series documents in tests
  */
@@ -8,7 +9,6 @@ import { Series } from '@upperroom/shared/types/Series';
 
 const firestoreDB = firebaseAdmin.firestore();
 // Use FieldValue from the same firebaseAdmin instance to ensure proper serialization in tests
-const FieldValue = firebaseAdmin.firestore.FieldValue;
 
 export interface SeriesDocumentData {
   subsplashId: string;

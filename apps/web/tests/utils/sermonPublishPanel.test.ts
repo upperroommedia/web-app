@@ -1,45 +1,58 @@
-jest.mock('../../context/user/UserContext', () => ({
-  __esModule: true,
-  default: () => ({ user: null }),
-}));
+import { buildSermonPublishIntent, hasPublishIntentChanges } from '../../utils/sermonPublishIntent';
+import { emptySermonList } from '../../types/SermonList';
+import { uploadStatus } from '../../types/SermonTypes';
 
-import {
-  resolveSessionSubsplashMediaItemId,
-  resolveSessionSubsplashUploadGeneration,
-} from '../../components/SermonPublishPanel';
-
-describe('resolveSessionSubsplashMediaItemId', () => {
-  it('prefers the explicit media item id from the active publish action', () => {
-    expect(resolveSessionSubsplashMediaItemId('session-media', 'persisted-media', 'explicit-media')).toBe('explicit-media');
+const lists = [
+  {
+    ...emptySermonList,
+    id: 'published',
+    uploadStatus: { status: uploadStatus.UPLOADED as const, listItemId: 'remote' },
+  },
+  { ...emptySermonList, id: 'new' },
+];
+const input = {
+  lists,
+  selectedListIds: ['published', 'new'],
+  seriesId: 'series',
+  seriesSelected: true,
+  seriesPublished: false,
+  soundcloudSelected: true,
+  soundcloudPublished: false,
+};
+describe('durable publish selection', () => {
+  it('submits canonical additions without re-creating completed destinations', () => {
+    expect(buildSermonPublishIntent(input)).toEqual({
+      destinations: { listIds: ['new'], seriesId: 'series', soundcloud: true },
+      removals: { listIds: [], soundcloud: false },
+    });
   });
-
-  it('reuses the same-session media item id before Firestore refresh catches up', () => {
-    expect(resolveSessionSubsplashMediaItemId('session-media', undefined, undefined)).toBe('session-media');
+  it('preserves an explicit empty selection and requests removal of published destinations', () => {
+    const payload = buildSermonPublishIntent({
+      ...input,
+      selectedListIds: [],
+      seriesSelected: false,
+      seriesPublished: true,
+      soundcloudSelected: false,
+      soundcloudPublished: true,
+    });
+    expect(payload).toEqual({
+      destinations: { listIds: [], soundcloud: false },
+      removals: { listIds: ['published'], seriesId: 'series', soundcloud: true },
+    });
   });
-
-  it('falls back to the persisted sermon subsplash id when there is no session override', () => {
-    expect(resolveSessionSubsplashMediaItemId(undefined, 'persisted-media', undefined)).toBe('persisted-media');
+  it('ignores selected IDs no longer in canonical memberships', () => {
+    const payload = buildSermonPublishIntent({
+      ...input,
+      selectedListIds: ['removed', 'published'],
+      seriesPublished: true,
+      soundcloudPublished: true,
+    });
+    expect(hasPublishIntentChanges(payload)).toBe(false);
   });
-
-  it('does not fall back to a stale persisted sermon subsplash id after the session clears a deleted media item', () => {
-    expect(resolveSessionSubsplashMediaItemId(null, 'persisted-media', undefined)).toBeUndefined();
-  });
-
-  it('ignores empty ids from any source', () => {
-    expect(resolveSessionSubsplashMediaItemId('  ', ' persisted-media ', '')).toBe('persisted-media');
-  });
-});
-
-describe('resolveSessionSubsplashUploadGeneration', () => {
-  it('prefers the in-session override after a delete before Firestore refresh catches up', () => {
-    expect(resolveSessionSubsplashUploadGeneration(3, 2)).toBe(3);
-  });
-
-  it('falls back to the sermon generation when there is no session override', () => {
-    expect(resolveSessionSubsplashUploadGeneration(undefined, 4)).toBe(4);
-  });
-
-  it('defaults to zero when neither source exists', () => {
-    expect(resolveSessionSubsplashUploadGeneration(undefined, undefined)).toBe(0);
+  it('keeps additions and removals together in one durable request', () => {
+    const payload = buildSermonPublishIntent({ ...input, selectedListIds: ['new'], seriesPublished: true });
+    expect(payload.destinations.listIds).toEqual(['new']);
+    expect(payload.removals.listIds).toEqual(['published']);
+    expect(hasPublishIntentChanges(payload)).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 ARG NODE_VERSION=22
-ARG PNPM_VERSION=11.28.2
+ARG PNPM_VERSION=12.11.2
 ARG PLAYWRIGHT_VERSION=1.62.1
 ARG YT_DLP_VERSION=2026.07.04
 ARG BGUTIL_YTDLP_POT_PROVIDER_VERSION=1.3.1
@@ -12,16 +12,18 @@ WORKDIR /workspace
 RUN npm install -g pnpm@${PNPM_VERSION}
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY patches ./patches
 COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/shared/package.json packages/shared/package.json
 COPY apps/browser-fallback/package.json apps/browser-fallback/package.json
 
 RUN pnpm install --frozen-lockfile --filter @upperroom/browser-fallback... --ignore-scripts
-RUN rm -rf packages/contracts/node_modules
 
 COPY packages/contracts ./packages/contracts
+COPY packages/shared ./packages/shared
 COPY apps/browser-fallback ./apps/browser-fallback
 
-RUN pnpm --dir apps/browser-fallback build
+RUN pnpm --dir packages/shared build && pnpm --dir packages/contracts build && pnpm --dir apps/browser-fallback build
 
 FROM node:${NODE_VERSION}-bookworm-slim AS production
 ARG PNPM_VERSION

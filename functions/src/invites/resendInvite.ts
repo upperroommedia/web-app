@@ -1,3 +1,4 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { buildInviteClaimUrl, queueInviteEmail } from './inviteEmail';
@@ -25,7 +26,8 @@ const isAdmin = (request: CallableRequest<unknown>): boolean =>
 const MAIL_COLLECTION = 'mail';
 
 export const resendInviteHandler = async (
-  request: CallableRequest<ResendInviteInputType>
+  request: CallableRequest<ResendInviteInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<ResendInviteOutputType> => {
   try {
     if (!isAdmin(request)) {
@@ -85,6 +87,7 @@ export const resendInviteHandler = async (
       typeof request.auth?.token.email === 'string' ? normalizeInviteEmail(request.auth.token.email) : null;
     const inviteUrl = buildInviteClaimUrl(rawToken);
 
+    await lease?.markEffectsStarted();
     const newInviteRef = await invitesCollection.add({
       invitedEmail,
       invitedRole,
@@ -144,6 +147,18 @@ export const resendInviteHandler = async (
   }
 };
 
-const resendinvite = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, resendInviteHandler);
+export const resendInviteHandlerSource = async (
+  request: Parameters<typeof resendInviteHandler>[0]
+): Promise<ResendInviteOutputType> => {
+  if (!(request.auth?.uid && request.auth.token.role === 'admin')) return resendInviteHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth!.uid,
+    'invite.resend',
+    (lease) => resendInviteHandler(request, lease)
+  );
+};
+
+const resendinvite = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, resendInviteHandlerSource);
 
 export default resendinvite;

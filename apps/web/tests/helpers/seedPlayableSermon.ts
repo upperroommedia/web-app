@@ -12,7 +12,7 @@ function ensureFirestoreEmulator() {
   process.env.FIRESTORE_EMULATOR_HOST = emulatorHost;
 }
 
-function getAdminDb() {
+export function getAdminDb() {
   ensureFirestoreEmulator();
   if (!getApps().length) {
     initializeApp({
@@ -34,27 +34,30 @@ export async function seedPlayableSermon(): Promise<SeededPlayableSermon> {
   const now = Date.now();
   const title = `Playwright Seeded Sermon ${id.slice(-6)}`;
 
-  await db.collection('sermons').doc(id).set({
-    title,
-    subtitle: 'Seeded subtitle',
-    description: 'Seeded sermon for deterministic Playwright coverage.',
-    speakers: [{ name: 'Playwright Speaker' }],
-    topics: ['playwright'],
-    date: Timestamp.fromMillis(now),
-    sourceStartTime: 0,
-    durationSeconds: 180,
-    status: {
-      audioStatus: 'PROCESSED',
-      soundCloud: 'NOT_UPLOADED',
-      subsplash: 'NOT_UPLOADED',
-    },
-    images: [],
-    numberOfLists: 0,
-    numberOfListsUploadedTo: 0,
-    createdAtMillis: now,
-    editedAtMillis: now,
-    uploaderId: 'playwright-e2e',
-  });
+  await db
+    .collection('sermons')
+    .doc(id)
+    .set({
+      title,
+      subtitle: 'Seeded subtitle',
+      description: 'Seeded sermon for deterministic Playwright coverage.',
+      speakers: [{ id: 'playwright-speaker', name: 'Playwright Speaker' }],
+      topics: ['playwright'],
+      date: Timestamp.fromMillis(now),
+      sourceStartTime: 0,
+      durationSeconds: 180,
+      status: {
+        audioStatus: 'PROCESSED',
+        soundCloud: 'NOT_UPLOADED',
+        subsplash: 'NOT_UPLOADED',
+      },
+      images: [],
+      numberOfLists: 0,
+      numberOfListsUploadedTo: 0,
+      createdAtMillis: now,
+      editedAtMillis: now,
+      uploaderId: 'playwright-e2e',
+    });
 
   return {
     id,

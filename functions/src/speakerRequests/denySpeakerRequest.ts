@@ -1,3 +1,4 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { adminBaseUrlSecretsWithRuntimeAlerts } from '../notifications/notificationSecrets';
@@ -19,7 +20,8 @@ const isAdmin = (request: CallableRequest<unknown>): boolean =>
   request.auth?.token.role === 'admin' && typeof request.auth.uid === 'string';
 
 export const denySpeakerRequestHandler = async (
-  request: CallableRequest<DenySpeakerRequestInputType>
+  request: CallableRequest<DenySpeakerRequestInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<DenySpeakerRequestOutputType> => {
   if (!isAdmin(request)) {
     return { status: 'error', error: 'Not Authorized' };
@@ -59,6 +61,7 @@ export const denySpeakerRequestHandler = async (
         ? request.auth.token.email.trim().toLowerCase()
         : null;
 
+    await lease?.markEffectsStarted();
     const outcomeEmailResult = await queueSpeakerRequestOutcomeEmail({
       speakerRequestId,
       requesterEmail: speakerRequest.requesterEmail,
@@ -125,6 +128,18 @@ export const denySpeakerRequestHandler = async (
   }
 };
 
-const denyspeakerrequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, denySpeakerRequestHandler);
+export const denySpeakerRequestHandlerSource = async (
+  request: Parameters<typeof denySpeakerRequestHandler>[0]
+): Promise<DenySpeakerRequestOutputType> => {
+  if (!(request.auth?.uid && request.auth.token.role === 'admin')) return denySpeakerRequestHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth!.uid,
+    'speaker.deny',
+    (lease) => denySpeakerRequestHandler(request, lease)
+  );
+};
+
+const denyspeakerrequest = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, denySpeakerRequestHandlerSource);
 
 export default denyspeakerrequest;

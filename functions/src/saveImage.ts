@@ -2,8 +2,7 @@ import { logger } from 'firebase-functions/v2';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import axios, { AxiosRequestConfig } from 'axios';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
-import { unlink } from 'fs/promises';
-import fs, { existsSync, mkdirSync } from 'fs';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import handleError from './handleError';
@@ -13,21 +12,6 @@ export interface SaveImageInputType {
   url: string;
   name: string;
 }
-const tempFiles = new Set<string>();
-
-const createTempFile = (fileName: string) => {
-  try {
-    if (!existsSync(os.tmpdir())) {
-      mkdirSync(os.tmpdir());
-    }
-    const filePath = path.join(os.tmpdir(), fileName);
-    tempFiles.add(filePath);
-    return filePath;
-  } catch (err) {
-    throw new Error(`Error creating temp file: ${err}`);
-  }
-};
-
 const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) => {
   if (request.auth?.token.role !== 'admin') {
     return { status: 'Not Authorized' };
@@ -37,8 +21,11 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     url: request.data.url,
     method: 'GET',
     responseType: 'arraybuffer',
+    timeout: 30000,
+    maxContentLength: 25 * 1024 * 1024,
   };
   logger.log('Axios config', uploadConfig);
+  let temporaryDirectory: string | undefined;
   try {
     logger.log('uploadConfig', uploadConfig);
     const axiosResponse = await axios(uploadConfig);
@@ -49,9 +36,10 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     logger.log('blobType', blobType);
     const imageBlob = axiosResponse.data;
     logger.log(imageBlob);
-    const tempFilePath = createTempFile(request.data.name);
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'urm-save-image-'));
+    const tempFilePath = path.join(temporaryDirectory, 'source');
     logger.log(`Saving image to ${tempFilePath}`);
-    fs.writeFileSync(tempFilePath, Buffer.from(imageBlob));
+    await writeFile(tempFilePath, Buffer.from(imageBlob));
     // Upload your data
     // const bucket = storage().bucket();
     const destinationFilePath = `speaker-images/${request.data.name}`;
@@ -73,13 +61,7 @@ const saveImage = onCall(async (request: CallableRequest<SaveImageInputType>) =>
     });
     return 'Error saving image';
   } finally {
-    const promises: Promise<void>[] = [];
-    tempFiles.forEach((file) => {
-      logger.log('Deleting temp file', file);
-      promises.push(unlink(file));
-    });
-    await Promise.all(promises);
-    logger.log('Temp files deleted');
+    if (temporaryDirectory) await rm(temporaryDirectory, {recursive: true, force: true});
   }
 });
 

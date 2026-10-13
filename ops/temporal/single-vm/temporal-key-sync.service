@@ -1,0 +1,22 @@
+[Unit]
+Description=Synchronize scoped Temporal Cloud keys from this VM's Secret Manager project
+After=k3s.service network-online.target
+Requires=k3s.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/urm-temporal/identity.env
+Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ExecStart=/usr/local/bin/node /opt/urm-temporal/scripts/temporal-vm-secrets.mjs --project ${FIREBASE_PROJECT_ID} --namespace ${TEMPORAL_KUBERNETES_NAMESPACE} --instance-id ${GCE_INSTANCE_ID}
+RuntimeDirectory=urm-temporal-key-sync
+RuntimeDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/rancher/k3s/data
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=null
+StandardError=journal

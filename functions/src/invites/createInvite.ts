@@ -1,3 +1,4 @@
+import type { LegacyAdmissionLease } from '../temporal/legacyAdmissionLease';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { CallableRequest, onCall } from 'firebase-functions/v2/https';
 import { buildInviteClaimUrl, queueInviteEmail } from './inviteEmail';
@@ -19,7 +20,8 @@ import {
 type CreateInviteOutputType = { status: 'success'; data: CreateInviteResultData } | { status: 'error'; error: string };
 
 export const createInviteHandler = async (
-  request: CallableRequest<CreateInviteInputType>
+  request: CallableRequest<CreateInviteInputType>,
+  lease?: LegacyAdmissionLease
 ): Promise<CreateInviteOutputType> => {
   try {
     if (request.auth?.token.role !== 'admin' || !request.auth.uid) {
@@ -45,19 +47,22 @@ export const createInviteHandler = async (
         : null;
     const inviteUrl = buildInviteClaimUrl(rawToken);
 
-    const inviteRef = await firebaseAdmin.firestore().collection(ROLE_INVITES_COLLECTION).add({
-      invitedEmail: normalizedEmail,
-      invitedRole: normalizedRole,
-      tokenHash,
-      claimStatus: InviteClaimStatus.PENDING,
-      createdByUid: request.auth.uid,
-      createdByEmail,
-      createdAtMs,
-      expiresAtMs,
-      email: {
-        status: InviteEmailStatus.NOT_ATTEMPTED,
-      },
-    });
+    const inviteRef = await firebaseAdmin
+      .firestore()
+      .collection(ROLE_INVITES_COLLECTION)
+      .add({
+        invitedEmail: normalizedEmail,
+        invitedRole: normalizedRole,
+        tokenHash,
+        claimStatus: InviteClaimStatus.PENDING,
+        createdByUid: request.auth.uid,
+        createdByEmail,
+        createdAtMs,
+        expiresAtMs,
+        email: {
+          status: InviteEmailStatus.NOT_ATTEMPTED,
+        },
+      });
 
     const emailState = await queueInviteEmail({
       inviteId: inviteRef.id,
@@ -100,6 +105,18 @@ export const createInviteHandler = async (
   }
 };
 
-const createInvite = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, createInviteHandler);
+export const createInviteHandlerSource = async (
+  request: Parameters<typeof createInviteHandler>[0]
+): Promise<CreateInviteOutputType> => {
+  if (!(request.auth?.uid && request.auth.token.role === 'admin')) return createInviteHandler(request);
+  return (await import('../temporal/accounts/sourceAdmission')).withLegacyAccountSource(
+    firebaseAdmin.firestore(),
+    request.auth!.uid,
+    'invite.create',
+    (lease) => createInviteHandler(request, lease)
+  );
+};
+
+const createInvite = onCall({ secrets: adminBaseUrlSecretsWithRuntimeAlerts }, createInviteHandlerSource);
 
 export default createInvite;

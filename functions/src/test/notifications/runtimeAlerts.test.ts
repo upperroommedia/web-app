@@ -1,5 +1,7 @@
+import { testCallableAuth, type AuthData } from '../helpers/callableAuth';
 import axios from 'axios';
 import { withIdempotency } from '../../locks/withIdempotency';
+import { withSubsplashLocks } from '../../locks/withSubsplashLocks';
 import handleError from '../../handleError';
 import { emitOperationalAlert } from '../../notifications/emitOperationalAlert';
 import uploadToSubsplash from '../../uploadToSubsplash';
@@ -13,11 +15,13 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE } from '@upperroom/shared/shared/soundcloudAuth';
 
 const mockUploadTrack = jest.fn();
+const mockPrepareMultipartUpload = jest.fn();
+const mockRunWithSoundCloudAccessToken = jest.fn();
+const mockQueueAudioRequest = jest.fn();
 const mockUpdateTrack = jest.fn();
 const mockDeleteTrack = jest.fn();
 const mockSermonDocUpdate = jest.fn();
 const mockStorageFileExists = jest.fn();
-const mockTaskQueueEnqueue = jest.fn();
 
 jest.mock('../../locks/withIdempotency', () => ({
   withIdempotency: jest.fn(async (_operationKey: string, run: () => Promise<unknown>) => run()),
@@ -45,7 +49,9 @@ jest.mock('../../handleError', () => ({
   }),
 }));
 jest.mock('../../soundcloudClient', () => ({
+  getAuthenticatedSoundCloudAccountId: jest.fn().mockResolvedValue('soundcloud:users:123'),
   uploadTrack: (...args: unknown[]) => mockUploadTrack(...args),
+  prepareMultipartUpload: (...args: unknown[]) => mockPrepareMultipartUpload(...args),
   updateTrack: (...args: unknown[]) => mockUpdateTrack(...args),
   deleteTrack: (...args: unknown[]) => mockDeleteTrack(...args),
   isSoundCloudTrackNotFoundError: () => false,
@@ -56,20 +62,17 @@ jest.mock('../../soundcloudClient', () => ({
 jest.mock('../../soundcloudSecrets', () => ({
   getSoundCloudAccessToken: () => 'fake-soundcloud-token',
   refreshSoundCloudAccessToken: () => 'fake-soundcloud-token',
-  runWithSoundCloudAccessToken: (operation: (token: string) => unknown) => operation('fake-soundcloud-token'),
+  runWithSoundCloudAccessToken: (operation: (token: string) => unknown) => mockRunWithSoundCloudAccessToken(operation),
   soundcloudSecretsWithRuntimeAlerts: [],
   soundcloudOAuthSecrets: [],
 }));
-jest.mock('firebase-admin/functions', () => ({
-  getFunctions: () => ({
-    taskQueue: () => ({
-      enqueue: (...args: unknown[]) => mockTaskQueueEnqueue(...args),
-    }),
-  }),
+jest.mock('../../../../functions-media/src/processAudioQueueStore', () => ({
+  queueOrReplaceProcessAudioRequest: (...args: unknown[]) => mockQueueAudioRequest(...args),
 }));
 jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
   __esModule: true,
   default: {
+    app: () => jest.requireActual('firebase-admin/app').getApp(),
     storage: () => ({
       bucket: () => ({
         file: () => ({
@@ -80,18 +83,22 @@ jest.mock('@upperroom/shared/firebase/firebaseAdmin', () => ({
         }),
       }),
     }),
-    firestore: () => ({
-      collection: () => ({
-        doc: () => ({
-          update: (...args: unknown[]) => mockSermonDocUpdate(...args),
-        }),
-        withConverter: () => ({
-          doc: () => ({
+    firestore: () => {
+      const actual = jest.requireActual('firebase-admin/firestore').getFirestore();
+      return {
+        // Exercise real cutover leases while keeping the business projection
+        // update observed by this notification contract test.
+        doc: actual.doc.bind(actual),
+        runTransaction: actual.runTransaction.bind(actual),
+        collection: (collectionName: string) => collectionName === 'sermons' ? {
+          doc: (id: string) => ({
+            get: () => actual.collection('sermons').doc(id).get(),
             update: (...args: unknown[]) => mockSermonDocUpdate(...args),
           }),
-        }),
-      }),
-    }),
+          withConverter: () => ({ doc: () => ({ update: (...args: unknown[]) => mockSermonDocUpdate(...args) }) }),
+        } : actual.collection(collectionName),
+      };
+    },
     database: () => ({
       ref: () => ({
         set: jest.fn(),
@@ -161,7 +168,7 @@ const audioRuntimeAlertTargets: RuntimeAlertTarget[] = [
 const runtimeAlertTargets = [...publishRuntimeAlertTargets, ...audioRuntimeAlertTargets];
 
 type CallableRequestShape<T> = {
-  auth?: { token?: { role?: string } };
+  auth?: AuthData;
   data: T;
 };
 
@@ -189,10 +196,11 @@ const addIntroOutroTaskGeneratorHandler = addintrooutrotaskgenerator as unknown 
 
 const mockAxios = axios as jest.MockedFunction<typeof axios>;
 const mockWithIdempotency = withIdempotency as jest.MockedFunction<typeof withIdempotency>;
+const mockWithSubsplashLocks = withSubsplashLocks as jest.MockedFunction<typeof withSubsplashLocks>;
 const mockEmitOperationalAlert = emitOperationalAlert as jest.MockedFunction<typeof emitOperationalAlert>;
 const mockHandleError = handleError as jest.MockedFunction<typeof handleError>;
 
-const adminAuth = { token: { role: 'admin' } };
+const adminAuth = testCallableAuth('admin');
 
 const buildUploadToSubsplashPayload = () => ({
   operationKey: 'upload-op-1',
@@ -213,14 +221,29 @@ const buildAddIntroOutroPayload = () => ({
   id: 'sermon-audio-123',
   startTime: 0,
   duration: 180,
-  storageFilePath: 'raw-sermons/sermon-audio-123.mp3',
+  storageFilePath: 'sermons/sermon-audio-123',
   introUrl: 'https://example.com/intro.mp3',
   outroUrl: 'https://example.com/outro.mp3',
 });
 
 describe('runtime alert taxonomy contract', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+    mockWithIdempotency.mockReset();
+    mockWithSubsplashLocks.mockReset();
+    mockPrepareMultipartUpload.mockReset();
+    mockRunWithSoundCloudAccessToken.mockReset();
+    mockQueueAudioRequest.mockReset();
+    mockHandleError.mockReset();
+    mockHandleError.mockImplementation((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return new HttpsError('internal', `normalized:${message}`);
+    });
+    mockWithSubsplashLocks.mockImplementation(async (_keys, run) => run());
+    mockPrepareMultipartUpload.mockResolvedValue({ post: (token: string) => mockUploadTrack(token), dispose: jest.fn() });
+    mockRunWithSoundCloudAccessToken.mockImplementation(async (operation: (token: string) => unknown) => operation('fake-soundcloud-token'));
+    mockQueueAudioRequest.mockResolvedValue({ state: 'queued', sourceType: 'storage', requestVersion: 'test-request' });
+    await jest.requireActual('firebase-admin/firestore').getFirestore().collection('sermons').doc('sermon-audio-123').set({ uploaderId: adminAuth.uid });
     process.env.SUBSPLASH_EMAIL = 'test@example.com';
     process.env.SUBSPLASH_PASSWORD = 'test-password';
 
@@ -237,7 +260,6 @@ describe('runtime alert taxonomy contract', () => {
     mockDeleteTrack.mockResolvedValue(undefined);
     mockSermonDocUpdate.mockResolvedValue(undefined);
     mockStorageFileExists.mockResolvedValue([true]);
-    mockTaskQueueEnqueue.mockResolvedValue(undefined);
   });
 
   it('declares deterministic alert codes and context requirements for each targeted catch path', () => {
@@ -255,7 +277,7 @@ describe('runtime alert taxonomy contract', () => {
   });
 
   it('emits publish alert for uploadToSubsplash catch path with operation context', async () => {
-    mockWithIdempotency.mockRejectedValueOnce(new Error('subsplash upload failed'));
+    mockWithSubsplashLocks.mockRejectedValueOnce(new Error('subsplash upload failed'));
 
     await expect(
       uploadToSubsplashHandler({
@@ -263,6 +285,8 @@ describe('runtime alert taxonomy contract', () => {
         data: buildUploadToSubsplashPayload(),
       })
     ).rejects.toMatchObject({ code: 'internal', message: 'normalized:subsplash upload failed' });
+    expect(mockWithSubsplashLocks).toHaveBeenCalledTimes(1);
+    expect(mockAxios).not.toHaveBeenCalled();
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -328,7 +352,7 @@ describe('runtime alert taxonomy contract', () => {
   });
 
   it('emits publish alert for uploadToSoundCloud catch path with request context', async () => {
-    mockUploadTrack.mockRejectedValueOnce(new Error('soundcloud upload failed'));
+    mockPrepareMultipartUpload.mockRejectedValueOnce(new Error('soundcloud upload failed'));
 
     await expect(
       uploadToSoundCloudHandler({
@@ -342,6 +366,8 @@ describe('runtime alert taxonomy contract', () => {
         },
       })
     ).rejects.toMatchObject({ code: 'internal', message: 'normalized:soundcloud upload failed' });
+    expect(mockPrepareMultipartUpload).toHaveBeenCalledTimes(1);
+    expect(mockUploadTrack).not.toHaveBeenCalled();
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -402,7 +428,7 @@ describe('runtime alert taxonomy contract', () => {
   });
 
   it('emits reconnect alert when SoundCloud upload requires re-authorization', async () => {
-    mockUploadTrack.mockRejectedValueOnce(
+    mockRunWithSoundCloudAccessToken.mockRejectedValueOnce(
       new HttpsError('failed-precondition', 'SoundCloud authorization is missing or expired.', {
         code: SOUNDCLOUD_AUTH_RECONNECT_REQUIRED_CODE,
       })
@@ -423,6 +449,9 @@ describe('runtime alert taxonomy contract', () => {
       code: 'failed-precondition',
       message: 'SoundCloud authorization is missing or expired.',
     });
+    expect(mockRunWithSoundCloudAccessToken).toHaveBeenCalledTimes(1);
+    expect(mockPrepareMultipartUpload).not.toHaveBeenCalled();
+    expect(mockUploadTrack).not.toHaveBeenCalled();
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -437,7 +466,7 @@ describe('runtime alert taxonomy contract', () => {
   });
 
   it('does not dedupe repeated publish catch-path failures', async () => {
-    mockUploadTrack.mockRejectedValue(new Error('soundcloud upload repeated failure'));
+    mockPrepareMultipartUpload.mockRejectedValue(new Error('soundcloud upload repeated failure'));
 
     const failingRequest = {
       auth: adminAuth,
@@ -460,10 +489,12 @@ describe('runtime alert taxonomy contract', () => {
     });
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledTimes(2);
+    expect(mockPrepareMultipartUpload).toHaveBeenCalledTimes(2);
+    expect(mockUploadTrack).not.toHaveBeenCalled();
   });
 
   it('emits audio alert for addintrooutrotaskgenerator catch path with task input context', async () => {
-    mockTaskQueueEnqueue.mockRejectedValueOnce(new Error('task enqueue failed'));
+    mockQueueAudioRequest.mockRejectedValueOnce(new Error('task enqueue failed'));
 
     await expect(
       addIntroOutroTaskGeneratorHandler({
@@ -471,6 +502,7 @@ describe('runtime alert taxonomy contract', () => {
         data: buildAddIntroOutroPayload(),
       })
     ).rejects.toMatchObject({ code: 'internal' });
+    expect(mockQueueAudioRequest).toHaveBeenCalledTimes(1);
 
     expect(mockEmitOperationalAlert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -479,7 +511,7 @@ describe('runtime alert taxonomy contract', () => {
           functionName: 'addintrooutrotaskgenerator',
           sermonId: 'sermon-audio-123',
           audioSourceType: 'StorageFilePath',
-          audioSource: 'raw-sermons/sermon-audio-123.mp3',
+          audioSource: 'sermons/sermon-audio-123',
           taskRoute: 'processaudiofiletask',
         }),
       })

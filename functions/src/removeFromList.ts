@@ -1,31 +1,32 @@
+import {
+  markPublishingCritical,
+  getPublishingMutationOperation,
+  runPublishingProviderMutation,
+  isDurablePublishingOperation,
+} from './temporal/publishing/durableOperationContext';
+import { providerPayloadFingerprint } from './temporal/publishing/providerReceipts';
+import { assertSynchronousProviderMutationCompleted } from './temporal/publishing/providerMutationCompletion';
+import { createDurableWriteBatch, runDurableTransaction } from './temporal/publishing/durableOperationContext';
 import axios from 'axios';
 import { FieldValue } from 'firebase-admin/firestore';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import handleError from './handleError';
 import { authenticateSubsplash, createAxiosConfig } from './subsplashUtils';
 import { canUserRolePublish } from '@upperroom/shared/types/User';
-import { getFullListRows } from './helpers/addToListHelpers';
+import {
+  getFullListRows,
+  freezeListMutationProjection,
+  commitListMutationProjection,
+} from './helpers/addToListHelpers';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { withSubsplashLocks } from './locks/withSubsplashLocks';
 import { withIdempotency } from './locks/withIdempotency';
-import {
-  DEFAULT_LOCK_RETRY_AFTER_MS,
-  DEFAULT_LOCK_WAIT_TIMEOUT_MS,
-  SUBSPLASH_LOCK_BUSY_CODE,
-} from './locks/lockTypes';
+import { DEFAULT_LOCK_RETRY_AFTER_MS, DEFAULT_LOCK_WAIT_TIMEOUT_MS, SUBSPLASH_LOCK_BUSY_CODE } from './locks/lockTypes';
 import { subsplashSecretsWithRuntimeAlerts } from './subsplashSecrets';
-import {
-  listDebugError,
-  listDebugLog,
-  listDebugWarn,
-  summarizeSubsplashRows,
-} from './helpers/listDebugLogger';
+import { listDebugError, listDebugLog, listDebugWarn, summarizeSubsplashRows } from './helpers/listDebugLogger';
 import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 import { SubsplashListRow } from './types/Subsplash';
-import {
-  getLogicalContentRows,
-  getRemoteRowResourceId,
-} from './helpers/remoteChainItems';
+import { getLogicalContentRows, getRemoteRowResourceId } from './helpers/remoteChainItems';
 import type { RemoteNodeRows } from './helpers/remoteChainItems';
 import { ensureCanPerformStrictPublishedMutation } from './helpers/publishedListDrift';
 
@@ -60,9 +61,7 @@ const getOperationKey = (operationKey?: string): string | undefined => {
   return normalizedKey ? normalizedKey : undefined;
 };
 
-const getErrorPayload = (
-  error: unknown
-): { error: string; errorCode?: string; errorDetails?: unknown } => {
+const getErrorPayload = (error: unknown): { error: string; errorCode?: string; errorDetails?: unknown } => {
   if (error && typeof error === 'object') {
     const maybeError = error as {
       message?: unknown;
@@ -106,7 +105,9 @@ const findItemPlacementInOverflowChain = async (
 ): Promise<{ listId: string; listItemId: string } | null> => {
   if (preloadedNodes && preloadedNodes.length > 0) {
     for (const node of preloadedNodes) {
-      const matchingRow = node.rows.find((row) => row.type === itemType && getRemoteRowResourceId(row) === itemId && row.id);
+      const matchingRow = node.rows.find(
+        (row) => row.type === itemType && getRemoteRowResourceId(row) === itemId && row.id
+      );
       if (matchingRow?.id) {
         return {
           listId: node.subsplashListId,
@@ -164,8 +165,7 @@ type OverflowChainNode = {
   remoteRows: SubsplashListRow[];
 };
 
-const cloneRow = (row: SubsplashListRow): SubsplashListRow =>
-  JSON.parse(JSON.stringify(row)) as SubsplashListRow;
+const cloneRow = (row: SubsplashListRow): SubsplashListRow => JSON.parse(JSON.stringify(row)) as SubsplashListRow;
 
 const cloneOverflowChainNodes = (nodes: OverflowChainNode[]): OverflowChainNode[] =>
   nodes.map((node) => ({
@@ -243,98 +243,90 @@ const updateRootProjectionAfterRemoval = async ({
     sermonIdByMediaItemId.set(subsplashId, doc.id);
   });
 
-  const batch = firestoreDB.batch();
   const resolvedRemovedSermonId = removedSermonId ?? sermonIdByMediaItemId.get(removedMediaItemId);
-  if (resolvedRemovedSermonId) {
-    listDebugLog('removeFromList.updateRootProjectionAfterRemoval.removedSermonResolved', {
-      rootFirestoreListId,
-      removedMediaItemId,
-      removedSermonId: resolvedRemovedSermonId,
-      resolutionMode: removedSermonId ? 'explicit-sermon-id' : 'projection-media-match',
-    });
-    const removedCanonicalRef = firestoreDB
-      .collection('sermons')
-      .doc(resolvedRemovedSermonId)
-      .collection('sermonLists')
-      .doc(rootFirestoreListId);
-    const removedCanonicalSnapshot = await removedCanonicalRef.get();
+  await runDurableTransaction(firestoreDB, async (batch) => {
+    if (resolvedRemovedSermonId) {
+      listDebugLog('removeFromList.updateRootProjectionAfterRemoval.removedSermonResolved', {
+        rootFirestoreListId,
+        removedMediaItemId,
+        removedSermonId: resolvedRemovedSermonId,
+        resolutionMode: removedSermonId ? 'explicit-sermon-id' : 'projection-media-match',
+      });
+      const removedCanonicalRef = firestoreDB
+        .collection('sermons')
+        .doc(resolvedRemovedSermonId)
+        .collection('sermonLists')
+        .doc(rootFirestoreListId);
+      const removedCanonicalSnapshot = await batch.get(removedCanonicalRef);
 
-    batch.update(
-      rootProjectionRef.doc(resolvedRemovedSermonId),
-      {
+      batch.update(rootProjectionRef.doc(resolvedRemovedSermonId), {
         uploadStatus: {
           status: uploadStatus.NOT_UPLOADED,
         },
         physicalPlacement: FieldValue.delete(),
-      }
-    );
-    if (removedCanonicalSnapshot.exists) {
-      batch.update(removedCanonicalRef, {
-        ...rootListData,
-        id: rootFirestoreListId,
-        uploadStatus: {
-          status: uploadStatus.NOT_UPLOADED,
-        },
-        publishGeneration: FieldValue.increment(1),
       });
-    } else {
-      batch.set(
-        removedCanonicalRef,
-        {
+      if (removedCanonicalSnapshot.exists) {
+        batch.update(removedCanonicalRef, {
           ...rootListData,
           id: rootFirestoreListId,
           uploadStatus: {
             status: uploadStatus.NOT_UPLOADED,
           },
-          publishGeneration: 1,
+          publishGeneration: (Number(removedCanonicalSnapshot.get('publishGeneration')) || 0) + 1,
+        });
+      } else {
+        batch.set(
+          removedCanonicalRef,
+          {
+            ...rootListData,
+            id: rootFirestoreListId,
+            uploadStatus: {
+              status: uploadStatus.NOT_UPLOADED,
+            },
+            publishGeneration: 1,
+          },
+          { merge: true }
+        );
+      }
+    } else {
+      listDebugWarn('removeFromList.updateRootProjectionAfterRemoval.missingRemovedSermonId', {
+        rootFirestoreListId,
+        removedMediaItemId,
+        knownProjectionMediaItemIds: [...sermonIdByMediaItemId.keys()],
+      });
+    }
+
+    placementsByMediaItemId.forEach((placement, mediaItemId) => {
+      const sermonId = sermonIdByMediaItemId.get(mediaItemId);
+      if (!sermonId) {
+        return;
+      }
+
+      batch.set(
+        rootProjectionRef.doc(sermonId),
+        {
+          uploadStatus: {
+            status: uploadStatus.UPLOADED,
+            listItemId: placement.listItemId,
+          },
+          physicalPlacement: placement,
         },
         { merge: true }
       );
-    }
-  } else {
-    listDebugWarn('removeFromList.updateRootProjectionAfterRemoval.missingRemovedSermonId', {
-      rootFirestoreListId,
-      removedMediaItemId,
-      knownProjectionMediaItemIds: [...sermonIdByMediaItemId.keys()],
+      batch.set(
+        firestoreDB.collection('sermons').doc(sermonId).collection('sermonLists').doc(rootFirestoreListId),
+        {
+          ...rootListData,
+          id: rootFirestoreListId,
+          uploadStatus: {
+            status: uploadStatus.UPLOADED,
+            ...(placement.listItemId ? { listItemId: placement.listItemId } : {}),
+          },
+        },
+        { merge: true }
+      );
     });
-  }
-
-  placementsByMediaItemId.forEach((placement, mediaItemId) => {
-    const sermonId = sermonIdByMediaItemId.get(mediaItemId);
-    if (!sermonId) {
-      return;
-    }
-
-    batch.set(
-      rootProjectionRef.doc(sermonId),
-      {
-        uploadStatus: {
-          status: uploadStatus.UPLOADED,
-          listItemId: placement.listItemId,
-        },
-        physicalPlacement: placement,
-      },
-      { merge: true }
-    );
-    batch.set(
-      firestoreDB
-        .collection('sermons')
-        .doc(sermonId)
-        .collection('sermonLists')
-        .doc(rootFirestoreListId),
-      {
-        ...rootListData,
-        id: rootFirestoreListId,
-        uploadStatus: {
-          status: uploadStatus.UPLOADED,
-          ...(placement.listItemId ? { listItemId: placement.listItemId } : {}),
-        },
-      },
-      { merge: true }
-    );
   });
-
-  await batch.commit();
 };
 
 const buildPlacementsByMediaItemId = (nodes: OverflowChainNode[]): Map<string, PublishedPlacement> => {
@@ -387,7 +379,7 @@ const syncOverflowChainMetadataWithoutRebalancing = async (
   const logicalCount = [...logicalCountsBySubsplashListId.values()].reduce((sum, count) => sum + count, 0);
   const hasOverflowPages = nodes.length > 1;
   const now = Date.now();
-  const batch = firestoreDB.batch();
+  const batch = createDurableWriteBatch(firestoreDB);
 
   nodes.forEach((node, index) => {
     batch.set(
@@ -433,7 +425,9 @@ export const rebalanceOverflowChainAfterRemoval = async ({
   maxListSize?: number;
   existingNodes?: OverflowChainNode[];
 }): Promise<void> => {
-  const nodes = existingNodes ? cloneOverflowChainNodes(existingNodes) : await loadOverflowChainNodes(rootSubsplashListId, token);
+  const nodes = existingNodes
+    ? cloneOverflowChainNodes(existingNodes)
+    : await loadOverflowChainNodes(rootSubsplashListId, token);
   if (nodes.length === 0) {
     return;
   }
@@ -509,7 +503,9 @@ export const removeFromList = async (
       itemTypes,
     });
 
-    const resolvedRootListIds = await Promise.all(listIds.map((listId) => resolveRootFirestoreListIdBySubsplashListId(listId)));
+    const resolvedRootListIds = await Promise.all(
+      listIds.map((listId) => resolveRootFirestoreListIdBySubsplashListId(listId))
+    );
     const removalsPerRootListId = resolvedRootListIds.reduce<Map<string, number>>((counts, rootFirestoreListId) => {
       if (!rootFirestoreListId) {
         return counts;
@@ -519,7 +515,10 @@ export const removeFromList = async (
       return counts;
     }, new Map());
     const rootListIdsByInputListId = new Map<string, string>();
-    const preflightStatesByRootListId = new Map<string, Awaited<ReturnType<typeof ensureCanPerformStrictPublishedMutation>>>();
+    const preflightStatesByRootListId = new Map<
+      string,
+      Awaited<ReturnType<typeof ensureCanPerformStrictPublishedMutation>>
+    >();
     const uniqueListIds = [...new Set(listIds)];
     for (const listId of uniqueListIds) {
       const rootFirestoreListId = await resolveRootFirestoreListIdBySubsplashListId(listId);
@@ -540,17 +539,18 @@ export const removeFromList = async (
       });
     }
 
-    const result = await Promise.allSettled(
-      listItemIds.map(async (listItemId, index) => {
+    const removeOne = async (listItemId: string, index: number) => {
       const listId = listIds[index];
       const itemId = itemIds[index];
       const itemType = itemTypes[index];
       const sermonId = sermonIds?.[index];
-      const rootFirestoreListId = rootListIdsByInputListId.get(listId) ?? await resolveRootFirestoreListIdBySubsplashListId(listId);
+      const rootFirestoreListId =
+        rootListIdsByInputListId.get(listId) ?? (await resolveRootFirestoreListIdBySubsplashListId(listId));
       const preflightState = rootFirestoreListId ? preflightStatesByRootListId.get(rootFirestoreListId) : undefined;
       const canReusePreloadedNodes =
         Boolean(rootFirestoreListId) && (removalsPerRootListId.get(rootFirestoreListId as string) ?? 0) === 1;
-      const preloadedNodes = preflightState && canReusePreloadedNodes ? toOverflowChainNodes(preflightState.remoteNodes) : undefined;
+      const preloadedNodes =
+        preflightState && canReusePreloadedNodes ? toOverflowChainNodes(preflightState.remoteNodes) : undefined;
       listDebugLog('removeFromList.item.start', {
         listId,
         listItemId,
@@ -558,7 +558,7 @@ export const removeFromList = async (
         itemType,
         sermonId,
       });
-      
+
       try {
         const resolvedPlacement = await findItemPlacementInOverflowChain(
           listId,
@@ -594,12 +594,51 @@ export const removeFromList = async (
           });
         }
 
+        const payload = { id: resolvedPlacement.listItemId, listId: resolvedPlacement.listId };
+        const step = `remove-list-row:${resolvedPlacement.listItemId}:${providerPayloadFingerprint(payload)}`;
+        const sourceRows = isDurablePublishingOperation()
+          ? preloadedNodes?.find((node) => node.subsplashListId === resolvedPlacement.listId)?.remoteRows ??
+            (await getFullListRows(resolvedPlacement.listId, token))
+          : [];
+        const remainingRows = sourceRows.filter((row) => row.id !== resolvedPlacement.listItemId);
+        const program = await freezeListMutationProjection({
+          listId: resolvedPlacement.listId,
+          rows: remainingRows,
+          method: 'DELETE',
+          step,
+          payload,
+          rowId: resolvedPlacement.listItemId,
+        });
+        await markPublishingCritical('PUBLISHING_DELETE_CRITICAL', {
+          provider: 'subsplash',
+          resourceType: 'list-row',
+          resourceId: resolvedPlacement.listItemId,
+          accountId: 'app:9XTSHD',
+          method: 'DELETE',
+        });
         const deleteConfig = createAxiosConfig(
           `https://core.subsplash.com/builder/v1/list-rows/${resolvedPlacement.listItemId}`,
           token,
           'DELETE'
         );
-        await axios(deleteConfig);
+        Object.assign(deleteConfig, { skipSubsplashEdgeRetry: true, maxRedirects: 0 });
+        await runPublishingProviderMutation({
+          operation: getPublishingMutationOperation() ?? 'legacy-list-mutation',
+          step,
+          target: {
+            provider: 'subsplash',
+            account: 'app:9XTSHD',
+            resourceType: 'list-row',
+            resourceId: resolvedPlacement.listItemId,
+          },
+          method: 'DELETE',
+          payload,
+          send: async () => {
+            assertSynchronousProviderMutationCompleted(await axios(deleteConfig));
+            return { completion: 'acknowledged', result: null };
+          },
+        });
+        await commitListMutationProjection(program, remainingRows, token);
         listDebugLog('removeFromList.item.deleteRemote.success', {
           listId,
           listItemId,
@@ -630,6 +669,7 @@ export const removeFromList = async (
           foundInOriginalList: resolvedPlacement.listId === listId,
         };
       } catch (error: unknown) {
+        if (isDurablePublishingOperation()) throw error;
         const axiosError = error as { response?: { status?: number }; status?: number };
         const errorStatus = (axiosError.response?.status ?? axiosError.status) as number | undefined;
         if (errorStatus === 404 || errorStatus === 400) {
@@ -659,21 +699,28 @@ export const removeFromList = async (
         });
         throw error;
       }
-      })
-    );
-  
+    };
+    const result = isDurablePublishingOperation()
+      ? await (async () => {
+          const outcomes: Array<PromiseFulfilledResult<Awaited<ReturnType<typeof removeOne>>>> = [];
+          for (let index = 0; index < listItemIds.length; index++)
+            outcomes.push({ status: 'fulfilled', value: await removeOne(listItemIds[index], index) });
+          return outcomes;
+        })()
+      : await Promise.allSettled(listItemIds.map(removeOne));
+
     listDebugLog('removeFromList.runRemoval.results', {
       result,
     });
     const returnResult = result.map((r, index): OutputTypes => {
       if (r.status === 'fulfilled') {
-      const status: status = 'success';
-      const result: OutputTypes = { listId: listIds[index], status, listItemId: r.value.listItemId };
-      // Include itemNotFound flag if the item wasn't found but was treated as success
-      if (r.value.itemNotFound) {
-        return { ...result, itemNotFound: true };
-      }
-      return result;
+        const status: status = 'success';
+        const result: OutputTypes = { listId: listIds[index], status, listItemId: r.value.listItemId };
+        // Include itemNotFound flag if the item wasn't found but was treated as success
+        if (r.value.itemNotFound) {
+          return { ...result, itemNotFound: true };
+        }
+        return result;
       }
 
       listDebugError('removeFromList.runRemoval.itemRejected', {
@@ -716,12 +763,14 @@ export const removeFromList = async (
         retry_after_ms: DEFAULT_LOCK_RETRY_AFTER_MS,
       };
 
-      return listIds.map((listId): OutputTypes => ({
-        listId,
-        status: 'error',
-        ...errorPayload,
-        errorDetails: busyDetails,
-      }));
+      return listIds.map(
+        (listId): OutputTypes => ({
+          listId,
+          status: 'error',
+          ...errorPayload,
+          errorDetails: busyDetails,
+        })
+      );
     }
     listDebugError('removeFromList.failed', {
       listIds,
@@ -731,62 +780,88 @@ export const removeFromList = async (
     throw error;
   }
 };
+export const removeFromListDomain = async (
+  request: Pick<CallableRequest<RemoveFromListInputType>, 'data' | 'auth'>
+): Promise<RemoveFromListOutputType> => {
+  listDebugLog('removeFromList.callable.start', {
+    uid: request.auth?.uid,
+    listIds: request.data?.listIds,
+    listItemIds: request.data?.listItemIds,
+    itemIds: request.data?.itemIds,
+    itemTypes: request.data?.itemTypes,
+    sermonIds: request.data?.sermonIds,
+    operationKey: request.data?.operationKey,
+  });
+
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
+  }
+  const data = request.data;
+  if (
+    !data.listItemIds ||
+    !data.listIds ||
+    !data.itemIds ||
+    !data.itemTypes ||
+    data.listIds.length !== data.listItemIds.length ||
+    data.listIds.length !== data.itemIds.length ||
+    data.listIds.length !== data.itemTypes.length ||
+    (data.sermonIds !== undefined && data.listIds.length !== data.sermonIds.length)
+  ) {
+    throw new HttpsError(
+      'invalid-argument',
+      'The function must be called with non-empty equal sized listIds, listItemIds, itemIds, itemTypes, and optional sermonIds arrays.'
+    );
+  }
+  try {
+    const output = await removeFromList(
+      data.listIds,
+      data.listItemIds,
+      data.itemIds,
+      data.itemTypes,
+      data.sermonIds,
+      data.operationKey
+    );
+    listDebugLog('removeFromList.callable.success', {
+      listIds: data.listIds,
+      itemIds: data.itemIds,
+      sermonIds: data.sermonIds,
+      output,
+    });
+    return output;
+  } catch (err) {
+    listDebugError('removeFromList.callable.failed', {
+      listIds: data.listIds,
+      itemIds: data.itemIds,
+      error: err,
+    });
+    throw handleError(err);
+  }
+};
+
 const removeFromListCallable = onCall(
   { secrets: subsplashSecretsWithRuntimeAlerts, memory: '512MiB' },
-  async (request: CallableRequest<RemoveFromListInputType>): Promise<RemoveFromListOutputType> => {
-    listDebugLog('removeFromList.callable.start', {
-      uid: request.auth?.uid,
-      listIds: request.data?.listIds,
-      listItemIds: request.data?.listItemIds,
-      itemIds: request.data?.itemIds,
-      itemTypes: request.data?.itemTypes,
-      sermonIds: request.data?.sermonIds,
-      operationKey: request.data?.operationKey,
-    });
-
+  async (request: Parameters<typeof removeFromListDomain>[0]) => {
     if (!canUserRolePublish(request.auth?.token.role)) {
       throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
     }
-    const data = request.data;
-    if (
-      !data.listItemIds ||
-      !data.listIds ||
-      !data.itemIds ||
-      !data.itemTypes ||
-      data.listIds.length !== data.listItemIds.length ||
-      data.listIds.length !== data.itemIds.length ||
-      data.listIds.length !== data.itemTypes.length ||
-      (data.sermonIds !== undefined && data.listIds.length !== data.sermonIds.length)
-    ) {
-      throw new HttpsError(
-        'invalid-argument',
-        'The function must be called with non-empty equal sized listIds, listItemIds, itemIds, itemTypes, and optional sermonIds arrays.'
-      );
+    if (!request.auth?.uid) {
+      const { HttpsError } = await import('firebase-functions/v2/https');
+      throw new HttpsError('unauthenticated', 'Authentication is required.');
     }
-    try {
-      const output = await removeFromList(
-        data.listIds,
-        data.listItemIds,
-        data.itemIds,
-        data.itemTypes,
-        data.sermonIds,
-        data.operationKey
-      );
-      listDebugLog('removeFromList.callable.success', {
-        listIds: data.listIds,
-        itemIds: data.itemIds,
-        sermonIds: data.sermonIds,
-        output,
-      });
-      return output;
-    } catch (err) {
-      listDebugError('removeFromList.callable.failed', {
-        listIds: data.listIds,
-        itemIds: data.itemIds,
-        error: err,
-      });
-      throw handleError(err);
-    }
+    const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+    return withLegacyAdmissionLease(
+      firebaseAdmin.firestore(),
+      {
+        domain: 'publishing',
+        actorUid: request.auth.uid,
+        operation: 'removeFromList',
+        projectId: firebaseAdmin.app().options.projectId || '',
+      },
+      async (lease) => {
+        await lease.markEffectsStarted();
+        return removeFromListDomain(request);
+      }
+    );
   }
 );
 

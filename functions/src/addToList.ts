@@ -1,3 +1,8 @@
+import {
+  createDurableWriteBatch,
+  commitDurableProjection,
+  isDurablePublishingOperation,
+} from './temporal/publishing/durableOperationContext';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { isAxiosError } from 'axios';
 import { SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE } from '@upperroom/contracts/addToList';
@@ -116,22 +121,15 @@ const normalizeString = (value: unknown): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
-const assertSubsplashMediaItemExists = async (
-  mediaItem: SubsplashMediaItem,
-  token: string
-): Promise<void> => {
+const assertSubsplashMediaItemExists = async (mediaItem: SubsplashMediaItem, token: string): Promise<void> => {
   try {
     await getSubsplashMediaItemDetails(mediaItem.id, token);
   } catch (error) {
     if (isAxiosError(error) && error.response?.status === 404) {
-      throw new HttpsError(
-        'not-found',
-        `Media item ${mediaItem.id} no longer exists in Subsplash.`,
-        {
-          code: SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE,
-          media_item_id: mediaItem.id,
-        }
-      );
+      throw new HttpsError('not-found', `Media item ${mediaItem.id} no longer exists in Subsplash.`, {
+        code: SUBSPLASH_MEDIA_ITEM_NOT_FOUND_CODE,
+        media_item_id: mediaItem.id,
+      });
     }
 
     throw error;
@@ -329,12 +327,11 @@ const collectListResolutionDiagnostics = async ({
 
   return {
     finalRowsSnapshot: finalRowsSnapshot ? summarizeSubsplashRows(finalRowsSnapshot) : undefined,
-    latestRows: latestRowsResult.ok && latestRows
-      ? summarizeSubsplashRows(latestRows)
-      : { error: latestRowsResult.ok ? 'No latest rows returned' : latestRowsResult.error },
-    mediaItemDiagnostics: mediaItemDiagnostics.found
-      ? mediaItemDiagnostics.summary
-      : mediaItemDiagnostics,
+    latestRows:
+      latestRowsResult.ok && latestRows
+        ? summarizeSubsplashRows(latestRows)
+        : { error: latestRowsResult.ok ? 'No latest rows returned' : latestRowsResult.error },
+    mediaItemDiagnostics: mediaItemDiagnostics.found ? mediaItemDiagnostics.summary : mediaItemDiagnostics,
     rowsReferencingMediaItem: summarizeSubsplashRows(rowsReferencingMediaItem),
     rowsReferencingCurrentSeries: summarizeSubsplashRows(rowsReferencingCurrentSeries),
   };
@@ -505,16 +502,16 @@ const computeOverflowContentKeepLimit = ({
   const adjustedKeepLimit = Math.min(logicalKeepLimit, physicalKeepLimit);
 
   if (adjustedKeepLimit < logicalKeepLimit) {
-      listDebugLog('addToList.computeOverflowContentKeepLimit.reserveSafetySlot', {
-        listId,
-        maxListSize,
-        physicalMaxRowCount,
-        updatedRowCount,
-        phantomRowCount,
-        effectiveVisibleCapacity,
-        logicalKeepLimit,
-        adjustedKeepLimit,
-      });
+    listDebugLog('addToList.computeOverflowContentKeepLimit.reserveSafetySlot', {
+      listId,
+      maxListSize,
+      physicalMaxRowCount,
+      updatedRowCount,
+      phantomRowCount,
+      effectiveVisibleCapacity,
+      logicalKeepLimit,
+      adjustedKeepLimit,
+    });
   }
 
   return adjustedKeepLimit;
@@ -557,12 +554,8 @@ const isSubsplashMaxRowExceededError = (error: unknown): boolean => {
     };
   };
 
-  const upstreamDetails = maybeError.details?.upstream?.errors;
-  if (Array.isArray(upstreamDetails)) {
-    return upstreamDetails.some((entry) => typeof entry?.detail === 'string' && entry.detail.includes('max number of list rows exceeded'));
-  }
-
-  return typeof maybeError.message === 'string' && maybeError.message.includes('max number of list rows exceeded');
+  return getSubsplashUpstreamErrorDetails(error).some(detail => detail.includes('max number of list rows exceeded')) ||
+    typeof maybeError.message === 'string' && maybeError.message.includes('max number of list rows exceeded');
 };
 
 const getSubsplashUpstreamErrorDetails = (error: unknown): string[] => {
@@ -570,31 +563,35 @@ const getSubsplashUpstreamErrorDetails = (error: unknown): string[] => {
     return [];
   }
 
-  const details = (error as {
-    details?: {
-      upstream?: {
-        errors?: Array<{ detail?: unknown }>;
+  const normalized = (
+    error as {
+      details?: {
+        upstream?: {
+          errors?: Array<{ detail?: unknown }>;
+        };
       };
-    };
-  }).details?.upstream?.errors;
+    }
+  ).details?.upstream?.errors;
+  // The durable transport retains the original Axios error so its factual
+  // completion evidence is not lost. Legacy preflight recovery must recognize
+  // the original validation response as well as the normalized callable shape.
+  const original = isAxiosError(error) && error.response?.status === 400
+    ? error.response.data?.errors
+    : undefined;
+  const details = Array.isArray(normalized) ? normalized : original;
 
   if (!Array.isArray(details)) {
     return [];
   }
 
-  return details
-    .map((entry) => entry?.detail)
-    .filter((detail): detail is string => typeof detail === 'string');
+  return details.map((entry) => entry?.detail).filter((detail): detail is string => typeof detail === 'string');
 };
 
 const isSubsplashUnknownListRowError = (error: unknown): boolean =>
   getSubsplashUpstreamErrorDetails(error).some((detail) => /unknown list row:/i.test(detail));
 
 class StaleListSnapshotPreflightError extends Error {
-  constructor(
-    readonly listId: string,
-    readonly originalError: unknown
-  ) {
+  constructor(readonly listId: string, readonly originalError: unknown) {
     super(`Subsplash returned a stale row snapshot for list ${listId}.`);
     this.name = 'StaleListSnapshotPreflightError';
   }
@@ -638,7 +635,11 @@ const applyRemoveOldestMutation = async ({
     try {
       finalRowsSnapshot = await patchListRows(listId, finalRows, token);
     } catch (error) {
-      if (!isSubsplashMaxRowExceededError(error) || visibleRowsAfterDelete.length >= finalRows.length) {
+      if (
+        isDurablePublishingOperation() ||
+        !isSubsplashMaxRowExceededError(error) ||
+        visibleRowsAfterDelete.length >= finalRows.length
+      ) {
         throw error;
       }
 
@@ -676,6 +677,7 @@ const applyRemoveOldestMutation = async ({
     });
     return finalRowsSnapshot;
   } catch (error) {
+    if (isDurablePublishingOperation()) throw error;
     listDebugWarn('addToList.processListStep.removeOldest.patchFailed', {
       listId,
       itemId,
@@ -723,7 +725,6 @@ const applyRemoveOldestMutation = async ({
       'Failed to update latest list in Subsplash and automatic rollback status could not be determined.'
     );
   }
-
 };
 
 const ensureImmediateOverflowListLinkInFirestore = async ({
@@ -771,7 +772,7 @@ const ensureImmediateOverflowListLinkInFirestore = async ({
   const overflowListDetails = await getListDetails(overflowListId, token);
   const now = Date.now();
 
-  const batch = firestoreDB.batch();
+  const batch = createDurableWriteBatch(firestoreDB);
   batch.set(
     listDoc.ref,
     {
@@ -826,7 +827,8 @@ async function processListStepOnce(
   maxListSize: number = getConfiguredMaxListSize(),
   shouldSyncChainMetadata: boolean = true,
   shouldSearchLogicalChain: boolean = true,
-  shouldEnforceStrictPreflight: boolean = true
+  shouldEnforceStrictPreflight: boolean = true,
+  operationKey?: string
 ): Promise<{
   listItemId?: string;
   actualPlacement?: {
@@ -918,7 +920,15 @@ async function processListStepOnce(
     maxListSize,
   });
 
-  await listDoc.ref.update({ updatedAtMillis: Timestamp.now().toMillis() });
+  const touchedAt = Timestamp.now().toMillis();
+  await commitDurableProjection(
+    async (tx) => {
+      tx.update(listDoc.ref, { updatedAtMillis: touchedAt });
+    },
+    async () => {
+      await listDoc.ref.update({ updatedAtMillis: touchedAt });
+    }
+  );
 
   if (existingPlacementsInChain.length > 0) {
     const currentPlacements = currentRows
@@ -927,8 +937,7 @@ async function processListStepOnce(
     const currentPlacementToKeep = currentPlacements[0]?.listItemId;
     const placementsToDelete = existingPlacementsInChain.filter(
       (placement) =>
-        placement.listId !== listId ||
-        (currentPlacementToKeep ? placement.listItemId !== currentPlacementToKeep : true)
+        placement.listId !== listId || (currentPlacementToKeep ? placement.listItemId !== currentPlacementToKeep : true)
     );
 
     if (placementsToDelete.length > 0) {
@@ -976,10 +985,7 @@ async function processListStepOnce(
     const existingRow = currentRows.find((row) => getRemoteRowResourceId(row) === itemToAdd.id);
     existingListItemId = existingRow?.id;
     if (existingRow && existingRow.position !== 1) {
-      const reorderedRows = [
-        existingRow,
-        ...currentRows.filter((row) => row.id !== existingRow.id),
-      ];
+      const reorderedRows = [existingRow, ...currentRows.filter((row) => row.id !== existingRow.id)];
       finalRowsSnapshot = await patchListRows(listId, reorderedRows, token);
       currentRows = finalRowsSnapshot;
       listDebugLog('addToList.processListStep.promoteExistingRow.complete', {
@@ -1166,7 +1172,12 @@ async function processListStepOnce(
               subtitle,
             });
 
-            const newList = await createNewList(newTitle, token, subtitle);
+            const newList = await createNewList(
+              newTitle,
+              token,
+              subtitle,
+              operationKey ? `${operationKey}:overflow:${rootListId}:${newOverflowDepth}` : undefined
+            );
             nextListId = newList.id;
             listDebugLog('addToList.processListStep.createOverflowList.success', {
               listId,
@@ -1212,9 +1223,10 @@ async function processListStepOnce(
                     })
                   : buildRootListMetadata({
                       rootListId: listDoc.id,
-                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
+                      logicalCount:
+                        typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
                       hasOverflowPages: true,
-                  })),
+                    })),
               },
               merge: true,
             };
@@ -1249,7 +1261,8 @@ async function processListStepOnce(
                     })
                   : buildRootListMetadata({
                       rootListId: listDoc.id,
-                      logicalCount: typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
+                      logicalCount:
+                        typeof listData.logicalCount === 'number' ? listData.logicalCount : enforcedRowCount,
                       hasOverflowPages: true,
                     })),
               },
@@ -1296,7 +1309,9 @@ async function processListStepOnce(
             if (!resourceId || !canReconstructRemoteRow(itemRow)) {
               throw new HttpsError(
                 'failed-precondition',
-                `Row ${itemRow.id ?? 'unknown'} cannot be shifted into overflow because Subsplash did not provide a reconstructible resource identity.`
+                `Row ${
+                  itemRow.id ?? 'unknown'
+                } cannot be shifted into overflow because Subsplash did not provide a reconstructible resource identity.`
               );
             }
 
@@ -1328,15 +1343,23 @@ async function processListStepOnce(
           ? { ...existingLinkRow, position: itemsToKeep.length + 1 }
           : createListRow({ id: nextListId!, type: 'list' }, listId, itemsToKeep.length + 1);
         const finalRows = [...itemsToKeep, linkRow];
-        finalRowsSnapshot = await patchListRows(listId, finalRows, token);
+        finalRowsSnapshot = await patchListRows(listId, finalRows, token, {
+          continuationListId: nextListId,
+          pendingCanonicalWrites: pendingOverflowDoc
+            ? [
+                { path: pendingOverflowDoc.ref.path, data: pendingOverflowDoc.data, merge: pendingOverflowDoc.merge },
+                { path: listDoc.ref.path, data: pendingOverflowDoc.parentUpdate, merge: true },
+              ]
+            : undefined,
+        });
         listDebugLog('addToList.processListStep.overflowPatch.complete', {
           listId,
           nextListId,
           finalRowsSnapshot: summarizeSubsplashRows(finalRowsSnapshot),
         });
 
-        if (pendingOverflowDoc) {
-          const batch = firestoreDB.batch();
+        if (pendingOverflowDoc && !isDurablePublishingOperation()) {
+          const batch = createDurableWriteBatch(firestoreDB);
           if (pendingOverflowDoc.merge) {
             batch.set(pendingOverflowDoc.ref, pendingOverflowDoc.data, { merge: true });
           } else {
@@ -1387,7 +1410,11 @@ async function processListStepOnce(
       try {
         finalRowsSnapshot = await patchListRows(listId, updatedRows, token);
       } catch (error) {
-        if (!isSubsplashMaxRowExceededError(error) || listData.overflowBehavior !== OverflowBehavior.REMOVEOLDEST) {
+        if (
+          isDurablePublishingOperation() ||
+          !isSubsplashMaxRowExceededError(error) ||
+          listData.overflowBehavior !== OverflowBehavior.REMOVEOLDEST
+        ) {
           throw error;
         }
 
@@ -1456,7 +1483,7 @@ async function processListStepOnce(
       targetListId,
       item,
     });
-    await processListStep(targetListId, item, token, maxListSize, false, false, false);
+    await processListStep(targetListId, item, token, maxListSize, false, false, false, operationKey);
   }
 
   let actualPlacement:
@@ -1520,7 +1547,8 @@ async function processListStep(
   maxListSize: number = getConfiguredMaxListSize(),
   shouldSyncChainMetadata: boolean = true,
   shouldSearchLogicalChain: boolean = true,
-  shouldEnforceStrictPreflight: boolean = true
+  shouldEnforceStrictPreflight: boolean = true,
+  operationKey?: string
 ): ReturnType<typeof processListStepOnce> {
   const maxAttempts = 2;
 
@@ -1533,9 +1561,11 @@ async function processListStep(
         maxListSize,
         shouldSyncChainMetadata,
         shouldSearchLogicalChain,
-        shouldEnforceStrictPreflight
+        shouldEnforceStrictPreflight,
+        operationKey
       );
     } catch (error) {
+      if (isDurablePublishingOperation()) throw error;
       if (!(error instanceof StaleListSnapshotPreflightError)) {
         throw error;
       }
@@ -1565,19 +1595,16 @@ const recoverPlacementAfterFailedMutation = async ({
   rootListId: string;
   mediaItem: SubsplashMediaItem;
   token: string;
-}): Promise<
-  | {
-      listItemId?: string;
-      actualPlacement?: {
-        firestoreListId: string;
-        subsplashListId: string;
-        overflowDepth: number;
-        position: number;
-        listItemId?: string;
-      };
-    }
-  | null
-> => {
+}): Promise<{
+  listItemId?: string;
+  actualPlacement?: {
+    firestoreListId: string;
+    subsplashListId: string;
+    overflowDepth: number;
+    position: number;
+    listItemId?: string;
+  };
+} | null> => {
   const resolvedPlacement = await findItemInOverflowChainWithRetry(rootListId, mediaItem, token);
   if (!resolvedPlacement) {
     return null;
@@ -1630,54 +1657,61 @@ const recoverPlacementAfterFailedMutation = async ({
   };
 };
 
-const addToList = onCall(
-  { secrets: subsplashSecretsWithRuntimeAlerts, memory: '512MiB' },
-  async (request: CallableRequest<AddtoListInputType>): Promise<AddToListOutputType> => {
-    listDebugLog('addToList.callable.start', {
-      uid: request.auth?.uid,
-      destinationListIds: request.data?.destinationListIds,
-      mediaItem: request.data?.mediaItem,
-      maxListSize: request.data?.maxListSize,
-      operationKey: request.data?.operationKey,
+export const addToListDomain = async (
+  request: Pick<CallableRequest<AddtoListInputType>, 'data' | 'auth'>
+): Promise<AddToListOutputType> => {
+  listDebugLog('addToList.callable.start', {
+    uid: request.auth?.uid,
+    destinationListIds: request.data?.destinationListIds,
+    mediaItem: request.data?.mediaItem,
+    maxListSize: request.data?.maxListSize,
+    operationKey: request.data?.operationKey,
+  });
+
+  if (!canUserRolePublish(request.auth?.token.role)) {
+    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
+  }
+
+  const { destinationListIds, mediaItem } = request.data;
+  if (!destinationListIds || !mediaItem) {
+    throw new HttpsError('invalid-argument', 'Missing destinationListIds or mediaItem.');
+  }
+
+  const operationKey = getOperationKey(request.data.operationKey);
+
+  try {
+    const token = await authenticateSubsplash();
+    const maxListSize = request.data.maxListSize ?? getConfiguredMaxListSize();
+    const lockKeys = [...destinationListIds.map((listId) => `list:${listId}`), `media-item:${mediaItem.id}`];
+    listDebugLog('addToList.callable.authenticated', {
+      destinationListIds,
+      mediaItemId: mediaItem.id,
+      maxListSize,
+      lockKeys,
+      operationKey,
     });
 
-    if (!canUserRolePublish(request.auth?.token.role)) {
-      throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-    }
-
-    const { destinationListIds, mediaItem } = request.data;
-    if (!destinationListIds || !mediaItem) {
-      throw new HttpsError('invalid-argument', 'Missing destinationListIds or mediaItem.');
-    }
-
-    const operationKey = getOperationKey(request.data.operationKey);
-
-    try {
-      const token = await authenticateSubsplash();
-      const maxListSize = request.data.maxListSize ?? getConfiguredMaxListSize();
-      const lockKeys = [...destinationListIds.map((listId) => `list:${listId}`), `media-item:${mediaItem.id}`];
-      listDebugLog('addToList.callable.authenticated', {
+    const runMutation = async (): Promise<AddToListOutputType> => {
+      listDebugLog('addToList.callable.runMutation.start', {
         destinationListIds,
         mediaItemId: mediaItem.id,
-        maxListSize,
-        lockKeys,
-        operationKey,
       });
+      await assertSubsplashMediaItemExists(mediaItem, token);
+      const mutateOne = async (listId: string) => {
+        const result = await processListStep(listId, mediaItem, token, maxListSize, true, true, true, operationKey);
+        return { listId, listItemId: result.listItemId, actualPlacement: result.actualPlacement };
+      };
+      const results = isDurablePublishingOperation()
+        ? await (async () => {
+            const outcomes: Array<PromiseFulfilledResult<Awaited<ReturnType<typeof mutateOne>>>> = [];
+            for (const listId of destinationListIds)
+              outcomes.push({ status: 'fulfilled', value: await mutateOne(listId) });
+            return outcomes;
+          })()
+        : await Promise.allSettled(destinationListIds.map(mutateOne));
 
-      const runMutation = async (): Promise<AddToListOutputType> => {
-        listDebugLog('addToList.callable.runMutation.start', {
-          destinationListIds,
-          mediaItemId: mediaItem.id,
-        });
-        await assertSubsplashMediaItemExists(mediaItem, token);
-        const results = await Promise.allSettled(
-          destinationListIds.map(async (listId) => {
-            const result = await processListStep(listId, mediaItem, token, maxListSize);
-            return { listId, listItemId: result.listItemId, actualPlacement: result.actualPlacement };
-          })
-        );
-
-        const outputs = await Promise.all(results.map(async (result, index): Promise<OutputTypes> => {
+      const outputs = await Promise.all(
+        results.map(async (result, index): Promise<OutputTypes> => {
           if (result.status === 'fulfilled') {
             return {
               listId: destinationListIds[index],
@@ -1747,58 +1781,85 @@ const addToList = onCall(
             status: 'error',
             ...errorPayload,
           };
-        }));
+        })
+      );
 
-        return outputs;
-      };
+      return outputs;
+    };
 
-      const executeLockedMutation = async (): Promise<AddToListOutputType> => {
-        return withSubsplashLocks(lockKeys, runMutation, {
-          ...(operationKey ? { operationKey } : {}),
-        });
-      };
-
-      const output = operationKey
-        ? await withIdempotency(operationKey, executeLockedMutation)
-        : await executeLockedMutation();
-      listDebugLog('addToList.callable.success', {
-        destinationListIds,
-        mediaItemId: mediaItem.id,
-        output,
+    const executeLockedMutation = async (): Promise<AddToListOutputType> => {
+      return withSubsplashLocks(lockKeys, runMutation, {
+        ...(operationKey ? { operationKey } : {}),
       });
-      return output;
-    } catch (error) {
-      const errorPayload = getErrorPayload(error);
-      if (errorPayload.errorCode === 'aborted') {
-        listDebugWarn('addToList.callable.lockAborted', {
-          destinationListIds,
-          mediaItemId: mediaItem.id,
-          errorPayload,
-        });
-        return destinationListIds.map(
-          (listId): OutputTypes => ({
-            listId,
-            status: 'error',
-            ...errorPayload,
-          })
-        );
-      }
+    };
 
-      const err = error as unknown;
-      listDebugError('addToList.callable.failed', {
+    const output = operationKey
+      ? await withIdempotency(operationKey, executeLockedMutation)
+      : await executeLockedMutation();
+    listDebugLog('addToList.callable.success', {
+      destinationListIds,
+      mediaItemId: mediaItem.id,
+      output,
+    });
+    return output;
+  } catch (error) {
+    const errorPayload = getErrorPayload(error);
+    if (errorPayload.errorCode === 'aborted') {
+      listDebugWarn('addToList.callable.lockAborted', {
         destinationListIds,
         mediaItemId: mediaItem.id,
         errorPayload,
       });
-      throw handleError(err, {
-        suppressReporting: isMissingSubsplashMediaItemError(err),
-        context: {
-          functionName: 'addtolist',
-          destinationListIds,
-          mediaItemId: mediaItem.id,
-        },
-      });
+      return destinationListIds.map(
+        (listId): OutputTypes => ({
+          listId,
+          status: 'error',
+          ...errorPayload,
+        })
+      );
     }
+
+    const err = error as unknown;
+    listDebugError('addToList.callable.failed', {
+      destinationListIds,
+      mediaItemId: mediaItem.id,
+      errorPayload,
+    });
+    throw handleError(err, {
+      suppressReporting: isMissingSubsplashMediaItemError(err),
+      context: {
+        functionName: 'addtolist',
+        destinationListIds,
+        mediaItemId: mediaItem.id,
+      },
+    });
+  }
+};
+
+const addToList = onCall(
+  { secrets: subsplashSecretsWithRuntimeAlerts, memory: '512MiB' },
+  async (request: Parameters<typeof addToListDomain>[0]) => {
+    if (!canUserRolePublish(request.auth?.token.role)) {
+      throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
+    }
+    if (!request.auth?.uid) {
+      const { HttpsError } = await import('firebase-functions/v2/https');
+      throw new HttpsError('unauthenticated', 'Authentication is required.');
+    }
+    const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+    return withLegacyAdmissionLease(
+      firebaseAdmin.firestore(),
+      {
+        domain: 'publishing',
+        actorUid: request.auth.uid,
+        operation: 'addToList',
+        projectId: firebaseAdmin.app().options.projectId || '',
+      },
+      async (lease) => {
+        await lease.markEffectsStarted();
+        return addToListDomain(request);
+      }
+    );
   }
 );
 

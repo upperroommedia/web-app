@@ -1,7 +1,7 @@
 import { getAverageColor } from 'fast-average-color-node';
 import { Vibrant } from 'node-vibrant/node';
 import { logger } from 'firebase-functions';
-import { imageSize } from 'image-size';
+import sharp from 'sharp';
 import axios from 'axios';
 import { readFile } from 'fs/promises';
 
@@ -36,9 +36,26 @@ const loadImageBuffer = async (source: string | Buffer): Promise<Buffer> => {
 };
 
 const computeMetadataForImage = async (source: string | Buffer, dimensionsOnly = false): Promise<ImageMetadata> => {
-  let buffer: Buffer | undefined;
-  buffer = await loadImageBuffer(source);
-  const { width, height } = imageSize(buffer);
+  const input = await loadImageBuffer(source);
+  let width: number;
+  let height: number;
+  let buffer: Buffer;
+  try {
+    const image = sharp(input, { limitInputPixels: 40_000_000, failOn: 'warning' });
+    const metadata = await image.metadata();
+    if (!metadata.width || !metadata.height || metadata.width > 16384 || metadata.height > 16384)
+      throw new Error('Image dimensions exceed the processing limit');
+    width = metadata.width;
+    height = metadata.height;
+    // Decode before passing bytes to secondary image parsers. Header-only
+    // detection can accept malformed/polyglot input; palette work needs only
+    // a small, freshly encoded image, not the original full-resolution file.
+    buffer = await image.resize({ width: 128, height: 128, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+  } catch {
+    const error = new Error('Image cannot be decoded within the processing limits');
+    error.name = 'ImageInputInvalid';
+    throw error;
+  }
   if (dimensionsOnly) {
     return { width, height, averageColorHex: '', vibrantColorHex: '' };
   }
@@ -59,8 +76,6 @@ const computeMetadataForImage = async (source: string | Buffer, dimensionsOnly =
     }
   } catch (error) {
     logger.error('Error fetching vibrant color', error);
-  } finally {
-    buffer = undefined;
   }
   return { width, height, averageColorHex, vibrantColorHex };
 };

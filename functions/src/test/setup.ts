@@ -36,12 +36,12 @@ if (!process.env.ADMIN_BASE_URL) {
 }
 
 // Import and initialize Firebase Admin
-import * as firebaseAdmin from 'firebase-admin';
+import { getApps, initializeApp } from 'firebase-admin/app';
 
 // Initialize Firebase Admin if not already initialized
-if (!firebaseAdmin.apps.length) {
+if (!getApps().length) {
   try {
-    firebaseAdmin.initializeApp({
+    initializeApp({
       projectId: 'urm-app',
       storageBucket: 'urm-app.appspot.com',
       databaseURL: 'https://urm-app-default-rtdb.firebaseio.com/',

@@ -1,3 +1,4 @@
+import {assertSynchronousProviderMutationCompleted} from './temporal/publishing/providerMutationCompletion';
 import axios, { isAxiosError } from 'axios';
 import { logger } from 'firebase-functions/v2';
 import { CallableRequest, HttpsError, FunctionsErrorCode, onCall } from 'firebase-functions/v2/https';
@@ -16,8 +17,11 @@ export interface DeleteFromSubsplashInputType {
 
 export type DeleteFromSubsplashReturnType = void;
 
-const deleteFromSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts }, async (request: CallableRequest<DeleteFromSubsplashInputType>): Promise<DeleteFromSubsplashReturnType> => {
-  logger.log('deleteFromSubsplash', request);
+export const deleteFromSubsplashDomain = async (
+  request: Pick<CallableRequest<DeleteFromSubsplashInputType>, 'data' | 'auth'>,
+  trustedOptions?: {bearerToken?:string;onResponse?:(response:{status:number})=>void}
+): Promise<DeleteFromSubsplashReturnType> => {
+  logger.info('deleteFromSubsplash.start', { mediaItemId: request.data?.subsplashId });
 
   // Authentication check
   if (!canUserRolePublish(request.auth?.token.role)) {
@@ -48,11 +52,13 @@ const deleteFromSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts 
       withSubsplashLocks(
         [`media-item:${mediaItemId}`],
         async () => {
-          const bearerToken = await authenticateSubsplash();
+          const bearerToken = trustedOptions?.bearerToken ?? await authenticateSubsplash();
           const config = createAxiosConfig(url, bearerToken, 'DELETE');
-          logger.debug('config', config);
+          logger.debug('deleteFromSubsplash.request', { mediaItemId });
 
           const response = await axios(config);
+          assertSynchronousProviderMutationCompleted(response);
+          trustedOptions?.onResponse?.({status:response.status});
           logger.log('Successfully deleted media item', { mediaItemId, status: response.status });
           return;
         },
@@ -60,10 +66,11 @@ const deleteFromSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts 
       )
     );
   } catch (error) {
-    logger.error('Error deleting from Subsplash', { mediaItemId, error });
+    logger.error('Error deleting from Subsplash', { mediaItemId, status: isAxiosError(error) ? error.response?.status : undefined });
 
     // Idempotency: deleting an already-deleted media item should succeed.
-    if (isAxiosError(error) && error.response?.status === 404) {
+    if (isAxiosError(error) && [404,410].includes(error.response?.status ?? 0)) {
+      trustedOptions?.onResponse?.({status:error.response!.status});
       logger.warn(`Media item not found (already deleted): ${mediaItemId}`);
       return;
     }
@@ -94,7 +101,6 @@ const deleteFromSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts 
       if (subsplashError?.code === 'resource_not_found') {
         code = 'not-found';
         logger.warn(`Media item not found: ${mediaItemId}`);
-        return;
       } else if (subsplashError?.code === 'unauthorized') {
         code = 'unauthenticated';
       } else if (subsplashError?.code === 'forbidden') {
@@ -112,6 +118,22 @@ const deleteFromSubsplash = onCall({ secrets: subsplashSecretsWithRuntimeAlerts 
     // Use the standard error handler for all other errors
     throw handleError(error);
   }
-});
+};
+
+const deleteFromSubsplash = onCall(
+  { secrets: subsplashSecretsWithRuntimeAlerts },
+  async (request: CallableRequest<DeleteFromSubsplashInputType>) => {
+    if (!canUserRolePublish(request.auth?.token.role)) return deleteFromSubsplashDomain(request);
+    if (!request.data || typeof request.data.operationKey !== 'string' || !request.data.operationKey.trim() || typeof request.data.subsplashId !== 'string' || !request.data.subsplashId.trim()) throw new HttpsError('invalid-argument', 'A valid publishing request is required.');
+    const { default: admin } = await import('@upperroom/shared/firebase/firebaseAdmin');
+    const { withLegacyAdmissionLease } = await import('./temporal/legacyAdmissionLease');
+    const projectId = admin.app().options.projectId ?? process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
+    if (!projectId) throw new HttpsError('failed-precondition', 'Firebase project is not configured.');
+    return withLegacyAdmissionLease(admin.firestore(), { domain: 'publishing', actorUid: request.auth!.uid, projectId, operation: 'deleteFromSubsplash' }, async lease => {
+      await lease.markEffectsStarted();
+      return deleteFromSubsplashDomain(request);
+    });
+  }
+);
 
 export default deleteFromSubsplash;

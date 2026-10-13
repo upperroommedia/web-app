@@ -1,4 +1,4 @@
-import type { firestore as FirebaseAdminFirestore } from 'firebase-admin';
+import type { Firestore, Query, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { authenticateSubsplash } from '../subsplashUtils';
 import { getAllSeriesItemsAcrossStatuses, getSeriesDetails } from './seriesHelpers';
@@ -10,7 +10,6 @@ import {
 } from './seriesItemSubtitles';
 import { withSubsplashLocks } from '../locks/withSubsplashLocks';
 
-type Firestore = FirebaseAdminFirestore.Firestore;
 
 export interface SeriesItemSubtitleBackfillResult {
   mode: 'dry-run' | 'apply';
@@ -55,12 +54,12 @@ export async function runSeriesItemSubtitleBackfill(
   const sync = options.sync ?? syncSeriesItemSubtitles;
   const mode = options.apply ? 'apply' : 'dry-run';
 
-  let documents: FirebaseAdminFirestore.QueryDocumentSnapshot[];
+  let documents: QueryDocumentSnapshot[];
   if (options.firestoreSeriesId) {
     const document = await firestore.collection('series').doc(options.firestoreSeriesId).get();
-    documents = document.exists ? [document as FirebaseAdminFirestore.QueryDocumentSnapshot] : [];
+    documents = document.exists ? [document as QueryDocumentSnapshot] : [];
   } else {
-    let query: FirebaseAdminFirestore.Query = firestore.collection('series');
+    let query: Query = firestore.collection('series');
     if (options.limit) {
       query = query.limit(options.limit);
     }

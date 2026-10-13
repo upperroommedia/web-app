@@ -1,7 +1,7 @@
 # Use Node 22 across both runtime profiles. Hetzner still needs the yt-dlp JS runtime,
 # while Cloud Run only uses the storage-backed trim/transcode path.
 ARG NODE_VERSION=22
-ARG PNPM_VERSION=11.28.2
+ARG PNPM_VERSION=12.11.2
 ARG PROCESS_AUDIO_RUNTIME_PROFILE=hetzner
 ARG YT_DLP_VERSION=2026.08.19
 ARG FFMPEG_VERSION=8.1
@@ -42,8 +42,10 @@ RUN npm install -g pnpm@${PNPM_VERSION}
 
 # Copy workspace manifests first so dependency installation can be cached
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY patches ./patches
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/shared/package.json packages/shared/package.json
+COPY packages/orchestration/package.json packages/orchestration/package.json
 COPY apps/process-audio/package.json apps/process-audio/package.json
 
 # Install only the process-audio workspace and its dependencies.
@@ -56,13 +58,15 @@ RUN pnpm install --frozen-lockfile --filter @upperroom/process-audio... --ignore
 # resolve @upperroom/shared when we compile inside the image.
 COPY packages/contracts ./packages/contracts
 COPY packages/shared ./packages/shared
+COPY packages/orchestration ./packages/orchestration
 COPY apps/process-audio ./apps/process-audio
 
-# Build the two local workspace packages that process-audio imports at runtime,
+# Build the local workspace packages that process-audio imports at runtime,
 # then build the service itself. This avoids depending on generated JS artifacts
 # being checked into git for Cloud Run images.
 RUN pnpm --dir packages/shared build \
     && pnpm --dir packages/contracts build \
+    && pnpm --dir packages/orchestration build \
     && pnpm --dir apps/process-audio build \
     && test -f apps/process-audio/dist/index.js
 
@@ -145,10 +149,9 @@ COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
 COPY --from=build --chown=node:node /workspace/packages ./packages
 COPY --from=build --chown=node:node /workspace/apps/process-audio ./apps/process-audio
 
-# Keep Google OAuth token fetches uncompressed. On the Hetzner runtime, gtoken's
-# node-fetch transport can intermittently fail compressed token responses with
-# ERR_STREAM_PREMATURE_CLOSE, which blocks deferred YouTube queue recovery.
-RUN node -e "const fs = require('node:fs'); const file = '/workspace/node_modules/gtoken/build/src/index.js'; const needle = \"headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\"; const replacement = \"headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept-Encoding': 'identity' },\"; let source = fs.readFileSync(file, 'utf8'); if (!source.includes(replacement)) { if (!source.includes(needle)) { throw new Error('Unable to patch gtoken token request headers'); } source = source.replace(needle, replacement); fs.writeFileSync(file, source); }"
+# Preserve the verified uncompressed-token workaround across both the modern
+# Google Auth 11 exchange and any transitive legacy SDK, including pnpm layouts.
+RUN node apps/process-audio/scripts/patch-google-oauth-transport.cjs /workspace/node_modules
 
 # The final image should not depend on pnpm's workspace symlink layout surviving
 # multi-stage copies. Flatten the two local workspace packages into the app-local

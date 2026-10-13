@@ -11,13 +11,13 @@ async function loginAsDevAdmin(page: import('@playwright/test').Page) {
   const devLoginButton = page.getByRole('button', { name: /Dev Login/i });
   await expect(devLoginButton).toBeVisible();
   await devLoginButton.click();
-  await expect(page.getByLabel('Upload from Youtube Url toggle')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
 }
 
 async function openYouTubeTrimmer(page: import('@playwright/test').Page, url: string) {
   await loginAsDevAdmin(page);
 
-  const toggle = page.getByLabel('Upload from Youtube Url toggle');
+  const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true });
   await toggle.click();
 
   const urlInput = page.getByLabel('Youtube Link');
@@ -53,7 +53,7 @@ async function dragSliderFromPercentToPercent(
 ) {
   await page.evaluate(
     async ({ start, end }) => {
-      const slider = document.querySelector('[data-testid=\"trim-slider\"]');
+      const slider = document.querySelector('[data-testid="trim-slider"]');
       if (!slider) throw new Error('Missing trim slider');
 
       const rect = slider.getBoundingClientRect();
@@ -102,11 +102,7 @@ async function dragSliderFromPercentToPercent(
   );
 }
 
-async function setTimeInputDigits(
-  page: import('@playwright/test').Page,
-  label: 'Start' | 'End',
-  digits: string
-) {
+async function setTimeInputDigits(page: import('@playwright/test').Page, label: 'Start' | 'End', digits: string) {
   const input = page.getByRole('textbox', { name: label });
   await input.click({ force: true });
   await page.keyboard.press('Control+A');
@@ -135,7 +131,7 @@ test.describe('YouTube trimmer', () => {
   test('shows validation error for invalid URL', async ({ page }) => {
     await loginAsDevAdmin(page);
 
-    const toggle = page.getByLabel('Upload from Youtube Url toggle');
+    const toggle = page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true });
     await toggle.click();
 
     const urlInput = page.getByLabel('Youtube Link');

@@ -23,7 +23,7 @@ async function playSermonFromSearch(page: import('@playwright/test').Page, sermo
 test.describe('Player clear on upload / edit routes', () => {
   test('bottom audio bar is not shown on upload page', async ({ page }) => {
     await loginAsDevAdmin(page, '/');
-    await expect(page.getByLabel('Upload from Youtube Url toggle')).toBeVisible();
+    await expect(page.getByRole('switch', { name: 'Upload from Youtube Url', exact: true })).toBeVisible();
     await expect(page.getByTestId('floating-audio-bar')).toHaveCount(0);
   });
 

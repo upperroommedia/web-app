@@ -2,7 +2,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
-const { withSentryConfig } = require('@sentry/nextjs');
+const { withSentryConfig } = require('@sentry/nextjs/config');
 
 /** @type {import('next').NextConfig} */
 
@@ -248,7 +248,7 @@ module.exports = withSentryConfig(nextConfig, {
   org: 'upper-room-media',
   project: 'web-app',
   authToken: process.env.SENTRY_AUTH_TOKEN,
-  release: sentryRelease || undefined,
+  release: sentryRelease ? { name: sentryRelease } : undefined,
   silent: !process.env.CI,
   widenClientFileUpload: true,
   webpack: {

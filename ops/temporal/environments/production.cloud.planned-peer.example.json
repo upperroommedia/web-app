@@ -1,0 +1,11 @@
+{
+  "environment": "production",
+  "deploymentState": "planned",
+  "connectionMode": "temporal-cloud",
+  "firebaseProjectId": "urm-app",
+  "temporalNamespace": "urm-app.qwejt",
+  "cloudAccountId": "qwejt",
+  "cloudProvider": "gcp",
+  "cloudRegion": "us-central1",
+  "workerHosting": "gce-k3s"
+}

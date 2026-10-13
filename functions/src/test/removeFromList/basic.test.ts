@@ -1,3 +1,5 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { SubsplashListRow } from '../../types/Subsplash';
 import { 
@@ -13,11 +15,7 @@ import { uploadStatus } from '@upperroom/shared/types/SermonTypes';
 
 // Type for the handler function (what onCall wraps)
 export type RemoveFromListTestRequest = {
-  auth?: {
-    token?: {
-      role?: string;
-    };
-  };
+  auth?: AuthData;
   data: RemoveFromListInputType;
 };
 
@@ -92,7 +90,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     });
 
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [listId],
         listItemIds: ['row-1'],
@@ -160,7 +158,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
 
     // Try to remove an item that doesn't exist (simulating direct Subsplash edit)
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [listId],
         listItemIds: ['non-existent-row'],
@@ -267,7 +265,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       });
 
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [listId],
         listItemIds: ['row-1'],
@@ -391,7 +389,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       });
 
     const result = await removeFromListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [rootListId],
         listItemIds: ['row-1'],
@@ -475,7 +473,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     });
 
     const result = await removeFromListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [listId],
         listItemIds: ['row-2'],
@@ -601,7 +599,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
       });
 
     const result = await removeFromListHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [listId],
         listItemIds: ['remove-me-row'],
@@ -722,7 +720,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     // Try to remove using the original listItemId (which won't exist in root list)
     // The function should search overflow lists and find it
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [rootListId],
         listItemIds: ['non-existent-in-root'], // This won't be found in root
@@ -816,7 +814,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
 
     // Try to remove an item that doesn't exist anywhere
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [rootListId],
         listItemIds: ['non-existent'],
@@ -884,7 +882,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     });
 
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [listId, listId],
         listItemIds: ['row-1', 'row-3'],
@@ -994,7 +992,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     });
 
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [rootListId],
         listItemIds: ['non-existent'],
@@ -1053,7 +1051,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
     });
 
     const request: RemoveFromListTestRequest = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         listIds: [listId],
         listItemIds: ['remove-row-op-key'],
@@ -1109,7 +1107,7 @@ describe('removeFromList - Basic Functionality (Real Firestore Emulator)', () =>
 
     try {
       const result = await removeFromListHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           listIds: [listId],
           listItemIds: ['remove-timeout-row'],

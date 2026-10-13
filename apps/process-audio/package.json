@@ -20,8 +20,9 @@
     "test:queue": "ts-node -r tsconfig-paths/register --project tsconfig.test.json scripts/test-process-audio-queue-store.ts",
     "test:request-context": "ts-node --project tsconfig.json scripts/test-process-audio-request-context.ts",
     "test:provider-relay": "ts-node --project tsconfig.json scripts/test-provider-relay.ts",
-    "test:ci": "pnpm run build && pnpm run test:youtube-admin && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run test:provider-relay && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop",
-    "test:youtube-admin": "ts-node --project tsconfig.json scripts/test-youtube-admin-desktop.ts && node scripts/test-youtube-auth-alerts.js"
+    "test:ci": "pnpm run build && pnpm run test:youtube-admin && pnpm run test:readiness && pnpm run test:queue && pnpm run test:request-context && pnpm run test:provider-relay && pnpm run verify:youtube:policy && pnpm run verify:youtube:loop && pnpm run test:sdk-upgrades",
+    "test:youtube-admin": "ts-node --project tsconfig.json scripts/test-youtube-admin-desktop.ts && node scripts/test-youtube-auth-alerts.js",
+    "test:sdk-upgrades": "node scripts/test-sentry-v11.cjs && node --test scripts/test-google-oauth-transport.cjs"
   },
   "engines": {
     "node": "22"
@@ -31,16 +32,19 @@
   "dependencies": {
     "@google-cloud/logging-winston": "^6.0.1",
     "@google-cloud/storage": "catalog:",
-    "@sentry/node": "^10.70.0",
+    "@sentry/node": "^11.7.0",
     "@upperroom/contracts": "workspace:*",
     "@upperroom/shared": "workspace:*",
     "axios": "catalog:",
     "express": "^4.18.2",
     "express-rate-limit": "8.7.1",
     "firebase-admin": "catalog:",
-    "google-auth-library": "^9.15.1",
+    "google-auth-library": "^11.2.0",
     "uuid": "catalog:",
-    "winston": "^3.18.3"
+    "winston": "^3.18.3",
+    "@upperroom/orchestration": "workspace:*",
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/common": "1.24.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

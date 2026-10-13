@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 import { clearFirestore, createSeriesDocument } from './firestoreHelpers';
 import { networkFailureInjector, subsplashSeriesMock, TestRequest } from './mocks';
 import bulkAddToSeries, {
@@ -58,7 +59,7 @@ describe('bulkAddToSeries - Cross-callable locking', () => {
 
     try {
       const request: TestRequest<BulkAddToSeriesInputType> = {
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: withConcurrencyEnvelope({
           firestoreSeriesId,
           seriesSubsplashId: subsplashSeries.id,

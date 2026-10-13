@@ -1,3 +1,4 @@
+import type { DurableJobRef } from '@upperroom/contracts/temporal';
 export type NotificationSource = 'role-request' | 'speaker-request' | 'runtime-alert';
 
 interface SpeakerRequestImageAsset {
@@ -45,6 +46,10 @@ export interface QueueEmailMessage {
 }
 
 export interface QueueEmailInput {
+  /** Stable logical notification identity; retries reuse its original queue record. */
+  idempotencyKey?: string;
+  /** Trusted server parent; never copied from a callable payload. */
+  temporalParentJobRef?: DurableJobRef;
   to: string[];
   message: QueueEmailMessage;
   source: NotificationSource;

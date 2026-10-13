@@ -5,7 +5,7 @@ import FormLabel from '@mui/material/FormLabel';
 import Skeleton from '@mui/material/Skeleton';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import Box from '@mui/system/Box';
+import Box from '@mui/material/Box';
 import { useInstantSearch, useRefinementList, UseRefinementListProps } from 'react-instantsearch';
 import { useEffect, useMemo, useState } from 'react';
 

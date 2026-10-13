@@ -2,11 +2,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const workspaceRoot = process.cwd();
 const workspaceConfigPath = path.join(workspaceRoot, 'pnpm-workspace.yaml');
 
-const defaultTargets = [
+export const defaultTargets = [
   'functions-core/package.json',
   'functions-media/package.json',
   'functions-image/package.json',
@@ -15,7 +16,7 @@ const defaultTargets = [
 
 const depSections = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 
-const parseCatalog = (raw) => {
+export const parseCatalog = (raw) => {
   const lines = raw.split(/\r?\n/);
   const start = lines.findIndex((line) => line.trim() === 'catalog:');
   if (start === -1) {
@@ -49,64 +50,82 @@ const parseCatalog = (raw) => {
   return catalog;
 };
 
-const args = process.argv.slice(2);
-const dryRun = args.includes('--dry-run');
-const explicitTargets = args.filter((arg) => !arg.startsWith('--'));
-const targets = explicitTargets.length > 0 ? explicitTargets : defaultTargets;
-
-const catalog = parseCatalog(fs.readFileSync(workspaceConfigPath, 'utf8'));
-const changes = [];
-
-for (const target of targets) {
-  const targetPath = path.join(workspaceRoot, target);
-  if (!fs.existsSync(targetPath)) {
-    throw new Error(`Target package.json not found: ${target}`);
-  }
-
-  const packageJson = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
-  let fileChanged = false;
-  const fileChanges = [];
-
+export function materializedPackageContents(original, workspace) {
+  const catalog = parseCatalog(workspace),
+    packageJson = JSON.parse(original);
   for (const section of depSections) {
     const deps = packageJson[section];
-    if (!deps || typeof deps !== 'object') {
-      continue;
+    if (!deps || typeof deps !== 'object') continue;
+    for (const [name, spec] of Object.entries(deps)) {
+      if (spec !== 'catalog:') continue;
+      const resolved = catalog.get(name);
+      if (!resolved) throw new Error(`No catalog version found for ${name}`);
+      deps[name] = resolved;
+    }
+  }
+  return `${JSON.stringify(packageJson, null, 2)}\n`;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const dryRun = args.includes('--dry-run');
+  const explicitTargets = args.filter((arg) => !arg.startsWith('--'));
+  const targets = explicitTargets.length > 0 ? explicitTargets : defaultTargets;
+
+  const catalog = parseCatalog(fs.readFileSync(workspaceConfigPath, 'utf8'));
+  const changes = [];
+
+  for (const target of targets) {
+    const targetPath = path.join(workspaceRoot, target);
+    if (!fs.existsSync(targetPath)) {
+      throw new Error(`Target package.json not found: ${target}`);
     }
 
-    for (const [name, spec] of Object.entries(deps)) {
-      if (spec !== 'catalog:') {
+    const packageJson = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+    let fileChanged = false;
+    const fileChanges = [];
+
+    for (const section of depSections) {
+      const deps = packageJson[section];
+      if (!deps || typeof deps !== 'object') {
         continue;
       }
-      const resolved = catalog.get(name);
-      if (!resolved) {
-        throw new Error(`No catalog version found for ${name} in ${target}`);
+
+      for (const [name, spec] of Object.entries(deps)) {
+        if (spec !== 'catalog:') {
+          continue;
+        }
+        const resolved = catalog.get(name);
+        if (!resolved) {
+          throw new Error(`No catalog version found for ${name} in ${target}`);
+        }
+        deps[name] = resolved;
+        fileChanged = true;
+        fileChanges.push({ section, name, resolved });
       }
-      deps[name] = resolved;
-      fileChanged = true;
-      fileChanges.push({ section, name, resolved });
+    }
+
+    if (fileChanged) {
+      changes.push({ target, fileChanges });
+      if (!dryRun) {
+        fs.writeFileSync(targetPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+      }
     }
   }
 
-  if (fileChanged) {
-    changes.push({ target, fileChanges });
-    if (!dryRun) {
-      fs.writeFileSync(targetPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  if (changes.length === 0) {
+    console.log('[catalog-materialize] No catalog references found in target package.json files.');
+    process.exit(0);
+  }
+
+  for (const change of changes) {
+    console.log(`[catalog-materialize] ${change.target}`);
+    for (const item of change.fileChanges) {
+      console.log(`  - ${item.section}.${item.name} -> ${item.resolved}`);
     }
   }
-}
 
-if (changes.length === 0) {
-  console.log('[catalog-materialize] No catalog references found in target package.json files.');
-  process.exit(0);
-}
-
-for (const change of changes) {
-  console.log(`[catalog-materialize] ${change.target}`);
-  for (const item of change.fileChanges) {
-    console.log(`  - ${item.section}.${item.name} -> ${item.resolved}`);
+  if (dryRun) {
+    console.log('[catalog-materialize] Dry run only, no files were modified.');
   }
-}
-
-if (dryRun) {
-  console.log('[catalog-materialize] Dry run only, no files were modified.');
 }

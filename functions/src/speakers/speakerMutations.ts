@@ -1,4 +1,17 @@
+import { prepareSpeakerDeletionMirrors, removeSpeakerDeletionMirrors, type SpeakerDeletionMirrorHandle } from '../helpers/speakerDeletionMirrors';
+import { assertSynchronousProviderMutationCompleted } from '../temporal/publishing/providerMutationCompletion';
+import {markPublishingCritical, getPublishingMutationOperation, runPublishingProviderMutation, prepareProviderMutationPlanCommit, prepareAcknowledgedProjectionPlan, publishingMutationRequestFingerprint} from '../temporal/publishing/durableOperationContext';
+import {reserveSubsplashAssociation} from '../temporal/publishing/providerAssociations';
 import axios, { isAxiosError } from 'axios';
+import { isDurablePublishingOperation, runDurableTransaction, commitDurableProjection } from '../temporal/publishing/durableOperationContext';
+import { executeProviderCreate, providerPayloadFingerprint,providerReceiptId } from '../temporal/publishing/providerReceipts';
+import {acknowledgedProjectionDigest} from '../temporal/publishing/criticalAcknowledgedRepair';
+import {repairMismatchedSubsplashImageRefs} from '../helpers/subsplashImageRefs';
+import {getDurablePublishingJobId} from '../temporal/publishing/durableOperationContext';
+import {inferProviderReceiptScope,PROVIDER_RECEIPTS_COLLECTION,type ProviderReceipt} from '../temporal/publishing/providerReceipts';
+import type {Firestore,Transaction} from 'firebase-admin/firestore';
+import type { FrozenProjectionWrite } from '../temporal/publishing/criticalAcknowledgedRepair';
+import type { ProviderMutationResource } from '../temporal/publishing/providerMutationGuard';
 import { DocumentReference, DocumentSnapshot } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions/v2';
 import { HttpsError } from 'firebase-functions/v2/https';
@@ -21,6 +34,11 @@ import {
   UpdateSpeakerCallableInputType,
   UpdateSpeakerCallableOutputType,
 } from './createSpeakerTypes';
+
+const synchronousMutationData = <T>(response: { status?: unknown; data: T }): T => {
+  assertSynchronousProviderMutationCompleted(response);
+  return response.data;
+};
 
 const firestore = firebaseAdmin.firestore();
 const speakersCollection = firestore.collection('speakers').withConverter(firestoreAdminSpeakerConverter);
@@ -54,6 +72,97 @@ interface UpdateSubsplashSpeakerTagImageInputType {
   squareImage: ImageType;
   operationKey?: string;
 }
+
+interface SpeakerProjectionSource {
+  speakerId?: string;
+}
+
+// Server source identities are supplied by speaker CRUD, never by a free-form patch.
+// Standalone tag/image operations must resolve exactly one current canonical owner.
+const freezeSpeakerTagProjection = async (
+  target: ProviderMutationResource & {provider:'subsplash';resourceType:'tag'},
+  step: string,
+  method: 'PATCH' | 'DELETE',
+  payload: Record<string, unknown>,
+  source: SpeakerProjectionSource,
+  patchFor: (current: ISpeaker) => Record<string, unknown>
+): Promise<void> => {
+  if (!isDurablePublishingOperation()) return;
+  const operation = getPublishingMutationOperation();
+  if (!operation) throw new Error('PROVIDER_ACK_PROJECTION_OPERATION_REQUIRED');
+  let canonicalId = source.speakerId;
+  if (!canonicalId) {
+    const owners = await speakersCollection.where('tagId', '==', target.resourceId).limit(2).get();
+    if (owners.size !== 1) throw new Error('PROVIDER_ACK_PROJECTION_CANONICAL_OWNER_REQUIRED');
+    canonicalId = owners.docs[0].id;
+  }
+  const ref = speakersCollection.doc(canonicalId);
+  await runDurableTransaction(firestore, async tx => {
+    const current = await tx.get(ref);
+    const data = current.data();
+    if (!current.exists || !data || data.tagId !== target.resourceId) {
+      throw new Error('PROVIDER_ACK_PROJECTION_CANONICAL_IDENTITY_CHANGED');
+    }
+    const patch = method === 'DELETE' ? {} : patchFor(data);
+    const original = data as unknown as Record<string, unknown>;
+    const expectedFields = {tagId:target.resourceId,...Object.fromEntries(Object.keys(patch).filter(key=>original[key]!==undefined).map(key=>[key,original[key]]))};
+    const absentFields = Object.keys(patch).filter(key=>original[key]===undefined);
+    const write: FrozenProjectionWrite = {
+      path: ref.path, expectedFields, ...(absentFields.length ? {absentFields} : {}),
+      patch,
+      ...(method === 'DELETE' ? { deleteFields: ['tagId'] } : {}),
+    };
+    const freeze = await prepareAcknowledgedProjectionPlan(tx, {
+      operation, completesActivity: false,
+      requests: [{ step, method, target, payload, fingerprint: publishingMutationRequestFingerprint({method,target,payload}) }],
+      writes: [write],
+      verifications: [{ ...target,
+        ...(method === 'DELETE' ? { expectedState: 'absent' as const, expectedProviderFields: {} } : {
+          expectedProviderFields: Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'app_key')),
+        }),
+      }],
+    });
+    freeze.commit();
+  });
+};
+
+const freezeSpeakerListProjection = async (
+  listId: string, step: string, payload: Record<string, unknown>, speakerName: string, images: ImageType[], canonicalListId?: string,
+  speakerProjection?: {speakerId:string;requiredTagStep?:string}
+): Promise<void> => {
+  if (!isDurablePublishingOperation()) return;
+  const operation = getPublishingMutationOperation();
+  if (!operation) throw new Error('PROVIDER_ACK_PROJECTION_OPERATION_REQUIRED');
+  let ref: DocumentReference<List>;
+  if (canonicalListId) ref = listsCollection.doc(canonicalListId);
+  else {
+    const owners = await listsCollection.where('subsplashId', '==', listId).limit(2).get();
+    if (owners.size !== 1) throw new Error('PROVIDER_ACK_PROJECTION_CANONICAL_OWNER_REQUIRED');
+    ref = owners.docs[0].ref;
+  }
+  const target = {provider:'subsplash' as const,account:'app:9XTSHD',resourceType:'list' as const,resourceId:listId};
+  await runDurableTransaction(firestore, async tx => {
+    const current = await tx.get(ref);
+    if (!current.exists || current.data()?.subsplashId !== listId) throw new Error('PROVIDER_ACK_PROJECTION_CANONICAL_IDENTITY_CHANGED');
+    const writes: FrozenProjectionWrite[] = [{path:ref.path,expectedFields:{subsplashId:listId,...(current.data()?.name!==undefined?{name:current.data()!.name}:{}),...(current.data()?.images!==undefined?{images:current.data()!.images}:{})},patch:{name:speakerName,images}}];
+    if (speakerProjection) {
+      const speakerRef = speakersCollection.doc(speakerProjection.speakerId);
+      const speaker = await tx.get(speakerRef);
+      const data = speaker.data();
+      if (!speaker.exists || !data || data.listId !== ref.id) throw new Error('PROVIDER_ACK_PROJECTION_CANONICAL_IDENTITY_CHANGED');
+      writes.push({path:speakerRef.path,expectedFields:{listId:ref.id,name:data.name,images:data.images},
+        requiredSteps:[...(speakerProjection.requiredTagStep?[speakerProjection.requiredTagStep]:[]),step],
+        patch:{name:speakerName,images}});
+    }
+    const freeze = await prepareAcknowledgedProjectionPlan(tx, {
+      operation, completesActivity: false,
+      requests: [{ step, method:'PATCH', target, payload, fingerprint:publishingMutationRequestFingerprint({method:'PATCH',target,payload}) }],
+      writes,
+      verifications: [{...target,expectedProviderFields:Object.fromEntries(Object.entries(payload).filter(([key])=>key!=='app_key'))}],
+    });
+    freeze.commit();
+  });
+};
 
 const MAX_SUBSPLASH_SPEAKER_NAME_LENGTH = 30;
 
@@ -319,7 +428,10 @@ const prepareSpeakerList = async (
     ...(operationKey ? { operationKey } : {}),
   });
 
-  const listRef = listsCollection.doc();
+  const listRef = isDurablePublishingOperation() && operationKey
+    ? listsCollection.doc(providerPayloadFingerprint([operationKey,'local-speaker-list']).slice(0,32))
+    : listsCollection.doc();
+  const existingList=isDurablePublishingOperation()?await listRef.get():undefined;
   const now = Date.now();
   return {
     listRef,
@@ -330,7 +442,7 @@ const prepareSpeakerList = async (
       overflowBehavior: OverflowBehavior.CREATENEWLIST,
       count: 0,
       type: ListType.SPEAKER_LIST,
-      createdAtMillis: now,
+      createdAtMillis: existingList?.data()?.createdAtMillis ?? now,
       updatedAtMillis: now,
       subsplashId: createResult.listId,
       ...buildRootListMetadata({
@@ -536,13 +648,10 @@ const findSubsplashSpeakerTagByTitle = async (
 };
 
 export const createSubsplashSpeakerTag = async (
-  input: CreateSubsplashSpeakerTagInputType
+  input: CreateSubsplashSpeakerTagInputType,
+  projectionSource: SpeakerProjectionSource = {}
 ): Promise<CreateSubsplashSpeakerTagOutputType> => {
-  const runMutation = async (): Promise<CreateSubsplashSpeakerTagOutputType> => {
-    const url = input.tagId
-      ? `https://core.subsplash.com/tags/v1/tags/${input.tagId}`
-      : 'https://core.subsplash.com/tags/v1/tags';
-    const payload = {
+  const buildPayload = () => ({
       app_key: '9XTSHD',
       type: 'speaker',
       title: input.title,
@@ -551,15 +660,29 @@ export const createSubsplashSpeakerTag = async (
       _embedded: {
         'square-image': toSubsplashImageReference(input.squareImage, 'squareImage'),
       },
-    };
+  });
+  const runMutation = async (): Promise<CreateSubsplashSpeakerTagOutputType> => {
+    const url = input.tagId
+      ? `https://core.subsplash.com/tags/v1/tags/${input.tagId}`
+      : 'https://core.subsplash.com/tags/v1/tags';
+    const payload = buildPayload();
 
     const accessToken = await authenticateSubsplash();
+    if (input.tagId) await freezeSpeakerTagProjection(
+      {provider:'subsplash',account:'app:9XTSHD',resourceType:'tag',resourceId:input.tagId},
+      `speaker-tag-patch:${input.tagId}:${providerPayloadFingerprint(payload)}`, 'PATCH', payload, projectionSource,
+      current => ({name:input.title,shortDescription:payload.short_description,description:payload.description,
+        images:[...current.images.filter(image=>image.type!=='square'),input.squareImage]}),
+    );
+    if(input.tagId)await markPublishingCritical('PUBLISHING_ASSOCIATION_CRITICAL',{provider:'subsplash',resourceType:'tag',resourceId:input.tagId!,accountId:'app:9XTSHD',method:'PATCH',requestFingerprint:providerPayloadFingerprint(payload)});
+    await reserveSubsplashAssociation(`tagimage:${input.tagId??input.operationKey??input.title}`,[input.tagId,payload._embedded['square-image'].id],payload,input.tagId?{target:{provider:'subsplash',kind:'tag',remoteId:input.tagId}}:input.operationKey?{targetReceiptId:providerReceiptId(input.operationKey,'speaker-tag-create')}:{});
     const config = createAxiosConfig(url, accessToken, input.tagId ? 'PATCH' : 'POST', payload);
+    if (!input.tagId) Object.assign(config, { skipSubsplashEdgeRetry: true });
     let response: { id?: unknown };
     try {
-      response = (await withSubsplashSpeakerRetry('createSpeakerTag', () => axios(config))).data as { id?: unknown };
+      response = (input.tagId ? await runPublishingProviderMutation({operation:getPublishingMutationOperation() ?? 'createSpeakerTag',target:{provider:'subsplash',account:'app:9XTSHD',resourceType:'tag',resourceId:input.tagId!},step:`speaker-tag-patch:${input.tagId}:${providerPayloadFingerprint(payload)}`,method:'PATCH',payload,send:async()=>{const response=synchronousMutationData<{id?:unknown}>(await axios(Object.assign(config,{skipSubsplashEdgeRetry:true})));return {completion:'acknowledged',result:{id:typeof response?.id==='string'?response.id:input.tagId}};}}) : (await axios(config)).data) as { id?: unknown };
     } catch (error) {
-      if (input.tagId || getAxiosStatusCode(error) !== 400) {
+      if (input.tagId || isDurablePublishingOperation() || getAxiosStatusCode(error) !== 400) {
         throw error;
       }
 
@@ -579,7 +702,11 @@ export const createSubsplashSpeakerTag = async (
         'PATCH',
         payload
       );
-      await withSubsplashSpeakerRetry('reconcileExistingSpeakerTag', () => axios(reconcileConfig));
+      await freezeSpeakerTagProjection({provider:'subsplash',account:'app:9XTSHD',resourceType:'tag',resourceId:existingTag.id},
+        `speaker-tag-reconcile:${existingTag.id}:${providerPayloadFingerprint(payload)}`, 'PATCH', payload, projectionSource,
+        current => ({name:input.title,shortDescription:payload.short_description,description:payload.description,images:[...current.images.filter(image=>image.type!=='square'),input.squareImage]}));
+      await markPublishingCritical('PUBLISHING_ASSOCIATION_CRITICAL',{provider:'subsplash',resourceType:'tag',resourceId:existingTag.id,accountId:'app:9XTSHD',method:'PATCH',requestFingerprint:providerPayloadFingerprint(payload)});
+      await runPublishingProviderMutation({operation:getPublishingMutationOperation() ?? 'reconcileExistingSpeakerTag',target:{provider:'subsplash',account:'app:9XTSHD',resourceType:'tag',resourceId:existingTag.id},step:`speaker-tag-reconcile:${existingTag.id}:${providerPayloadFingerprint(payload)}`,method:'PATCH',payload,send:async()=>{synchronousMutationData(await axios(Object.assign(reconcileConfig,{skipSubsplashEdgeRetry:true})));return {completion:'acknowledged',result:null};}});
       response = { id: existingTag.id };
     }
     const tagId = typeof response.id === 'string' ? response.id : input.tagId || '';
@@ -590,13 +717,17 @@ export const createSubsplashSpeakerTag = async (
     return { tagId };
   };
 
-  return withSubsplashLocks([getCreateSpeakerTagLockKey(input.title)], runMutation, {
+  const guardedMutation = input.operationKey && !input.tagId
+    ? () => executeProviderCreate({ operationKey: input.operationKey!, step: 'speaker-tag-create', payload: {title:input.title,squareImage:input.squareImage,shortDescription:input.shortDescription,description:input.description},prepare:async()=>{const payload=buildPayload();await reserveSubsplashAssociation(`tagimage:${input.operationKey}`,[payload._embedded['square-image'].id],payload,{targetReceiptId:providerReceiptId(input.operationKey!,'speaker-tag-create')});}, execute: runMutation })
+    : runMutation;
+  return withSubsplashLocks([getCreateSpeakerTagLockKey(input.title)], guardedMutation, {
     ...(input.operationKey ? { operationKey: input.operationKey } : {}),
   });
 };
 
 export const updateSubsplashSpeakerTagSquareImage = async (
-  input: UpdateSubsplashSpeakerTagImageInputType
+  input: UpdateSubsplashSpeakerTagImageInputType,
+  projectionSource: SpeakerProjectionSource = {}
 ): Promise<void> => {
   const runMutation = async (): Promise<void> => {
     const url = `https://core.subsplash.com/tags/v1/tags/${input.tagId}`;
@@ -607,8 +738,13 @@ export const updateSubsplashSpeakerTagSquareImage = async (
       },
     };
 
+    await freezeSpeakerTagProjection({provider:'subsplash',account:'app:9XTSHD',resourceType:'tag',resourceId:input.tagId},
+      `speaker-tag-image-patch:${input.tagId}:${providerPayloadFingerprint(payload)}`, 'PATCH', payload, projectionSource,
+      current => ({images:[...current.images.filter(image=>image.type!=='square'),input.squareImage]}));
+    await markPublishingCritical('PUBLISHING_ASSOCIATION_CRITICAL',{provider:'subsplash',resourceType:'tag',resourceId:input.tagId,accountId:'app:9XTSHD',method:'PATCH',requestFingerprint:providerPayloadFingerprint(payload)});
+    await reserveSubsplashAssociation(`tagimage:${input.tagId}`,[input.tagId,payload._embedded['square-image'].id],payload,{target:{provider:'subsplash',kind:'tag',remoteId:input.tagId}});
     const config = createAxiosConfig(url, await authenticateSubsplash(), 'PATCH', payload);
-    await withSubsplashSpeakerRetry('updateSpeakerTagSquareImage', () => axios(config));
+    await runPublishingProviderMutation({operation:getPublishingMutationOperation() ?? 'updateSpeakerTagSquareImage',target:{provider:'subsplash',account:'app:9XTSHD',resourceType:'tag',resourceId:input.tagId},step:`speaker-tag-image-patch:${input.tagId}:${providerPayloadFingerprint(payload)}`,method:'PATCH',payload,send:async()=>{synchronousMutationData(await axios(Object.assign(config,{skipSubsplashEdgeRetry:true})));return {completion:'acknowledged',result:null};}});
   };
 
   await withSubsplashLocks([getUpdateSpeakerTagLockKey(input.tagId)], runMutation, {
@@ -620,7 +756,9 @@ const syncSubsplashSpeakerListRemote = async (
   subsplashListId: string,
   speakerName: string,
   images: ImageType[],
-  operationKey?: string
+  operationKey?: string,
+  canonicalListId?: string,
+  speakerProjection?: {speakerId:string;requiredTagStep?:string}
 ): Promise<void> => {
   const runMutation = async (): Promise<void> => {
     const url = `https://core.subsplash.com/builder/v1/lists/${subsplashListId}`;
@@ -631,8 +769,11 @@ const syncSubsplashSpeakerListRemote = async (
         images: images.map((image) => toSubsplashImageReference(image, `images.${image.type}`)),
       },
     };
+    await freezeSpeakerListProjection(subsplashListId,`syncSubsplashSpeakerListRemote:${subsplashListId}:${providerPayloadFingerprint(payload)}`,payload,speakerName,images,canonicalListId,speakerProjection);
+    await markPublishingCritical('PUBLISHING_ASSOCIATION_CRITICAL',{provider:'subsplash',resourceType:'list',resourceId:subsplashListId,accountId:'app:9XTSHD',method:'PATCH',requestFingerprint:providerPayloadFingerprint(payload)});
+    await reserveSubsplashAssociation(`speakerlistimages:${subsplashListId}`,[subsplashListId,...payload._embedded.images.map(image=>image.id)],payload,{target:{provider:'subsplash',kind:'list',remoteId:subsplashListId}});
     const config = createAxiosConfig(url, await authenticateSubsplash(), 'PATCH', payload);
-    await axios(config);
+    await runPublishingProviderMutation({operation:getPublishingMutationOperation() ?? 'syncSubsplashSpeakerListRemote',target:{provider:'subsplash',account:'app:9XTSHD',resourceType:'list',resourceId:subsplashListId},step:`syncSubsplashSpeakerListRemote:${subsplashListId}:${providerPayloadFingerprint(payload)}`,method:'PATCH',payload:payload,send:async()=>{synchronousMutationData(await axios(Object.assign(config,{skipSubsplashEdgeRetry:true})));return {completion:'acknowledged',result:null};}});
   };
 
   const runLockedMutation = async (): Promise<void> => {
@@ -648,11 +789,27 @@ const syncSubsplashSpeakerListRemote = async (
   await runLockedMutation();
 };
 
-const deleteSubsplashTagRemote = async (subsplashTagId: string, operationKey?: string): Promise<void> => {
+const deleteSubsplashTagRemote = async (subsplashTagId: string, operationKey?: string, projectionSource: SpeakerProjectionSource = {}): Promise<{sermonsUpdated:number;listMirrorsUpdated:number;seriesMirrorsUpdated:number}|undefined> => {
+  let mirrors: SpeakerDeletionMirrorHandle | undefined;
+  if (isDurablePublishingOperation()) {
+    if (!projectionSource.speakerId) throw new Error('PROVIDER_ACK_PROJECTION_CANONICAL_OWNER_REQUIRED');
+    mirrors = await prepareSpeakerDeletionMirrors(firestore, {speakerId:projectionSource.speakerId,tagId:subsplashTagId});
+  }
   const runMutation = async (): Promise<void> => {
     const url = `https://core.subsplash.com/tags/v1/tags/${subsplashTagId}`;
+    await markPublishingCritical('PUBLISHING_DELETE_CRITICAL',{provider:'subsplash',resourceType:'tag',resourceId:subsplashTagId,accountId:'app:9XTSHD',method:'DELETE'});
     const config = createAxiosConfig(url, await authenticateSubsplash(), 'DELETE');
-    await axios(config);
+    await runPublishingProviderMutation({operation:getPublishingMutationOperation() ?? 'deleteSubsplashTagRemote',target:{provider:'subsplash',account:'app:9XTSHD',resourceType:'tag',resourceId:subsplashTagId},step:`deleteSubsplashTagRemote:${subsplashTagId}:${providerPayloadFingerprint({id:subsplashTagId})}`,method:'DELETE',payload:{id:subsplashTagId},send:async()=>{
+      try {
+        synchronousMutationData(await axios(Object.assign(config,{skipSubsplashEdgeRetry:true})));
+        return {completion:'acknowledged',result:null};
+      } catch (error) {
+        // The authenticated fixed-ID DELETE already has its desired state on an original 404.
+        if (isAxiosError(error) && (error.response?.status === 404 || error.response?.status === 410))
+          return {completion:'rejected_no_effect',evidence:{transport:'original_http_response',status:error.response.status,providerCode:'resource_not_found'}};
+        throw error;
+      }
+    }});
   };
 
   const runLockedMutation = async (): Promise<void> => {
@@ -664,18 +821,25 @@ const deleteSubsplashTagRemote = async (subsplashTagId: string, operationKey?: s
   try {
     if (operationKey) {
       await withIdempotency(operationKey, runLockedMutation);
-      return;
+    } else {
+      await runLockedMutation();
     }
-    await runLockedMutation();
+    if (mirrors) return removeSpeakerDeletionMirrors(firestore,mirrors);
   } catch (error) {
+    if ((error instanceof Error && error.message === 'PROVIDER_MUTATION_REJECTED_NO_EFFECT') ||
+      error && typeof error==='object' && 'code' in error && error.code==='PROVIDER_MUTATION_REJECTED_NO_EFFECT') {
+      if (!mirrors) throw error;
+      return removeSpeakerDeletionMirrors(firestore,mirrors);
+    }
     if (isAxiosError(error)) {
       const responseCode = getSubsplashErrorCode(error.response?.data);
-      if (error.response?.status === 404 || responseCode === 'resource_not_found') {
+      if (!isDurablePublishingOperation() && (error.response?.status === 404 || responseCode === 'resource_not_found')) {
         return;
       }
     }
     throw error;
   }
+  return undefined;
 };
 
 const matchesSpeakerReference = (candidate: unknown, targetSpeaker: ISpeaker, normalizedTargetName: string): boolean => {
@@ -685,8 +849,9 @@ const matchesSpeakerReference = (candidate: unknown, targetSpeaker: ISpeaker, no
 
   const candidateRecord = candidate as { id?: unknown; tagId?: unknown; name?: unknown };
 
-  if (typeof candidateRecord.id === 'string' && candidateRecord.id === targetSpeaker.id) {
-    return true;
+  // An explicit canonical ID takes precedence over legacy name/tag aliases.
+  if (typeof candidateRecord.id === 'string' && candidateRecord.id.trim()) {
+    return candidateRecord.id === targetSpeaker.id;
   }
 
   if (
@@ -715,14 +880,26 @@ const removeSpeakerFromSermons = async (targetSpeaker: ISpeaker): Promise<number
   let updatedSermons = 0;
   let pendingWrites = 0;
   let batch = firestore.batch();
+  let stagedRefs: DocumentReference[] = [];
 
   const commitBatchIfNeeded = async (): Promise<void> => {
     if (pendingWrites === 0) {
       return;
     }
-    await batch.commit();
+    const refs=stagedRefs;
+    const pendingBatch=batch;
+    await commitDurableProjection(async tx=> {
+      const current=await Promise.all(refs.map(ref=>tx.get(ref)));
+      for(const doc of current) {
+        const speakers=doc.data()?.speakers;
+        if(!Array.isArray(speakers)) continue;
+        const remaining=speakers.filter(candidate=>!matchesSpeakerReference(candidate,targetSpeaker,normalizedTargetName));
+        if(remaining.length!==speakers.length) tx.update(doc.ref,{speakers:remaining,editedAtMillis:Date.now()});
+      }
+    },async()=>{await pendingBatch.commit();});
     batch = firestore.batch();
     pendingWrites = 0;
+    stagedRefs=[];
   };
 
   for (const sermonDoc of sermonsSnapshot.docs) {
@@ -740,6 +917,7 @@ const removeSpeakerFromSermons = async (targetSpeaker: ISpeaker): Promise<number
     }
 
     updatedSermons += 1;
+    stagedRefs.push(sermonDoc.ref);
     batch.update(sermonDoc.ref, {
       speakers: filteredSpeakers,
       editedAtMillis: Date.now(),
@@ -755,11 +933,132 @@ const removeSpeakerFromSermons = async (targetSpeaker: ISpeaker): Promise<number
   return updatedSermons;
 };
 
+export interface SpeakerCreateTailCheckpoint {
+  schemaVersion:1;projectId:string;jobId:string;generation:number;workflowId:string;speakerId:string;operationKey:string;inputFingerprint:string;
+  images:ImageType[];desiredSpeaker:Omit<ISpeaker,'tagId'>;tagPayload:{title:string;squareImage:ImageType;shortDescription?:string;description?:string};
+  originalExists:boolean;originalDocumentDigest:string;listPayload?:Record<string,unknown>;desiredList?:Omit<List,'subsplashId'>;originalListDocumentDigest?:string;checkpointDigest:string;
+}
+const speakerTailIdentity=(value:SpeakerCreateTailCheckpoint)=>Object.fromEntries(['schemaVersion','projectId','jobId','generation','workflowId','speakerId','operationKey','inputFingerprint','images','desiredSpeaker','tagPayload','originalExists','originalDocumentDigest','listPayload','desiredList','originalListDocumentDigest'].filter(key=>(value as unknown as Record<string,unknown>)[key]!==undefined).map(key=>[key,(value as unknown as Record<string,unknown>)[key]]));
+const speakerTailFailure=():never=>{throw new HttpsError('failed-precondition','The original speaker create program is unavailable or changed.');};
+const validTailId=(value:unknown):value is string=>typeof value==='string'&&!!value&&value.length<=256&&!/[\s/?#]/.test(value);
+export function validateSpeakerCreateTailCheckpoint(checkpoint:SpeakerCreateTailCheckpoint,input:CreateSpeakerCallableInputType,speakerId:string):void {
+  if(checkpoint?.schemaVersion!==1||checkpoint.speakerId!==speakerId||checkpoint.operationKey!==input.operationKey||checkpoint.inputFingerprint!==providerPayloadFingerprint(input)||checkpoint.checkpointDigest!==acknowledgedProjectionDigest(speakerTailIdentity(checkpoint))||!Number.isSafeInteger(checkpoint.generation)||checkpoint.generation<1||!validTailId(checkpoint.workflowId)||!Array.isArray(checkpoint.images)||checkpoint.desiredSpeaker.id!==speakerId||checkpoint.desiredSpeaker.name!==requireTrimmedSpeakerName(input.speaker.name)||Boolean(checkpoint.listPayload)!==Boolean(input.createSpeakerList)||Boolean(checkpoint.desiredList)!==Boolean(input.createSpeakerList)||providerPayloadFingerprint(checkpoint.desiredSpeaker.images)!==providerPayloadFingerprint(checkpoint.images))speakerTailFailure();
+  requireSquareImage(checkpoint.images);
+}
+const speakerCheckpointRef=(database:Firestore,checkpoint:Pick<SpeakerCreateTailCheckpoint,'jobId'|'speakerId'>)=>database.doc(`temporalPublishingSpeakerCreationState/${providerReceiptId(checkpoint.jobId,checkpoint.speakerId)}`);
+const frozenListPayload=(name:string,images:ImageType[]):Record<string,unknown>=>({app_key:'9XTSHD',display_type:'image',generated:false,header_type:'none',layout_type:'list',title:name,type:'standard',_embedded:{images:images.map(image=>toSubsplashImageReference(image,'speaker image'))}});
+const readSpeakerCreateReceipt=async(database:Firestore,checkpoint:SpeakerCreateTailCheckpoint,stage:'speaker-tag-create'|'list-create'):Promise<ProviderReceipt|undefined>=>{
+  const key=scopeOperationKey(checkpoint.operationKey,stage==='speaker-tag-create'?'create-speaker-tag':'create-speaker-list')!;
+  const receipt=(await database.doc(`${PROVIDER_RECEIPTS_COLLECTION}/${providerReceiptId(key,stage)}`).get()).data() as ProviderReceipt|undefined;
+  if(receipt&&(receipt.operationKey!==key||receipt.step!==stage||receipt.projectId!==checkpoint.projectId||receipt.jobId!==checkpoint.jobId||receipt.providerAccount?.provider!=='subsplash'||receipt.providerAccount.account!=='app:9XTSHD'||receipt.fingerprint!==providerPayloadFingerprint(stage==='speaker-tag-create'?checkpoint.tagPayload:checkpoint.listPayload)))speakerTailFailure();
+  return receipt;
+};
+/** Fixed post-tag stages only. Images and the original tag allocation are never replayed. */
+export async function completeConfirmedSpeakerCreate(input:CreateSpeakerCallableInputType,confirmed:{tagId:string},options:{checkpoint:SpeakerCreateTailCheckpoint;speakerId:string;firestore?:Firestore;commitCurrent?:(mutate:(tx:Transaction)=>Promise<void>)=>Promise<void>}):Promise<CreateSpeakerCallableOutputType> {
+  const checkpoint=options.checkpoint,database=options.firestore??firestore,commit=options.commitCurrent??(mutate=>runDurableTransaction(database,mutate));
+  validateSpeakerCreateTailCheckpoint(checkpoint,input,options.speakerId);
+  if(getDurablePublishingJobId()!==checkpoint.jobId||!validTailId(confirmed.tagId))speakerTailFailure();
+  const stateRef=speakerCheckpointRef(database,checkpoint),speakerRef=database.collection('speakers').doc(checkpoint.speakerId);
+  const tagReceipt=await readSpeakerCreateReceipt(database,checkpoint,'speaker-tag-create');
+  if(tagReceipt?.state!=='confirmed'||(tagReceipt.result as {tagId?:unknown}|undefined)?.tagId!==confirmed.tagId)speakerTailFailure();
+  let completed:ISpeaker|undefined,completedListSubsplashId:string|undefined;
+  await commit(async tx=>{
+    const [state,canonical,job]=await Promise.all([tx.get(stateRef),tx.get(speakerRef),tx.get(database.doc(`durableJobs/${checkpoint.jobId}`))]);
+    if(!state.exists||state.get('checkpointDigest')!==checkpoint.checkpointDigest||job.get('generation')!==checkpoint.generation||job.get('workflowId')!==checkpoint.workflowId||state.get('tagId')&&state.get('tagId')!==confirmed.tagId)speakerTailFailure();
+    if(state.get('state')==='completed') {
+      const current=canonical.data() as ISpeaker|undefined;
+      if(!current||current.tagId!==confirmed.tagId||current.listId!==checkpoint.desiredSpeaker.listId||providerPayloadFingerprint(Object.fromEntries(Object.keys(checkpoint.desiredSpeaker).filter(key=>key!=='sermonCount').map(key=>[key,(current as unknown as Record<string,unknown>)[key]])))!==providerPayloadFingerprint(Object.fromEntries(Object.entries(checkpoint.desiredSpeaker).filter(([key])=>key!=='sermonCount'))))speakerTailFailure();
+      const remoteList=state.get('listSubsplashId');
+      if(checkpoint.desiredList&&!validTailId(remoteList))speakerTailFailure();
+      completed=current;completedListSubsplashId=validTailId(remoteList)?remoteList:undefined;return;
+    }
+    if(acknowledgedProjectionDigest(canonical.data()??null)!==checkpoint.originalDocumentDigest)speakerTailFailure();
+    if(checkpoint.desiredSpeaker.listId&&!checkpoint.desiredList&&!(await tx.get(database.doc(`lists/${checkpoint.desiredSpeaker.listId}`))).exists)speakerTailFailure();
+  });
+  if(completed)return {status:'success',speakerId:checkpoint.speakerId,speaker:completed,speakerListCreated:Boolean(checkpoint.desiredList),...(completed.listId?{listId:completed.listId}:{}),...(completedListSubsplashId?{listSubsplashId:completedListSubsplashId}:{})};
+  const token=await authenticateSubsplash(),tagResponse=synchronousMutationData<Record<string,unknown>>(await axios(createAxiosConfig(`https://core.subsplash.com/tags/v1/tags/${confirmed.tagId}`,token,'GET')));
+  const tagSquare=((tagResponse._embedded as {'square-image'?:{id?:unknown}}|undefined)?.['square-image'])?.id;
+  if(tagResponse.id!==confirmed.tagId||tagResponse.app_key!=='9XTSHD'||tagResponse.type!=='speaker'||tagResponse.title!==checkpoint.tagPayload.title||tagSquare!==toSubsplashImageReference(checkpoint.tagPayload.squareImage,'squareImage').id||String(tagResponse.short_description??'')!==(checkpoint.tagPayload.shortDescription??'')||String(tagResponse.description??'')!==(checkpoint.tagPayload.description??''))speakerTailFailure();
+  await commit(async tx=>{const state=await tx.get(stateRef);if(state.get('checkpointDigest')!==checkpoint.checkpointDigest||state.get('tagId')&&state.get('tagId')!==confirmed.tagId)speakerTailFailure();if(!state.get('listSubsplashId'))tx.update(stateRef,{state:'tag_confirmed',tagId:confirmed.tagId});});
+  let remoteListId:string|undefined;
+  if(checkpoint.desiredList&&checkpoint.listPayload) {
+    const prior=await readSpeakerCreateReceipt(database,checkpoint,'list-create');
+    let result:unknown=prior?.state==='confirmed'?prior.result:undefined;
+    if(!result) {
+      const key=scopeOperationKey(checkpoint.operationKey,'create-speaker-list')!;
+      result=await executeProviderCreate({operationKey:key,step:'list-create',payload:checkpoint.listPayload,prepare:async()=>reserveSubsplashAssociation(`listcreate:${key}`,checkpoint.images.map(image=>toSubsplashImageReference(image,'speaker image').id),checkpoint.listPayload,{targetReceiptId:providerReceiptId(key,'list-create')}),execute:async()=>{
+        const config=createAxiosConfig('https://core.subsplash.com/builder/v1/lists',token,'POST',checkpoint.listPayload);Object.assign(config,{skipSubsplashEdgeRetry:true});const response=(await axios(config)).data as {id?:unknown};if(!validTailId(response.id))speakerTailFailure();return {listId:response.id};
+      }});
+    }
+    const created=(result as {listId?:unknown}|undefined)?.listId;if(!validTailId(created))return speakerTailFailure();remoteListId=created;
+    const list=synchronousMutationData<Record<string,unknown>>(await axios(createAxiosConfig(`https://core.subsplash.com/builder/v1/lists/${remoteListId}`,token,'GET')));
+    const remoteImages=((list._embedded as {images?:Array<{id?:unknown;type?:unknown}>}|undefined)?.images??[]).map(image=>({id:image.id,type:image.type}));
+    const expectedImages=checkpoint.images.map(image=>toSubsplashImageReference(image,'speaker image'));
+    if(list.id!==remoteListId||list.app_key!=='9XTSHD'||list.title!==checkpoint.desiredList.name||providerPayloadFingerprint([...remoteImages].sort((a,b)=>String(a.type).localeCompare(String(b.type))||String(a.id).localeCompare(String(b.id))))!==providerPayloadFingerprint([...expectedImages].sort((a,b)=>a.type.localeCompare(b.type)||a.id.localeCompare(b.id))))speakerTailFailure();
+    await commit(async tx=>{const state=await tx.get(stateRef);if(state.get('checkpointDigest')!==checkpoint.checkpointDigest||state.get('listSubsplashId')&&state.get('listSubsplashId')!==remoteListId)speakerTailFailure();tx.update(stateRef,{state:'list_confirmed',listSubsplashId:remoteListId});});
+  }
+  const speaker:ISpeaker={...checkpoint.desiredSpeaker,tagId:confirmed.tagId};
+  await commit(async tx=>{
+    const operation=getPublishingMutationOperation(),guard=operation?await prepareProviderMutationPlanCommit(tx,{operation}):undefined;
+    const [state,current]=await Promise.all([tx.get(stateRef),tx.get(speakerRef)]);
+    if(state.get('checkpointDigest')!==checkpoint.checkpointDigest||state.get('tagId')!==confirmed.tagId||acknowledgedProjectionDigest(current.data()??null)!==checkpoint.originalDocumentDigest)speakerTailFailure();
+    const linked=checkpoint.desiredSpeaker.listId?await tx.get(database.doc(`lists/${checkpoint.desiredSpeaker.listId}`)):undefined;
+    if(checkpoint.desiredList&&acknowledgedProjectionDigest(linked?.data()??null)!==checkpoint.originalListDocumentDigest||!checkpoint.desiredList&&checkpoint.desiredSpeaker.listId&&!linked?.exists)speakerTailFailure();
+    if(guard?.alreadyCommitted)speakerTailFailure();
+    tx.set(speakerRef,speaker);
+    if(checkpoint.desiredList&&remoteListId)tx.set(database.doc(`lists/${checkpoint.desiredList.id}`),{...checkpoint.desiredList,subsplashId:remoteListId});
+    tx.update(stateRef,{state:'completed',tagId:confirmed.tagId,...(remoteListId?{listSubsplashId:remoteListId}:{})});guard?.commit();
+  });
+  return {status:'success',speakerId:speaker.id,speaker,speakerListCreated:Boolean(checkpoint.desiredList),...(speaker.listId?{listId:speaker.listId}:{}),...(remoteListId?{listSubsplashId:remoteListId}:{})};
+}
+
+async function createDurableSpeakerWithCheckpoint(input:CreateSpeakerCallableInputType,options:{speakerId?:string}):Promise<CreateSpeakerCallableOutputType> {
+  const operationKey=input.operationKey!,scope=inferProviderReceiptScope(operationKey),jobId=getDurablePublishingJobId();
+  if(!scope||scope.jobId!==jobId)speakerTailFailure();
+  const speakerId=options.speakerId??providerReceiptId(operationKey,'local-speaker'),speakerRef=firestore.collection('speakers').doc(speakerId),stateRef=speakerCheckpointRef(firestore,{jobId:jobId!,speakerId});
+  let checkpoint=(await stateRef.get()).data() as SpeakerCreateTailCheckpoint|undefined;
+  if(checkpoint)validateSpeakerCreateTailCheckpoint(checkpoint,input,speakerId);
+  else {
+    const name=requireTrimmedSpeakerName(input.speaker.name);await assertSpeakerNameUnique(name);if(input.associatedListId)await assertListExists(input.associatedListId);
+    const original=await speakerRef.get();
+    if(original.exists)throw new HttpsError('already-exists','The selected speaker already exists.');
+    const resolved=input.createSpeakerList?await repairMismatchedSubsplashImageRefs(input.speaker.images,await authenticateSubsplash(),scopeOperationKey(operationKey,'speaker-images')):input.speaker.images;
+    if(resolved.length!==input.speaker.images.length)speakerTailFailure();
+    const images=input.speaker.images.map((image,index)=>{if(resolved[index].id!==image.id||resolved[index].type!==image.type)speakerTailFailure();return {...image,...(resolved[index].subsplashId?{subsplashId:resolved[index].subsplashId}:{})};});
+    const tagPayload={title:name,squareImage:requireSquareImage(images),...(input.speaker.shortDescription!==undefined?{shortDescription:input.speaker.shortDescription}:{}),...(input.speaker.description!==undefined?{description:input.speaker.description}:{})};
+    await runDurableTransaction(firestore,async tx=>{
+      const [previous,current,job,intent]=await Promise.all([tx.get(stateRef),tx.get(speakerRef),tx.get(firestore.doc(`durableJobs/${jobId}`)),tx.get(firestore.doc(`durableJobIntents/${jobId}`))]);
+      if(previous.exists){checkpoint=previous.data() as SpeakerCreateTailCheckpoint;validateSpeakerCreateTailCheckpoint(checkpoint,input,speakerId);return;}
+      if(!job.exists||job.get('projectId')!==scope!.projectId||job.get('jobId')!==jobId||job.get('generation')!==intent.get('generation')||!Number.isSafeInteger(job.get('generation'))||!validTailId(job.get('workflowId'))||intent.get('kind')==='speaker.mutate'&&intent.get('entity.id')!==speakerId||acknowledgedProjectionDigest(current.data()??null)!==acknowledgedProjectionDigest(original.data()??null))speakerTailFailure();
+      const listId=input.createSpeakerList?providerPayloadFingerprint([scopeOperationKey(operationKey,'create-speaker-list'),'local-speaker-list']).slice(0,32):input.associatedListId;
+      const listBase=input.createSpeakerList&&listId?await tx.get(firestore.doc(`lists/${listId}`)):undefined;
+      const now=Date.now(),desiredSpeaker:Omit<ISpeaker,'tagId'>={id:speakerId,name,shortDescription:input.speaker.shortDescription??'',description:input.speaker.description??'',images,sermonCount:0,...(listId?{listId}:{})};
+      const desiredList=input.createSpeakerList&&listId?{id:listId,name,images,overflowBehavior:OverflowBehavior.CREATENEWLIST,count:0,type:ListType.SPEAKER_LIST,createdAtMillis:now,updatedAtMillis:now,...buildRootListMetadata({rootListId:listId,logicalCount:0,hasOverflowPages:false})}:undefined;
+      const raw={schemaVersion:1 as const,...scope!,generation:job.get('generation') as number,workflowId:job.get('workflowId') as string,speakerId,operationKey,inputFingerprint:providerPayloadFingerprint(input),images,desiredSpeaker,tagPayload,originalExists:current.exists,originalDocumentDigest:acknowledgedProjectionDigest(current.data()??null),...(desiredList?{desiredList,listPayload:frozenListPayload(name,images),originalListDocumentDigest:acknowledgedProjectionDigest(listBase?.data()??null)}:{})};
+      checkpoint={...raw,checkpointDigest:acknowledgedProjectionDigest(raw)};tx.create(stateRef,{...checkpoint,state:'captured'});
+    });
+  }
+  if(!checkpoint)speakerTailFailure();
+  const tag=await createSubsplashSpeakerTag({...checkpoint!.tagPayload,operationKey:scopeOperationKey(operationKey,'create-speaker-tag')});
+  return completeConfirmedSpeakerCreate(input,tag,{checkpoint:checkpoint!,speakerId});
+}
+
 export const createSpeakerMutation = async (
-  input: CreateSpeakerCallableInputType
+  input: CreateSpeakerCallableInputType,
+  options: {speakerId?:string} = {}
 ): Promise<CreateSpeakerCallableOutputType> => {
   return runWithOptionalIdempotency(input.operationKey, async () => {
+    if(isDurablePublishingOperation()&&input.operationKey)return createDurableSpeakerWithCheckpoint(input,options);
     const normalizedName = requireTrimmedSpeakerName(input.speaker.name);
+    const existingSpeakerRef=options.speakerId?speakersCollection.doc(options.speakerId):undefined;
+    if(existingSpeakerRef) {
+      const existing=await existingSpeakerRef.get();
+      if(existing.exists) {
+        const speaker=existing.data()!;
+        if(normalizeSpeakerNameForDuplicateCheck(speaker.name)!==normalizeSpeakerNameForDuplicateCheck(normalizedName)) throw new HttpsError('failed-precondition','The admitted speaker identity changed.');
+        return {status:'success' as const,speakerId:speaker.id,speaker,speakerListCreated:Boolean(speaker.listId),...(speaker.listId?{listId:speaker.listId}:{})};
+      }
+    }
     const squareImage = requireSquareImage(input.speaker.images);
     await assertSpeakerNameUnique(normalizedName);
 
@@ -785,7 +1084,7 @@ export const createSpeakerMutation = async (
         );
       }
 
-      const speakerRef = speakersCollection.doc();
+      const speakerRef = existingSpeakerRef ?? speakersCollection.doc();
       const associatedListId = preparedList?.list.id ?? input.associatedListId;
       const speaker: ISpeaker = {
         id: speakerRef.id,
@@ -798,11 +1097,15 @@ export const createSpeakerMutation = async (
         ...(associatedListId ? { listId: associatedListId } : {}),
       };
 
-      await firestore.runTransaction(async (transaction) => {
+      await runDurableTransaction(firestore, async (transaction) => {
+        const operation = getPublishingMutationOperation();
+        const guard = operation ? await prepareProviderMutationPlanCommit(transaction, { operation }) : undefined;
+        if (guard?.alreadyCommitted) return;
         transaction.set(speakerRef, speaker);
         if (preparedList) {
           transaction.set(preparedList.listRef, preparedList.list);
         }
+        guard?.commit();
       });
 
       return {
@@ -814,6 +1117,8 @@ export const createSpeakerMutation = async (
         ...(preparedList?.list.subsplashId ? { listSubsplashId: preparedList.list.subsplashId } : {}),
       };
     } catch (error) {
+      // Durable primitive receipts retain remote objects for a resumed saga.
+      if(isDurablePublishingOperation()) throw error;
       try {
         await deleteSubsplashTagRemote(
           createdTag.tagId,
@@ -856,7 +1161,8 @@ export const updateSpeakerMutation = async (
       await assertSpeakerNameUnique(normalizedName, existingSpeaker.id);
     }
 
-    if (input.createSpeakerList && existingSpeaker.listId && !input.deleteAssociatedList) {
+    const durableListId=isDurablePublishingOperation() && input.operationKey ? providerPayloadFingerprint([scopeOperationKey(input.operationKey,'create-speaker-list'),'local-speaker-list']).slice(0,32) : undefined;
+    if (input.createSpeakerList && existingSpeaker.listId && !input.deleteAssociatedList && existingSpeaker.listId!==durableListId) {
       throw new HttpsError(
         'invalid-argument',
         'Speaker already has an associated list. Remove it before creating a new one.'
@@ -893,7 +1199,11 @@ export const updateSpeakerMutation = async (
       }
     }
 
+    let requiredTagStep: string | undefined;
     if (existingSpeaker.tagId) {
+      const tagPayload = {app_key:'9XTSHD',type:'speaker',title:normalizedName,short_description:nextShortDescription ?? '',description:nextDescription ?? '',
+        _embedded:{'square-image':toSubsplashImageReference(requireSquareImage(nextImages),'squareImage')}};
+      requiredTagStep = `speaker-tag-patch:${existingSpeaker.tagId}:${providerPayloadFingerprint(tagPayload)}`;
       await createSubsplashSpeakerTag({
         tagId: existingSpeaker.tagId,
         title: normalizedName,
@@ -901,7 +1211,7 @@ export const updateSpeakerMutation = async (
         shortDescription: nextShortDescription,
         description: nextDescription,
         operationKey: scopeOperationKey(input.operationKey, `update-speaker-tag-${existingSpeaker.tagId}`),
-      });
+      }, {speakerId:existingSpeaker.id});
     }
 
     if (
@@ -917,7 +1227,9 @@ export const updateSpeakerMutation = async (
           existingList.subsplashId,
           normalizedName,
           nextImages,
-          scopeOperationKey(input.operationKey, `update-speaker-list-${existingList.subsplashId}`)
+          scopeOperationKey(input.operationKey, `update-speaker-list-${existingList.subsplashId}`),
+          existingSpeaker.listId,
+          {speakerId:existingSpeaker.id,requiredTagStep}
         );
       }
     }
@@ -940,7 +1252,10 @@ export const updateSpeakerMutation = async (
       ...(nextListId ? { listId: nextListId } : {}),
     };
 
-    await firestore.runTransaction(async (transaction) => {
+    await runDurableTransaction(firestore, async (transaction) => {
+      const operation = getPublishingMutationOperation();
+      const guard = operation ? await prepareProviderMutationPlanCommit(transaction, { operation }) : undefined;
+      if (guard?.alreadyCommitted) return;
       transaction.set(speakerRef, updatedSpeaker);
       if (preparedList) {
         transaction.set(preparedList.listRef, preparedList.list);
@@ -964,6 +1279,7 @@ export const updateSpeakerMutation = async (
           { merge: true }
         );
       }
+      guard?.commit();
     });
 
     return {
@@ -984,6 +1300,7 @@ export const deleteSpeakerMutation = async (
     const speakerRef = speakersCollection.doc(input.speakerId);
     const speakerSnapshot = await speakerRef.get();
     if (!speakerSnapshot.exists) {
+      if(isDurablePublishingOperation()) return {status:'success' as const,speakerId:input.speakerId,tagDeleted:false,removedFromSermonsCount:0,listDeleted:false};
       throw new HttpsError('not-found', `Speaker ${input.speakerId} does not exist.`);
     }
 
@@ -993,10 +1310,12 @@ export const deleteSpeakerMutation = async (
     }
 
     let tagDeleted = false;
+    let mirrorCounts: {sermonsUpdated:number;listMirrorsUpdated:number;seriesMirrorsUpdated:number} | undefined;
     if (existingSpeaker.tagId) {
-      await deleteSubsplashTagRemote(
+      mirrorCounts = await deleteSubsplashTagRemote(
         existingSpeaker.tagId,
-        scopeOperationKey(input.operationKey, `delete-tag-${existingSpeaker.tagId}`)
+        scopeOperationKey(input.operationKey, `delete-tag-${existingSpeaker.tagId}`),
+        {speakerId:existingSpeaker.id}
       );
       tagDeleted = true;
     }
@@ -1005,7 +1324,7 @@ export const deleteSpeakerMutation = async (
     let deletedSubsplashListId: string | undefined;
     let listDeleted = false;
 
-    if (existingSpeaker.listId) {
+    if (input.deleteAssociatedList === true && existingSpeaker.listId) {
       const listRef = listsCollection.doc(existingSpeaker.listId);
       const listSnapshot = await listRef.get();
       if (listSnapshot.exists) {
@@ -1023,11 +1342,17 @@ export const deleteSpeakerMutation = async (
       }
     }
 
-    const removedFromSermonsCount = await removeSpeakerFromSermons(existingSpeaker);
+    const removedFromSermonsCount = mirrorCounts?.sermonsUpdated ?? await removeSpeakerFromSermons(existingSpeaker);
 
     const deleteBatch = firestore.batch();
     deleteBatch.delete(speakerRef);
-    await deleteBatch.commit();
+    await commitDurableProjection(async tx=>{
+      const operation = getPublishingMutationOperation();
+      const guard = operation ? await prepareProviderMutationPlanCommit(tx, { operation }) : undefined;
+      if (guard?.alreadyCommitted) return;
+      tx.delete(speakerRef);
+      guard?.commit();
+    },async()=>{await deleteBatch.commit();});
 
     return {
       status: 'success',

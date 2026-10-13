@@ -7,14 +7,16 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import PopUp from './PopUp';
 import Image from 'next/image';
 import ImageUploader from './ImageUploader';
-import firestore, { collection, getDocs, onSnapshot, query, where } from '../firebase/firestore';
-import { imageStorage, ref, uploadBytes } from '../firebase/storage';
+import firestore, { doc, getDoc } from '../firebase/firestore';
+import { ingestDurableImage } from '../utils/durableImages';
+import { useDurableJob } from '../hooks/useDurableJobs';
+import JobStatusPanel from './jobs/JobStatusPanel';
 import { CroppedImageData } from '../utils/cropImage';
 import { SpeakerRequestImageAsset } from '@upperroom/contracts/speakerRequests/speakerRequestTypes';
 
@@ -44,28 +46,7 @@ interface CreateSpeakerPopupProps {
   submitLabel?: string;
 }
 
-const IMAGE_SAVE_TIMEOUT_MS = 30000;
-const IMAGE_NAME_MAX_ATTEMPTS = 50;
 const MAX_SPEAKER_NAME_LENGTH = 30;
-
-const buildIncrementedImageName = (name: string, increment: number): string => {
-  const extensionIndex = name.lastIndexOf('.');
-  if (extensionIndex <= 0) {
-    return `${name}-${increment}`;
-  }
-
-  const baseName = name.slice(0, extensionIndex);
-  const extension = name.slice(extensionIndex);
-  const imageTypeSuffixMatch = baseName.match(/-(square|wide|banner)$/);
-
-  if (imageTypeSuffixMatch) {
-    const imageTypeSuffix = imageTypeSuffixMatch[0];
-    const nameWithoutTypeSuffix = baseName.slice(0, -imageTypeSuffix.length);
-    return `${nameWithoutTypeSuffix}-${increment}${imageTypeSuffix}${extension}`;
-  }
-
-  return `${baseName}-${increment}${extension}`;
-};
 
 const CreateSpeakerPopup = ({
   open,
@@ -82,12 +63,12 @@ const CreateSpeakerPopup = ({
   const [submitError, setSubmitError] = useState<string>('');
   const [imageUploadError, setImageUploadError] = useState<string>('');
   const [imageUploading, setImageUploading] = useState<boolean>(false);
+  const [imageJobId, setImageJobId] = useState<string>();
+  const { job: imageJob, stale: imageJobStale } = useDurableJob(imageJobId);
+  const handledImageJob = useRef<string | undefined>(undefined);
   const [requestedImageCropType, setRequestedImageCropType] = useState<ImageSizeType | null>(null);
 
-  const hasSquareImage = useMemo(
-    () => formValues.images.some((image) => image.type === 'square'),
-    [formValues.images]
-  );
+  const hasSquareImage = useMemo(() => formValues.images.some((image) => image.type === 'square'), [formValues.images]);
   const normalizedName = formValues.name.trim();
 
   const resetForm = useCallback(() => {
@@ -132,62 +113,43 @@ const CreateSpeakerPopup = ({
 
   const uploadTitle = normalizedName.replaceAll(' ', '-');
 
-  const handleRequestedImageUpload = useCallback(
-    async (croppedImageData: CroppedImageData, name: string) => {
-      try {
-        setImageUploading(true);
-        setImageUploadError('');
-
-        let resolvedName = name;
-        let existingImageQuery = query(collection(firestore, 'images'), where('name', '==', resolvedName));
-        let existingImageSnapshot = await getDocs(existingImageQuery);
-
-        for (let increment = 2; !existingImageSnapshot.empty && increment <= IMAGE_NAME_MAX_ATTEMPTS; increment += 1) {
-          resolvedName = buildIncrementedImageName(name, increment);
-          existingImageQuery = query(collection(firestore, 'images'), where('name', '==', resolvedName));
-          existingImageSnapshot = await getDocs(existingImageQuery);
-        }
-
-        if (!existingImageSnapshot.empty) {
-          setImageUploadError('Unable to find a unique image name for this speaker image. Please try again.');
-          setImageUploading(false);
-          return;
-        }
-
-        const imageRef = ref(imageStorage, `speaker-images/${resolvedName}`);
-        await uploadBytes(imageRef, croppedImageData.blob, {
-          contentType: croppedImageData.contentType,
-          customMetadata: { name: resolvedName, size: 'original', type: croppedImageData.type },
-        });
-
-        let unsubscribe: () => void = () => {};
-        const timeoutId = window.setTimeout(() => {
-          unsubscribe();
-          setImageUploading(false);
-            setImageUploadError('Image upload finished, but processing did not complete in time. Please try again.');
-        }, IMAGE_SAVE_TIMEOUT_MS);
-
-        unsubscribe = onSnapshot(existingImageQuery, (snapshot) => {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type !== 'added') {
-              return;
-            }
-
-            const uploadedImage = change.doc.data() as ImageType;
-            window.clearTimeout(timeoutId);
-            setImageUploading(false);
-            handleImageUpdate(uploadedImage);
-            setRequestedImageCropType(null);
-            unsubscribe();
-          });
-        });
-      } catch (error) {
-        setImageUploading(false);
-        setImageUploadError(error instanceof Error ? error.message : 'Unable to upload requested image.');
-      }
-    },
-    [handleImageUpdate]
-  );
+  const handleRequestedImageUpload = useCallback(async (croppedImageData: CroppedImageData, name: string) => {
+    setImageUploading(true);
+    setImageUploadError('');
+    try {
+      const receipt = await ingestDurableImage(croppedImageData, name);
+      setImageJobId(receipt.jobId);
+      setRequestedImageCropType(null);
+    } catch (error) {
+      setImageUploadError(
+        error instanceof Error ? error.message : 'Unable to confirm this image request. The source has been kept.'
+      );
+      throw error;
+    } finally {
+      setImageUploading(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (imageJob?.state !== 'succeeded' || handledImageJob.current === imageJob.jobId) return;
+    const imageId = imageJob.result?.imageId;
+    if (typeof imageId !== 'string') return;
+    let cancelled = false;
+    getDoc(doc(firestore, 'images', imageId))
+      .then((snapshot) => {
+        if (cancelled || !snapshot.exists()) return;
+        handledImageJob.current = imageJob.jobId;
+        handleImageUpdate({ ...snapshot.data(), id: snapshot.id } as ImageType);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setImageUploadError(
+            'Image processing completed, but its details could not be refreshed. Select it from the image library.'
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageJob, handleImageUpdate]);
 
   const handleSubmit = async () => {
     if (!normalizedName || !hasSquareImage || submitting || imageUploading) {
@@ -278,7 +240,8 @@ const CreateSpeakerPopup = ({
           {requestedImageAsset && (
             <Stack spacing={1.5} sx={{ mb: 2 }}>
               <Typography variant="body2" color="text.secondary">
-                A request image was included. You can crop it into square, wide, or banner images before creating the speaker.
+                A request image was included. You can crop it into square, wide, or banner images before creating the
+                speaker.
               </Typography>
               <Box
                 sx={{
@@ -292,12 +255,12 @@ const CreateSpeakerPopup = ({
                   borderColor: 'divider',
                   backgroundColor: 'background.default',
                 }}
-                >
-                  <Image
-                    src={requestedImageAsset.downloadLink}
-                    alt={requestedImageAsset.fileName}
-                    fill
-                    sizes="(max-width: 600px) 100vw, 220px"
+              >
+                <Image
+                  src={requestedImageAsset.downloadLink}
+                  alt={requestedImageAsset.fileName}
+                  fill
+                  sizes="(max-width: 600px) 100vw, 220px"
                   style={{ objectFit: 'contain' }}
                 />
               </Box>
@@ -336,7 +299,8 @@ const CreateSpeakerPopup = ({
           />
         </Box>
 
-        {imageUploading && <Alert severity="info">Uploading cropped speaker image…</Alert>}
+        {imageUploading && <Alert severity="info">Sending cropped image…</Alert>}
+        {imageJob && <JobStatusPanel job={imageJob} stale={imageJobStale} compact />}
         {imageUploadError && <Alert severity="error">{imageUploadError}</Alert>}
         {submitError && <Alert severity="error">{submitError}</Alert>}
       </Stack>

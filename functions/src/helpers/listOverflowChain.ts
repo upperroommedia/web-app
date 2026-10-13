@@ -1,3 +1,7 @@
+import {markPublishingCritical, getPublishingMutationOperation, runPublishingProviderMutation} from '../temporal/publishing/durableOperationContext';
+import { providerPayloadFingerprint } from '../temporal/publishing/providerReceipts';
+import { assertSynchronousProviderMutationCompleted } from '../temporal/publishing/providerMutationCompletion';
+import { createDurableWriteBatch, runDurableTransaction } from '../temporal/publishing/durableOperationContext';
 import firebaseAdmin from '../../../packages/shared/firebase/firebaseAdmin.js';
 import { FieldValue, type DocumentReference, type SetOptions } from 'firebase-admin/firestore';
 import type { List } from '../../../packages/shared/types/List';
@@ -217,28 +221,28 @@ type BatchWriteOperation =
     }
   | {
       type: 'update';
+      incrementPublishGeneration?: true;
       ref: DocumentReference;
       data: Record<string, unknown>;
     };
 
 const commitBatchWriteOperations = async (operations: BatchWriteOperation[]): Promise<void> => {
   for (const operationChunk of chunkValues(operations, 400)) {
-    const batch = firestore.batch();
-
-    operationChunk.forEach((operation) => {
-      if (operation.type === 'set') {
-        if (operation.options) {
-          batch.set(operation.ref, operation.data, operation.options);
-        } else {
-          batch.set(operation.ref, operation.data);
+    await runDurableTransaction(firestore, async batch => {
+      const generations = new Map<string, number>();
+      for (const operation of operationChunk) {
+        if (operation.type === 'update' && operation.incrementPublishGeneration) {
+          const current = await batch.get(operation.ref);
+          generations.set(operation.ref.path, (Number(current.get('publishGeneration')) || 0) + 1);
         }
-        return;
       }
-
-      batch.update(operation.ref, operation.data);
+      for (const operation of operationChunk) {
+        if (operation.type === 'set') {
+          if (operation.options) batch.set(operation.ref, operation.data, operation.options);
+          else batch.set(operation.ref, operation.data);
+        } else batch.update(operation.ref, {...operation.data,...(operation.incrementPublishGeneration ? {publishGeneration:generations.get(operation.ref.path)} : {})});
+      }
     });
-
-    await batch.commit();
   }
 };
 
@@ -402,10 +406,10 @@ export const syncRootMembershipPlacements = async (
     operations.push({
       type: 'update',
       ref: firestore.collection('sermons').doc(doc.id).collection('sermonLists').doc(rootListId),
+      incrementPublishGeneration:true,
       data: {
         'uploadStatus.status': uploadStatus.NOT_UPLOADED,
         'uploadStatus.listItemId': FieldValue.delete(),
-        publishGeneration: FieldValue.increment(1),
       },
     });
   });
@@ -438,7 +442,19 @@ const patchSubsplashListTitle = async (
     requestData
   );
 
-  await axios(config);
+  await markPublishingCritical('PUBLISHING_ASSOCIATION_CRITICAL', {
+    provider: 'subsplash', resourceType: 'list', resourceId: subsplashId, accountId: 'app:9XTSHD',
+    method: 'PATCH', requestFingerprint: providerPayloadFingerprint(JSON.parse(requestData)),
+  });
+  Object.assign(config, { skipSubsplashEdgeRetry: true });
+  const payload = JSON.parse(requestData);
+  await runPublishingProviderMutation({
+    operation: getPublishingMutationOperation() ?? 'legacy-list-mutation',
+    step: `patch-list-title:${subsplashId}:${providerPayloadFingerprint(payload)}`,
+    target: { provider: 'subsplash', account: 'app:9XTSHD', resourceType: 'list', resourceId: subsplashId },
+    method: 'PATCH', payload,
+    send: async () => { assertSynchronousProviderMutationCompleted(await axios(config)); return { completion: 'acknowledged', result: { id: subsplashId } }; },
+  });
 };
 
 const collapseEmptyTailOverflowPages = async (
@@ -505,12 +521,24 @@ const collapseEmptyTailOverflowPages = async (
       linkRowsToDelete: summarizeSubsplashRows(linkRowsToDelete),
     });
     for (const linkRow of linkRowsToDelete) {
+      await markPublishingCritical('PUBLISHING_DELETE_CRITICAL', {
+        provider: 'subsplash', resourceType: 'list-row', resourceId: linkRow.id!, accountId: 'app:9XTSHD',
+        method: 'DELETE', canonicalPaths: [`lists/${parentNode.record.id}`],
+      });
       const deleteConfig = createAxiosConfig(
         `https://core.subsplash.com/builder/v1/list-rows/${linkRow.id}`,
         token,
         'DELETE'
       );
-      await axios(deleteConfig);
+      Object.assign(deleteConfig, { skipSubsplashEdgeRetry: true });
+      const payload = { id: linkRow.id! };
+      await runPublishingProviderMutation({
+        operation: getPublishingMutationOperation() ?? 'legacy-list-mutation',
+        step: `delete-overflow-link:${linkRow.id}:${providerPayloadFingerprint(payload)}`,
+        target: { provider: 'subsplash', account: 'app:9XTSHD', resourceType: 'list-row', resourceId: linkRow.id! },
+        method: 'DELETE', payload,
+        send: async () => { assertSynchronousProviderMutationCompleted(await axios(deleteConfig)); return { completion: 'acknowledged', result: null }; },
+      });
     }
     const updatedParentRows = parentRows.filter(
       (row) => !(row.type === 'list' && row._embedded.list?.id === tailSubsplashId)
@@ -518,7 +546,7 @@ const collapseEmptyTailOverflowPages = async (
 
     await patchListRows(parentSubsplashId, updatedParentRows, token);
     const now = Date.now();
-    const batch = firestore.batch();
+    const batch = createDurableWriteBatch(firestore);
     batch.update(firestore.collection('lists').doc(parentNode.record.id), {
       moreSermonsRef: FieldValue.delete(),
       updatedAtMillis: now,
@@ -961,7 +989,7 @@ export const syncOverflowChainMetadata = async (
   const logicalCount = counts.reduce((sum, count) => sum + count, 0);
   const hasOverflowPages = chain.length > 1;
   const now = Date.now();
-  const batch = firestore.batch();
+  const batch = createDurableWriteBatch(firestore);
 
   chain.forEach((node, index) => {
     const metadata =
@@ -1022,7 +1050,7 @@ export const syncOverflowChainNames = async (
   const issues: GetListOverflowChainIssue[] = [];
   const rootRecord = await resolveRootRecord(startingRecord, issues);
   const chain = await getStoredChainNodesFromRoot(rootRecord);
-  const batch = firestore.batch();
+  const batch = createDurableWriteBatch(firestore);
   const now = Date.now();
 
   batch.set(

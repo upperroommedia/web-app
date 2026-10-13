@@ -16,9 +16,9 @@
 
 import { createTransport } from "nodemailer";
 import { URL } from "url";
-import { invalidTlsOptions, invalidURI } from "./logs";
+import type {ConnectionOptions} from "node:tls";
+import { invalidURI } from "./logs";
 import { AuthenticatonType, Config } from "./types";
-import * as logger from "firebase-functions/logger";
 
 function compileUrl($: string): URL | null {
   try {
@@ -35,17 +35,18 @@ function checkMicrosoftServer($: string): boolean {
 }
 
 export function parseTlsOptions(tlsOptions: string = "{}") {
-  let tls = { rejectUnauthorized: true };
+  let tls: ConnectionOptions = { rejectUnauthorized: true };
 
   try {
     tls = JSON.parse(tlsOptions.trim() || "{}");
     if (!tls || typeof tls !== "object" || Array.isArray(tls)) throw new Error("Expected TLS options object");
+    if (tls.rejectUnauthorized === false || process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") throw new Error("Certificate verification required");
+    if (tls.minVersion && !["TLSv1.2", "TLSv1.3"].includes(tls.minVersion) || tls.maxVersion && !["TLSv1.2", "TLSv1.3"].includes(tls.maxVersion) || tls.secureProtocol || tls.secureOptions) throw new Error("TLS 1.2 or newer required without legacy overrides");
   } catch (ex) {
-    invalidTlsOptions();
-    throw new Error("Invalid TLS_OPTIONS JSON; refusing insecure fallback");
+    throw new Error("Invalid TLS_OPTIONS: require valid JSON, certificate verification, and TLS 1.2 or newer; refusing insecure fallback");
   }
 
-  return tls;
+  return {...tls, rejectUnauthorized: true, minVersion: tls.minVersion || "TLSv1.2"};
 }
 
 export function setSmtpCredentials(config: Config) {
@@ -55,7 +56,6 @@ export function setSmtpCredentials(config: Config) {
 
     const transporter = setupOAuth2(config);
 
-    logger.info("OAuth2 transport setup successfully");
     return transporter;
   }
 
@@ -68,7 +68,7 @@ export function setSmtpCredentials(config: Config) {
   url = compileUrl(smtpConnectionUri);
 
   /** return null if invalid url */
-  if (!url) {
+  if (!url || !["smtp:", "smtps:"].includes(url.protocol)) {
     invalidURI();
     throw new Error(
       `Invalid URI: please reconfigure with a valid SMTP connection URI`
@@ -88,7 +88,9 @@ export function setSmtpCredentials(config: Config) {
   // Outlook requires explicit configuration
   if (checkMicrosoftServer(url.hostname)) {
     transport = createTransport({
-      service: "hotmail",
+      service: "hotmail", logger: false, debug: false,
+      requireTLS: true, ignoreTLS: false, tls: parseTlsOptions(config.tls),
+      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 45000,
       auth: {
         user: decodeURIComponent(url.username),
         pass: decodeURIComponent(url.password),
@@ -96,7 +98,8 @@ export function setSmtpCredentials(config: Config) {
     });
   } else {
     transport = createTransport({
-      url: url.href,
+      url: url.href, logger: false, debug: false,
+      secure: url.protocol === "smtps:", requireTLS: url.protocol === "smtp:", ignoreTLS: false,
       tls: parseTlsOptions(config.tls),
       connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 45000,
     });
@@ -120,10 +123,10 @@ export function setupOAuth2(config: Config) {
     config;
   try {
     return createTransport({
-      host,
+      host, logger: false, debug: false,
       connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 45000,
       port,
-      secure,
+      secure, requireTLS: !secure, ignoreTLS: false, tls: parseTlsOptions(config.tls),
       auth: {
         type: AuthenticatonType.OAuth2,
         clientId,

@@ -1,3 +1,4 @@
+import { testCallableAuth } from '../helpers/callableAuth';
 /**
  * Tests for createSeries Firebase function
  * TDD approach: Tests written first
@@ -7,7 +8,12 @@ import { subsplashSeriesMock, networkFailureInjector, TestRequest } from './mock
 import { clearFirestore, createSeriesDocument, getSeriesBySubsplashId, getAllSeries } from './firestoreHelpers';
 import createSeries, { CreateSeriesInputType, CreateSeriesOutputType } from '../../createSeries';
 import * as seriesHelpers from '../../helpers/seriesHelpers';
-import { claimOperation } from '../../locks/withIdempotency';
+import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
+import {
+  PROVIDER_RECEIPTS_COLLECTION,
+  providerReceiptId,
+  providerPayloadFingerprint,
+} from '../../temporal/publishing/providerReceipts';
 
 // Type for the handler function
 type CreateSeriesHandler = (request: TestRequest<CreateSeriesInputType>) => Promise<CreateSeriesOutputType>;
@@ -24,7 +30,7 @@ describe('createSeries - Basic Functionality', () => {
 
   it('should create a new series with title', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'My Test Series',
         ownerId: TEST_USER_ID,
@@ -47,7 +53,7 @@ describe('createSeries - Basic Functionality', () => {
 
   it('should create a series with derived subtitle and summary', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Complete Series',
         summary: '<p>This is the summary</p>',
@@ -67,7 +73,7 @@ describe('createSeries - Basic Functionality', () => {
 
   it('should return subsplash metadata in the response', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Metadata Test Series',
         ownerId: TEST_USER_ID,
@@ -83,7 +89,7 @@ describe('createSeries - Basic Functionality', () => {
 
   it('should initialize series with zero item counts', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Empty Series',
         ownerId: TEST_USER_ID,
@@ -102,7 +108,7 @@ describe('createSeries - Basic Functionality', () => {
 
   it('should publish the remote series immediately after creation', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Draft Series',
         ownerId: TEST_USER_ID,
@@ -119,7 +125,7 @@ describe('createSeries - Basic Functionality', () => {
 
   it('should persist provided images when syncing to Subsplash', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Series With Synced Images',
         ownerId: TEST_USER_ID,
@@ -146,7 +152,7 @@ describe('createSeries - Basic Functionality', () => {
     subsplashSeriesMock.createImage('banner', { id: 'subsplash-banner', title: 'Banner' });
 
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Series With Remote Image Refs',
         ownerId: TEST_USER_ID,
@@ -193,7 +199,7 @@ describe('createSeries - Basic Functionality', () => {
     subsplashSeriesMock.createImage('square', { id: 'subsplash-banner', title: 'Banner But Wrong Type' });
 
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Series With Repaired Image Refs',
         ownerId: TEST_USER_ID,
@@ -250,7 +256,7 @@ describe('createSeries - Basic Functionality', () => {
     });
 
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         firestoreId: existingSeriesId,
         title: 'Local Draft Series',
@@ -293,7 +299,7 @@ describe('createSeries - Authentication', () => {
 
   it('should reject requests from users without publish role when syncing to Subsplash', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'viewer' } },
+      auth: testCallableAuth('viewer'),
       data: {
         title: 'Viewer Series',
         ownerId: TEST_USER_ID,
@@ -305,7 +311,7 @@ describe('createSeries - Authentication', () => {
 
   it('should allow admin role to create series', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Admin Series',
         ownerId: TEST_USER_ID,
@@ -318,7 +324,7 @@ describe('createSeries - Authentication', () => {
 
   it('should allow publisher role to create series', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'publisher' } },
+      auth: testCallableAuth('publisher'),
       data: {
         title: 'Publisher Series',
         ownerId: TEST_USER_ID,
@@ -331,7 +337,7 @@ describe('createSeries - Authentication', () => {
 
   it('should allow uploader role to create local-only series with skipSubsplash', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'uploader' } },
+      auth: testCallableAuth('uploader'),
       data: {
         title: 'Uploader Series',
         ownerId: TEST_USER_ID,
@@ -354,7 +360,7 @@ describe('createSeries - Validation', () => {
 
   it('should reject requests without title', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: '',
         ownerId: TEST_USER_ID,
@@ -366,7 +372,7 @@ describe('createSeries - Validation', () => {
 
   it('should handle whitespace-only title as invalid', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: '   ',
         ownerId: TEST_USER_ID,
@@ -378,7 +384,7 @@ describe('createSeries - Validation', () => {
 
   it('should reject requests without ownerId', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Missing Owner Series',
         ownerId: '',
@@ -401,7 +407,7 @@ describe('createSeries - Error Handling', () => {
     networkFailureInjector.registerFailure('createSeries', () => true);
 
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Failing Series',
         ownerId: TEST_USER_ID,
@@ -425,7 +431,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
 
   it('should create a local-only series without calling Subsplash', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Local Only Series',
         ownerId: TEST_USER_ID,
@@ -449,7 +455,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
 
   it('should create local-only series with derived subtitle and summary', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'uploader' } },
+      auth: testCallableAuth('uploader'),
       data: {
         title: 'Full Local Series',
         summary: 'A local summary',
@@ -474,7 +480,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
     ];
 
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'uploader' } },
+      auth: testCallableAuth('uploader'),
       data: {
         title: 'Series With Images',
         ownerId: TEST_USER_ID,
@@ -496,7 +502,7 @@ describe('createSeries - Local Only (skipSubsplash)', () => {
 
   it('should create local-only series with empty images array when not provided', async () => {
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'uploader' } },
+      auth: testCallableAuth('uploader'),
       data: {
         title: 'Series Without Images',
         ownerId: TEST_USER_ID,
@@ -524,7 +530,7 @@ describe('createSeries - Locking and Idempotency', () => {
   it('should replay prior terminal result for duplicate operation key', async () => {
     const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries');
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Replay Create Series',
         ownerId: TEST_USER_ID,
@@ -536,6 +542,22 @@ describe('createSeries - Locking and Idempotency', () => {
     const secondResult = await createSeriesHandler(request);
 
     expect(firstResult).toEqual(secondResult);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects changed content for a confirmed creation operation key', async () => {
+    const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries');
+    const request: TestRequest<CreateSeriesInputType> = {
+      auth: testCallableAuth('admin'),
+      data: { title: 'Immutable series', ownerId: TEST_USER_ID, operationKey: 'immutable-create-1' },
+    };
+    await createSeriesHandler(request);
+    await expect(
+      createSeriesHandler({ ...request, data: { ...request.data, title: 'Different series' } })
+    ).rejects.toMatchObject({
+      code: 'failed-precondition',
+      details: { reason: 'PROVIDER_PAYLOAD_CHANGED' },
+    });
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -554,7 +576,7 @@ describe('createSeries - Locking and Idempotency', () => {
     const results = await Promise.all(
       ['concurrent-create-1', 'concurrent-create-2', 'concurrent-create-3'].map((operationKey) =>
         createSeriesHandler({
-          auth: { token: { role: 'admin' } },
+          auth: testCallableAuth('admin'),
           data: {
             title: 'Concurrent Create Series',
             ownerId: TEST_USER_ID,
@@ -569,11 +591,10 @@ describe('createSeries - Locking and Idempotency', () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('should return busy payload details when operation key is already in progress', async () => {
+  it('requires provider review when a crashed creation receipt is still executing', async () => {
     const createSpy = jest.spyOn(seriesHelpers, 'createSubsplashSeries');
-    await claimOperation('create-op-busy-1');
     const request: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Busy Create Series',
         ownerId: TEST_USER_ID,
@@ -581,14 +602,24 @@ describe('createSeries - Locking and Idempotency', () => {
       } as CreateSeriesInputType,
     };
 
+    const operationKey = 'create-op-busy-1';
+    const payload = { ...request.data, firestoreId: providerReceiptId(operationKey, 'local-series') };
+    await firebaseAdmin
+      .firestore()
+      .collection(PROVIDER_RECEIPTS_COLLECTION)
+      .doc(providerReceiptId(operationKey, 'subsplash-series'))
+      .set({
+        operationKey,
+        step: 'subsplash-series',
+        fingerprint: providerPayloadFingerprint(payload),
+        intentPayload: payload,
+        state: 'executing',
+        owner: 'crashed-process',
+        updatedAtMillis: 0,
+      });
     await expect(createSeriesHandler(request)).rejects.toMatchObject({
-      code: 'aborted',
-      details: {
-        code: 'SUBSPLASH_LOCK_BUSY',
-        locked_keys: ['operation:create-op-busy-1'],
-        wait_ms: 10000,
-        retry_after_ms: 1000,
-      },
+      code: 'failed-precondition',
+      details: { reason: 'PROVIDER_RESULT_AMBIGUOUS' },
     });
     expect(createSpy).not.toHaveBeenCalled();
   });
@@ -601,7 +632,7 @@ describe('createSeries - Locking and Idempotency', () => {
     });
 
     const firstRequest: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Create Lock Release',
         ownerId: TEST_USER_ID,
@@ -610,11 +641,12 @@ describe('createSeries - Locking and Idempotency', () => {
     };
 
     await expect(createSeriesHandler(firstRequest)).rejects.toMatchObject({
-      code: 'internal',
+      code: 'failed-precondition',
+      details: { reason: 'PROVIDER_RESULT_AMBIGUOUS' },
     });
 
     const secondRequest: TestRequest<CreateSeriesInputType> = {
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         title: 'Create Lock Release',
         ownerId: TEST_USER_ID,

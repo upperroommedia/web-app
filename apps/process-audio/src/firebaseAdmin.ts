@@ -1,4 +1,8 @@
-import firebaseAdmin from 'firebase-admin';
+import { getApp, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getDatabase } from 'firebase-admin/database';
+import { getStorage } from 'firebase-admin/storage';
 import { applicationDefault, cert } from 'firebase-admin/app';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -86,7 +90,7 @@ const resolveDatabaseUrl = (projectId: string): string => {
   return process.env.FIREBASE_DATABASE_URL || getFirebaseConfigFromEnv().databaseURL || `https://${databaseInstance}.firebaseio.com/`;
 };
 
-if (!firebaseAdmin.apps.length) {
+if (!getApps().length) {
   const firebaseProjectId = resolveFirebaseProjectId();
   const storageBucket = resolveStorageBucket(firebaseProjectId);
   const serviceAccount = !isDevelopment ? parseServiceAccountFromEnv() : null;
@@ -178,6 +182,15 @@ if (!firebaseAdmin.apps.length) {
       : applicationDefault();
   }
 
-  firebaseAdmin.initializeApp(initConfig);
+  initializeApp(initConfig);
 }
+// The application exposes only its configured services; SDK types and static
+// helpers are imported directly from their modular firebase-admin entry points.
+const firebaseAdmin = {
+  app: getApp,
+  auth: getAuth,
+  firestore: getFirestore,
+  database: getDatabase,
+  storage: getStorage,
+};
 export default firebaseAdmin;

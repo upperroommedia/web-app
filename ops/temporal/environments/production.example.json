@@ -1,0 +1,58 @@
+{
+  "environment": "production",
+  "context": "REQUIRED_PRIVATE_PRODUCTION_CONTEXT",
+  "clusterUid": "REQUIRED_KUBE_SYSTEM_UID",
+  "namespace": "temporal-production",
+  "temporalNamespace": "urm-app",
+  "firebaseProjectId": "urm-app",
+  "privateApiHost": "REQUIRED_PRIVATE_TEMPORAL_DNS",
+  "postgresHost": "REQUIRED_PRIVATE_HA_POSTGRES_DNS",
+  "postgresServerName": "REQUIRED_POSTGRES_CERTIFICATE_SAN",
+  "postgresCidr": "REQUIRED_PRIVATE_DATABASE_CIDR",
+  "databaseMode": "self-hosted",
+  "storageClass": "REQUIRED_DURABLE_CSI_STORAGE_CLASS",
+  "databaseStorage": "100Gi",
+  "backupDestination": "s3://REQUIRED_OFFHOST_BUCKET/production/",
+  "backupEndpoint": "https://REQUIRED_OBJECT_STORE_ENDPOINT",
+  "applicationEgressCidrs": [],
+  "historyShards": 512,
+  "retention": "30d",
+  "backupEvidence": "REQUIRED_PATH_TO_RECENT_RESTORE_REPORT",
+  "workerImage": "REQUIRED_REGISTRY_IMAGE@sha256:DIGEST",
+  "workerBuildId": "REQUIRED_GIT_COMMIT",
+  "workerDeploymentName": "urm-worker-production",
+  "workerReplicas": 2,
+  "workerRoles": ["orchestration", "controls", "media", "email", "images", "search"],
+  "workerPort": 8080,
+  "media": {
+    "concurrency": 2,
+    "sourceLimitGiB": 20,
+    "outputLimitGiB": 20,
+    "workspaceGiB": 64,
+    "headroomGiB": 16,
+    "scratchStorage": "160Gi",
+    "storageClass": "REQUIRED_QUOTA_ENFORCED_MEDIA_CSI_CLASS",
+    "retainedVersions": 2,
+    "storageBudget": "960Gi"
+  },
+  "kubernetesApiEndpoints": [
+    {
+      "cidr": "REQUIRED_PRIVATE_KUBERNETES_SERVICE_IP/32",
+      "port": 443
+    },
+    {
+      "cidr": "REQUIRED_PRIVATE_API_NODE_OR_VIP_IP/32",
+      "port": 6443
+    }
+  ],
+  "workerIdentityNodeNames": ["REQUIRED_NODE_1", "REQUIRED_NODE_2", "REQUIRED_NODE_3"],
+  "emailEgress": {
+    "schemaVersion": 1,
+    "provider": "smtp",
+    "hostname": "REQUIRED_SMTP_HOSTNAME",
+    "port": 465,
+    "tls": "implicit",
+    "addresses": ["REQUIRED_REVIEWED_SMTP_IP"]
+  },
+  "imagePullSecrets": ["REQUIRED_REGISTRY_PULL_SECRET"]
+}

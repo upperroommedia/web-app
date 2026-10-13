@@ -25,9 +25,7 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import UserTable from '../../components/UserTable';
 import useAuth from '../../context/user/UserContext';
-import { GetUserInputType, GetUserOutputType } from '@upperroom/contracts/getUser';
 import {
-  CreateInviteInputType,
   CreateInviteResultData,
   INVITE_ROLES,
   InviteLifecycleStatusType,
@@ -35,30 +33,24 @@ import {
   InviteSummary,
   ListInvitesInputType,
   ListInvitesResultData,
-  ResendInviteInputType,
-  ResendInviteResultData,
   RevokeInviteInputType,
   RevokeInviteResultData,
 } from '@upperroom/contracts/invites/inviteTypes';
 import { ListUsersInputType, ListUsersOutputType } from '@upperroom/contracts/listUsers';
 import {
-  AcceptRoleRequestInputType,
-  AcceptRoleRequestOutputType,
-  DenyRoleRequestInputType,
-  DenyRoleRequestOutputType,
   ListRoleRequestsInputType,
   ListRoleRequestsOutputType,
   RoleRequestSummary,
 } from '@upperroom/contracts/roleRequests/roleRequestTypes';
-import { SetUserRoleInputType, SetUserRoleOutputType } from '@upperroom/contracts/setUserRole';
 import AppLayout from '../../layout/AppLayout';
 import { DirectoryUserWithLoading } from '../../types/User';
 import { createFunctionV2 } from '../../utils/createFunction';
+import { submitDurableIntent } from '../../utils/durableJobs';
+import { useVisibleJobs } from '../../hooks/useDurableJobs';
+import JobStatusPanel from '../../components/jobs/JobStatusPanel';
 
-type CreateInviteOutputType = { status: 'success'; data: CreateInviteResultData } | { status: 'error'; error: string };
 type ListInvitesOutputType = { status: 'success'; data: ListInvitesResultData } | { status: 'error'; error: string };
 type RevokeInviteOutputType = { status: 'success'; data: RevokeInviteResultData } | { status: 'error'; error: string };
-type ResendInviteOutputType = { status: 'success'; data: ResendInviteResultData } | { status: 'error'; error: string };
 type NoticeSeverity = 'success' | 'error' | 'warning' | 'info';
 
 const formatInviteStatus = (status: InviteLifecycleStatusType): string =>
@@ -98,6 +90,14 @@ const fetchUsersWithDedupe = async (): Promise<DirectoryUserWithLoading[]> => {
 
 const AdminUsers = () => {
   const isMountedRef = useRef(true);
+  const { jobs, stale: jobsStale } = useVisibleJobs();
+  const accountJobs = jobs.filter((job) =>
+    ['invite.create', 'invite.resend', 'invite.claim', 'role.resolve', 'role.assign'].includes(job.kind)
+  );
+  const completedRevision = accountJobs
+    .filter((job) => job.state === 'succeeded')
+    .map((job) => `${job.jobId}:${job.revision}`)
+    .join(',');
   const [usersWithLoading, setUsersWithLoading] = useState<DirectoryUserWithLoading[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [pageNotice, setPageNotice] = useState<{ severity: NoticeSeverity; text: string } | null>(null);
@@ -117,7 +117,9 @@ const AdminUsers = () => {
   const [loadingRoleRequests, setLoadingRoleRequests] = useState(false);
   const [roleRequestFilter, setRoleRequestFilter] = useState('');
   const [selectedRoleRequest, setSelectedRoleRequest] = useState<RoleRequestSummary | null>(null);
-  const [resolveRoleRequestLoadingAction, setResolveRoleRequestLoadingAction] = useState<'accept' | 'deny' | null>(null);
+  const [resolveRoleRequestLoadingAction, setResolveRoleRequestLoadingAction] = useState<'accept' | 'deny' | null>(
+    null
+  );
 
   const fetchUsers = async () => {
     if (isMountedRef.current) {
@@ -170,7 +172,9 @@ const AdminUsers = () => {
       setLoadingRoleRequests(true);
     }
     try {
-      const listRoleRequests = createFunctionV2<ListRoleRequestsInputType, ListRoleRequestsOutputType>('listrolerequests');
+      const listRoleRequests = createFunctionV2<ListRoleRequestsInputType, ListRoleRequestsOutputType>(
+        'listrolerequests'
+      );
       const response = await listRoleRequests({ limit: 100 });
       if (response.status === 'error') {
         throw new Error(response.error);
@@ -244,30 +248,28 @@ const AdminUsers = () => {
     setInviteEmailError(null);
     setInviteNotice({
       severity: 'info',
-      text: 'Creating invite and queueing email...',
+      text: 'Submitting invite request...',
     });
 
     try {
-      const createInvite = createFunctionV2<CreateInviteInputType, CreateInviteOutputType>('createinvite');
-      const response = await createInvite({ email: normalizedEmail, role: inviteRole });
-
-      if (response.status === 'error') {
-        if (response.error.toLowerCase().includes('invalid invite email')) {
-          setInviteEmailError('Enter a valid email address.');
-        }
-        throw new Error(response.error);
-      }
-
-      setGeneratedInviteUrl(response.data.inviteUrl);
-      setInviteExpiresAtMs(response.data.expiresAtMs);
-      setInviteDeliveryStatus(response.data.emailStatus);
-      setInviteNotice(null);
+      const receipt = await submitDurableIntent({
+        kind: 'invite.create',
+        entity: { type: 'user', id: 'new-invite' },
+        payload: { email: normalizedEmail, role: inviteRole },
+      });
+      const result = (receipt as typeof receipt & { clientResult?: Record<string, unknown> }).clientResult;
+      if (typeof result?.inviteUrl === 'string') setGeneratedInviteUrl(result.inviteUrl);
+      if (typeof result?.expiresAtMs === 'number') setInviteExpiresAtMs(result.expiresAtMs);
+      setInviteNotice({
+        severity: 'info',
+        text: 'Invite created. Email delivery is tracked in Activity; you can close this dialog.',
+      });
       await fetchInvites();
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Failed to create invite.';
       setInviteNotice({
         severity: 'error',
-        text: `Invite not sent. ${text}`,
+        text,
       });
     } finally {
       setInviteLoading(false);
@@ -321,21 +323,21 @@ const AdminUsers = () => {
   const handleResendInvite = async (inviteId: string) => {
     setInviteActionLoading(inviteId, true);
     try {
-      const resendInvite = createFunctionV2<ResendInviteInputType, ResendInviteOutputType>('resendinvite');
-      const response = await resendInvite({ inviteId });
-      if (response.status === 'error') {
-        throw new Error(response.error);
-      }
-
+      const receipt = await submitDurableIntent({
+        kind: 'invite.resend',
+        entity: { type: 'user', id: inviteId },
+        payload: { inviteId },
+      });
+      const result = (receipt as typeof receipt & { clientResult?: Record<string, unknown> }).clientResult;
       setInviteDialogOpen(true);
-      setGeneratedInviteUrl(response.data.inviteUrl);
-      setInviteExpiresAtMs(response.data.expiresAtMs);
-      setInviteEmail(response.data.invitedEmail);
-      setInviteRole(response.data.invitedRole);
-      setInviteDeliveryStatus(response.data.emailStatus);
+      if (typeof result?.inviteUrl === 'string') setGeneratedInviteUrl(result.inviteUrl);
+      if (typeof result?.expiresAtMs === 'number') setInviteExpiresAtMs(result.expiresAtMs);
+      if (typeof result?.invitedEmail === 'string') setInviteEmail(result.invitedEmail);
+      if (INVITE_ROLES.includes(result?.invitedRole as InviteRoleType))
+        setInviteRole(result!.invitedRole as InviteRoleType);
+      setInviteDeliveryStatus(null);
       setInviteEmailError(null);
-      setInviteNotice(null);
-
+      setInviteNotice({ severity: 'info', text: 'Replacement invite created. Email delivery is tracked in Activity.' });
       await fetchInvites();
     } catch (error) {
       setPageNotice({
@@ -350,29 +352,10 @@ const AdminUsers = () => {
   const handleRoleChange = async (uid: string, role: string) => {
     setUserLoading(uid, true);
     try {
-      const setUserRole = createFunctionV2<SetUserRoleInputType, SetUserRoleOutputType>('setuserrole');
-      const setUserRoleResult = await setUserRole({ uid, role });
-      if (setUserRoleResult.status === 'error') {
-        throw new Error(setUserRoleResult.error);
-      }
-
-      const getUser = createFunctionV2<GetUserInputType, GetUserOutputType>('getuser');
-      const getUserResponse = await getUser({ uid });
-      if (getUserResponse.status === 'error') {
-        throw new Error(getUserResponse.error);
-      }
-      setUsersWithLoading((previousUsersWithLoading) => {
-        const updatedUsers = previousUsersWithLoading.map((previousUserWithLoading) => {
-          if (previousUserWithLoading.uid === uid) {
-            return { ...getUserResponse.data, loading: false };
-          }
-          return previousUserWithLoading;
-        });
-        return updatedUsers;
-      });
+      await submitDurableIntent({ kind: 'role.assign', entity: { type: 'user', id: uid }, payload: { uid, role } });
       setPageNotice({
-        severity: 'success',
-        text: `Role updated for user ${uid}.`,
+        severity: 'info',
+        text: 'Role update accepted. Updated access and session changes are tracked in Activity.',
       });
     } catch (error) {
       let message = '';
@@ -410,35 +393,14 @@ const AdminUsers = () => {
 
     setResolveRoleRequestLoadingAction(action);
     try {
-      const response =
-        action === 'accept'
-          ? await createFunctionV2<AcceptRoleRequestInputType, AcceptRoleRequestOutputType>('acceptrolerequest')({
-            roleRequestId: selectedRoleRequest.roleRequestId,
-          })
-          : await createFunctionV2<DenyRoleRequestInputType, DenyRoleRequestOutputType>('denyrolerequest')({
-            roleRequestId: selectedRoleRequest.roleRequestId,
-          });
-      if (response.status === 'error') {
-        throw new Error(response.error);
-      }
-
-      if (action === 'accept') {
-        await fetchUsers();
-      }
-
-      setRoleRequests((previousRoleRequests) =>
-        previousRoleRequests.filter((roleRequest) => roleRequest.roleRequestId !== selectedRoleRequest.roleRequestId)
-      );
+      await submitDurableIntent({
+        kind: 'role.resolve',
+        entity: { type: 'user', id: selectedRoleRequest.requesterUid },
+        payload: { requestId: selectedRoleRequest.roleRequestId, decision: action },
+      });
       setPageNotice({
-        severity: response.data.warning ? 'warning' : 'success',
-        text:
-          action === 'accept'
-            ? response.data.warning
-              ? `Accepted ${selectedRoleRequest.requesterEmail} request, but outcome email did not queue. ${response.data.warning.message}`
-              : `Accepted ${selectedRoleRequest.requesterEmail} request and queued approval email.`
-            : response.data.warning
-              ? `Denied ${selectedRoleRequest.requesterEmail} request, but outcome email did not queue. ${response.data.warning.message}`
-              : `Denied ${selectedRoleRequest.requesterEmail} request and queued denial email.`,
+        severity: 'info',
+        text: 'Request resolution accepted. Role changes and the outcome email are tracked in Activity.',
       });
       setSelectedRoleRequest(null);
     } catch (error) {
@@ -448,8 +410,8 @@ const AdminUsers = () => {
           error instanceof Error
             ? error.message
             : action === 'accept'
-              ? 'Failed to accept role request.'
-              : 'Failed to deny role request.',
+            ? 'Failed to accept role request.'
+            : 'Failed to deny role request.',
       });
     } finally {
       setResolveRoleRequestLoadingAction(null);
@@ -469,16 +431,22 @@ const AdminUsers = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!completedRevision) return;
+    void Promise.all([fetchUsers(), fetchInvites(), fetchRoleRequests()]);
+    // Completion is observed from server-owned projections, not admission responses.
+  }, [completedRevision]);
+
   const normalizedRoleRequestFilter = roleRequestFilter.trim().toLowerCase();
   const filteredRoleRequests =
     normalizedRoleRequestFilter.length === 0
       ? roleRequests
       : roleRequests.filter((roleRequest) =>
-        [roleRequest.requesterEmail, roleRequest.requesterUid, roleRequest.requesterDisplayName ?? '']
-          .join(' ')
-          .toLowerCase()
-          .includes(normalizedRoleRequestFilter)
-      );
+          [roleRequest.requesterEmail, roleRequest.requesterUid, roleRequest.requesterDisplayName ?? '']
+            .join(' ')
+            .toLowerCase()
+            .includes(normalizedRoleRequestFilter)
+        );
   const selectedRequesterUser = selectedRoleRequest
     ? usersWithLoading.find((userWithLoading) => userWithLoading.uid === selectedRoleRequest.requesterUid)
     : null;
@@ -495,8 +463,26 @@ const AdminUsers = () => {
           {pageNotice.text}
         </Alert>
       )}
+      {accountJobs.length > 0 && (
+        <Stack spacing={1} sx={{ mb: 3 }} component="section" aria-label="Account activity">
+          <Typography variant="h6">Account activity</Typography>
+          {accountJobs.map((job) => (
+            <JobStatusPanel key={job.jobId} job={job} compact stale={jobsStale} />
+          ))}
+        </Stack>
+      )}
       <UserTable
-        usersWithLoading={usersWithLoading}
+        usersWithLoading={usersWithLoading.map((item) => ({
+          ...item,
+          loading:
+            item.loading ||
+            accountJobs.some(
+              (job) =>
+                job.entity.id === item.uid &&
+                ['role.assign', 'role.resolve'].includes(job.kind) &&
+                !['succeeded', 'failed', 'cancelled', 'superseded'].includes(job.state)
+            ),
+        }))}
         handleRoleChange={handleRoleChange}
         loading={loadingUsers}
         toolbarActions={
@@ -521,7 +507,13 @@ const AdminUsers = () => {
         ) : (
           <Stack spacing={1}>
             {invites.map((invite) => {
-              const busy = inviteActionLoadingById[invite.inviteId] === true;
+              const busy =
+                inviteActionLoadingById[invite.inviteId] === true ||
+                accountJobs.some(
+                  (job) =>
+                    job.entity.id === invite.inviteId &&
+                    !['succeeded', 'failed', 'cancelled', 'superseded'].includes(job.state)
+                );
               return (
                 <Box
                   key={invite.inviteId}
@@ -541,7 +533,8 @@ const AdminUsers = () => {
                       {invite.invitedEmail}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Created {new Date(invite.createdAtMs).toLocaleString()} • Expires {new Date(invite.expiresAtMs).toLocaleString()}
+                      Created {new Date(invite.createdAtMs).toLocaleString()} • Expires{' '}
+                      {new Date(invite.expiresAtMs).toLocaleString()}
                     </Typography>
                   </Box>
                   <Typography variant="body2">Role: {invite.invitedRole}</Typography>
@@ -571,7 +564,13 @@ const AdminUsers = () => {
         )}
       </Box>
       <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" sx={{ mb: 2 }} gap={1.5}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          alignItems={{ sm: 'center' }}
+          justifyContent="space-between"
+          sx={{ mb: 2 }}
+          gap={1.5}
+        >
           <Typography variant="h6">Open Role Requests</Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
             <TextField
@@ -624,7 +623,15 @@ const AdminUsers = () => {
                         size="small"
                         variant="contained"
                         onClick={() => openResolveRoleRequestDialog(roleRequest)}
-                        disabled={resolveRoleRequestLoadingAction !== null}
+                        disabled={
+                          resolveRoleRequestLoadingAction !== null ||
+                          accountJobs.some(
+                            (job) =>
+                              job.entity.id === roleRequest.requesterUid &&
+                              job.kind === 'role.resolve' &&
+                              !['succeeded', 'failed', 'cancelled', 'superseded'].includes(job.state)
+                          )
+                        }
                       >
                         Review
                       </Button>
@@ -636,12 +643,7 @@ const AdminUsers = () => {
           </TableContainer>
         )}
       </Box>
-      <Dialog
-        open={Boolean(selectedRoleRequest)}
-        onClose={closeResolveRoleRequestDialog}
-        fullWidth
-        maxWidth="sm"
-      >
+      <Dialog open={Boolean(selectedRoleRequest)} onClose={closeResolveRoleRequestDialog} fullWidth maxWidth="sm">
         <DialogTitle sx={{ pr: 6 }}>
           Review Request
           <IconButton
@@ -749,10 +751,10 @@ const AdminUsers = () => {
           </FormControl>
           {generatedInviteUrl && (
             <Stack spacing={1} sx={{ mt: 2 }}>
-              <Alert severity={inviteDeliveryStatus === 'QUEUED' ? 'success' : 'warning'}>
+              <Alert severity={inviteDeliveryStatus === 'QUEUED' ? 'success' : 'info'}>
                 {inviteDeliveryStatus === 'QUEUED'
                   ? 'Email queued for delivery.'
-                  : 'Email was not queued. Share this link manually.'}
+                  : 'Invite link is available. See Activity for email delivery status.'}
                 {inviteExpiresAtMs ? ` Expires ${new Date(inviteExpiresAtMs).toLocaleString()}.` : ''}
               </Alert>
               <TextField fullWidth value={generatedInviteUrl} InputProps={{ readOnly: true }} />
@@ -769,8 +771,12 @@ const AdminUsers = () => {
             Close
           </Button>
           {!generatedInviteUrl && (
-            <Button onClick={handleCreateInvite} disabled={inviteLoading || inviteEmail.trim().length === 0} variant="contained">
-              {inviteLoading ? 'Sending...' : 'Generate Invite'}
+            <Button
+              onClick={handleCreateInvite}
+              disabled={inviteLoading || inviteEmail.trim().length === 0}
+              variant="contained"
+            >
+              {inviteLoading ? 'Submitting...' : 'Generate Invite'}
             </Button>
           )}
         </DialogActions>

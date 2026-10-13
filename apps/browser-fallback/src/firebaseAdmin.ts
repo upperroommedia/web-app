@@ -1,4 +1,8 @@
-import firebaseAdmin from 'firebase-admin';
+import { getApp, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getDatabase } from 'firebase-admin/database';
+import { getStorage } from 'firebase-admin/storage';
 import { cert, type ServiceAccount } from 'firebase-admin/app';
 
 function parseServiceAccountJson(): ServiceAccount | null {
@@ -33,10 +37,10 @@ function parseServiceAccountJson(): ServiceAccount | null {
   };
 }
 
-if (!firebaseAdmin.apps.length) {
+if (!getApps().length) {
   const serviceAccount = parseServiceAccountJson();
 
-  firebaseAdmin.initializeApp({
+  initializeApp({
     projectId: process.env.FIREBASE_PROJECT_ID,
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
     databaseURL: process.env.FIREBASE_DATABASE_URL,
@@ -44,4 +48,13 @@ if (!firebaseAdmin.apps.length) {
   });
 }
 
+// The application exposes only its configured services; SDK types and static
+// helpers are imported directly from their modular firebase-admin entry points.
+const firebaseAdmin = {
+  app: getApp,
+  auth: getAuth,
+  firestore: getFirestore,
+  database: getDatabase,
+  storage: getStorage,
+};
 export default firebaseAdmin;

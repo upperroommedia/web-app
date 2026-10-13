@@ -166,11 +166,13 @@ pnpm exec firebase deploy --project urm-app-staging --config firebase.kits.json 
 
 Staging's original Algolia extensions remain installed. The attempted replacement `images-index` instance was removed and its backfill queue paused. Search is unavailable until an Algolia application and project-specific search/write credentials are restored. Do not reuse production indexes or production write-key bindings for staging.
 
+The staging web configuration also sets `NEXT_PUBLIC_ALGOLIA_SEARCH_ENABLED=false` at build time. All browser search clients, secured-key initialization and Algolia preconnects honor this setting, so inherited credentials cannot send requests to the missing application. Speaker, list and image selection retain bounded Firestore browsing with pagination and retry controls; full-text search displays an unavailable message. Browsing never substitutes an unbounded collection scan.
+
 When staging search is restored:
 
 1. Create or recover a staging Algolia application and separate indexes.
 2. Update all five staging instance configurations and their Secret Manager write-key bindings, plus App Hosting/Functions `ALGOLIA_SEARCH_API_KEY` and the staging web application ID.
-3. Remove `--without-search` from the staging workflow after configuration is ready.
+3. Remove `--without-search` from the staging workflow after configuration is ready, set `NEXT_PUBLIC_ALGOLIA_SEARCH_ENABLED=true` in `apps/web/apphosting.staging.yaml`, and build a new App Hosting rollout. A runtime-only change cannot update an already compiled browser bundle.
 4. Deploy the replacements, resume/recreate the managed backfill queues as needed, and verify indexing and real web search before retiring the original extensions.
 
 Email authentication was verified in both projects without sending real messages. Continue to use local/mocked delivery for package tests and avoid creating email queue messages merely to smoke-test deployment. Preserve the delivery lease and configured Firestore TTL.

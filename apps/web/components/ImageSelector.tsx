@@ -8,7 +8,6 @@ import firestore, {
   DocumentData,
   orderBy,
   startAfter,
-  onSnapshot,
 } from '../firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { AlgoliaImage, AspectRatio, ImageType } from '../types/Image';
@@ -18,23 +17,25 @@ import Image from 'next/image';
 import { ISpeaker } from '../types/Speaker';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import ImageUploader from './ImageUploader';
-import { imageStorage, ref, uploadBytes } from '../firebase/storage';
 import { CroppedImageData } from '../utils/cropImage';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 import styles from '../styles/ImageSelector.module.css';
 import CircularProgress from '@mui/material/CircularProgress';
-import { algoliasearch, SearchResponse } from 'algoliasearch';
+import { SearchResponse } from 'algoliasearch';
+import { createBrowserSearchClient } from '../utils/algolia/browserSearch';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import InputAdornment from '@mui/material/InputAdornment';
-import { reportHandledError, reportHandledMessage } from '../utils/reportHandledError';
-const IMAGE_SAVE_TIMEOUT_MS = 30000;
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import { ingestDurableImage } from '../utils/durableImages';
+import { useDurableJob } from '../hooks/useDurableJobs';
+import JobStatusPanel from './jobs/JobStatusPanel';
+import { doc, getDoc } from '../firebase/firestore';
+import { reportHandledError } from '../utils/reportHandledError';
 
-const client =
-  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID && process.env.NEXT_PUBLIC_ALGOLIA_API_KEY
-    ? algoliasearch(process.env.NEXT_PUBLIC_ALGOLIA_APP_ID, process.env.NEXT_PUBLIC_ALGOLIA_API_KEY)
-    : undefined;
+const client = createBrowserSearchClient();
 
 const InfinitScrollMessage = ({ message }: { message: string }) => (
   <p style={{ flexBasis: '100%', textAlign: 'center' }}>
@@ -51,6 +52,8 @@ const ImageSelector = (props: {
   setPopupTitle: (title: string) => void;
 }) => {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const searchRevision = useRef(0);
+  const pageInFlight = useRef(false);
   const [images, setImages] = useState<ImageType[]>([]);
   const [imageSearchResults, setImageSearchResults] = useState<AlgoliaImage[]>();
   const [imageSearchQuery, setImageQuery] = useState<string>('');
@@ -60,20 +63,44 @@ const ImageSelector = (props: {
   );
   const [lastImage, setLastImage] = useState<QueryDocumentSnapshot<DocumentData>>();
   const [imageUploading, setImageUploading] = useState<boolean>(false);
+  const [imageJobId, setImageJobId] = useState<string>();
+  const [uploadError, setUploadError] = useState<string>();
+  const { job: imageJob, stale: imageStale } = useDurableJob(imageJobId);
+  const handledImageJob = useRef<string | undefined>(undefined);
 
-  const fetchMoreImages = async () => {
-    const q = query(
-      collection(firestore, 'images'),
-      limit(25),
-      where('type', '==', props.selectedImageFromSpeakerDetails.type),
-      orderBy('dateAddedMillis', 'desc'),
-      startAfter(lastImage)
-    );
-    const querySnapshot = await getDocs(q);
-    setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
-    const nextImages = querySnapshot.docs.map((doc) => doc.data() as ImageType);
-    setImages((oldImages) => [...oldImages, ...nextImages]);
+  const imageBrowseRevision = useRef(0);
+  const [imageBrowseError, setImageBrowseError] = useState<string>();
+  const fetchImages = async (reset = false) => {
+    if (!reset && (!lastImage || pageInFlight.current)) return;
+    const revision = reset ? ++imageBrowseRevision.current : imageBrowseRevision.current;
+    if (reset) {
+      setImages([]);
+      setLastImage(undefined);
+    }
+    pageInFlight.current = true;
+    setImageBrowseError(undefined);
+    try {
+      const q = query(
+        collection(firestore, 'images'),
+        limit(25),
+        where('type', '==', props.selectedImageFromSpeakerDetails.type),
+        orderBy('dateAddedMillis', 'desc'),
+        ...(reset ? [] : [startAfter(lastImage!)])
+      );
+      const snapshot = await getDocs(q);
+      if (revision !== imageBrowseRevision.current) return;
+      setLastImage(snapshot.size === 25 ? snapshot.docs.at(-1) : undefined);
+      const nextImages = snapshot.docs.map((doc) => doc.data() as ImageType);
+      setImages((previous) =>
+        Array.from(new Map([...(reset ? [] : previous), ...nextImages].map((image) => [image.id, image])).values())
+      );
+    } catch {
+      if (revision === imageBrowseRevision.current) setImageBrowseError('Unable to load images. Please try again.');
+    } finally {
+      if (revision === imageBrowseRevision.current) pageInFlight.current = false;
+    }
   };
+  const fetchMoreImages = () => fetchImages();
 
   const searchImages = async (query: string, hitsPerPage: number, page: number) => {
     const images: AlgoliaImage[] = [];
@@ -92,7 +119,6 @@ const ImageSelector = (props: {
           images.push(hit);
         });
       } catch (error) {
-         
         console.error('Search error:', error);
       }
     }
@@ -100,24 +126,18 @@ const ImageSelector = (props: {
   };
 
   useEffect(() => {
-    const fetchImages = async () => {
-      const q = query(
-        collection(firestore, 'images'),
-        limit(25),
-        where('type', '==', props.selectedImageFromSpeakerDetails.type),
-        orderBy('dateAddedMillis', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      setLastImage(querySnapshot.docs[querySnapshot.docs.length - 1]);
-      setImages(querySnapshot.docs.map((doc) => doc.data() as ImageType));
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active) return fetchImages(true);
+    });
+    return () => {
+      active = false;
+      // This generation invalidates pending reads, rather than referencing a DOM node.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      imageBrowseRevision.current++;
     };
-
-    const g = async () => {
-      await fetchImages();
-    };
-    g();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [props.selectedImageFromSpeakerDetails.type]);
 
   useEffect(() => {
     const focusTimer = window.setTimeout(() => {
@@ -127,80 +147,77 @@ const ImageSelector = (props: {
   }, [props.selectedImageFromSpeakerDetails.id, props.selectedImageFromSpeakerDetails.type]);
 
   const saveImage = async (croppedImageData: CroppedImageData, name: string) => {
+    setImageUploading(true);
+    setUploadError(undefined);
+    props.setPopupTitle(`Sending image ${name}`);
     try {
-      setImageUploading(true);
-      props.setPopupTitle(`Saving image ${name}`);
-      const q = query(collection(firestore, 'images'), where('name', '==', name));
-      const querySnapshot = await getDocs(q);
-      if (querySnapshot.empty) {
-        const imageRef = ref(imageStorage, `speaker-images/${name}`);
-        await uploadBytes(imageRef, croppedImageData.blob, {
-          contentType: croppedImageData.contentType,
-          customMetadata: { name, size: 'original', type: croppedImageData.type },
-        });
-
-        let unsubscribe: () => void = () => {};
-        const timeoutId = window.setTimeout(() => {
-          unsubscribe();
-          setImageUploading(false);
-          reportHandledMessage('Image upload finished, but image processing did not complete in time.', {
-            area: 'image-selector',
-            action: 'save-image-timeout',
-            level: 'warning',
-            extras: {
-              name,
-              selectedImageType: props.selectedImageFromSpeakerDetails.type,
-            },
-          });
-          alert('Image upload finished, but image processing did not complete in time. Please try again in a moment.');
-        }, IMAGE_SAVE_TIMEOUT_MS);
-
-        unsubscribe = onSnapshot(q, (snapshot) => {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === 'added') {
-              const imageAddedToFirestore = change.doc.data() as ImageType;
-              window.clearTimeout(timeoutId);
-              setImageUploading(false);
-              setImages((oldImages) => [imageAddedToFirestore, ...oldImages]);
-              props.setNewSelectedImage(imageAddedToFirestore);
-              props.confirmSelecedImage(imageAddedToFirestore);
-              unsubscribe();
-            }
-          });
-        });
-      } else {
-        alert('An image with this name already exists, please use a different name');
-        setImageUploading(false);
-      }
-    } catch (e) {
-      reportHandledError(e, {
-        area: 'image-selector',
-        action: 'save-image',
-        extras: {
-          name,
-          selectedImageType: props.selectedImageFromSpeakerDetails.type,
-        },
-      });
-      alert(e);
+      const receipt = await ingestDurableImage(croppedImageData, name);
+      setImageJobId(receipt.jobId);
+      props.setPopupTitle('Image processing');
+    } catch (error) {
+      setUploadError(
+        error instanceof Error ? error.message : 'Unable to confirm the image request. Your source has been kept.'
+      );
+      reportHandledError(error, { area: 'image-selector', action: 'save-image', extras: { name } });
+      throw error;
+    } finally {
       setImageUploading(false);
     }
   };
 
+  useEffect(() => {
+    if (imageJob?.state !== 'succeeded' || handledImageJob.current === imageJob.jobId) return;
+    const imageId = imageJob.result?.imageId;
+    if (typeof imageId !== 'string') return;
+    let cancelled = false;
+    getDoc(doc(firestore, 'images', imageId))
+      .then((snapshot) => {
+        if (cancelled || !snapshot.exists()) return;
+        const image = { ...snapshot.data(), id: snapshot.id } as ImageType;
+        handledImageJob.current = imageJob.jobId;
+        setImages((previous) => [image, ...previous.filter((item) => item.id !== image.id)]);
+        props.setNewSelectedImage(image);
+        props.confirmSelecedImage(image);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setUploadError(
+            'The image finished processing, but its details could not be refreshed. Find it in the image library or Activity.'
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageJob, props]);
+
   return (
     <div>
+      {uploadError && <Alert severity="error">{uploadError}</Alert>}
+      {imageBrowseError && (
+        <Alert severity="error" action={<Button onClick={() => void fetchImages(!lastImage)}>Retry</Button>}>
+          {imageBrowseError}
+        </Alert>
+      )}
+      {imageJob && <JobStatusPanel job={imageJob} stale={imageStale} compact />}
       {imageUploading ? (
         <CircularProgress />
       ) : (
         <>
           <TextField
+            disabled={!client}
+            helperText={!client ? 'Search is unavailable. Browse images below.' : undefined}
             autoFocus
             inputRef={searchInputRef}
             value={imageSearchQuery}
             onChange={async (e) => {
               setImageQuery(e.target.value);
-              if (e.target.value !== null || e.target.value !== '') {
-                setImageSearchResults(await searchImages(e.target.value, 100, 0));
+              const revision = ++searchRevision.current;
+              if (e.target.value.trim() === '') {
+                setImageSearchResults(undefined);
+                return;
               }
+              const results = await searchImages(e.target.value, 100, 0);
+              if (revision === searchRevision.current) setImageSearchResults(results);
             }}
             fullWidth
             placeholder="Search for an image"
@@ -228,8 +245,6 @@ const ImageSelector = (props: {
               style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', paddingTop: '4px' }}
             >
               {imageSearchResults.map((image) => {
-                delete image._highlightResult;
-                delete image?.nbHits;
                 return (
                   <Tooltip
                     key={image.id}
@@ -251,7 +266,8 @@ const ImageSelector = (props: {
                         height: '164px',
                         aspectRatio: AspectRatio[image.type],
                         backgroundColor: image.averageColorHex || 'var(--placeholder-bg, #f1f5f9)',
-                        boxShadow: props.newSelectedImage?.id === image.id ? '0 0 0 4px var(--accent-primary, #f97316)' : 'none',
+                        boxShadow:
+                          props.newSelectedImage?.id === image.id ? '0 0 0 4px var(--accent-primary, #f97316)' : 'none',
                       }}
                     >
                       <Image

@@ -30,6 +30,7 @@ Important details:
 - `firebase.test.json` is the source of truth for test emulator ports.
 - The test RTDB emulator uses a separate port from normal dev so tests do not collide with `pnpm dev`.
 - Do not run multiple `firebase emulators:exec` test commands in parallel for the same project; they will contend on the same test-emulator ports and produce misleading failures.
+- Full-suite scripts use `--maxWorkers=1` with a bounded `workerIdleMemoryLimit`, so suites remain serial while Jest can recycle its worker. Do not add `--runInBand` to a full-suite command: it disables recycling and can exhaust Node22 memory. Focused harness commands may keep `--runInBand`.
 - Functions tests intentionally clear `SUBSPLASH_DEV_MAX_LIST_SIZE` in `functions/src/test/setup.ts` so test expectations are not polluted by local dev-only `.env` overrides. If a test needs a smaller max list size, set it explicitly inside that test.
 - Do not validate functions tests by manually exporting `FIRESTORE_EMULATOR_HOST` / `FIREBASE_DATABASE_EMULATOR_HOST` against the dev stack unless you explicitly want to exercise the live dev session.
 - If a test fails with missing docs or unexpected state while the same logic works in dev, first confirm it is running through `firebase emulators:exec --config ../firebase.test.json` before debugging the application code.
@@ -43,11 +44,11 @@ Current Sentry rollout status:
 - Firebase Cloud Functions are instrumented for Sentry project `firebase-functions` in org `upper-room-media`.
 - Sentry bootstrap is in [apps/process-audio/src/instrument.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/process-audio/src/instrument.ts).
 - Frontend bootstrap lives in:
-  - [apps/web/sentry.client.config.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/sentry.client.config.ts)
+  - [apps/web/instrumentation-client.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/instrumentation-client.ts)
   - [apps/web/sentry.server.config.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/sentry.server.config.ts)
   - [apps/web/sentry.edge.config.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/sentry.edge.config.ts)
   - [apps/web/sentry.shared.ts](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/sentry.shared.ts)
-  - [apps/web/pages/_error.tsx](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/pages/_error.tsx)
+  - [apps/web/pages/\_error.tsx](/Users/yasaad/Projects/upper-room-media/web-app/apps/web/pages/_error.tsx)
 - Firebase Functions bootstrap is in [functions/src/sentry.ts](/Users/yasaad/Projects/upper-room-media/web-app/functions/src/sentry.ts) and is initialized from each split codebase entrypoint.
 - Hetzner deploy injects `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_ENABLE_LOGS`, and `SENTRY_LOG_LEVELS` from [scripts/deploy-process-audio-hetzner.sh](/Users/yasaad/Projects/upper-room-media/web-app/scripts/deploy-process-audio-hetzner.sh).
 - GCP secret name for the Hetzner runtime is `PROCESS_AUDIO_SENTRY_DSN` in both `urm-app` and `urm-app-staging`.
@@ -91,6 +92,7 @@ This project has a knowledge graph at graphify-out/ with god nodes, community st
 When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
 
 Rules:
+
 - For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
 - Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.

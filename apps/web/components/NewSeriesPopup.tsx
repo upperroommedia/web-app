@@ -14,12 +14,13 @@ import { ImageSizeType, ImageType, isImageType } from '../types/Image';
 import ImageViewer from './ImageViewer';
 import PopUp from './PopUp';
 import useAuth from '../context/user/UserContext';
-import { createFunctionV2 } from '../utils/createFunction';
-import { CreateSeriesInputType, CreateSeriesOutputType } from '@upperroom/contracts/createSeries';
-import { Series, emptySeries } from '../types/Series';
+import { submitDurableIntent, getPendingCreationId, forgetPendingCreationId } from '../utils/durableJobs';
+import { useEntityJobs } from '../hooks/useDurableJobs';
+import EntityJobHistory from './jobs/EntityJobHistory';
+import firestore, { doc, getDoc } from '../firebase/firestore';
+import { Series, seriesConverter } from '../types/Series';
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { saveSeriesMetadata } from '../utils/saveSeriesMetadata';
 
 interface NewSeriesPopupProps {
   open: boolean;
@@ -28,10 +29,9 @@ interface NewSeriesPopupProps {
   existingSeries?: Series; // For editing existing series
 }
 
-const createSeriesFunction = createFunctionV2<CreateSeriesInputType, CreateSeriesOutputType>('createseries');
-
 const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   const { user } = useAuth();
+  const { onSeriesCreated } = props;
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -46,6 +46,29 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [trackedId, setTrackedId] = useState('');
+  const [admitted, setAdmitted] = useState(false);
+  const [admittedJobId, setAdmittedJobId] = useState('');
+  const { jobs } = useEntityJobs({ type: 'series', id: trackedId });
+  const completionHandled = useRef('');
+  const succeededJobId = jobs.find((job) => job.jobId === admittedJobId && job.state === 'succeeded')?.jobId;
+  useEffect(() => {
+    if (!trackedId || !succeededJobId || completionHandled.current === succeededJobId) return;
+    let disposed = false;
+    void getDoc(doc(firestore, 'series', trackedId).withConverter(seriesConverter))
+      .then((snapshot) => {
+        if (disposed || !snapshot.exists()) return;
+        completionHandled.current = succeededJobId;
+        onSeriesCreated?.(snapshot.data());
+      })
+      .catch(() => {
+        if (!disposed) setError('The task completed, but the series could not be refreshed. Reload to view it.');
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [onSeriesCreated, succeededJobId, trackedId]);
 
   // Reset form when existing series changes
   useEffect(() => {
@@ -103,54 +126,25 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
     setError(null);
 
     try {
-      // Published series sync to Subsplash immediately; drafts stay local-only.
-      if (props.existingSeries) {
-        const updatedSeries = await saveSeriesMetadata({
-          series: props.existingSeries,
-          name: formData.name,
-          summary: formData.summary,
-          images: formData.images,
-        });
-
-        props.onSeriesCreated?.(updatedSeries);
-        props.setOpen(false);
-      } else {
-        // Creating new series
-        const result = await createSeriesFunction({
+      const kind = props.existingSeries ? 'series.update' : 'series.create';
+      const payload = {
+        input: {
           title: formData.name.trim(),
-          summary: formData.summary.trim() || undefined,
-          ownerId: user.uid,
-          skipSubsplash: true, // Only create in Firestore at upload time
+          summary: formData.summary.trim() || null,
           images: formData.images,
-        });
-
-        if (result.status === 'success' && result.firestoreId) {
-          // Create a Series object to pass back
-          const newSeries: Series = {
-            ...emptySeries,
-            id: result.firestoreId,
-            name: formData.name.trim(),
-            subtitle: '0 part series',
-            summary: formData.summary.trim() || undefined,
-            images: formData.images,
-            ownerId: user.uid,
-            subsplashId: '', // Not yet published
-            status: 'draft',
-          };
-
-          props.onSeriesCreated?.(newSeries);
-          props.setOpen(false);
-
-          // Reset form
-          setFormData({
-            name: '',
-            summary: '',
-            images: [],
-          });
-        } else {
-          setError(result.error || 'Failed to create series');
-        }
-      }
+          ...(!props.existingSeries ? { skipSubsplash: true } : {}),
+        },
+      };
+      const entityId = props.existingSeries?.id || (await getPendingCreationId(kind, payload));
+      setTrackedId(entityId);
+      const receipt = await submitDurableIntent({
+        kind,
+        entity: { type: 'series', id: entityId },
+        payload,
+      });
+      if (!props.existingSeries) await forgetPendingCreationId(kind, payload);
+      setAdmittedJobId(receipt.jobId);
+      setAdmitted(true);
     } catch (err: unknown) {
       console.error('Error saving series:', err);
       const message = err instanceof Error ? err.message : 'An unexpected error occurred';
@@ -161,6 +155,7 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   };
 
   const handleClose = () => {
+    setAdmitted(false);
     // Reset to existing series data if editing, otherwise clear form
     if (props.existingSeries) {
       setFormData({
@@ -181,10 +176,9 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
   const nameError = formData.name.trim() ? null : 'Name is required';
   const hasWideImage = formData.images.some((image) => image.type === 'wide');
   const hasBannerImage = formData.images.some((image) => image.type === 'banner');
-  const missingRequiredImages = [
-    !hasWideImage ? 'wide' : null,
-    !hasBannerImage ? 'banner' : null,
-  ].filter((value): value is 'wide' | 'banner' => value !== null);
+  const missingRequiredImages = [!hasWideImage ? 'wide' : null, !hasBannerImage ? 'banner' : null].filter(
+    (value): value is 'wide' | 'banner' => value !== null
+  );
   const isValid = formData.name.trim() !== '' && missingRequiredImages.length === 0;
 
   return (
@@ -195,16 +189,30 @@ const NewSeriesPopup = (props: NewSeriesPopupProps) => {
       onClose={handleClose}
       dialogProps={{ fullWidth: true, maxWidth: 'lg', fullScreen: isMobile }}
       button={
-        <Button
-          variant="contained"
-          disabled={!isValid || submitting}
-          onClick={handleSubmit}
-        >
-          {submitting ? <CircularProgress size={24} /> : props.existingSeries ? 'Save Changes' : 'Create Series'}
+        <Button variant="contained" disabled={!isValid || submitting || admitted} onClick={handleSubmit}>
+          {submitting ? (
+            <CircularProgress size={24} />
+          ) : admitted ? (
+            'Request accepted'
+          ) : props.existingSeries ? (
+            'Save Changes'
+          ) : (
+            'Create Series'
+          )}
         </Button>
       }
     >
-      <Box display="flex" padding={{ xs: '4px', sm: '12px', md: '16px' }} justifyContent="center" flexDirection="column" gap={2.5}>
+      <Box
+        display="flex"
+        padding={{ xs: '4px', sm: '12px', md: '16px' }}
+        justifyContent="center"
+        flexDirection="column"
+        gap={2.5}
+      >
+        {admitted && (
+          <Alert severity="info">Your request is saved. You may close this dialog while work continues.</Alert>
+        )}
+        {trackedId && <EntityJobHistory entity={{ type: 'series', id: trackedId }} />}
         {error && (
           <Alert severity="error" onClose={() => setError(null)}>
             {error}

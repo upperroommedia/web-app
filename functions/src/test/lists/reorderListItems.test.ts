@@ -1,3 +1,6 @@
+import type { AuthData } from '../helpers/callableAuth';
+import { testCallableAuth } from '../helpers/callableAuth';
+import { Timestamp } from 'firebase-admin/firestore';
 import { OverflowBehavior } from '@upperroom/shared/types/List';
 import { networkFailureInjector, subsplashMock } from '../addToList/mocks';
 import reorderListItems from '../../reorderListItems';
@@ -12,11 +15,7 @@ import firebaseAdmin from '@upperroom/shared/firebase/firebaseAdmin';
 import { sermonStatusType, uploadStatus } from '@upperroom/shared/types/SermonTypes';
 
 type TestRequest = {
-  auth?: {
-    token?: {
-      role?: string;
-    };
-  };
+  auth?: AuthData;
   data: ReorderListItemsInputType;
 };
 
@@ -182,7 +181,7 @@ const seedPublishedProjection = async ({
         subtitle: '',
         description: '',
         speakers: [],
-        date: firebaseAdmin.firestore.Timestamp.fromMillis(Date.now()),
+        date: Timestamp.fromMillis(Date.now()),
         dateMillis: Date.now(),
         sourceStartTime: 0,
         durationSeconds: 1000,
@@ -303,7 +302,7 @@ describe('reorderListItems', () => {
     });
 
     const result = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: rootFirestoreListId,
         logicalItemOrder: [
@@ -432,7 +431,7 @@ describe('reorderListItems', () => {
     });
 
     const result = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: rootFirestoreListId,
         logicalItemOrder: [
@@ -544,7 +543,7 @@ describe('reorderListItems', () => {
     });
 
     const result = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: rootFirestoreListId,
         logicalItemOrder: [
@@ -668,7 +667,7 @@ describe('reorderListItems', () => {
     });
 
     const result = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: rootFirestoreListId,
         logicalItemOrder: [
@@ -709,7 +708,7 @@ describe('reorderListItems', () => {
     });
 
     const result = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId,
         logicalItemOrder: [],
@@ -768,7 +767,7 @@ describe('reorderListItems', () => {
 
     await expect(
       reorderListItemsHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           rootListId: 'broken-root-list',
           logicalItemOrder: [
@@ -805,7 +804,7 @@ describe('reorderListItems', () => {
 
     await expect(
       reorderListItemsHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           rootListId: 'missing-item-root',
           logicalItemOrder: [{ mediaItemId: 'media-b', position: 1 }],
@@ -853,7 +852,7 @@ describe('reorderListItems', () => {
       });
       subsplashMock.clearHistory();
       const result = await reorderListItemsHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           rootListId: fixture.rootFirestoreListId,
           logicalItemOrder: targetOrder.map((mediaItemId, index) => ({ mediaItemId, position: index + 1 })),
@@ -930,7 +929,7 @@ describe('reorderListItems', () => {
     subsplashMock.clearHistory();
 
     const result = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: fixture.rootFirestoreListId,
         logicalItemOrder: targetOrder.map((mediaItemId, index) => ({ mediaItemId, position: index + 1 })),
@@ -1030,7 +1029,7 @@ describe('reorderListItems', () => {
     const targetOrder = ['media-200', ...Array.from({ length: 199 }, (_, index) => `media-${index + 1}`), 'media-201', 'media-202'];
 
     const result = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: rootFirestoreListId,
         logicalItemOrder: targetOrder.map((mediaItemId, index) => ({ mediaItemId, position: index + 1 })),
@@ -1099,7 +1098,7 @@ describe('reorderListItems', () => {
     subsplashMock.clearHistory();
 
     const firstResult = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: fixture.rootFirestoreListId,
         logicalItemOrder: targetOrder.map((mediaItemId, index) => ({ mediaItemId, position: index + 1 })),
@@ -1109,7 +1108,7 @@ describe('reorderListItems', () => {
     const historyCountAfterFirst = subsplashMock.getHistory().length;
 
     const secondResult = await reorderListItemsHandler({
-      auth: { token: { role: 'admin' } },
+      auth: testCallableAuth('admin'),
       data: {
         rootListId: fixture.rootFirestoreListId,
         logicalItemOrder: targetOrder.map((mediaItemId, index) => ({ mediaItemId, position: index + 1 })),
@@ -1163,7 +1162,7 @@ describe('reorderListItems', () => {
 
     await expect(
       reorderListItemsHandler({
-        auth: { token: { role: 'admin' } },
+        auth: testCallableAuth('admin'),
         data: {
           rootListId: fixture.rootFirestoreListId,
           logicalItemOrder: [
